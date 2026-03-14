@@ -29,6 +29,7 @@ pnpm db:generate  # Generate migration SQL files after schema changes (drizzle-k
 
 - **No workarounds.** Always find and fix the root cause. Do not use hacks, fallbacks, or temporary patches to bypass issues. If something isn't working, investigate why and fix it properly.
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
+- **Database.** Uses embedded Postgres (not Docker). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
 
 ## Conventions
 

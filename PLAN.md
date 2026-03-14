@@ -185,13 +185,12 @@ Copy from SpecMind and adapt:
 | POST | `/api/repos` | Register repo `{ path }` |
 | GET | `/api/repos` | List repos |
 | GET | `/api/repos/:id` | Repo details + latest analysis |
-| GET | `/api/repos/:id/branches` | List git branches |
 | DELETE | `/api/repos/:id` | Remove repo |
-| POST | `/api/repos/:id/analyze` | Trigger analysis `{ branch }` (async, progress via WebSocket) |
+| POST | `/api/repos/:id/analyze` | Trigger analysis (auto-detects current branch, async, progress via WebSocket) |
 | GET | `/api/repos/:id/graph?branch=xxx` | Graph data (nodes + edges) for a specific branch |
-| GET | `/api/repos/:id/changes?branch=xxx` | Pending git changes (uncommitted + staged) with affected graph nodes |
-| POST | `/api/repos/:id/insights` | Generate LLM insights (for analysis or pending changes) |
-| GET | `/api/repos/:id/insights?branch=xxx` | Get insights for a branch |
+| GET | `/api/repos/:id/changes` | Pending git changes (uncommitted + staged) with affected graph nodes |
+| POST | `/api/repos/:id/insights` | Generate LLM insights |
+| GET | `/api/repos/:id/insights` | Get insights |
 
 ### 1.5 React Flow Graph (Service Level) `STATUS: DONE`
 
@@ -217,8 +216,8 @@ Copy from SpecMind and adapt:
 
 - **`/`** — Repo selector (folder picker or paste path) + list of analyzed repos
 - **`/repos/[repoId]`** — Full-screen React Flow canvas + collapsible right sidebar for insights
-- **Branch selector** in top bar — switch between branches, each has its own analysis
-- **Pending changes toggle** — overlay mode that highlights areas of the graph affected by uncommitted changes, with change-specific insights and warnings
+- **Branch label** in top bar — shows current branch (read-only, no checkout). Each branch has its own analysis history.
+- **Pending changes toggle** (Phase 4) — overlay mode that highlights areas of the graph affected by uncommitted changes
 - **Dark/Light mode** — support both themes, toggle in top bar. Use Tailwind CSS dark mode (`class` strategy). Persist user preference in localStorage. Default to system preference.
 
 ### 1.8 Test Plan (Phase 1) `STATUS: DONE`
@@ -412,14 +411,20 @@ npx truecourse        # subsequent runs: just start
 - Publishing includes npm provenance for supply chain security
 - No more manual `npm publish` — just tag and push
 
+### 1.14 CLI `add` Command `STATUS: DONE`
+
+- `npx truecourse add` — registers the current working directory as a repo
+- Detects cwd, calls `POST /api/repos` with the path
+- Prints the URL to open the repo graph (e.g., `http://localhost:3001/repos/<id>`)
+- Requires the server to be running (shows helpful error if not)
+
 ### Verification (Phase 1)
 1. `truecourse setup` runs wizard, writes .env, starts embedded Postgres, runs migrations
 2. `pnpm dev` starts server + web (embedded Postgres starts automatically)
 4. Open browser → select a JS/TS repo folder
-5. Branch selector shows available branches → select `main`
-6. Analysis runs for selected branch, progress shows in real-time
+5. Header shows current branch name (read-only label)
+6. Analysis runs on current branch, progress shows in real-time
 7. Graph renders with service nodes and dependency edges
-8. Switch to a different branch → separate analysis runs, different graph
 9. Insights panel shows LLM-generated observations
 10. Click "Explain" on a service node → agent chat panel opens with context, explains the service
 11. Ask follow-up questions → agent responds with project-aware answers
@@ -429,58 +434,156 @@ npx truecourse        # subsequent runs: just start
 
 ---
 
-## Phase 2: Layer Detection Within Services `STATUS: BACKLOG`
+## Phase 2: Layer Detection Within Services `STATUS: DONE`
 
-- Double-click service → zoom in to see layers (data, api, service, external) as sub-nodes
+**Depth toggle** — a toolbar control to switch between graph depth levels. Phase 2 adds the "Layers" level.
+
+Depth levels (progressive, added across phases):
+- **Services** (Phase 1, default) — high-level service nodes
+- **Layers** (Phase 2) — api, data, service, external within each service
+- **Modules** (Phase 3) — classes/modules within each layer
+- **Methods** (Phase 3) — functions/methods within each module
+
+### Phase 2 Scope
+- Toolbar depth toggle: Services | Layers
+- In Layers view, each service expands to show its internal layers as sub-nodes
 - Cross-layer dependency edges (red if violation)
 - New tables: `layers`, `layer_dependencies`
-- New API: `GET /api/repos/:id/graph?level=layers&serviceId=xxx`
+- New API: `GET /api/repos/:id/graph?level=layers` returns layer sub-nodes grouped by service
 - `LayerNode` component with colored layer indicators
 - LLM insights become layer-aware
 
-### Test Plan (Phase 2) `STATUS: BACKLOG`
+### Test Plan (Phase 2) `STATUS: DONE`
+- Depth toggle renders and switches between Services/Layers views
 - Layer node rendering: `LayerNode` component renders layer name, file count, colored indicator
 - Cross-layer edge styling: violation edges render red, normal edges render default
-- API `GET /api/repos/:id/graph?level=layers&serviceId=xxx` returns layer sub-nodes with correct parent
+- API `GET /api/repos/:id/graph?level=layers` returns layer sub-nodes with correct parent service
 - Layer detection accuracy: analyzer assigns files to correct layers within a service (data, api, service, external)
 - Layer violation detection: reversed dependencies (e.g., data → api) are flagged
 - Dagre sub-layout: layer nodes are positioned correctly within service bounds
 
 ### Verification (Phase 2)
 1. Open a previously analyzed repo with multiple layers
-2. Double-click a service node → layers appear as sub-nodes
+2. Toggle depth to "Layers" → services expand to show layer sub-nodes
 3. Cross-layer edges render correctly (red for violations)
 4. Insights panel shows layer-specific observations
+5. Toggle back to "Services" → returns to service-level view
 
 ---
 
-## Phase 3: File-Level Dependencies, APIs, Entities `STATUS: BACKLOG`
+## Phase 3: Database Detection & Schema Visualization `STATUS: BACKLOG`
 
-- Zoom into layer → see individual file nodes
-- Import edges between files
-- API endpoint extraction (Express/Fastify routes)
-- Entity/ORM nodes with field lists (mini ER diagram)
-- New tables: `files`, `file_dependencies`, `api_endpoints`, `entities`
-- `FileNode`, `EntityNode`, `ApiEndpointNode` components
+Detect databases used by each service and render them as infrastructure nodes on the graph. Includes a dedicated schema review mode for exploring tables and relationships.
+
+### Detection
+
+The analyzer detects database usage by scanning for:
+- **ORM/driver imports** — Prisma, TypeORM, Drizzle, Sequelize, Mongoose, Knex, `pg`, `mysql2`, `ioredis`, `redis`, `mongodb`
+- **Connection strings** — `DATABASE_URL`, `REDIS_URL`, env var patterns in config files
+- **Schema files** — `schema.prisma`, `ormconfig`, Drizzle schema definitions, Mongoose models
+- **Docker Compose** — parse `docker-compose.yml` for `postgres`, `redis`, `mongo`, `mysql` service images
+
+Each detected database produces:
+- Database type (PostgreSQL, Redis, MongoDB, MySQL, SQLite)
+- Which services connect to it
+- Schema details (tables/collections, fields, relations) when schema files are available
+
+### Graph Integration
+
+**Service-level graph:**
+- Database nodes rendered as distinct infrastructure nodes (cylinder/database icon style)
+- Edges from services to their databases (labeled with ORM/driver name, e.g. "Prisma", "ioredis")
+- Shared databases show edges from multiple services (highlights coupling)
+- Redis/cache nodes styled differently from persistent stores
+
+**Layer-level graph:**
+- Database node connects to the data layer of each service that uses it
+- Shows which layer actually accesses the database (should be data layer — if api layer accesses directly, that's a violation)
+
+### Schema Review Mode
+
+Clicking a database node opens a dedicated panel/view:
+- **Tables/collections list** — extracted from schema files (Prisma schema, Drizzle schema, Mongoose models)
+- **Table detail** — columns with types, nullability, defaults, primary keys
+- **Relations** — foreign keys visualized as an ER diagram (mini React Flow graph)
+- **Which services access which tables** — cross-reference with service imports
+- LLM can explain the data model and suggest improvements
+
+### New Tables
+- `databases` — id, analysisId, name, type (postgres/redis/mongo/mysql/sqlite), connectionConfig (jsonb)
+- `database_connections` — id, analysisId, serviceId, databaseId, driver (prisma/typeorm/drizzle/ioredis/pg), layerId
+- `database_tables` — id, databaseId, name, columns (jsonb), primaryKey, indexes (jsonb)
+- `database_relations` — id, databaseId, sourceTableId, targetTableId, relationType (one-to-one/one-to-many/many-to-many), foreignKey
+
+### API
+- `GET /api/repos/:id/graph` — database nodes included in both service and layer graph responses
+- `GET /api/repos/:id/databases` — list detected databases with connection info
+- `GET /api/repos/:id/databases/:dbId/schema` — tables, columns, relations for a specific database
+
+### Components
+- `DatabaseNode` — cylinder-styled node with DB type icon, name, table count, connected services badge
+- `DatabaseEdge` — styled edge from service/layer to database (different from dependency edges)
+- `SchemaPanel` — right-side panel showing tables, columns, ER diagram when a database node is clicked
+- `ERDiagram` — mini React Flow graph inside SchemaPanel showing table relations
 
 ### Test Plan (Phase 3) `STATUS: BACKLOG`
-- File node rendering: `FileNode` displays filename, function count, class count, line count
-- Entity node rendering: `EntityNode` shows entity name, fields, relationships as mini ER diagram
-- API endpoint extraction: correctly parses Express `router.get/post/put/delete` and decorator-based routes
-- Entity extraction: detects Prisma models, TypeORM entities, Drizzle schemas with fields and relationships
-- File dependency edges: import statements create correct source→target edges
-- API `GET /api/repos/:id/graph?level=files&layerId=xxx` returns file nodes with import edges
-- DB tables: `files`, `file_dependencies`, `api_endpoints`, `entities` store and retrieve correctly
+- Database detection: correctly identifies Prisma, Drizzle, Mongoose, raw pg/redis imports
+- Docker Compose parsing: extracts database services and their types
+- Schema extraction: Prisma schema → tables, columns, relations
+- Schema extraction: Drizzle schema → tables, columns, relations
+- Graph integration: database nodes appear with correct edges to services
+- Layer graph: database connects to data layer, not api layer
+- API returns database nodes in graph response
+- API `/databases/:dbId/schema` returns correct table/column/relation data
+- DatabaseNode renders with correct type icon and metadata
 
 ### Verification (Phase 3)
-1. Zoom into a layer → individual file nodes appear with import edges
-2. API layer shows extracted endpoints (method + path)
-3. Data layer shows entity nodes with field lists and relationships
-4. Clicking a file node shows its functions, classes, and imports
+1. Analyze a repo using Prisma + Redis → two database nodes appear on graph
+2. Service-level: edges connect services to their databases
+3. Layer-level: database connects to data layer
+4. Click a database node → SchemaPanel opens showing tables
+5. ER diagram shows foreign key relationships between tables
+6. Shared database shows edges from multiple services
+7. LLM insights reference database architecture (e.g. "3 services share the same Postgres — consider splitting")
 
 ---
 
-## Phase 4: Git Pending Changes Overlay `STATUS: BACKLOG`
+## Phase 4: Module & Method Depth Levels `STATUS: BACKLOG`
+
+Extends the depth toggle with two more levels:
+- **Modules** — classes, interfaces, and standalone modules within each layer
+- **Methods** — functions and methods within each module
+
+### Phase 4 Scope
+- Depth toggle: Services | Layers | Modules | Methods
+- Module extraction: detect classes, interfaces, exported modules from analyzed files
+- Method extraction: detect functions, methods, constructors within modules
+- `ModuleNode` component — shows class/module name, method count, import count
+- `MethodNode` component — shows function signature, return type
+- Dependency edges between modules (import-based)
+- Call edges between methods (function call extraction)
+- New tables: `modules`, `methods`, `module_dependencies`
+- API: `GET /api/repos/:id/graph?level=modules` and `?level=methods`
+
+### Test Plan (Phase 4) `STATUS: BACKLOG`
+- Module extraction: correctly identifies classes, interfaces, and exported modules from TS/JS files
+- Method extraction: correctly identifies functions, methods with signatures
+- Module node rendering: `ModuleNode` displays name, method count, import count
+- Method node rendering: `MethodNode` displays function signature
+- Module dependency edges: import statements create correct source→target edges
+- Call edges: function calls map to correct source method → target method
+- API returns correct nodes at each depth level
+- DB tables store and retrieve module/method data correctly
+
+### Verification (Phase 4)
+1. Toggle to "Modules" → layers expand to show class/module nodes
+2. Toggle to "Methods" → modules expand to show function/method nodes
+3. Dependency edges show import relationships between modules
+4. Call edges show function call relationships between methods
+
+---
+
+## Phase 5: Git Pending Changes Overlay `STATUS: BACKLOG`
 
 - `simple-git` integration — detect uncommitted + staged changes
 
@@ -520,7 +623,7 @@ The graph itself is the primary way to see what's changing — not just a sideba
 - File watcher triggers git status re-check → overlay updates live
 - No need to re-analyze — just re-map changed files to existing graph nodes
 
-### Test Plan (Phase 4) `STATUS: BACKLOG`
+### Test Plan (Phase 5) `STATUS: BACKLOG`
 - Git change detection: `simple-git` correctly identifies new, modified, deleted, and staged files
 - Change mapping: changed files map to correct service/layer/file graph nodes
 - Blast radius calculation: given a changed file, correctly identifies all downstream dependents
@@ -530,7 +633,7 @@ The graph itself is the primary way to see what's changing — not just a sideba
 - File watcher → git status: chokidar change event triggers git status re-check and emits updated overlay data
 - Dimming: unchanged nodes receive dimmed styling when changes overlay is active
 
-### Verification (Phase 4)
+### Verification (Phase 5)
 1. Analyze a repo, then modify files in the target repo
 2. Graph immediately highlights affected services/layers (unchanged areas dim)
 3. Zoom into highlighted service → see which layers have changes
@@ -544,14 +647,14 @@ The graph itself is the primary way to see what's changing — not just a sideba
 
 ---
 
-## Phase 5: Advanced Insights & Fix Prompts `STATUS: BACKLOG`
+## Phase 6: Advanced Insights & Fix Prompts `STATUS: BACKLOG`
 
 - Circular dependency detection, god services, orphan files
 - Each warning has a "Copy Fix Prompt" button
 - Insight history — compare analyses over time
 - Deterministic violation detector + LLM-enhanced descriptions
 
-### Test Plan (Phase 5) `STATUS: BACKLOG`
+### Test Plan (Phase 6) `STATUS: BACKLOG`
 - Circular dependency detection: given a dependency graph with cycles, correctly identifies all circular paths
 - God service detection: services exceeding file/dependency thresholds are flagged
 - Orphan file detection: files not imported by any other file are identified
@@ -560,7 +663,7 @@ The graph itself is the primary way to see what's changing — not just a sideba
 - Deterministic detector: same input always produces same violations (no LLM randomness)
 - LLM-enhanced descriptions: violations are enriched with human-readable explanations
 
-### Verification (Phase 5)
+### Verification (Phase 6)
 1. Analyze a repo with known circular dependencies → warnings appear on graph
 2. Click a warning → insight card shows description + "Copy Fix Prompt" button
 3. Copy prompt → paste into AI coding assistant → produces valid fix
@@ -568,13 +671,13 @@ The graph itself is the primary way to see what's changing — not just a sideba
 
 ---
 
-## Phase 6: Multi-Language Support `STATUS: BACKLOG`
+## Phase 7: Multi-Language Support `STATUS: BACKLOG`
 
 - Re-enable Python, C# extractors from SpecMind
 - Language-specific import resolution and pattern detection
 - Incremental analysis (content-hash cache, only re-analyze changed files)
 
-### Test Plan (Phase 6) `STATUS: BACKLOG`
+### Test Plan (Phase 7) `STATUS: BACKLOG`
 - Python parser: parses `.py` files, extracts functions, classes, imports (decorators, type hints)
 - C# parser: parses `.cs` files, extracts classes, methods, using statements, attributes
 - Python import resolution: resolves relative imports, `__init__.py`, package imports
@@ -584,7 +687,7 @@ The graph itself is the primary way to see what's changing — not just a sideba
 - Cache invalidation: modifying a file updates its hash and triggers re-analysis
 - Mixed-language repo: a repo with both TS and Python files produces correct combined analysis
 
-### Verification (Phase 6)
+### Verification (Phase 7)
 1. Analyze a Python repo → services, layers, files detected correctly
 2. Analyze a C# repo → same
 3. Modify a single file in a large repo → only that file re-analyzed (check logs)
@@ -592,14 +695,14 @@ The graph itself is the primary way to see what's changing — not just a sideba
 
 ---
 
-## Phase 7: Cloud Version (Future) `STATUS: BACKLOG`
+## Phase 8: Cloud Version (Future) `STATUS: BACKLOG`
 
 - Auth (NextAuth.js), GitHub integration
 - GitHub webhooks replacing file watcher
 - Landing page, dashboard, team features
 - Managed Postgres deployment
 
-### Test Plan (Phase 7) `STATUS: BACKLOG`
+### Test Plan (Phase 8) `STATUS: BACKLOG`
 - Auth flow: NextAuth.js sign-in/sign-out, session persistence, token refresh
 - GitHub OAuth: mock OAuth flow, verify user creation and repo access scoping
 - Webhook handler: GitHub push event triggers analysis for correct repo and branch
@@ -608,7 +711,7 @@ The graph itself is the primary way to see what's changing — not just a sideba
 - Team access: shared repo analyses are visible to all team members
 - Cloud DB: migrations run cleanly on managed Postgres (connection pooling, SSL)
 
-### Verification (Phase 7)
+### Verification (Phase 8)
 1. Sign up / sign in via OAuth
 2. Connect a GitHub repo → webhook triggers analysis on push
 3. Graph renders in cloud-hosted UI

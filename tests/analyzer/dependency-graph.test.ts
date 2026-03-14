@@ -154,14 +154,14 @@ describe('dependency graph with fixture project', () => {
   it('resolves user-service internal dependencies', () => {
     const deps = buildDependencyGraph(fixtureAnalyses, FIXTURE_PATH);
 
-    // user.handler.ts imports from user.repository.ts
+    // user.handler.ts imports from user.service.ts (service layer)
     const handlerFile = fixtureAnalyses.find((a) =>
       a.filePath.includes('user.handler.ts')
     );
     expect(handlerFile).toBeDefined();
 
     const handlerDeps = deps.filter((d) => d.source === handlerFile!.filePath);
-    expect(handlerDeps.some((d) => d.target.includes('user.repository'))).toBe(true);
+    expect(handlerDeps.some((d) => d.target.includes('user.service'))).toBe(true);
   });
 
   it('resolves shared/utils internal re-exports', () => {

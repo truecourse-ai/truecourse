@@ -5,6 +5,8 @@ import type {
   ServiceInfo,
   ServiceDependencyInfo,
   Architecture,
+  LayerDetail,
+  LayerDependencyInfo,
 } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
@@ -15,6 +17,8 @@ export interface AnalysisResult {
   architecture: Architecture;
   services: ServiceInfo[];
   dependencies: ServiceDependencyInfo[];
+  layerDetails: LayerDetail[];
+  layerDependencies: LayerDependencyInfo[];
   fileAnalyses: FileAnalysis[];
   moduleDependencies: ModuleDependency[];
   metadata: Record<string, unknown>;
@@ -22,16 +26,13 @@ export interface AnalysisResult {
 
 export async function runAnalysis(
   repoPath: string,
-  branch: string | undefined,
+  _branch: string | undefined,
   onProgress: AnalysisProgressCallback
 ): Promise<AnalysisResult> {
   const git = simpleGit(repoPath);
 
-  // Checkout branch if specified
-  if (branch) {
-    onProgress({ step: 'checkout', percent: 5, detail: `Checking out branch: ${branch}` });
-    await git.checkout(branch);
-  }
+  // Detect current branch (we never checkout — analyze whatever is checked out)
+  const currentBranch = (await git.branch()).current;
 
   onProgress({ step: 'discover', percent: 10, detail: 'Discovering files...' });
 
@@ -107,12 +108,14 @@ export async function runAnalysis(
     architecture: splitResult.architecture,
     services: splitResult.services,
     dependencies: splitResult.dependencies,
+    layerDetails: splitResult.layerDetails,
+    layerDependencies: splitResult.layerDependencies,
     fileAnalyses,
     moduleDependencies,
     metadata: {
       totalFiles: files.length,
       analyzedFiles: fileAnalyses.length,
-      branch: branch || 'HEAD',
+      branch: currentBranch || 'HEAD',
       analyzedAt: new Date().toISOString(),
     },
   };

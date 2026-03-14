@@ -16,23 +16,25 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress';
 import * as api from '@/lib/api';
 import type { RepoResponse } from '@/lib/api';
-import type { GraphNode, GraphEdge } from '@/types/graph';
+import type { GraphNode, GraphEdge, DepthLevel } from '@/types/graph';
+import type { Node, Edge } from '@xyflow/react';
 
 export default function RepoGraphPage() {
   const params = useParams();
   const repoId = Array.isArray(params.slug) ? params.slug[0] : '';
   const [repo, setRepo] = useState<RepoResponse | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState<string | undefined>();
   const [selectedService, setSelectedService] = useState<string | null>(null);
-  const [filteredNodes, setFilteredNodes] = useState<GraphNode[]>([]);
-  const [filteredEdges, setFilteredEdges] = useState<GraphEdge[]>([]);
+  const [depthLevel, setDepthLevel] = useState<DepthLevel>('services');
+  const [filteredNodes, setFilteredNodes] = useState<Node[]>([]);
+  const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState('insights');
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
+  const currentBranch = repo?.defaultBranch;
   const { nodes, edges, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
-    useGraph(repoId, selectedBranch);
+    useGraph(repoId, currentBranch, depthLevel);
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
   const { insights, isLoading: insightsLoading, refetch: refetchInsights } = useInsights(repoId, selectedService ?? undefined);
 
@@ -41,13 +43,6 @@ export default function RepoGraphPage() {
     if (!repoId) return;
     api.getRepo(repoId).then(setRepo).catch(() => {});
   }, [repoId]);
-
-  // Set default branch
-  useEffect(() => {
-    if (repo?.defaultBranch && !selectedBranch) {
-      setSelectedBranch(repo.defaultBranch);
-    }
-  }, [repo, selectedBranch]);
 
   // Initialize filtered data
   useEffect(() => {
@@ -75,7 +70,7 @@ export default function RepoGraphPage() {
   const handleAnalyze = async () => {
     try {
       setIsAnalyzing(true);
-      await api.analyzeRepo(repoId, selectedBranch);
+      await api.analyzeRepo(repoId);
     } catch {
       setIsAnalyzing(false);
     }
@@ -86,7 +81,7 @@ export default function RepoGraphPage() {
   }, []);
 
   const handleExplainNode = useCallback((nodeId: string) => {
-    const nodeName = nodes.find((n) => n.id === nodeId)?.data.label || nodeId;
+    const nodeName = (nodes.find((n) => n.id === nodeId)?.data as Record<string, unknown>)?.label as string || nodeId;
     setSelectedService(nodeId);
     setActiveTab('chat');
     setExplainRequest({ nodeId, nodeName });
@@ -94,7 +89,14 @@ export default function RepoGraphPage() {
 
   const handleFilterChange = useCallback(
     (filters: FilterState) => {
-      let filtered = nodes;
+      // Filters only apply to service-level view
+      if (depthLevel !== 'services') {
+        setFilteredNodes(nodes);
+        setFilteredEdges(edges);
+        return;
+      }
+
+      let filtered = nodes as GraphNode[];
 
       // Exclude service types
       if (filters.excludedTypes.size > 0) {
@@ -127,7 +129,7 @@ export default function RepoGraphPage() {
       setFilteredNodes(filtered);
       setFilteredEdges(filtEdges);
     },
-    [nodes, edges],
+    [nodes, edges, depthLevel],
   );
 
   if (!repoId) {
@@ -135,15 +137,16 @@ export default function RepoGraphPage() {
   }
 
   const selectedServiceName = selectedService
-    ? nodes.find((n) => n.id === selectedService)?.data.label ?? null
+    ? ((nodes.find((n) => n.id === selectedService)?.data as Record<string, unknown>)?.label as string) ?? null
     : null;
 
-  // Extract unique service types and frameworks for filter panel
-  const serviceTypes = [...new Set(nodes.map((n) => n.data.serviceInfo.type))];
+  // Extract unique service types and frameworks for filter panel (services level only)
+  const serviceNodes = depthLevel === 'services' ? (nodes as GraphNode[]) : [];
+  const serviceTypes = [...new Set(serviceNodes.map((n) => n.data?.serviceInfo?.type).filter(Boolean))];
   const frameworks = [
     ...new Set(
-      nodes
-        .map((n) => n.data.serviceInfo.framework)
+      serviceNodes
+        .map((n) => n.data?.serviceInfo?.framework)
         .filter((f): f is string => !!f),
     ),
   ];
@@ -152,9 +155,7 @@ export default function RepoGraphPage() {
     <div className="flex h-screen flex-col">
       <Header
         repoName={repo?.name}
-        branches={repo?.branches}
-        selectedBranch={selectedBranch}
-        onBranchChange={setSelectedBranch}
+        currentBranch={currentBranch}
         onAnalyze={handleAnalyze}
         isAnalyzing={isAnalyzing}
         showBack
@@ -248,11 +249,13 @@ export default function RepoGraphPage() {
             </div>
           ) : (
             <>
-              <FilterPanel
-                serviceTypes={serviceTypes}
-                frameworks={frameworks}
-                onFilterChange={handleFilterChange}
-              />
+              {depthLevel === 'services' && (
+                <FilterPanel
+                  serviceTypes={serviceTypes}
+                  frameworks={frameworks}
+                  onFilterChange={handleFilterChange}
+                />
+              )}
               <GraphCanvas
                 initialNodes={filteredNodes}
                 initialEdges={filteredEdges}
@@ -260,8 +263,10 @@ export default function RepoGraphPage() {
                 onExplainNode={handleExplainNode}
                 selectedNodeId={selectedService}
                 repoId={repoId}
-                branch={selectedBranch}
+                branch={currentBranch}
                 onRefetch={refetchGraph}
+                depthLevel={depthLevel}
+                onDepthChange={setDepthLevel}
               />
             </>
           )}

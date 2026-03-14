@@ -1,9 +1,12 @@
 import { PrismaClient } from '@prisma/client';
+import { getUsers } from '../handlers/user.handler';
 
 const prisma = new PrismaClient();
 
 export class UserRepository {
   async findAll() {
+    // VIOLATION: data layer should not call API layer
+    console.log(getUsers);
     return prisma.user.findMany();
   }
 

@@ -9,6 +9,8 @@ import type {
   ServiceDependencyDetail,
   HttpCall,
   Entity,
+  LayerDetail,
+  LayerDependencyInfo,
 } from '@truecourse/shared'
 import { detectLayers, toLayerDetectionResults } from './layer-detector.js'
 import { detectServices, type Service } from './service-detector.js'
@@ -21,6 +23,8 @@ export interface SplitAnalysisResult {
   services: ServiceInfo[]
   dependencies: ServiceDependencyInfo[]
   architecture: Architecture
+  layerDetails: LayerDetail[]
+  layerDependencies: LayerDependencyInfo[]
 }
 
 /**
@@ -154,10 +158,118 @@ export function performSplitAnalysis(
     }
   }
 
+  // 5. Build per-service layer details
+  const layerDetails: LayerDetail[] = []
+
+  for (const service of detectedServices) {
+    const serviceAnalyses = analyses.filter(a => service.files.includes(a.filePath))
+    const layerFilesMap = new Map<Layer, { files: string[]; confidence: number; evidence: string[] }>()
+
+    for (const analysis of serviceAnalyses) {
+      const detection = detectLayers(analysis)
+      for (const layer of detection.layers) {
+        if (!layerFilesMap.has(layer)) {
+          layerFilesMap.set(layer, { files: [], confidence: detection.confidence, evidence: [] })
+        }
+        const entry = layerFilesMap.get(layer)!
+        entry.files.push(analysis.filePath)
+        if (detection.confidence > entry.confidence) {
+          entry.confidence = detection.confidence
+        }
+        for (const reason of detection.reasons) {
+          if (!entry.evidence.includes(reason)) {
+            entry.evidence.push(reason)
+          }
+        }
+      }
+    }
+
+    for (const [layer, data] of layerFilesMap.entries()) {
+      layerDetails.push({
+        serviceName: service.name,
+        layer,
+        fileCount: data.files.length,
+        filePaths: data.files,
+        confidence: data.confidence,
+        evidence: data.evidence,
+      })
+    }
+  }
+
+  // 6. Compute cross-layer dependencies with violation detection
+  const layerDependencies: LayerDependencyInfo[] = []
+
+  // Build file-to-layer lookup (file → { serviceName, layer })
+  const fileLayerLookup = new Map<string, { serviceName: string; layer: Layer }>()
+  for (const detail of layerDetails) {
+    for (const filePath of detail.filePaths) {
+      // A file may belong to multiple layers; use the first (primary) one
+      if (!fileLayerLookup.has(filePath)) {
+        fileLayerLookup.set(filePath, { serviceName: detail.serviceName, layer: detail.layer })
+      }
+    }
+  }
+
+  // Aggregate cross-layer dependencies from module dependencies
+  const layerDepKey = (src: string, srcLayer: Layer, tgt: string, tgtLayer: Layer) =>
+    `${src}::${srcLayer}::${tgt}::${tgtLayer}`
+
+  const layerDepCounts = new Map<string, { count: number; srcService: string; srcLayer: Layer; tgtService: string; tgtLayer: Layer }>()
+
+  for (const dep of dependencies) {
+    const srcInfo = fileLayerLookup.get(dep.source)
+    const tgtInfo = fileLayerLookup.get(dep.target)
+    if (!srcInfo || !tgtInfo) continue
+    // Skip same-layer within same service
+    if (srcInfo.serviceName === tgtInfo.serviceName && srcInfo.layer === tgtInfo.layer) continue
+
+    const key = layerDepKey(srcInfo.serviceName, srcInfo.layer, tgtInfo.serviceName, tgtInfo.layer)
+    if (!layerDepCounts.has(key)) {
+      layerDepCounts.set(key, {
+        count: 0,
+        srcService: srcInfo.serviceName,
+        srcLayer: srcInfo.layer,
+        tgtService: tgtInfo.serviceName,
+        tgtLayer: tgtInfo.layer,
+      })
+    }
+    layerDepCounts.get(key)!.count += dep.importedNames.length || 1
+  }
+
+  // Violation pairs: [sourceLayer, targetLayer] where direction is invalid
+  const violationPairs: [Layer, Layer][] = [
+    ['data', 'api'],       // Data layer should not depend on API layer
+    ['external', 'api'],   // External integrations should not depend on API layer
+    ['data', 'external'],  // Data layer should not call external services
+  ]
+
+  for (const [, data] of layerDepCounts.entries()) {
+    const isViolation = violationPairs.some(
+      ([src, tgt]) => data.srcLayer === src && data.tgtLayer === tgt
+    )
+
+    let violationReason: string | undefined
+    if (isViolation) {
+      violationReason = `${data.srcLayer} layer should not depend on ${data.tgtLayer} layer`
+    }
+
+    layerDependencies.push({
+      sourceServiceName: data.srcService,
+      sourceLayer: data.srcLayer,
+      targetServiceName: data.tgtService,
+      targetLayer: data.tgtLayer,
+      dependencyCount: data.count,
+      isViolation,
+      violationReason,
+    })
+  }
+
   return {
     services,
     dependencies: serviceDependencies,
     architecture,
+    layerDetails,
+    layerDependencies,
   }
 }
 

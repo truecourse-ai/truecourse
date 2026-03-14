@@ -30,6 +30,7 @@ async function fetchApi<T>(
     throw new ApiError(res.status, body);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -47,6 +48,9 @@ export type GraphResponse = {
     id: string;
     type: string;
     position: { x: number; y: number };
+    parentId?: string;
+    extent?: string;
+    style?: Record<string, unknown>;
     data: {
       label: string;
       description?: string;
@@ -55,6 +59,12 @@ export type GraphResponse = {
       fileCount: number;
       layers: string[];
       rootPath: string;
+      layerColor?: string;
+      fileNames?: string[];
+      layerDeps?: Array<{ targetLayer: string; count: number; isViolation: boolean }>;
+      violations?: Array<{ edgeId: string; targetLayer: string; reason: string }>;
+      isViolation?: boolean;
+      violationReason?: string;
     };
   }>;
   edges: Array<{
@@ -62,9 +72,13 @@ export type GraphResponse = {
     source: string;
     target: string;
     label?: string;
+    sourceHandle?: string;
+    targetHandle?: string;
     data: {
       dependencyCount: number;
       dependencyType?: string;
+      isViolation?: boolean;
+      violationReason?: string;
     };
   }>;
 };
@@ -114,9 +128,15 @@ export function analyzeRepo(id: string, branch?: string): Promise<{ jobId: strin
 }
 
 // Graph
-export function getGraph(repoId: string, branch?: string): Promise<GraphResponse> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<GraphResponse>(`/api/repos/${repoId}/graph${params}`);
+export function getGraph(
+  repoId: string,
+  options?: { branch?: string; level?: 'services' | 'layers' },
+): Promise<GraphResponse> {
+  const params = new URLSearchParams();
+  if (options?.branch) params.set('branch', options.branch);
+  if (options?.level) params.set('level', options.level);
+  const qs = params.toString();
+  return fetchApi<GraphResponse>(`/api/repos/${repoId}/graph${qs ? `?${qs}` : ''}`);
 }
 
 export function saveGraphPositions(

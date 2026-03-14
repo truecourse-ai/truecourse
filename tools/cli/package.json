@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/index.ts",
+    "dev": "echo 'CLI is not used in dev mode'",
     "clean": "rm -rf dist"
   },
   "dependencies": {

@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
-import type { GraphNode, GraphEdge, ServiceNodeData } from '@/types/graph';
+import type { GraphNode, GraphEdge, ServiceNodeData, DepthLevel } from '@/types/graph';
+import type { Node, Edge } from '@xyflow/react';
 
-export function useGraph(repoId: string, branch?: string) {
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
+export function useGraph(repoId: string, branch?: string, level: DepthLevel = 'services') {
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,53 +16,112 @@ export function useGraph(repoId: string, branch?: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.getGraph(repoId, branch);
+      const data = await api.getGraph(repoId, { branch, level });
 
-      const graphNodes: GraphNode[] = data.nodes.map((node) => ({
-        id: node.id,
-        type: 'service' as const,
-        position: node.position,
-        data: {
-          label: node.data.label,
-          description: node.data.description,
-          serviceInfo: {
-            type: node.data.serviceType || 'unknown',
-            framework: node.data.framework || null,
-            fileCount: node.data.fileCount || 0,
-            layers: (node.data.layers || []).map((l) => ({
-              layer: l,
-              confidence: 1,
-              evidence: [],
-            })),
-            rootPath: node.data.rootPath || '',
+      if (level === 'layers') {
+        // Layer-level view: mix of serviceGroupNode and layerNode types
+        const graphNodes: Node[] = data.nodes.map((node) => {
+          if (node.type === 'layerNode') {
+            return {
+              id: node.id,
+              type: 'layer' as const,
+              position: node.position,
+              parentId: node.parentId,
+              extent: node.extent as 'parent' | undefined,
+              data: {
+                label: node.data.label,
+                layer: node.data.label,
+                fileCount: node.data.fileCount || 0,
+                layerColor: node.data.layerColor || '#6b7280',
+                fileNames: node.data.fileNames || [],
+              },
+            };
+          }
+
+          // serviceGroupNode
+          return {
+            id: node.id,
+            type: 'serviceGroup' as const,
+            position: node.position,
+            style: node.style,
+            data: {
+              label: node.data.label,
+              description: node.data.description,
+              serviceType: node.data.serviceType || 'unknown',
+              framework: node.data.framework,
+              fileCount: node.data.fileCount || 0,
+              layers: node.data.layers || [],
+              violations: node.data.violations || [],
+            },
+          };
+        });
+
+        const graphEdges: Edge[] = data.edges.map((edge) => ({
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
+          type: 'intraLayer',
+          data: {
+            label: '',
+            dependencyCount: edge.data.dependencyCount || 0,
+            hasHttpCalls: edge.data.dependencyType === 'http',
+            isViolation: edge.data.isViolation || false,
+            violationReason: edge.data.violationReason,
           },
-          insightCount: 0,
-          hasHighSeverity: false,
-        } as ServiceNodeData,
-      }));
+        }));
 
-      const graphEdges: GraphEdge[] = data.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: 'dependency' as const,
-        data: {
-          label: edge.data.dependencyType === 'http'
-            ? `${edge.data.dependencyCount || 0} HTTP call${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`
-            : `${edge.data.dependencyCount || 0} import${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`,
-          dependencyCount: edge.data.dependencyCount || 0,
-          hasHttpCalls: edge.data.dependencyType === 'http',
-        },
-      }));
+        setNodes(graphNodes);
+        setEdges(graphEdges);
+      } else {
+        // Service-level view (existing behavior)
+        const graphNodes: GraphNode[] = data.nodes.map((node) => ({
+          id: node.id,
+          type: 'service' as const,
+          position: node.position,
+          data: {
+            label: node.data.label,
+            description: node.data.description,
+            serviceInfo: {
+              type: node.data.serviceType || 'unknown',
+              framework: node.data.framework || null,
+              fileCount: node.data.fileCount || 0,
+              layers: (node.data.layers || []).map((l) => ({
+                layer: l,
+                confidence: 1,
+                evidence: [],
+              })),
+              rootPath: node.data.rootPath || '',
+            },
+            insightCount: 0,
+            hasHighSeverity: false,
+          } as ServiceNodeData,
+        }));
 
-      setNodes(graphNodes);
-      setEdges(graphEdges);
+        const graphEdges: GraphEdge[] = data.edges.map((edge) => ({
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          type: 'dependency' as const,
+          data: {
+            label: edge.data.dependencyType === 'http'
+              ? `${edge.data.dependencyCount || 0} HTTP call${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`
+              : `${edge.data.dependencyCount || 0} import${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`,
+            dependencyCount: edge.data.dependencyCount || 0,
+            hasHttpCalls: edge.data.dependencyType === 'http',
+          },
+        }));
+
+        setNodes(graphNodes);
+        setEdges(graphEdges);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch graph');
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, branch]);
+  }, [repoId, branch, level]);
 
   useEffect(() => {
     fetchGraph();

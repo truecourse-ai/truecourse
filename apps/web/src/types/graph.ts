@@ -20,10 +20,34 @@ export type ServiceNodeData = {
 
 export type GraphNode = Node<ServiceNodeData, 'service'>;
 
+// Layer node data (child of a service group node)
+export type LayerNodeData = {
+  label: string;
+  layer: Layer;
+  fileCount: number;
+  layerColor: string;
+};
+
+export type LayerGraphNode = Node<LayerNodeData, 'layer'>;
+
+// Service group node data (parent container in layer view)
+export type ServiceGroupNodeData = {
+  label: string;
+  description?: string;
+  serviceType: string;
+  framework?: string;
+  fileCount: number;
+  layers: string[];
+};
+
+export type ServiceGroupGraphNode = Node<ServiceGroupNodeData, 'serviceGroup'>;
+
 export type DependencyEdgeData = {
   label: string;
   dependencyCount: number;
   hasHttpCalls: boolean;
+  isViolation?: boolean;
+  violationReason?: string;
 };
 
 export type GraphEdge = Edge<DependencyEdgeData>;
@@ -32,6 +56,8 @@ export type GraphData = {
   nodes: GraphNode[];
   edges: GraphEdge[];
 };
+
+export type DepthLevel = 'services' | 'layers';
 
 export type LayerColor = {
   layer: Layer;

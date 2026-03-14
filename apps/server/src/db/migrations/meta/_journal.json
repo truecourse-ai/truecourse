@@ -8,6 +8,13 @@
       "when": 1773441480658,
       "tag": "0000_daily_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773455493129,
+      "tag": "0001_rare_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

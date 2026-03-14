@@ -6,6 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { runSetup } from "./commands/setup.js";
 import { runStart } from "./commands/start.js";
+import { runAdd } from "./commands/add.js";
 
 const program = new Command();
 
@@ -26,6 +27,13 @@ program
   .description("Start TrueCourse services")
   .action(async () => {
     await runStart();
+  });
+
+program
+  .command("add")
+  .description("Add the current directory as a repository")
+  .action(async () => {
+    await runAdd();
   });
 
 program

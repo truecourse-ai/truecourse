@@ -6,6 +6,8 @@ import {
   analyses,
   services,
   serviceDependencies,
+  layers,
+  layerDependencies,
   insights,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
@@ -17,7 +19,7 @@ import {
   emitAnalysisComplete,
   emitInsightsReady,
 } from '../socket/handlers.js';
-import { buildGraphData } from '../services/graph.service.js';
+import { buildGraphData, buildLayerGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -45,7 +47,9 @@ router.post(
         throw createAppError('Repo not found', 404);
       }
 
-      const branch = parsed.data.branch;
+      // Detect current branch (never checkout — analyze what's on disk)
+      const git = simpleGit(repo.path);
+      const branch = (await git.branch()).current || null;
 
       // Respond immediately, run analysis asynchronously
       res.status(202).json({ message: 'Analysis started', repoId: id, branch });
@@ -58,7 +62,7 @@ router.post(
           detail: 'Starting analysis...',
         });
 
-        const result = await runAnalysis(repo.path, branch, (progress) => {
+        const result = await runAnalysis(repo.path, branch ?? undefined, (progress) => {
           emitAnalysisProgress(id, progress);
         });
 
@@ -136,6 +140,42 @@ router.post(
           }
         }
 
+        // Save layer details
+        if (result.layerDetails) {
+          for (const detail of result.layerDetails) {
+            const serviceId = serviceIdMap.get(detail.serviceName);
+            if (serviceId) {
+              await db.insert(layers).values({
+                analysisId: analysis.id,
+                serviceId,
+                serviceName: detail.serviceName,
+                layer: detail.layer,
+                fileCount: detail.fileCount,
+                filePaths: detail.filePaths,
+                confidence: Math.round(detail.confidence * 100),
+                evidence: detail.evidence,
+              });
+            }
+          }
+        }
+
+        // Save layer dependencies
+        if (result.layerDependencies) {
+          for (const dep of result.layerDependencies) {
+            await db.insert(layerDependencies).values({
+              analysisId: analysis.id,
+              sourceServiceName: dep.sourceServiceName,
+              sourceLayer: dep.sourceLayer,
+              targetServiceName: dep.targetServiceName,
+              targetLayer: dep.targetLayer,
+              dependencyCount: dep.dependencyCount,
+              isViolation: dep.isViolation,
+              violationReason: dep.violationReason || null,
+            });
+          }
+
+        }
+
         // Carry over node positions from previous analysis
         if (Object.keys(prevPositionsByName).length > 0) {
           const newPositions: Record<string, { x: number; y: number }> = {};
@@ -181,10 +221,15 @@ router.post(
             dependencyType: d.httpCalls && d.httpCalls.length > 0 ? 'http' : 'import',
           }));
 
+          const violationDescriptions = (result.layerDependencies || [])
+            .filter((d) => d.isViolation)
+            .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
+
           const { insights: generatedInsights, serviceDescriptions } = await generateInsights({
             architecture: result.architecture,
             services: analysisServices,
             dependencies: analysisDeps,
+            violations: violationDescriptions,
           });
 
           for (const insight of generatedInsights) {
@@ -281,6 +326,8 @@ router.get(
 
       const analysis = latestAnalysis[0];
 
+      const level = (req.query.level as string) || 'services';
+
       const analysisServices = await db
         .select()
         .from(services)
@@ -291,7 +338,37 @@ router.get(
         .from(serviceDependencies)
         .where(eq(serviceDependencies.analysisId, analysis.id));
 
-      const graphData = buildGraphData(analysisServices, analysisDeps);
+      let graphData;
+
+      if (level === 'layers') {
+        const analysisLayers = await db
+          .select()
+          .from(layers)
+          .where(eq(layers.analysisId, analysis.id));
+
+        const analysisLayerDeps = await db
+          .select()
+          .from(layerDependencies)
+          .where(eq(layerDependencies.analysisId, analysis.id));
+
+        graphData = buildLayerGraphData(
+          analysisServices,
+          analysisDeps,
+          analysisLayers.map((l) => ({
+            id: l.id,
+            serviceName: l.serviceName,
+            serviceId: l.serviceId,
+            layer: l.layer,
+            fileCount: l.fileCount,
+            filePaths: l.filePaths as string[],
+            confidence: l.confidence,
+            evidence: l.evidence as string[],
+          })),
+          analysisLayerDeps,
+        );
+      } else {
+        graphData = buildGraphData(analysisServices, analysisDeps);
+      }
 
       // Include saved node positions if any
       const savedPositions = analysis.nodePositions as Record<string, { x: number; y: number }> | null;

@@ -1,46 +1,59 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
+  ReactFlowProvider,
   MiniMap,
   Background,
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type NodeTypes,
   type EdgeTypes,
   type NodeMouseHandler,
   type Node,
+  type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import { ServiceNode } from '@/components/graph/nodes/ServiceNode';
+import { LayerNode } from '@/components/graph/nodes/LayerNode';
+import { ServiceGroupNode } from '@/components/graph/nodes/ServiceGroupNode';
 import { DependencyEdge } from '@/components/graph/edges/DependencyEdge';
+import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { ZoomControls } from '@/components/graph/controls/ZoomControls';
+import { DepthToggle } from '@/components/graph/controls/DepthToggle';
 import * as api from '@/lib/api';
-import type { GraphNode, GraphEdge } from '@/types/graph';
+import type { DepthLevel } from '@/types/graph';
 
 type GraphCanvasProps = {
-  initialNodes: GraphNode[];
-  initialEdges: GraphEdge[];
+  initialNodes: Node[];
+  initialEdges: Edge[];
   onNodeSelect?: (nodeId: string | null) => void;
   onExplainNode?: (nodeId: string) => void;
   selectedNodeId?: string | null;
   repoId: string;
   branch?: string;
   onRefetch?: () => void;
+  depthLevel: DepthLevel;
+  onDepthChange: (level: DepthLevel) => void;
 };
 
 const nodeTypes: NodeTypes = {
   service: ServiceNode as unknown as NodeTypes[string],
+  layer: LayerNode as unknown as NodeTypes[string],
+  serviceGroup: ServiceGroupNode as unknown as NodeTypes[string],
 };
 
 const edgeTypes: EdgeTypes = {
   dependency: DependencyEdge as unknown as EdgeTypes[string],
+  violation: DependencyEdge as unknown as EdgeTypes[string],
+  intraLayer: IntraLayerEdge as unknown as EdgeTypes[string],
 };
 
-export function GraphCanvas({
+function GraphCanvasInner({
   initialNodes,
   initialEdges,
   onNodeSelect,
@@ -49,9 +62,13 @@ export function GraphCanvas({
   repoId,
   branch,
   onRefetch,
+  depthLevel,
+  onDepthChange,
 }: GraphCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
   const nodesRef = useRef<Node[]>([]);
+  const prevDepthRef = useRef(depthLevel);
+  const { fitView } = useReactFlow();
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
@@ -59,28 +76,49 @@ export function GraphCanvas({
   // Keep ref in sync with current nodes
   nodesRef.current = nodes;
 
-  // Update when initial data changes (positions come from the API already applied)
+  // Update when initial data changes
   useMemo(() => {
-    const nodesWithCallbacks = initialNodes.map((node) => ({
-      ...node,
-      selected: node.id === selectedNodeId,
-      data: { ...node.data, onExplain: onExplainNode },
-    }));
-    setNodes(nodesWithCallbacks);
+    if (depthLevel === 'services') {
+      const nodesWithCallbacks = initialNodes.map((node) => ({
+        ...node,
+        selected: node.id === selectedNodeId,
+        data: { ...node.data, onExplain: onExplainNode },
+      }));
+      setNodes(nodesWithCallbacks);
+    } else {
+      const nodesWithCallbacks = initialNodes.map((node) =>
+        node.type === 'layer'
+          ? { ...node, data: { ...node.data, onExplain: onExplainNode } }
+          : { ...node, selected: node.id === selectedNodeId }
+      );
+      setNodes(nodesWithCallbacks);
+    }
     setEdges(initialEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId]);
+  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId, depthLevel]);
+
+  // Fit view when depth level changes or new data arrives
+  useEffect(() => {
+    // Use requestAnimationFrame to wait for ReactFlow to measure nodes
+    const raf = requestAnimationFrame(() => {
+      fitView({ padding: 0.3 });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [depthLevel, initialNodes, fitView]);
 
   const onNodeDragStop = useCallback(
     () => {
       const positions: Record<string, { x: number; y: number }> = {};
       for (const node of nodesRef.current) {
+        // In layers mode, only save service group positions, not layer nodes
+        if (depthLevel === 'layers' && node.type === 'layer') continue;
         positions[node.id] = node.position;
       }
+      if (Object.keys(positions).length === 0) return;
       setIsSaving(true);
       api.saveGraphPositions(repoId, positions, branch)
         .finally(() => setIsSaving(false));
     },
-    [repoId, branch],
+    [repoId, branch, depthLevel],
   );
 
   const handleAutoLayout = useCallback(() => {
@@ -92,22 +130,42 @@ export function GraphCanvas({
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       onNodeSelect?.(node.id);
+
+      if (depthLevel === 'services') {
+        // Zoom to clicked service node
+        setTimeout(() => {
+          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
+        }, 50);
+      } else if (depthLevel === 'layers' && node.type === 'serviceGroup') {
+        // Zoom to service group and its children
+        const childNodeIds = nodesRef.current
+          .filter((n) => (n as Record<string, unknown>).parentId === node.id)
+          .map((n) => n.id);
+        const nodeIds = [node.id, ...childNodeIds];
+        setTimeout(() => {
+          fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
+        }, 50);
+      }
     },
-    [onNodeSelect],
+    [onNodeSelect, depthLevel, fitView],
   );
 
   const onPaneClick = useCallback(() => {
     onNodeSelect?.(null);
-  }, [onNodeSelect]);
-
+    // Clicking pane zooms back to fit all
+    fitView({ padding: 0.3, duration: 300 });
+  }, [onNodeSelect, depthLevel, fitView]);
 
   return (
     <div className="h-full w-full">
-      {isSaving && (
-        <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-md border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm">
-          Saving...
-        </div>
-      )}
+      <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2">
+        <DepthToggle level={depthLevel} onChange={onDepthChange} />
+        {isSaving && (
+          <div className="mt-2 rounded-md border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm text-center">
+            Saving...
+          </div>
+        )}
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -119,8 +177,6 @@ export function GraphCanvas({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodesConnectable={false}
-        fitView
-        fitViewOptions={{ padding: 0.3 }}
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
@@ -134,5 +190,13 @@ export function GraphCanvas({
         <ZoomControls onAutoLayout={handleAutoLayout} />
       </ReactFlow>
     </div>
+  );
+}
+
+export function GraphCanvas(props: GraphCanvasProps) {
+  return (
+    <ReactFlowProvider>
+      <GraphCanvasInner {...props} />
+    </ReactFlowProvider>
   );
 }

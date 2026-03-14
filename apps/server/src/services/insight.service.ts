@@ -19,6 +19,7 @@ export interface InsightGenerationInput {
     dependencyCount: number | null;
     dependencyType: string | null;
   }[];
+  violations?: string[];
 }
 
 export async function generateInsights(
@@ -39,6 +40,7 @@ export async function generateInsights(
       count: d.dependencyCount || 0,
       type: d.dependencyType || undefined,
     })),
+    violations: input.violations,
   };
 
   const provider = createLLMProvider();

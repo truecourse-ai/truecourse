@@ -18,6 +18,8 @@ import {
   ServiceInfoSchema,
   LayerDetectionResultSchema,
   EntitySchema,
+  LayerDetailSchema,
+  LayerDependencyInfoSchema,
 } from '../../packages/shared/src/types/entity';
 import {
   InsightSchema,
@@ -341,6 +343,97 @@ describe('InsightSchema', () => {
       content: 'Test',
       severity: 'extreme',
       createdAt: '2025-01-01T00:00:00Z',
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2: Layer Detail & Dependency Schemas
+// ---------------------------------------------------------------------------
+
+describe('LayerDetailSchema', () => {
+  it('accepts valid layer detail', () => {
+    const result = LayerDetailSchema.safeParse({
+      serviceName: 'api-gateway',
+      layer: 'api',
+      fileCount: 5,
+      filePaths: ['src/routes/users.ts', 'src/routes/health.ts'],
+      confidence: 0.9,
+      evidence: ['Imports API framework: express'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid layer value', () => {
+    const result = LayerDetailSchema.safeParse({
+      serviceName: 'api-gateway',
+      layer: 'presentation',
+      fileCount: 1,
+      filePaths: ['src/index.ts'],
+      confidence: 0.5,
+      evidence: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing serviceName', () => {
+    const result = LayerDetailSchema.safeParse({
+      layer: 'api',
+      fileCount: 1,
+      filePaths: [],
+      confidence: 0.5,
+      evidence: [],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('LayerDependencyInfoSchema', () => {
+  it('accepts valid layer dependency', () => {
+    const result = LayerDependencyInfoSchema.safeParse({
+      sourceServiceName: 'api-gateway',
+      sourceLayer: 'api',
+      targetServiceName: 'api-gateway',
+      targetLayer: 'service',
+      dependencyCount: 3,
+      isViolation: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts violation with reason', () => {
+    const result = LayerDependencyInfoSchema.safeParse({
+      sourceServiceName: 'user-service',
+      sourceLayer: 'data',
+      targetServiceName: 'user-service',
+      targetLayer: 'api',
+      dependencyCount: 1,
+      isViolation: true,
+      violationReason: 'data layer should not depend on api layer',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid source layer', () => {
+    const result = LayerDependencyInfoSchema.safeParse({
+      sourceServiceName: 'svc',
+      sourceLayer: 'invalid',
+      targetServiceName: 'svc',
+      targetLayer: 'api',
+      dependencyCount: 1,
+      isViolation: false,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects missing isViolation', () => {
+    const result = LayerDependencyInfoSchema.safeParse({
+      sourceServiceName: 'svc',
+      sourceLayer: 'api',
+      targetServiceName: 'svc',
+      targetLayer: 'service',
+      dependencyCount: 1,
     });
     expect(result.success).toBe(false);
   });

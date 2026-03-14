@@ -1,15 +1,13 @@
 'use client';
 
-import { Sun, Moon, ArrowLeft, GitBranch, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Sun, Moon, ArrowLeft, GitBranch, Loader2, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 
 type HeaderProps = {
   repoName?: string;
-  branches?: string[];
-  selectedBranch?: string;
-  onBranchChange?: (branch: string) => void;
+  currentBranch?: string;
   onAnalyze?: () => void;
   isAnalyzing?: boolean;
   showBack?: boolean;
@@ -20,9 +18,7 @@ type HeaderProps = {
 
 export function Header({
   repoName,
-  branches,
-  selectedBranch,
-  onBranchChange,
+  currentBranch,
   onAnalyze,
   isAnalyzing,
   showBack,
@@ -54,7 +50,8 @@ export function Header({
             <ArrowLeft className="h-5 w-5" />
           </Link>
         )}
-        <Link href="/" className="text-lg font-bold text-foreground">
+        <Link href="/" className="flex items-center gap-2 text-lg font-bold text-foreground">
+          <img src="/logo.svg" alt="TrueCourse" className="h-7 w-7" />
           TrueCourse
         </Link>
       </div>
@@ -65,20 +62,10 @@ export function Header({
             {repoName}
           </span>
         )}
-        {branches && branches.length > 0 && (
+        {currentBranch && (
           <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1">
             <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-            <select
-              value={selectedBranch || ''}
-              onChange={(e) => onBranchChange?.(e.target.value)}
-              className="bg-transparent text-sm text-foreground outline-none"
-            >
-              {branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
+            <span className="text-sm text-foreground">{currentBranch}</span>
           </div>
         )}
         {onAnalyze && (
@@ -92,16 +79,13 @@ export function Header({
       <div className="flex items-center gap-1">
         {onToggleSidebar && (
           <Button
-            variant="ghost"
-            size="icon-sm"
+            variant={isSidebarOpen ? 'default' : 'outline'}
+            size="sm"
             onClick={onToggleSidebar}
-            aria-label={isSidebarOpen ? 'Close panel' : 'Open panel'}
+            aria-label="Toggle Agent"
           >
-            {isSidebarOpen ? (
-              <PanelRightClose className="h-5 w-5" />
-            ) : (
-              <PanelRightOpen className="h-5 w-5" />
-            )}
+            <MessageCircle className="h-4 w-4" />
+            Agent
           </Button>
         )}
         <Button

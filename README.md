@@ -89,6 +89,7 @@ LLM prompts work out of the box without Langfuse (using local definitions). To e
 npx truecourse          # First run: setup wizard → start. Subsequent runs: just start.
 npx truecourse setup    # Re-run setup wizard (reconfigure LLM keys, etc.)
 npx truecourse start    # Skip setup, just start
+npx truecourse add      # Register the current directory as a repo (server must be running)
 ```
 
 ## Tech Stack

@@ -118,3 +118,34 @@ export const ServiceDependencyInfoSchema = z.object({
 })
 
 export type ServiceDependencyInfo = z.infer<typeof ServiceDependencyInfoSchema>
+
+// ---------------------------------------------------------------------------
+// Layer Detail (per-service layer with file paths)
+// ---------------------------------------------------------------------------
+
+export const LayerDetailSchema = z.object({
+  serviceName: z.string(),
+  layer: LayerSchema,
+  fileCount: z.number(),
+  filePaths: z.array(z.string()),
+  confidence: z.number(),
+  evidence: z.array(z.string()),
+})
+
+export type LayerDetail = z.infer<typeof LayerDetailSchema>
+
+// ---------------------------------------------------------------------------
+// Layer Dependency (cross-layer dependency with violation detection)
+// ---------------------------------------------------------------------------
+
+export const LayerDependencyInfoSchema = z.object({
+  sourceServiceName: z.string(),
+  sourceLayer: LayerSchema,
+  targetServiceName: z.string(),
+  targetLayer: LayerSchema,
+  dependencyCount: z.number(),
+  isViolation: z.boolean(),
+  violationReason: z.string().optional(),
+})
+
+export type LayerDependencyInfo = z.infer<typeof LayerDependencyInfoSchema>

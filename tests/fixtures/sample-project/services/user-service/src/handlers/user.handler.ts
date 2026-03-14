@@ -1,16 +1,16 @@
 import { Request, Response } from 'express';
-import { UserRepository } from '../repositories/user.repository';
+import { UserService } from '../services/user.service';
 import { validateEmail } from '@sample/shared-utils';
 
-const repo = new UserRepository();
+const userService = new UserService();
 
 export async function getUsers(_req: Request, res: Response) {
-  const users = await repo.findAll();
+  const users = await userService.getAll();
   res.json(users);
 }
 
 export async function getUserById(req: Request, res: Response) {
-  const user = await repo.findById(req.params.id);
+  const user = await userService.getById(req.params.id);
   if (!user) {
     res.status(404).json({ error: 'Not found' });
     return;
@@ -24,11 +24,11 @@ export async function createUser(req: Request, res: Response) {
     res.status(400).json({ error: 'Invalid email' });
     return;
   }
-  const user = await repo.create({ name, email });
+  const user = await userService.create({ name, email });
   res.status(201).json(user);
 }
 
 export async function deleteUser(req: Request, res: Response) {
-  await repo.delete(req.params.id);
+  await userService.delete(req.params.id);
   res.status(204).send();
 }

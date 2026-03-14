@@ -60,6 +60,8 @@ export async function analyzeRepository(rootPath: string): Promise<{
         services: [],
         dependencies: [],
         architecture: 'monolith',
+        layerDetails: [],
+        layerDependencies: [],
       },
     }
   }

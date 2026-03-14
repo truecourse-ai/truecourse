@@ -25,7 +25,7 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
     <Card
       className={`relative min-w-[220px] !gap-0 !py-0 rounded-md shadow-md transition-all ${
         selected
-          ? 'border-primary ring-2 ring-primary ring-opacity-30'
+          ? 'border-primary ring-1 ring-primary/30'
           : ''
       }`}
     >

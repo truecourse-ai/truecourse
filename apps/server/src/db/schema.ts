@@ -5,6 +5,7 @@ import {
   timestamp,
   jsonb,
   integer,
+  boolean,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -50,6 +51,8 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   }),
   services: many(services),
   serviceDependencies: many(serviceDependencies),
+  layers: many(layers),
+  layerDependencies: many(layerDependencies),
   insights: many(insights),
 }));
 
@@ -79,6 +82,7 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
   }),
   sourceEdges: many(serviceDependencies, { relationName: 'sourceService' }),
   targetEdges: many(serviceDependencies, { relationName: 'targetService' }),
+  layers: many(layers),
   insights: many(insights),
 }));
 
@@ -120,6 +124,62 @@ export const serviceDependenciesRelations = relations(
     }),
   })
 );
+
+// ---------------------------------------------------------------------------
+// layers (per-service layer details)
+// ---------------------------------------------------------------------------
+
+export const layers = pgTable('layers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  serviceId: uuid('service_id')
+    .notNull()
+    .references(() => services.id, { onDelete: 'cascade' }),
+  serviceName: text('service_name').notNull(),
+  layer: text('layer').notNull(), // 'data' | 'api' | 'service' | 'external'
+  fileCount: integer('file_count').notNull(),
+  filePaths: jsonb('file_paths').notNull(), // string[]
+  confidence: integer('confidence').notNull(), // stored as 0-100
+  evidence: jsonb('evidence').notNull(), // string[]
+});
+
+export const layersRelations = relations(layers, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [layers.analysisId],
+    references: [analyses.id],
+  }),
+  service: one(services, {
+    fields: [layers.serviceId],
+    references: [services.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// layer_dependencies (cross-layer dependencies with violation detection)
+// ---------------------------------------------------------------------------
+
+export const layerDependencies = pgTable('layer_dependencies', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  sourceServiceName: text('source_service_name').notNull(),
+  sourceLayer: text('source_layer').notNull(),
+  targetServiceName: text('target_service_name').notNull(),
+  targetLayer: text('target_layer').notNull(),
+  dependencyCount: integer('dependency_count').notNull(),
+  isViolation: boolean('is_violation').notNull().default(false),
+  violationReason: text('violation_reason'),
+});
+
+export const layerDependenciesRelations = relations(layerDependencies, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [layerDependencies.analysisId],
+    references: [analyses.id],
+  }),
+}));
 
 // ---------------------------------------------------------------------------
 // insights

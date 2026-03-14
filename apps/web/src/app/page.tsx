@@ -42,6 +42,9 @@ export default function HomePage() {
 
         <div className="mb-8">
           <RepoSelector onAdd={addRepo} />
+          <p className="mt-3 text-center text-xs text-muted-foreground">
+            Or run <code className="rounded bg-muted px-1.5 py-0.5 font-mono">npx truecourse add</code> from your project directory to add it
+          </p>
         </div>
 
         {error && (

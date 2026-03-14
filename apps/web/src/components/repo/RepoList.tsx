@@ -20,6 +20,14 @@ type RepoListProps = {
 };
 
 export function RepoList({ repos, onAnalyze, onDelete }: RepoListProps) {
+  const handleDelete = (repo: RepoResponse) => {
+    const message = repo.lastAnalyzed
+      ? `Delete "${repo.name}"? This will remove all analyses, insights, and chat history.`
+      : `Delete "${repo.name}"?`;
+    if (confirm(message)) {
+      onDelete(repo.id);
+    }
+  };
   if (repos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16">
@@ -53,7 +61,7 @@ export function RepoList({ repos, onAnalyze, onDelete }: RepoListProps) {
             <Button
               variant="ghost"
               size="icon-xs"
-              onClick={() => onDelete(repo.id)}
+              onClick={() => handleDelete(repo)}
               className="ml-2 flex-shrink-0 text-muted-foreground hover:text-destructive"
               aria-label="Delete repository"
             >
