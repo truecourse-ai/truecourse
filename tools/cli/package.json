@@ -1,0 +1,23 @@
+{
+  "name": "truecourse",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "truecourse": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "@clack/prompts": "^0.9.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0"
+  }
+}

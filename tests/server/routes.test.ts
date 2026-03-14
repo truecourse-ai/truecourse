@@ -1,0 +1,369 @@
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
+import { fileURLToPath } from 'url';
+import { resolve, dirname } from 'path';
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { eq } from 'drizzle-orm';
+import * as schema from '../../apps/server/src/db/schema';
+
+// ---------------------------------------------------------------------------
+// Mock the socket handlers so analysis doesn't crash on getIO()
+// ---------------------------------------------------------------------------
+
+vi.mock('../../apps/server/src/socket/handlers', () => ({
+  emitAnalysisProgress: vi.fn(),
+  emitAnalysisComplete: vi.fn(),
+  emitInsightsReady: vi.fn(),
+  emitFilesChanged: vi.fn(),
+}));
+
+// Import routes AFTER mocks are set up
+import { errorHandler } from '../../apps/server/src/middleware/error';
+import { initDatabase, closeDatabase } from '../../apps/server/src/config/database';
+import reposRouter from '../../apps/server/src/routes/repos';
+import analysisRouter from '../../apps/server/src/routes/analysis';
+
+// ---------------------------------------------------------------------------
+// Fixture path
+// ---------------------------------------------------------------------------
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+
+// ---------------------------------------------------------------------------
+// Database setup (same connection as the real server)
+// ---------------------------------------------------------------------------
+
+const DATABASE_URL =
+  process.env.DATABASE_URL ||
+  'postgresql://postgres:postgres@localhost:5435/truecourse_test';
+
+const client = postgres(DATABASE_URL);
+const db = drizzle(client, { schema });
+
+// ---------------------------------------------------------------------------
+// Build a standalone Express app for testing (avoids socket.io and server.listen)
+// ---------------------------------------------------------------------------
+
+function createTestApp(): express.Express {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/repos', reposRouter);
+  app.use('/api/repos', analysisRouter);
+  app.use(errorHandler);
+  return app;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Remove any repo with the fixture path from the database (cleanup from prior runs). */
+async function cleanupFixtureRepo(): Promise<void> {
+  const existing = await db
+    .select()
+    .from(schema.repos)
+    .where(eq(schema.repos.path, FIXTURE_PATH));
+
+  for (const repo of existing) {
+    const repoAnalyses = await db
+      .select()
+      .from(schema.analyses)
+      .where(eq(schema.analyses.repoId, repo.id));
+
+    for (const analysis of repoAnalyses) {
+      await db
+        .delete(schema.insights)
+        .where(eq(schema.insights.analysisId, analysis.id));
+      await db
+        .delete(schema.serviceDependencies)
+        .where(eq(schema.serviceDependencies.analysisId, analysis.id));
+      await db
+        .delete(schema.services)
+        .where(eq(schema.services.analysisId, analysis.id));
+    }
+
+    await db
+      .delete(schema.analyses)
+      .where(eq(schema.analyses.repoId, repo.id));
+
+    // Delete conversations and messages
+    const repoConversations = await db
+      .select()
+      .from(schema.conversations)
+      .where(eq(schema.conversations.repoId, repo.id));
+
+    for (const conv of repoConversations) {
+      await db
+        .delete(schema.messages)
+        .where(eq(schema.messages.conversationId, conv.id));
+    }
+
+    await db
+      .delete(schema.conversations)
+      .where(eq(schema.conversations.repoId, repo.id));
+
+    await db.delete(schema.repos).where(eq(schema.repos.id, repo.id));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('API routes (integration)', () => {
+  const app = createTestApp();
+  let createdRepoId: string;
+  let fixtureHadGit: boolean;
+
+  beforeAll(async () => {
+    // Initialize the server's database connection (used by route handlers)
+    initDatabase(DATABASE_URL);
+
+    // Ensure the fixture directory is a git repo so simple-git calls work
+    fixtureHadGit = existsSync(resolve(FIXTURE_PATH, '.git'));
+    if (!fixtureHadGit) {
+      execSync('git init && git add -A && git commit -m "init"', {
+        cwd: FIXTURE_PATH,
+        stdio: 'ignore',
+      });
+    }
+
+    // Remove any leftover fixture repo from prior test runs
+    await cleanupFixtureRepo();
+  });
+
+  afterAll(async () => {
+    // Clean up any repos created during tests
+    if (createdRepoId) {
+      try {
+        await cleanupFixtureRepo();
+      } catch {
+        // Repo may already have been deleted by the DELETE test
+      }
+    }
+
+    // Remove .git from fixture if we created it
+    if (!fixtureHadGit) {
+      execSync('rm -rf .git', { cwd: FIXTURE_PATH, stdio: 'ignore' });
+    }
+
+    await closeDatabase();
+    await client.end();
+  });
+
+  // -----------------------------------------------------------------------
+  // POST /api/repos — creates repo, returns 201
+  // -----------------------------------------------------------------------
+
+  it('POST /api/repos — creates repo, returns 201', async () => {
+    const res = await request(app)
+      .post('/api/repos')
+      .send({ path: FIXTURE_PATH })
+      .expect(201);
+
+    expect(res.body).toHaveProperty('id');
+    expect(res.body.name).toBe('sample-project');
+    expect(res.body.path).toBe(FIXTURE_PATH);
+    createdRepoId = res.body.id;
+  });
+
+  // -----------------------------------------------------------------------
+  // POST /api/repos — duplicate returns 200 (idempotent)
+  // -----------------------------------------------------------------------
+
+  it('POST /api/repos — duplicate path returns 200', async () => {
+    const res = await request(app)
+      .post('/api/repos')
+      .send({ path: FIXTURE_PATH })
+      .expect(200);
+
+    expect(res.body.id).toBe(createdRepoId);
+  });
+
+  // -----------------------------------------------------------------------
+  // POST /api/repos — rejects invalid path, returns 400
+  // -----------------------------------------------------------------------
+
+  it('POST /api/repos — rejects invalid path, returns 400', async () => {
+    const res = await request(app)
+      .post('/api/repos')
+      .send({ path: '/nonexistent/path/that/does/not/exist' })
+      .expect(400);
+
+    expect(res.body).toHaveProperty('error');
+  });
+
+  // -----------------------------------------------------------------------
+  // POST /api/repos — rejects missing path, returns 400
+  // -----------------------------------------------------------------------
+
+  it('POST /api/repos — rejects missing path, returns 400', async () => {
+    const res = await request(app).post('/api/repos').send({}).expect(400);
+
+    expect(res.body).toHaveProperty('error');
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos — lists repos
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos — lists repos', async () => {
+    const res = await request(app).get('/api/repos').expect(200);
+
+    expect(Array.isArray(res.body)).toBe(true);
+    const found = res.body.find(
+      (r: { id: string }) => r.id === createdRepoId
+    );
+    expect(found).toBeDefined();
+    expect(found.name).toBe('sample-project');
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id — returns repo with latest analysis (none yet)
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id — returns repo details', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}`)
+      .expect(200);
+
+    expect(res.body.id).toBe(createdRepoId);
+    expect(res.body.name).toBe('sample-project');
+    expect(res.body).toHaveProperty('branches');
+    expect(res.body).toHaveProperty('defaultBranch');
+    expect(res.body.latestAnalysis).toBeNull();
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id — returns 404 for nonexistent repo
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id — returns 404 for nonexistent repo', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000000000';
+    await request(app).get(`/api/repos/${fakeId}`).expect(404);
+  });
+
+  // -----------------------------------------------------------------------
+  // POST /api/repos/:id/analyze — triggers analysis, returns 202
+  // -----------------------------------------------------------------------
+
+  it('POST /api/repos/:id/analyze — triggers analysis, returns 202', async () => {
+    const res = await request(app)
+      .post(`/api/repos/${createdRepoId}/analyze`)
+      .send({})
+      .expect(202);
+
+    expect(res.body.message).toBe('Analysis started');
+    expect(res.body.repoId).toBe(createdRepoId);
+
+    // Wait for background analysis to complete by polling the database
+    const maxWait = 60_000;
+    const pollInterval = 1_000;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWait) {
+      const analysisRows = await db
+        .select()
+        .from(schema.analyses)
+        .where(eq(schema.analyses.repoId, createdRepoId));
+
+      if (analysisRows.length > 0) {
+        break;
+      }
+
+      await new Promise((r) => setTimeout(r, pollInterval));
+    }
+
+    // Verify analysis was actually saved
+    const analysisRows = await db
+      .select()
+      .from(schema.analyses)
+      .where(eq(schema.analyses.repoId, createdRepoId));
+
+    expect(analysisRows.length).toBeGreaterThan(0);
+    expect(analysisRows[0].repoId).toBe(createdRepoId);
+  }, 90_000);
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id — returns repo with latest analysis (after analyze)
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id — includes latest analysis after analyze', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}`)
+      .expect(200);
+
+    expect(res.body.latestAnalysis).not.toBeNull();
+    expect(res.body.latestAnalysis).toHaveProperty('id');
+    expect(res.body.latestAnalysis).toHaveProperty('architecture');
+    expect(res.body.latestAnalysis).toHaveProperty('services');
+    expect(res.body.latestAnalysis.services.length).toBeGreaterThan(0);
+    expect(res.body.latestAnalysis).toHaveProperty('dependencies');
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/graph — returns graph data after analysis
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/graph — returns graph data after analysis', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}/graph`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('nodes');
+    expect(res.body).toHaveProperty('edges');
+    expect(Array.isArray(res.body.nodes)).toBe(true);
+    expect(res.body.nodes.length).toBeGreaterThan(0);
+
+    // Each node should have expected fields
+    const firstNode = res.body.nodes[0];
+    expect(firstNode).toHaveProperty('id');
+    expect(firstNode).toHaveProperty('type');
+    expect(firstNode).toHaveProperty('position');
+    expect(firstNode).toHaveProperty('data');
+    expect(firstNode.data).toHaveProperty('label');
+  });
+
+  // -----------------------------------------------------------------------
+  // DELETE /api/repos/:id — removes repo and cascades
+  // -----------------------------------------------------------------------
+
+  it('DELETE /api/repos/:id — removes repo, returns 204', async () => {
+    await request(app)
+      .delete(`/api/repos/${createdRepoId}`)
+      .expect(204);
+
+    // Verify repo is gone
+    const rows = await db
+      .select()
+      .from(schema.repos)
+      .where(eq(schema.repos.id, createdRepoId));
+
+    expect(rows).toHaveLength(0);
+
+    // Verify cascaded data is also gone
+    const analysisRows = await db
+      .select()
+      .from(schema.analyses)
+      .where(eq(schema.analyses.repoId, createdRepoId));
+
+    expect(analysisRows).toHaveLength(0);
+
+    // Mark as deleted so afterAll cleanup doesn't try again
+    createdRepoId = '';
+  });
+
+  // -----------------------------------------------------------------------
+  // DELETE /api/repos/:id — 404 for already-deleted repo
+  // -----------------------------------------------------------------------
+
+  it('DELETE /api/repos/:id — returns 404 for nonexistent repo', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000000000';
+    await request(app).delete(`/api/repos/${fakeId}`).expect(404);
+  });
+});

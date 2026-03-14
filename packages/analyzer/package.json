@@ -1,0 +1,31 @@
+{
+  "name": "@truecourse/analyzer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@truecourse/shared": "workspace:*",
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-typescript": "^0.21.2",
+    "tree-sitter-javascript": "^0.21.4",
+    "ignore": "^7.0.5",
+    "minimatch": "^10.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}
