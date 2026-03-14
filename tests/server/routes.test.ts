@@ -127,7 +127,7 @@ describe('API routes (integration)', () => {
     // Ensure the fixture directory is a git repo so simple-git calls work
     fixtureHadGit = existsSync(resolve(FIXTURE_PATH, '.git'));
     if (!fixtureHadGit) {
-      execSync('git init && git add -A && git commit -m "init"', {
+      execSync('git init && git add -A && git -c user.name="test" -c user.email="test@test.com" commit -m "init"', {
         cwd: FIXTURE_PATH,
         stdio: 'ignore',
       });

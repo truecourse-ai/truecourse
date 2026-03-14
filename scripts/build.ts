@@ -130,7 +130,7 @@ const publishPkg = {
   license: 'MIT',
   repository: {
     type: 'git',
-    url: 'https://github.com/specmind/truecourse',
+    url: 'https://github.com/truecourse-ai/truecourse',
   },
   keywords: ['codebase', 'architecture', 'visualization', 'graph', 'tree-sitter'],
 };
