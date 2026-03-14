@@ -81,9 +81,21 @@ async function main() {
     });
     httpServer.listen(config.port, () => {
       console.log('');
-      console.log(`  TrueCourse is running!`);
+      console.log('         _|_');
+      console.log('        /_|_\\');
+      console.log('          |');
+      console.log('         /|');
+      console.log('        / |');
+      console.log('       /  |');
+      console.log('      /   |');
+      console.log('     /    |');
+      console.log('    /_____|_____\\');
+      console.log('    \\__________|');
+      console.log('     \\_________/');
+      console.log('   ~~~~~~~~~~~~~~');
       console.log('');
-      console.log(`  Open http://localhost:${config.port}`);
+      console.log(`   Charting your course...`);
+      console.log(`   Open http://localhost:${config.port} to sail`);
       console.log('');
       resolve();
     });
