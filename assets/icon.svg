@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="80" fill="#0f172a"/>
+
+  <!-- Sail -->
+  <polygon points="256,110 256,310 170,310" fill="#3b82f6"/>
+
+  <!-- Mast -->
+  <line x1="256" y1="95" x2="256" y2="330" stroke="#e2e8f0" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Crow's nest -->
+  <rect x="238" y="95" width="36" height="20" rx="4" fill="#e2e8f0"/>
+  <line x1="256" y1="95" x2="256" y2="85" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Hull -->
+  <path d="M 140,330 L 370,330 L 345,380 L 165,380 Z" fill="#e2e8f0"/>
+
+  <!-- Hull accent -->
+  <path d="M 150,348 L 360,348 L 350,372 L 160,372 Z" fill="#3b82f6" opacity="0.35"/>
+</svg>

@@ -403,7 +403,7 @@ npx truecourse        # subsequent runs: just start
 10. `tools/cli` — setup wizard + distribution packaging
 11. All tests passing → Phase 1 complete
 
-### 1.13 CI/CD — Automated npm Publishing `STATUS: BACKLOG`
+### 1.13 CI/CD — Automated npm Publishing `STATUS: DONE`
 
 - GitHub Actions workflow triggered on version tags (`v*`)
 - Workflow steps: checkout → pnpm install → run tests → `pnpm build:dist` → set version from tag → `npm publish --provenance`

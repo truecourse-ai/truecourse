@@ -4,7 +4,14 @@
 
 <p align="center">
   <em>Chart the waters of your codebase.</em>
-</p> TrueCourse analyzes JavaScript/TypeScript repositories using tree-sitter, renders service-level dependency graphs with React Flow, and provides LLM-powered architectural insights.
+</p>
+
+<p align="center">
+  <a href="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml"><img src="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml/badge.svg" alt="Tests" /></a>
+  <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
+</p>
+
+TrueCourse analyzes JavaScript/TypeScript repositories using tree-sitter, renders service-level dependency graphs with React Flow, and provides LLM-powered architectural insights.
 
 ## How it works
 
