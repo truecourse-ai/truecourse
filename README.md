@@ -1,21 +1,10 @@
-# TrueCourse
+<p align="center">
+  <img src="assets/logo.svg" alt="TrueCourse" width="300" />
+</p>
 
-```
-       _|_
-      /_|_\
-        |
-       /|
-      / |
-     /  |
-    /   |
-   /    |
-  /_____|_____\
-  \__________|
-   \_________/
- ~~~~~~~~~~~~~~
-```
-
-Visualize your codebase architecture as an interactive graph. TrueCourse analyzes JavaScript/TypeScript repositories using tree-sitter, renders service-level dependency graphs with React Flow, and provides LLM-powered architectural insights.
+<p align="center">
+  <em>Chart the waters of your codebase.</em>
+</p> TrueCourse analyzes JavaScript/TypeScript repositories using tree-sitter, renders service-level dependency graphs with React Flow, and provides LLM-powered architectural insights.
 
 ## How it works
 
