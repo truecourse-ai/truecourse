@@ -78,7 +78,7 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
           <span className="text-[10px] text-muted-foreground">{fileCount} files</span>
           {onExplain && (
             <button
-              className="flex cursor-pointer items-center justify-center rounded-sm border border-border bg-muted p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex items-center justify-center rounded-sm border border-border bg-muted p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={(e) => { e.stopPropagation(); onExplain(id); }}
               title="Explain"
             >

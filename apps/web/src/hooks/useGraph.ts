@@ -19,8 +19,23 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
       const data = await api.getGraph(repoId, { branch, level });
 
       if (level === 'layers') {
-        // Layer-level view: mix of serviceGroupNode and layerNode types
+        // Layer-level view: mix of serviceGroupNode, layerNode, and databaseNode types
         const graphNodes: Node[] = data.nodes.map((node) => {
+          if (node.type === 'databaseNode') {
+            return {
+              id: node.id,
+              type: 'database' as const,
+              position: node.position,
+              data: {
+                label: node.data.label,
+                databaseType: node.data.databaseType || node.data.serviceType,
+                tableCount: node.data.tableCount ?? node.data.fileCount ?? 0,
+                connectedServices: node.data.connectedServices || [],
+                framework: node.data.framework,
+              },
+            };
+          }
+
           if (node.type === 'layerNode') {
             return {
               id: node.id,
@@ -62,7 +77,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
           target: edge.target,
           sourceHandle: edge.sourceHandle,
           targetHandle: edge.targetHandle,
-          type: 'intraLayer',
+          type: edge.data.dependencyType === 'database' ? 'database' : 'intraLayer',
           data: {
             label: '',
             dependencyCount: edge.data.dependencyCount || 0,
@@ -76,38 +91,57 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
         setEdges(graphEdges);
       } else {
         // Service-level view (existing behavior)
-        const graphNodes: GraphNode[] = data.nodes.map((node) => ({
-          id: node.id,
-          type: 'service' as const,
-          position: node.position,
-          data: {
-            label: node.data.label,
-            description: node.data.description,
-            serviceInfo: {
-              type: node.data.serviceType || 'unknown',
-              framework: node.data.framework || null,
-              fileCount: node.data.fileCount || 0,
-              layers: (node.data.layers || []).map((l) => ({
-                layer: l,
-                confidence: 1,
-                evidence: [],
-              })),
-              rootPath: node.data.rootPath || '',
-            },
-            insightCount: 0,
-            hasHighSeverity: false,
-          } as ServiceNodeData,
-        }));
+        const graphNodes: Node[] = data.nodes.map((node) => {
+          if (node.type === 'databaseNode') {
+            return {
+              id: node.id,
+              type: 'database' as const,
+              position: node.position,
+              data: {
+                label: node.data.label,
+                databaseType: node.data.databaseType || node.data.serviceType,
+                tableCount: node.data.tableCount ?? node.data.fileCount ?? 0,
+                connectedServices: node.data.connectedServices || [],
+                framework: node.data.framework,
+              },
+            };
+          }
 
-        const graphEdges: GraphEdge[] = data.edges.map((edge) => ({
+          return {
+            id: node.id,
+            type: 'service' as const,
+            position: node.position,
+            data: {
+              label: node.data.label,
+              description: node.data.description,
+              serviceInfo: {
+                type: node.data.serviceType || 'unknown',
+                framework: node.data.framework || null,
+                fileCount: node.data.fileCount || 0,
+                layers: (node.data.layers || []).map((l) => ({
+                  layer: l,
+                  confidence: 1,
+                  evidence: [],
+                })),
+                rootPath: node.data.rootPath || '',
+              },
+              insightCount: 0,
+              hasHighSeverity: false,
+            } as ServiceNodeData,
+          };
+        });
+
+        const graphEdges: Edge[] = data.edges.map((edge) => ({
           id: edge.id,
           source: edge.source,
           target: edge.target,
-          type: 'dependency' as const,
+          type: edge.data.dependencyType === 'database' ? 'database' : 'dependency',
           data: {
             label: edge.data.dependencyType === 'http'
               ? `${edge.data.dependencyCount || 0} HTTP call${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`
-              : `${edge.data.dependencyCount || 0} import${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`,
+              : edge.data.dependencyType === 'database'
+                ? ''
+                : `${edge.data.dependencyCount || 0} import${(edge.data.dependencyCount || 0) !== 1 ? 's' : ''}`,
             dependencyCount: edge.data.dependencyCount || 0,
             hasHttpCalls: edge.data.dependencyType === 'http',
           },

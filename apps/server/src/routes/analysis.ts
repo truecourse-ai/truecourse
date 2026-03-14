@@ -9,6 +9,8 @@ import {
   layers,
   layerDependencies,
   insights,
+  databases,
+  databaseConnections,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
@@ -21,6 +23,7 @@ import {
 } from '../socket/handlers.js';
 import { buildGraphData, buildLayerGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
+import { getAllDefaultRules } from '@truecourse/analyzer';
 import { v4 as uuidv4 } from 'uuid';
 
 const router: Router = Router();
@@ -77,15 +80,19 @@ router.post(
           .limit(1);
 
         let prevPositionsByName: Record<string, { x: number; y: number }> = {};
+        let prevLayerPositions: Record<string, { x: number; y: number }> | null = null;
         if (prevAnalyses.length > 0 && prevAnalyses[0].nodePositions) {
-          const prevPositions = prevAnalyses[0].nodePositions as Record<string, { x: number; y: number }>;
+          const allPrev = prevAnalyses[0].nodePositions as Record<string, unknown>;
+          // Support both namespaced and legacy flat formats
+          const prevServicePositions = (allPrev.services || allPrev) as Record<string, { x: number; y: number }>;
+          prevLayerPositions = (allPrev.layers as Record<string, { x: number; y: number }>) || null;
           const prevServices = await db
             .select()
             .from(services)
             .where(eq(services.analysisId, prevAnalyses[0].id));
           for (const svc of prevServices) {
-            if (prevPositions[svc.id]) {
-              prevPositionsByName[svc.name] = prevPositions[svc.id];
+            if (prevServicePositions[svc.id]) {
+              prevPositionsByName[svc.name] = prevServicePositions[svc.id];
             }
           }
         }
@@ -176,20 +183,80 @@ router.post(
 
         }
 
-        // Carry over node positions from previous analysis
-        if (Object.keys(prevPositionsByName).length > 0) {
-          const newPositions: Record<string, { x: number; y: number }> = {};
-          for (const [name, newId] of serviceIdMap) {
-            if (prevPositionsByName[name]) {
-              newPositions[newId] = prevPositionsByName[name];
+        // Save detected databases
+        const dbIdMap = new Map<string, string>();
+        if (result.databaseResult && result.databaseResult.databases.length > 0) {
+
+          for (const dbInfo of result.databaseResult.databases) {
+            const [savedDb] = await db.insert(databases).values({
+              analysisId: analysis.id,
+              name: dbInfo.name,
+              type: dbInfo.type,
+              driver: dbInfo.driver,
+              connectionConfig: dbInfo.connectionEnvVar ? { envVar: dbInfo.connectionEnvVar } : null,
+              tables: dbInfo.tables,
+              dbRelations: dbInfo.relations,
+              connectedServices: dbInfo.connectedServices,
+            }).returning();
+
+            dbIdMap.set(dbInfo.name, savedDb.id);
+          }
+
+          for (const conn of result.databaseResult.connections) {
+            const serviceId = serviceIdMap.get(conn.serviceName);
+            const databaseId = dbIdMap.get(conn.databaseName);
+            if (serviceId && databaseId) {
+              await db.insert(databaseConnections).values({
+                analysisId: analysis.id,
+                serviceId,
+                databaseId,
+                driver: conn.driver,
+              });
             }
           }
-          if (Object.keys(newPositions).length > 0) {
-            await db
-              .update(analyses)
-              .set({ nodePositions: newPositions })
-              .where(eq(analyses.id, analysis.id));
+        }
+
+        // Carry over node positions from previous analysis (namespaced)
+        const carryOver: Record<string, unknown> = {};
+        if (Object.keys(prevPositionsByName).length > 0) {
+          const newServicePositions: Record<string, { x: number; y: number }> = {};
+          for (const [name, newId] of serviceIdMap) {
+            if (prevPositionsByName[name]) {
+              newServicePositions[newId] = prevPositionsByName[name];
+            }
           }
+          if (Object.keys(newServicePositions).length > 0) {
+            carryOver.services = newServicePositions;
+          }
+        }
+        if (prevLayerPositions) {
+          // Layer positions use service group IDs which change on re-analysis;
+          // remap using service name → new ID
+          const newLayerPositions: Record<string, { x: number; y: number }> = {};
+          const prevServices = prevAnalyses.length > 0
+            ? await db.select().from(services).where(eq(services.analysisId, prevAnalyses[0].id))
+            : [];
+          const prevIdToName = new Map(prevServices.map((s) => [s.id, s.name]));
+          for (const [key, pos] of Object.entries(prevLayerPositions)) {
+            // Service group positions: old service ID → name → new service ID
+            const name = prevIdToName.get(key);
+            if (name) {
+              const newId = serviceIdMap.get(name);
+              if (newId) newLayerPositions[newId] = pos;
+            } else {
+              // Database or other nodes — keep as-is
+              newLayerPositions[key] = pos;
+            }
+          }
+          if (Object.keys(newLayerPositions).length > 0) {
+            carryOver.layers = newLayerPositions;
+          }
+        }
+        if (Object.keys(carryOver).length > 0) {
+          await db
+            .update(analyses)
+            .set({ nodePositions: carryOver })
+            .where(eq(analyses.id, analysis.id));
         }
 
         // Update repo lastAnalyzedAt
@@ -207,6 +274,7 @@ router.post(
           });
 
           const analysisServices = result.services.map((s) => ({
+            id: serviceIdMap.get(s.name)!,
             name: s.name,
             type: s.type,
             framework: s.framework || undefined,
@@ -225,19 +293,45 @@ router.post(
             .filter((d) => d.isViolation)
             .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
 
+          // Gather enabled LLM rules for insight generation
+          const allRules = getAllDefaultRules();
+          const enabledLlmRules = allRules
+            .filter((r) => r.type === 'llm' && r.enabled && r.prompt)
+            .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt! }));
+
           const { insights: generatedInsights, serviceDescriptions } = await generateInsights({
             architecture: result.architecture,
             services: analysisServices,
             dependencies: analysisDeps,
             violations: violationDescriptions,
+            databases: result.databaseResult?.databases.map((d) => ({
+              id: dbIdMap.get(d.name)!,
+              name: d.name,
+              type: d.type,
+              driver: d.driver,
+              tableCount: d.tables.length,
+              connectedServices: d.connectedServices,
+              tables: d.tables.map((t) => ({
+                name: t.name,
+                columns: t.columns.map((c) => ({
+                  name: c.name,
+                  type: c.type,
+                  isNullable: c.isNullable,
+                  isPrimaryKey: c.isPrimaryKey,
+                  isForeignKey: c.isForeignKey,
+                  referencesTable: c.referencesTable,
+                })),
+              })),
+              relations: d.relations.map((r) => ({
+                sourceTable: r.sourceTable,
+                targetTable: r.targetTable,
+                foreignKeyColumn: r.foreignKeyColumn,
+              })),
+            })),
+            llmRules: enabledLlmRules,
           });
 
           for (const insight of generatedInsights) {
-            let targetServiceId: string | null = null;
-            if (insight.targetService) {
-              targetServiceId = serviceIdMap.get(insight.targetService) || null;
-            }
-
             await db.insert(insights).values({
               id: uuidv4(),
               repoId: id,
@@ -246,19 +340,20 @@ router.post(
               title: insight.title,
               content: insight.content,
               severity: insight.severity,
-              targetServiceId,
+              targetServiceId: insight.targetServiceId || null,
+              targetDatabaseId: insight.targetDatabaseId || null,
+              targetTable: insight.targetTable || null,
               fixPrompt: insight.fixPrompt || null,
             });
           }
 
           // Save service descriptions
           for (const desc of serviceDescriptions) {
-            const svcId = serviceIdMap.get(desc.name);
-            if (svcId) {
+            if (desc.id) {
               await db
                 .update(services)
                 .set({ description: desc.description })
-                .where(eq(services.id, svcId));
+                .where(eq(services.id, desc.id));
             }
           }
 
@@ -338,6 +433,17 @@ router.get(
         .from(serviceDependencies)
         .where(eq(serviceDependencies.analysisId, analysis.id));
 
+      // Fetch databases for this analysis
+      const analysisDatabases = await db
+        .select()
+        .from(databases)
+        .where(eq(databases.analysisId, analysis.id));
+
+      const analysisDbConnections = await db
+        .select()
+        .from(databaseConnections)
+        .where(eq(databaseConnections.analysisId, analysis.id));
+
       let graphData;
 
       if (level === 'layers') {
@@ -365,13 +471,16 @@ router.get(
             evidence: l.evidence as string[],
           })),
           analysisLayerDeps,
+          analysisDatabases,
+          analysisDbConnections,
         );
       } else {
-        graphData = buildGraphData(analysisServices, analysisDeps);
+        graphData = buildGraphData(analysisServices, analysisDeps, analysisDatabases, analysisDbConnections);
       }
 
-      // Include saved node positions if any
-      const savedPositions = analysis.nodePositions as Record<string, { x: number; y: number }> | null;
+      // Include saved node positions if any (namespaced by level)
+      const allPositions = analysis.nodePositions as Record<string, unknown> | null;
+      const savedPositions = allPositions?.[level] as Record<string, { x: number; y: number }> | undefined;
       if (savedPositions) {
         for (const node of graphData.nodes) {
           const pos = savedPositions[node.id];
@@ -395,6 +504,7 @@ router.put(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
+      const level = (req.query.level as string) || 'services';
       const { positions } = req.body as { positions: Record<string, { x: number; y: number }> };
 
       if (!positions || typeof positions !== 'object') {
@@ -417,9 +527,12 @@ router.put(
         throw createAppError('No analysis found', 404);
       }
 
+      const existing = (latestAnalysis[0].nodePositions as Record<string, unknown>) || {};
+      const merged = { ...existing, [level]: positions };
+
       await db
         .update(analyses)
-        .set({ nodePositions: positions })
+        .set({ nodePositions: merged })
         .where(eq(analyses.id, latestAnalysis[0].id));
 
       res.json({ ok: true });
@@ -436,6 +549,7 @@ router.delete(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
+      const level = (req.query.level as string) || 'services';
 
       const conditions = [eq(analyses.repoId, id)];
       if (branch) {
@@ -453,9 +567,13 @@ router.delete(
         throw createAppError('No analysis found', 404);
       }
 
+      const existing = (latestAnalysis[0].nodePositions as Record<string, unknown>) || {};
+      delete existing[level];
+      const merged = Object.keys(existing).length > 0 ? existing : null;
+
       await db
         .update(analyses)
-        .set({ nodePositions: null })
+        .set({ nodePositions: merged })
         .where(eq(analyses.id, latestAnalysis[0].id));
 
       res.json({ ok: true });

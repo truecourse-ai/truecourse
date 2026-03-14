@@ -11,10 +11,13 @@ import type {
   Entity,
   LayerDetail,
   LayerDependencyInfo,
+  DatabaseDetectionResult,
 } from '@truecourse/shared'
 import { detectLayers, toLayerDetectionResults } from './layer-detector.js'
 import { detectServices, type Service } from './service-detector.js'
 import { shouldExtractEntities, extractEntities } from './extractors/entities.js'
+import { detectDatabases } from './database-detector.js'
+import { DETERMINISTIC_RULES } from './rules/deterministic-rules.js'
 
 /**
  * Result of the split analysis
@@ -25,6 +28,7 @@ export interface SplitAnalysisResult {
   architecture: Architecture
   layerDetails: LayerDetail[]
   layerDependencies: LayerDependencyInfo[]
+  databaseResult: DatabaseDetectionResult
 }
 
 /**
@@ -236,12 +240,14 @@ export function performSplitAnalysis(
     layerDepCounts.get(key)!.count += dep.importedNames.length || 1
   }
 
-  // Violation pairs: [sourceLayer, targetLayer] where direction is invalid
-  const violationPairs: [Layer, Layer][] = [
-    ['data', 'api'],       // Data layer should not depend on API layer
-    ['external', 'api'],   // External integrations should not depend on API layer
-    ['data', 'external'],  // Data layer should not call external services
-  ]
+  // Build violation pairs from enabled deterministic rules matching arch/layer-violation-*
+  const violationPairs: [Layer, Layer][] = DETERMINISTIC_RULES
+    .filter((r) => r.enabled && r.key.startsWith('arch/layer-violation-'))
+    .map((r) => {
+      const suffix = r.key.replace('arch/layer-violation-', '')
+      const [src, tgt] = suffix.split('-') as [Layer, Layer]
+      return [src, tgt]
+    })
 
   for (const [, data] of layerDepCounts.entries()) {
     const isViolation = violationPairs.some(
@@ -264,12 +270,16 @@ export function performSplitAnalysis(
     })
   }
 
+  // 7. Detect databases
+  const databaseResult = detectDatabases(rootPath, analyses, detectedServices)
+
   return {
     services,
     dependencies: serviceDependencies,
     architecture,
     layerDetails,
     layerDependencies,
+    databaseResult,
   }
 }
 

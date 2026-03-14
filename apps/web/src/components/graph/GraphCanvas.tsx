@@ -21,8 +21,10 @@ import '@xyflow/react/dist/style.css';
 import { ServiceNode } from '@/components/graph/nodes/ServiceNode';
 import { LayerNode } from '@/components/graph/nodes/LayerNode';
 import { ServiceGroupNode } from '@/components/graph/nodes/ServiceGroupNode';
+import { DatabaseNode } from '@/components/graph/nodes/DatabaseNode';
 import { DependencyEdge } from '@/components/graph/edges/DependencyEdge';
 import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
+import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
 import { ZoomControls } from '@/components/graph/controls/ZoomControls';
 import { DepthToggle } from '@/components/graph/controls/DepthToggle';
 import * as api from '@/lib/api';
@@ -45,12 +47,14 @@ const nodeTypes: NodeTypes = {
   service: ServiceNode as unknown as NodeTypes[string],
   layer: LayerNode as unknown as NodeTypes[string],
   serviceGroup: ServiceGroupNode as unknown as NodeTypes[string],
+  database: DatabaseNode as unknown as NodeTypes[string],
 };
 
 const edgeTypes: EdgeTypes = {
   dependency: DependencyEdge as unknown as EdgeTypes[string],
   violation: DependencyEdge as unknown as EdgeTypes[string],
   intraLayer: IntraLayerEdge as unknown as EdgeTypes[string],
+  database: DatabaseEdge as unknown as EdgeTypes[string],
 };
 
 function GraphCanvasInner({
@@ -115,36 +119,43 @@ function GraphCanvasInner({
       }
       if (Object.keys(positions).length === 0) return;
       setIsSaving(true);
-      api.saveGraphPositions(repoId, positions, branch)
+      api.saveGraphPositions(repoId, positions, branch, depthLevel)
         .finally(() => setIsSaving(false));
     },
     [repoId, branch, depthLevel],
   );
 
   const handleAutoLayout = useCallback(() => {
-    api.resetGraphPositions(repoId, branch)
+    api.resetGraphPositions(repoId, branch, depthLevel)
       .then(() => onRefetch?.())
       .catch(() => {});
-  }, [repoId, branch, onRefetch]);
+  }, [repoId, branch, depthLevel, onRefetch]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       onNodeSelect?.(node.id);
 
       if (depthLevel === 'services') {
-        // Zoom to clicked service node
+        // Zoom to clicked service or database node
         setTimeout(() => {
           fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
         }, 50);
-      } else if (depthLevel === 'layers' && node.type === 'serviceGroup') {
-        // Zoom to service group and its children
-        const childNodeIds = nodesRef.current
-          .filter((n) => (n as Record<string, unknown>).parentId === node.id)
-          .map((n) => n.id);
-        const nodeIds = [node.id, ...childNodeIds];
-        setTimeout(() => {
-          fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
-        }, 50);
+      } else if (depthLevel === 'layers') {
+        if (node.type === 'serviceGroup') {
+          // Zoom to service group and its children
+          const childNodeIds = nodesRef.current
+            .filter((n) => (n as Record<string, unknown>).parentId === node.id)
+            .map((n) => n.id);
+          const nodeIds = [node.id, ...childNodeIds];
+          setTimeout(() => {
+            fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
+          }, 50);
+        } else if (node.type === 'database') {
+          // Zoom to database node
+          setTimeout(() => {
+            fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
+          }, 50);
+        }
       }
     },
     [onNodeSelect, depthLevel, fitView],

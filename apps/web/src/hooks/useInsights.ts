@@ -40,7 +40,9 @@ export function useInsights(repoId: string, selectedServiceId?: string) {
     );
     if (!selectedServiceId) return sorted;
     return sorted.filter(
-      (insight) => insight.targetServiceId === selectedServiceId,
+      (insight) =>
+        insight.targetServiceId === selectedServiceId ||
+        insight.targetDatabaseId === selectedServiceId,
     );
   }, [insights, selectedServiceId]);
 

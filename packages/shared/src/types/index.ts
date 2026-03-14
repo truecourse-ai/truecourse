@@ -1,3 +1,5 @@
 export * from './analysis.js'
 export * from './entity.js'
 export * from './insights.js'
+export * from './database.js'
+export * from './rules.js'

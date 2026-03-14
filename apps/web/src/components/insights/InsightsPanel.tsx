@@ -1,8 +1,10 @@
 'use client';
 
-import { Lightbulb, MessageCircle, Loader2 } from 'lucide-react';
+import { Lightbulb, MessageCircle, Shield, Loader2 } from 'lucide-react';
 import { InsightCard } from '@/components/insights/InsightCard';
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { SchemaPanel } from '@/components/schema/SchemaPanel';
+import { RulesPanel } from '@/components/rules/RulesPanel';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import type { InsightResponse } from '@/lib/api';
 
@@ -16,6 +18,7 @@ type InsightsPanelProps = {
   onTabChange?: (tab: string) => void;
   explainRequest?: { nodeId: string; nodeName: string } | null;
   onExplainHandled?: () => void;
+  selectedDatabaseId?: string | null;
 };
 
 export function InsightsPanel({
@@ -28,8 +31,10 @@ export function InsightsPanel({
   onTabChange,
   explainRequest,
   onExplainHandled,
+  selectedDatabaseId,
 }: InsightsPanelProps) {
   const isChat = activeTab === 'chat';
+  const isRules = activeTab === 'rules';
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -43,12 +48,16 @@ export function InsightsPanel({
             <MessageCircle className="h-4 w-4" />
             Chat
           </TabsTrigger>
+          <TabsTrigger value="rules">
+            <Shield className="h-4 w-4" />
+            Rules
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 
       {/* Insights content */}
-      <div className={`min-h-0 flex-1 overflow-y-auto ${isChat ? 'hidden' : ''}`}>
-        <div className="p-3">
+      <div className={`min-h-0 flex-1 flex flex-col overflow-hidden ${isChat || isRules ? 'hidden' : ''}`}>
+        <div className={`overflow-y-auto p-3 ${selectedDatabaseId ? 'flex-1' : 'flex-1'}`}>
           {selectedService && (
             <div className="mb-3 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
               Filtered by:{' '}
@@ -78,6 +87,13 @@ export function InsightsPanel({
             </div>
           )}
         </div>
+
+        {/* ER diagram fills remaining space at the bottom */}
+        {selectedDatabaseId && (
+          <div className="flex-shrink-0 border-t border-border h-[264px]">
+            <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} insights={insights} />
+          </div>
+        )}
       </div>
 
       {/* Chat content — always mounted, hidden when not active */}
@@ -88,6 +104,11 @@ export function InsightsPanel({
           explainRequest={explainRequest}
           onExplainHandled={onExplainHandled}
         />
+      </div>
+
+      {/* Rules content */}
+      <div className={`min-h-0 flex-1 overflow-y-auto ${isRules ? '' : 'hidden'}`}>
+        <RulesPanel />
       </div>
     </div>
   );

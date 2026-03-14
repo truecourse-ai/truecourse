@@ -16,8 +16,8 @@ TrueCourse analyzes JavaScript/TypeScript repositories using tree-sitter, render
 ## How it works
 
 1. Point TrueCourse at a local repo folder
-2. The analyzer scans all JS/TS files using tree-sitter, detects services, layers, and dependencies
-3. Results render as an interactive graph — services as nodes, dependencies as animated edges
+2. The analyzer scans all JS/TS files using tree-sitter, detects services, layers, dependencies, and databases
+3. Results render as an interactive graph — services as nodes, dependencies as animated edges, databases as infrastructure nodes with ER diagrams
 4. An AI agent explains your architecture and answers questions about your codebase
 
 ## Prerequisites
@@ -113,6 +113,7 @@ truecourse/
   packages/
     shared/         Shared types and Zod validation schemas
     analyzer/       Tree-sitter analysis engine (adapted from SpecMind)
+      src/rules/    Analysis rules (deterministic + LLM)
   tools/
     cli/            Setup wizard and start command
   tests/
@@ -126,7 +127,16 @@ truecourse/
 
 ### `@truecourse/analyzer`
 
-Tree-sitter-based code analysis engine. Detects services (monorepo structure, Docker Compose, entry points), architectural layers (data, API, service, external), and builds module dependency graphs.
+Tree-sitter-based code analysis engine. Detects services (monorepo structure, Docker Compose, entry points), architectural layers (data, API, service, external), databases (Prisma, Drizzle, Mongoose, raw drivers, Docker Compose), and builds module dependency graphs.
+
+**Analysis rules** live in `packages/analyzer/src/rules/`:
+
+| File | What |
+|---|---|
+| `deterministic-rules.ts` | 3 layer violation rules — checked programmatically during analysis |
+| `llm-rules.ts` | 9 LLM rules (4 architecture + 5 database) — passed as guidance to the LLM prompt |
+
+The folder contains only rule definitions — no code. The aggregator (`rule-engine.ts`) lives in the parent `src/` directory. To add a new rule, add an entry to the appropriate file and submit a PR. All rules are visible in the **Rules** tab in the web UI.
 
 ### `@truecourse/shared`
 
@@ -152,7 +162,10 @@ Next.js App Router frontend. React Flow renders the service graph with custom no
 | GET | `/api/repos/:id/graph` | Graph data (nodes + edges) |
 | POST | `/api/repos/:id/insights` | Generate LLM insights |
 | GET | `/api/repos/:id/insights` | Get insights |
+| GET | `/api/repos/:id/databases` | List detected databases |
+| GET | `/api/repos/:id/databases/:dbId/schema` | Database schema (tables, columns, relations) |
 | POST | `/api/repos/:id/chat` | Chat with AI agent (SSE streaming) |
+| GET | `/api/rules` | List all analysis rules |
 
 ## Testing
 
@@ -164,7 +177,7 @@ pnpm test
 pnpm test:watch
 ```
 
-111 tests across 10 test files covering schema validation, tree-sitter parsing, file analysis, dependency graph building, service/layer detection, graph layout, and end-to-end analysis.
+Tests cover schema validation, tree-sitter parsing, file analysis, dependency graph building, service/layer detection, database detection, schema parsing, graph layout, and end-to-end analysis.
 
 ## Environment Variables
 

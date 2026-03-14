@@ -63,6 +63,9 @@ export type GraphResponse = {
       fileNames?: string[];
       layerDeps?: Array<{ targetLayer: string; count: number; isViolation: boolean }>;
       violations?: Array<{ edgeId: string; targetLayer: string; reason: string }>;
+      databaseType?: string;
+      tableCount?: number;
+      connectedServices?: string[];
       isViolation?: boolean;
       violationReason?: string;
     };
@@ -91,6 +94,9 @@ export type InsightResponse = {
   severity: string;
   targetServiceId?: string | null;
   targetServiceName?: string | null;
+  targetDatabaseId?: string | null;
+  targetDatabaseName?: string | null;
+  targetTable?: string | null;
   fixPrompt?: string | null;
   createdAt: string;
 };
@@ -143,9 +149,13 @@ export function saveGraphPositions(
   repoId: string,
   positions: Record<string, { x: number; y: number }>,
   branch?: string,
+  level?: string,
 ): Promise<{ ok: boolean }> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<{ ok: boolean }>(`/api/repos/${repoId}/graph/positions${params}`, {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (level) params.set('level', level);
+  const qs = params.toString();
+  return fetchApi<{ ok: boolean }>(`/api/repos/${repoId}/graph/positions${qs ? `?${qs}` : ''}`, {
     method: 'PUT',
     body: JSON.stringify({ positions }),
   });
@@ -154,9 +164,13 @@ export function saveGraphPositions(
 export function resetGraphPositions(
   repoId: string,
   branch?: string,
+  level?: string,
 ): Promise<{ ok: boolean }> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<{ ok: boolean }>(`/api/repos/${repoId}/graph/positions${params}`, {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (level) params.set('level', level);
+  const qs = params.toString();
+  return fetchApi<{ ok: boolean }>(`/api/repos/${repoId}/graph/positions${qs ? `?${qs}` : ''}`, {
     method: 'DELETE',
   });
 }
@@ -164,6 +178,68 @@ export function resetGraphPositions(
 // Insights
 export function getInsights(repoId: string): Promise<InsightResponse[]> {
   return fetchApi<InsightResponse[]>(`/api/repos/${repoId}/insights`);
+}
+
+// Databases
+export type DatabaseResponse = {
+  id: string;
+  name: string;
+  type: string;
+  driver: string;
+  tableCount: number;
+  connectedServices: string[];
+  connections: Array<{ serviceId: string; driver: string }>;
+};
+
+export type DatabaseSchemaResponse = {
+  id: string;
+  name: string;
+  type: string;
+  driver: string;
+  tables: Array<{
+    name: string;
+    columns: Array<{
+      name: string;
+      type: string;
+      isNullable?: boolean;
+      isPrimaryKey?: boolean;
+      isForeignKey?: boolean;
+      referencesTable?: string;
+      referencesColumn?: string;
+    }>;
+    primaryKey?: string;
+  }>;
+  relations: Array<{
+    sourceTable: string;
+    targetTable: string;
+    relationType: string;
+    foreignKeyColumn: string;
+  }>;
+};
+
+export function getDatabases(repoId: string, branch?: string): Promise<DatabaseResponse[]> {
+  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+  return fetchApi<DatabaseResponse[]>(`/api/repos/${repoId}/databases${params}`);
+}
+
+export function getDatabaseSchema(repoId: string, dbId: string): Promise<DatabaseSchemaResponse> {
+  return fetchApi<DatabaseSchemaResponse>(`/api/repos/${repoId}/databases/${dbId}/schema`);
+}
+
+// Rules
+export type RuleResponse = {
+  key: string;
+  category: string;
+  name: string;
+  description: string;
+  prompt?: string;
+  enabled: boolean;
+  severity: string;
+  type: string;
+};
+
+export function getRules(): Promise<RuleResponse[]> {
+  return fetchApi<RuleResponse[]>('/api/rules');
 }
 
 // Conversations

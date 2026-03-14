@@ -70,9 +70,27 @@ function getServiceRank(type: string): number {
   }
 }
 
+interface DatabaseData {
+  id: string;
+  name: string;
+  type: string;
+  driver: string;
+  tables: unknown;
+  connectedServices: unknown;
+}
+
+interface DatabaseConnectionData {
+  id: string;
+  serviceId: string;
+  databaseId: string;
+  driver: string;
+}
+
 export function buildGraphData(
   services: ServiceData[],
-  dependencies: DependencyData[]
+  dependencies: DependencyData[],
+  databasesList?: DatabaseData[],
+  databaseConnectionsList?: DatabaseConnectionData[],
 ): GraphData {
   const g = new dagre.graphlib.Graph();
 
@@ -132,6 +150,67 @@ export function buildGraphData(
     };
   });
 
+  // Add database nodes to dagre
+  if (databasesList && databasesList.length > 0) {
+    for (const dbData of databasesList) {
+      g.setNode(dbData.id, {
+        width: 200,
+        height: 80,
+        rank: 4, // Below all services
+      });
+    }
+
+    // Add edges from services to databases
+    if (databaseConnectionsList) {
+      for (const conn of databaseConnectionsList) {
+        g.setEdge(conn.serviceId, conn.databaseId);
+      }
+    }
+
+    // Re-run layout with database nodes
+    dagre.layout(g);
+
+    // Update service node positions after re-layout
+    for (const node of nodes) {
+      const pos = g.node(node.id);
+      if (pos) {
+        node.position = {
+          x: pos.x - 140,
+          y: pos.y - 60,
+        };
+      }
+    }
+
+    // Add database nodes
+    for (const dbData of databasesList) {
+      const pos = g.node(dbData.id);
+      const tableCount = Array.isArray(dbData.tables) ? dbData.tables.length : 0;
+      const connectedSvcs = Array.isArray(dbData.connectedServices) ? dbData.connectedServices : [];
+
+      nodes.push({
+        id: dbData.id,
+        type: 'databaseNode',
+        position: {
+          x: pos.x - 100,
+          y: pos.y - 40,
+        },
+        data: {
+          label: dbData.name,
+          serviceType: dbData.type,
+          framework: dbData.driver,
+          fileCount: tableCount,
+          layers: [],
+          rootPath: '',
+          ...({
+            databaseType: dbData.type,
+            tableCount,
+            connectedServices: connectedSvcs,
+          } as Record<string, unknown>),
+        },
+      });
+    }
+  }
+
   // Build graph edges
   const edges: GraphEdge[] = dependencies.map((dep) => ({
     id: dep.id,
@@ -143,6 +222,22 @@ export function buildGraphData(
       dependencyType: dep.dependencyType || undefined,
     },
   }));
+
+  // Add database edges
+  if (databaseConnectionsList) {
+    for (const conn of databaseConnectionsList) {
+      edges.push({
+        id: `db-${conn.id}`,
+        source: conn.serviceId,
+        target: conn.databaseId,
+        label: conn.driver,
+        data: {
+          dependencyCount: 0,
+          dependencyType: 'database',
+        },
+      });
+    }
+  }
 
   return { nodes, edges };
 }
@@ -192,6 +287,8 @@ export function buildLayerGraphData(
   serviceDeps: DependencyData[],
   layersList: LayerData[],
   layerDeps: LayerDepData[],
+  databasesList?: DatabaseData[],
+  databaseConnectionsList?: DatabaseConnectionData[],
 ): GraphData {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
@@ -449,6 +546,77 @@ export function buildLayerGraphData(
     const violations = violationsByService.get(node.id);
     if (violations) {
       (node.data as Record<string, unknown>).violations = violations;
+    }
+  }
+
+  // Add database nodes below service groups
+  if (databasesList && databasesList.length > 0) {
+    // Find the lowest Y position among service group nodes
+    let maxY = 0;
+    for (const node of nodes) {
+      if (node.type === 'serviceGroupNode') {
+        const nodeHeight = (node as unknown as Record<string, unknown>).style
+          ? ((node as unknown as Record<string, unknown>).style as Record<string, number>).height || 200
+          : 200;
+        const bottomY = node.position.y + nodeHeight;
+        if (bottomY > maxY) maxY = bottomY;
+      }
+    }
+
+    const DB_NODE_GAP = 80;
+    let dbX = 0;
+
+    for (const dbData of databasesList) {
+      const tableCount = Array.isArray(dbData.tables) ? dbData.tables.length : 0;
+      const connectedSvcs = Array.isArray(dbData.connectedServices) ? dbData.connectedServices : [];
+
+      nodes.push({
+        id: dbData.id,
+        type: 'databaseNode',
+        position: {
+          x: dbX,
+          y: maxY + DB_NODE_GAP,
+        },
+        data: {
+          label: dbData.name,
+          serviceType: dbData.type,
+          framework: dbData.driver,
+          fileCount: tableCount,
+          layers: [],
+          rootPath: '',
+          ...({
+            databaseType: dbData.type,
+            tableCount,
+            connectedServices: connectedSvcs,
+          } as Record<string, unknown>),
+        },
+      });
+
+      dbX += 260;
+    }
+
+    // Add edges from data layers to databases
+    if (databaseConnectionsList) {
+      for (const conn of databaseConnectionsList) {
+        const svcName = servicesList.find((s) => s.id === conn.serviceId)?.name;
+        if (!svcName) continue;
+
+        // Connect to data layer if it exists, otherwise service group
+        const dataLayerNodeId = `${conn.serviceId}__data`;
+        const hasDataLayer = nodes.some((n) => n.id === dataLayerNodeId);
+
+        edges.push({
+          id: `db-${conn.id}`,
+          source: hasDataLayer ? dataLayerNodeId : conn.serviceId,
+          target: conn.databaseId,
+          label: conn.driver,
+          data: {
+            dependencyCount: 0,
+            dependencyType: 'database',
+          },
+          ...({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>),
+        });
+      }
     }
   }
 

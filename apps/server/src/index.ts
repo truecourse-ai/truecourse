@@ -16,6 +16,8 @@ import reposRouter from './routes/repos.js';
 import analysisRouter from './routes/analysis.js';
 import insightsRouter from './routes/insights.js';
 import chatRouter from './routes/chat.js';
+import databasesRouter from './routes/databases.js';
+import rulesRouter from './routes/rules.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +51,8 @@ async function main() {
   app.use('/api/repos', analysisRouter);
   app.use('/api/repos', insightsRouter);
   app.use('/api/repos', chatRouter);
+  app.use('/api/repos', databasesRouter);
+  app.use('/api/rules', rulesRouter);
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

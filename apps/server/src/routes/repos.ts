@@ -60,7 +60,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const allRepos = await db.select().from(repos).orderBy(desc(repos.createdAt));
-    res.json(allRepos);
+    res.json(allRepos.map((r) => ({
+      id: r.id,
+      name: r.name,
+      path: r.path,
+      lastAnalyzed: r.lastAnalyzedAt?.toISOString() ?? null,
+    })));
   } catch (error) {
     next(error);
   }

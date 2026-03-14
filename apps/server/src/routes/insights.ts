@@ -7,6 +7,7 @@ import {
   analyses,
   services,
   serviceDependencies,
+  databases,
   insights,
 } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
@@ -46,11 +47,16 @@ router.post(
 
       const analysis = latestAnalysis[0];
 
-      // Get services and dependencies for the analysis
+      // Get services, dependencies, and databases for the analysis
       const analysisServices = await db
         .select()
         .from(services)
         .where(eq(services.analysisId, analysis.id));
+
+      const analysisDatabases = await db
+        .select()
+        .from(databases)
+        .where(eq(databases.analysisId, analysis.id));
 
       const analysisDeps = await db
         .select()
@@ -62,10 +68,16 @@ router.post(
         analysisServices.map((s) => [s.id, s.name])
       );
 
+      // Build database ID map
+      const dbIdMap = new Map(
+        analysisDatabases.map((d) => [d.name, d.id])
+      );
+
       // Generate insights via LLM
       const generatedInsights = await generateInsights({
         architecture: analysis.architecture,
         services: analysisServices.map((s) => ({
+          id: s.id,
           name: s.name,
           type: s.type,
           framework: s.framework || undefined,
@@ -78,6 +90,16 @@ router.post(
           dependencyCount: d.dependencyCount,
           dependencyType: d.dependencyType,
         })),
+        databases: analysisDatabases.map((d) => ({
+          id: d.id,
+          name: d.name,
+          type: d.type,
+          driver: d.driver,
+          tableCount: (d.tables as unknown[])?.length || 0,
+          connectedServices: (d.connectedServices as string[]) || [],
+          tables: d.tables as { name: string; columns: { name: string; type: string; isNullable?: boolean; isPrimaryKey?: boolean; isForeignKey?: boolean; referencesTable?: string }[] }[],
+          relations: d.dbRelations as { sourceTable: string; targetTable: string; foreignKeyColumn: string }[],
+        })),
       });
 
       const { insights: generatedInsightsList, serviceDescriptions } = generatedInsights;
@@ -85,17 +107,6 @@ router.post(
       // Save insights to database
       const savedInsights = [];
       for (const insight of generatedInsightsList) {
-        // Find target service ID if targetService name is provided
-        let targetServiceId: string | null = null;
-        if (insight.targetService) {
-          const targetService = analysisServices.find(
-            (s) => s.name === insight.targetService
-          );
-          if (targetService) {
-            targetServiceId = targetService.id;
-          }
-        }
-
         const [saved] = await db
           .insert(insights)
           .values({
@@ -106,7 +117,9 @@ router.post(
             title: insight.title,
             content: insight.content,
             severity: insight.severity,
-            targetServiceId,
+            targetServiceId: insight.targetServiceId || null,
+            targetDatabaseId: insight.targetDatabaseId || null,
+            targetTable: insight.targetTable || null,
             fixPrompt: insight.fixPrompt || null,
           })
           .returning();
@@ -116,12 +129,11 @@ router.post(
 
       // Save service descriptions
       for (const desc of serviceDescriptions) {
-        const svc = analysisServices.find((s) => s.name === desc.name);
-        if (svc) {
+        if (desc.id) {
           await db
             .update(services)
             .set({ description: desc.description })
-            .where(eq(services.id, svc.id));
+            .where(eq(services.id, desc.id));
         }
       }
 
@@ -181,11 +193,15 @@ router.get(
           severity: insights.severity,
           targetServiceId: insights.targetServiceId,
           targetServiceName: services.name,
+          targetDatabaseId: insights.targetDatabaseId,
+          targetDatabaseName: databases.name,
+          targetTable: insights.targetTable,
           fixPrompt: insights.fixPrompt,
           createdAt: insights.createdAt,
         })
         .from(insights)
         .leftJoin(services, eq(insights.targetServiceId, services.id))
+        .leftJoin(databases, eq(insights.targetDatabaseId, databases.id))
         .where(eq(insights.analysisId, analysis.id))
         .orderBy(desc(insights.createdAt));
 

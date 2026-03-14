@@ -19,6 +19,7 @@ export interface AnalysisResult {
   dependencies: ServiceDependencyInfo[];
   layerDetails: LayerDetail[];
   layerDependencies: LayerDependencyInfo[];
+  databaseResult: import('@truecourse/shared').DatabaseDetectionResult;
   fileAnalyses: FileAnalysis[];
   moduleDependencies: ModuleDependency[];
   metadata: Record<string, unknown>;
@@ -110,6 +111,7 @@ export async function runAnalysis(
     dependencies: splitResult.dependencies,
     layerDetails: splitResult.layerDetails,
     layerDependencies: splitResult.layerDependencies,
+    databaseResult: splitResult.databaseResult,
     fileAnalyses,
     moduleDependencies,
     metadata: {

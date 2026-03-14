@@ -54,6 +54,7 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   layers: many(layers),
   layerDependencies: many(layerDependencies),
   insights: many(insights),
+  databases: many(databases),
 }));
 
 // ---------------------------------------------------------------------------
@@ -200,6 +201,10 @@ export const insights = pgTable('insights', {
   targetServiceId: uuid('target_service_id').references(() => services.id, {
     onDelete: 'set null',
   }),
+  targetDatabaseId: uuid('target_database_id').references(() => databases.id, {
+    onDelete: 'set null',
+  }),
+  targetTable: text('target_table'),
   fixPrompt: text('fix_prompt'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
 });
@@ -216,6 +221,10 @@ export const insightsRelations = relations(insights, ({ one }) => ({
   targetService: one(services, {
     fields: [insights.targetServiceId],
     references: [services.id],
+  }),
+  targetDatabase: one(databases, {
+    fields: [insights.targetDatabaseId],
+    references: [databases.id],
   }),
 }));
 
@@ -265,3 +274,66 @@ export const messagesRelations = relations(messages, ({ one }) => ({
     references: [conversations.id],
   }),
 }));
+
+// ---------------------------------------------------------------------------
+// databases (detected database instances per analysis)
+// ---------------------------------------------------------------------------
+
+export const databases = pgTable('databases', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  type: text('type').notNull(), // 'postgres' | 'redis' | 'mongodb' | 'mysql' | 'sqlite'
+  driver: text('driver').notNull(),
+  connectionConfig: jsonb('connection_config'), // env var, docker service, etc.
+  tables: jsonb('tables'), // TableInfo[]
+  dbRelations: jsonb('db_relations'), // RelationInfo[]
+  connectedServices: jsonb('connected_services'), // string[]
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+});
+
+export const databasesRelations = relations(databases, ({ one, many }) => ({
+  analysis: one(analyses, {
+    fields: [databases.analysisId],
+    references: [analyses.id],
+  }),
+  connections: many(databaseConnections),
+}));
+
+// ---------------------------------------------------------------------------
+// database_connections (which service uses which database)
+// ---------------------------------------------------------------------------
+
+export const databaseConnections = pgTable('database_connections', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  serviceId: uuid('service_id')
+    .notNull()
+    .references(() => services.id, { onDelete: 'cascade' }),
+  databaseId: uuid('database_id')
+    .notNull()
+    .references(() => databases.id, { onDelete: 'cascade' }),
+  driver: text('driver').notNull(),
+});
+
+export const databaseConnectionsRelations = relations(
+  databaseConnections,
+  ({ one }) => ({
+    analysis: one(analyses, {
+      fields: [databaseConnections.analysisId],
+      references: [analyses.id],
+    }),
+    service: one(services, {
+      fields: [databaseConnections.serviceId],
+      references: [services.id],
+    }),
+    database: one(databases, {
+      fields: [databaseConnections.databaseId],
+      references: [databases.id],
+    }),
+  })
+);

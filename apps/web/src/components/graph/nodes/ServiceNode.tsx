@@ -94,7 +94,7 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
           </span>
           {onExplain && (
             <button
-              className="flex cursor-pointer items-center gap-1 rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex items-center gap-1 rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               onClick={(e) => { e.stopPropagation(); onExplain(id); }}
             >
               <MessageCircle className="h-2.5 w-2.5" />

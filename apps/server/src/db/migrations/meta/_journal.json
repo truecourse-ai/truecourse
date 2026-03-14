@@ -15,6 +15,27 @@
       "when": 1773455493129,
       "tag": "0001_rare_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773463244663,
+      "tag": "0002_broken_wither",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1773507287194,
+      "tag": "0003_nifty_galactus",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1773508862289,
+      "tag": "0004_colossal_black_cat",
+      "breakpoints": true
     }
   ]
 }

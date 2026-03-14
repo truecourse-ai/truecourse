@@ -18,13 +18,16 @@ Services:
 Dependencies:
 {{depList}}
 {{violations}}
+{{databases}}
+{{llmRules}}
 
 Focus on:
 1. Architecture patterns and anti-patterns
 2. Dependency issues (circular dependencies, tight coupling)
 3. Layer violations
-4. Suggestions for improvement
-5. Potential risks or code smells
+4. Database usage patterns (connection sharing, ORM choices, missing indices hints)
+5. Suggestions for improvement
+6. Potential risks or code smells
 
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
 
@@ -46,7 +49,8 @@ Services:
 
 Dependencies:
 {{depList}}
-{{violations}}`,
+{{violations}}
+{{databases}}`,
     config: {
       model: 'gpt-4o',
       max_tokens: 2048,
@@ -81,7 +85,7 @@ export function buildTemplateVars(context: ArchitectureContext): Record<string, 
   const serviceList = context.services
     .map(
       (s) =>
-        `- ${s.name} (type: ${s.type}, framework: ${s.framework || 'none'}, files: ${s.fileCount}, layers: ${s.layers.join(', ') || 'none'})`
+        `- ${s.name} [id: ${s.id}] (type: ${s.type}, framework: ${s.framework || 'none'}, files: ${s.fileCount}, layers: ${s.layers.join(', ') || 'none'})`
     )
     .join('\n');
 
@@ -96,7 +100,39 @@ export function buildTemplateVars(context: ArchitectureContext): Record<string, 
     ? `\nViolations detected:\n${context.violations.map((v) => `- ${v}`).join('\n')}`
     : '';
 
-  return { architecture: context.architecture, serviceList, depList, violations };
+  const databases = context.databases?.length
+    ? `\nDatabases:\n${context.databases.map((d) => {
+        let dbStr = `- ${d.name} [id: ${d.id}] (${d.type}, driver: ${d.driver}, tables: ${d.tableCount}, used by: ${d.connectedServices.join(', ') || 'none'})`;
+        if (d.tables?.length) {
+          dbStr += '\n  Schema:';
+          for (const t of d.tables) {
+            const cols = t.columns.map((c) => {
+              let col = `${c.name}: ${c.type}`;
+              if (c.isPrimaryKey) col += ' [PK]';
+              if (c.isForeignKey) col += ` [FK → ${c.referencesTable}]`;
+              if (c.isNullable) col += ' [nullable]';
+              return col;
+            }).join(', ');
+            dbStr += `\n    ${t.name} (${cols})`;
+          }
+        }
+        if (d.relations?.length) {
+          dbStr += '\n  Relations:';
+          for (const r of d.relations) {
+            dbStr += `\n    ${r.sourceTable}.${r.foreignKeyColumn} → ${r.targetTable}`;
+          }
+        }
+        return dbStr;
+      }).join('\n')}`
+    : '';
+
+  const llmRules = context.llmRules?.length
+    ? `\nAnalysis Rules (evaluate the architecture against these):\n${context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
+      ).join('\n')}`
+    : '';
+
+  return { architecture: context.architecture, serviceList, depList, violations, databases, llmRules };
 }
 
 // ---------------------------------------------------------------------------

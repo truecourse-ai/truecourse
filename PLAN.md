@@ -51,6 +51,7 @@ truecourse/
           repo/RepoSelector.tsx, RepoList.tsx
           insights/InsightsPanel.tsx, InsightCard.tsx, WarningCard.tsx
           chat/ChatPanel.tsx, ChatMessage.tsx, ChatInput.tsx
+          schema/SchemaPanel.tsx     # Database schema review panel
           layout/Header.tsx, Sidebar.tsx
         hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useChat.ts
         lib/api.ts, socket.ts
@@ -60,7 +61,7 @@ truecourse/
       src/
         index.ts
         config/index.ts, database.ts
-        routes/repos.ts, analysis.ts, insights.ts, chat.ts
+        routes/repos.ts, analysis.ts, insights.ts, chat.ts, databases.ts
         services/
           analyzer.service.ts
           graph.service.ts
@@ -92,6 +93,11 @@ truecourse/
           index.ts
           service-patterns.ts      # TS constants (not JSON)
           layer-patterns.ts        # TS constants (not JSON)
+          database-patterns.ts     # ORM/driver → database type mapping
+        schema-parsers/
+          prisma.ts                # Prisma schema file parser
+          drizzle.ts               # Drizzle schema file parser
+        database-detector.ts       # Detects databases from imports, schemas, Docker Compose
         extractors/
           calls.ts, http-calls.ts, entities.ts
           languages/typescript.ts, javascript.ts, common.ts
@@ -471,7 +477,7 @@ Depth levels (progressive, added across phases):
 
 ---
 
-## Phase 3: Database Detection & Schema Visualization `STATUS: BACKLOG`
+## Phase 3: Database Detection & Schema Visualization `STATUS: DONE`
 
 Detect databases used by each service and render them as infrastructure nodes on the graph. Includes a dedicated schema review mode for exploring tables and relationships.
 
@@ -526,7 +532,7 @@ Clicking a database node opens a dedicated panel/view:
 - `SchemaPanel` — right-side panel showing tables, columns, ER diagram when a database node is clicked
 - `ERDiagram` — mini React Flow graph inside SchemaPanel showing table relations
 
-### Test Plan (Phase 3) `STATUS: BACKLOG`
+### Test Plan (Phase 3) `STATUS: DONE`
 - Database detection: correctly identifies Prisma, Drizzle, Mongoose, raw pg/redis imports
 - Docker Compose parsing: extracts database services and their types
 - Schema extraction: Prisma schema → tables, columns, relations
@@ -545,6 +551,30 @@ Clicking a database node opens a dedicated panel/view:
 5. ER diagram shows foreign key relationships between tables
 6. Shared database shows edges from multiple services
 7. LLM insights reference database architecture (e.g. "3 services share the same Postgres — consider splitting")
+
+---
+
+## Phase 3.5: Analysis Rules `STATUS: DONE`
+
+Define configurable analysis rules for deterministic checks and LLM guidance. Rules are defined in code (contributable via PRs). Two types:
+- **Deterministic** — TypeScript constants, checked programmatically (layer violations)
+- **LLM** — TypeScript constants with prompt text, passed as guidance to the LLM prompt
+
+### Scope
+- Extract 3 hardcoded layer violation rules into deterministic rules file
+- Define LLM architecture rules (circular deps, god service, tight coupling, missing layers)
+- Define LLM database rules (missing FK, missing index, naming, timestamps, nullability)
+- Wire deterministic rules into split-analyzer (replace hardcoded pairs)
+- Wire LLM rules into insight generation prompt
+- Read-only Rules tab in frontend to view all rules
+- GET /api/rules endpoint returns all default rules
+- No user editing/overrides yet (future phase)
+
+### Verification
+1. Rules tab shows all rules (3 deterministic + 9 LLM)
+2. Layer violations still detected as before
+3. LLM insights reference the rule patterns
+4. pnpm build and pnpm test pass
 
 ---
 

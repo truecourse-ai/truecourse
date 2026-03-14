@@ -76,9 +76,22 @@ export default function RepoGraphPage() {
     }
   };
 
+  const [selectedDatabaseId, setSelectedDatabaseId] = useState<string | null>(null);
+
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedService(nodeId);
-  }, []);
+
+    // Check if clicked node is a database node
+    if (nodeId) {
+      const clickedNode = nodes.find((n) => n.id === nodeId);
+      if (clickedNode && clickedNode.type === 'database') {
+        setSelectedDatabaseId(nodeId);
+        setActiveTab('insights');
+        return;
+      }
+    }
+    setSelectedDatabaseId(null);
+  }, [nodes]);
 
   const handleExplainNode = useCallback((nodeId: string) => {
     const nodeName = (nodes.find((n) => n.id === nodeId)?.data as Record<string, unknown>)?.label as string || nodeId;
@@ -284,6 +297,7 @@ export default function RepoGraphPage() {
             onTabChange={setActiveTab}
             explainRequest={explainRequest}
             onExplainHandled={() => setExplainRequest(null)}
+            selectedDatabaseId={selectedDatabaseId}
           />
         </Sidebar>
       </div>

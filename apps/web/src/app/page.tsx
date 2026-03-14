@@ -8,16 +8,8 @@ import { Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function HomePage() {
-  const { repos, isLoading, error, addRepo, deleteRepo, analyzeRepo } =
+  const { repos, isLoading, error, addRepo, deleteRepo } =
     useRepo();
-
-  const handleAnalyze = async (id: string) => {
-    try {
-      await analyzeRepo(id);
-    } catch {
-      // Error is handled in hook
-    }
-  };
 
   const handleDelete = async (id: string) => {
     try {
@@ -60,7 +52,6 @@ export default function HomePage() {
         ) : (
           <RepoList
             repos={repos}
-            onAnalyze={handleAnalyze}
             onDelete={handleDelete}
           />
         )}

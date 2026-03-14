@@ -72,7 +72,7 @@ export function ChatPanel({ repoId, explainRequest, onExplainHandled }: ChatPane
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <button
             onClick={() => setShowHistory(false)}
-            className="flex cursor-pointer items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             aria-label="Back to chat"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -91,7 +91,7 @@ export function ChatPanel({ repoId, explainRequest, onExplainHandled }: ChatPane
                 <button
                   key={conv.id}
                   onClick={() => handleSelectConversation(conv.id)}
-                  className="w-full cursor-pointer px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                  className="w-full px-3 py-2.5 text-left transition-colors hover:bg-accent"
                 >
                   <p className="truncate text-sm text-foreground">{conv.preview}</p>
                   <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -117,7 +117,7 @@ export function ChatPanel({ repoId, explainRequest, onExplainHandled }: ChatPane
       <div className="flex items-center justify-end gap-1 border-b border-border px-2 py-1.5">
         <button
           onClick={handleNewConversation}
-          className="flex cursor-pointer items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="New conversation"
           title="New conversation"
         >
@@ -125,7 +125,7 @@ export function ChatPanel({ repoId, explainRequest, onExplainHandled }: ChatPane
         </button>
         <button
           onClick={handleShowHistory}
-          className="flex cursor-pointer items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label="Conversation history"
           title="Conversation history"
         >

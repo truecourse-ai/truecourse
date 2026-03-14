@@ -15,6 +15,7 @@ import { wrapWithTracing } from './tracing.js';
 export interface ArchitectureContext {
   architecture: string;
   services: {
+    id: string;
     name: string;
     type: string;
     framework?: string;
@@ -28,6 +29,24 @@ export interface ArchitectureContext {
     type?: string;
   }[];
   violations?: string[];
+  databases?: {
+    id: string;
+    name: string;
+    type: string;
+    driver: string;
+    tableCount: number;
+    connectedServices: string[];
+    tables?: {
+      name: string;
+      columns: { name: string; type: string; isNullable?: boolean; isPrimaryKey?: boolean; isForeignKey?: boolean; referencesTable?: string }[];
+    }[];
+    relations?: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[];
+  }[];
+  llmRules?: {
+    name: string;
+    severity: string;
+    prompt: string;
+  }[];
 }
 
 export interface ChatMessage {
@@ -36,7 +55,7 @@ export interface ChatMessage {
 }
 
 export interface ServiceDescription {
-  name: string;
+  id: string;
   description: string;
 }
 
@@ -58,17 +77,19 @@ export interface LLMProvider {
 const InsightOutputSchema = z.object({
   insights: z.array(
     z.object({
-      type: z.enum(['architecture', 'dependency', 'violation', 'suggestion', 'warning']),
+      type: z.enum(['architecture', 'dependency', 'violation', 'suggestion', 'warning', 'database']),
       title: z.string(),
       content: z.string(),
       severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
-      targetService: z.string().nullable(),
+      targetServiceId: z.string().nullable().describe('The id of the service this insight applies to, must be an exact id from the Services list'),
+      targetDatabaseId: z.string().nullable().describe('The id of the database this insight applies to, must be an exact id from the Databases list'),
+      targetTable: z.string().nullable().describe('The exact table name this insight applies to, if the insight is about a specific table'),
       fixPrompt: z.string().nullable(),
     })
   ),
   serviceDescriptions: z.array(
     z.object({
-      name: z.string().describe('The service name, must match one of the provided service names'),
+      id: z.string().describe('The service id, must be an exact id from the Services list'),
       description: z.string().describe('A concise 1-2 sentence description of what this service does'),
     })
   ),
@@ -123,7 +144,9 @@ class AISDKProvider implements LLMProvider {
         title: insight.title,
         content: insight.content,
         severity: insight.severity,
-        targetService: insight.targetService ?? undefined,
+        targetServiceId: insight.targetServiceId ?? undefined,
+        targetDatabaseId: insight.targetDatabaseId ?? undefined,
+        targetTable: insight.targetTable ?? undefined,
         fixPrompt: insight.fixPrompt ?? undefined,
         createdAt: new Date().toISOString(),
       })),

@@ -37,8 +37,17 @@ export {
 } from './extractors/languages/javascript.js'
 export { createSourceLocation, extractDocComment } from './extractors/languages/common.js'
 
+// Database detection
+export { detectDatabases, parseDockerCompose } from './database-detector.js'
+export { parsePrismaSchema } from './schema-parsers/prisma.js'
+export { parseDrizzleSchema } from './schema-parsers/drizzle.js'
+
 // Patterns
-export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPatterns, externalLayerPatterns } from './patterns/index.js'
+export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPatterns, externalLayerPatterns, DATABASE_IMPORT_MAP, CONNECTION_ENV_VARS, DOCKER_IMAGE_MAP } from './patterns/index.js'
+
+// Rules
+export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES } from './rules/index.js'
+export { getAllDefaultRules } from './rule-engine.js'
 
 /**
  * High-level function to analyze an entire repository
@@ -62,6 +71,7 @@ export async function analyzeRepository(rootPath: string): Promise<{
         architecture: 'monolith',
         layerDetails: [],
         layerDependencies: [],
+        databaseResult: { databases: [], connections: [] },
       },
     }
   }

@@ -7,6 +7,7 @@ import {
 export interface InsightGenerationInput {
   architecture: string;
   services: {
+    id: string;
     name: string;
     type: string;
     framework?: string;
@@ -20,6 +21,24 @@ export interface InsightGenerationInput {
     dependencyType: string | null;
   }[];
   violations?: string[];
+  databases?: {
+    id: string;
+    name: string;
+    type: string;
+    driver: string;
+    tableCount: number;
+    connectedServices: string[];
+    tables?: {
+      name: string;
+      columns: { name: string; type: string; isNullable?: boolean; isPrimaryKey?: boolean; isForeignKey?: boolean; referencesTable?: string }[];
+    }[];
+    relations?: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[];
+  }[];
+  llmRules?: {
+    name: string;
+    severity: string;
+    prompt: string;
+  }[];
 }
 
 export async function generateInsights(
@@ -28,6 +47,7 @@ export async function generateInsights(
   const context: ArchitectureContext = {
     architecture: input.architecture,
     services: input.services.map((s) => ({
+      id: s.id,
       name: s.name,
       type: s.type,
       framework: s.framework,
@@ -41,6 +61,8 @@ export async function generateInsights(
       type: d.dependencyType || undefined,
     })),
     violations: input.violations,
+    databases: input.databases,
+    llmRules: input.llmRules,
   };
 
   const provider = createLLMProvider();

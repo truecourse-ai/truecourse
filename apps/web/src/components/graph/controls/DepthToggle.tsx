@@ -18,7 +18,7 @@ export function DepthToggle({ level, onChange }: DepthToggleProps) {
       {levels.map(({ value, label }) => (
         <button
           key={value}
-          className={`cursor-pointer px-3 py-1.5 text-xs font-medium transition-colors ${
+          className={`px-3 py-1.5 text-xs font-medium transition-colors ${
             level === value
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
