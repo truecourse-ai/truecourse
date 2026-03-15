@@ -26,6 +26,7 @@ function DependencyEdgeComponent({
   const label = data?.label ?? '';
   const highlighted = (data as Record<string, unknown>)?.highlighted === true;
   const dimmed = (data as Record<string, unknown>)?.dimmed === true;
+  const hidden = (data as Record<string, unknown>)?.hidden === true;
   const useStep = (data as Record<string, unknown>)?.edgeStyle === 'step';
 
   const isEmphasized = highlighted || selected;
@@ -57,7 +58,7 @@ function DependencyEdgeComponent({
           markerHeight="6"
           orient="auto"
         >
-          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} opacity={dimmed ? 0.08 : 0.6} />
+          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} opacity={hidden ? 0 : dimmed ? 0.08 : 0.6} />
         </marker>
       </defs>
       <path
@@ -67,12 +68,12 @@ function DependencyEdgeComponent({
         stroke={strokeColor}
         strokeWidth={strokeWidth}
         strokeDasharray={hasHttpCalls ? '8 4' : '2 3'}
-        opacity={dimmed ? 0.08 : isEmphasized ? 1 : 0.6}
+        opacity={hidden ? 0 : dimmed ? 0.08 : isEmphasized ? 1 : 0.6}
         markerEnd={`url(#${markerId})`}
-        className={dimmed ? '' : 'animate-edge-flow'}
-        style={{ transition: 'opacity 0.2s ease' }}
+        className={dimmed || hidden ? '' : 'animate-edge-flow'}
+        style={{ transition: 'opacity 0.2s ease', pointerEvents: hidden ? 'none' : undefined }}
       />
-      {label && !dimmed && (
+      {label && !dimmed && !hidden && (
         <EdgeLabelRenderer>
           <div
             style={{

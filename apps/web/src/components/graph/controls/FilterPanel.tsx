@@ -76,7 +76,7 @@ export function FilterPanel({
 
   const searchPlaceholder =
     depthLevel === 'services' ? 'Search services...' :
-    depthLevel === 'methods' ? 'Search methods...' :
+    depthLevel === 'methods' ? 'Search functions...' :
     depthLevel === 'modules' ? 'Search modules...' :
     'Search...';
 

@@ -25,6 +25,7 @@ function DatabaseEdgeComponent({
   selected,
 }: EdgeProps & { data?: DatabaseEdgeData }) {
   const dimmed = (data as Record<string, unknown>)?.dimmed === true;
+  const hidden = (data as Record<string, unknown>)?.hidden === true;
   const useStep = (data as Record<string, unknown>)?.edgeStyle === 'step';
 
   const pathFn = useStep ? getSmoothStepPath : getBezierPath;
@@ -40,7 +41,7 @@ function DatabaseEdgeComponent({
   const isEmphasized = selected;
   const strokeColor = isEmphasized ? 'var(--primary)' : '#f59e0b'; // amber
   const strokeWidth = isEmphasized ? 2 : 1.5;
-  const opacity = dimmed ? 0.08 : 1;
+  const opacity = hidden ? 0 : dimmed ? 0.08 : 1;
 
   const markerId = `db-arrow-${id}`;
 
@@ -68,10 +69,10 @@ function DatabaseEdgeComponent({
         strokeDasharray="6 3"
         opacity={opacity}
         markerEnd={`url(#${markerId})`}
-        className={dimmed ? '' : 'animate-edge-flow'}
-        style={{ transition: 'opacity 0.2s ease' }}
+        className={dimmed || hidden ? '' : 'animate-edge-flow'}
+        style={{ transition: 'opacity 0.2s ease', pointerEvents: hidden ? 'none' : undefined }}
       />
-      {!dimmed && <EdgeLabelRenderer>
+      {!dimmed && !hidden && <EdgeLabelRenderer>
         <div
           style={{
             position: 'absolute',

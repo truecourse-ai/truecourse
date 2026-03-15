@@ -132,7 +132,7 @@ export async function generateInsights(
     llmRules: archRules,
   };
   const archPromise = provider.generateArchitectureInsights(archContext).then((result) => {
-    onProgress?.('Architecture insights ready');
+    onProgress?.('Architecture checks done');
     return result;
   });
 
@@ -145,7 +145,7 @@ export async function generateInsights(
           llmRules: dbRules,
         };
         return provider.generateDatabaseInsights(dbContext).then((result) => {
-          onProgress?.('Database insights ready');
+          onProgress?.('Database checks done');
           return result;
         });
       })()
@@ -164,7 +164,7 @@ export async function generateInsights(
           violations: input.moduleViolations,
         };
         return provider.generateModuleInsights(moduleContext).then((result) => {
-          onProgress?.('Module insights ready');
+          onProgress?.('Module checks done');
           return result;
         });
       })()

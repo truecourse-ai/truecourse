@@ -413,7 +413,6 @@ export default function RepoGraphPage() {
             onLocateNode={(nodeId, requiredDepth) => {
               if (requiredDepth && requiredDepth !== depthLevel) {
                 setDepthLevel(requiredDepth as DepthLevel);
-                // Delay focus until new graph data loads
                 setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
               } else {
                 setFocusRequest({ nodeId, key: Date.now() });

@@ -2,7 +2,7 @@
 
 import { memo, useCallback } from 'react';
 import { Handle, Position, useNodeConnections, useReactFlow, type NodeProps } from '@xyflow/react';
-import { MessageCircle, AlertTriangle } from 'lucide-react';
+import { MessageCircle, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 import { LAYER_LABELS } from '@/types/graph';
 import type { Layer } from '@truecourse/shared';
 
@@ -20,6 +20,9 @@ type LayerNodeData = {
   layerColor: string;
   fileNames: string[];
   isContainer?: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: (nodeId: string) => void;
+  moduleCount?: number;
   violations?: LayerViolation[];
   onExplain?: (nodeId: string) => void;
 };
@@ -30,7 +33,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
-  const { label, fileCount, layerColor, fileNames = [], isContainer, violations = [], onExplain } = data;
+  const { label, fileCount, layerColor, fileNames = [], isContainer, isCollapsed, onToggleCollapse, moduleCount, violations = [], onExplain } = data;
   const layerLabel = LAYER_LABELS[label as Layer] || label;
   const { setEdges } = useReactFlow();
 
@@ -90,8 +93,19 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
         <Handle type="target" position={Position.Right} id="right-tgt" className={HIDDEN_CLASS} />
 
         <div className="flex items-center gap-2 px-3 py-1.5">
+          {onToggleCollapse && (
+            <button
+              className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors nodrag"
+              onClick={(e) => { e.stopPropagation(); onToggleCollapse(id); }}
+            >
+              {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+          )}
           <div className="h-2 w-2 rounded-full" style={{ backgroundColor: layerColor }} />
           <span className="text-[10px] font-medium text-muted-foreground">{layerLabel}</span>
+          {isCollapsed && moduleCount !== undefined && (
+            <span className="text-[9px] text-muted-foreground/60 ml-auto">{moduleCount} modules</span>
+          )}
         </div>
       </div>
     );

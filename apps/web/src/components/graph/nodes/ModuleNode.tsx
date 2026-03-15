@@ -2,7 +2,7 @@
 
 import { memo, useCallback } from 'react';
 import { Handle, Position, useNodeConnections, useReactFlow, type NodeProps } from '@xyflow/react';
-import { Box, FileCode, Braces, MessageCircle, AlertTriangle } from 'lucide-react';
+import { Box, FileCode, Braces, MessageCircle, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 
 type ModuleViolation = {
   targetLayer: string;
@@ -21,6 +21,8 @@ type ModuleNodeData = {
   layerColor: string;
   isDead?: boolean;
   isContainer?: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: (nodeId: string) => void;
   violations?: ModuleViolation[];
   onExplain?: (nodeId: string) => void;
 };
@@ -35,7 +37,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleNodeData }) {
-  const { label, moduleKind, methodCount, layerColor, isDead, isContainer, violations, onExplain } = data;
+  const { label, moduleKind, methodCount, layerColor, isDead, isContainer, isCollapsed, onToggleCollapse, violations, onExplain } = data;
   const Icon = KIND_ICONS[moduleKind] || FileCode;
   const { setEdges } = useReactFlow();
 
@@ -107,11 +109,19 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
         <Handle type="target" position={Position.Right} id="right-tgt" className={rightTgtConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} />
 
         <div className="flex items-center gap-2 px-2.5 py-1">
+          {onToggleCollapse && (
+            <button
+              className="flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors nodrag"
+              onClick={(e) => { e.stopPropagation(); onToggleCollapse(id); }}
+            >
+              {isCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+          )}
           <Icon className="h-2.5 w-2.5 text-muted-foreground" />
           <span className="text-[10px] font-medium text-muted-foreground truncate">{label}</span>
           {violationTooltip}
           {deadTooltip}
-          <span className="ml-auto text-[9px] text-muted-foreground/60">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
+          <span className="ml-auto shrink-0 text-[9px] text-muted-foreground/60">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
         </div>
       </div>
     );
@@ -120,7 +130,7 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
   // Card mode: compact node (used in modules depth level)
   return (
     <div
-      className={`min-w-[180px] rounded-md shadow-sm transition-all border ${
+      className={`w-full overflow-hidden rounded-md shadow-sm transition-all border ${
         violations?.length ? 'border-red-500/60' : isDead ? 'border-dashed border-amber-500/60 bg-card/60' : 'bg-card/80'
       } ${selected ? 'animate-border-pulse' : ''}`}
     >
@@ -129,12 +139,12 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
       <Handle type="source" position={Position.Right} id="right-src" className={rightSrcConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} style={{ top: '75%' }} />
       <Handle type="target" position={Position.Right} id="right-tgt" className={rightTgtConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} style={{ top: '25%' }} />
 
-      <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <Icon className="h-3 w-3 text-muted-foreground" />
+      <div className="flex items-center gap-2 px-2.5 py-1.5 min-w-0">
+        <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="text-xs font-medium text-foreground truncate">{label}</span>
         {violationTooltip}
         {deadTooltip}
-        <span className="ml-auto text-[10px] text-muted-foreground">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
         {onExplain && (
           <button
             className="flex items-center justify-center rounded-sm border border-border bg-muted p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

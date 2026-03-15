@@ -33,7 +33,7 @@ async function main() {
   // 3. Run migrations
   const migrationClient = postgres(databaseUrl, { max: 1, onnotice: () => {} });
   await migrate(drizzle(migrationClient), {
-    migrationsFolder: path.join(__dirname, 'db/migrations'),
+    migrationsFolder: path.join(__dirname, '../src/db/migrations'),
   });
   await migrationClient.end();
   console.log('[Database] Migrations complete');

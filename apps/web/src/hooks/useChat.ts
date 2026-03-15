@@ -84,7 +84,7 @@ export function useChat(repoId: string) {
   const explainNode = useCallback(
     (nodeId: string, nodeName: string, nodeType?: string) => {
       const kind =
-        nodeType === 'methodNode' ? 'method' :
+        nodeType === 'methodNode' ? 'function' :
         nodeType === 'moduleNode' ? 'module' :
         nodeType === 'layerNode' ? 'layer' : 'service';
       sendMessage(

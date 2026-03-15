@@ -50,21 +50,22 @@ function MethodNodeComponent({ id, data, selected }: NodeProps & { data: MethodN
 
   return (
     <div
-      className={`min-w-[160px] rounded transition-all ${
+      className={`rounded transition-all overflow-hidden ${
         isDead ? 'border border-dashed border-amber-500/60 bg-card/60' : 'border border-border/50 bg-card/80'
       } ${selected ? 'bg-card animate-border-pulse' : ''}`}
+      style={{ width: '100%', maxWidth: '100%' }}
     >
       <Handle type="target" position={Position.Top} id="top" className={topConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} />
       <Handle type="source" position={Position.Bottom} id="bottom" className={bottomConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} />
       <Handle type="source" position={Position.Right} id="right-src" className={rightSrcConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} style={{ top: '75%' }} />
       <Handle type="target" position={Position.Right} id="right-tgt" className={rightTgtConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} style={{ top: '25%' }} />
 
-      <div className="flex items-center gap-1.5 px-2 py-1">
-        {isAsync && <Zap className="h-2.5 w-2.5 text-yellow-500" />}
+      <div className="flex items-center gap-1.5 px-2 py-1 min-w-0">
+        {isAsync && <Zap className="h-2.5 w-2.5 shrink-0 text-yellow-500" />}
         <span className={`text-[11px] truncate ${isExported ? 'font-medium' : ''} text-foreground`}>
           {label}
         </span>
-        <span className="ml-auto" />
+        <span className="ml-auto shrink-0" />
         {deadTooltip}
         {hasWarning && !isDead && <AlertTriangle className="h-2.5 w-2.5 text-amber-500" />}
         {onExplain && (

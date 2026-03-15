@@ -10,6 +10,7 @@
     "db:generate": "turbo db:generate --filter=@truecourse/server",
     "db:migrate": "turbo db:migrate --filter=@truecourse/server",
     "db:push": "turbo db:push --filter=@truecourse/server",
+    "start": "turbo start",
     "build:dist": "tsx scripts/build.ts",
     "test": "vitest run",
     "test:watch": "vitest",

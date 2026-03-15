@@ -29,8 +29,10 @@ import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
 import { ZoomControls } from '@/components/graph/controls/ZoomControls';
 import { DepthToggle } from '@/components/graph/controls/DepthToggle';
-import { Spline, CornerDownRight } from 'lucide-react';
+import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network } from 'lucide-react';
 import * as api from '@/lib/api';
+import { useCollapseState } from '@/hooks/useCollapseState';
+import { applyCollapseState } from '@/lib/collapse';
 import type { DepthLevel } from '@/types/graph';
 
 type GraphCanvasProps = {
@@ -79,10 +81,19 @@ function GraphCanvasInner({
   focusKey,
 }: GraphCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
+  const [animationsEnabled, setAnimationsEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem(`truecourse:animations:${depthLevel}`) !== 'off';
+  });
   const [edgeStyle, setEdgeStyle] = useState<'bezier' | 'step'>(() => {
     if (typeof window === 'undefined') return 'bezier';
     return (localStorage.getItem(`truecourse:edgeStyle:${depthLevel}`) as 'bezier' | 'step') || 'bezier';
   });
+  const [focusMode, setFocusMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(`truecourse:focusMode:${depthLevel}`) === 'on';
+  });
+  const [panMode, setPanMode] = useState(true);
   const nodesRef = useRef<Node[]>([]);
   const prevDepthRef = useRef(depthLevel);
   const { fitView } = useReactFlow();
@@ -90,44 +101,113 @@ function GraphCanvasInner({
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+  // Collapse state for modules/methods modes
+  const { collapsedIds, toggle: toggleCollapse, expandAll, collapseAll, isBulkAction } = useCollapseState(repoId, depthLevel, initialNodes);
+  const relayoutRef = useRef(false);
+
   // Keep ref in sync with current nodes
   nodesRef.current = nodes;
 
+  // Count modules per layer for collapsed badge
+  const moduleCountByLayer = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of initialNodes) {
+      const parentId = (node as Record<string, unknown>).parentId as string | undefined;
+      if (parentId && node.type === 'module') {
+        counts.set(parentId, (counts.get(parentId) || 0) + 1);
+      }
+    }
+    return counts;
+  }, [initialNodes]);
+
   // Update when initial data changes
   useMemo(() => {
+    const isSelected = (id: string) => id === selectedNodeId || id === focusNodeId;
+    let processedNodes: Node[];
     if (depthLevel === 'services') {
-      const nodesWithCallbacks = initialNodes.map((node) => ({
+      processedNodes = initialNodes.map((node) => ({
         ...node,
-        selected: node.id === selectedNodeId,
+        selected: isSelected(node.id),
         data: { ...node.data, onExplain: onExplainNode },
       }));
-      setNodes(nodesWithCallbacks);
     } else {
-      const nodesWithCallbacks = initialNodes.map((node) => {
-        if (node.type === 'module' || node.type === 'method') {
-          return { ...node, selected: node.id === selectedNodeId, data: { ...node.data, onExplain: onExplainNode } };
+      processedNodes = initialNodes.map((node) => {
+        // Inject collapse callbacks into layer container nodes
+        if (node.type === 'layer' && (node.data as Record<string, unknown>).isContainer) {
+          return {
+            ...node,
+            selected: isSelected(node.id),
+            data: {
+              ...node.data,
+              isCollapsed: collapsedIds.has(node.id),
+              onToggleCollapse: toggleCollapse,
+              moduleCount: moduleCountByLayer.get(node.id) || 0,
+            },
+          };
         }
-        return { ...node, selected: node.id === selectedNodeId };
+        // Inject collapse callbacks into module container nodes (methods mode)
+        if (node.type === 'module' && (node.data as Record<string, unknown>).isContainer) {
+          return {
+            ...node,
+            selected: isSelected(node.id),
+            data: {
+              ...node.data,
+              onExplain: onExplainNode,
+              isCollapsed: collapsedIds.has(node.id),
+              onToggleCollapse: toggleCollapse,
+            },
+          };
+        }
+        if (node.type === 'module' || node.type === 'method') {
+          return { ...node, selected: isSelected(node.id), data: { ...node.data, onExplain: onExplainNode } };
+        }
+        return { ...node, selected: isSelected(node.id) };
       });
-      setNodes(nodesWithCallbacks);
     }
-    setEdges(initialEdges.map((e) => ({ ...e, data: { ...e.data, edgeStyle } })));
-  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId, depthLevel, edgeStyle]);
 
-  // Load saved edge style when depth level changes
+    let processedEdges = initialEdges.map((e) => ({ ...e, data: { ...e.data, edgeStyle, hidden: focusMode } }));
+
+    // Apply collapse transform for non-services modes
+    if (depthLevel !== 'services' && collapsedIds.size > 0) {
+      const relayout = relayoutRef.current;
+      relayoutRef.current = false;
+      const collapsed = applyCollapseState(processedNodes, processedEdges, collapsedIds, depthLevel, relayout);
+      processedNodes = collapsed.nodes;
+      processedEdges = collapsed.edges.map((e) => ({ ...e, data: { ...e.data, edgeStyle, hidden: focusMode } }));
+    }
+
+    setNodes(processedNodes);
+    setEdges(processedEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId, focusNodeId, depthLevel, edgeStyle, collapsedIds, toggleCollapse, moduleCountByLayer, focusMode]);
+
+  const animDuration = animationsEnabled ? 300 : 0;
+
+  // Load saved edge style and animation preference when depth level changes
   useEffect(() => {
     const saved = localStorage.getItem(`truecourse:edgeStyle:${depthLevel}`) as 'bezier' | 'step' | null;
     setEdgeStyle(saved || 'bezier');
+    const savedAnim = localStorage.getItem(`truecourse:animations:${depthLevel}`);
+    setAnimationsEnabled(savedAnim !== 'off');
+    const savedFocus = localStorage.getItem(`truecourse:focusMode:${depthLevel}`);
+    setFocusMode(savedFocus === 'on');
   }, [depthLevel]);
 
-  // Fit view when depth level changes or new data arrives
+  // Fit view when depth level changes, new data arrives, or bulk collapse/expand
   useEffect(() => {
-    // Use requestAnimationFrame to wait for ReactFlow to measure nodes
     const raf = requestAnimationFrame(() => {
-      fitView({ padding: 0.3 });
+      fitView({ padding: 0.3, duration: animDuration });
     });
     return () => cancelAnimationFrame(raf);
-  }, [depthLevel, initialNodes, fitView]);
+  }, [depthLevel, initialNodes, fitView, animDuration]);
+
+  // Fit view on bulk collapse/expand only (not individual toggles)
+  useEffect(() => {
+    if (!isBulkAction()) return;
+    const raf = requestAnimationFrame(() => {
+      fitView({ padding: 0.3, duration: animDuration });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [collapsedIds, fitView, animDuration, isBulkAction]);
 
   // Focus on a specific node when requested from insights panel
   useEffect(() => {
@@ -144,7 +224,7 @@ function GraphCanvasInner({
           .filter((n) => (n as Record<string, unknown>).parentId === node.id)
           .map((n) => n.id);
         const nodeIds = [node.id, ...childNodeIds];
-        fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
+        fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: animDuration });
       } else if (node.type === 'module' || node.type === 'method') {
         // For module/method nodes, also show sibling nodes in the same parent
         const parentId = (node as Record<string, unknown>).parentId as string | undefined;
@@ -152,12 +232,12 @@ function GraphCanvasInner({
           const siblingIds = nodesRef.current
             .filter((n) => (n as Record<string, unknown>).parentId === parentId)
             .map((n) => n.id);
-          fitView({ nodes: [{ id: parentId }, ...siblingIds.map((id) => ({ id }))], padding: 0.3, duration: 300 });
+          fitView({ nodes: [{ id: parentId }, ...siblingIds.map((id) => ({ id }))], padding: 0.3, duration: animDuration });
         } else {
-          fitView({ nodes: [{ id: focusNodeId }], padding: 1, duration: 300 });
+          fitView({ nodes: [{ id: focusNodeId }], padding: 1, duration: animDuration });
         }
       } else {
-        fitView({ nodes: [{ id: focusNodeId }], padding: 1.5, duration: 300 });
+        fitView({ nodes: [{ id: focusNodeId }], padding: 1.5, duration: animDuration });
       }
     }, 50);
   }, [focusKey, focusNodeId, fitView, setNodes]);
@@ -191,7 +271,7 @@ function GraphCanvasInner({
       if (depthLevel === 'services') {
         // Zoom to clicked service or database node
         setTimeout(() => {
-          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
+          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: animDuration });
         }, 50);
       } else if (node.type === 'serviceGroup') {
         // Zoom to service group and its children (layers, modules, methods)
@@ -200,16 +280,16 @@ function GraphCanvasInner({
           .map((n) => n.id);
         const nodeIds = [node.id, ...childNodeIds];
         setTimeout(() => {
-          fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
+          fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: animDuration });
         }, 50);
       } else if (node.type === 'database') {
         // Zoom to database node
         setTimeout(() => {
-          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
+          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: animDuration });
         }, 50);
       }
     },
-    [onNodeSelect, depthLevel, fitView],
+    [onNodeSelect, depthLevel, fitView, animDuration],
   );
 
   const onNodeMouseEnter: NodeMouseHandler = useCallback(
@@ -235,37 +315,47 @@ function GraphCanvasInner({
         if (connectedIds.size === 0) return eds;
         return eds.map((e) => ({
           ...e,
-          data: { ...e.data, dimmed: !connectedIds.has(e.id) },
+          data: {
+            ...e.data,
+            dimmed: !connectedIds.has(e.id),
+            hidden: focusMode ? !connectedIds.has(e.id) : (e.data as Record<string, unknown>)?.hidden,
+          },
         }));
       });
     },
-    [setEdges],
+    [setEdges, focusMode],
   );
 
   const onNodeMouseLeave: NodeMouseHandler = useCallback(
     () => {
       setEdges((eds) =>
-        eds.map((e) =>
-          e.data?.dimmed ? { ...e, data: { ...e.data, dimmed: false } } : e,
-        ),
+        eds.map((e) => ({
+          ...e,
+          data: {
+            ...e.data,
+            dimmed: e.data?.dimmed ? false : e.data?.dimmed,
+            hidden: focusMode ? true : false,
+          },
+        })),
       );
     },
-    [setEdges],
+    [setEdges, focusMode],
   );
 
   const onPaneClick = useCallback(() => {
     onNodeSelect?.(null);
     setEdges((eds) =>
-      eds.map((e) =>
-        e.data?.dimmed ? { ...e, data: { ...e.data, dimmed: false } } : e,
-      ),
+      eds.map((e) => ({
+        ...e,
+        data: { ...e.data, dimmed: false, hidden: focusMode },
+      })),
     );
     // Clicking pane zooms back to fit all
-    fitView({ padding: 0.3, duration: 300 });
-  }, [onNodeSelect, depthLevel, fitView, setEdges]);
+    fitView({ padding: 0.3, duration: animDuration });
+  }, [onNodeSelect, depthLevel, fitView, setEdges, focusMode, animDuration]);
 
   return (
-    <div className="h-full w-full">
+    <div className={`h-full w-full${animationsEnabled ? '' : ' no-animations'}`}>
       <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 flex items-center gap-2">
         <DepthToggle level={depthLevel} onChange={onDepthChange} />
         <button
@@ -278,6 +368,37 @@ function GraphCanvasInner({
           title={edgeStyle === 'bezier' ? 'Switch to L-shaped edges' : 'Switch to curved edges'}
         >
           {edgeStyle === 'bezier' ? <CornerDownRight className="h-3.5 w-3.5" /> : <Spline className="h-3.5 w-3.5" />}
+        </button>
+        {depthLevel !== 'services' && (
+          <button
+            onClick={() => { relayoutRef.current = true; collapsedIds.size > 0 ? expandAll() : collapseAll(); }}
+            className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+            title={collapsedIds.size > 0 ? 'Expand All' : 'Collapse All'}
+          >
+            {collapsedIds.size > 0 ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
+          </button>
+        )}
+        <button
+          onClick={() => setFocusMode((v) => {
+            const next = !v;
+            localStorage.setItem(`truecourse:focusMode:${depthLevel}`, next ? 'on' : 'off');
+            return next;
+          })}
+          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+          title={focusMode ? 'Show all edges' : 'Show edges on hover only'}
+        >
+          <Network className={`h-3.5 w-3.5 ${focusMode ? 'opacity-40' : ''}`} />
+        </button>
+        <button
+          onClick={() => setAnimationsEnabled((v) => {
+            const next = !v;
+            localStorage.setItem(`truecourse:animations:${depthLevel}`, next ? 'on' : 'off');
+            return next;
+          })}
+          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+          title={animationsEnabled ? 'Disable animations' : 'Enable animations'}
+        >
+          {animationsEnabled ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
         </button>
         {isSaving && (
           <div className="mt-2 rounded-md border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm text-center">
@@ -298,6 +419,8 @@ function GraphCanvasInner({
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodesConnectable={false}
+        nodesDraggable={!panMode}
+        elementsSelectable={!panMode}
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
@@ -308,7 +431,7 @@ function GraphCanvasInner({
           className="!bg-card !border-border"
           maskColor="rgba(0, 0, 0, 0.1)"
         />
-        <ZoomControls onAutoLayout={handleAutoLayout} />
+        <ZoomControls onAutoLayout={handleAutoLayout} panMode={panMode} onTogglePanMode={() => setPanMode((v) => !v)} />
       </ReactFlow>
     </div>
   );

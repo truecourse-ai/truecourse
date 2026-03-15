@@ -43,6 +43,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
               position: node.position,
               parentId: node.parentId,
               extent: node.extent as 'parent' | undefined,
+              style: node.style,
               data: node.data,
             };
           }

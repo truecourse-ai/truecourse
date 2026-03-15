@@ -141,6 +141,7 @@ function toMethodInfo(
  * Derive a module name from the file's primary export or main function.
  *
  * Strategy:
+ * - Next.js route/page files → derive from directory path (e.g. "api/dealers/[id]")
  * - Default export → use its name (e.g. `export default router`)
  * - Single non-reexport named export with no functions → use export name
  *   (e.g. `export const userRoutes = Router()` → "userRoutes")
@@ -149,6 +150,13 @@ function toMethodInfo(
  * - Fallback to file name
  */
 function deriveModuleName(analysis: FileAnalysis): string {
+  // Next.js convention: route.ts/page.tsx files export HTTP methods (GET, POST, etc.)
+  // or page components. Derive a unique name from the directory path to avoid collisions.
+  const nextjsName = deriveNextjsRouteName(analysis.filePath)
+  if (nextjsName) {
+    return nextjsName
+  }
+
   // Prefer the default export name
   const defaultExport = analysis.exports.find((e) => e.isDefault && !e.source)
   if (defaultExport && defaultExport.name !== 'default') {
@@ -177,6 +185,38 @@ function deriveModuleName(analysis: FileAnalysis): string {
 
   // Fallback to file name (multiple functions, or no exports)
   return baseName
+}
+
+/**
+ * For Next.js route.ts and page.tsx files, derive a unique module name from
+ * the directory path relative to the app directory.
+ *
+ * Examples:
+ *   app/api/dealers/[id]/route.ts       → "api/dealers/[id]"
+ *   app/api/health/route.ts             → "api/health"
+ *   app/(dashboard)/(pages)/dealers/page.tsx → "dealers"
+ *   app/api/dealers/[id]/leases/route.ts → "api/dealers/[id]/leases"
+ *
+ * Returns null if the file doesn't match the Next.js route/page pattern.
+ */
+function deriveNextjsRouteName(filePath: string): string | null {
+  const base = path.basename(filePath).replace(/\.(ts|tsx|js|jsx)$/, '')
+  if (base !== 'route' && base !== 'page') return null
+
+  // Find the "app" directory in the path to get the relative segment
+  const parts = filePath.split(path.sep)
+  const appIdx = parts.lastIndexOf('app')
+  if (appIdx === -1) return null
+
+  // Get path segments between "app" and the file name
+  const segments = parts.slice(appIdx + 1, -1)
+
+  // Filter out Next.js route group markers like (dashboard), (pages)
+  const filtered = segments.filter((s) => !s.startsWith('('))
+
+  if (filtered.length === 0) return base // root page/route
+
+  return filtered.join('/')
 }
 
 const GENERIC_DIR_NAMES = new Set(['src', 'lib', 'dist', 'build', 'app', 'root'])
@@ -233,15 +273,17 @@ function buildModuleDependencies(
     for (const srcMod of sourceModules) {
       for (const tgtMod of targetModules) {
         if (srcMod === tgtMod && dep.source === dep.target) continue
-        const key = `${sourceInfo.serviceName}::${srcMod}::${targetInfo.serviceName}::${tgtMod}`
+        const key = `${sourceInfo.serviceName}::${srcMod}::${dep.source}::${targetInfo.serviceName}::${tgtMod}::${dep.target}`
         if (seen.has(key)) continue
         seen.add(key)
 
         deps.push({
           sourceModule: srcMod,
           sourceService: sourceInfo.serviceName,
+          sourceFilePath: dep.source,
           targetModule: tgtMod,
           targetService: targetInfo.serviceName,
+          targetFilePath: dep.target,
           importedNames: dep.importedNames,
         })
       }
@@ -398,9 +440,10 @@ function buildMethodDependencies(
       // Skip self-calls within the same method
       if (targetMethod.moduleName === callerMethod.moduleName
         && targetMethod.name === callerMethod.name
-        && targetMethod.serviceName === callerMethod.serviceName) continue
+        && targetMethod.serviceName === callerMethod.serviceName
+        && targetMethod.filePath === callerMethod.filePath) continue
 
-      const key = `${callerMethod.serviceName}::${callerMethod.moduleName}::${callerMethod.name}::${targetMethod.serviceName}::${targetMethod.moduleName}::${targetMethod.name}`
+      const key = `${callerMethod.serviceName}::${callerMethod.moduleName}::${callerMethod.name}::${callerMethod.filePath}::${targetMethod.serviceName}::${targetMethod.moduleName}::${targetMethod.name}::${targetMethod.filePath}`
       counts.set(key, (counts.get(key) || 0) + 1)
 
       if (seen.has(key)) continue
@@ -410,14 +453,16 @@ function buildMethodDependencies(
 
   // Convert to MethodLevelDependency with counts
   for (const [key, count] of counts) {
-    const [callerService, callerModule, callerMethod, calleeService, calleeModule, calleeMethod] = key.split('::')
+    const parts = key.split('::')
     deps.push({
-      callerMethod,
-      callerModule,
-      callerService,
-      calleeMethod,
-      calleeModule,
-      calleeService,
+      callerMethod: parts[2],
+      callerModule: parts[1],
+      callerService: parts[0],
+      callerFilePath: parts[3],
+      calleeMethod: parts[6],
+      calleeModule: parts[5],
+      calleeService: parts[4],
+      calleeFilePath: parts[7],
       callCount: count,
     })
   }

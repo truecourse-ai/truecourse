@@ -367,6 +367,115 @@ describe('extractModulesAndMethods', () => {
     expect(result.methodDependencies[0].calleeMethod).toBe('doWork');
   });
 
+  it('derives unique names for Next.js route.ts files using directory path', () => {
+    const routeFile1 = makeAnalysis({
+      filePath: '/repo/app/api/dealers/route.ts',
+      functions: [
+        {
+          name: 'GET',
+          params: [{ name: 'request', type: 'NextRequest' }],
+          isAsync: true,
+          isExported: true,
+          location: { filePath: '/repo/app/api/dealers/route.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+        },
+        {
+          name: 'POST',
+          params: [{ name: 'request', type: 'NextRequest' }],
+          isAsync: true,
+          isExported: true,
+          location: { filePath: '/repo/app/api/dealers/route.ts', startLine: 12, endLine: 25, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [
+        { name: 'GET', isDefault: false },
+        { name: 'POST', isDefault: false },
+      ],
+    });
+
+    const routeFile2 = makeAnalysis({
+      filePath: '/repo/app/api/health/route.ts',
+      functions: [
+        {
+          name: 'GET',
+          params: [],
+          isAsync: true,
+          isExported: true,
+          location: { filePath: '/repo/app/api/health/route.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [{ name: 'GET', isDefault: false }],
+    });
+
+    const routeFile3 = makeAnalysis({
+      filePath: '/repo/app/api/dealers/[id]/route.ts',
+      functions: [
+        {
+          name: 'GET',
+          params: [{ name: 'request', type: 'NextRequest' }],
+          isAsync: true,
+          isExported: true,
+          location: { filePath: '/repo/app/api/dealers/[id]/route.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [{ name: 'GET', isDefault: false }],
+    });
+
+    const layers = [
+      makeLayerDetail({
+        layer: 'api',
+        filePaths: [
+          '/repo/app/api/dealers/route.ts',
+          '/repo/app/api/health/route.ts',
+          '/repo/app/api/dealers/[id]/route.ts',
+        ],
+      }),
+    ];
+
+    const result = extractModulesAndMethods([routeFile1, routeFile2, routeFile3], layers, []);
+
+    // Each route file should get a unique module name based on directory path
+    expect(result.modules).toHaveLength(3);
+    const names = result.modules.map((m) => m.name).sort();
+    expect(names).toEqual(['api/dealers', 'api/dealers/[id]', 'api/health']);
+
+    // Methods should be correctly associated with their modules
+    expect(result.methods).toHaveLength(4); // 2 + 1 + 1
+    const dealersMethods = result.methods.filter((m) => m.moduleName === 'api/dealers');
+    expect(dealersMethods).toHaveLength(2);
+    const healthMethods = result.methods.filter((m) => m.moduleName === 'api/health');
+    expect(healthMethods).toHaveLength(1);
+    const dealerIdMethods = result.methods.filter((m) => m.moduleName === 'api/dealers/[id]');
+    expect(dealerIdMethods).toHaveLength(1);
+  });
+
+  it('derives unique names for Next.js page.tsx files, stripping route groups', () => {
+    const pageFile = makeAnalysis({
+      filePath: '/repo/app/(dashboard)/(pages)/dealers/page.tsx',
+      functions: [
+        {
+          name: 'DealersPage',
+          params: [],
+          isAsync: true,
+          isExported: true,
+          location: { filePath: '/repo/app/(dashboard)/(pages)/dealers/page.tsx', startLine: 1, endLine: 15, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [{ name: 'default', isDefault: true }],
+    });
+
+    const layers = [
+      makeLayerDetail({
+        filePaths: ['/repo/app/(dashboard)/(pages)/dealers/page.tsx'],
+      }),
+    ];
+
+    const result = extractModulesAndMethods([pageFile], layers, []);
+
+    expect(result.modules).toHaveLength(1);
+    // Route groups like (dashboard) and (pages) should be stripped
+    expect(result.modules[0].name).toBe('dealers');
+  });
+
   it('preserves function metrics (lineCount, statementCount, maxNestingDepth)', () => {
     const analysis = makeAnalysis({
       filePath: '/repo/svc/src/big.ts',

@@ -596,7 +596,7 @@ interface MethodDepData {
   callCount: number;
 }
 
-const MODULE_NODE_WIDTH = 220;
+const MODULE_NODE_WIDTH = 264;
 const MODULE_NODE_HEIGHT = 50;
 const MODULE_GAP = 16;
 
@@ -625,10 +625,18 @@ export function buildModuleGraphData(
   const LAYER_PAD_BOTTOM = 12;
   const LAYER_GAP = 24;
 
+  const MAX_PER_COL = 5;
+  const MOD_COL_GAP = 16;
+
+  function getModColCount(itemCount: number): number {
+    return Math.max(Math.ceil(itemCount / MAX_PER_COL), 1);
+  }
+
   function getModuleLayerHeight(layerId: string): number {
     const mods = modulesByLayer.get(layerId) || [];
-    const modCount = Math.max(mods.length, 1);
-    return LAYER_PAD_TOP + modCount * MODULE_NODE_HEIGHT + (modCount - 1) * MODULE_GAP + LAYER_PAD_BOTTOM;
+    const cols = getModColCount(mods.length);
+    const rowCount = Math.max(Math.ceil(mods.length / cols), 1);
+    return LAYER_PAD_TOP + rowCount * MODULE_NODE_HEIGHT + (rowCount - 1) * MODULE_GAP + LAYER_PAD_BOTTOM;
   }
 
   // Compute dimensions for shared layout
@@ -640,13 +648,20 @@ export function buildModuleGraphData(
     const svcLayers = layersByService.get(service.id) || [];
     let totalHeight = GROUP_PAD_TOP + GROUP_PAD_BOTTOM;
 
+    // Find max column count across all layers in this service for consistent width
+    let maxCols = 1;
+    for (const l of svcLayers) {
+      const mods = modulesByLayer.get(l.id) || [];
+      maxCols = Math.max(maxCols, getModColCount(mods.length));
+    }
+
     for (const l of svcLayers) {
       totalHeight += getModuleLayerHeight(l.id) + LAYER_GAP;
     }
     if (svcLayers.length > 0) totalHeight -= LAYER_GAP;
     if (svcLayers.length === 0) totalHeight += MODULE_NODE_HEIGHT;
 
-    const groupWidth = Math.max(320, MODULE_NODE_WIDTH + GROUP_PAD_X * 2 + 40);
+    const groupWidth = Math.max(320, maxCols * MODULE_NODE_WIDTH + (maxCols - 1) * MOD_COL_GAP + GROUP_PAD_X * 2 + 24);
     serviceGroupWidths.set(service.id, groupWidth);
     dimensions.set(service.id, { width: groupWidth, height: totalHeight });
     groupHeights.set(service.id, totalHeight);
@@ -681,14 +696,20 @@ export function buildModuleGraphData(
         { x: GROUP_PAD_X, y: yOffset }, layerWidth, layerHeight,
       ));
 
-      // Module nodes inside layer
+      // Module nodes inside layer — dynamic column grid
       const mods = modulesByLayer.get(layer.id) || [];
-      let modY = LAYER_PAD_TOP;
-      for (const mod of mods) {
+      const LAYER_PAD_X = 12;
+      const modCols = getModColCount(mods.length);
+      for (let i = 0; i < mods.length; i++) {
+        const mod = mods[i];
+        const col = i % modCols;
+        const row = Math.floor(i / modCols);
+        const modX = LAYER_PAD_X + col * (MODULE_NODE_WIDTH + MOD_COL_GAP);
+        const modYPos = LAYER_PAD_TOP + row * (MODULE_NODE_HEIGHT + MODULE_GAP);
         nodes.push({
           id: mod.id,
           type: 'moduleNode',
-          position: { x: 12, y: modY },
+          position: { x: modX, y: modYPos },
           data: {
             label: mod.name,
             serviceType: mod.kind,
@@ -707,9 +728,8 @@ export function buildModuleGraphData(
               layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
             }) as Record<string, unknown>),
           },
-          ...(({ parentId: layerNodeId, extent: 'parent' }) as Record<string, unknown>),
+          ...(({ parentId: layerNodeId, extent: 'parent', style: { width: MODULE_NODE_WIDTH } }) as Record<string, unknown>),
         });
-        modY += MODULE_NODE_HEIGHT + MODULE_GAP;
       }
 
       yOffset += layerHeight + LAYER_GAP;
@@ -795,11 +815,28 @@ export function buildMethodGraphData(
   const METHOD_GAP = 8;
   const MOD_PAD_TOP = 32;
   const MOD_PAD_BOTTOM = 8;
+  const MOD_PAD_X = 8;
+  const METHOD_COL_GAP = 8;
+  const MOD_COL_GAP = 16;
+  const MAX_PER_COL = 5;
+
+  function getColCount(itemCount: number): number {
+    return Math.max(Math.ceil(itemCount / MAX_PER_COL), 1);
+  }
+
+  const METHOD_NODE_WIDTH = 204;
 
   function getModuleHeight(moduleId: string): number {
     const mths = methodsByModule.get(moduleId) || [];
-    const count = Math.max(mths.length, 1);
-    return MOD_PAD_TOP + count * METHOD_NODE_HEIGHT + (count - 1) * METHOD_GAP + MOD_PAD_BOTTOM;
+    const cols = getColCount(mths.length);
+    const rowCount = Math.max(Math.ceil(mths.length / cols), 1);
+    return MOD_PAD_TOP + rowCount * METHOD_NODE_HEIGHT + (rowCount - 1) * METHOD_GAP + MOD_PAD_BOTTOM;
+  }
+
+  function getModuleWidth(moduleId: string): number {
+    const mths = methodsByModule.get(moduleId) || [];
+    const cols = getColCount(mths.length);
+    return MOD_PAD_X * 2 + cols * METHOD_NODE_WIDTH + (cols - 1) * METHOD_COL_GAP;
   }
 
   const GROUP_PAD_TOP = 50;
@@ -811,19 +848,40 @@ export function buildMethodGraphData(
 
   function getLayerHeight(layerId: string): number {
     const mods = modulesByLayer.get(layerId) || [];
+    if (mods.length === 0) return LAYER_PAD_TOP + MODULE_NODE_HEIGHT + LAYER_PAD_BOTTOM;
+    const modCols = getColCount(mods.length);
+    const rowCount = Math.ceil(mods.length / modCols);
     let h = LAYER_PAD_TOP + LAYER_PAD_BOTTOM;
-    for (const mod of mods) {
-      h += getModuleHeight(mod.id) + MODULE_GAP;
+    for (let r = 0; r < rowCount; r++) {
+      let maxH = 0;
+      for (let c = 0; c < modCols; c++) {
+        const mod = mods[r * modCols + c];
+        if (mod) maxH = Math.max(maxH, getModuleHeight(mod.id));
+      }
+      h += maxH + MODULE_GAP;
     }
-    if (mods.length > 0) h -= MODULE_GAP;
-    if (mods.length === 0) h += MODULE_NODE_HEIGHT;
+    h -= MODULE_GAP; // remove trailing gap
     return h;
   }
 
-  const MODULE_WIDTH = 260;
+  const MIN_MODULE_WIDTH = 180;
   const serviceGroupWidths = new Map<string, number>();
   const dimensions = new Map<string, NodeDimension>();
   const groupHeights = new Map<string, number>();
+
+  // Compute per-layer content width (sum of per-column max module widths)
+  function getLayerContentWidth(layerId: string): number {
+    const mods = modulesByLayer.get(layerId) || [];
+    if (mods.length === 0) return MIN_MODULE_WIDTH;
+    const modCols = getColCount(mods.length);
+    // Compute max module width per column
+    const colWidths: number[] = new Array(modCols).fill(MIN_MODULE_WIDTH);
+    for (let i = 0; i < mods.length; i++) {
+      const col = i % modCols;
+      colWidths[col] = Math.max(colWidths[col], getModuleWidth(mods[i].id));
+    }
+    return colWidths.reduce((sum, w) => sum + w, 0) + (modCols - 1) * MOD_COL_GAP;
+  }
 
   for (const service of servicesList) {
     const svcLayers = layersByService.get(service.id) || [];
@@ -834,7 +892,13 @@ export function buildMethodGraphData(
     if (svcLayers.length > 0) totalHeight -= LAYER_GAP;
     if (svcLayers.length === 0) totalHeight += MODULE_NODE_HEIGHT;
 
-    const groupWidth = Math.max(360, MODULE_WIDTH + GROUP_PAD_X * 2 + 40);
+    // Service width = widest layer content + padding
+    let maxLayerContent = MIN_MODULE_WIDTH;
+    for (const l of svcLayers) {
+      maxLayerContent = Math.max(maxLayerContent, getLayerContentWidth(l.id));
+    }
+
+    const groupWidth = Math.max(360, maxLayerContent + 2 * 12 + GROUP_PAD_X * 2);
     serviceGroupWidths.set(service.id, groupWidth);
     dimensions.set(service.id, { width: groupWidth, height: totalHeight });
     groupHeights.set(service.id, totalHeight);
@@ -867,17 +931,54 @@ export function buildMethodGraphData(
         { x: GROUP_PAD_X, y: yOffset }, layerWidth, layerHeight,
       ));
 
-      // Module nodes inside layer (as containers for methods)
+      // Module containers inside layer — dynamic column grid with per-column widths
       const mods = modulesByLayer.get(layer.id) || [];
-      let modY = LAYER_PAD_TOP;
-      for (const mod of mods) {
+      const LAYER_PAD_X_INNER = 12;
+      const modCols = getColCount(mods.length);
+
+      // Compute per-column widths based on actual module content
+      const modColWidths: number[] = new Array(modCols).fill(MIN_MODULE_WIDTH);
+      for (let i = 0; i < mods.length; i++) {
+        const col = i % modCols;
+        modColWidths[col] = Math.max(modColWidths[col], getModuleWidth(mods[i].id));
+      }
+
+      // Compute column x offsets
+      const modColOffsets: number[] = [];
+      let xOff = LAYER_PAD_X_INNER;
+      for (let c = 0; c < modCols; c++) {
+        modColOffsets.push(xOff);
+        xOff += modColWidths[c] + MOD_COL_GAP;
+      }
+
+      // Pre-compute row heights (max across columns in each row)
+      const modRowCount = Math.ceil(mods.length / modCols);
+      const modRowHeights: number[] = [];
+      for (let r = 0; r < modRowCount; r++) {
+        let maxH = 0;
+        for (let c = 0; c < modCols; c++) {
+          const mod = mods[r * modCols + c];
+          if (mod) maxH = Math.max(maxH, getModuleHeight(mod.id));
+        }
+        modRowHeights.push(maxH);
+      }
+
+      for (let i = 0; i < mods.length; i++) {
+        const mod = mods[i];
+        const col = i % modCols;
+        const row = Math.floor(i / modCols);
+        const modX = modColOffsets[col];
+        let modYPos = LAYER_PAD_TOP;
+        for (let r = 0; r < row; r++) {
+          modYPos += modRowHeights[r] + MODULE_GAP;
+        }
         const modHeight = getModuleHeight(mod.id);
-        const modWidth = layerWidth - 24;
+        const modWidth = Math.max(MIN_MODULE_WIDTH, getModuleWidth(mod.id));
 
         nodes.push({
           id: mod.id,
           type: 'moduleNode',
-          position: { x: 12, y: modY },
+          position: { x: modX, y: modYPos },
           data: {
             label: mod.name,
             serviceType: mod.kind,
@@ -900,14 +1001,20 @@ export function buildMethodGraphData(
           }) as Record<string, unknown>),
         });
 
-        // Method nodes inside module
+        // Method nodes inside module — dynamic column grid
         const mths = methodsByModule.get(mod.id) || [];
-        let mthY = MOD_PAD_TOP;
-        for (const mth of mths) {
+        const mthCols = getColCount(mths.length);
+        const methodColWidth = (modWidth - 2 * MOD_PAD_X - (mthCols - 1) * METHOD_COL_GAP) / mthCols;
+        for (let j = 0; j < mths.length; j++) {
+          const mth = mths[j];
+          const mCol = j % mthCols;
+          const mRow = Math.floor(j / mthCols);
+          const mthX = MOD_PAD_X + mCol * (methodColWidth + METHOD_COL_GAP);
+          const mthY = MOD_PAD_TOP + mRow * (METHOD_NODE_HEIGHT + METHOD_GAP);
           nodes.push({
             id: mth.id,
             type: 'methodNode',
-            position: { x: 8, y: mthY },
+            position: { x: mthX, y: mthY },
             data: {
               label: mth.name,
               serviceType: 'method',
@@ -927,12 +1034,13 @@ export function buildMethodGraphData(
                 maxNestingDepth: mth.maxNestingDepth,
               }) as Record<string, unknown>),
             },
-            ...(({ parentId: mod.id, extent: 'parent' }) as Record<string, unknown>),
+            ...(({
+              parentId: mod.id,
+              extent: 'parent',
+              style: { width: methodColWidth },
+            }) as Record<string, unknown>),
           });
-          mthY += METHOD_NODE_HEIGHT + METHOD_GAP;
         }
-
-        modY += modHeight + MODULE_GAP;
       }
 
       yOffset += layerHeight + LAYER_GAP;

@@ -221,7 +221,9 @@ router.post(
         }
 
         // Save modules
-        const moduleIdMap = new Map<string, string>(); // "serviceName::moduleName" → dbId
+        // Key includes filePath to avoid collisions when multiple files produce
+        // modules with the same name (e.g. Next.js route.ts files).
+        const moduleIdMap = new Map<string, string>(); // "serviceName::moduleName::filePath" → dbId
         if (result.modules && result.modules.length > 0) {
           // Build layer lookup: "serviceName::layerName" → layerId
           const layerIdLookup = new Map<string, string>();
@@ -253,7 +255,7 @@ router.post(
               lineCount: mod.lineCount || null,
             }).returning();
 
-            moduleIdMap.set(`${mod.serviceName}::${mod.name}`, saved.id);
+            moduleIdMap.set(`${mod.serviceName}::${mod.name}::${mod.filePath}`, saved.id);
           }
         }
 
@@ -261,7 +263,7 @@ router.post(
         const methodIdMap = new Map<string, string>();
         if (result.methods && result.methods.length > 0) {
           for (const method of result.methods) {
-            const moduleKey = `${method.serviceName}::${method.moduleName}`;
+            const moduleKey = `${method.serviceName}::${method.moduleName}::${method.filePath}`;
             const moduleId = moduleIdMap.get(moduleKey);
             if (!moduleId) continue;
 
@@ -279,7 +281,7 @@ router.post(
               maxNestingDepth: method.maxNestingDepth || null,
             }).returning();
 
-            methodIdMap.set(`${method.serviceName}::${method.moduleName}::${method.name}`, saved.id);
+            methodIdMap.set(`${method.serviceName}::${method.moduleName}::${method.name}::${method.filePath}`, saved.id);
           }
         }
 
@@ -287,8 +289,8 @@ router.post(
         console.log(`[Analysis] File dependencies: ${result.dependencies.length}, Module-level deps: ${result.moduleLevelDependencies?.length ?? 0}, Modules: ${result.modules?.length ?? 0}`);
         if (result.moduleLevelDependencies && result.moduleLevelDependencies.length > 0) {
           for (const dep of result.moduleLevelDependencies) {
-            const srcId = moduleIdMap.get(`${dep.sourceService}::${dep.sourceModule}`);
-            const tgtId = moduleIdMap.get(`${dep.targetService}::${dep.targetModule}`);
+            const srcId = moduleIdMap.get(`${dep.sourceService}::${dep.sourceModule}::${dep.sourceFilePath || ''}`);
+            const tgtId = moduleIdMap.get(`${dep.targetService}::${dep.targetModule}::${dep.targetFilePath || ''}`);
             if (!srcId || !tgtId) {
               console.log(`[Analysis] Skipped module dep: ${dep.sourceService}::${dep.sourceModule} → ${dep.targetService}::${dep.targetModule} (srcId=${!!srcId}, tgtId=${!!tgtId})`);
               continue;
@@ -307,8 +309,8 @@ router.post(
         // Save method dependencies
         if (result.methodLevelDependencies && result.methodLevelDependencies.length > 0) {
           for (const dep of result.methodLevelDependencies) {
-            const srcId = methodIdMap.get(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}`);
-            const tgtId = methodIdMap.get(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}`);
+            const srcId = methodIdMap.get(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}::${dep.callerFilePath || ''}`);
+            const tgtId = methodIdMap.get(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}::${dep.calleeFilePath || ''}`);
             if (!srcId || !tgtId) continue;
 
             await db.insert(methodDeps).values({
@@ -416,9 +418,9 @@ router.post(
 
           let currentPercent = 85;
           emitAnalysisProgress(id, {
-            step: 'insights',
+            step: 'analyzing',
             percent: currentPercent,
-            detail: `Generating insights (${callParts.join(', ')})...`,
+            detail: 'Running checks...',
           });
 
           const analysisServices = result.services.map((s) => ({
@@ -449,7 +451,7 @@ router.post(
 
           // Build module data for insight generation
           const insightModules = result.modules?.map((m) => ({
-            id: moduleIdMap.get(`${m.serviceName}::${m.name}`) || '',
+            id: moduleIdMap.get(`${m.serviceName}::${m.name}::${m.filePath}`) || '',
             name: m.name,
             kind: m.kind,
             serviceName: m.serviceName,
@@ -463,7 +465,7 @@ router.post(
           })).filter((m) => m.id); // exclude modules that weren't saved
 
           const insightMethods = result.methods?.map((m) => ({
-            id: methodIdMap.get(`${m.serviceName}::${m.moduleName}::${m.name}`) || undefined,
+            id: methodIdMap.get(`${m.serviceName}::${m.moduleName}::${m.name}::${m.filePath}`) || undefined,
             moduleName: m.moduleName,
             name: m.name,
             signature: m.signature,
@@ -519,9 +521,9 @@ router.post(
             methods: insightMethods,
             moduleDependencies: insightModuleDeps,
             moduleViolations: moduleViolations.map((v) => {
-              const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}` : undefined;
+              const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}::${v.filePath}` : undefined;
               const methodKey = v.methodName && v.moduleName
-                ? `${v.serviceName}::${v.moduleName}::${v.methodName}` : undefined;
+                ? `${v.serviceName}::${v.moduleName}::${v.methodName}::${v.filePath}` : undefined;
               return {
                 ...v,
                 serviceId: serviceIdMap.get(v.serviceName),
@@ -532,7 +534,7 @@ router.post(
           }, (step) => {
             currentPercent += 3;
             emitAnalysisProgress(id, {
-              step: 'insights',
+              step: 'analyzing',
               percent: currentPercent,
               detail: step,
             });

@@ -190,7 +190,7 @@ export interface LLMProvider {
 const ArchitectureInsightOutputSchema = z.object({
   insights: z.array(
     z.object({
-      type: z.enum(['architecture', 'dependency', 'violation', 'suggestion', 'warning']),
+      type: z.literal('service'),
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
@@ -223,7 +223,7 @@ const DatabaseInsightOutputSchema = z.object({
 const ModuleInsightOutputSchema = z.object({
   insights: z.array(
     z.object({
-      type: z.literal('module'),
+      type: z.enum(['module', 'function']).describe('Use "function" when the issue targets a specific function/method, use "module" when it targets the module/class itself'),
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),

@@ -155,3 +155,12 @@
 .animate-border-pulse {
   animation: border-pulse 0.8s ease-in-out infinite;
 }
+
+.no-animations .animate-edge-flow,
+.no-animations .animate-border-pulse {
+  animation: none !important;
+}
+
+.no-animations * {
+  transition-duration: 0s !important;
+}

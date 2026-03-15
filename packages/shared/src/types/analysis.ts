@@ -213,8 +213,10 @@ export type MethodInfo = z.infer<typeof MethodInfoSchema>
 export const ModuleLevelDependencySchema = z.object({
   sourceModule: z.string(),
   sourceService: z.string(),
+  sourceFilePath: z.string().optional(),
   targetModule: z.string(),
   targetService: z.string(),
+  targetFilePath: z.string().optional(),
   importedNames: z.array(z.string()),
 })
 
@@ -228,9 +230,11 @@ export const MethodLevelDependencySchema = z.object({
   callerMethod: z.string(),
   callerModule: z.string(),
   callerService: z.string(),
+  callerFilePath: z.string().optional(),
   calleeMethod: z.string(),
   calleeModule: z.string(),
   calleeService: z.string(),
+  calleeFilePath: z.string().optional(),
   callCount: z.number(),
 })
 

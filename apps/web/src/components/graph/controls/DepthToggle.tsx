@@ -10,7 +10,7 @@ type DepthToggleProps = {
 const levels: { value: DepthLevel; label: string }[] = [
   { value: 'services', label: 'Services' },
   { value: 'modules', label: 'Modules' },
-  { value: 'methods', label: 'Methods' },
+  { value: 'methods', label: 'Functions' },
 ];
 
 export function DepthToggle({ level, onChange }: DepthToggleProps) {
