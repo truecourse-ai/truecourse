@@ -42,6 +42,7 @@ export const InsightSchema = z.object({
   targetServiceId: z.string().optional(),
   targetDatabaseId: z.string().optional(),
   targetModuleId: z.string().optional(),
+  targetMethodId: z.string().optional(),
   targetTable: z.string().optional(),
   fixPrompt: z.string().optional(),
   createdAt: z.string(),

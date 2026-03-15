@@ -58,6 +58,7 @@ export interface InsightGenerationInput {
     lineCount?: number;
   }[];
   methods?: {
+    id?: string;
     moduleName: string;
     name: string;
     signature: string;
@@ -72,6 +73,18 @@ export interface InsightGenerationInput {
     sourceModule: string;
     targetModule: string;
     importedNames: string[];
+  }[];
+  moduleViolations?: {
+    ruleKey: string;
+    title: string;
+    description: string;
+    severity: string;
+    serviceName: string;
+    serviceId?: string;
+    moduleName?: string;
+    moduleId?: string;
+    methodName?: string;
+    methodId?: string;
   }[];
 }
 
@@ -106,6 +119,7 @@ export async function generateInsights(
   const validServiceIds = new Set(input.services.map((s) => s.id));
   const validDatabaseIds = new Set((input.databases || []).map((d) => d.id));
   const validModuleIds = new Set((input.modules || []).map((m) => m.id));
+  const validMethodIds = new Set((input.methods || []).filter((m) => m.id).map((m) => m.id!));
 
   // --- Build promises ---
 
@@ -147,6 +161,7 @@ export async function generateInsights(
           methods: input.methods || [],
           moduleDependencies: input.moduleDependencies || [],
           llmRules: moduleRules,
+          violations: input.moduleViolations,
         };
         return provider.generateModuleInsights(moduleContext).then((result) => {
           onProgress?.('Module insights ready');
@@ -204,8 +219,14 @@ export async function generateInsights(
     if (moduleResult.status === 'fulfilled') {
       const modData = moduleResult.value as { insights: Insight[] };
       for (const insight of modData.insights) {
+        if (insight.targetServiceId && !validServiceIds.has(insight.targetServiceId)) {
+          insight.targetServiceId = undefined;
+        }
         if (insight.targetModuleId && !validModuleIds.has(insight.targetModuleId)) {
           insight.targetModuleId = undefined;
+        }
+        if (insight.targetMethodId && !validMethodIds.has(insight.targetMethodId)) {
+          insight.targetMethodId = undefined;
         }
         allInsights.push(insight);
       }

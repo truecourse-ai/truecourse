@@ -29,8 +29,9 @@ export default function RepoGraphPage() {
   const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState('insights');
-  const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string } | null>(null);
+  const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string } | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
 
   const currentBranch = repo?.defaultBranch;
   const { nodes, edges, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
@@ -102,53 +103,138 @@ export default function RepoGraphPage() {
   }, [nodes]);
 
   const handleExplainNode = useCallback((nodeId: string) => {
-    const nodeName = (nodes.find((n) => n.id === nodeId)?.data as Record<string, unknown>)?.label as string || nodeId;
+    const node = nodes.find((n) => n.id === nodeId);
+    const nodeName = (node?.data as Record<string, unknown>)?.label as string || nodeId;
     setSelectedService(nodeId);
     setActiveTab('chat');
-    setExplainRequest({ nodeId, nodeName });
+    setExplainRequest({ nodeId, nodeName, nodeType: node?.type });
   }, [nodes]);
 
   const handleFilterChange = useCallback(
     (filters: FilterState) => {
-      // Filters only apply to service-level view
-      if (depthLevel !== 'services') {
-        setFilteredNodes(nodes);
-        setFilteredEdges(edges);
-        return;
+      const hiddenIds = new Set<string>();
+
+      if (depthLevel === 'services') {
+        for (const n of nodes) {
+          const d = n.data as Record<string, unknown>;
+          const info = d.serviceInfo as { type: string; framework: string | null } | undefined;
+          if (info && filters.excludedTypes.size > 0 && filters.excludedTypes.has(info.type)) {
+            hiddenIds.add(n.id);
+          }
+          if (info?.framework && filters.excludedFrameworks.size > 0 && filters.excludedFrameworks.has(info.framework)) {
+            hiddenIds.add(n.id);
+          }
+          if (filters.searchQuery) {
+            const label = (d.label as string) || '';
+            if (!label.toLowerCase().includes(filters.searchQuery.toLowerCase())) {
+              hiddenIds.add(n.id);
+            }
+          }
+          if (!filters.showDatabases && n.type === 'database') {
+            hiddenIds.add(n.id);
+          }
+        }
+      } else {
+        // Hierarchical modes: serviceGroup > layer > module > method
+        const parentMap = new Map<string, string>();
+        for (const n of nodes) {
+          const pid = (n as Record<string, unknown>).parentId as string | undefined;
+          if (pid) parentMap.set(n.id, pid);
+        }
+
+        // Hide databases
+        if (!filters.showDatabases) {
+          for (const n of nodes) {
+            if (n.type === 'database') hiddenIds.add(n.id);
+          }
+        }
+
+        // Hide service groups by type/framework
+        for (const n of nodes) {
+          if (n.type !== 'serviceGroup') continue;
+          const d = n.data as Record<string, unknown>;
+          if (filters.excludedTypes.size > 0 && filters.excludedTypes.has(d.serviceType as string)) {
+            hiddenIds.add(n.id);
+          }
+          if (d.framework && filters.excludedFrameworks.size > 0 && filters.excludedFrameworks.has(d.framework as string)) {
+            hiddenIds.add(n.id);
+          }
+        }
+
+        // Hide layers by layer type
+        if (filters.excludedLayers.size > 0) {
+          for (const n of nodes) {
+            if (n.type !== 'layer') continue;
+            const d = n.data as Record<string, unknown>;
+            if (filters.excludedLayers.has(d.label as string)) {
+              hiddenIds.add(n.id);
+            }
+          }
+        }
+
+        // Cascade: hide children of hidden parents
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const n of nodes) {
+            if (hiddenIds.has(n.id)) continue;
+            const pid = parentMap.get(n.id);
+            if (pid && hiddenIds.has(pid)) {
+              hiddenIds.add(n.id);
+              changed = true;
+            }
+          }
+        }
+
+        // Search: match labels, keep matching nodes + ancestors + descendants
+        if (filters.searchQuery) {
+          const query = filters.searchQuery.toLowerCase();
+          const matchingIds = new Set<string>();
+
+          for (const n of nodes) {
+            if (hiddenIds.has(n.id)) continue;
+            const label = ((n.data as Record<string, unknown>).label as string) || '';
+            if (label.toLowerCase().includes(query)) {
+              matchingIds.add(n.id);
+              let pid = parentMap.get(n.id);
+              while (pid) { matchingIds.add(pid); pid = parentMap.get(pid); }
+            }
+          }
+
+          // Keep all children of matching nodes visible
+          let expandChanged = true;
+          while (expandChanged) {
+            expandChanged = false;
+            for (const n of nodes) {
+              if (matchingIds.has(n.id)) continue;
+              const pid = parentMap.get(n.id);
+              if (pid && matchingIds.has(pid)) {
+                matchingIds.add(n.id);
+                expandChanged = true;
+              }
+            }
+          }
+
+          for (const n of nodes) {
+            if (n.type === 'database') continue;
+            if (!matchingIds.has(n.id)) hiddenIds.add(n.id);
+          }
+        }
+
+        // Remove empty service groups
+        for (const n of nodes) {
+          if (n.type !== 'serviceGroup' || hiddenIds.has(n.id)) continue;
+          const hasChild = nodes.some((c) => parentMap.get(c.id) === n.id && !hiddenIds.has(c.id));
+          if (!hasChild) hiddenIds.add(n.id);
+        }
       }
 
-      let filtered = nodes as GraphNode[];
+      const visible = nodes.filter((n) => !hiddenIds.has(n.id));
+      const visibleIds = new Set(visible.map((n) => n.id));
+      const visibleEdges = edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
 
-      // Exclude service types
-      if (filters.excludedTypes.size > 0) {
-        filtered = filtered.filter((n) =>
-          !filters.excludedTypes.has(n.data.serviceInfo.type),
-        );
-      }
-
-      // Exclude frameworks
-      if (filters.excludedFrameworks.size > 0) {
-        filtered = filtered.filter((n) => {
-          const fw = n.data.serviceInfo.framework;
-          return !fw || !filters.excludedFrameworks.has(fw);
-        });
-      }
-
-      // Filter by search query
-      if (filters.searchQuery) {
-        const query = filters.searchQuery.toLowerCase();
-        filtered = filtered.filter((n) =>
-          n.data.label.toLowerCase().includes(query),
-        );
-      }
-
-      const nodeIds = new Set(filtered.map((n) => n.id));
-      const filtEdges = edges.filter(
-        (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
-      );
-
-      setFilteredNodes(filtered);
-      setFilteredEdges(filtEdges);
+      setFilteredNodes(visible);
+      setFilteredEdges(visibleEdges);
     },
     [nodes, edges, depthLevel],
   );
@@ -161,16 +247,31 @@ export default function RepoGraphPage() {
     ? ((nodes.find((n) => n.id === selectedService)?.data as Record<string, unknown>)?.label as string) ?? null
     : null;
 
-  // Extract unique service types and frameworks for filter panel (services level only)
-  const serviceNodes = depthLevel === 'services' ? (nodes as GraphNode[]) : [];
-  const serviceTypes = [...new Set(serviceNodes.map((n) => n.data?.serviceInfo?.type).filter(Boolean))];
-  const frameworks = [
-    ...new Set(
-      serviceNodes
-        .map((n) => n.data?.serviceInfo?.framework)
-        .filter((f): f is string => !!f),
-    ),
-  ];
+  // Extract filter options from nodes
+  const hasDatabases = nodes.some((n) => n.type === 'database');
+  const typeSet = new Set<string>();
+  const fwSet = new Set<string>();
+  const layerSet = new Set<string>();
+
+  for (const n of nodes) {
+    const d = n.data as Record<string, unknown>;
+    if (n.type === 'service') {
+      const info = d.serviceInfo as { type: string; framework: string | null } | undefined;
+      if (info?.type) typeSet.add(info.type);
+      if (info?.framework) fwSet.add(info.framework);
+    }
+    if (n.type === 'serviceGroup') {
+      if (d.serviceType) typeSet.add(d.serviceType as string);
+      if (d.framework) fwSet.add(d.framework as string);
+    }
+    if (n.type === 'layer') {
+      layerSet.add(d.label as string);
+    }
+  }
+
+  const serviceTypes = [...typeSet];
+  const frameworks = [...fwSet];
+  const layerTypes = [...layerSet];
 
   return (
     <div className="flex h-screen flex-col">
@@ -198,7 +299,7 @@ export default function RepoGraphPage() {
                     <ProgressLabel className="text-[11px] font-medium capitalize">
                       {analysisProgress.step}
                     </ProgressLabel>
-                    <ProgressValue className="text-[11px]" />
+                    {/* <ProgressValue className="text-[11px]" /> */}
                   </div>
                 </Progress>
               </div>
@@ -270,13 +371,14 @@ export default function RepoGraphPage() {
             </div>
           ) : (
             <>
-              {depthLevel === 'services' && (
-                <FilterPanel
-                  serviceTypes={serviceTypes}
-                  frameworks={frameworks}
-                  onFilterChange={handleFilterChange}
-                />
-              )}
+              <FilterPanel
+                depthLevel={depthLevel}
+                serviceTypes={serviceTypes}
+                frameworks={frameworks}
+                layerTypes={layerTypes}
+                hasDatabases={hasDatabases}
+                onFilterChange={handleFilterChange}
+              />
               <GraphCanvas
                 initialNodes={filteredNodes}
                 initialEdges={filteredEdges}
@@ -288,6 +390,8 @@ export default function RepoGraphPage() {
                 onRefetch={refetchGraph}
                 depthLevel={depthLevel}
                 onDepthChange={setDepthLevel}
+                focusNodeId={focusRequest?.nodeId ?? null}
+                focusKey={focusRequest?.key ?? 0}
               />
             </>
           )}
@@ -306,6 +410,15 @@ export default function RepoGraphPage() {
             explainRequest={explainRequest}
             onExplainHandled={() => setExplainRequest(null)}
             selectedDatabaseId={selectedDatabaseId}
+            onLocateNode={(nodeId, requiredDepth) => {
+              if (requiredDepth && requiredDepth !== depthLevel) {
+                setDepthLevel(requiredDepth as DepthLevel);
+                // Delay focus until new graph data loads
+                setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
+              } else {
+                setFocusRequest({ nodeId, key: Date.now() });
+              }
+            }}
           />
         </Sidebar>
       </div>

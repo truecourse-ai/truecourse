@@ -29,7 +29,7 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
 
   return (
     <Card
-      className={`relative min-w-[220px] !gap-0 !py-0 !overflow-visible rounded-md shadow-md transition-all ${
+      className={`relative min-w-[220px] !gap-0 !py-0 !overflow-visible rounded-md shadow-md transition-all !bg-card/80 ${
         selected
           ? 'border-primary ring-1 ring-primary/30'
           : ''

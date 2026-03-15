@@ -14,6 +14,7 @@ import {
   modules,
   methods,
   moduleDeps,
+  methodDeps,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
@@ -26,7 +27,7 @@ import {
 } from '../socket/handlers.js';
 import { buildGraphData, buildLayerGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
-import { getAllDefaultRules, checkModuleRules } from '@truecourse/analyzer';
+import { getAllDefaultRules, checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
 import { v4 as uuidv4 } from 'uuid';
 
 const router: Router = Router();
@@ -256,14 +257,15 @@ router.post(
           }
         }
 
-        // Save methods
+        // Save methods (and build methodIdMap for method deps)
+        const methodIdMap = new Map<string, string>();
         if (result.methods && result.methods.length > 0) {
           for (const method of result.methods) {
             const moduleKey = `${method.serviceName}::${method.moduleName}`;
             const moduleId = moduleIdMap.get(moduleKey);
             if (!moduleId) continue;
 
-            await db.insert(methods).values({
+            const [saved] = await db.insert(methods).values({
               analysisId: analysis.id,
               moduleId,
               name: method.name,
@@ -275,7 +277,9 @@ router.post(
               lineCount: method.lineCount || null,
               statementCount: method.statementCount || null,
               maxNestingDepth: method.maxNestingDepth || null,
-            });
+            }).returning();
+
+            methodIdMap.set(`${method.serviceName}::${method.moduleName}::${method.name}`, saved.id);
           }
         }
 
@@ -300,7 +304,24 @@ router.post(
           }
         }
 
+        // Save method dependencies
+        if (result.methodLevelDependencies && result.methodLevelDependencies.length > 0) {
+          for (const dep of result.methodLevelDependencies) {
+            const srcId = methodIdMap.get(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}`);
+            const tgtId = methodIdMap.get(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}`);
+            if (!srcId || !tgtId) continue;
+
+            await db.insert(methodDeps).values({
+              analysisId: analysis.id,
+              sourceMethodId: srcId,
+              targetMethodId: tgtId,
+              callCount: dep.callCount,
+            });
+          }
+        }
+
         // Check deterministic module rules
+        let moduleViolations: ModuleViolation[] = [];
         if (result.modules && result.methods) {
           const allRules = getAllDefaultRules();
           const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic' && r.enabled);
@@ -326,27 +347,16 @@ router.post(
             }
           }
 
-          const moduleViolations = checkModuleRules(
+          moduleViolations = checkModuleRules(
             result.modules,
             result.methods,
             result.moduleDependencies || [],
             enabledDeterministic,
             result.moduleLevelDependencies || [],
             dbConnectedModuleKeys,
+            result.methodLevelDependencies || [],
           );
 
-          for (const violation of moduleViolations) {
-            await db.insert(insights).values({
-              id: uuidv4(),
-              repoId: id,
-              analysisId: analysis.id,
-              type: violation.ruleKey,
-              title: violation.title,
-              content: violation.description,
-              severity: violation.severity,
-              targetServiceId: serviceIdMap.get(violation.serviceName) || null,
-            });
-          }
         }
 
         // Carry over node positions from previous analysis (namespaced)
@@ -453,6 +463,7 @@ router.post(
           })).filter((m) => m.id); // exclude modules that weren't saved
 
           const insightMethods = result.methods?.map((m) => ({
+            id: methodIdMap.get(`${m.serviceName}::${m.moduleName}::${m.name}`) || undefined,
             moduleName: m.moduleName,
             name: m.name,
             signature: m.signature,
@@ -507,6 +518,17 @@ router.post(
             modules: insightModules,
             methods: insightMethods,
             moduleDependencies: insightModuleDeps,
+            moduleViolations: moduleViolations.map((v) => {
+              const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}` : undefined;
+              const methodKey = v.methodName && v.moduleName
+                ? `${v.serviceName}::${v.moduleName}::${v.methodName}` : undefined;
+              return {
+                ...v,
+                serviceId: serviceIdMap.get(v.serviceName),
+                moduleId: moduleKey ? moduleIdMap.get(moduleKey) : undefined,
+                methodId: methodKey ? methodIdMap.get(methodKey) : undefined,
+              };
+            }),
           }, (step) => {
             currentPercent += 3;
             emitAnalysisProgress(id, {
@@ -528,6 +550,7 @@ router.post(
               targetServiceId: insight.targetServiceId || null,
               targetDatabaseId: insight.targetDatabaseId || null,
               targetModuleId: insight.targetModuleId || null,
+              targetMethodId: insight.targetMethodId || null,
               targetTable: insight.targetTable || null,
               fixPrompt: insight.fixPrompt || null,
             });
@@ -670,6 +693,11 @@ router.get(
             .from(methods)
             .where(eq(methods.analysisId, analysis.id));
 
+          const analysisMethodDeps = await db
+            .select()
+            .from(methodDeps)
+            .where(eq(methodDeps.analysisId, analysis.id));
+
           graphData = buildMethodGraphData(
             analysisServices,
             layerData,
@@ -679,6 +707,8 @@ router.get(
             analysisDatabases,
             analysisDbConnections,
             analysisLayerDeps,
+            analysisMethodDeps,
+            analysisDeps,
           );
         } else {
           graphData = buildModuleGraphData(
@@ -689,6 +719,7 @@ router.get(
             analysisDatabases,
             analysisDbConnections,
             analysisLayerDeps,
+            analysisDeps,
           );
         }
       } else if (level === 'layers') {

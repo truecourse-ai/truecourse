@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { Lightbulb, MessageCircle, Shield, Loader2 } from 'lucide-react';
+import { AlertTriangle, MessageCircle, Shield, Loader2 } from 'lucide-react';
 import { InsightCard } from '@/components/insights/InsightCard';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
@@ -17,9 +17,10 @@ type InsightsPanelProps = {
   selectedServiceName?: string | null;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
-  explainRequest?: { nodeId: string; nodeName: string } | null;
+  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string } | null;
   onExplainHandled?: () => void;
   selectedDatabaseId?: string | null;
+  onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
 };
 
 export function InsightsPanel({
@@ -33,6 +34,7 @@ export function InsightsPanel({
   explainRequest,
   onExplainHandled,
   selectedDatabaseId,
+  onLocateNode,
 }: InsightsPanelProps) {
   const isChat = activeTab === 'chat';
   const isRules = activeTab === 'rules';
@@ -71,8 +73,8 @@ export function InsightsPanel({
       <Tabs value={activeTab} onValueChange={(v) => onTabChange?.(String(v))} className="flex flex-shrink-0 flex-col">
         <TabsList variant="line" className="w-full">
           <TabsTrigger value="insights">
-            <Lightbulb className="h-4 w-4" />
-            Insights
+            <AlertTriangle className="h-4 w-4" />
+            Violations
           </TabsTrigger>
           <TabsTrigger value="rules">
             <Shield className="h-4 w-4" />
@@ -102,17 +104,17 @@ export function InsightsPanel({
             </div>
           ) : insights.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Lightbulb className="mb-3 h-8 w-8 text-muted-foreground" />
+              <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
               <p className="text-sm text-muted-foreground">
                 {selectedService
-                  ? 'No insights for this service'
-                  : 'No insights yet. Run an analysis to get insights.'}
+                  ? 'No violations for this service'
+                  : 'No violations yet. Run an analysis to detect violations.'}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
               {insights.map((insight) => (
-                <InsightCard key={insight.id} insight={insight} />
+                <InsightCard key={insight.id} insight={insight} onLocateNode={onLocateNode} />
               ))}
             </div>
           )}

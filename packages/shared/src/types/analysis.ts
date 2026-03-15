@@ -219,3 +219,19 @@ export const ModuleLevelDependencySchema = z.object({
 })
 
 export type ModuleLevelDependency = z.infer<typeof ModuleLevelDependencySchema>
+
+// ---------------------------------------------------------------------------
+// Method Dependency (call-based, between methods)
+// ---------------------------------------------------------------------------
+
+export const MethodLevelDependencySchema = z.object({
+  callerMethod: z.string(),
+  callerModule: z.string(),
+  callerService: z.string(),
+  calleeMethod: z.string(),
+  calleeModule: z.string(),
+  calleeService: z.string(),
+  callCount: z.number(),
+})
+
+export type MethodLevelDependency = z.infer<typeof MethodLevelDependencySchema>

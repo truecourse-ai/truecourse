@@ -578,7 +578,7 @@ Define configurable analysis rules for deterministic checks and LLM guidance. Ru
 
 ---
 
-## Phase 4: Module & Method Depth Levels `STATUS: IN PROGRESS`
+## Phase 4: Module & Method Depth Levels `STATUS: DONE`
 
 Extends the depth toggle with two more levels:
 - **Modules** — classes, interfaces, and standalone modules within each layer
@@ -614,7 +614,7 @@ Also adds module/method-level analysis rules — some deterministic (AST-based),
 - `llm/arch-excessive-fan-in` — module imported by too many others (change risk, bottleneck)
 - `llm/arch-mixed-abstraction-levels` — method doing both high-level orchestration and low-level details
 
-### Test Plan (Phase 4) `STATUS: BACKLOG`
+### Test Plan (Phase 4) `STATUS: DONE`
 - Module extraction: correctly identifies classes, interfaces, and exported modules from TS/JS files
 - Method extraction: correctly identifies functions, methods with signatures
 - Module node rendering: `ModuleNode` displays name, method count, import count

@@ -65,6 +65,8 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
                 superClass: node.data.superClass,
                 layerColor: node.data.layerColor || '#6b7280',
                 isDead: node.data.isDead || false,
+                isContainer: node.data.isContainer || false,
+                violations: node.data.violations,
               },
             };
           }

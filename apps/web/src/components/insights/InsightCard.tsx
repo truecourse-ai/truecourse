@@ -1,6 +1,6 @@
 'use client';
 
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronUp, Crosshair } from 'lucide-react';
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import type { InsightResponse } from '@/lib/api';
 
 type InsightCardProps = {
   insight: InsightResponse;
+  onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
 };
 
 const severityColors: Record<string, string> = {
@@ -27,8 +28,9 @@ const severityBadgeColors: Record<string, string> = {
   critical: 'bg-red-600/10 text-red-700 dark:text-red-500',
 };
 
-export function InsightCard({ insight }: InsightCardProps) {
+export function InsightCard({ insight, onLocateNode }: InsightCardProps) {
   const [copied, setCopied] = useState(false);
+  const [showFix, setShowFix] = useState(false);
 
   const handleCopyFix = async () => {
     if (!insight.fixPrompt) return;
@@ -36,6 +38,13 @@ export function InsightCard({ insight }: InsightCardProps) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // Most specific target: method > module > database > service
+  const locateTargetId = insight.targetMethodId || insight.targetModuleId || insight.targetDatabaseId || insight.targetServiceId;
+  const locateTargetName = insight.targetMethodName || insight.targetModuleName || insight.targetDatabaseName || insight.targetServiceName;
+  const locateDepth = insight.targetMethodId ? 'methods'
+    : insight.targetModuleId ? 'modules'
+    : undefined;
 
   return (
     <Card
@@ -59,6 +68,18 @@ export function InsightCard({ insight }: InsightCardProps) {
           >
             {insight.severity}
           </Badge>
+          {onLocateNode && locateTargetId && (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => onLocateNode(locateTargetId, locateDepth)}
+              className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+              title={`Locate ${locateTargetName || 'target'} in graph`}
+            >
+              <Crosshair className="h-3 w-3" />
+              Locate
+            </Button>
+          )}
         </div>
 
         <h4 className="text-sm font-bold text-foreground">
@@ -68,34 +89,68 @@ export function InsightCard({ insight }: InsightCardProps) {
           {insight.content}
         </p>
 
-        {insight.targetServiceName && (
+        {(insight.targetServiceName || insight.targetDatabaseName) && (
           <p className="mt-2 text-[10px] text-muted-foreground">
             Target:{' '}
             <span className="font-medium text-foreground">
-              {insight.targetServiceName}
+              {insight.targetServiceName || insight.targetDatabaseName}
             </span>
+            {insight.targetModuleName && (
+              <>
+                {' / '}
+                <span className="font-medium text-foreground">
+                  {insight.targetModuleName}
+                </span>
+              </>
+            )}
+            {insight.targetMethodName && (
+              <>
+                {' / '}
+                <span className="font-medium text-foreground">
+                  {insight.targetMethodName}
+                </span>
+              </>
+            )}
           </p>
         )}
 
         {insight.fixPrompt && (
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={handleCopyFix}
-            className="mt-2 text-[10px] text-muted-foreground hover:text-foreground"
-          >
-            {copied ? (
-              <>
-                <Check className="h-3 w-3 text-emerald-500" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="h-3 w-3" />
-                Copy Fix Prompt
-              </>
+          <div className="mt-2">
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => setShowFix((v) => !v)}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                {showFix ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                Fix Prompt
+              </Button>
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={handleCopyFix}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3 w-3 text-emerald-500" />
+                    Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" />
+                    Copy Fix
+                  </>
+                )}
+              </Button>
+            </div>
+            {showFix && (
+              <pre className="mt-1.5 rounded-md bg-muted px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
+                {insight.fixPrompt}
+              </pre>
             )}
-          </Button>
+          </div>
         )}
       </CardContent>
     </Card>

@@ -82,9 +82,13 @@ export function useChat(repoId: string) {
   );
 
   const explainNode = useCallback(
-    (nodeId: string, nodeName: string) => {
+    (nodeId: string, nodeName: string, nodeType?: string) => {
+      const kind =
+        nodeType === 'methodNode' ? 'method' :
+        nodeType === 'moduleNode' ? 'module' :
+        nodeType === 'layerNode' ? 'layer' : 'service';
       sendMessage(
-        `Explain the "${nodeName}" service — what does it do, how does it fit into the architecture, and are there any concerns?`,
+        `Explain the "${nodeName}" ${kind} — what does it do, how does it fit into the architecture, and are there any concerns?`,
       );
     },
     [sendMessage],

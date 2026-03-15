@@ -10,6 +10,7 @@ import type {
   ModuleInfo,
   MethodInfo,
   ModuleLevelDependency,
+  MethodLevelDependency,
 } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
@@ -26,6 +27,7 @@ export interface AnalysisResult {
   modules: ModuleInfo[];
   methods: MethodInfo[];
   moduleLevelDependencies: ModuleLevelDependency[];
+  methodLevelDependencies: MethodLevelDependency[];
   fileAnalyses: FileAnalysis[];
   moduleDependencies: ModuleDependency[];
   metadata: Record<string, unknown>;
@@ -106,9 +108,9 @@ export async function runAnalysis(
   );
 
   onProgress({
-    step: 'complete',
-    percent: 100,
-    detail: `Analysis complete: ${splitResult.services.length} services detected`,
+    step: 'saving',
+    percent: 80,
+    detail: `Saving results: ${splitResult.services.length} services detected`,
   });
 
   return {
@@ -121,6 +123,7 @@ export async function runAnalysis(
     modules: splitResult.modules,
     methods: splitResult.methods,
     moduleLevelDependencies: splitResult.moduleLevelDependencies,
+    methodLevelDependencies: splitResult.methodLevelDependencies,
     fileAnalyses,
     moduleDependencies,
     metadata: {

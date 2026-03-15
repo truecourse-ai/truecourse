@@ -24,11 +24,13 @@ function IntraLayerEdgeComponent({
   const hasHttpCalls = data?.hasHttpCalls ?? false;
   const isViolation = data?.isViolation ?? false;
   const highlighted = (data as Record<string, unknown>)?.highlighted === true;
+  const dimmed = (data as Record<string, unknown>)?.dimmed === true;
+  const useStep = (data as Record<string, unknown>)?.edgeStyle === 'step';
 
-  // Intra-service (right→right) uses smooth step, cross-service (top/bottom) uses bezier
+  // Intra-service (right→right) always uses smooth step; cross-service respects the toggle
   const isIntraService = sourcePosition === targetPosition;
 
-  const [edgePath, labelX, labelY] = isIntraService
+  const [edgePath, labelX, labelY] = (isIntraService || useStep)
     ? getSmoothStepPath({
         sourceX, sourceY, targetX, targetY,
         sourcePosition, targetPosition,
@@ -45,9 +47,11 @@ function IntraLayerEdgeComponent({
     ? '#ef4444'
     : isEmphasized
       ? 'var(--primary)'
-      : 'var(--muted-foreground)';
-  const strokeWidth = isEmphasized ? 2 : (hasHttpCalls ? 1.5 : 1);
-  const opacity = 1;
+      : hasHttpCalls
+        ? '#60a5fa'
+        : 'var(--muted-foreground)';
+  const strokeWidth = isViolation ? (isEmphasized ? 3 : 2) : isEmphasized ? 2 : (hasHttpCalls ? 1.5 : 1);
+  const opacity = dimmed ? 0.08 : isEmphasized ? 1 : 0.6;
   const strokeDasharray = hasHttpCalls ? '8 4' : '2 3';
 
   // Only show labels for cross-service edges, not intra-service
@@ -83,9 +87,10 @@ function IntraLayerEdgeComponent({
         strokeDasharray={strokeDasharray}
         opacity={opacity}
         markerEnd={`url(#${markerId})`}
-        className="animate-edge-flow"
+        className={dimmed ? '' : 'animate-edge-flow'}
+        style={{ transition: 'opacity 0.2s ease' }}
       />
-      {label && (
+      {label && !dimmed && (
         <EdgeLabelRenderer>
           <div
             style={{

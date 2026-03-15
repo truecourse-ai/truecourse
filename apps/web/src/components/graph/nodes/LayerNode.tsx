@@ -59,12 +59,12 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
 
   const violationIcon = violations.length > 0 && (
     <div
-      className="group/violation relative shrink-0"
+      className="group/violation relative shrink-0 pointer-events-auto nodrag"
       onMouseEnter={highlightViolations}
       onMouseLeave={unhighlightViolations}
     >
       <AlertTriangle className="h-3 w-3 text-red-500" />
-      <div className="pointer-events-none absolute left-1/2 bottom-full mb-1.5 -translate-x-1/2 z-50 hidden group-hover/violation:block">
+      <div className="pointer-events-none absolute left-1/2 bottom-full mb-1.5 -translate-x-1/2 z-[9999] hidden group-hover/violation:block">
         <div className="rounded-md border border-red-500/30 bg-card px-2.5 py-2 shadow-lg w-[220px]">
           <p className="text-[10px] font-semibold text-red-500 mb-1">Layer Violation</p>
           {violations.map((v, i) => (
@@ -82,7 +82,7 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
     return (
       <div
         className="rounded-md border border-border/50 bg-muted/20"
-        style={{ width: '100%', height: '100%', borderLeftWidth: 3, borderLeftColor: layerColor }}
+        style={{ width: '100%', height: '100%' }}
       >
         <Handle type="target" position={Position.Top} id="top" className={HIDDEN_CLASS} />
         <Handle type="source" position={Position.Bottom} id="bottom" className={HIDDEN_CLASS} />
@@ -92,7 +92,6 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
         <div className="flex items-center gap-2 px-3 py-1.5">
           <div className="h-2 w-2 rounded-full" style={{ backgroundColor: layerColor }} />
           <span className="text-[10px] font-medium text-muted-foreground">{layerLabel}</span>
-          {violationIcon}
         </div>
       </div>
     );
@@ -104,7 +103,7 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
 
   return (
     <div
-      className="rounded-md border bg-card shadow-sm"
+      className="rounded-md border bg-card/80 shadow-sm"
       style={{ borderLeftWidth: 3, borderLeftColor: layerColor, minWidth: 260 }}
     >
       {/* Cross-service edges: top/bottom */}

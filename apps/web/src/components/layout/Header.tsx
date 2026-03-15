@@ -1,6 +1,6 @@
 'use client';
 
-import { Sun, Moon, ArrowLeft, GitBranch, Loader2, MessageCircle } from 'lucide-react';
+import { Sun, Moon, ArrowLeft, GitBranch, Loader2, PanelRight } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -82,10 +82,10 @@ export function Header({
             variant={isSidebarOpen ? 'default' : 'outline'}
             size="sm"
             onClick={onToggleSidebar}
-            aria-label="Toggle Agent"
+            aria-label="Toggle Inspector"
           >
-            <MessageCircle className="h-4 w-4" />
-            Agent
+            <PanelRight className="h-4 w-4" />
+            Inspector
           </Button>
         )}
         <Button

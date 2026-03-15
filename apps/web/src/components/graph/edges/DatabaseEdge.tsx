@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import {
   getBezierPath,
+  getSmoothStepPath,
   EdgeLabelRenderer,
   type EdgeProps,
 } from '@xyflow/react';
@@ -23,18 +24,23 @@ function DatabaseEdgeComponent({
   data,
   selected,
 }: EdgeProps & { data?: DatabaseEdgeData }) {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const dimmed = (data as Record<string, unknown>)?.dimmed === true;
+  const useStep = (data as Record<string, unknown>)?.edgeStyle === 'step';
+
+  const pathFn = useStep ? getSmoothStepPath : getBezierPath;
+  const [edgePath, labelX, labelY] = pathFn({
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
     targetPosition,
+    ...(useStep ? { borderRadius: 8 } : {}),
   });
-
   const isEmphasized = selected;
   const strokeColor = isEmphasized ? 'var(--primary)' : '#f59e0b'; // amber
   const strokeWidth = isEmphasized ? 2 : 1.5;
+  const opacity = dimmed ? 0.08 : 1;
 
   const markerId = `db-arrow-${id}`;
 
@@ -50,7 +56,7 @@ function DatabaseEdgeComponent({
           markerHeight="6"
           orient="auto"
         >
-          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} />
+          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} opacity={opacity} />
         </marker>
       </defs>
       <path
@@ -60,10 +66,12 @@ function DatabaseEdgeComponent({
         stroke={strokeColor}
         strokeWidth={strokeWidth}
         strokeDasharray="6 3"
+        opacity={opacity}
         markerEnd={`url(#${markerId})`}
-        className="animate-edge-flow"
+        className={dimmed ? '' : 'animate-edge-flow'}
+        style={{ transition: 'opacity 0.2s ease' }}
       />
-      <EdgeLabelRenderer>
+      {!dimmed && <EdgeLabelRenderer>
         <div
           style={{
             position: 'absolute',
@@ -76,7 +84,7 @@ function DatabaseEdgeComponent({
             DB
           </span>
         </div>
-      </EdgeLabelRenderer>
+      </EdgeLabelRenderer>}
     </>
   );
 }

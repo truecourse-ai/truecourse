@@ -112,6 +112,7 @@ export interface ModuleInsightContext {
     lineCount?: number;
   }[];
   methods: {
+    id?: string;
     moduleName: string;
     name: string;
     signature: string;
@@ -128,6 +129,18 @@ export interface ModuleInsightContext {
     importedNames: string[];
   }[];
   llmRules: { name: string; severity: string; prompt: string }[];
+  violations?: {
+    ruleKey: string;
+    title: string;
+    description: string;
+    severity: string;
+    serviceName: string;
+    serviceId?: string;
+    moduleName?: string;
+    moduleId?: string;
+    methodName?: string;
+    methodId?: string;
+  }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +193,7 @@ const ArchitectureInsightOutputSchema = z.object({
       type: z.enum(['architecture', 'dependency', 'violation', 'suggestion', 'warning']),
       title: z.string(),
       content: z.string(),
-      severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
       targetServiceId: z.string().nullable().describe('The id of the service this insight applies to, must be an exact id from the Services list'),
       fixPrompt: z.string().nullable(),
     })
@@ -199,7 +212,7 @@ const DatabaseInsightOutputSchema = z.object({
       type: z.literal('database'),
       title: z.string(),
       content: z.string(),
-      severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
       targetDatabaseId: z.string().nullable().describe('The id of the database this insight applies to, must be an exact id from the Databases list'),
       targetTable: z.string().nullable().describe('The exact table name this insight applies to'),
       fixPrompt: z.string().nullable(),
@@ -213,8 +226,10 @@ const ModuleInsightOutputSchema = z.object({
       type: z.literal('module'),
       title: z.string(),
       content: z.string(),
-      severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      targetServiceId: z.string().nullable().describe('The id of the service this insight applies to, must be an exact id from the Services list'),
       targetModuleId: z.string().nullable().describe('The id of the module this insight applies to, must be an exact id from the Modules list'),
+      targetMethodId: z.string().nullable().describe('The id of the method this insight applies to, must be an exact id from the Methods list'),
       fixPrompt: z.string().nullable(),
     })
   ),
@@ -319,7 +334,9 @@ class AISDKProvider implements LLMProvider {
         title: insight.title,
         content: insight.content,
         severity: insight.severity,
+        targetServiceId: insight.targetServiceId ?? undefined,
         targetModuleId: insight.targetModuleId ?? undefined,
+        targetMethodId: insight.targetMethodId ?? undefined,
         fixPrompt: insight.fixPrompt ?? undefined,
         createdAt: new Date().toISOString(),
       })),

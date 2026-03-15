@@ -15,6 +15,7 @@ import type {
   ModuleInfo,
   MethodInfo,
   ModuleLevelDependency,
+  MethodLevelDependency,
 } from '@truecourse/shared'
 import { detectLayers, toLayerDetectionResults } from './layer-detector.js'
 import { detectServices, type Service } from './service-detector.js'
@@ -36,6 +37,7 @@ export interface SplitAnalysisResult {
   modules: ModuleInfo[]
   methods: MethodInfo[]
   moduleLevelDependencies: ModuleLevelDependency[]
+  methodLevelDependencies: MethodLevelDependency[]
 }
 
 /**
@@ -293,6 +295,7 @@ export function performSplitAnalysis(
     modules: moduleResult.modules,
     methods: moduleResult.methods,
     moduleLevelDependencies: moduleResult.moduleDependencies,
+    methodLevelDependencies: moduleResult.methodDependencies,
   }
 }
 

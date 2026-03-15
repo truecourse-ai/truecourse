@@ -84,4 +84,13 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'arch/dead-method',
+    category: 'module',
+    name: 'Dead method',
+    description: 'Method has no incoming or outgoing calls — likely unused.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
 ]

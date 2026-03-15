@@ -50,6 +50,20 @@
       "when": 1773515223822,
       "tag": "0006_greedy_squadron_supreme",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1773537425217,
+      "tag": "0007_secret_omega_red",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1773541533294,
+      "tag": "0008_illegal_riptide",
+      "breakpoints": true
     }
   ]
 }

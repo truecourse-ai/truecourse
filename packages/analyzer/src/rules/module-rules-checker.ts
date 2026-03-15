@@ -1,4 +1,4 @@
-import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, AnalysisRule } from '@truecourse/shared'
+import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule } from '@truecourse/shared'
 
 export interface ModuleViolation {
   ruleKey: string
@@ -26,6 +26,7 @@ export function checkModuleRules(
   enabledRules: AnalysisRule[],
   moduleLevelDeps?: ModuleLevelDependency[],
   dbConnectedModuleKeys?: Set<string>,
+  methodLevelDeps?: MethodLevelDependency[],
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -130,8 +131,6 @@ export function checkModuleRules(
     // Check exported classes
     for (const mod of modules) {
       if (mod.kind === 'class' && !importedTargets.has(mod.name)) {
-        // Check if the class name appears in any export of its file's analysis
-        // If the class is exported (its file has exports), check
         if (mod.exportCount > 0 && !importedTargets.has(mod.name)) {
           violations.push({
             ruleKey: 'arch/unused-export',
@@ -166,6 +165,31 @@ export function checkModuleRules(
           serviceName: mod.serviceName,
           moduleName: mod.name,
           filePath: mod.filePath,
+        })
+      }
+    }
+  }
+
+  // Dead method
+  if (ruleKeys.has('arch/dead-method') && methodLevelDeps) {
+    const connectedMethods = new Set<string>()
+    for (const dep of methodLevelDeps) {
+      connectedMethods.add(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}`)
+      connectedMethods.add(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}`)
+    }
+
+    for (const method of methods) {
+      const key = `${method.serviceName}::${method.moduleName}::${method.name}`
+      if (!connectedMethods.has(key)) {
+        violations.push({
+          ruleKey: 'arch/dead-method',
+          title: `Dead method: ${method.moduleName}.${method.name}`,
+          description: `${method.name} in ${method.moduleName} (${method.serviceName}) has no incoming or outgoing calls — it may be unused.`,
+          severity: 'low',
+          serviceName: method.serviceName,
+          moduleName: method.moduleName,
+          methodName: method.name,
+          filePath: method.filePath,
         })
       }
     }

@@ -142,3 +142,16 @@
 .animate-edge-flow {
   animation: edge-flow 1s linear infinite;
 }
+
+@keyframes border-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.animate-border-pulse {
+  animation: border-pulse 0.8s ease-in-out infinite;
+}

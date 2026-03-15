@@ -184,6 +184,189 @@ describe('extractModulesAndMethods', () => {
     expect(result.moduleDependencies[0].importedNames).toEqual(['UserService']);
   });
 
+  it('filters out anonymous methods', () => {
+    const analysis = makeAnalysis({
+      filePath: '/repo/svc/src/app.ts',
+      functions: [
+        {
+          name: 'startServer',
+          params: [],
+          isAsync: true,
+          isExported: true,
+          location: { filePath: '/repo/svc/src/app.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+        },
+        {
+          name: 'anonymous',
+          params: [],
+          isAsync: false,
+          isExported: false,
+          location: { filePath: '/repo/svc/src/app.ts', startLine: 7, endLine: 9, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [{ name: 'startServer', isDefault: false }],
+    });
+
+    const layers = [makeLayerDetail({ filePaths: ['/repo/svc/src/app.ts'] })];
+    const result = extractModulesAndMethods([analysis], layers, []);
+
+    // Only named methods, not anonymous
+    expect(result.methods).toHaveLength(1);
+    expect(result.methods[0].name).toBe('startServer');
+    // Module method count should also exclude anonymous
+    expect(result.modules[0].methodCount).toBe(1);
+  });
+
+  it('builds method-level dependencies from call expressions', () => {
+    const analysis1 = makeAnalysis({
+      filePath: '/repo/svc/src/controller.ts',
+      classes: [{
+        name: 'UserController',
+        methods: [
+          {
+            name: 'getAll',
+            params: [],
+            isAsync: true,
+            isExported: false,
+            location: { filePath: '/repo/svc/src/controller.ts', startLine: 5, endLine: 15, startColumn: 0, endColumn: 0 },
+          },
+        ],
+        properties: [],
+        location: { filePath: '/repo/svc/src/controller.ts', startLine: 1, endLine: 20, startColumn: 0, endColumn: 0 },
+      }],
+      imports: [{ source: './service', specifiers: [{ name: 'UserService', isDefault: false, isNamespace: false }], isTypeOnly: false }],
+      exports: [{ name: 'UserController', isDefault: false }],
+      calls: [
+        { callee: 'this.userService.findAll', callerFunction: 'UserController.getAll', arguments: [] },
+      ],
+    });
+
+    const analysis2 = makeAnalysis({
+      filePath: '/repo/svc/src/service.ts',
+      classes: [{
+        name: 'UserService',
+        methods: [
+          {
+            name: 'findAll',
+            params: [],
+            isAsync: true,
+            isExported: false,
+            location: { filePath: '/repo/svc/src/service.ts', startLine: 5, endLine: 15, startColumn: 0, endColumn: 0 },
+          },
+        ],
+        properties: [],
+        location: { filePath: '/repo/svc/src/service.ts', startLine: 1, endLine: 20, startColumn: 0, endColumn: 0 },
+      }],
+      exports: [{ name: 'UserService', isDefault: false }],
+    });
+
+    const layers = [
+      makeLayerDetail({ layer: 'api', filePaths: ['/repo/svc/src/controller.ts'] }),
+      makeLayerDetail({ layer: 'service', filePaths: ['/repo/svc/src/service.ts'] }),
+    ];
+
+    const fileDeps: ModuleDependency[] = [
+      { source: '/repo/svc/src/controller.ts', target: '/repo/svc/src/service.ts', importedNames: ['UserService'] },
+    ];
+
+    const result = extractModulesAndMethods([analysis1, analysis2], layers, fileDeps);
+
+    expect(result.methodDependencies).toHaveLength(1);
+    expect(result.methodDependencies[0].callerModule).toBe('UserController');
+    expect(result.methodDependencies[0].callerMethod).toBe('getAll');
+    expect(result.methodDependencies[0].calleeModule).toBe('UserService');
+    expect(result.methodDependencies[0].calleeMethod).toBe('findAll');
+    expect(result.methodDependencies[0].callCount).toBe(1);
+  });
+
+  it('skips builtin calls (console.log, Array.map, etc.)', () => {
+    const analysis = makeAnalysis({
+      filePath: '/repo/svc/src/service.ts',
+      classes: [{
+        name: 'MyService',
+        methods: [
+          {
+            name: 'run',
+            params: [],
+            isAsync: false,
+            isExported: false,
+            location: { filePath: '/repo/svc/src/service.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+          },
+        ],
+        properties: [],
+        location: { filePath: '/repo/svc/src/service.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+      }],
+      exports: [{ name: 'MyService', isDefault: false }],
+      calls: [
+        { callee: 'console.log', callerFunction: 'MyService.run', arguments: [] },
+        { callee: 'items.map', callerFunction: 'MyService.run', arguments: [] },
+        { callee: 'JSON.parse', callerFunction: 'MyService.run', arguments: [] },
+      ],
+    });
+
+    const layers = [makeLayerDetail({ filePaths: ['/repo/svc/src/service.ts'] })];
+    const result = extractModulesAndMethods([analysis], layers, []);
+
+    expect(result.methodDependencies).toHaveLength(0);
+  });
+
+  it('strips this. prefix before resolving callee', () => {
+    const analysis1 = makeAnalysis({
+      filePath: '/repo/svc/src/controller.ts',
+      classes: [{
+        name: 'Controller',
+        methods: [
+          {
+            name: 'handle',
+            params: [],
+            isAsync: false,
+            isExported: false,
+            location: { filePath: '/repo/svc/src/controller.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+          },
+        ],
+        properties: [],
+        location: { filePath: '/repo/svc/src/controller.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+      }],
+      imports: [{ source: './helper', specifiers: [{ name: 'Helper', isDefault: false, isNamespace: false }], isTypeOnly: false }],
+      exports: [{ name: 'Controller', isDefault: false }],
+      calls: [
+        { callee: 'this.Helper.doWork', callerFunction: 'Controller.handle', arguments: [] },
+      ],
+    });
+
+    const analysis2 = makeAnalysis({
+      filePath: '/repo/svc/src/helper.ts',
+      classes: [{
+        name: 'Helper',
+        methods: [
+          {
+            name: 'doWork',
+            params: [],
+            isAsync: false,
+            isExported: false,
+            location: { filePath: '/repo/svc/src/helper.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+          },
+        ],
+        properties: [],
+        location: { filePath: '/repo/svc/src/helper.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+      }],
+      exports: [{ name: 'Helper', isDefault: false }],
+    });
+
+    const layers = [
+      makeLayerDetail({ filePaths: ['/repo/svc/src/controller.ts', '/repo/svc/src/helper.ts'] }),
+    ];
+
+    const fileDeps: ModuleDependency[] = [
+      { source: '/repo/svc/src/controller.ts', target: '/repo/svc/src/helper.ts', importedNames: ['Helper'] },
+    ];
+
+    const result = extractModulesAndMethods([analysis1, analysis2], layers, fileDeps);
+
+    expect(result.methodDependencies).toHaveLength(1);
+    expect(result.methodDependencies[0].calleeModule).toBe('Helper');
+    expect(result.methodDependencies[0].calleeMethod).toBe('doWork');
+  });
+
   it('preserves function metrics (lineCount, statementCount, maxNestingDepth)', () => {
     const analysis = makeAnalysis({
       filePath: '/repo/svc/src/big.ts',

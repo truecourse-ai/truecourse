@@ -79,6 +79,7 @@ export async function analyzeRepository(rootPath: string): Promise<{
         modules: [],
         methods: [],
         moduleLevelDependencies: [],
+        methodLevelDependencies: [],
       },
     }
   }

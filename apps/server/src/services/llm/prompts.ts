@@ -13,7 +13,7 @@ import type {
 
 export const PROMPT_DEFINITIONS = {
   'insights-architecture': {
-    prompt: `Analyze the following codebase architecture and provide actionable insights.
+    prompt: `Analyze the following codebase architecture and identify violations and issues that need to be fixed.
 
 Architecture: {{architecture}}
 
@@ -27,12 +27,15 @@ Dependencies:
 
 IMPORTANT: When referencing a service, use the exact id from the Services list above. Do not fabricate or modify ids.
 
+Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
+
 Focus on:
-1. Architecture patterns and anti-patterns
+1. Architecture anti-patterns
 2. Dependency issues (circular dependencies, tight coupling)
 3. Layer violations
-4. Suggestions for improvement
-5. Potential risks or code smells
+4. Potential risks or code smells
+
+For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (service names, file paths) in fixPrompts — never include internal ids.
 
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
 
@@ -45,7 +48,7 @@ Return your findings as structured data using the provided schema.`,
   },
 
   'insights-database': {
-    prompt: `Analyze the following database schemas and provide actionable insights.
+    prompt: `Analyze the following database schemas and identify violations and issues that need to be fixed.
 
 Databases:
 {{databaseList}}
@@ -53,12 +56,16 @@ Databases:
 
 IMPORTANT: When referencing a database, use the exact id from the Databases list above. Do not fabricate or modify ids.
 
+Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
+
 Focus on:
 1. Schema design issues (missing foreign keys, missing indexes)
 2. Naming convention inconsistencies
 3. Missing audit columns (created_at, updated_at)
 4. Overly nullable schemas
 5. Referential integrity concerns
+
+For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
 
 Return your findings as structured data using the provided schema.`,
     config: {
@@ -69,7 +76,7 @@ Return your findings as structured data using the provided schema.`,
   },
 
   'insights-module': {
-    prompt: `Analyze the following modules and methods and provide actionable insights.
+    prompt: `Analyze the following modules and methods and identify violations and issues that need to be fixed.
 
 Modules:
 {{moduleList}}
@@ -79,9 +86,12 @@ Methods:
 
 Module Dependencies:
 {{moduleDependencyList}}
+{{violations}}
 {{llmRules}}
 
-IMPORTANT: When referencing a module, use the exact id from the Modules list above. Do not fabricate or modify ids.
+IMPORTANT: When referencing a module or method, use the exact id from the Modules or Methods list above. Do not fabricate or modify ids. Set targetServiceId, targetModuleId, and targetMethodId to link insights to the correct entities.
+
+Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
 Focus on:
 1. Circular module dependencies
@@ -89,6 +99,8 @@ Focus on:
 3. Excessive fan-out or fan-in
 4. Mixed abstraction levels in methods
 5. Code organization issues
+
+If violations are listed above, generate an insight for each violation with a concrete fixPrompt that an AI coding assistant could use to fix the issue. The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt. Example: "Split UserService into UserQueryService and UserCommandService by separating read and write methods".
 
 Return your findings as structured data using the provided schema.`,
     config: {
@@ -271,7 +283,7 @@ export function buildModuleTemplateVars(context: ModuleInsightContext): Record<s
   const methodList = context.methods
     .map(
       (m) =>
-        `- ${m.moduleName}.${m.name}: ${m.signature} (params: ${m.paramCount}${m.returnType ? `, returns: ${m.returnType}` : ''}${m.isAsync ? ', async' : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''}${m.statementCount ? `, statements: ${m.statementCount}` : ''}${m.maxNestingDepth ? `, nesting: ${m.maxNestingDepth}` : ''})`
+        `- ${m.moduleName}.${m.name}${m.id ? ` [id: ${m.id}]` : ''}: ${m.signature} (params: ${m.paramCount}${m.returnType ? `, returns: ${m.returnType}` : ''}${m.isAsync ? ', async' : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''}${m.statementCount ? `, statements: ${m.statementCount}` : ''}${m.maxNestingDepth ? `, nesting: ${m.maxNestingDepth}` : ''})`
     )
     .join('\n') || '(none)';
 
@@ -281,13 +293,19 @@ export function buildModuleTemplateVars(context: ModuleInsightContext): Record<s
     )
     .join('\n') || '(none)';
 
+  const violations = context.violations?.length
+    ? `\nDeterministic violations detected (generate an insight with fixPrompt for each, and link to the correct service/module/method using their ids):\n${context.violations.map(
+        (v) => `- [${v.severity.toUpperCase()}] ${v.title}: ${v.description} (rule: ${v.ruleKey}, service: ${v.serviceName}${v.serviceId ? ` [serviceId: ${v.serviceId}]` : ''}${v.moduleName ? `, module: ${v.moduleName}` : ''}${v.moduleId ? ` [moduleId: ${v.moduleId}]` : ''}${v.methodName ? `, method: ${v.methodName}` : ''}${v.methodId ? ` [methodId: ${v.methodId}]` : ''})`
+      ).join('\n')}`
+    : '';
+
   const llmRules = context.llmRules.length
     ? `\nAnalysis Rules (evaluate the modules against these):\n${context.llmRules.map(
         (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
       ).join('\n')}`
     : '';
 
-  return { moduleList, methodList, moduleDependencyList, llmRules };
+  return { moduleList, methodList, moduleDependencyList, violations, llmRules };
 }
 
 // ---------------------------------------------------------------------------

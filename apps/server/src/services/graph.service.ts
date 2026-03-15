@@ -223,34 +223,6 @@ export function buildGraphData(
     };
   });
 
-  // Add database nodes
-  if (databasesList && databasesList.length > 0) {
-    for (const dbData of databasesList) {
-      const pos = databasePositions.get(dbData.id)!;
-      const tableCount = Array.isArray(dbData.tables) ? dbData.tables.length : 0;
-      const connectedSvcs = Array.isArray(dbData.connectedServices) ? dbData.connectedServices : [];
-
-      nodes.push({
-        id: dbData.id,
-        type: 'databaseNode',
-        position: pos,
-        data: {
-          label: dbData.name,
-          serviceType: dbData.type,
-          framework: dbData.driver,
-          fileCount: tableCount,
-          layers: [],
-          rootPath: '',
-          ...({
-            databaseType: dbData.type,
-            tableCount,
-            connectedServices: connectedSvcs,
-          } as Record<string, unknown>),
-        },
-      });
-    }
-  }
-
   // Build graph edges
   const edges: GraphEdge[] = dependencies.map((dep) => ({
     id: dep.id,
@@ -264,22 +236,8 @@ export function buildGraphData(
     ...({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>),
   }));
 
-  // Add database edges
-  if (databaseConnectionsList) {
-    for (const conn of databaseConnectionsList) {
-      edges.push({
-        id: `db-${conn.id}`,
-        source: conn.serviceId,
-        target: conn.databaseId,
-        label: conn.driver,
-        data: {
-          dependencyCount: 0,
-          dependencyType: 'database',
-        },
-        ...({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>),
-      });
-    }
-  }
+  // Add database nodes + edges
+  addDatabaseNodesFromLayout(nodes, edges, databasePositions, databasesList, databaseConnectionsList);
 
   return { nodes, edges };
 }
@@ -320,8 +278,8 @@ const LAYER_ORDER: Record<string, number> = {
 const LAYER_COLORS: Record<string, string> = {
   api: '#3b82f6',      // blue
   service: '#8b5cf6',  // purple
-  data: '#f59e0b',     // amber
-  external: '#ef4444', // red
+  data: '#10b981',     // emerald
+  external: '#f97316', // orange
 };
 
 export function buildLayerGraphData(
@@ -342,12 +300,7 @@ export function buildLayerGraphData(
   }
 
   // Group layers by service
-  const layersByService = new Map<string, LayerData[]>();
-  for (const layer of layersList) {
-    const svcLayers = layersByService.get(layer.serviceName) || [];
-    svcLayers.push(layer);
-    layersByService.set(layer.serviceName, svcLayers);
-  }
+  const layersByService = groupBy(layersList, (l) => l.serviceName);
 
   // Calculate group sizes based on layer count
   const SERVICE_GROUP_WIDTH = 320;
@@ -590,56 +543,7 @@ export function buildLayerGraphData(
   }
 
   // Add database nodes (positioned by shared dagre layout)
-  if (databasesList && databasesList.length > 0) {
-    for (const dbData of databasesList) {
-      const pos = databasePositions.get(dbData.id)!;
-      const tableCount = Array.isArray(dbData.tables) ? dbData.tables.length : 0;
-      const connectedSvcs = Array.isArray(dbData.connectedServices) ? dbData.connectedServices : [];
-
-      nodes.push({
-        id: dbData.id,
-        type: 'databaseNode',
-        position: pos,
-        data: {
-          label: dbData.name,
-          serviceType: dbData.type,
-          framework: dbData.driver,
-          fileCount: tableCount,
-          layers: [],
-          rootPath: '',
-          ...({
-            databaseType: dbData.type,
-            tableCount,
-            connectedServices: connectedSvcs,
-          } as Record<string, unknown>),
-        },
-      });
-    }
-
-    // Add edges from data layers to databases
-    if (databaseConnectionsList) {
-      for (const conn of databaseConnectionsList) {
-        const svcName = servicesList.find((s) => s.id === conn.serviceId)?.name;
-        if (!svcName) continue;
-
-        // Connect to data layer if it exists, otherwise service group
-        const dataLayerNodeId = `${conn.serviceId}__data`;
-        const hasDataLayer = nodes.some((n) => n.id === dataLayerNodeId);
-
-        edges.push({
-          id: `db-${conn.id}`,
-          source: hasDataLayer ? dataLayerNodeId : conn.serviceId,
-          target: conn.databaseId,
-          label: conn.driver,
-          data: {
-            dependencyCount: 0,
-            dependencyType: 'database',
-          },
-          ...({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>),
-        });
-      }
-    }
-  }
+  addDatabaseNodesFromLayout(nodes, edges, databasePositions, databasesList, databaseConnectionsList);
 
   return { nodes, edges };
 }
@@ -685,6 +589,13 @@ interface MethodData {
   maxNestingDepth: number | null;
 }
 
+interface MethodDepData {
+  id: string;
+  sourceMethodId: string;
+  targetMethodId: string;
+  callCount: number;
+}
+
 const MODULE_NODE_WIDTH = 220;
 const MODULE_NODE_HEIGHT = 50;
 const MODULE_GAP = 16;
@@ -697,24 +608,14 @@ export function buildModuleGraphData(
   databasesList?: DatabaseData[],
   databaseConnectionsList?: DatabaseConnectionData[],
   layerDeps?: LayerDepData[],
+  serviceDeps?: DependencyData[],
 ): GraphData {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
   // Group layers by service, modules by layer
-  const layersByService = new Map<string, LayerData[]>();
-  for (const layer of layersList) {
-    const svcLayers = layersByService.get(layer.serviceId) || [];
-    svcLayers.push(layer);
-    layersByService.set(layer.serviceId, svcLayers);
-  }
-
-  const modulesByLayer = new Map<string, ModuleData[]>();
-  for (const mod of modulesList) {
-    const layerMods = modulesByLayer.get(mod.layerId) || [];
-    layerMods.push(mod);
-    modulesByLayer.set(mod.layerId, layerMods);
-  }
+  const layersByService = groupBy(layersList, (l) => l.serviceId);
+  const modulesByLayer = groupBy(modulesList, (m) => m.layerId);
 
   // Calculate sizes
   const GROUP_PAD_TOP = 50;
@@ -751,30 +652,7 @@ export function buildModuleGraphData(
     groupHeights.set(service.id, totalHeight);
   }
 
-  // Need service deps — build from module deps' cross-service relationships
-  const svcDeps = moduleDepsList
-    .filter((d) => {
-      const srcMod = modulesList.find((m) => m.id === d.sourceModuleId);
-      const tgtMod = modulesList.find((m) => m.id === d.targetModuleId);
-      return srcMod && tgtMod && srcMod.serviceId !== tgtMod.serviceId;
-    })
-    .reduce<DependencyData[]>((acc, d) => {
-      const srcMod = modulesList.find((m) => m.id === d.sourceModuleId)!;
-      const tgtMod = modulesList.find((m) => m.id === d.targetModuleId)!;
-      const existing = acc.find(
-        (a) => a.sourceServiceId === srcMod.serviceId && a.targetServiceId === tgtMod.serviceId,
-      );
-      if (!existing) {
-        acc.push({
-          id: `svc-dep-${srcMod.serviceId}-${tgtMod.serviceId}`,
-          sourceServiceId: srcMod.serviceId,
-          targetServiceId: tgtMod.serviceId,
-          dependencyCount: d.dependencyCount,
-          dependencyType: 'import',
-        });
-      }
-      return acc;
-    }, []);
+  const svcDeps = aggregateCrossServiceDeps(moduleDepsList, modulesList);
 
   const { servicePositions, databasePositions } = computeOuterLayout(
     servicesList, svcDeps, dimensions, databasesList, databaseConnectionsList,
@@ -789,22 +667,7 @@ export function buildModuleGraphData(
       (a, b) => (LAYER_ORDER[a.layer] ?? 99) - (LAYER_ORDER[b.layer] ?? 99)
     );
 
-    // Service group node
-    nodes.push({
-      id: service.id,
-      type: 'serviceGroupNode',
-      position: pos,
-      data: {
-        label: service.name,
-        description: service.description || undefined,
-        serviceType: service.type,
-        framework: service.framework || undefined,
-        fileCount: service.fileCount || 0,
-        layers: svcLayers.map((l) => l.layer),
-        rootPath: service.rootPath,
-      },
-      ...(({ style: { width: groupWidth, height: totalHeight } }) as Record<string, unknown>),
-    });
+    nodes.push(createServiceGroupNode(service, pos, svcLayers, groupWidth, totalHeight));
 
     // Layer container nodes + module sub-nodes
     let yOffset = GROUP_PAD_TOP;
@@ -813,29 +676,10 @@ export function buildModuleGraphData(
       const layerHeight = getModuleLayerHeight(layer.id);
       const layerWidth = groupWidth - GROUP_PAD_X * 2;
 
-      nodes.push({
-        id: layerNodeId,
-        type: 'layerNode',
-        position: { x: GROUP_PAD_X, y: yOffset },
-        data: {
-          label: layer.layer,
-          serviceType: service.type,
-          fileCount: layer.fileCount,
-          layers: [layer.layer],
-          rootPath: service.rootPath,
-          description: undefined,
-          framework: undefined,
-          ...(({
-            layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
-            isContainer: true,
-          }) as Record<string, unknown>),
-        },
-        ...(({
-          parentId: service.id,
-          extent: 'parent',
-          style: { width: layerWidth, height: layerHeight },
-        }) as Record<string, unknown>),
-      });
+      nodes.push(createLayerContainerNode(
+        service.id, layer, service.type, service.rootPath,
+        { x: GROUP_PAD_X, y: yOffset }, layerWidth, layerHeight,
+      ));
 
       // Module nodes inside layer
       const mods = modulesByLayer.get(layer.id) || [];
@@ -872,76 +716,53 @@ export function buildModuleGraphData(
     }
   }
 
-  // Mark dead modules (no module deps AND no database connections)
-  const connectedModuleIds = new Set<string>();
-  for (const dep of moduleDepsList) {
-    connectedModuleIds.add(dep.sourceModuleId);
-    connectedModuleIds.add(dep.targetModuleId);
-  }
-  // Modules connected to databases are not dead
-  if (databaseConnectionsList && databasesList) {
-    for (const conn of databaseConnectionsList) {
-      const dataLayer = layersList.find(
-        (l) => l.serviceId === conn.serviceId && l.layer === 'data',
-      );
-      if (dataLayer) {
-        const dataModules = modulesList.filter((m) => m.layerId === dataLayer.id);
-        if (dataModules.length > 0) {
-          const driverLower = conn.driver.toLowerCase();
-          const dbData = databasesList.find((d) => d.id === conn.databaseId);
-          const dbNameLower = dbData?.name.toLowerCase() || '';
-          const matched = dataModules.find((m) => {
-            const nameLower = m.name.toLowerCase();
-            return nameLower.includes(driverLower) || driverLower.includes(nameLower)
-              || nameLower.includes(dbNameLower) || dbNameLower.includes(nameLower);
-          });
-          connectedModuleIds.add(matched?.id || dataModules[0].id);
-        }
-      }
-    }
-  }
-  for (const node of nodes) {
-    if (node.type === 'moduleNode') {
-      const mod = modulesList.find((m) => m.id === node.id);
-      if (mod && !connectedModuleIds.has(mod.id)) {
-        (node.data as Record<string, unknown>).isDead = true;
-      }
-    }
-  }
+  markDeadModules(nodes, modulesList, moduleDepsList, layersList, databasesList, databaseConnectionsList);
 
   // Module dependency edges
-  console.log(`[Graph:modules] moduleDepsList: ${moduleDepsList.length}, modulesList: ${modulesList.length}`);
-  let skipped = 0;
-  for (const dep of moduleDepsList) {
-    const srcMod = modulesList.find((m) => m.id === dep.sourceModuleId);
-    const tgtMod = modulesList.find((m) => m.id === dep.targetModuleId);
-    if (!srcMod || !tgtMod) {
-      console.log(`[Graph:modules] Skipped dep: src=${dep.sourceModuleId} (found=${!!srcMod}), tgt=${dep.targetModuleId} (found=${!!tgtMod})`);
-      skipped++;
-      continue;
+  edges.push(...createModuleDepEdges(moduleDepsList, modulesList));
+
+  // HTTP service deps: map to module-level edges (external module → api module)
+  if (serviceDeps) {
+    for (const dep of serviceDeps) {
+      if (dep.dependencyType !== 'http') continue;
+      const srcServiceName = servicesList.find((s) => s.id === dep.sourceServiceId)?.name || '';
+      const tgtServiceName = servicesList.find((s) => s.id === dep.targetServiceId)?.name || '';
+
+      const srcLayers = layersByService.get(dep.sourceServiceId) || [];
+      const tgtLayers = layersByService.get(dep.targetServiceId) || [];
+
+      const srcLayer = srcLayers.find((l) => l.layer === 'external')
+        || srcLayers.find((l) => l.layer === 'service')
+        || srcLayers[0];
+      const tgtLayer = tgtLayers.find((l) => l.layer === 'api')
+        || tgtLayers[0];
+
+      if (!srcLayer || !tgtLayer) continue;
+
+      const srcMods = modulesByLayer.get(srcLayer.id) || [];
+      const tgtMods = modulesByLayer.get(tgtLayer.id) || [];
+      const srcMod = srcMods[0];
+      const tgtMod = tgtMods[0];
+      if (!srcMod || !tgtMod) continue;
+
+      if (edges.some((e) => e.source === srcMod.id && e.target === tgtMod.id)) continue;
+
+      edges.push({
+        id: `http-mod-${dep.id}`,
+        source: srcMod.id,
+        target: tgtMod.id,
+        data: {
+          dependencyCount: dep.dependencyCount || 0,
+          dependencyType: 'http',
+        },
+        ...({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>),
+      });
     }
-
-    const isSameService = srcMod.serviceId === tgtMod.serviceId;
-
-    edges.push({
-      id: dep.id,
-      source: dep.sourceModuleId,
-      target: dep.targetModuleId,
-      label: String(dep.dependencyCount),
-      data: {
-        dependencyCount: dep.dependencyCount,
-        dependencyType: 'module-dep',
-      },
-      ...(isSameService
-        ? ({ sourceHandle: 'right-src', targetHandle: 'right-tgt' } as Record<string, unknown>)
-        : ({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>)),
-    });
   }
-  console.log(`[Graph:modules] Created ${edges.length} edges total (${skipped} skipped)`);
 
   // Inject layer violation info onto module edges and service group nodes
   if (layerDeps && layerDeps.length > 0) {
-    injectModuleViolations(nodes, edges, modulesList, layersList, servicesList, layerDeps);
+    injectModuleViolations(nodes, edges, modulesList, layersList, servicesList, layerDeps, moduleDepsList);
   }
 
   // Database nodes (positioned by shared dagre layout)
@@ -959,31 +780,16 @@ export function buildMethodGraphData(
   databasesList?: DatabaseData[],
   databaseConnectionsList?: DatabaseConnectionData[],
   layerDeps?: LayerDepData[],
+  methodDepsList?: MethodDepData[],
+  serviceDeps?: DependencyData[],
 ): GraphData {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
   // Group layers by service, modules by layer, methods by module
-  const layersByService = new Map<string, LayerData[]>();
-  for (const layer of layersList) {
-    const svcLayers = layersByService.get(layer.serviceId) || [];
-    svcLayers.push(layer);
-    layersByService.set(layer.serviceId, svcLayers);
-  }
-
-  const modulesByLayer = new Map<string, ModuleData[]>();
-  for (const mod of modulesList) {
-    const layerMods = modulesByLayer.get(mod.layerId) || [];
-    layerMods.push(mod);
-    modulesByLayer.set(mod.layerId, layerMods);
-  }
-
-  const methodsByModule = new Map<string, MethodData[]>();
-  for (const m of methodsList) {
-    const modMethods = methodsByModule.get(m.moduleId) || [];
-    modMethods.push(m);
-    methodsByModule.set(m.moduleId, modMethods);
-  }
+  const layersByService = groupBy(layersList, (l) => l.serviceId);
+  const modulesByLayer = groupBy(modulesList, (m) => m.layerId);
+  const methodsByModule = groupBy(methodsList, (m) => m.moduleId);
 
   const METHOD_NODE_HEIGHT = 32;
   const METHOD_GAP = 8;
@@ -1034,30 +840,7 @@ export function buildMethodGraphData(
     groupHeights.set(service.id, totalHeight);
   }
 
-  // Build service deps from module deps' cross-service relationships
-  const svcDeps = moduleDepsList
-    .filter((d) => {
-      const srcMod = modulesList.find((m) => m.id === d.sourceModuleId);
-      const tgtMod = modulesList.find((m) => m.id === d.targetModuleId);
-      return srcMod && tgtMod && srcMod.serviceId !== tgtMod.serviceId;
-    })
-    .reduce<DependencyData[]>((acc, d) => {
-      const srcMod = modulesList.find((m) => m.id === d.sourceModuleId)!;
-      const tgtMod = modulesList.find((m) => m.id === d.targetModuleId)!;
-      const existing = acc.find(
-        (a) => a.sourceServiceId === srcMod.serviceId && a.targetServiceId === tgtMod.serviceId,
-      );
-      if (!existing) {
-        acc.push({
-          id: `svc-dep-${srcMod.serviceId}-${tgtMod.serviceId}`,
-          sourceServiceId: srcMod.serviceId,
-          targetServiceId: tgtMod.serviceId,
-          dependencyCount: d.dependencyCount,
-          dependencyType: 'import',
-        });
-      }
-      return acc;
-    }, []);
+  const svcDeps = aggregateCrossServiceDeps(moduleDepsList, modulesList);
 
   const { servicePositions, databasePositions } = computeOuterLayout(
     servicesList, svcDeps, dimensions, databasesList, databaseConnectionsList,
@@ -1071,21 +854,7 @@ export function buildMethodGraphData(
       (a, b) => (LAYER_ORDER[a.layer] ?? 99) - (LAYER_ORDER[b.layer] ?? 99)
     );
 
-    nodes.push({
-      id: service.id,
-      type: 'serviceGroupNode',
-      position: pos,
-      data: {
-        label: service.name,
-        description: service.description || undefined,
-        serviceType: service.type,
-        framework: service.framework || undefined,
-        fileCount: service.fileCount || 0,
-        layers: svcLayers.map((l) => l.layer),
-        rootPath: service.rootPath,
-      },
-      ...(({ style: { width: groupWidth, height: totalHeight } }) as Record<string, unknown>),
-    });
+    nodes.push(createServiceGroupNode(service, pos, svcLayers, groupWidth, totalHeight));
 
     let yOffset = GROUP_PAD_TOP;
     for (const layer of svcLayers) {
@@ -1093,29 +862,10 @@ export function buildMethodGraphData(
       const layerHeight = getLayerHeight(layer.id);
       const layerWidth = groupWidth - GROUP_PAD_X * 2;
 
-      nodes.push({
-        id: layerNodeId,
-        type: 'layerNode',
-        position: { x: GROUP_PAD_X, y: yOffset },
-        data: {
-          label: layer.layer,
-          serviceType: service.type,
-          fileCount: layer.fileCount,
-          layers: [layer.layer],
-          rootPath: service.rootPath,
-          description: undefined,
-          framework: undefined,
-          ...(({
-            layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
-            isContainer: true,
-          }) as Record<string, unknown>),
-        },
-        ...(({
-          parentId: service.id,
-          extent: 'parent',
-          style: { width: layerWidth, height: layerHeight },
-        }) as Record<string, unknown>),
-      });
+      nodes.push(createLayerContainerNode(
+        service.id, layer, service.type, service.rootPath,
+        { x: GROUP_PAD_X, y: yOffset }, layerWidth, layerHeight,
+      ));
 
       // Module nodes inside layer (as containers for methods)
       const mods = modulesByLayer.get(layer.id) || [];
@@ -1140,6 +890,7 @@ export function buildMethodGraphData(
               moduleKind: mod.kind,
               methodCount: mod.methodCount,
               layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
+              isContainer: true,
             }) as Record<string, unknown>),
           },
           ...(({
@@ -1188,7 +939,221 @@ export function buildMethodGraphData(
     }
   }
 
-  // Module dependency edges
+  markDeadModules(nodes, modulesList, moduleDepsList, layersList, databasesList, databaseConnectionsList);
+
+  // Method dependency edges (call-level relationships between methods)
+  if (methodDepsList && methodDepsList.length > 0) {
+    edges.push(...createMethodDepEdges(methodDepsList, methodsList, modulesList));
+  }
+
+  // Add module-level dep edges where no method-level edges exist between the same modules.
+  // This ensures import-only relationships (no actual method calls) still show as edges.
+  const methodModuleMap = new Map<string, string>();
+  for (const m of methodsList) {
+    const mod = modulesList.find((mod) => mod.id === m.moduleId);
+    if (mod) methodModuleMap.set(m.id, mod.id);
+  }
+  const connectedModulePairs = new Set<string>();
+  for (const edge of edges) {
+    const srcMod = methodModuleMap.get(edge.source);
+    const tgtMod = methodModuleMap.get(edge.target);
+    if (srcMod && tgtMod) connectedModulePairs.add(`${srcMod}::${tgtMod}`);
+  }
+  for (const dep of moduleDepsList) {
+    const srcMod = modulesList.find((m) => m.id === dep.sourceModuleId);
+    const tgtMod = modulesList.find((m) => m.id === dep.targetModuleId);
+    if (!srcMod || !tgtMod) continue;
+    if (connectedModulePairs.has(`${srcMod.id}::${tgtMod.id}`)) continue;
+    const isSameService = srcMod.serviceId === tgtMod.serviceId;
+    edges.push({
+      id: `mod-${dep.id}`,
+      source: dep.sourceModuleId,
+      target: dep.targetModuleId,
+      label: String(dep.dependencyCount),
+      data: {
+        dependencyCount: dep.dependencyCount,
+        dependencyType: 'module-dep',
+      },
+      ...(isSameService
+        ? ({ sourceHandle: 'right-src', targetHandle: 'right-tgt' } as Record<string, unknown>)
+        : ({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>)),
+    });
+  }
+
+  // HTTP service deps: map to module-level edges (external module → api module)
+  if (serviceDeps) {
+    for (const dep of serviceDeps) {
+      if (dep.dependencyType !== 'http') continue;
+
+      const srcLayers = layersByService.get(dep.sourceServiceId) || [];
+      const tgtLayers = layersByService.get(dep.targetServiceId) || [];
+
+      const srcLayer = srcLayers.find((l) => l.layer === 'external')
+        || srcLayers.find((l) => l.layer === 'service')
+        || srcLayers[0];
+      const tgtLayer = tgtLayers.find((l) => l.layer === 'api')
+        || tgtLayers[0];
+
+      if (!srcLayer || !tgtLayer) continue;
+
+      const srcMods = modulesByLayer.get(srcLayer.id) || [];
+      const tgtMods = modulesByLayer.get(tgtLayer.id) || [];
+      const srcMod = srcMods[0];
+      const tgtMod = tgtMods[0];
+      if (!srcMod || !tgtMod) continue;
+
+      if (edges.some((e) => e.source === srcMod.id && e.target === tgtMod.id)) continue;
+
+      edges.push({
+        id: `http-mth-${dep.id}`,
+        source: srcMod.id,
+        target: tgtMod.id,
+        data: {
+          dependencyCount: dep.dependencyCount || 0,
+          dependencyType: 'http',
+        },
+        ...({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>),
+      });
+    }
+  }
+
+  // Mark dead methods (no method deps)
+  markDeadMethods(nodes, methodDepsList || []);
+
+  // Inject layer violation info onto edges and service group nodes
+  if (layerDeps && layerDeps.length > 0) {
+    injectModuleViolations(nodes, edges, modulesList, layersList, servicesList, layerDeps, moduleDepsList);
+  }
+
+  // Database nodes (positioned by shared dagre layout)
+  addDatabaseNodesFromLayout(nodes, edges, databasePositions, databasesList, databaseConnectionsList, modulesList, layersList);
+
+  return { nodes, edges };
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers — deduplicated logic used across multiple graph builders
+// ---------------------------------------------------------------------------
+
+/**
+ * Group items into a Map by a key extracted from each item.
+ */
+function groupBy<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = keyFn(item);
+    const arr = map.get(key) || [];
+    arr.push(item);
+    map.set(key, arr);
+  }
+  return map;
+}
+
+/**
+ * Aggregate module-level cross-service deps into service-level DependencyData.
+ */
+function aggregateCrossServiceDeps(
+  moduleDepsList: ModuleDepData[],
+  modulesList: ModuleData[],
+): DependencyData[] {
+  return moduleDepsList
+    .filter((d) => {
+      const srcMod = modulesList.find((m) => m.id === d.sourceModuleId);
+      const tgtMod = modulesList.find((m) => m.id === d.targetModuleId);
+      return srcMod && tgtMod && srcMod.serviceId !== tgtMod.serviceId;
+    })
+    .reduce<DependencyData[]>((acc, d) => {
+      const srcMod = modulesList.find((m) => m.id === d.sourceModuleId)!;
+      const tgtMod = modulesList.find((m) => m.id === d.targetModuleId)!;
+      const existing = acc.find(
+        (a) => a.sourceServiceId === srcMod.serviceId && a.targetServiceId === tgtMod.serviceId,
+      );
+      if (!existing) {
+        acc.push({
+          id: `svc-dep-${srcMod.serviceId}-${tgtMod.serviceId}`,
+          sourceServiceId: srcMod.serviceId,
+          targetServiceId: tgtMod.serviceId,
+          dependencyCount: d.dependencyCount,
+          dependencyType: 'import',
+        });
+      }
+      return acc;
+    }, []);
+}
+
+/**
+ * Create a service group node.
+ */
+function createServiceGroupNode(
+  service: ServiceData,
+  position: { x: number; y: number },
+  svcLayers: LayerData[],
+  width: number,
+  height: number,
+): GraphNode {
+  return {
+    id: service.id,
+    type: 'serviceGroupNode',
+    position,
+    data: {
+      label: service.name,
+      description: service.description || undefined,
+      serviceType: service.type,
+      framework: service.framework || undefined,
+      fileCount: service.fileCount || 0,
+      layers: svcLayers.map((l) => l.layer),
+      rootPath: service.rootPath,
+    },
+    ...(({ style: { width, height } }) as Record<string, unknown>),
+  };
+}
+
+/**
+ * Create a layer container node (used in module and method depth levels).
+ */
+function createLayerContainerNode(
+  serviceId: string,
+  layer: LayerData,
+  serviceType: string,
+  rootPath: string,
+  position: { x: number; y: number },
+  width: number,
+  height: number,
+): GraphNode {
+  const layerNodeId = `${serviceId}__${layer.layer}`;
+  return {
+    id: layerNodeId,
+    type: 'layerNode',
+    position,
+    data: {
+      label: layer.layer,
+      serviceType,
+      fileCount: layer.fileCount,
+      layers: [layer.layer],
+      rootPath,
+      description: undefined,
+      framework: undefined,
+      ...(({
+        layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
+        isContainer: true,
+      }) as Record<string, unknown>),
+    },
+    ...(({
+      parentId: serviceId,
+      extent: 'parent',
+      style: { width, height },
+    }) as Record<string, unknown>),
+  };
+}
+
+/**
+ * Create module dependency edges with same-service vs cross-service handle routing.
+ */
+function createModuleDepEdges(
+  moduleDepsList: ModuleDepData[],
+  modulesList: ModuleData[],
+): GraphEdge[] {
+  const edges: GraphEdge[] = [];
   for (const dep of moduleDepsList) {
     const srcMod = modulesList.find((m) => m.id === dep.sourceModuleId);
     const tgtMod = modulesList.find((m) => m.id === dep.targetModuleId);
@@ -1210,16 +1175,118 @@ export function buildMethodGraphData(
         : ({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>)),
     });
   }
+  return edges;
+}
 
-  // Inject layer violation info onto module edges and service group nodes
-  if (layerDeps && layerDeps.length > 0) {
-    injectModuleViolations(nodes, edges, modulesList, layersList, servicesList, layerDeps);
+/**
+ * Create method dependency edges with routing based on relationship:
+ * - Same module: right-side handles (like intra-service module edges)
+ * - Same service, different module: right-side handles
+ * - Cross-service: top/bottom handles
+ */
+function createMethodDepEdges(
+  methodDepsList: MethodDepData[],
+  methodsList: MethodData[],
+  modulesList: ModuleData[],
+): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+
+  // Build method → module lookup
+  const methodModuleMap = new Map<string, ModuleData>();
+  for (const method of methodsList) {
+    const mod = modulesList.find((m) => m.id === method.moduleId);
+    if (mod) methodModuleMap.set(method.id, mod);
   }
 
-  // Database nodes (positioned by shared dagre layout)
-  addDatabaseNodesFromLayout(nodes, edges, databasePositions, databasesList, databaseConnectionsList, modulesList, layersList);
+  for (const dep of methodDepsList) {
+    const srcMod = methodModuleMap.get(dep.sourceMethodId);
+    const tgtMod = methodModuleMap.get(dep.targetMethodId);
+    if (!srcMod || !tgtMod) continue;
 
-  return { nodes, edges };
+    const isSameService = srcMod.serviceId === tgtMod.serviceId;
+
+    edges.push({
+      id: dep.id,
+      source: dep.sourceMethodId,
+      target: dep.targetMethodId,
+      label: dep.callCount > 1 ? String(dep.callCount) : undefined,
+      data: {
+        dependencyCount: dep.callCount,
+        dependencyType: 'method-dep',
+      },
+      ...(isSameService
+        ? ({ sourceHandle: 'right-src', targetHandle: 'right-tgt' } as Record<string, unknown>)
+        : ({ sourceHandle: 'bottom', targetHandle: 'top' } as Record<string, unknown>)),
+    });
+  }
+  return edges;
+}
+
+/**
+ * Mark modules with no dependencies (and no database connections) as dead.
+ * Used by both buildModuleGraphData and buildMethodGraphData.
+ */
+function markDeadModules(
+  nodes: GraphNode[],
+  modulesList: ModuleData[],
+  moduleDepsList: ModuleDepData[],
+  layersList: LayerData[],
+  databasesList?: DatabaseData[],
+  databaseConnectionsList?: DatabaseConnectionData[],
+) {
+  const connectedModuleIds = new Set<string>();
+  for (const dep of moduleDepsList) {
+    connectedModuleIds.add(dep.sourceModuleId);
+    connectedModuleIds.add(dep.targetModuleId);
+  }
+  if (databaseConnectionsList && databasesList) {
+    for (const conn of databaseConnectionsList) {
+      const dataLayer = layersList.find(
+        (l) => l.serviceId === conn.serviceId && l.layer === 'data',
+      );
+      if (dataLayer) {
+        const dataModules = modulesList.filter((m) => m.layerId === dataLayer.id);
+        if (dataModules.length > 0) {
+          const driverLower = conn.driver.toLowerCase();
+          const dbData = databasesList.find((d) => d.id === conn.databaseId);
+          const dbNameLower = dbData?.name.toLowerCase() || '';
+          const matched = dataModules.find((m) => {
+            const nameLower = m.name.toLowerCase();
+            return nameLower.includes(driverLower) || driverLower.includes(nameLower)
+              || nameLower.includes(dbNameLower) || dbNameLower.includes(nameLower);
+          });
+          connectedModuleIds.add(matched?.id || dataModules[0].id);
+        }
+      }
+    }
+  }
+  for (const node of nodes) {
+    if (node.type === 'moduleNode') {
+      const mod = modulesList.find((m) => m.id === node.id);
+      if (mod && !connectedModuleIds.has(mod.id)) {
+        (node.data as Record<string, unknown>).isDead = true;
+      }
+    }
+  }
+}
+
+/**
+ * Mark methods with no incoming or outgoing method dependencies as dead.
+ */
+function markDeadMethods(
+  nodes: GraphNode[],
+  methodDepsList: MethodDepData[],
+) {
+  const connectedMethodIds = new Set<string>();
+  for (const dep of methodDepsList) {
+    connectedMethodIds.add(dep.sourceMethodId);
+    connectedMethodIds.add(dep.targetMethodId);
+  }
+  for (const node of nodes) {
+    if (node.type === 'methodNode' && !connectedMethodIds.has(node.id)) {
+      (node.data as Record<string, unknown>).isDead = true;
+    }
+  }
 }
 
 /**
@@ -1233,6 +1300,7 @@ function injectModuleViolations(
   layersList: LayerData[],
   servicesList: ServiceData[],
   layerDeps: LayerDepData[],
+  moduleDepsList?: ModuleDepData[],
 ) {
   // Build lookup: moduleId → { serviceName, layer }
   const moduleLayerLookup = new Map<string, { serviceName: string; layer: string }>();
@@ -1257,9 +1325,21 @@ function injectModuleViolations(
   const serviceNameToId = new Map<string, string>();
   for (const svc of servicesList) serviceNameToId.set(svc.name, svc.id);
 
+  // Build method → module lookup (for method-mode edges)
+  const methodToModule = new Map<string, string>();
+  for (const node of nodes) {
+    const parentId = (node as unknown as Record<string, unknown>).parentId as string | undefined;
+    if (node.type === 'methodNode' && parentId) {
+      methodToModule.set(node.id, parentId);
+    }
+  }
+
   for (const edge of edges) {
-    const srcInfo = moduleLayerLookup.get(edge.source);
-    const tgtInfo = moduleLayerLookup.get(edge.target);
+    // Resolve to module IDs: direct for module edges, via parentId for method edges
+    const srcModuleId = moduleLayerLookup.has(edge.source) ? edge.source : methodToModule.get(edge.source);
+    const tgtModuleId = moduleLayerLookup.has(edge.target) ? edge.target : methodToModule.get(edge.target);
+    const srcInfo = srcModuleId ? moduleLayerLookup.get(srcModuleId) : undefined;
+    const tgtInfo = tgtModuleId ? moduleLayerLookup.get(tgtModuleId) : undefined;
     if (!srcInfo || !tgtInfo) continue;
     if (srcInfo.layer === tgtInfo.layer) continue;
 
@@ -1302,6 +1382,60 @@ function injectModuleViolations(
     const violations = violationsByService.get(node.id);
     if (violations) {
       (node.data as Record<string, unknown>).violations = violations;
+    }
+  }
+
+  // Inject violation info into source module nodes
+  // Use module-level dependency data: for each module, check if it has outgoing
+  // edges to modules in a different layer that cross a violation boundary.
+  const violationsByModule = new Map<string, { targetLayer: string; reason: string; edgeIds: string[] }[]>();
+
+  // First try from tagged edges (works in module mode where edges connect modules)
+  for (const edge of edges) {
+    if (!(edge.data as Record<string, unknown>).isViolation) continue;
+    const srcInfo = moduleLayerLookup.get(edge.source);
+    const tgtInfo = moduleLayerLookup.get(edge.target);
+    if (!srcInfo || !tgtInfo) continue;
+    if (!violationsByModule.has(edge.source)) violationsByModule.set(edge.source, []);
+    violationsByModule.get(edge.source)!.push({
+      targetLayer: tgtInfo.layer,
+      reason: (edge.data as Record<string, unknown>).violationReason as string || 'Architectural violation',
+      edgeIds: [edge.id],
+    });
+  }
+
+  // Also tag modules from module-level dependencies directly (works in method mode
+  // where graph edges are between methods, not modules)
+  if (moduleDepsList) {
+    for (const dep of moduleDepsList) {
+      if (violationsByModule.has(dep.sourceModuleId)) continue;
+      const srcInfo = moduleLayerLookup.get(dep.sourceModuleId);
+      const tgtInfo = moduleLayerLookup.get(dep.targetModuleId);
+      if (!srcInfo || !tgtInfo || srcInfo.layer === tgtInfo.layer) continue;
+      const key = `${srcInfo.serviceName}::${srcInfo.layer}::${tgtInfo.layer}`;
+      const violation = violationLookup.get(key);
+      if (violation) {
+        if (!violationsByModule.has(dep.sourceModuleId)) violationsByModule.set(dep.sourceModuleId, []);
+        // Find all violation edges related to this module dep
+        const relatedEdgeIds = edges
+          .filter((e) => (e.data as Record<string, unknown>).isViolation && (
+            e.source === dep.sourceModuleId || e.target === dep.targetModuleId
+          ))
+          .map((e) => e.id);
+        violationsByModule.get(dep.sourceModuleId)!.push({
+          targetLayer: tgtInfo.layer,
+          reason: violation.violationReason || 'Architectural violation',
+          edgeIds: relatedEdgeIds,
+        });
+      }
+    }
+  }
+
+  for (const node of nodes) {
+    if (node.type !== 'moduleNode') continue;
+    const moduleViolations = violationsByModule.get(node.id);
+    if (moduleViolations) {
+      (node.data as Record<string, unknown>).violations = moduleViolations;
     }
   }
 

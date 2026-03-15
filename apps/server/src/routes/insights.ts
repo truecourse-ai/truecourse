@@ -8,6 +8,8 @@ import {
   services,
   serviceDependencies,
   databases,
+  modules,
+  methods,
   insights,
 } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
@@ -195,6 +197,10 @@ router.get(
           targetServiceName: services.name,
           targetDatabaseId: insights.targetDatabaseId,
           targetDatabaseName: databases.name,
+          targetModuleId: insights.targetModuleId,
+          targetModuleName: modules.name,
+          targetMethodId: insights.targetMethodId,
+          targetMethodName: methods.name,
           targetTable: insights.targetTable,
           fixPrompt: insights.fixPrompt,
           createdAt: insights.createdAt,
@@ -202,6 +208,8 @@ router.get(
         .from(insights)
         .leftJoin(services, eq(insights.targetServiceId, services.id))
         .leftJoin(databases, eq(insights.targetDatabaseId, databases.id))
+        .leftJoin(modules, eq(insights.targetModuleId, modules.id))
+        .leftJoin(methods, eq(insights.targetMethodId, methods.id))
         .where(eq(insights.analysisId, analysis.id))
         .orderBy(desc(insights.createdAt));
 

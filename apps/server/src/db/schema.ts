@@ -210,6 +210,9 @@ export const insights = pgTable('insights', {
   targetModuleId: uuid('target_module_id').references(() => modules.id, {
     onDelete: 'set null',
   }),
+  targetMethodId: uuid('target_method_id').references(() => methods.id, {
+    onDelete: 'set null',
+  }),
   targetTable: text('target_table'),
   fixPrompt: text('fix_prompt'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
@@ -235,6 +238,10 @@ export const insightsRelations = relations(insights, ({ one }) => ({
   targetModule: one(modules, {
     fields: [insights.targetModuleId],
     references: [modules.id],
+  }),
+  targetMethod: one(methods, {
+    fields: [insights.targetMethodId],
+    references: [methods.id],
   }),
 }));
 
@@ -457,5 +464,40 @@ export const moduleDepsRelations = relations(moduleDeps, ({ one }) => ({
     fields: [moduleDeps.targetModuleId],
     references: [modules.id],
     relationName: 'targetModule',
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// method_dependencies (call-based dependencies between methods)
+// ---------------------------------------------------------------------------
+
+export const methodDeps = pgTable('method_dependencies', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  sourceMethodId: uuid('source_method_id')
+    .notNull()
+    .references(() => methods.id, { onDelete: 'cascade' }),
+  targetMethodId: uuid('target_method_id')
+    .notNull()
+    .references(() => methods.id, { onDelete: 'cascade' }),
+  callCount: integer('call_count').notNull().default(1),
+});
+
+export const methodDepsRelations = relations(methodDeps, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [methodDeps.analysisId],
+    references: [analyses.id],
+  }),
+  sourceMethod: one(methods, {
+    fields: [methodDeps.sourceMethodId],
+    references: [methods.id],
+    relationName: 'sourceMethod',
+  }),
+  targetMethod: one(methods, {
+    fields: [methodDeps.targetMethodId],
+    references: [methods.id],
+    relationName: 'targetMethod',
   }),
 }));

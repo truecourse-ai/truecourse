@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import {
   getBezierPath,
+  getSmoothStepPath,
   EdgeLabelRenderer,
   type EdgeProps,
 } from '@xyflow/react';
@@ -21,20 +22,27 @@ function DependencyEdgeComponent({
 }: EdgeProps & { data?: DependencyEdgeData }) {
   const dependencyCount = data?.dependencyCount ?? 1;
   const hasHttpCalls = data?.hasHttpCalls ?? false;
+  const isViolation = data?.isViolation ?? false;
   const label = data?.label ?? '';
+  const highlighted = (data as Record<string, unknown>)?.highlighted === true;
+  const dimmed = (data as Record<string, unknown>)?.dimmed === true;
+  const useStep = (data as Record<string, unknown>)?.edgeStyle === 'step';
 
-  const strokeWidth = hasHttpCalls ? 1.5 : 1;
+  const isEmphasized = highlighted || selected;
+  const strokeWidth = isViolation ? (isEmphasized ? 3 : 2) : isEmphasized ? 2 : hasHttpCalls ? 1.5 : 1;
 
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const pathFn = useStep ? getSmoothStepPath : getBezierPath;
+  const [edgePath, labelX, labelY] = pathFn({
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
     targetPosition,
+    ...(useStep ? { borderRadius: 8 } : {}),
   });
 
-  const strokeColor = selected ? 'var(--primary)' : 'var(--muted-foreground)';
+  const strokeColor = isViolation ? '#ef4444' : isEmphasized ? 'var(--primary)' : hasHttpCalls ? '#60a5fa' : 'var(--muted-foreground)';
   const markerId = `dep-arrow-${id}`;
 
   return (
@@ -49,7 +57,7 @@ function DependencyEdgeComponent({
           markerHeight="6"
           orient="auto"
         >
-          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} opacity={0.6} />
+          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} opacity={dimmed ? 0.08 : 0.6} />
         </marker>
       </defs>
       <path
@@ -59,11 +67,12 @@ function DependencyEdgeComponent({
         stroke={strokeColor}
         strokeWidth={strokeWidth}
         strokeDasharray={hasHttpCalls ? '8 4' : '2 3'}
-        opacity={0.6}
+        opacity={dimmed ? 0.08 : isEmphasized ? 1 : 0.6}
         markerEnd={`url(#${markerId})`}
-        className="animate-edge-flow"
+        className={dimmed ? '' : 'animate-edge-flow'}
+        style={{ transition: 'opacity 0.2s ease' }}
       />
-      {label && (
+      {label && !dimmed && (
         <EdgeLabelRenderer>
           <div
             style={{

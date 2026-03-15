@@ -73,7 +73,7 @@ export const LAYER_LABELS: Record<Layer, string> = {
 
 export const LAYER_COLORS: (LayerColor & { label: string })[] = [
   { layer: 'api', color: '#3b82f6', label: LAYER_LABELS.api },
-  { layer: 'service', color: '#10b981', label: LAYER_LABELS.service },
-  { layer: 'data', color: '#8b5cf6', label: LAYER_LABELS.data },
+  { layer: 'service', color: '#8b5cf6', label: LAYER_LABELS.service },
+  { layer: 'data', color: '#10b981', label: LAYER_LABELS.data },
   { layer: 'external', color: '#f97316', label: LAYER_LABELS.external },
 ];

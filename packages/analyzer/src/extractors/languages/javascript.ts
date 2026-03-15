@@ -18,11 +18,50 @@ import { getParser } from '../../parser.js'
 import { createSourceLocation, extractDocComment, computeFunctionMetrics } from './common.js'
 
 /**
- * Extract function name from node
+ * Extract function name from node.
+ * For arrow functions / function expressions, check parent context:
+ *  - variable_declarator: `const foo = () => {}` → "foo"
+ *  - pair (object literal): `{ foo: () => {} }` → "foo"
+ *  - assignment_expression: `obj.foo = () => {}` → "foo"
+ *  - argument in a method call: `router.get('/', () => {})` → "get_handler"
  */
 function extractFunctionName(node: SyntaxNode): string {
   const nameNode = node.childForFieldName('name')
-  return nameNode?.text || 'anonymous'
+  if (nameNode?.text) return nameNode.text
+
+  const parent = node.parent
+  if (!parent) return 'anonymous'
+
+  if (parent.type === 'variable_declarator') {
+    const varName = parent.childForFieldName('name')
+    if (varName?.text) return varName.text
+  }
+
+  if (parent.type === 'pair') {
+    const key = parent.childForFieldName('key')
+    if (key?.text) return key.text
+  }
+
+  if (parent.type === 'assignment_expression') {
+    const left = parent.childForFieldName('left')
+    if (left?.type === 'member_expression') {
+      const prop = left.childForFieldName('property')
+      if (prop?.text) return prop.text
+    }
+  }
+
+  if (parent.type === 'arguments') {
+    const callNode = parent.parent
+    if (callNode?.type === 'call_expression') {
+      const callee = callNode.childForFieldName('function')
+      if (callee?.type === 'member_expression') {
+        const method = callee.childForFieldName('property')
+        if (method?.text) return `${method.text}_handler`
+      }
+    }
+  }
+
+  return 'anonymous'
 }
 
 /**
@@ -208,6 +247,32 @@ function extractMethods(
         maxNestingDepth: metrics.maxNestingDepth,
       })
     }
+
+    // Arrow function properties: e.g. getAll = async (req, res) => { ... }
+    if (member.type === 'public_field_definition' || member.type === 'field_definition') {
+      const value = member.childForFieldName('value')
+      if (value && (value.type === 'arrow_function' || value.type === 'function_expression' || value.type === 'function')) {
+        const name = member.childForFieldName('name')?.text || member.childForFieldName('property')?.text || 'unknown'
+        const paramsNode = value.childForFieldName('parameters')
+        const params = extractParameters(paramsNode)
+        const location = createSourceLocation(member, filePath)
+        const async = isAsync(value)
+
+        const metrics = computeFunctionMetrics(value)
+
+        methods.push({
+          name,
+          params,
+          returnType: undefined,
+          isExported: false,
+          isAsync: async,
+          location,
+          lineCount: metrics.lineCount,
+          statementCount: metrics.statementCount,
+          maxNestingDepth: metrics.maxNestingDepth,
+        })
+      }
+    }
   }
 
   return methods
@@ -223,7 +288,13 @@ function extractProperties(
 
   for (const member of bodyNode.namedChildren) {
     if (member.type === 'public_field_definition' || member.type === 'field_definition') {
-      const name = member.childForFieldName('property')?.text || 'unknown'
+      // Skip arrow function properties — they're extracted as methods
+      const value = member.childForFieldName('value')
+      if (value && (value.type === 'arrow_function' || value.type === 'function_expression' || value.type === 'function')) {
+        continue
+      }
+
+      const name = member.childForFieldName('name')?.text || member.childForFieldName('property')?.text || 'unknown'
       const isStatic = hasModifier(member, 'static')
 
       properties.push({

@@ -14,9 +14,9 @@ type SidebarProps = {
 export function Sidebar({
   children,
   isOpen,
-  defaultWidth = 320,
+  defaultWidth = 387,
   minWidth = 260,
-  maxWidth = 600,
+  maxWidth = 780,
 }: SidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const isDragging = useRef(false);

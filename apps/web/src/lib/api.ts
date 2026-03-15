@@ -114,6 +114,10 @@ export type InsightResponse = {
   targetServiceName?: string | null;
   targetDatabaseId?: string | null;
   targetDatabaseName?: string | null;
+  targetModuleId?: string | null;
+  targetModuleName?: string | null;
+  targetMethodId?: string | null;
+  targetMethodName?: string | null;
   targetTable?: string | null;
   fixPrompt?: string | null;
   createdAt: string;

@@ -9,7 +9,7 @@ import { useChat, type DisplayMessage } from '@/hooks/useChat';
 type ChatPanelProps = {
   repoId: string;
   selectedService?: string | null;
-  explainRequest?: { nodeId: string; nodeName: string } | null;
+  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string } | null;
   onExplainHandled?: () => void;
 };
 
@@ -41,7 +41,7 @@ export function ChatPanel({ repoId, explainRequest, onExplainHandled }: ChatPane
   useEffect(() => {
     if (explainRequest && explainRequest.nodeId !== lastExplainRef.current) {
       lastExplainRef.current = explainRequest.nodeId;
-      explainNode(explainRequest.nodeId, explainRequest.nodeName);
+      explainNode(explainRequest.nodeId, explainRequest.nodeName, explainRequest.nodeType);
       onExplainHandled?.();
     }
   }, [explainRequest, explainNode, onExplainHandled]);

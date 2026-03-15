@@ -41,7 +41,7 @@ function DatabaseNodeComponent({ id, data, selected }: NodeProps & { data: Datab
 
   return (
     <div
-      className={`min-w-[180px] rounded-lg bg-card shadow-md transition-all ${
+      className={`min-w-[180px] rounded-lg bg-card/80 shadow-md transition-all ${
         selected ? 'ring-1 ring-primary/30' : 'border'
       }`}
       style={selected ? undefined : { borderColor: color }}

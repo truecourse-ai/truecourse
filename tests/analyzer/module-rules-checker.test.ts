@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ModuleInfo, MethodInfo, ModuleDependency, AnalysisRule } from '../../packages/shared/src/types';
+import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule } from '../../packages/shared/src/types';
 import { checkModuleRules } from '../../packages/analyzer/src/rules/module-rules-checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/deterministic-rules';
 
@@ -144,5 +144,116 @@ describe('checkModuleRules', () => {
     expect(ruleKeys).toContain('arch/long-method');
     expect(ruleKeys).toContain('arch/too-many-parameters');
     expect(ruleKeys).toContain('arch/deeply-nested-logic');
+  });
+
+  // Dead module detection
+  it('detects dead module (no incoming or outgoing deps)', () => {
+    const modules = [
+      makeModule({ name: 'ActiveModule', serviceName: 'svc' }),
+      makeModule({ name: 'DeadModule', serviceName: 'svc' }),
+    ];
+    const moduleLevelDeps: ModuleLevelDependency[] = [
+      {
+        sourceModule: 'ActiveModule',
+        sourceService: 'svc',
+        targetModule: 'OtherModule',
+        targetService: 'svc',
+        importedNames: ['something'],
+      },
+    ];
+
+    const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
+
+    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-module');
+    expect(deadViolations).toHaveLength(1);
+    expect(deadViolations[0].title).toContain('DeadModule');
+  });
+
+  it('does not flag module that appears in dependencies', () => {
+    const modules = [makeModule({ name: 'ConnectedModule', serviceName: 'svc' })];
+    const moduleLevelDeps: ModuleLevelDependency[] = [
+      {
+        sourceModule: 'Other',
+        sourceService: 'svc',
+        targetModule: 'ConnectedModule',
+        targetService: 'svc',
+        importedNames: ['ConnectedModule'],
+      },
+    ];
+
+    const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
+
+    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-module');
+    expect(deadViolations).toHaveLength(0);
+  });
+
+  it('does not flag dead module when rule is disabled', () => {
+    const onlyDeadModuleDisabled = enabledRules.map((r) =>
+      r.key === 'arch/dead-module' ? { ...r, enabled: false } : r
+    );
+    const modules = [makeModule({ name: 'Isolated', serviceName: 'svc' })];
+    const moduleLevelDeps: ModuleLevelDependency[] = [];
+
+    const violations = checkModuleRules(modules, [], [], onlyDeadModuleDisabled, moduleLevelDeps);
+
+    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-module');
+    expect(deadViolations).toHaveLength(0);
+  });
+
+  // Dead method detection
+  it('detects dead method (no incoming or outgoing calls)', () => {
+    const methods = [
+      makeMethod({ name: 'activeMethod', moduleName: 'Mod', serviceName: 'svc' }),
+      makeMethod({ name: 'deadMethod', moduleName: 'Mod', serviceName: 'svc' }),
+    ];
+    const methodLevelDeps: MethodLevelDependency[] = [
+      {
+        callerMethod: 'activeMethod',
+        callerModule: 'Mod',
+        callerService: 'svc',
+        calleeMethod: 'otherMethod',
+        calleeModule: 'Other',
+        calleeService: 'svc',
+        callCount: 1,
+      },
+    ];
+
+    const violations = checkModuleRules([], methods, [], enabledRules, undefined, undefined, methodLevelDeps);
+
+    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
+    expect(deadViolations).toHaveLength(1);
+    expect(deadViolations[0].title).toContain('deadMethod');
+  });
+
+  it('does not flag method that appears as caller or callee', () => {
+    const methods = [
+      makeMethod({ name: 'caller', moduleName: 'A', serviceName: 'svc' }),
+      makeMethod({ name: 'callee', moduleName: 'B', serviceName: 'svc' }),
+    ];
+    const methodLevelDeps: MethodLevelDependency[] = [
+      {
+        callerMethod: 'caller',
+        callerModule: 'A',
+        callerService: 'svc',
+        calleeMethod: 'callee',
+        calleeModule: 'B',
+        calleeService: 'svc',
+        callCount: 2,
+      },
+    ];
+
+    const violations = checkModuleRules([], methods, [], enabledRules, undefined, undefined, methodLevelDeps);
+
+    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
+    expect(deadViolations).toHaveLength(0);
+  });
+
+  it('does not run dead method check when methodLevelDeps is undefined', () => {
+    const methods = [makeMethod({ name: 'someMethod' })];
+
+    const violations = checkModuleRules([], methods, [], enabledRules);
+
+    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
+    expect(deadViolations).toHaveLength(0);
   });
 });
