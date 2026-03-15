@@ -57,7 +57,7 @@ export type GraphData = {
   edges: GraphEdge[];
 };
 
-export type DepthLevel = 'services' | 'layers';
+export type DepthLevel = 'services' | 'layers' | 'modules' | 'methods';
 
 export type LayerColor = {
   layer: Layer;

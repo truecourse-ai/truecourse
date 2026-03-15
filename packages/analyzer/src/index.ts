@@ -45,9 +45,13 @@ export { parseDrizzleSchema } from './schema-parsers/drizzle.js'
 // Patterns
 export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPatterns, externalLayerPatterns, DATABASE_IMPORT_MAP, CONNECTION_ENV_VARS, DOCKER_IMAGE_MAP } from './patterns/index.js'
 
+// Module extraction
+export { extractModulesAndMethods, type ModuleExtractionResult } from './module-extractor.js'
+
 // Rules
-export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES } from './rules/index.js'
+export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES } from './rules/index.js'
 export { getAllDefaultRules } from './rule-engine.js'
+export { checkModuleRules, type ModuleViolation } from './rules/module-rules-checker.js'
 
 /**
  * High-level function to analyze an entire repository
@@ -72,6 +76,9 @@ export async function analyzeRepository(rootPath: string): Promise<{
         layerDetails: [],
         layerDependencies: [],
         databaseResult: { databases: [], connections: [] },
+        modules: [],
+        methods: [],
+        moduleLevelDependencies: [],
       },
     }
   }

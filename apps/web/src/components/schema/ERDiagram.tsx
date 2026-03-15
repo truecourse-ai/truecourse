@@ -9,6 +9,7 @@ import {
   EdgeLabelRenderer,
   getBezierPath,
   useNodesState,
+  useViewport,
   type Node,
   type Edge,
   type EdgeProps,
@@ -249,14 +250,19 @@ function layoutNodes(
 type ERDiagramProps = {
   schema: DatabaseSchemaResponse;
   insights?: InsightResponse[];
+  isFullscreen?: boolean;
 };
 
-function DatabaseInsightsBanner({ insights }: { insights: TableInsight[] }) {
+function DatabaseInsightsBanner({ insights, isFullscreen }: { insights: TableInsight[]; isFullscreen?: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const { zoom } = useViewport();
   const hasHighSeverity = insights.some((i) => i.severity === 'high' || i.severity === 'critical');
 
   return (
-    <div className="absolute left-3 top-3 z-10">
+    <div
+      className="absolute left-3 top-3 z-10 origin-top-left"
+      style={isFullscreen ? { transform: `scale(${zoom})` } : undefined}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium shadow-sm transition-colors ${
@@ -264,12 +270,20 @@ function DatabaseInsightsBanner({ insights }: { insights: TableInsight[] }) {
             ? 'border-red-500/30 bg-red-500/10 text-red-500'
             : 'border-amber-500/30 bg-amber-500/10 text-amber-500'
         }`}
+        title={!isFullscreen ? `${insights.length} database issue${insights.length !== 1 ? 's' : ''}` : undefined}
       >
         <AlertTriangle className="h-3 w-3" />
-        {insights.length} database issue{insights.length !== 1 ? 's' : ''}
-        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        {isFullscreen && (
+          <>
+            {insights.length} database issue{insights.length !== 1 ? 's' : ''}
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </>
+        )}
+        {!isFullscreen && (
+          <span className="text-[9px]">{insights.length}</span>
+        )}
       </button>
-      {expanded && (
+      {expanded && isFullscreen && (
         <div className="mt-1 rounded-md border border-border bg-card px-2.5 py-2 shadow-lg w-[280px]">
           {insights.map((ins, i) => (
             <div key={i} className="text-[10px] text-muted-foreground leading-tight py-0.5">
@@ -288,7 +302,7 @@ function DatabaseInsightsBanner({ insights }: { insights: TableInsight[] }) {
   );
 }
 
-function ERDiagramInner({ schema, insights = [] }: ERDiagramProps) {
+function ERDiagramInner({ schema, insights = [], isFullscreen }: ERDiagramProps) {
   const { initialNodes, edges } = useMemo(() => {
     const sourceTables = new Set(schema.relations.map((r) => r.sourceTable));
     const targetTables = new Set(schema.relations.map((r) => r.targetTable));
@@ -364,7 +378,7 @@ function ERDiagramInner({ schema, insights = [] }: ERDiagramProps) {
   return (
     <div className="h-full w-full relative">
       {dbLevelInsights.length > 0 && (
-        <DatabaseInsightsBanner insights={dbLevelInsights} />
+        <DatabaseInsightsBanner insights={dbLevelInsights} isFullscreen={isFullscreen} />
       )}
       <ReactFlow
         nodes={nodes}
@@ -388,10 +402,10 @@ function ERDiagramInner({ schema, insights = [] }: ERDiagramProps) {
   );
 }
 
-export function ERDiagram({ schema, insights }: ERDiagramProps) {
+export function ERDiagram({ schema, insights, isFullscreen }: ERDiagramProps) {
   return (
     <ReactFlowProvider>
-      <ERDiagramInner schema={schema} insights={insights} />
+      <ERDiagramInner schema={schema} insights={insights} isFullscreen={isFullscreen} />
     </ReactFlowProvider>
   );
 }

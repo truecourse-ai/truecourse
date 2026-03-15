@@ -18,7 +18,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
     try {
       const data = await api.getGraph(repoId, { branch, level });
 
-      if (level === 'layers') {
+      if (level === 'modules' || level === 'methods' || level === 'layers') {
         // Layer-level view: mix of serviceGroupNode, layerNode, and databaseNode types
         const graphNodes: Node[] = data.nodes.map((node) => {
           if (node.type === 'databaseNode') {
@@ -36,6 +36,39 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
             };
           }
 
+          if (node.type === 'methodNode') {
+            return {
+              id: node.id,
+              type: 'method' as const,
+              position: node.position,
+              parentId: node.parentId,
+              extent: node.extent as 'parent' | undefined,
+              data: node.data,
+            };
+          }
+
+          if (node.type === 'moduleNode') {
+            return {
+              id: node.id,
+              type: 'module' as const,
+              position: node.position,
+              parentId: node.parentId,
+              extent: node.extent as 'parent' | undefined,
+              style: node.style,
+              data: {
+                label: node.data.label,
+                moduleKind: node.data.moduleKind || node.data.serviceType || 'standalone',
+                methodCount: node.data.methodCount ?? node.data.fileCount ?? 0,
+                propertyCount: node.data.propertyCount,
+                importCount: node.data.importCount,
+                exportCount: node.data.exportCount,
+                superClass: node.data.superClass,
+                layerColor: node.data.layerColor || '#6b7280',
+                isDead: node.data.isDead || false,
+              },
+            };
+          }
+
           if (node.type === 'layerNode') {
             return {
               id: node.id,
@@ -43,12 +76,15 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
               position: node.position,
               parentId: node.parentId,
               extent: node.extent as 'parent' | undefined,
+              style: node.style,
               data: {
                 label: node.data.label,
                 layer: node.data.label,
                 fileCount: node.data.fileCount || 0,
                 layerColor: node.data.layerColor || '#6b7280',
                 fileNames: node.data.fileNames || [],
+                isContainer: node.data.isContainer || false,
+                violations: node.data.violations || [],
               },
             };
           }
@@ -135,6 +171,8 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
           id: edge.id,
           source: edge.source,
           target: edge.target,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
           type: edge.data.dependencyType === 'database' ? 'database' : 'dependency',
           data: {
             label: edge.data.dependencyType === 'http'

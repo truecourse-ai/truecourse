@@ -1,6 +1,16 @@
 import { Langfuse } from 'langfuse';
 import { config } from '../../config/index.js';
-import type { LLMProvider, ArchitectureContext, ChatMessage, InsightsResult } from './provider.js';
+import type {
+  LLMProvider,
+  ArchitectureContext,
+  ArchitectureInsightContext,
+  DatabaseInsightContext,
+  ModuleInsightContext,
+  ChatMessage,
+  ArchitectureInsightsResult,
+  DatabaseInsightsResult,
+  ModuleInsightsResult,
+} from './provider.js';
 
 function isLangfuseConfigured(): boolean {
   return !!(config.langfuse.publicKey && config.langfuse.secretKey);
@@ -27,24 +37,88 @@ function getLangfuse(): Langfuse | null {
 class TracedLLMProvider implements LLMProvider {
   constructor(private inner: LLMProvider) {}
 
-  async generateInsights(context: ArchitectureContext): Promise<InsightsResult> {
+  async generateArchitectureInsights(context: ArchitectureInsightContext): Promise<ArchitectureInsightsResult> {
     const langfuse = getLangfuse();
     if (!langfuse) {
-      return this.inner.generateInsights(context);
+      return this.inner.generateArchitectureInsights(context);
     }
 
     const trace = langfuse.trace({
-      name: 'generateInsights',
+      name: 'llm-insights-architecture',
       input: context,
     });
 
     try {
       const generation = trace.generation({
-        name: 'llm-generate-insights',
+        name: 'llm-insights-architecture',
         input: context,
       });
 
-      const result = await this.inner.generateInsights(context);
+      const result = await this.inner.generateArchitectureInsights(context);
+
+      generation.end({ output: result });
+      await langfuse.flushAsync();
+
+      return result;
+    } catch (error) {
+      trace.update({
+        output: { error: error instanceof Error ? error.message : String(error) },
+      });
+      await langfuse.flushAsync();
+      throw error;
+    }
+  }
+
+  async generateDatabaseInsights(context: DatabaseInsightContext): Promise<DatabaseInsightsResult> {
+    const langfuse = getLangfuse();
+    if (!langfuse) {
+      return this.inner.generateDatabaseInsights(context);
+    }
+
+    const trace = langfuse.trace({
+      name: 'llm-insights-database',
+      input: context,
+    });
+
+    try {
+      const generation = trace.generation({
+        name: 'llm-insights-database',
+        input: context,
+      });
+
+      const result = await this.inner.generateDatabaseInsights(context);
+
+      generation.end({ output: result });
+      await langfuse.flushAsync();
+
+      return result;
+    } catch (error) {
+      trace.update({
+        output: { error: error instanceof Error ? error.message : String(error) },
+      });
+      await langfuse.flushAsync();
+      throw error;
+    }
+  }
+
+  async generateModuleInsights(context: ModuleInsightContext): Promise<ModuleInsightsResult> {
+    const langfuse = getLangfuse();
+    if (!langfuse) {
+      return this.inner.generateModuleInsights(context);
+    }
+
+    const trace = langfuse.trace({
+      name: 'llm-insights-module',
+      input: context,
+    });
+
+    try {
+      const generation = trace.generation({
+        name: 'llm-insights-module',
+        input: context,
+      });
+
+      const result = await this.inner.generateModuleInsights(context);
 
       generation.end({ output: result });
       await langfuse.flushAsync();

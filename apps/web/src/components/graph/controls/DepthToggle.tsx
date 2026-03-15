@@ -10,19 +10,21 @@ type DepthToggleProps = {
 const levels: { value: DepthLevel; label: string }[] = [
   { value: 'services', label: 'Services' },
   { value: 'layers', label: 'Layers' },
+  { value: 'modules', label: 'Modules' },
+  { value: 'methods', label: 'Methods' },
 ];
 
 export function DepthToggle({ level, onChange }: DepthToggleProps) {
   return (
     <div className="flex items-center rounded-md border border-border bg-card shadow-sm">
-      {levels.map(({ value, label }) => (
+      {levels.map(({ value, label }, i) => (
         <button
           key={value}
           className={`px-3 py-1.5 text-xs font-medium transition-colors ${
             level === value
-              ? 'bg-primary text-primary-foreground'
+              ? 'bg-primary/20 text-primary'
               : 'text-muted-foreground hover:text-foreground'
-          } ${value === 'services' ? 'rounded-l-md' : 'rounded-r-md'}`}
+          } ${i === 0 ? 'rounded-l-md' : ''} ${i === levels.length - 1 ? 'rounded-r-md' : ''}`}
           onClick={() => onChange(value)}
         >
           {label}

@@ -32,11 +32,26 @@ export default function HomePage() {
           </p>
         </div>
 
-        <div className="mb-8">
+        <div className="mb-8 space-y-5">
+          {/* Primary: CLI command */}
+          <div className="flex flex-col items-center gap-2.5 rounded-lg border border-border bg-card p-6">
+            <p className="text-sm text-muted-foreground">
+              Run this from your project directory:
+            </p>
+            <code className="rounded-md bg-muted px-4 py-2.5 font-mono text-sm text-foreground select-all">
+              npx truecourse add
+            </code>
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or add manually</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          {/* Secondary: path input */}
           <RepoSelector onAdd={addRepo} />
-          <p className="mt-3 text-center text-xs text-muted-foreground">
-            Or run <code className="rounded bg-muted px-1.5 py-0.5 font-mono">npx truecourse add</code> from your project directory to add it
-          </p>
         </div>
 
         {error && (

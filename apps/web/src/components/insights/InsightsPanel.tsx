@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useRef, useState } from 'react';
 import { Lightbulb, MessageCircle, Shield, Loader2 } from 'lucide-react';
 import { InsightCard } from '@/components/insights/InsightCard';
 import { ChatPanel } from '@/components/chat/ChatPanel';
@@ -36,6 +37,35 @@ export function InsightsPanel({
   const isChat = activeTab === 'chat';
   const isRules = activeTab === 'rules';
 
+  // Resizable ER panel
+  const [erHeight, setErHeight] = useState(264);
+  const isDraggingEr = useRef(false);
+
+  const handleErResizeDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDraggingEr.current = true;
+      const startY = e.clientY;
+      const startH = erHeight;
+
+      const onMove = (ev: MouseEvent) => {
+        if (!isDraggingEr.current) return;
+        const delta = startY - ev.clientY;
+        setErHeight(Math.min(500, Math.max(120, startH + delta)));
+      };
+
+      const onUp = () => {
+        isDraggingEr.current = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [erHeight],
+  );
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <Tabs value={activeTab} onValueChange={(v) => onTabChange?.(String(v))} className="flex flex-shrink-0 flex-col">
@@ -44,13 +74,13 @@ export function InsightsPanel({
             <Lightbulb className="h-4 w-4" />
             Insights
           </TabsTrigger>
-          <TabsTrigger value="chat">
-            <MessageCircle className="h-4 w-4" />
-            Chat
-          </TabsTrigger>
           <TabsTrigger value="rules">
             <Shield className="h-4 w-4" />
             Rules
+          </TabsTrigger>
+          <TabsTrigger value="chat">
+            <MessageCircle className="h-4 w-4" />
+            Chat
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -88,9 +118,13 @@ export function InsightsPanel({
           )}
         </div>
 
-        {/* ER diagram fills remaining space at the bottom */}
+        {/* ER diagram with resize handle */}
         {selectedDatabaseId && (
-          <div className="flex-shrink-0 border-t border-border h-[264px]">
+          <div className="relative flex-shrink-0 border-t border-border" style={{ height: erHeight }}>
+            <div
+              className="absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize hover:bg-primary/30 active:bg-primary/50"
+              onMouseDown={handleErResizeDown}
+            />
             <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} insights={insights} />
           </div>
         )}

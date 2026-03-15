@@ -36,6 +36,20 @@
       "when": 1773508862289,
       "tag": "0004_colossal_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773512679281,
+      "tag": "0005_jazzy_gladiator",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1773515223822,
+      "tag": "0006_greedy_squadron_supreme",
+      "breakpoints": true
     }
   ]
 }

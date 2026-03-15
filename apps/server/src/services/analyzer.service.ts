@@ -7,6 +7,9 @@ import type {
   Architecture,
   LayerDetail,
   LayerDependencyInfo,
+  ModuleInfo,
+  MethodInfo,
+  ModuleLevelDependency,
 } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
@@ -20,6 +23,9 @@ export interface AnalysisResult {
   layerDetails: LayerDetail[];
   layerDependencies: LayerDependencyInfo[];
   databaseResult: import('@truecourse/shared').DatabaseDetectionResult;
+  modules: ModuleInfo[];
+  methods: MethodInfo[];
+  moduleLevelDependencies: ModuleLevelDependency[];
   fileAnalyses: FileAnalysis[];
   moduleDependencies: ModuleDependency[];
   metadata: Record<string, unknown>;
@@ -112,6 +118,9 @@ export async function runAnalysis(
     layerDetails: splitResult.layerDetails,
     layerDependencies: splitResult.layerDependencies,
     databaseResult: splitResult.databaseResult,
+    modules: splitResult.modules,
+    methods: splitResult.methods,
+    moduleLevelDependencies: splitResult.moduleLevelDependencies,
     fileAnalyses,
     moduleDependencies,
     metadata: {

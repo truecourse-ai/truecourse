@@ -17,10 +17,10 @@ const severityIcons: Record<string, React.ElementType> = {
 };
 
 const severityStyles: Record<string, string> = {
-  critical: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20',
-  high: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20',
-  medium: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20',
-  low: 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20',
+  critical: 'bg-red-600/10 text-red-700 dark:text-red-500 border-red-600/20',
+  high: 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20',
+  medium: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20',
+  low: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
   info: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
 };
 

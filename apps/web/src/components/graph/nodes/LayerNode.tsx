@@ -1,10 +1,17 @@
 'use client';
 
-import { memo } from 'react';
-import { Handle, Position, useHandleConnections, type NodeProps } from '@xyflow/react';
-import { MessageCircle } from 'lucide-react';
+import { memo, useCallback } from 'react';
+import { Handle, Position, useNodeConnections, useReactFlow, type NodeProps } from '@xyflow/react';
+import { MessageCircle, AlertTriangle } from 'lucide-react';
 import { LAYER_LABELS } from '@/types/graph';
 import type { Layer } from '@truecourse/shared';
+
+type LayerViolation = {
+  edgeId?: string;
+  edgeIds?: string[];
+  targetLayer: string;
+  reason: string;
+};
 
 type LayerNodeData = {
   label: string;
@@ -12,24 +19,88 @@ type LayerNodeData = {
   fileCount: number;
   layerColor: string;
   fileNames: string[];
+  isContainer?: boolean;
+  violations?: LayerViolation[];
   onExplain?: (nodeId: string) => void;
 };
 
 const MAX_FILES_SHOWN = 5;
 
-const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px]';
+const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
-  const { label, fileCount, layerColor, fileNames = [], onExplain } = data;
+  const { label, fileCount, layerColor, fileNames = [], isContainer, violations = [], onExplain } = data;
   const layerLabel = LAYER_LABELS[label as Layer] || label;
+  const { setEdges } = useReactFlow();
+
+  const allViolationEdgeIds = violations.flatMap((v) => v.edgeIds?.length ? v.edgeIds : v.edgeId ? [v.edgeId] : []);
+
+  const highlightViolations = useCallback(() => {
+    if (allViolationEdgeIds.length === 0) return;
+    const idSet = new Set(allViolationEdgeIds);
+    setEdges((edges) =>
+      edges.map((e) => idSet.has(e.id) ? { ...e, data: { ...e.data, highlighted: true } } : e)
+    );
+  }, [setEdges, allViolationEdgeIds]);
+
+  const unhighlightViolations = useCallback(() => {
+    if (allViolationEdgeIds.length === 0) return;
+    const idSet = new Set(allViolationEdgeIds);
+    setEdges((edges) =>
+      edges.map((e) => idSet.has(e.id) ? { ...e, data: { ...e.data, highlighted: false } } : e)
+    );
+  }, [setEdges, allViolationEdgeIds]);
+
+  const topConnections = useNodeConnections({ handleType: 'target', handleId: 'top' });
+  const bottomConnections = useNodeConnections({ handleType: 'source', handleId: 'bottom' });
+  const rightSrcConnections = useNodeConnections({ handleType: 'source', handleId: 'right-src' });
+  const rightTgtConnections = useNodeConnections({ handleType: 'target', handleId: 'right-tgt' });
+
+  const violationIcon = violations.length > 0 && (
+    <div
+      className="group/violation relative shrink-0"
+      onMouseEnter={highlightViolations}
+      onMouseLeave={unhighlightViolations}
+    >
+      <AlertTriangle className="h-3 w-3 text-red-500" />
+      <div className="pointer-events-none absolute left-1/2 bottom-full mb-1.5 -translate-x-1/2 z-50 hidden group-hover/violation:block">
+        <div className="rounded-md border border-red-500/30 bg-card px-2.5 py-2 shadow-lg w-[220px]">
+          <p className="text-[10px] font-semibold text-red-500 mb-1">Layer Violation</p>
+          {violations.map((v, i) => (
+            <p key={i} className="text-[10px] text-muted-foreground leading-tight">
+              Depends on <span className="font-medium text-foreground">{LAYER_LABELS[v.targetLayer as Layer] || v.targetLayer}</span> — {v.reason}
+            </p>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  // Container mode: transparent wrapper with just a header (modules/methods render inside)
+  if (isContainer) {
+    return (
+      <div
+        className="rounded-md border border-border/50 bg-muted/20"
+        style={{ width: '100%', height: '100%', borderLeftWidth: 3, borderLeftColor: layerColor }}
+      >
+        <Handle type="target" position={Position.Top} id="top" className={HIDDEN_CLASS} />
+        <Handle type="source" position={Position.Bottom} id="bottom" className={HIDDEN_CLASS} />
+        <Handle type="source" position={Position.Right} id="right-src" className={HIDDEN_CLASS} />
+        <Handle type="target" position={Position.Right} id="right-tgt" className={HIDDEN_CLASS} />
+
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          <div className="h-2 w-2 rounded-full" style={{ backgroundColor: layerColor }} />
+          <span className="text-[10px] font-medium text-muted-foreground">{layerLabel}</span>
+          {violationIcon}
+        </div>
+      </div>
+    );
+  }
+
+  // Card mode: shows file list (used in layers depth level)
   const shownFiles = fileNames.slice(0, MAX_FILES_SHOWN);
   const remaining = fileNames.length - MAX_FILES_SHOWN;
-
-  const topConnections = useHandleConnections({ type: 'target', id: 'top' });
-  const bottomConnections = useHandleConnections({ type: 'source', id: 'bottom' });
-  const rightSrcConnections = useHandleConnections({ type: 'source', id: 'right-src' });
-  const rightTgtConnections = useHandleConnections({ type: 'target', id: 'right-tgt' });
 
   return (
     <div
@@ -73,6 +144,7 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
             style={{ backgroundColor: layerColor }}
           />
           <span className="text-xs font-medium text-foreground">{layerLabel}</span>
+          {violationIcon}
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-muted-foreground">{fileCount} files</span>

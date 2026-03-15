@@ -11,7 +11,7 @@ import type {
 } from '@truecourse/shared'
 import { getLanguageConfig } from '../../language-config.js'
 import { getParser } from '../../parser.js'
-import { createSourceLocation, extractDocComment } from './common.js'
+import { createSourceLocation, extractDocComment, computeFunctionMetrics } from './common.js'
 
 /**
  * Extract function name from node
@@ -170,6 +170,8 @@ function extractMethods(
       const location = createSourceLocation(member, filePath)
       const async = isAsync(member)
 
+      const metrics = computeFunctionMetrics(member)
+
       methods.push({
         name,
         params,
@@ -177,6 +179,9 @@ function extractMethods(
         isExported: false, // Methods aren't directly exported
         isAsync: async,
         location,
+        lineCount: metrics.lineCount,
+        statementCount: metrics.statementCount,
+        maxNestingDepth: metrics.maxNestingDepth,
       })
     }
   }
@@ -391,6 +396,8 @@ export function extractTypeScriptFunctions(
     const exported = isExported(node)
     const async = isAsync(node)
 
+    const metrics = computeFunctionMetrics(node)
+
     functions.push({
       name,
       params,
@@ -398,6 +405,9 @@ export function extractTypeScriptFunctions(
       isExported: exported,
       isAsync: async,
       location,
+      lineCount: metrics.lineCount,
+      statementCount: metrics.statementCount,
+      maxNestingDepth: metrics.maxNestingDepth,
     })
   }
 

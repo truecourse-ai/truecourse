@@ -12,11 +12,15 @@ import type {
   LayerDetail,
   LayerDependencyInfo,
   DatabaseDetectionResult,
+  ModuleInfo,
+  MethodInfo,
+  ModuleLevelDependency,
 } from '@truecourse/shared'
 import { detectLayers, toLayerDetectionResults } from './layer-detector.js'
 import { detectServices, type Service } from './service-detector.js'
 import { shouldExtractEntities, extractEntities } from './extractors/entities.js'
 import { detectDatabases } from './database-detector.js'
+import { extractModulesAndMethods } from './module-extractor.js'
 import { DETERMINISTIC_RULES } from './rules/deterministic-rules.js'
 
 /**
@@ -29,6 +33,9 @@ export interface SplitAnalysisResult {
   layerDetails: LayerDetail[]
   layerDependencies: LayerDependencyInfo[]
   databaseResult: DatabaseDetectionResult
+  modules: ModuleInfo[]
+  methods: MethodInfo[]
+  moduleLevelDependencies: ModuleLevelDependency[]
 }
 
 /**
@@ -270,7 +277,10 @@ export function performSplitAnalysis(
     })
   }
 
-  // 7. Detect databases
+  // 7. Extract modules and methods per layer
+  const moduleResult = extractModulesAndMethods(analyses, layerDetails, dependencies)
+
+  // 8. Detect databases
   const databaseResult = detectDatabases(rootPath, analyses, detectedServices)
 
   return {
@@ -280,6 +290,9 @@ export function performSplitAnalysis(
     layerDetails,
     layerDependencies,
     databaseResult,
+    modules: moduleResult.modules,
+    methods: moduleResult.methods,
+    moduleLevelDependencies: moduleResult.moduleDependencies,
   }
 }
 

@@ -62,12 +62,30 @@ export type GraphResponse = {
       layerColor?: string;
       fileNames?: string[];
       layerDeps?: Array<{ targetLayer: string; count: number; isViolation: boolean }>;
-      violations?: Array<{ edgeId: string; targetLayer: string; reason: string }>;
+      violations?: Array<{ edgeId?: string; edgeIds?: string[]; sourceLayer?: string; targetLayer: string; reason: string }>;
       databaseType?: string;
       tableCount?: number;
       connectedServices?: string[];
       isViolation?: boolean;
       violationReason?: string;
+      // Module-level fields
+      moduleKind?: string;
+      methodCount?: number;
+      propertyCount?: number;
+      importCount?: number;
+      exportCount?: number;
+      superClass?: string;
+      // Method-level fields
+      signature?: string;
+      paramCount?: number;
+      returnType?: string;
+      isAsync?: boolean;
+      isExported?: boolean;
+      lineCount?: number;
+      statementCount?: number;
+      maxNestingDepth?: number;
+      isContainer?: boolean;
+      isDead?: boolean;
     };
   }>;
   edges: Array<{
@@ -136,7 +154,7 @@ export function analyzeRepo(id: string, branch?: string): Promise<{ jobId: strin
 // Graph
 export function getGraph(
   repoId: string,
-  options?: { branch?: string; level?: 'services' | 'layers' },
+  options?: { branch?: string; level?: 'services' | 'layers' | 'modules' | 'methods' },
 ): Promise<GraphResponse> {
   const params = new URLSearchParams();
   if (options?.branch) params.set('branch', options.branch);

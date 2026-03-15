@@ -35,9 +35,23 @@ function DependencyEdgeComponent({
   });
 
   const strokeColor = selected ? 'var(--primary)' : 'var(--muted-foreground)';
+  const markerId = `dep-arrow-${id}`;
 
   return (
     <>
+      <defs>
+        <marker
+          id={markerId}
+          viewBox="0 0 10 10"
+          refX="8"
+          refY="5"
+          markerWidth="6"
+          markerHeight="6"
+          orient="auto"
+        >
+          <path d="M 0 1 L 8 5 L 0 9 z" fill={strokeColor} opacity={0.6} />
+        </marker>
+      </defs>
       <path
         id={id}
         d={edgePath}
@@ -46,6 +60,7 @@ function DependencyEdgeComponent({
         strokeWidth={strokeWidth}
         strokeDasharray={hasHttpCalls ? '8 4' : '2 3'}
         opacity={0.6}
+        markerEnd={`url(#${markerId})`}
         className="animate-edge-flow"
       />
       {label && (

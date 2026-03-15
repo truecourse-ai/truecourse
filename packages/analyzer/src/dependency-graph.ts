@@ -5,6 +5,53 @@ import { getLanguageConfig } from './language-config.js'
 import { monorepoPatterns } from './patterns/service-patterns.js'
 
 /**
+ * Parse tsconfig.json compilerOptions.paths into a map of prefix → directory
+ * e.g. { "@/*": ["src/*"] } → Map { "@/" → "/abs/path/src/" }
+ */
+function buildPathAliasMap(rootPath: string): Map<string, string> {
+  const aliasMap = new Map<string, string>()
+
+  // Search for tsconfig.json in rootPath and immediate subdirs (monorepo packages)
+  const tsconfigCandidates = [join(rootPath, 'tsconfig.json')]
+
+  for (const pattern of monorepoPatterns) {
+    const dirPath = join(rootPath, pattern)
+    if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) continue
+    try {
+      for (const entry of readdirSync(dirPath)) {
+        tsconfigCandidates.push(join(dirPath, entry, 'tsconfig.json'))
+      }
+    } catch { /* skip */ }
+  }
+
+  for (const tsconfigPath of tsconfigCandidates) {
+    if (!existsSync(tsconfigPath)) continue
+    try {
+      // Strip comments (// and /* */) for JSON parsing
+      const raw = readFileSync(tsconfigPath, 'utf-8')
+        .replace(/\/\/.*$/gm, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+      const tsconfig = JSON.parse(raw)
+      const paths = tsconfig?.compilerOptions?.paths
+      const baseUrl = tsconfig?.compilerOptions?.baseUrl || '.'
+      if (!paths) continue
+
+      const baseDir = resolve(dirname(tsconfigPath), baseUrl)
+
+      for (const [alias, targets] of Object.entries(paths)) {
+        if (!Array.isArray(targets) || targets.length === 0) continue
+        // "@/*" → prefix "@/", target "src/*" → dir "src/"
+        const prefix = alias.replace(/\*$/, '')
+        const targetDir = resolve(baseDir, (targets[0] as string).replace(/\*$/, ''))
+        aliasMap.set(prefix, targetDir)
+      }
+    } catch { /* skip invalid tsconfig */ }
+  }
+
+  return aliasMap
+}
+
+/**
  * Build a map of workspace package names to their root directories
  * by scanning monorepo pattern directories for package.json files
  */
@@ -110,9 +157,34 @@ export function buildDependencyGraph(
     ? buildWorkspacePackageMap(rootPath)
     : new Map<string, string>()
 
+  // Build path alias map from tsconfig.json
+  const pathAliases = rootPath
+    ? buildPathAliasMap(rootPath)
+    : new Map<string, string>()
+
   for (const file of files) {
+    // Collect both imports and re-exports (export { x } from './y') as dependency sources
+    const depSources: { source: string; names: string[] }[] = []
+
     for (const importStmt of file.imports) {
-      const importSource = importStmt.source
+      depSources.push({
+        source: importStmt.source,
+        names: importStmt.specifiers.map((spec) => spec.name),
+      })
+    }
+
+    // Re-exports are exports with a source field — they create real dependencies
+    for (const exportStmt of file.exports) {
+      if (exportStmt.source) {
+        depSources.push({
+          source: exportStmt.source,
+          names: [exportStmt.name],
+        })
+      }
+    }
+
+    for (const dep of depSources) {
+      const importSource = dep.source
 
       if (importSource.startsWith('.')) {
         // Resolve relative import
@@ -123,23 +195,36 @@ export function buildDependencyGraph(
           dependencies.push({
             source: file.filePath,
             target: resolvedPath,
-            importedNames: importStmt.specifiers.map((spec) => spec.name),
+            importedNames: dep.names,
           })
         }
-      } else if (workspacePackages.size > 0) {
-        // Try to resolve as workspace package import
-        const resolvedPath = resolveWorkspaceImport(
-          importSource,
-          workspacePackages,
-          filePaths,
-          file.language,
-        )
+      } else {
+        let resolved: string | null = null
 
-        if (resolvedPath) {
+        // Try path alias resolution (e.g. @/utils/validators → src/utils/validators)
+        for (const [prefix, targetDir] of pathAliases) {
+          if (importSource.startsWith(prefix)) {
+            const rest = importSource.slice(prefix.length)
+            resolved = resolveImportPath(targetDir, './' + rest, file.language, filePaths)
+            if (resolved) break
+          }
+        }
+
+        // Try workspace package resolution
+        if (!resolved && workspacePackages.size > 0) {
+          resolved = resolveWorkspaceImport(
+            importSource,
+            workspacePackages,
+            filePaths,
+            file.language,
+          )
+        }
+
+        if (resolved) {
           dependencies.push({
             source: file.filePath,
-            target: resolvedPath,
-            importedNames: importStmt.specifiers.map((spec) => spec.name),
+            target: resolved,
+            importedNames: dep.names,
           })
         }
       }

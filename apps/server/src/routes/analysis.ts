@@ -11,6 +11,9 @@ import {
   insights,
   databases,
   databaseConnections,
+  modules,
+  methods,
+  moduleDeps,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
@@ -21,9 +24,9 @@ import {
   emitAnalysisComplete,
   emitInsightsReady,
 } from '../socket/handlers.js';
-import { buildGraphData, buildLayerGraphData } from '../services/graph.service.js';
+import { buildGraphData, buildLayerGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
-import { getAllDefaultRules } from '@truecourse/analyzer';
+import { getAllDefaultRules, checkModuleRules } from '@truecourse/analyzer';
 import { v4 as uuidv4 } from 'uuid';
 
 const router: Router = Router();
@@ -216,6 +219,136 @@ router.post(
           }
         }
 
+        // Save modules
+        const moduleIdMap = new Map<string, string>(); // "serviceName::moduleName" → dbId
+        if (result.modules && result.modules.length > 0) {
+          // Build layer lookup: "serviceName::layerName" → layerId
+          const layerIdLookup = new Map<string, string>();
+          const savedLayers = await db
+            .select()
+            .from(layers)
+            .where(eq(layers.analysisId, analysis.id));
+          for (const l of savedLayers) {
+            layerIdLookup.set(`${l.serviceName}::${l.layer}`, l.id);
+          }
+
+          for (const mod of result.modules) {
+            const serviceId = serviceIdMap.get(mod.serviceName);
+            const layerId = layerIdLookup.get(`${mod.serviceName}::${mod.layerName}`);
+            if (!serviceId || !layerId) continue;
+
+            const [saved] = await db.insert(modules).values({
+              analysisId: analysis.id,
+              layerId,
+              serviceId,
+              name: mod.name,
+              kind: mod.kind,
+              filePath: mod.filePath,
+              methodCount: mod.methodCount,
+              propertyCount: mod.propertyCount,
+              importCount: mod.importCount,
+              exportCount: mod.exportCount,
+              superClass: mod.superClass || null,
+              lineCount: mod.lineCount || null,
+            }).returning();
+
+            moduleIdMap.set(`${mod.serviceName}::${mod.name}`, saved.id);
+          }
+        }
+
+        // Save methods
+        if (result.methods && result.methods.length > 0) {
+          for (const method of result.methods) {
+            const moduleKey = `${method.serviceName}::${method.moduleName}`;
+            const moduleId = moduleIdMap.get(moduleKey);
+            if (!moduleId) continue;
+
+            await db.insert(methods).values({
+              analysisId: analysis.id,
+              moduleId,
+              name: method.name,
+              signature: method.signature,
+              paramCount: method.paramCount,
+              returnType: method.returnType || null,
+              isAsync: method.isAsync,
+              isExported: method.isExported,
+              lineCount: method.lineCount || null,
+              statementCount: method.statementCount || null,
+              maxNestingDepth: method.maxNestingDepth || null,
+            });
+          }
+        }
+
+        // Save module dependencies
+        console.log(`[Analysis] File dependencies: ${result.dependencies.length}, Module-level deps: ${result.moduleLevelDependencies?.length ?? 0}, Modules: ${result.modules?.length ?? 0}`);
+        if (result.moduleLevelDependencies && result.moduleLevelDependencies.length > 0) {
+          for (const dep of result.moduleLevelDependencies) {
+            const srcId = moduleIdMap.get(`${dep.sourceService}::${dep.sourceModule}`);
+            const tgtId = moduleIdMap.get(`${dep.targetService}::${dep.targetModule}`);
+            if (!srcId || !tgtId) {
+              console.log(`[Analysis] Skipped module dep: ${dep.sourceService}::${dep.sourceModule} → ${dep.targetService}::${dep.targetModule} (srcId=${!!srcId}, tgtId=${!!tgtId})`);
+              continue;
+            }
+
+            await db.insert(moduleDeps).values({
+              analysisId: analysis.id,
+              sourceModuleId: srcId,
+              targetModuleId: tgtId,
+              importedNames: dep.importedNames,
+              dependencyCount: dep.importedNames.length || 1,
+            });
+          }
+        }
+
+        // Check deterministic module rules
+        if (result.modules && result.methods) {
+          const allRules = getAllDefaultRules();
+          const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic' && r.enabled);
+
+          // Build set of module keys connected to databases so they aren't flagged as dead
+          const dbConnectedModuleKeys = new Set<string>();
+          if (result.databaseResult) {
+            for (const conn of result.databaseResult.connections) {
+              const driverLower = conn.driver.toLowerCase();
+              const dbNameLower = conn.databaseName.toLowerCase();
+              const dataModules = result.modules.filter(
+                (m) => m.serviceName === conn.serviceName && m.layerName === 'data',
+              );
+              if (dataModules.length > 0) {
+                const matched = dataModules.find((m) => {
+                  const nameLower = m.name.toLowerCase();
+                  return nameLower.includes(driverLower) || driverLower.includes(nameLower)
+                    || nameLower.includes(dbNameLower) || dbNameLower.includes(nameLower);
+                });
+                const mod = matched || dataModules[0];
+                dbConnectedModuleKeys.add(`${mod.serviceName}::${mod.name}`);
+              }
+            }
+          }
+
+          const moduleViolations = checkModuleRules(
+            result.modules,
+            result.methods,
+            result.moduleDependencies || [],
+            enabledDeterministic,
+            result.moduleLevelDependencies || [],
+            dbConnectedModuleKeys,
+          );
+
+          for (const violation of moduleViolations) {
+            await db.insert(insights).values({
+              id: uuidv4(),
+              repoId: id,
+              analysisId: analysis.id,
+              type: violation.ruleKey,
+              title: violation.title,
+              content: violation.description,
+              severity: violation.severity,
+              targetServiceId: serviceIdMap.get(violation.serviceName) || null,
+            });
+          }
+        }
+
         // Carry over node positions from previous analysis (namespaced)
         const carryOver: Record<string, unknown> = {};
         if (Object.keys(prevPositionsByName).length > 0) {
@@ -267,10 +400,15 @@ router.post(
 
         // Generate LLM insights before completing
         try {
+          const callParts: string[] = ['architecture'];
+          if (result.databaseResult && result.databaseResult.databases.length > 0) callParts.push('database');
+          if (result.modules && result.modules.length > 0) callParts.push('module');
+
+          let currentPercent = 85;
           emitAnalysisProgress(id, {
             step: 'insights',
-            percent: 90,
-            detail: 'Generating insights...',
+            percent: currentPercent,
+            detail: `Generating insights (${callParts.join(', ')})...`,
           });
 
           const analysisServices = result.services.map((s) => ({
@@ -293,11 +431,48 @@ router.post(
             .filter((d) => d.isViolation)
             .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
 
-          // Gather enabled LLM rules for insight generation
+          // Gather enabled LLM rules with category for insight generation
           const allRules = getAllDefaultRules();
           const enabledLlmRules = allRules
             .filter((r) => r.type === 'llm' && r.enabled && r.prompt)
-            .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt! }));
+            .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
+
+          // Build module data for insight generation
+          const insightModules = result.modules?.map((m) => ({
+            id: moduleIdMap.get(`${m.serviceName}::${m.name}`) || '',
+            name: m.name,
+            kind: m.kind,
+            serviceName: m.serviceName,
+            layerName: m.layerName,
+            methodCount: m.methodCount,
+            propertyCount: m.propertyCount,
+            importCount: m.importCount,
+            exportCount: m.exportCount,
+            superClass: m.superClass || undefined,
+            lineCount: m.lineCount || undefined,
+          })).filter((m) => m.id); // exclude modules that weren't saved
+
+          const insightMethods = result.methods?.map((m) => ({
+            moduleName: m.moduleName,
+            name: m.name,
+            signature: m.signature,
+            paramCount: m.paramCount,
+            returnType: m.returnType || undefined,
+            isAsync: m.isAsync,
+            lineCount: m.lineCount || undefined,
+            statementCount: m.statementCount || undefined,
+            maxNestingDepth: m.maxNestingDepth || undefined,
+          }));
+
+          const insightModuleDeps = result.moduleLevelDependencies?.map((d) => {
+            const srcName = result.modules?.find((m) => m.serviceName === d.sourceService && m.name === d.sourceModule)?.name;
+            const tgtName = result.modules?.find((m) => m.serviceName === d.targetService && m.name === d.targetModule)?.name;
+            return {
+              sourceModule: srcName || d.sourceModule,
+              targetModule: tgtName || d.targetModule,
+              importedNames: d.importedNames,
+            };
+          });
 
           const { insights: generatedInsights, serviceDescriptions } = await generateInsights({
             architecture: result.architecture,
@@ -329,6 +504,16 @@ router.post(
               })),
             })),
             llmRules: enabledLlmRules,
+            modules: insightModules,
+            methods: insightMethods,
+            moduleDependencies: insightModuleDeps,
+          }, (step) => {
+            currentPercent += 3;
+            emitAnalysisProgress(id, {
+              step: 'insights',
+              percent: currentPercent,
+              detail: step,
+            });
           });
 
           for (const insight of generatedInsights) {
@@ -342,6 +527,7 @@ router.post(
               severity: insight.severity,
               targetServiceId: insight.targetServiceId || null,
               targetDatabaseId: insight.targetDatabaseId || null,
+              targetModuleId: insight.targetModuleId || null,
               targetTable: insight.targetTable || null,
               fixPrompt: insight.fixPrompt || null,
             });
@@ -446,7 +632,66 @@ router.get(
 
       let graphData;
 
-      if (level === 'layers') {
+      if (level === 'modules' || level === 'methods') {
+        const analysisLayers = await db
+          .select()
+          .from(layers)
+          .where(eq(layers.analysisId, analysis.id));
+
+        const analysisLayerDeps = await db
+          .select()
+          .from(layerDependencies)
+          .where(eq(layerDependencies.analysisId, analysis.id));
+
+        const analysisModules = await db
+          .select()
+          .from(modules)
+          .where(eq(modules.analysisId, analysis.id));
+
+        const analysisModuleDeps = await db
+          .select()
+          .from(moduleDeps)
+          .where(eq(moduleDeps.analysisId, analysis.id));
+
+        const layerData = analysisLayers.map((l) => ({
+          id: l.id,
+          serviceName: l.serviceName,
+          serviceId: l.serviceId,
+          layer: l.layer,
+          fileCount: l.fileCount,
+          filePaths: l.filePaths as string[],
+          confidence: l.confidence,
+          evidence: l.evidence as string[],
+        }));
+
+        if (level === 'methods') {
+          const analysisMethods = await db
+            .select()
+            .from(methods)
+            .where(eq(methods.analysisId, analysis.id));
+
+          graphData = buildMethodGraphData(
+            analysisServices,
+            layerData,
+            analysisModules,
+            analysisMethods,
+            analysisModuleDeps,
+            analysisDatabases,
+            analysisDbConnections,
+            analysisLayerDeps,
+          );
+        } else {
+          graphData = buildModuleGraphData(
+            analysisServices,
+            layerData,
+            analysisModules,
+            analysisModuleDeps,
+            analysisDatabases,
+            analysisDbConnections,
+            analysisLayerDeps,
+          );
+        }
+      } else if (level === 'layers') {
         const analysisLayers = await db
           .select()
           .from(layers)

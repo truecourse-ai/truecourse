@@ -578,11 +578,13 @@ Define configurable analysis rules for deterministic checks and LLM guidance. Ru
 
 ---
 
-## Phase 4: Module & Method Depth Levels `STATUS: BACKLOG`
+## Phase 4: Module & Method Depth Levels `STATUS: IN PROGRESS`
 
 Extends the depth toggle with two more levels:
 - **Modules** — classes, interfaces, and standalone modules within each layer
 - **Methods** — functions and methods within each module
+
+Also adds module/method-level analysis rules — some deterministic (AST-based), some LLM.
 
 ### Phase 4 Scope
 - Depth toggle: Services | Layers | Modules | Methods
@@ -594,6 +596,23 @@ Extends the depth toggle with two more levels:
 - Call edges between methods (function call extraction)
 - New tables: `modules`, `methods`, `module_dependencies`
 - API: `GET /api/repos/:id/graph?level=modules` and `?level=methods`
+- New analysis rules (see below)
+
+### Analysis Rules (Module/Method Level)
+
+**Deterministic rules** (checked via AST — tree-sitter gives exact counts):
+- `arch/god-module` — class/module with too many methods (threshold-based)
+- `arch/long-method` — function with too many statements/lines
+- `arch/too-many-parameters` — function with 5+ parameters
+- `arch/deeply-nested-logic` — excessive nesting depth (if/for/try chains)
+- `arch/unused-export` — exported function/class not imported anywhere in the codebase
+
+**LLM rules** (need semantic understanding):
+- `llm/arch-circular-module-dependency` — circular imports between modules within a service
+- `llm/arch-deep-inheritance-chain` — class extending 3+ levels deep (fragility)
+- `llm/arch-excessive-fan-out` — module importing too many other modules (high coupling)
+- `llm/arch-excessive-fan-in` — module imported by too many others (change risk, bottleneck)
+- `llm/arch-mixed-abstraction-levels` — method doing both high-level orchestration and low-level details
 
 ### Test Plan (Phase 4) `STATUS: BACKLOG`
 - Module extraction: correctly identifies classes, interfaces, and exported modules from TS/JS files
@@ -604,12 +623,17 @@ Extends the depth toggle with two more levels:
 - Call edges: function calls map to correct source method → target method
 - API returns correct nodes at each depth level
 - DB tables store and retrieve module/method data correctly
+- Deterministic rules: god-module, long-method, too-many-parameters, deeply-nested, unused-export trigger on fixture code
+- LLM rules: circular module deps, deep inheritance, fan-out/fan-in, mixed abstraction appear in insights
 
 ### Verification (Phase 4)
 1. Toggle to "Modules" → layers expand to show class/module nodes
 2. Toggle to "Methods" → modules expand to show function/method nodes
 3. Dependency edges show import relationships between modules
 4. Call edges show function call relationships between methods
+5. Rules tab shows the new module/method rules alongside existing rules
+6. Deterministic rules flag violations directly on module/method nodes
+7. LLM insights reference module/method-level patterns
 
 ---
 

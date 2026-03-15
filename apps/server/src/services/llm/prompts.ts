@@ -1,13 +1,18 @@
 import { Langfuse } from 'langfuse';
 import { config } from '../../config/index.js';
-import type { ArchitectureContext } from './provider.js';
+import type {
+  ArchitectureContext,
+  ArchitectureInsightContext,
+  DatabaseInsightContext,
+  ModuleInsightContext,
+} from './provider.js';
 
 // ---------------------------------------------------------------------------
 // Prompt definitions — single source of truth
 // ---------------------------------------------------------------------------
 
 export const PROMPT_DEFINITIONS = {
-  'insights-generation': {
+  'insights-architecture': {
     prompt: `Analyze the following codebase architecture and provide actionable insights.
 
 Architecture: {{architecture}}
@@ -18,18 +23,72 @@ Services:
 Dependencies:
 {{depList}}
 {{violations}}
-{{databases}}
 {{llmRules}}
+
+IMPORTANT: When referencing a service, use the exact id from the Services list above. Do not fabricate or modify ids.
 
 Focus on:
 1. Architecture patterns and anti-patterns
 2. Dependency issues (circular dependencies, tight coupling)
 3. Layer violations
-4. Database usage patterns (connection sharing, ORM choices, missing indices hints)
-5. Suggestions for improvement
-6. Potential risks or code smells
+4. Suggestions for improvement
+5. Potential risks or code smells
 
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
+
+Return your findings as structured data using the provided schema.`,
+    config: {
+      model: 'gpt-4o',
+      max_tokens: 4096,
+    },
+    labels: ['production'],
+  },
+
+  'insights-database': {
+    prompt: `Analyze the following database schemas and provide actionable insights.
+
+Databases:
+{{databaseList}}
+{{llmRules}}
+
+IMPORTANT: When referencing a database, use the exact id from the Databases list above. Do not fabricate or modify ids.
+
+Focus on:
+1. Schema design issues (missing foreign keys, missing indexes)
+2. Naming convention inconsistencies
+3. Missing audit columns (created_at, updated_at)
+4. Overly nullable schemas
+5. Referential integrity concerns
+
+Return your findings as structured data using the provided schema.`,
+    config: {
+      model: 'gpt-4o',
+      max_tokens: 4096,
+    },
+    labels: ['production'],
+  },
+
+  'insights-module': {
+    prompt: `Analyze the following modules and methods and provide actionable insights.
+
+Modules:
+{{moduleList}}
+
+Methods:
+{{methodList}}
+
+Module Dependencies:
+{{moduleDependencyList}}
+{{llmRules}}
+
+IMPORTANT: When referencing a module, use the exact id from the Modules list above. Do not fabricate or modify ids.
+
+Focus on:
+1. Circular module dependencies
+2. Deep inheritance chains
+3. Excessive fan-out or fan-in
+4. Mixed abstraction levels in methods
+5. Code organization issues
 
 Return your findings as structured data using the provided schema.`,
     config: {
@@ -81,6 +140,7 @@ export type PromptName = keyof typeof PROMPT_DEFINITIONS;
 // Template variable helpers
 // ---------------------------------------------------------------------------
 
+/** Build template vars for architecture-summary prompt (unchanged). */
 export function buildTemplateVars(context: ArchitectureContext): Record<string, string> {
   const serviceList = context.services
     .map(
@@ -133,6 +193,101 @@ export function buildTemplateVars(context: ArchitectureContext): Record<string, 
     : '';
 
   return { architecture: context.architecture, serviceList, depList, violations, databases, llmRules };
+}
+
+/** Build template vars for insights-architecture prompt. */
+export function buildArchitectureTemplateVars(context: ArchitectureInsightContext): Record<string, string> {
+  const serviceList = context.services
+    .map(
+      (s) =>
+        `- ${s.name} [id: ${s.id}] (type: ${s.type}, framework: ${s.framework || 'none'}, files: ${s.fileCount}, layers: ${s.layers.join(', ') || 'none'})`
+    )
+    .join('\n');
+
+  const depList = context.dependencies
+    .map(
+      (d) =>
+        `- ${d.source} -> ${d.target} (count: ${d.count}, type: ${d.type || 'import'})`
+    )
+    .join('\n') || '(none)';
+
+  const violations = context.violations?.length
+    ? `\nViolations detected:\n${context.violations.map((v) => `- ${v}`).join('\n')}`
+    : '';
+
+  const llmRules = context.llmRules.length
+    ? `\nAnalysis Rules (evaluate the architecture against these):\n${context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
+      ).join('\n')}`
+    : '';
+
+  return { architecture: context.architecture, serviceList, depList, violations, llmRules };
+}
+
+/** Build template vars for insights-database prompt. */
+export function buildDatabaseTemplateVars(context: DatabaseInsightContext): Record<string, string> {
+  const databaseList = context.databases.map((d) => {
+    let dbStr = `- ${d.name} [id: ${d.id}] (${d.type}, driver: ${d.driver}, tables: ${d.tableCount}, used by: ${d.connectedServices.join(', ') || 'none'})`;
+    if (d.tables?.length) {
+      dbStr += '\n  Schema:';
+      for (const t of d.tables) {
+        const cols = t.columns.map((c) => {
+          let col = `${c.name}: ${c.type}`;
+          if (c.isPrimaryKey) col += ' [PK]';
+          if (c.isForeignKey) col += ` [FK → ${c.referencesTable}]`;
+          if (c.isNullable) col += ' [nullable]';
+          return col;
+        }).join(', ');
+        dbStr += `\n    ${t.name} (${cols})`;
+      }
+    }
+    if (d.relations?.length) {
+      dbStr += '\n  Relations:';
+      for (const r of d.relations) {
+        dbStr += `\n    ${r.sourceTable}.${r.foreignKeyColumn} → ${r.targetTable}`;
+      }
+    }
+    return dbStr;
+  }).join('\n');
+
+  const llmRules = context.llmRules.length
+    ? `\nAnalysis Rules (evaluate the databases against these):\n${context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
+      ).join('\n')}`
+    : '';
+
+  return { databaseList, llmRules };
+}
+
+/** Build template vars for insights-module prompt. */
+export function buildModuleTemplateVars(context: ModuleInsightContext): Record<string, string> {
+  const moduleList = context.modules
+    .map(
+      (m) =>
+        `- ${m.name} [id: ${m.id}] (kind: ${m.kind}, service: ${m.serviceName}, layer: ${m.layerName}, methods: ${m.methodCount}, properties: ${m.propertyCount}, imports: ${m.importCount}, exports: ${m.exportCount}${m.superClass ? `, extends: ${m.superClass}` : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''})`
+    )
+    .join('\n') || '(none)';
+
+  const methodList = context.methods
+    .map(
+      (m) =>
+        `- ${m.moduleName}.${m.name}: ${m.signature} (params: ${m.paramCount}${m.returnType ? `, returns: ${m.returnType}` : ''}${m.isAsync ? ', async' : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''}${m.statementCount ? `, statements: ${m.statementCount}` : ''}${m.maxNestingDepth ? `, nesting: ${m.maxNestingDepth}` : ''})`
+    )
+    .join('\n') || '(none)';
+
+  const moduleDependencyList = context.moduleDependencies
+    .map(
+      (d) => `- ${d.sourceModule} -> ${d.targetModule} (imports: ${d.importedNames.join(', ')})`
+    )
+    .join('\n') || '(none)';
+
+  const llmRules = context.llmRules.length
+    ? `\nAnalysis Rules (evaluate the modules against these):\n${context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
+      ).join('\n')}`
+    : '';
+
+  return { moduleList, methodList, moduleDependencyList, llmRules };
 }
 
 // ---------------------------------------------------------------------------

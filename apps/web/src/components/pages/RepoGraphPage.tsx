@@ -50,6 +50,13 @@ export default function RepoGraphPage() {
     setFilteredEdges(edges);
   }, [nodes, edges]);
 
+  // Sync isAnalyzing with server-side progress (handles page refresh mid-analysis)
+  useEffect(() => {
+    if (analysisProgress && !isAnalyzing) {
+      setIsAnalyzing(true);
+    }
+  }, [analysisProgress, isAnalyzing]);
+
   // Listen for analysis complete to refetch
   useEffect(() => {
     const unsub = onEvent('analysis:complete', () => {
@@ -62,6 +69,7 @@ export default function RepoGraphPage() {
   // Listen for insights ready
   useEffect(() => {
     const unsub = onEvent('insights:ready', () => {
+      setIsAnalyzing(false);
       refetchInsights();
     });
     return unsub;

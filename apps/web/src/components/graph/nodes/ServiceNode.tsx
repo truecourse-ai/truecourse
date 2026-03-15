@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useNodeConnections, type NodeProps } from '@xyflow/react';
 import { Monitor, Server, Cog, Package, AlertTriangle, MessageCircle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import type { ServiceNodeData } from '@/types/graph';
@@ -15,15 +15,21 @@ const typeIcons: Record<string, React.ElementType> = {
   unknown: Package,
 };
 
+const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
+const HIDDEN_CLASS = '!invisible';
+
 function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: ServiceNodeData }) {
   const { label, description, serviceInfo, insightCount, hasHighSeverity, onExplain } = data;
   const Icon = typeIcons[serviceInfo.type] || Package;
+
+  const topConnections = useNodeConnections({ handleType: 'target', handleId: 'top' });
+  const bottomConnections = useNodeConnections({ handleType: 'source', handleId: 'bottom' });
 
   const layersPresent = serviceInfo.layers.map((l) => l.layer);
 
   return (
     <Card
-      className={`relative min-w-[220px] !gap-0 !py-0 rounded-md shadow-md transition-all ${
+      className={`relative min-w-[220px] !gap-0 !py-0 !overflow-visible rounded-md shadow-md transition-all ${
         selected
           ? 'border-primary ring-1 ring-primary/30'
           : ''
@@ -32,7 +38,8 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
       <Handle
         type="target"
         position={Position.Top}
-        className="!invisible"
+        id="top"
+        className={topConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS}
       />
 
       <CardContent className="p-3">
@@ -107,7 +114,8 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!invisible"
+        id="bottom"
+        className={bottomConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS}
       />
     </Card>
   );

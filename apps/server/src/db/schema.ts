@@ -55,6 +55,9 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   layerDependencies: many(layerDependencies),
   insights: many(insights),
   databases: many(databases),
+  modules: many(modules),
+  methods: many(methods),
+  moduleDeps: many(moduleDeps),
 }));
 
 // ---------------------------------------------------------------------------
@@ -204,6 +207,9 @@ export const insights = pgTable('insights', {
   targetDatabaseId: uuid('target_database_id').references(() => databases.id, {
     onDelete: 'set null',
   }),
+  targetModuleId: uuid('target_module_id').references(() => modules.id, {
+    onDelete: 'set null',
+  }),
   targetTable: text('target_table'),
   fixPrompt: text('fix_prompt'),
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
@@ -225,6 +231,10 @@ export const insightsRelations = relations(insights, ({ one }) => ({
   targetDatabase: one(databases, {
     fields: [insights.targetDatabaseId],
     references: [databases.id],
+  }),
+  targetModule: one(modules, {
+    fields: [insights.targetModuleId],
+    references: [modules.id],
   }),
 }));
 
@@ -337,3 +347,115 @@ export const databaseConnectionsRelations = relations(
     }),
   })
 );
+
+// ---------------------------------------------------------------------------
+// modules (classes/interfaces/standalone modules per layer)
+// ---------------------------------------------------------------------------
+
+export const modules = pgTable('modules', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  layerId: uuid('layer_id')
+    .notNull()
+    .references(() => layers.id, { onDelete: 'cascade' }),
+  serviceId: uuid('service_id')
+    .notNull()
+    .references(() => services.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(), // 'class' | 'interface' | 'standalone'
+  filePath: text('file_path').notNull(),
+  methodCount: integer('method_count').notNull().default(0),
+  propertyCount: integer('property_count').notNull().default(0),
+  importCount: integer('import_count').notNull().default(0),
+  exportCount: integer('export_count').notNull().default(0),
+  superClass: text('super_class'),
+  lineCount: integer('line_count'),
+});
+
+export const modulesRelations = relations(modules, ({ one, many }) => ({
+  analysis: one(analyses, {
+    fields: [modules.analysisId],
+    references: [analyses.id],
+  }),
+  layer: one(layers, {
+    fields: [modules.layerId],
+    references: [layers.id],
+  }),
+  service: one(services, {
+    fields: [modules.serviceId],
+    references: [services.id],
+  }),
+  methods: many(methods),
+}));
+
+// ---------------------------------------------------------------------------
+// methods (functions/methods within modules)
+// ---------------------------------------------------------------------------
+
+export const methods = pgTable('methods', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  moduleId: uuid('module_id')
+    .notNull()
+    .references(() => modules.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  signature: text('signature').notNull(),
+  paramCount: integer('param_count').notNull().default(0),
+  returnType: text('return_type'),
+  isAsync: boolean('is_async').notNull().default(false),
+  isExported: boolean('is_exported').notNull().default(false),
+  lineCount: integer('line_count'),
+  statementCount: integer('statement_count'),
+  maxNestingDepth: integer('max_nesting_depth'),
+});
+
+export const methodsRelations = relations(methods, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [methods.analysisId],
+    references: [analyses.id],
+  }),
+  module: one(modules, {
+    fields: [methods.moduleId],
+    references: [modules.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// module_dependencies (import-based dependencies between modules)
+// ---------------------------------------------------------------------------
+
+export const moduleDeps = pgTable('module_dependencies', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  sourceModuleId: uuid('source_module_id')
+    .notNull()
+    .references(() => modules.id, { onDelete: 'cascade' }),
+  targetModuleId: uuid('target_module_id')
+    .notNull()
+    .references(() => modules.id, { onDelete: 'cascade' }),
+  importedNames: jsonb('imported_names').notNull(), // string[]
+  dependencyCount: integer('dependency_count').notNull().default(1),
+});
+
+export const moduleDepsRelations = relations(moduleDeps, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [moduleDeps.analysisId],
+    references: [analyses.id],
+  }),
+  sourceModule: one(modules, {
+    fields: [moduleDeps.sourceModuleId],
+    references: [modules.id],
+    relationName: 'sourceModule',
+  }),
+  targetModule: one(modules, {
+    fields: [moduleDeps.targetModuleId],
+    references: [modules.id],
+    relationName: 'targetModule',
+  }),
+}));

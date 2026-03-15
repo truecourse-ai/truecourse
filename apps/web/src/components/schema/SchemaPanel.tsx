@@ -103,7 +103,7 @@ export function SchemaPanel({ repoId, databaseId, insights = [] }: SchemaPanelPr
       {/* ER Diagram view */}
       {view === 'diagram' && (
         <div className="flex-1 min-h-0">
-          <ERDiagram schema={schema} insights={insights} />
+          <ERDiagram schema={schema} insights={insights} isFullscreen={false} />
         </div>
       )}
 
@@ -212,7 +212,7 @@ export function SchemaPanel({ repoId, databaseId, insights = [] }: SchemaPanelPr
           </div>
           {/* Fullscreen ER diagram */}
           <div className="flex-1 min-h-0">
-            <ERDiagram schema={schema} insights={insights} />
+            <ERDiagram schema={schema} insights={insights} isFullscreen />
           </div>
         </div>,
         document.body,

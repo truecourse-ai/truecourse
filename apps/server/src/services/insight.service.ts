@@ -1,8 +1,12 @@
 import {
   createLLMProvider,
   type ArchitectureContext,
+  type ArchitectureInsightContext,
+  type DatabaseInsightContext,
+  type ModuleInsightContext,
   type InsightsResult,
 } from './llm/provider.js';
+import type { Insight } from '@truecourse/shared';
 
 export interface InsightGenerationInput {
   architecture: string;
@@ -38,35 +42,179 @@ export interface InsightGenerationInput {
     name: string;
     severity: string;
     prompt: string;
+    category: string;
+  }[];
+  modules?: {
+    id: string;
+    name: string;
+    kind: string;
+    serviceName: string;
+    layerName: string;
+    methodCount: number;
+    propertyCount: number;
+    importCount: number;
+    exportCount: number;
+    superClass?: string;
+    lineCount?: number;
+  }[];
+  methods?: {
+    moduleName: string;
+    name: string;
+    signature: string;
+    paramCount: number;
+    returnType?: string;
+    isAsync: boolean;
+    lineCount?: number;
+    statementCount?: number;
+    maxNestingDepth?: number;
+  }[];
+  moduleDependencies?: {
+    sourceModule: string;
+    targetModule: string;
+    importedNames: string[];
   }[];
 }
 
 export async function generateInsights(
-  input: InsightGenerationInput
+  input: InsightGenerationInput,
+  onProgress?: (step: string) => void,
 ): Promise<InsightsResult> {
-  const context: ArchitectureContext = {
-    architecture: input.architecture,
-    services: input.services.map((s) => ({
-      id: s.id,
-      name: s.name,
-      type: s.type,
-      framework: s.framework,
-      fileCount: s.fileCount,
-      layers: extractLayerNames(s.layerSummary),
-    })),
-    dependencies: input.dependencies.map((d) => ({
-      source: d.sourceServiceName,
-      target: d.targetServiceName,
-      count: d.dependencyCount || 0,
-      type: d.dependencyType || undefined,
-    })),
-    violations: input.violations,
-    databases: input.databases,
-    llmRules: input.llmRules,
-  };
-
   const provider = createLLMProvider();
-  return provider.generateInsights(context);
+
+  // Partition rules by category
+  const archRules = (input.llmRules || []).filter((r) => r.category === 'architecture');
+  const dbRules = (input.llmRules || []).filter((r) => r.category === 'database');
+  const moduleRules = (input.llmRules || []).filter((r) => r.category === 'module');
+
+  const serviceDtos = input.services.map((s) => ({
+    id: s.id,
+    name: s.name,
+    type: s.type,
+    framework: s.framework,
+    fileCount: s.fileCount,
+    layers: extractLayerNames(s.layerSummary),
+  }));
+
+  const depDtos = input.dependencies.map((d) => ({
+    source: d.sourceServiceName,
+    target: d.targetServiceName,
+    count: d.dependencyCount || 0,
+    type: d.dependencyType || undefined,
+  }));
+
+  // Valid ID sets for post-call validation
+  const validServiceIds = new Set(input.services.map((s) => s.id));
+  const validDatabaseIds = new Set((input.databases || []).map((d) => d.id));
+  const validModuleIds = new Set((input.modules || []).map((m) => m.id));
+
+  // --- Build promises ---
+
+  // 1. Architecture call (always runs)
+  const archContext: ArchitectureInsightContext = {
+    architecture: input.architecture,
+    services: serviceDtos,
+    dependencies: depDtos,
+    violations: input.violations,
+    llmRules: archRules,
+  };
+  const archPromise = provider.generateArchitectureInsights(archContext).then((result) => {
+    onProgress?.('Architecture insights ready');
+    return result;
+  });
+
+  // 2. Database call (only if databases exist)
+  const hasDBs = input.databases && input.databases.length > 0;
+  const dbPromise = hasDBs
+    ? (() => {
+        const dbContext: DatabaseInsightContext = {
+          databases: input.databases!,
+          llmRules: dbRules,
+        };
+        return provider.generateDatabaseInsights(dbContext).then((result) => {
+          onProgress?.('Database insights ready');
+          return result;
+        });
+      })()
+    : null;
+
+  // 3. Module call (only if modules exist)
+  const hasModules = input.modules && input.modules.length > 0;
+  const modulePromise = hasModules
+    ? (() => {
+        const moduleContext: ModuleInsightContext = {
+          services: input.services.map((s) => ({ id: s.id, name: s.name })),
+          modules: input.modules!,
+          methods: input.methods || [],
+          moduleDependencies: input.moduleDependencies || [],
+          llmRules: moduleRules,
+        };
+        return provider.generateModuleInsights(moduleContext).then((result) => {
+          onProgress?.('Module insights ready');
+          return result;
+        });
+      })()
+    : null;
+
+  // Run all in parallel
+  const promises = [archPromise, dbPromise, modulePromise].filter(Boolean) as Promise<unknown>[];
+  const results = await Promise.allSettled(promises);
+
+  // --- Merge results ---
+  const allInsights: Insight[] = [];
+  let serviceDescriptions: { id: string; description: string }[] = [];
+
+  // Map settled results back to their call type
+  let idx = 0;
+
+  // Architecture result
+  const archResult = results[idx++];
+  if (archResult.status === 'fulfilled') {
+    const arch = archResult.value as { insights: Insight[]; serviceDescriptions: { id: string; description: string }[] };
+    // Validate service IDs
+    for (const insight of arch.insights) {
+      if (insight.targetServiceId && !validServiceIds.has(insight.targetServiceId)) {
+        insight.targetServiceId = undefined;
+      }
+      allInsights.push(insight);
+    }
+    serviceDescriptions = arch.serviceDescriptions.filter((d) => validServiceIds.has(d.id));
+  } else {
+    console.error('[Insights] Architecture call failed:', archResult.reason);
+  }
+
+  // Database result
+  if (hasDBs) {
+    const dbResult = results[idx++];
+    if (dbResult.status === 'fulfilled') {
+      const dbData = dbResult.value as { insights: Insight[] };
+      for (const insight of dbData.insights) {
+        if (insight.targetDatabaseId && !validDatabaseIds.has(insight.targetDatabaseId)) {
+          insight.targetDatabaseId = undefined;
+        }
+        allInsights.push(insight);
+      }
+    } else {
+      console.error('[Insights] Database call failed:', dbResult.reason);
+    }
+  }
+
+  // Module result
+  if (hasModules) {
+    const moduleResult = results[idx++];
+    if (moduleResult.status === 'fulfilled') {
+      const modData = moduleResult.value as { insights: Insight[] };
+      for (const insight of modData.insights) {
+        if (insight.targetModuleId && !validModuleIds.has(insight.targetModuleId)) {
+          insight.targetModuleId = undefined;
+        }
+        allInsights.push(insight);
+      }
+    } else {
+      console.error('[Insights] Module call failed:', moduleResult.reason);
+    }
+  }
+
+  return { insights: allInsights, serviceDescriptions };
 }
 
 function extractLayerNames(layerSummary: unknown): string[] {

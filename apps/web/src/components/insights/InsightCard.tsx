@@ -13,18 +13,18 @@ type InsightCardProps = {
 
 const severityColors: Record<string, string> = {
   info: 'border-l-blue-500',
-  low: 'border-l-green-500',
-  medium: 'border-l-yellow-500',
-  high: 'border-l-orange-500',
-  critical: 'border-l-red-500',
+  low: 'border-l-amber-500',
+  medium: 'border-l-orange-500',
+  high: 'border-l-red-500',
+  critical: 'border-l-red-600',
 };
 
 const severityBadgeColors: Record<string, string> = {
   info: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  low: 'bg-green-500/10 text-green-600 dark:text-green-400',
-  medium: 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
-  high: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
-  critical: 'bg-red-500/10 text-red-600 dark:text-red-400',
+  low: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  medium: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
+  high: 'bg-red-500/10 text-red-600 dark:text-red-400',
+  critical: 'bg-red-600/10 text-red-700 dark:text-red-500',
 };
 
 export function InsightCard({ insight }: InsightCardProps) {

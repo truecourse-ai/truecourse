@@ -22,6 +22,8 @@ import { ServiceNode } from '@/components/graph/nodes/ServiceNode';
 import { LayerNode } from '@/components/graph/nodes/LayerNode';
 import { ServiceGroupNode } from '@/components/graph/nodes/ServiceGroupNode';
 import { DatabaseNode } from '@/components/graph/nodes/DatabaseNode';
+import { ModuleNode } from '@/components/graph/nodes/ModuleNode';
+import { MethodNode } from '@/components/graph/nodes/MethodNode';
 import { DependencyEdge } from '@/components/graph/edges/DependencyEdge';
 import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
@@ -48,6 +50,8 @@ const nodeTypes: NodeTypes = {
   layer: LayerNode as unknown as NodeTypes[string],
   serviceGroup: ServiceGroupNode as unknown as NodeTypes[string],
   database: DatabaseNode as unknown as NodeTypes[string],
+  module: ModuleNode as unknown as NodeTypes[string],
+  method: MethodNode as unknown as NodeTypes[string],
 };
 
 const edgeTypes: EdgeTypes = {
@@ -90,11 +94,12 @@ function GraphCanvasInner({
       }));
       setNodes(nodesWithCallbacks);
     } else {
-      const nodesWithCallbacks = initialNodes.map((node) =>
-        node.type === 'layer'
-          ? { ...node, data: { ...node.data, onExplain: onExplainNode } }
-          : { ...node, selected: node.id === selectedNodeId }
-      );
+      const nodesWithCallbacks = initialNodes.map((node) => {
+        if (node.type === 'module' || node.type === 'method') {
+          return { ...node, selected: node.id === selectedNodeId, data: { ...node.data, onExplain: onExplainNode } };
+        }
+        return { ...node, selected: node.id === selectedNodeId };
+      });
       setNodes(nodesWithCallbacks);
     }
     setEdges(initialEdges);
@@ -113,8 +118,8 @@ function GraphCanvasInner({
     () => {
       const positions: Record<string, { x: number; y: number }> = {};
       for (const node of nodesRef.current) {
-        // In layers mode, only save service group positions, not layer nodes
-        if (depthLevel === 'layers' && node.type === 'layer') continue;
+        // Only save top-level draggable positions (service groups and databases)
+        if (node.type === 'layer' || node.type === 'module' || node.type === 'method') continue;
         positions[node.id] = node.position;
       }
       if (Object.keys(positions).length === 0) return;
@@ -140,22 +145,20 @@ function GraphCanvasInner({
         setTimeout(() => {
           fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
         }, 50);
-      } else if (depthLevel === 'layers') {
-        if (node.type === 'serviceGroup') {
-          // Zoom to service group and its children
-          const childNodeIds = nodesRef.current
-            .filter((n) => (n as Record<string, unknown>).parentId === node.id)
-            .map((n) => n.id);
-          const nodeIds = [node.id, ...childNodeIds];
-          setTimeout(() => {
-            fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
-          }, 50);
-        } else if (node.type === 'database') {
-          // Zoom to database node
-          setTimeout(() => {
-            fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
-          }, 50);
-        }
+      } else if (node.type === 'serviceGroup') {
+        // Zoom to service group and its children (layers, modules, methods)
+        const childNodeIds = nodesRef.current
+          .filter((n) => (n as Record<string, unknown>).parentId === node.id)
+          .map((n) => n.id);
+        const nodeIds = [node.id, ...childNodeIds];
+        setTimeout(() => {
+          fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: 300 });
+        }, 50);
+      } else if (node.type === 'database') {
+        // Zoom to database node
+        setTimeout(() => {
+          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: 300 });
+        }, 50);
       }
     },
     [onNodeSelect, depthLevel, fitView],

@@ -31,6 +31,15 @@ pnpm db:generate  # Generate migration SQL files after schema changes (drizzle-k
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
 - **Database.** Uses embedded Postgres (not Docker). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
 
+## Debugging LLM Behavior
+
+When investigating LLM-related issues (wrong outputs, missing data, hallucinations), check the traces in the local Langfuse instance at `http://localhost:3002`. Use the Langfuse API to fetch traces and observations:
+- `GET /api/public/traces?limit=5&orderBy=timestamp.desc` — list recent traces
+- `GET /api/public/traces/{traceId}` — get trace details
+- `GET /api/public/observations?traceId={traceId}` — get LLM generation input/output
+
+Auth: Basic auth with `LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY` from `.env`.
+
 ## Conventions
 
 - All tests live in the `tests/` directory at the repo root, not colocated with source files

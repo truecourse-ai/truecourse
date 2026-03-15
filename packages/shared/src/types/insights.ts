@@ -12,6 +12,7 @@ export const InsightTypeSchema = z.enum([
   'suggestion',
   'warning',
   'database',
+  'module',
 ])
 export type InsightType = z.infer<typeof InsightTypeSchema>
 
@@ -40,6 +41,7 @@ export const InsightSchema = z.object({
   severity: InsightSeveritySchema,
   targetServiceId: z.string().optional(),
   targetDatabaseId: z.string().optional(),
+  targetModuleId: z.string().optional(),
   targetTable: z.string().optional(),
   fixPrompt: z.string().optional(),
   createdAt: z.string(),

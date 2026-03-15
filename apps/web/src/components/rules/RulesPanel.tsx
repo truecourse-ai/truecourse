@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Shield, Cpu, Database, Loader2 } from 'lucide-react';
+import { Shield, Cpu, Database, Box, Loader2 } from 'lucide-react';
 import { getRules, type RuleResponse } from '@/lib/api';
 
-type CategoryFilter = 'all' | 'architecture' | 'database';
+type CategoryFilter = 'all' | 'architecture' | 'database' | 'module';
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -32,7 +32,7 @@ export function RulesPanel() {
   }, []);
 
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  const categoryOrder: Record<string, number> = { architecture: 0, database: 1 };
+  const categoryOrder: Record<string, number> = { architecture: 0, module: 1, database: 2 };
   const filtered = (filter === 'all' ? rules : rules.filter((r) => r.category === filter))
     .slice()
     .sort((a, b) =>
@@ -43,6 +43,7 @@ export function RulesPanel() {
   const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
     { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
     { value: 'architecture', label: 'Architecture', icon: <Cpu className="h-3.5 w-3.5" /> },
+    { value: 'module', label: 'Module', icon: <Box className="h-3.5 w-3.5" /> },
     { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
   ];
 

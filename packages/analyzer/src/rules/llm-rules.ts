@@ -104,3 +104,61 @@ export const LLM_DATABASE_RULES: AnalysisRule[] = [
     type: 'llm',
   },
 ]
+
+export const LLM_MODULE_RULES: AnalysisRule[] = [
+  {
+    key: 'llm/arch-circular-module-dependency',
+    category: 'module',
+    name: 'Circular module dependency',
+    description: 'Circular imports between modules within a service.',
+    prompt:
+      'Detect circular import chains between modules within the same service. A circular dependency exists when module A imports module B, and module B (directly or transitively) imports module A. Flag any cycles found and list the full dependency chain. Circular module dependencies make refactoring difficult and indicate unclear boundaries.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+  },
+  {
+    key: 'llm/arch-deep-inheritance-chain',
+    category: 'module',
+    name: 'Deep inheritance chain',
+    description: 'Class extending 3+ levels deep.',
+    prompt:
+      'Identify classes with deep inheritance chains (3 or more levels of extends). Deep inheritance makes code fragile — changes in base classes ripple unpredictably. Flag the full chain and suggest composition over inheritance where appropriate.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'llm/arch-excessive-fan-out',
+    category: 'module',
+    name: 'Excessive fan-out',
+    description: 'Module importing too many other modules.',
+    prompt:
+      'Identify modules that import too many other modules (high fan-out). A module with many outgoing dependencies is tightly coupled to the rest of the codebase and hard to change in isolation. Flag modules importing from more than 8-10 other internal modules and suggest extracting responsibilities.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'llm/arch-excessive-fan-in',
+    category: 'module',
+    name: 'Excessive fan-in',
+    description: 'Module imported by too many others.',
+    prompt:
+      'Identify modules imported by a disproportionately high number of other modules (high fan-in). These are bottleneck modules where any change has a large blast radius. Flag such modules and assess whether they should be split into smaller, more focused interfaces.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'llm/arch-mixed-abstraction-levels',
+    category: 'module',
+    name: 'Mixed abstraction levels',
+    description: 'Method mixing high-level orchestration with low-level details.',
+    prompt:
+      'Identify methods that mix different abstraction levels — e.g., a function that both orchestrates high-level workflow (calling other services, managing transactions) and performs low-level operations (string manipulation, raw SQL, bit operations). Each function should operate at a single level of abstraction. Flag methods where you see this mixing and suggest how to separate concerns.',
+    enabled: true,
+    severity: 'low',
+    type: 'llm',
+  },
+]

@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, useNodeConnections, type NodeProps } from '@xyflow/react';
 import { Database, Zap } from 'lucide-react';
 
 type DatabaseNodeData = {
@@ -29,9 +29,12 @@ const DB_TYPE_LABELS: Record<string, string> = {
   sqlite: 'SQLite',
 };
 
+const HIDDEN_CLASS = '!invisible';
+
 function DatabaseNodeComponent({ id, data, selected }: NodeProps & { data: DatabaseNodeData }) {
   const { label, databaseType, tableCount, connectedServices, framework } = data;
   const color = DB_TYPE_COLORS[databaseType] || '#6b7280';
+  const topConnections = useNodeConnections({ handleType: 'target', handleId: 'top' });
   const typeLabel = DB_TYPE_LABELS[databaseType] || databaseType;
   const isCache = databaseType === 'redis';
   const Icon = isCache ? Zap : Database;
@@ -43,7 +46,7 @@ function DatabaseNodeComponent({ id, data, selected }: NodeProps & { data: Datab
       }`}
       style={selected ? undefined : { borderColor: color }}
     >
-      <Handle type="target" position={Position.Top} id="top" className="!bg-muted-foreground !border-none !w-[5px] !h-[5px]" />
+      <Handle type="target" position={Position.Top} id="top" className={topConnections.length > 0 ? '!border-none !w-[5px] !h-[5px] !z-10' : HIDDEN_CLASS} style={topConnections.length > 0 ? { backgroundColor: color } : undefined} />
 
       <div className="flex items-center gap-2 px-3 py-2">
         <div

@@ -44,6 +44,9 @@ export const FunctionDefinitionSchema = z.object({
   isAsync: z.boolean(),
   isExported: z.boolean(),
   location: SourceLocationSchema,
+  lineCount: z.number().optional(),
+  statementCount: z.number().optional(),
+  maxNestingDepth: z.number().optional(),
 })
 
 export type FunctionDefinition = z.infer<typeof FunctionDefinitionSchema>
@@ -158,3 +161,61 @@ export const ModuleDependencySchema = z.object({
 })
 
 export type ModuleDependency = z.infer<typeof ModuleDependencySchema>
+
+// ---------------------------------------------------------------------------
+// Module Info (class, interface, or standalone file module)
+// ---------------------------------------------------------------------------
+
+export const ModuleKindSchema = z.enum(['class', 'interface', 'standalone'])
+export type ModuleKind = z.infer<typeof ModuleKindSchema>
+
+export const ModuleInfoSchema = z.object({
+  name: z.string(),
+  filePath: z.string(),
+  kind: ModuleKindSchema,
+  serviceName: z.string(),
+  layerName: z.string(),
+  methodCount: z.number(),
+  propertyCount: z.number(),
+  importCount: z.number(),
+  exportCount: z.number(),
+  superClass: z.string().optional(),
+  lineCount: z.number().optional(),
+})
+
+export type ModuleInfo = z.infer<typeof ModuleInfoSchema>
+
+// ---------------------------------------------------------------------------
+// Method Info (function or class method)
+// ---------------------------------------------------------------------------
+
+export const MethodInfoSchema = z.object({
+  name: z.string(),
+  moduleName: z.string(),
+  serviceName: z.string(),
+  filePath: z.string(),
+  signature: z.string(),
+  paramCount: z.number(),
+  returnType: z.string().optional(),
+  isAsync: z.boolean(),
+  isExported: z.boolean(),
+  lineCount: z.number().optional(),
+  statementCount: z.number().optional(),
+  maxNestingDepth: z.number().optional(),
+})
+
+export type MethodInfo = z.infer<typeof MethodInfoSchema>
+
+// ---------------------------------------------------------------------------
+// Module Dependency (import-based, between modules)
+// ---------------------------------------------------------------------------
+
+export const ModuleLevelDependencySchema = z.object({
+  sourceModule: z.string(),
+  sourceService: z.string(),
+  targetModule: z.string(),
+  targetService: z.string(),
+  importedNames: z.array(z.string()),
+})
+
+export type ModuleLevelDependency = z.infer<typeof ModuleLevelDependencySchema>
