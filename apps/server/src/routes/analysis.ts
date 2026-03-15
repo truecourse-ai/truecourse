@@ -25,7 +25,7 @@ import {
   emitAnalysisComplete,
   emitInsightsReady,
 } from '../socket/handlers.js';
-import { buildGraphData, buildLayerGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
+import { buildGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
 import { getAllDefaultRules, checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
 import { v4 as uuidv4 } from 'uuid';
@@ -722,34 +722,6 @@ router.get(
             analysisDeps,
           );
         }
-      } else if (level === 'layers') {
-        const analysisLayers = await db
-          .select()
-          .from(layers)
-          .where(eq(layers.analysisId, analysis.id));
-
-        const analysisLayerDeps = await db
-          .select()
-          .from(layerDependencies)
-          .where(eq(layerDependencies.analysisId, analysis.id));
-
-        graphData = buildLayerGraphData(
-          analysisServices,
-          analysisDeps,
-          analysisLayers.map((l) => ({
-            id: l.id,
-            serviceName: l.serviceName,
-            serviceId: l.serviceId,
-            layer: l.layer,
-            fileCount: l.fileCount,
-            filePaths: l.filePaths as string[],
-            confidence: l.confidence,
-            evidence: l.evidence as string[],
-          })),
-          analysisLayerDeps,
-          analysisDatabases,
-          analysisDbConnections,
-        );
       } else {
         graphData = buildGraphData(analysisServices, analysisDeps, analysisDatabases, analysisDbConnections);
       }

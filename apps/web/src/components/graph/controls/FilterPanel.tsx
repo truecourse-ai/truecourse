@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Filter, Search, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Filter, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
 import type { DepthLevel } from '@/types/graph';
 
 type FilterPanelProps = {
@@ -83,147 +81,130 @@ export function FilterPanel({
     'Search...';
 
   return (
-    <div className="absolute left-4 top-4 z-10">
-      <Button
-        variant="outline"
+    <div className="absolute left-4 top-3 z-10">
+      <button
         onClick={() => setIsOpen(!isOpen)}
-        className="shadow-md"
+        className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm text-muted-foreground hover:text-foreground transition-colors"
       >
-        <Filter className="h-4 w-4" />
+        <Filter className="h-3.5 w-3.5" />
         Filters
         {hasActiveFilters && (
           <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
             {activeCount}
           </span>
         )}
-      </Button>
+      </button>
 
       {isOpen && (
-        <Card className="mt-2 w-64 shadow-lg max-h-[calc(100vh-120px)] overflow-y-auto">
-          <CardContent className="p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-foreground">
-                Filters
-              </h3>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setIsOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </Button>
+        <div className="mt-1.5 w-56 rounded-md border border-border bg-card p-2.5 shadow-lg max-h-[calc(100vh-120px)] overflow-y-auto">
+          {/* Search */}
+          <div className="relative mb-2">
+            <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="text"
+              value={filters.searchQuery}
+              onChange={(e) =>
+                updateFilters({ ...filters, searchQuery: e.target.value })
+              }
+              placeholder={searchPlaceholder}
+              className="h-7 pl-7 text-[11px]"
+            />
+          </div>
+
+          {/* Service Types (includes database) */}
+          {(serviceTypes.length > 0 || hasDatabases) && (
+            <div className="mb-2">
+              <h4 className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Type
+              </h4>
+              <div className="space-y-0.5">
+                {serviceTypes.map((type) => (
+                  <label
+                    key={type}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-foreground hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!filters.excludedTypes.has(type)}
+                      onChange={() =>
+                        updateFilters({ ...filters, excludedTypes: toggleSet(filters.excludedTypes, type) })
+                      }
+                      className="rounded border-border accent-primary h-3 w-3"
+                    />
+                    {type}
+                  </label>
+                ))}
+                {hasDatabases && (
+                  <label className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-foreground hover:bg-muted/50">
+                    <input
+                      type="checkbox"
+                      checked={filters.showDatabases}
+                      onChange={() =>
+                        updateFilters({ ...filters, showDatabases: !filters.showDatabases })
+                      }
+                      className="rounded border-border accent-primary h-3 w-3"
+                    />
+                    database
+                  </label>
+                )}
+              </div>
             </div>
+          )}
 
-            {/* Search */}
-            <div className="relative mb-3">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="text"
-                value={filters.searchQuery}
-                onChange={(e) =>
-                  updateFilters({ ...filters, searchQuery: e.target.value })
-                }
-                placeholder={searchPlaceholder}
-                className="pl-8 text-xs"
-              />
+          {/* Frameworks */}
+          {frameworks.length > 0 && (
+            <div className="mb-2">
+              <h4 className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Framework
+              </h4>
+              <div className="space-y-0.5">
+                {frameworks.map((fw) => (
+                  <label
+                    key={fw}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-foreground hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!filters.excludedFrameworks.has(fw)}
+                      onChange={() =>
+                        updateFilters({ ...filters, excludedFrameworks: toggleSet(filters.excludedFrameworks, fw) })
+                      }
+                      className="rounded border-border accent-primary h-3 w-3"
+                    />
+                    {fw}
+                  </label>
+                ))}
+              </div>
             </div>
+          )}
 
-            {/* Service Types (includes database) */}
-            {(serviceTypes.length > 0 || hasDatabases) && (
-              <div className="mb-3">
-                <h4 className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  Service Type
-                </h4>
-                <div className="space-y-1">
-                  {serviceTypes.map((type) => (
-                    <label
-                      key={type}
-                      className="flex cursor-pointer items-center gap-2 text-xs text-foreground"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!filters.excludedTypes.has(type)}
-                        onChange={() =>
-                          updateFilters({ ...filters, excludedTypes: toggleSet(filters.excludedTypes, type) })
-                        }
-                        className="rounded border-border accent-primary"
-                      />
-                      {type}
-                    </label>
-                  ))}
-                  {hasDatabases && (
-                    <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground">
-                      <input
-                        type="checkbox"
-                        checked={filters.showDatabases}
-                        onChange={() =>
-                          updateFilters({ ...filters, showDatabases: !filters.showDatabases })
-                        }
-                        className="rounded border-border accent-primary"
-                      />
-                      database
-                    </label>
-                  )}
-                </div>
+          {/* Layer Types */}
+          {showLayerFilter && (
+            <div>
+              <h4 className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Layer
+              </h4>
+              <div className="space-y-0.5">
+                {layerTypes.map((layer) => (
+                  <label
+                    key={layer}
+                    className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-foreground hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!filters.excludedLayers.has(layer)}
+                      onChange={() =>
+                        updateFilters({ ...filters, excludedLayers: toggleSet(filters.excludedLayers, layer) })
+                      }
+                      className="rounded border-border accent-primary h-3 w-3"
+                    />
+                    {LAYER_LABELS[layer] || layer}
+                  </label>
+                ))}
               </div>
-            )}
-
-            {/* Frameworks */}
-            {frameworks.length > 0 && (
-              <div className="mb-3">
-                <h4 className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  Framework
-                </h4>
-                <div className="space-y-1">
-                  {frameworks.map((fw) => (
-                    <label
-                      key={fw}
-                      className="flex cursor-pointer items-center gap-2 text-xs text-foreground"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!filters.excludedFrameworks.has(fw)}
-                        onChange={() =>
-                          updateFilters({ ...filters, excludedFrameworks: toggleSet(filters.excludedFrameworks, fw) })
-                        }
-                        className="rounded border-border accent-primary"
-                      />
-                      {fw}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Layer Types */}
-            {showLayerFilter && (
-              <div className="mb-3">
-                <h4 className="mb-1.5 text-xs font-medium text-muted-foreground">
-                  Layer Type
-                </h4>
-                <div className="space-y-1">
-                  {layerTypes.map((layer) => (
-                    <label
-                      key={layer}
-                      className="flex cursor-pointer items-center gap-2 text-xs text-foreground"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!filters.excludedLayers.has(layer)}
-                        onChange={() =>
-                          updateFilters({ ...filters, excludedLayers: toggleSet(filters.excludedLayers, layer) })
-                        }
-                        className="rounded border-border accent-primary"
-                      />
-                      {LAYER_LABELS[layer] || layer}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          </CardContent>
-        </Card>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

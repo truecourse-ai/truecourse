@@ -97,7 +97,7 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
     );
   }
 
-  // Card mode: shows file list (used in layers depth level)
+  // Card mode: fallback (layers depth level was removed; container mode is the primary usage)
   const shownFiles = fileNames.slice(0, MAX_FILES_SHOWN);
   const remaining = fileNames.length - MAX_FILES_SHOWN;
 

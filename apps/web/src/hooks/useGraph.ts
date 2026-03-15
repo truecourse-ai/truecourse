@@ -18,7 +18,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
     try {
       const data = await api.getGraph(repoId, { branch, level });
 
-      if (level === 'modules' || level === 'methods' || level === 'layers') {
+      if (level === 'modules' || level === 'methods') {
         // Layer-level view: mix of serviceGroupNode, layerNode, and databaseNode types
         const graphNodes: Node[] = data.nodes.map((node) => {
           if (node.type === 'databaseNode') {

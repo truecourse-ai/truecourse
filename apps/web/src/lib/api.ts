@@ -158,7 +158,7 @@ export function analyzeRepo(id: string, branch?: string): Promise<{ jobId: strin
 // Graph
 export function getGraph(
   repoId: string,
-  options?: { branch?: string; level?: 'services' | 'layers' | 'modules' | 'methods' },
+  options?: { branch?: string; level?: 'services' | 'modules' | 'methods' },
 ): Promise<GraphResponse> {
   const params = new URLSearchParams();
   if (options?.branch) params.set('branch', options.branch);

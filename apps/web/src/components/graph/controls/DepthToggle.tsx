@@ -9,7 +9,6 @@ type DepthToggleProps = {
 
 const levels: { value: DepthLevel; label: string }[] = [
   { value: 'services', label: 'Services' },
-  { value: 'layers', label: 'Layers' },
   { value: 'modules', label: 'Modules' },
   { value: 'methods', label: 'Methods' },
 ];
