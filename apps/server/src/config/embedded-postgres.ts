@@ -57,7 +57,7 @@ export async function startEmbeddedPostgres(): Promise<string> {
     if (message.includes('address already in use') || message.includes('EADDRINUSE') || !message) {
       throw new Error(
         `Port ${port} is already in use. Is another TrueCourse instance or PostgreSQL running?\n` +
-        `Stop it first, or set EMBEDDED_PG_PORT to use a different port.`
+        `Stop the other instance first.`
       );
     }
     throw new Error(`Failed to start embedded PostgreSQL: ${message}`);

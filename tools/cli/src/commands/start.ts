@@ -31,7 +31,6 @@ export async function runStart(): Promise<void> {
 
   serverProcess.on("close", (code) => {
     if (code !== null && code !== 0) {
-      p.log.error(`Server exited with code ${code}`);
       process.exit(code);
     }
   });

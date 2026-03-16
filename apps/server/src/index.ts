@@ -32,10 +32,13 @@ async function main() {
   initDatabase(databaseUrl);
 
   // 3. Run migrations
+  // In dev: migrations are at ../src/db/migrations relative to src/
+  // In packaged mode: migrations are at ./db/migrations relative to dist/server.mjs
+  const devMigrations = path.join(__dirname, '../src/db/migrations');
+  const distMigrations = path.join(__dirname, 'db/migrations');
+  const migrationsFolder = fs.existsSync(distMigrations) ? distMigrations : devMigrations;
   const migrationClient = postgres(databaseUrl, { max: 1, onnotice: () => {} });
-  await migrate(drizzle(migrationClient), {
-    migrationsFolder: path.join(__dirname, '../src/db/migrations'),
-  });
+  await migrate(drizzle(migrationClient), { migrationsFolder });
   await migrationClient.end();
   console.log('[Database] Migrations complete');
 
@@ -131,6 +134,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[Server] Failed to start:', err);
+  console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

@@ -11,7 +11,9 @@
   <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
 </p>
 
-TrueCourse analyzes JavaScript/TypeScript repositories to detect architectural violations like circular dependencies, layer breaches, god modules, dead code, and more. It uses tree-sitter for static analysis and LLMs to surface violations with actionable fix suggestions. View results in the terminal or explore an interactive dependency graph in the web UI.
+TrueCourse analyzes your codebase to detect architectural violations like circular dependencies, layer breaches, god modules, dead code, and more. It uses [tree-sitter](https://tree-sitter.github.io/tree-sitter/) for static analysis and LLMs to surface violations with actionable fix suggestions. View results in the terminal or explore an interactive dependency graph in the web UI.
+
+Everything runs locally on your machine with your own API keys. Your code never leaves your environment.
 
 <p align="center">
   <img src="assets/screenshot.png" alt="TrueCourse Screenshot" width="100%" />
@@ -86,6 +88,13 @@ cp .env.example .env
 
 pnpm dev
 ```
+
+## Language Support
+
+| Language | Status |
+|---|---|
+| JavaScript / TypeScript | Supported |
+| Python | Upcoming |
 
 ## Analysis Rules
 
