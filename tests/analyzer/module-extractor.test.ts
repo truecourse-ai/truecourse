@@ -476,6 +476,205 @@ describe('extractModulesAndMethods', () => {
     expect(result.modules[0].name).toBe('dealers');
   });
 
+  it('creates standalone module for exported functions alongside classes', () => {
+    const analysis = makeAnalysis({
+      filePath: '/repo/svc/src/user.ts',
+      classes: [
+        {
+          name: 'UserService',
+          methods: [
+            {
+              name: 'getUser',
+              params: [],
+              isAsync: false,
+              isExported: false,
+              location: { filePath: '/repo/svc/src/user.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+            },
+          ],
+          properties: [],
+          location: { filePath: '/repo/svc/src/user.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      functions: [
+        {
+          name: 'createUserHelper',
+          params: [],
+          isAsync: false,
+          isExported: true,
+          location: { filePath: '/repo/svc/src/user.ts', startLine: 12, endLine: 20, startColumn: 0, endColumn: 0 },
+        },
+        {
+          name: 'validateUser',
+          params: [],
+          isAsync: false,
+          isExported: true,
+          location: { filePath: '/repo/svc/src/user.ts', startLine: 22, endLine: 30, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [
+        { name: 'UserService', isDefault: false },
+        { name: 'createUserHelper', isDefault: false },
+        { name: 'validateUser', isDefault: false },
+      ],
+    });
+
+    const layers = [makeLayerDetail({ filePaths: ['/repo/svc/src/user.ts'] })];
+    const result = extractModulesAndMethods([analysis], layers, []);
+
+    // Should have 2 modules: the class + a standalone for the exported functions
+    expect(result.modules).toHaveLength(2);
+    expect(result.modules[0].name).toBe('UserService');
+    expect(result.modules[0].kind).toBe('class');
+    expect(result.modules[1].kind).toBe('standalone');
+    expect(result.modules[1].methodCount).toBe(2);
+  });
+
+  it('uses parent directory name for index files instead of function name', () => {
+    const analysis = makeAnalysis({
+      filePath: '/repo/svc/src/db/index.ts',
+      functions: [
+        {
+          name: 'get',
+          params: [],
+          isAsync: false,
+          isExported: true,
+          location: { filePath: '/repo/svc/src/db/index.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [{ name: 'get', isDefault: false }],
+    });
+
+    const layers = [makeLayerDetail({ filePaths: ['/repo/svc/src/db/index.ts'] })];
+    const result = extractModulesAndMethods([analysis], layers, []);
+
+    expect(result.modules).toHaveLength(1);
+    expect(result.modules[0].name).toBe('db');
+  });
+
+  it('filters dependency edges by importedNames instead of cartesian product', () => {
+    const analysis1 = makeAnalysis({
+      filePath: '/repo/svc/src/app.ts',
+      classes: [{
+        name: 'App',
+        methods: [],
+        properties: [],
+        location: { filePath: '/repo/svc/src/app.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+      }],
+      imports: [{ source: './models', specifiers: [{ name: 'Foo', isDefault: false, isNamespace: false }], isTypeOnly: false }],
+      exports: [{ name: 'App', isDefault: false }],
+    });
+
+    const analysis2 = makeAnalysis({
+      filePath: '/repo/svc/src/models.ts',
+      classes: [
+        {
+          name: 'Foo',
+          methods: [],
+          properties: [],
+          location: { filePath: '/repo/svc/src/models.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+        },
+        {
+          name: 'Bar',
+          methods: [],
+          properties: [],
+          location: { filePath: '/repo/svc/src/models.ts', startLine: 7, endLine: 12, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [
+        { name: 'Foo', isDefault: false },
+        { name: 'Bar', isDefault: false },
+      ],
+    });
+
+    const layers = [
+      makeLayerDetail({ filePaths: ['/repo/svc/src/app.ts', '/repo/svc/src/models.ts'] }),
+    ];
+
+    const fileDeps: ModuleDependency[] = [
+      { source: '/repo/svc/src/app.ts', target: '/repo/svc/src/models.ts', importedNames: ['Foo'] },
+    ];
+
+    const result = extractModulesAndMethods([analysis1, analysis2], layers, fileDeps);
+
+    // Should only create edge to Foo, not Bar
+    expect(result.moduleDependencies).toHaveLength(1);
+    expect(result.moduleDependencies[0].targetModule).toBe('Foo');
+  });
+
+  it('falls back to first target module when importedNames is empty (import *)', () => {
+    const analysis1 = makeAnalysis({
+      filePath: '/repo/svc/src/app.ts',
+      classes: [{
+        name: 'App',
+        methods: [],
+        properties: [],
+        location: { filePath: '/repo/svc/src/app.ts', startLine: 1, endLine: 10, startColumn: 0, endColumn: 0 },
+      }],
+      imports: [{ source: './models', specifiers: [{ name: '*', isDefault: false, isNamespace: true }], isTypeOnly: false }],
+      exports: [{ name: 'App', isDefault: false }],
+    });
+
+    const analysis2 = makeAnalysis({
+      filePath: '/repo/svc/src/models.ts',
+      classes: [
+        {
+          name: 'Alpha',
+          methods: [],
+          properties: [],
+          location: { filePath: '/repo/svc/src/models.ts', startLine: 1, endLine: 5, startColumn: 0, endColumn: 0 },
+        },
+        {
+          name: 'Beta',
+          methods: [],
+          properties: [],
+          location: { filePath: '/repo/svc/src/models.ts', startLine: 7, endLine: 12, startColumn: 0, endColumn: 0 },
+        },
+        {
+          name: 'Gamma',
+          methods: [],
+          properties: [],
+          location: { filePath: '/repo/svc/src/models.ts', startLine: 14, endLine: 20, startColumn: 0, endColumn: 0 },
+        },
+      ],
+      exports: [
+        { name: 'Alpha', isDefault: false },
+        { name: 'Beta', isDefault: false },
+        { name: 'Gamma', isDefault: false },
+      ],
+    });
+
+    const layers = [
+      makeLayerDetail({ filePaths: ['/repo/svc/src/app.ts', '/repo/svc/src/models.ts'] }),
+    ];
+
+    const fileDeps: ModuleDependency[] = [
+      { source: '/repo/svc/src/app.ts', target: '/repo/svc/src/models.ts', importedNames: [] },
+    ];
+
+    const result = extractModulesAndMethods([analysis1, analysis2], layers, fileDeps);
+
+    // Should create only 1 edge to first module, not 3
+    expect(result.moduleDependencies).toHaveLength(1);
+    expect(result.moduleDependencies[0].targetModule).toBe('Alpha');
+  });
+
+  it('skips standalone module creation for type-only files with no named functions', () => {
+    const analysis = makeAnalysis({
+      filePath: '/repo/svc/src/types.ts',
+      functions: [],
+      exports: [
+        { name: 'UserType', isDefault: false },
+        { name: 'Config', isDefault: false },
+      ],
+    });
+
+    const layers = [makeLayerDetail({ filePaths: ['/repo/svc/src/types.ts'] })];
+    const result = extractModulesAndMethods([analysis], layers, []);
+
+    expect(result.modules).toHaveLength(0);
+    expect(result.methods).toHaveLength(0);
+  });
+
   it('preserves function metrics (lineCount, statementCount, maxNestingDepth)', () => {
     const analysis = makeAnalysis({
       filePath: '/repo/svc/src/big.ts',

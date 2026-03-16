@@ -1,4 +1,5 @@
 import dagre from 'dagre';
+import { isFrameworkEntryFile } from '@truecourse/analyzer';
 
 export interface GraphNode {
   id: string;
@@ -1371,7 +1372,7 @@ function markDeadModules(
   for (const node of nodes) {
     if (node.type === 'moduleNode') {
       const mod = modulesList.find((m) => m.id === node.id);
-      if (mod && !connectedModuleIds.has(mod.id)) {
+      if (mod && !connectedModuleIds.has(mod.id) && !isFrameworkEntryFile(mod.filePath)) {
         (node.data as Record<string, unknown>).isDead = true;
       }
     }

@@ -16,7 +16,7 @@ export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer
 export { parseCode, parseFile, getParser } from './parser.js'
 
 // Language configuration
-export { detectLanguage, getLanguageConfig, type LanguageConfig } from './language-config.js'
+export { detectLanguage, getLanguageConfig, isFrameworkEntryFile, type LanguageConfig } from './language-config.js'
 export { TYPESCRIPT_CONFIG, JAVASCRIPT_CONFIG } from './language-config.js'
 
 // Extractors

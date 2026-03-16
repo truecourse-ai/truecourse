@@ -55,6 +55,12 @@ function loadIgnorePatterns(baseDir: string): { ig: ReturnType<typeof ignore>; r
   // Always ignore .git directory (never analyze git internals)
   ig.add('.git')
 
+  // Ignore test files — they're not application architecture
+  ig.add('**/*.test.*')
+  ig.add('**/*.spec.*')
+  ig.add('**/__tests__/')
+  ig.add('**/__mocks__/')
+
   return { ig, rootDir }
 }
 

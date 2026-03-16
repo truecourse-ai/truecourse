@@ -76,10 +76,48 @@ export function extractModulesAndMethods(
       addToFileModules(fileToModules, analysis.filePath, modName)
     }
 
+    // Extract exported functions not already captured as class methods into a standalone module
+    if (analysis.classes.length > 0 && analysis.functions.length > 0) {
+      const classMethodNames = new Set<string>()
+      for (const cls of analysis.classes) {
+        for (const m of cls.methods) {
+          classMethodNames.add(m.name)
+        }
+      }
+
+      const extraFunctions = analysis.functions.filter(
+        (f) => f.isExported && f.name !== 'anonymous' && !classMethodNames.has(f.name),
+      )
+
+      if (extraFunctions.length > 0) {
+        const modName = deriveModuleName(analysis)
+        modules.push({
+          name: modName,
+          filePath: analysis.filePath,
+          kind: 'standalone',
+          serviceName,
+          layerName,
+          methodCount: extraFunctions.length,
+          propertyCount: 0,
+          importCount: analysis.imports.length,
+          exportCount: analysis.exports.length,
+          lineCount: totalFileLines(analysis),
+        })
+
+        for (const fn of extraFunctions) {
+          methods.push(toMethodInfo(fn, modName, serviceName, analysis.filePath))
+        }
+
+        addToFileModules(fileToModules, analysis.filePath, modName)
+      }
+    }
+
     // If file has no classes but has functions or exports → standalone module
     if (analysis.classes.length === 0 && (analysis.functions.length > 0 || analysis.exports.length > 0)) {
       const modName = deriveModuleName(analysis)
       const namedFunctions = analysis.functions.filter((f) => f.name !== 'anonymous')
+
+      if (namedFunctions.length === 0) continue
 
       modules.push({
         name: modName,
@@ -102,8 +140,16 @@ export function extractModulesAndMethods(
     }
   }
 
+  // Build method name → module name lookup (for matching function imports to modules)
+  const methodToModule = new Map<string, string>()
+  for (const m of methods) {
+    if (!methodToModule.has(m.name)) {
+      methodToModule.set(m.name, m.moduleName)
+    }
+  }
+
   // Build module-level dependencies from file-level dependencies
-  const moduleDependencies = buildModuleDependencies(fileDependencies, fileToModules, fileLookup)
+  const moduleDependencies = buildModuleDependencies(fileDependencies, fileToModules, fileLookup, methodToModule)
 
   // Build method-level dependencies from call expressions
   const methodDependencies = buildMethodDependencies(analyses, modules, methods, fileLookup)
@@ -170,15 +216,20 @@ function deriveModuleName(analysis: FileAnalysis): string {
     return localExports[0].name
   }
 
+  // For index files, use parent directory name (they're barrels/entry points)
+  const baseName = fileBaseName(analysis.filePath)
+  if (path.basename(analysis.filePath).replace(/\.(ts|tsx|js|jsx)$/, '') === 'index') {
+    return baseName
+  }
+
   // Single exported function → use its name
   const exportedFns = analysis.functions.filter((f) => f.isExported)
   if (exportedFns.length === 1) {
     return exportedFns[0].name
   }
 
-  // For index files, prefer first local export or first function name before directory fallback
-  const baseName = fileBaseName(analysis.filePath)
-  if (baseName === 'index' || GENERIC_DIR_NAMES.has(baseName)) {
+  // Generic directory names — use first export or function name
+  if (GENERIC_DIR_NAMES.has(baseName)) {
     if (localExports.length > 0) return localExports[0].name
     if (analysis.functions.length > 0) return analysis.functions[0].name
   }
@@ -256,24 +307,76 @@ function buildModuleDependencies(
   fileDeps: ModuleDependency[],
   fileToModules: Map<string, string[]>,
   fileLookup: Map<string, { serviceName: string; layerName: string }>,
+  methodToModule: Map<string, string>,
 ): ModuleLevelDependency[] {
   const deps: ModuleLevelDependency[] = []
   const seen = new Set<string>()
 
+  // Build module name → file path lookup (for barrel resolution)
+  const moduleToFile = new Map<string, string>()
+  for (const [filePath, modNames] of fileToModules) {
+    for (const modName of modNames) {
+      moduleToFile.set(modName, filePath)
+    }
+  }
+
   for (const dep of fileDeps) {
     const sourceModules = fileToModules.get(dep.source)
-    const targetModules = fileToModules.get(dep.target)
-    if (!sourceModules?.length || !targetModules?.length) continue
+    if (!sourceModules?.length) continue
+
+    // Resolve target modules — if target file has no modules (barrel/re-export file),
+    // follow its own file deps to find the real target modules
+    let targetModules = fileToModules.get(dep.target)
+    let resolvedThroughBarrel = false
+    if (!targetModules?.length) {
+      const resolved: string[] = []
+      for (const barrelDep of fileDeps) {
+        if (barrelDep.source === dep.target) {
+          const mods = fileToModules.get(barrelDep.target)
+          if (mods) resolved.push(...mods)
+        }
+      }
+      if (resolved.length === 0) continue
+      targetModules = resolved
+      resolvedThroughBarrel = true
+    }
 
     const sourceInfo = fileLookup.get(dep.source)
-    const targetInfo = fileLookup.get(dep.target)
-    if (!sourceInfo || !targetInfo) continue
+    if (!sourceInfo) continue
 
-    // Map each source module to each target module
+    // Filter target modules by imported names to avoid cartesian product
+    const importedSet = new Set(dep.importedNames.map((n) => n.toLowerCase()))
+
     for (const srcMod of sourceModules) {
-      for (const tgtMod of targetModules) {
-        if (srcMod === tgtMod && dep.source === dep.target) continue
-        const key = `${sourceInfo.serviceName}::${srcMod}::${dep.source}::${targetInfo.serviceName}::${tgtMod}::${dep.target}`
+      // Match targets whose name appears in the import list
+      let matchedTargets = importedSet.size > 0
+        ? targetModules.filter((t) => importedSet.has(t.toLowerCase()))
+        : []
+
+      // Fallback: match imported function names to the modules that contain them
+      if (matchedTargets.length === 0 && importedSet.size > 0) {
+        const targetSet = new Set(targetModules)
+        const resolved = new Set<string>()
+        for (const name of dep.importedNames) {
+          const mod = methodToModule.get(name)
+          if (mod && targetSet.has(mod)) resolved.add(mod)
+        }
+        matchedTargets = [...resolved]
+      }
+
+      // If still no match (import *, side-effect, default), connect to first target only
+      const targets = matchedTargets.length > 0 ? matchedTargets : [targetModules[0]]
+
+      for (const tgtMod of targets) {
+        // When resolved through barrel, use the actual module's file path
+        const tgtFilePath = resolvedThroughBarrel
+          ? (moduleToFile.get(tgtMod) || dep.target)
+          : dep.target
+        const targetInfo = fileLookup.get(tgtFilePath)
+        if (!targetInfo) continue
+
+        if (srcMod === tgtMod && dep.source === tgtFilePath) continue
+        const key = `${sourceInfo.serviceName}::${srcMod}::${dep.source}::${targetInfo.serviceName}::${tgtMod}::${tgtFilePath}`
         if (seen.has(key)) continue
         seen.add(key)
 
@@ -283,7 +386,7 @@ function buildModuleDependencies(
           sourceFilePath: dep.source,
           targetModule: tgtMod,
           targetService: targetInfo.serviceName,
-          targetFilePath: dep.target,
+          targetFilePath: tgtFilePath,
           importedNames: dep.importedNames,
         })
       }

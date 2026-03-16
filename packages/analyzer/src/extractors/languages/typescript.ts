@@ -21,6 +21,22 @@ import { createSourceLocation, extractDocComment, computeFunctionMetrics } from 
  *  - assignment_expression: `obj.foo = () => {}` → "foo"
  *  - argument in a method call: `router.get('/', () => {})` → "get_handler"
  */
+const FUNCTION_NODE_TYPES = new Set([
+  'function_declaration', 'function', 'arrow_function',
+  'generator_function_declaration', 'generator_function',
+  'method_definition',
+])
+
+/** Check if a node is nested inside another function (not top-level) */
+function isNestedInFunction(node: SyntaxNode): boolean {
+  let current = node.parent
+  while (current) {
+    if (FUNCTION_NODE_TYPES.has(current.type)) return true
+    current = current.parent
+  }
+  return false
+}
+
 function extractFunctionName(node: SyntaxNode): string {
   const nameNode = node.childForFieldName('name')
   if (nameNode?.text) return nameNode.text
@@ -28,6 +44,9 @@ function extractFunctionName(node: SyntaxNode): string {
   // Check parent for naming context
   const parent = node.parent
   if (!parent) return 'anonymous'
+
+  // Skip arrow functions nested inside other functions — they're implementation details
+  if (isNestedInFunction(node)) return 'anonymous'
 
   // const foo = () => {} or const foo = function() {}
   if (parent.type === 'variable_declarator') {
@@ -47,21 +66,6 @@ function extractFunctionName(node: SyntaxNode): string {
     if (left?.type === 'member_expression') {
       const prop = left.childForFieldName('property')
       if (prop?.text) return prop.text
-    }
-  }
-
-  // router.get('/', () => {}) — arrow fn is an argument in a call
-  if (parent.type === 'arguments') {
-    const callNode = parent.parent
-    if (callNode?.type === 'call_expression') {
-      const callee = callNode.childForFieldName('function')
-      if (callee) {
-        // Extract method name from callee (e.g., "get" from "router.get")
-        if (callee.type === 'member_expression') {
-          const method = callee.childForFieldName('property')
-          if (method?.text) return `${method.text}_handler`
-        }
-      }
     }
   }
 
@@ -450,6 +454,7 @@ export function extractTypeScriptFunctions(
 ): FunctionDefinition[] {
   const config = getLanguageConfig('typescript')
   const functions: FunctionDefinition[] = []
+  const seenLocations = new Set<string>()
 
   const queryString =
     config.functionQuery ||
@@ -468,11 +473,15 @@ export function extractTypeScriptFunctions(
       continue
     }
 
+    const location = createSourceLocation(node, filePath)
+    const locationKey = `${location.startLine}:${location.startColumn}`
+    if (seenLocations.has(locationKey)) continue
+    seenLocations.add(locationKey)
+
     const name = extractFunctionName(node)
     const paramsNode = node.childForFieldName('parameters')
     const params = extractParameters(paramsNode)
     const returnType = extractReturnType(node)
-    const location = createSourceLocation(node, filePath)
     const exported = isExported(node)
     const async = isAsync(node)
 

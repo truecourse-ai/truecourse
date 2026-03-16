@@ -22,6 +22,9 @@ export interface LanguageConfig {
   exportNodeTypes: string[]
   callNodeTypes: string[]
 
+  // Framework entry file patterns (files invoked by the framework, not by user code)
+  frameworkEntryPatterns: RegExp[]
+
   // Optional: Custom tree-sitter query strings
   functionQuery?: string
   classQuery?: string
@@ -52,9 +55,6 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
   classNodeTypes: [
     'class_declaration',
     'abstract_class_declaration',
-    'interface_declaration',
-    'type_alias_declaration',
-    'enum_declaration',
   ],
 
   importNodeTypes: ['import_statement', 'import_clause'],
@@ -62,6 +62,18 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
   exportNodeTypes: ['export_statement'],
 
   callNodeTypes: ['call_expression'],
+
+  frameworkEntryPatterns: [
+    /\bpage\.tsx?$/,
+    /\blayout\.tsx?$/,
+    /\bloading\.tsx?$/,
+    /\berror\.tsx?$/,
+    /\bnot-found\.tsx?$/,
+    /\broute\.tsx?$/,
+    /\bmiddleware\.tsx?$/,
+    /\bworker\.tsx?$/,
+    /\binstrument\.tsx?$/,
+  ],
 
   // Simplified queries - just capture node types
   functionQuery: `
@@ -73,9 +85,6 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
   classQuery: `
     (class_declaration) @class
     (abstract_class_declaration) @class
-    (interface_declaration) @class
-    (type_alias_declaration) @class
-    (enum_declaration) @class
   `,
 
   importQuery: `
@@ -128,17 +137,27 @@ export const JAVASCRIPT_CONFIG: LanguageConfig = {
 }
 
 /**
+ * Registry of all language configurations. Add new languages here.
+ */
+const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, JAVASCRIPT_CONFIG]
+
+/**
  * Get language configuration by language name
  */
 export function getLanguageConfig(language: SupportedLanguage): LanguageConfig {
-  switch (language) {
-    case 'typescript':
-      return TYPESCRIPT_CONFIG
-    case 'javascript':
-      return JAVASCRIPT_CONFIG
-    default:
-      throw new Error(`Unsupported language: ${language}`)
-  }
+  const config = LANGUAGE_CONFIGS.find((c) => c.name === language)
+  if (!config) throw new Error(`Unsupported language: ${language}`)
+  return config
+}
+
+/**
+ * Check if a file is a framework entry file (invoked by the framework, not by user code).
+ * Checks against all registered language configs.
+ */
+export function isFrameworkEntryFile(filePath: string): boolean {
+  return LANGUAGE_CONFIGS.some((config) =>
+    config.frameworkEntryPatterns.some((pattern) => pattern.test(filePath)),
+  )
 }
 
 /**
@@ -146,14 +165,6 @@ export function getLanguageConfig(language: SupportedLanguage): LanguageConfig {
  */
 export function detectLanguage(filePath: string): SupportedLanguage | null {
   const ext = filePath.substring(filePath.lastIndexOf('.'))
-
-  if (TYPESCRIPT_CONFIG.fileExtensions.includes(ext)) {
-    return 'typescript'
-  }
-
-  if (JAVASCRIPT_CONFIG.fileExtensions.includes(ext)) {
-    return 'javascript'
-  }
-
-  return null
+  const config = LANGUAGE_CONFIGS.find((c) => c.fileExtensions.includes(ext))
+  return config?.name ?? null
 }

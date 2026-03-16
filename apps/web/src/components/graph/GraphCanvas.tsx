@@ -312,7 +312,6 @@ function GraphCanvasInner({
             connectedIds.add(e.id);
           }
         }
-        if (connectedIds.size === 0) return eds;
         return eds.map((e) => ({
           ...e,
           data: {
