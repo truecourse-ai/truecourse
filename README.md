@@ -44,17 +44,18 @@ Violations print directly in your terminal. The web UI at **http://localhost:300
 
 ## CLI Commands
 
-**Starting the server**
-
-`npx truecourse` runs setup (first time only) then starts the server. You can also run them separately:
-
 ```bash
-npx truecourse          # Setup + start (all-in-one)
-npx truecourse setup    # Just configure LLM keys
-npx truecourse start    # Just start the server
+npx truecourse                # Runs setup + starts the server
 ```
 
-**Analyzing repos** (server must be running)
+You can also run them manually:
+
+```bash
+npx truecourse setup          # Configure LLM keys
+npx truecourse start          # Start the server
+```
+
+Once the server is running, `cd` into any repo and:
 
 ```bash
 npx truecourse analyze        # Analyze current repo, show violations
