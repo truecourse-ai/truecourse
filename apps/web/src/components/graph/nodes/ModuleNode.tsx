@@ -10,6 +10,8 @@ type ModuleViolation = {
   edgeIds?: string[];
 };
 
+type DiffBadge = { newCount: number; resolvedCount: number };
+
 type ModuleNodeData = {
   label: string;
   moduleKind: string;
@@ -25,6 +27,7 @@ type ModuleNodeData = {
   onToggleCollapse?: (nodeId: string) => void;
   violations?: ModuleViolation[];
   onExplain?: (nodeId: string) => void;
+  diffBadge?: DiffBadge;
 };
 
 const KIND_ICONS: Record<string, typeof Box> = {

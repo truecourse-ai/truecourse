@@ -64,11 +64,11 @@ export function emitFilesChanged(
   io.to(`repo:${repoId}`).emit('files:changed', { repoId, changedFiles });
 }
 
-export function emitInsightsReady(
+export function emitViolationsReady(
   repoId: string,
   analysisId: string
 ): void {
   activeAnalyses.delete(repoId);
   const io = getIO();
-  io.to(`repo:${repoId}`).emit('insights:ready', { repoId, analysisId });
+  io.to(`repo:${repoId}`).emit('violations:ready', { repoId, analysisId });
 }

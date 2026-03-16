@@ -77,8 +77,8 @@ async function cleanupFixtureRepo(): Promise<void> {
 
     for (const analysis of repoAnalyses) {
       await db
-        .delete(schema.insights)
-        .where(eq(schema.insights.analysisId, analysis.id));
+        .delete(schema.violations)
+        .where(eq(schema.violations.analysisId, analysis.id));
       await db
         .delete(schema.serviceDependencies)
         .where(eq(schema.serviceDependencies.analysisId, analysis.id));

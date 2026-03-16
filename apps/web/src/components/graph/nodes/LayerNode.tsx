@@ -13,6 +13,8 @@ type LayerViolation = {
   reason: string;
 };
 
+type DiffBadge = { newCount: number; resolvedCount: number };
+
 type LayerNodeData = {
   label: string;
   layer: string;
@@ -25,6 +27,7 @@ type LayerNodeData = {
   moduleCount?: number;
   violations?: LayerViolation[];
   onExplain?: (nodeId: string) => void;
+  diffBadge?: DiffBadge;
 };
 
 const MAX_FILES_SHOWN = 5;
@@ -33,7 +36,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
-  const { label, fileCount, layerColor, fileNames = [], isContainer, isCollapsed, onToggleCollapse, moduleCount, violations = [], onExplain } = data;
+  const { label, fileCount, layerColor, fileNames = [], isContainer, isCollapsed, onToggleCollapse, moduleCount, violations = [], onExplain, diffBadge } = data;
   const layerLabel = LAYER_LABELS[label as Layer] || label;
   const { setEdges } = useReactFlow();
 
@@ -106,6 +109,16 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
           {isCollapsed && moduleCount !== undefined && (
             <span className="text-[9px] text-muted-foreground/60 ml-auto">{moduleCount} modules</span>
           )}
+          {diffBadge && (diffBadge.newCount > 0 || diffBadge.resolvedCount > 0) && (
+            <div className="ml-auto flex gap-1">
+              {diffBadge.newCount > 0 && (
+                <span className="inline-flex items-center rounded-full bg-amber-500/20 px-1 py-0.5 text-[8px] font-semibold text-amber-500">+{diffBadge.newCount}</span>
+              )}
+              {diffBadge.resolvedCount > 0 && (
+                <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-1 py-0.5 text-[8px] font-semibold text-emerald-500">-{diffBadge.resolvedCount}</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -160,6 +173,16 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
           {violationIcon}
         </div>
         <div className="flex items-center gap-1.5">
+          {diffBadge && (diffBadge.newCount > 0 || diffBadge.resolvedCount > 0) && (
+            <>
+              {diffBadge.newCount > 0 && (
+                <span className="inline-flex items-center rounded-full bg-amber-500/20 px-1 py-0.5 text-[8px] font-semibold text-amber-500">+{diffBadge.newCount}</span>
+              )}
+              {diffBadge.resolvedCount > 0 && (
+                <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-1 py-0.5 text-[8px] font-semibold text-emerald-500">-{diffBadge.resolvedCount}</span>
+              )}
+            </>
+          )}
           <span className="text-[10px] text-muted-foreground">{fileCount} files</span>
           {onExplain && (
             <button

@@ -14,11 +14,12 @@ import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import reposRouter from './routes/repos.js';
 import analysisRouter from './routes/analysis.js';
-import insightsRouter from './routes/insights.js';
+import violationsRouter from './routes/insights.js';
 import chatRouter from './routes/chat.js';
 import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
 import { stopAllWatchers } from './services/watcher.service.js';
+import { seedRules } from './services/rules.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,10 @@ async function main() {
   await migrationClient.end();
   console.log('[Database] Migrations complete');
 
+  // 3b. Seed default rules (upserts — safe to run every startup)
+  await seedRules();
+  console.log('[Database] Rules seeded');
+
   // 4. Setup Express app
   const app: express.Express = express();
   const httpServer = createServer(app);
@@ -49,7 +54,7 @@ async function main() {
 
   app.use('/api/repos', reposRouter);
   app.use('/api/repos', analysisRouter);
-  app.use('/api/repos', insightsRouter);
+  app.use('/api/repos', violationsRouter);
   app.use('/api/repos', chatRouter);
   app.use('/api/repos', databasesRouter);
   app.use('/api/rules', rulesRouter);
@@ -100,6 +105,10 @@ async function main() {
       console.log('');
       console.log(`   Charting your course...`);
       console.log(`   Open http://localhost:${config.port} to sail`);
+      console.log('');
+      console.log('   To analyze a repo from your terminal:');
+      console.log('     cd /path/to/your/repo');
+      console.log('     npx truecourse analyze');
       console.log('');
       resolve();
     });

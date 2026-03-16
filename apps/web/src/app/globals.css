@@ -164,3 +164,23 @@
 .no-animations * {
   transition-duration: 0s !important;
 }
+
+/* Thin scrollbar utility — matches native overlay style */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.5 0 0 / 30%) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: oklch(0.5 0 0 / 30%);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.5 0 0 / 50%);
+}

@@ -4,6 +4,8 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Monitor, Server, Cog, Package } from 'lucide-react';
 
+type DiffBadge = { newCount: number; resolvedCount: number };
+
 type ServiceGroupNodeData = {
   label: string;
   description?: string;
@@ -11,6 +13,7 @@ type ServiceGroupNodeData = {
   framework?: string;
   fileCount: number;
   layers: string[];
+  diffBadge?: DiffBadge;
 };
 
 const typeIcons: Record<string, React.ElementType> = {
@@ -22,7 +25,7 @@ const typeIcons: Record<string, React.ElementType> = {
 };
 
 function ServiceGroupNodeComponent({ data, selected }: NodeProps & { data: ServiceGroupNodeData }) {
-  const { label, serviceType, framework } = data;
+  const { label, serviceType, framework, diffBadge } = data;
   const Icon = typeIcons[serviceType] || Package;
 
   return (
@@ -33,6 +36,20 @@ function ServiceGroupNodeComponent({ data, selected }: NodeProps & { data: Servi
         <span className="text-xs font-bold text-foreground">{label}</span>
         {framework && (
           <span className="text-[9px] italic text-muted-foreground">{framework}</span>
+        )}
+        {diffBadge && (diffBadge.newCount > 0 || diffBadge.resolvedCount > 0) && (
+          <div className="ml-auto flex gap-1">
+            {diffBadge.newCount > 0 && (
+              <span className="inline-flex items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-500">
+                +{diffBadge.newCount}
+              </span>
+            )}
+            {diffBadge.resolvedCount > 0 && (
+              <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-500">
+                -{diffBadge.resolvedCount}
+              </span>
+            )}
+          </div>
         )}
       </div>
 

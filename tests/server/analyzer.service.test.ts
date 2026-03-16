@@ -13,7 +13,7 @@ describe('runAnalysis (integration)', () => {
   beforeAll(async () => {
     result = await runAnalysis(FIXTURE_PATH, undefined, (progress) => {
       progressCalls.push(progress);
-    });
+    }, { skipStash: true });
   }, 60_000);
 
   it('calls progress callback multiple times', () => {

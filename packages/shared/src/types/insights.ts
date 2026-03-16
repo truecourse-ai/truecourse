@@ -13,6 +13,8 @@ export const InsightTypeSchema = z.enum([
   'warning',
   'database',
   'module',
+  'service',
+  'function',
 ])
 export type InsightType = z.infer<typeof InsightTypeSchema>
 

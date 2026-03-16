@@ -50,10 +50,11 @@ truecourse/
             controls/ZoomControls.tsx, FilterPanel.tsx
           repo/RepoSelector.tsx, RepoList.tsx
           insights/InsightsPanel.tsx, InsightCard.tsx, WarningCard.tsx
+          graph/panels/DiffPanel.tsx
           chat/ChatPanel.tsx, ChatMessage.tsx, ChatInput.tsx
           schema/SchemaPanel.tsx     # Database schema review panel
           layout/Header.tsx, Sidebar.tsx
-        hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useChat.ts
+        hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useChat.ts, useDiffCheck.ts
         lib/api.ts, socket.ts
         types/graph.ts
 
@@ -67,6 +68,7 @@ truecourse/
           graph.service.ts
           insight.service.ts
           watcher.service.ts
+          diff-check.service.ts       # Git diff violation comparison
           llm/provider.ts, tracing.ts, prompts.ts, push-prompts.ts
           chat.service.ts
         socket/index.ts, handlers.ts
@@ -129,6 +131,7 @@ truecourse/
     server/                        # Tests for apps/server
       graph.service.test.ts
       analyzer.service.test.ts
+      diff-check.service.test.ts
       routes.test.ts
 ```
 
@@ -159,7 +162,7 @@ truecourse/
 
 **Tables:**
 - `repos` — id, name, path (unique), lastAnalyzedAt, createdAt, updatedAt
-- `analyses` — id, repoId, branch, architecture ('monolith'|'microservices'), metadata (jsonb), createdAt
+- `analyses` — id, repoId, branch, architecture ('monolith'|'microservices'), metadata (jsonb), fileAnalyses (jsonb, baseline for diff-check), createdAt
 - `services` — id, analysisId, name, rootPath, type, framework, fileCount, layerSummary (jsonb)
 - `service_dependencies` — id, analysisId, sourceServiceId, targetServiceId, dependencyCount, dependencyType
 - `insights` — id, repoId, analysisId, type, title, content, severity, targetServiceId, fixPrompt, createdAt
@@ -195,6 +198,7 @@ Copy from SpecMind and adapt:
 | POST | `/api/repos/:id/analyze` | Trigger analysis (auto-detects current branch, async, progress via WebSocket) |
 | GET | `/api/repos/:id/graph?branch=xxx` | Graph data (nodes + edges) for a specific branch |
 | GET | `/api/repos/:id/changes` | Pending git changes (uncommitted + staged) with affected graph nodes |
+| POST | `/api/repos/:id/diff-check` | Violation diff against latest analysis baseline (Git Diff mode) |
 | POST | `/api/repos/:id/insights` | Generate LLM insights |
 | GET | `/api/repos/:id/insights` | Get insights |
 
@@ -637,67 +641,119 @@ Also adds module/method-level analysis rules — some deterministic (AST-based),
 
 ---
 
-## Phase 5: Git Pending Changes Overlay `STATUS: BACKLOG`
+## Phase 5: Git Diff Mode — Violation Diff `STATUS: DONE`
 
-- `simple-git` integration — detect uncommitted + staged changes
+Show how uncommitted changes affect architectural violations. The key question this answers: **"Will my pending changes introduce new violations or resolve existing ones?"**
 
-### Graph-Level Change Visualization
-The graph itself is the primary way to see what's changing — not just a sidebar or panel.
+### Two Modes
 
-**At service level (zoomed out):**
-- Services containing changes get a pulsing border/glow (color = severity of change: green for additions, yellow for modifications, red for deletions)
-- A small badge on the service node shows change count (e.g., "3 files changed")
-- Services with NO changes are dimmed/faded so changed areas stand out
+The header contains a **Normal / Git Diff** toggle (segmented control) with an info tooltip explaining both modes:
 
-**At layer level (zoomed into a service):**
-- Affected layers are highlighted with the same color scheme
-- Unaffected layers are dimmed
-- New edges (new imports introduced by changes) shown as dashed green lines
-- Removed edges (imports removed) shown as dashed red lines
+- **Normal mode** — Stashes pending changes, analyzes the committed code, then restores your changes. The baseline is always the committed state.
+- **Git Diff mode** — Compares your working tree against the last analysis baseline. Shows which violations your pending changes introduce or resolve. A single **Analyze** button triggers the appropriate action based on the current mode.
 
-**At file level (zoomed into a layer):**
-- Modified files: yellow glow + diff summary badge (e.g., "+25 / -10 lines")
-- New files: green glow + "NEW" badge, with dashed border (doesn't exist yet)
-- Deleted files: red glow + strikethrough name + "DELETED" badge
-- New dependency edges from changed files shown as dashed green
-- Removed dependency edges shown as dashed red
-- Clicking a changed file node expands an inline diff preview (or opens detail panel)
+### Core Flow
 
-**Change flow visualization:**
-- Animated edges show the "blast radius" — which other nodes are affected by the changes (e.g., if you change a util file, all files importing it pulse briefly)
+1. User runs analysis in Normal mode → system stashes uncommitted changes, analyzes committed code, restores changes
+2. Baseline `fileAnalyses` are persisted to the `analyses` table (`file_analyses` JSONB column) so diff-check works across server restarts
+3. User switches to Git Diff mode and clicks Analyze
+4. `POST /api/repos/:id/diff-check` loads baseline from DB (latest analysis), detects changed files via `simple-git`, re-analyzes only changed files, merges with baseline, recomputes violations, and diffs old vs new
+5. Result is ephemeral (not saved to DB) — categorizes each violation as **new**, **resolved**, or **unchanged**
+6. Graph overlay shows the violation diff visually
 
-### Change-Specific Insights
-- LLM analyzes the pending diff and provides:
-  - Summary of what's changing and why it matters architecturally
-  - Warnings if changes introduce issues (new circular deps, layer violations, etc.)
-  - Suggestions (e.g., "this new file should be in the service layer, not the API layer")
-- Insights appear both in the sidebar AND as warning badges on affected graph nodes
+### Stash/Unstash (Normal Mode)
 
-### Real-Time
-- File watcher triggers git status re-check → overlay updates live
-- No need to re-analyze — just re-map changed files to existing graph nodes
+When running analysis in Normal mode, the system:
+1. Checks `git status` for uncommitted changes
+2. If dirty: stashes with `git stash push --include-untracked -m 'truecourse-analysis-stash'`
+3. Emits progress: "Stashing pending changes to analyze committed state..."
+4. Runs the full analysis on committed code
+5. Pops the stash in a `finally` block: "Restoring pending changes..."
 
-### Test Plan (Phase 5) `STATUS: BACKLOG`
-- Git change detection: `simple-git` correctly identifies new, modified, deleted, and staged files
-- Change mapping: changed files map to correct service/layer/file graph nodes
-- Blast radius calculation: given a changed file, correctly identifies all downstream dependents
-- Node overlay styling: changed nodes get correct CSS classes (green/yellow/red glow, badges)
-- Edge overlay styling: new edges render dashed green, removed edges render dashed red
-- API `GET /api/repos/:id/changes?branch=xxx` returns correct change data with affected node IDs
-- File watcher → git status: chokidar change event triggers git status re-check and emits updated overlay data
-- Dimming: unchanged nodes receive dimmed styling when changes overlay is active
+This ensures the baseline always reflects the committed state, making Git Diff comparisons meaningful.
+
+### Incremental Re-Analysis (Git Diff Mode)
+
+Not a full re-analysis — only changed files are re-analyzed:
+- `simple-git` detects uncommitted + staged + untracked files
+- Parse changed/new files with tree-sitter; mark deleted files for removal
+- Merge with baseline `fileAnalyses` from DB (replace changed, remove deleted, add new)
+- Recompute dependency graph and violations on the merged set
+- Diff violations using composite key: `${sourceService}::${sourceLayer}::${targetService}::${targetLayer}`
+
+### Graph Overlay
+
+When in Git Diff mode with results:
+- **Affected nodes** show diff badges: orange `+N` for new violations, green `-N` for resolved
+- **Unaffected nodes** (including databases) are dimmed (`opacity: 0.4`)
+- **Summary banner** at bottom: `+3 new  -2 resolved  12 unchanged | 5 files changed`
+- **Instructional banner** shown before first check: "click Analyze to compare pending changes against your last analysis"
+
+### Violation Diff Panel
+
+A **Diff** tab appears in the sidebar (after Violations, before Rules) when Git Diff mode is active:
+- **New violations** — amber list with source→target layers and reason
+- **Resolved violations** — green list
+- **Changed files** — grouped by status (Added/Modified/Deleted)
+- Empty state with icon: "Click Analyze to scan pending changes"
+
+### Error Handling
+
+When no prior analysis exists and user clicks Analyze in Git Diff mode:
+- Endpoint returns 409
+- An amber warning alert appears below the Analyze button: "Switch to Normal mode and run an analysis first"
+- Works even when no graph data is rendered (error is in RepoGraphPage, not GraphCanvas)
+
+### API
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/repos/:id/diff-check` | Run violation diff against latest analysis baseline |
+
+Returns `DiffCheckResult`: `changedFiles`, `violations` (with status), `summary` (counts), `affectedNodeIds` (services + layers).
+
+### Data Persistence
+
+- `fileAnalyses` (JSONB) stored on the `analyses` table — provides the baseline for diff-check
+- `layerDependencies` loaded from the `layer_dependencies` table
+- No in-memory cache — everything loads from DB, survives server restarts
+
+### Shared Types
+
+```typescript
+type ViolationDiffStatus = 'new' | 'resolved' | 'unchanged'
+type ViolationDiffItem = {
+  sourceServiceName: string; sourceLayer: string;
+  targetServiceName: string; targetLayer: string;
+  violationReason: string; status: ViolationDiffStatus; dependencyCount: number;
+}
+type DiffCheckResult = {
+  changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>
+  violations: ViolationDiffItem[]
+  summary: { newCount: number; resolvedCount: number; unchangedCount: number }
+  affectedNodeIds: { services: string[]; layers: string[] }
+}
+```
+
+### Test Plan (Phase 5) `STATUS: DONE`
+- Incremental re-analysis: only changed files are parsed; unchanged file data is reused from baseline
+- Violation diff: given old violations and recomputed violations, correctly categorizes each as new/resolved/unchanged
+- Merge logic: replaced files are swapped, deleted files excluded, new files added
+- DiffCheckResult has correct structure with changedFiles, violations, summary, affectedNodeIds
+- Empty changes produce zero new/resolved counts
+- Graph overlay: nodes with new violations get orange badges, resolved get green, unaffected are dimmed
 
 ### Verification (Phase 5)
-1. Analyze a repo, then modify files in the target repo
-2. Graph immediately highlights affected services/layers (unchanged areas dim)
-3. Zoom into highlighted service → see which layers have changes
-4. Zoom into layer → see file-level changes with color coding and diff badges
-5. New files appear as green dashed nodes, deleted as red strikethrough
-6. New/removed import edges shown as dashed green/red lines
-7. Click a changed file → see inline diff preview
-8. "Blast radius" animation shows downstream impact of changes
-9. Insights panel shows change-specific warnings
-10. File watcher picks up new changes → overlay updates in real-time
+1. Analyze a repo in Normal mode (stashes pending changes, analyzes committed state, restores)
+2. Switch to Git Diff mode → instructional banner shown
+3. Click Analyze → diff-check runs, summary banner shows results
+4. Modify a file to introduce a new layer violation → click Analyze → orange `+1` badge on affected nodes
+5. Modify a file to remove an existing violation → click Analyze → green `-1` badge on affected nodes
+6. Delete a file with violations → click Analyze → those violations shown as resolved
+7. Diff tab in sidebar shows new/resolved violations and changed files
+8. Exit Git Diff mode → graph returns to normal view
+9. Restart server → Git Diff still works (loads baseline from DB, not in-memory cache)
+10. No prior analysis → Git Diff shows amber warning: "Switch to Normal mode and run an analysis first"
 
 ---
 

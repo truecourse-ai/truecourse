@@ -402,7 +402,7 @@ export function buildLayerGraphData(
           fileCount: layer.fileCount,
           layers: [layer.layer],
           rootPath: service.rootPath,
-          ...(({ layerColor: LAYER_COLORS[layer.layer] || '#6b7280', fileNames }) as Record<string, unknown>),
+          ...(({ layerColor: LAYER_COLORS[layer.layer] || '#6b7280', fileNames, filePaths: layer.filePaths }) as Record<string, unknown>),
         },
         ...(({ parentId: service.id, extent: 'parent' }) as Record<string, unknown>),
       });
@@ -1021,7 +1021,7 @@ export function buildMethodGraphData(
               serviceType: 'method',
               fileCount: 0,
               layers: [],
-              rootPath: '',
+              rootPath: mod.filePath,
               description: mth.signature,
               framework: undefined,
               ...(({
@@ -1245,6 +1245,7 @@ function createLayerContainerNode(
       ...(({
         layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
         isContainer: true,
+        filePaths: layer.filePaths,
       }) as Record<string, unknown>),
     },
     ...(({

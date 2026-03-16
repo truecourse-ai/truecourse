@@ -3,7 +3,7 @@ import type { AnalysisRule } from '@truecourse/shared'
 export const DETERMINISTIC_RULES: AnalysisRule[] = [
   {
     key: 'arch/layer-violation-data-api',
-    category: 'architecture',
+    category: 'service',
     name: 'Data layer depends on API layer',
     description: 'Data layer should not import from the API layer.',
     enabled: true,
@@ -12,7 +12,7 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
   },
   {
     key: 'arch/layer-violation-external-api',
-    category: 'architecture',
+    category: 'service',
     name: 'External layer depends on API layer',
     description: 'External integrations should not depend on the API layer directly.',
     enabled: true,
@@ -21,7 +21,7 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
   },
   {
     key: 'arch/layer-violation-data-external',
-    category: 'architecture',
+    category: 'service',
     name: 'Data layer depends on external layer',
     description: 'Data layer should not call external services.',
     enabled: true,

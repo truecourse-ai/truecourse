@@ -3,7 +3,7 @@ import type { AnalysisRule } from '@truecourse/shared'
 export const LLM_ARCHITECTURE_RULES: AnalysisRule[] = [
   {
     key: 'llm/arch-circular-dependency',
-    category: 'architecture',
+    category: 'service',
     name: 'Circular service dependency',
     description: 'Detect circular dependency chains between services.',
     prompt:
@@ -14,7 +14,7 @@ export const LLM_ARCHITECTURE_RULES: AnalysisRule[] = [
   },
   {
     key: 'llm/arch-god-service',
-    category: 'architecture',
+    category: 'service',
     name: 'God service with too many responsibilities',
     description: 'Identify services that have too many responsibilities.',
     prompt:
@@ -25,7 +25,7 @@ export const LLM_ARCHITECTURE_RULES: AnalysisRule[] = [
   },
   {
     key: 'llm/arch-tight-coupling',
-    category: 'architecture',
+    category: 'service',
     name: 'Tightly coupled service pair',
     description: 'Identify pairs of services with unusually high cross-dependencies.',
     prompt:
@@ -36,7 +36,7 @@ export const LLM_ARCHITECTURE_RULES: AnalysisRule[] = [
   },
   {
     key: 'llm/arch-missing-layers',
-    category: 'architecture',
+    category: 'service',
     name: 'Service missing expected architectural layers',
     description: 'Check whether each service has the expected architectural layers for its type.',
     prompt:

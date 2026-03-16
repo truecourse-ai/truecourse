@@ -7,6 +7,8 @@ import os from "node:os";
 import { runSetup } from "./commands/setup.js";
 import { runStart } from "./commands/start.js";
 import { runAdd } from "./commands/add.js";
+import { runAnalyze, runAnalyzeDiff } from "./commands/analyze.js";
+import { runList, runListDiff } from "./commands/list.js";
 
 const program = new Command();
 
@@ -37,6 +39,30 @@ program
   });
 
 program
+  .command("analyze")
+  .description("Analyze the current repository")
+  .option("--diff", "Run diff check against latest analysis")
+  .action(async (options) => {
+    if (options.diff) {
+      await runAnalyzeDiff();
+    } else {
+      await runAnalyze();
+    }
+  });
+
+program
+  .command("list")
+  .description("List violations from the latest analysis")
+  .option("--diff", "Show diff check results (new and resolved)")
+  .action(async (options) => {
+    if (options.diff) {
+      await runListDiff();
+    } else {
+      await runList();
+    }
+  });
+
+program
   .action(async () => {
     const configDir = path.join(os.homedir(), ".truecourse");
     const envPath = path.join(configDir, ".env");
@@ -44,9 +70,8 @@ program
 
     if (isFirstRun) {
       await runSetup();
-    } else {
-      await runStart();
     }
+    await runStart();
   });
 
 program.parse();

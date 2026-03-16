@@ -1,6 +1,6 @@
 'use client';
 
-import { Sun, Moon, ArrowLeft, GitBranch, Loader2, PanelRight } from 'lucide-react';
+import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -12,8 +12,11 @@ type HeaderProps = {
   isAnalyzing?: boolean;
   showBack?: boolean;
   backHref?: string;
-  isSidebarOpen?: boolean;
-  onToggleSidebar?: () => void;
+  isChatOpen?: boolean;
+  onToggleChat?: () => void;
+  isDiffMode?: boolean;
+  onEnterDiffMode?: () => void;
+  onExitDiffMode?: () => void;
 };
 
 export function Header({
@@ -23,8 +26,11 @@ export function Header({
   isAnalyzing,
   showBack,
   backHref = '/',
-  isSidebarOpen,
-  onToggleSidebar,
+  isChatOpen,
+  onToggleChat,
+  isDiffMode,
+  onEnterDiffMode,
+  onExitDiffMode,
 }: HeaderProps) {
   const [isDark, setIsDark] = useState(false);
 
@@ -63,13 +69,48 @@ export function Header({
           </span>
         )}
         {currentBranch && (
-          <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1">
-            <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-sm text-foreground">{currentBranch}</span>
+          <span className="text-xs text-muted-foreground font-mono">{currentBranch}</span>
+        )}
+        {onEnterDiffMode && (
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center rounded-md border border-border bg-card shadow-sm">
+              <button
+                className={`px-3 py-1.5 text-xs font-medium rounded-l-md transition-colors ${
+                  !isDiffMode ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => { if (isDiffMode) onExitDiffMode?.(); }}
+              >
+                Normal
+              </button>
+              <button
+                className={`px-3 py-1.5 text-xs font-medium rounded-r-md transition-colors ${
+                  isDiffMode ? 'bg-amber-500/20 text-amber-500' : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => { if (!isDiffMode) onEnterDiffMode?.(); }}
+              >
+                Git Diff
+              </button>
+            </div>
+            <div className="group/info relative">
+              <Info className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help transition-colors" />
+              <div className="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 z-[9999] hidden group-hover/info:block">
+                <div className="rounded-lg border border-border bg-popover px-4 py-3 shadow-lg w-[280px] text-[11px] leading-relaxed text-popover-foreground">
+                  <p className="font-semibold mb-1.5">Normal mode</p>
+                  <p className="text-muted-foreground">Stashes pending changes, analyzes the committed code, then restores your changes. The baseline is always the committed state.</p>
+                  <div className="my-2 border-t border-border" />
+                  <p className="font-semibold mb-1.5">Git Diff mode</p>
+                  <p className="text-muted-foreground">Compares your working tree against the last analysis baseline. Shows which violations your pending changes introduce or resolve.</p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
         {onAnalyze && (
-          <Button size="sm" onClick={onAnalyze} disabled={isAnalyzing}>
+          <Button
+            size="sm"
+            onClick={onAnalyze}
+            disabled={isAnalyzing}
+          >
             {isAnalyzing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {isAnalyzing ? 'Analyzing...' : 'Analyze'}
           </Button>
@@ -77,15 +118,15 @@ export function Header({
       </div>
 
       <div className="flex items-center gap-1">
-        {onToggleSidebar && (
+        {onToggleChat && (
           <Button
-            variant={isSidebarOpen ? 'default' : 'outline'}
+            variant={isChatOpen ? 'default' : 'outline'}
             size="sm"
-            onClick={onToggleSidebar}
-            aria-label="Toggle Inspector"
+            onClick={onToggleChat}
+            aria-label="Toggle Chat"
           >
-            <PanelRight className="h-4 w-4" />
-            Inspector
+            <MessageCircle className="h-4 w-4" />
+            Chat
           </Button>
         )}
         <Button

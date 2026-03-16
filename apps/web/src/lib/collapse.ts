@@ -17,7 +17,10 @@ export function applyCollapseState(
   depthLevel: DepthLevel,
   relayout = false,
 ): { nodes: Node[]; edges: Edge[] } {
-  if (collapsedIds.size === 0 || depthLevel === 'services') {
+  if (depthLevel === 'services') {
+    return { nodes, edges };
+  }
+  if (collapsedIds.size === 0 && !relayout) {
     return { nodes, edges };
   }
 

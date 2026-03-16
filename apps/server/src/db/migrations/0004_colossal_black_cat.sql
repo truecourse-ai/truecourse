@@ -1,1 +1,0 @@
-ALTER TABLE "insights" ADD COLUMN "target_table" text;

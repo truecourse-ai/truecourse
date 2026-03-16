@@ -10,17 +10,17 @@ import {
   databases,
   modules,
   methods,
-  insights,
+  violations,
 } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
 import { generateInsights } from '../services/insight.service.js';
-import { emitInsightsReady } from '../socket/handlers.js';
+import { emitViolationsReady } from '../socket/handlers.js';
 
 const router: Router = Router();
 
-// POST /api/repos/:id/insights - Generate LLM insights
+// POST /api/repos/:id/violations - Generate LLM violations
 router.post(
-  '/:id/insights',
+  '/:id/violations',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -75,7 +75,7 @@ router.post(
         analysisDatabases.map((d) => [d.name, d.id])
       );
 
-      // Generate insights via LLM
+      // Generate violations via LLM
       const generatedInsights = await generateInsights({
         architecture: analysis.architecture,
         services: analysisServices.map((s) => ({
@@ -104,13 +104,13 @@ router.post(
         })),
       });
 
-      const { insights: generatedInsightsList, serviceDescriptions } = generatedInsights;
+      const { violations: generatedInsightsList, serviceDescriptions } = generatedInsights;
 
-      // Save insights to database
+      // Save violations to database
       const savedInsights = [];
       for (const insight of generatedInsightsList) {
         const [saved] = await db
-          .insert(insights)
+          .insert(violations)
           .values({
             id: uuidv4(),
             repoId: id,
@@ -139,7 +139,7 @@ router.post(
         }
       }
 
-      emitInsightsReady(id, analysis.id);
+      emitViolationsReady(id, analysis.id);
 
       res.status(201).json(savedInsights);
     } catch (error) {
@@ -148,9 +148,9 @@ router.post(
   }
 );
 
-// GET /api/repos/:id/insights - Get insights
+// GET /api/repos/:id/violations - Get violations
 router.get(
-  '/:id/insights',
+  '/:id/violations',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -188,30 +188,30 @@ router.get(
 
       const analysisInsights = await db
         .select({
-          id: insights.id,
-          type: insights.type,
-          title: insights.title,
-          content: insights.content,
-          severity: insights.severity,
-          targetServiceId: insights.targetServiceId,
+          id: violations.id,
+          type: violations.type,
+          title: violations.title,
+          content: violations.content,
+          severity: violations.severity,
+          targetServiceId: violations.targetServiceId,
           targetServiceName: services.name,
-          targetDatabaseId: insights.targetDatabaseId,
+          targetDatabaseId: violations.targetDatabaseId,
           targetDatabaseName: databases.name,
-          targetModuleId: insights.targetModuleId,
+          targetModuleId: violations.targetModuleId,
           targetModuleName: modules.name,
-          targetMethodId: insights.targetMethodId,
+          targetMethodId: violations.targetMethodId,
           targetMethodName: methods.name,
-          targetTable: insights.targetTable,
-          fixPrompt: insights.fixPrompt,
-          createdAt: insights.createdAt,
+          targetTable: violations.targetTable,
+          fixPrompt: violations.fixPrompt,
+          createdAt: violations.createdAt,
         })
-        .from(insights)
-        .leftJoin(services, eq(insights.targetServiceId, services.id))
-        .leftJoin(databases, eq(insights.targetDatabaseId, databases.id))
-        .leftJoin(modules, eq(insights.targetModuleId, modules.id))
-        .leftJoin(methods, eq(insights.targetMethodId, methods.id))
-        .where(eq(insights.analysisId, analysis.id))
-        .orderBy(desc(insights.createdAt));
+        .from(violations)
+        .leftJoin(services, eq(violations.targetServiceId, services.id))
+        .leftJoin(databases, eq(violations.targetDatabaseId, databases.id))
+        .leftJoin(modules, eq(violations.targetModuleId, modules.id))
+        .leftJoin(methods, eq(violations.targetMethodId, methods.id))
+        .where(eq(violations.analysisId, analysis.id))
+        .orderBy(desc(violations.createdAt));
 
       res.json(analysisInsights);
     } catch (error) {

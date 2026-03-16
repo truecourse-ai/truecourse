@@ -8,6 +8,7 @@ import type { Node, Edge } from '@xyflow/react';
 export function useGraph(repoId: string, branch?: string, level: DepthLevel = 'services') {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [savedCollapsedIds, setSavedCollapsedIds] = useState<string[] | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +45,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
               parentId: node.parentId,
               extent: node.extent as 'parent' | undefined,
               style: node.style,
-              data: node.data,
+              data: { ...node.data, filePath: node.data.rootPath || '' },
             };
           }
 
@@ -68,6 +69,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
                 isDead: node.data.isDead || false,
                 isContainer: node.data.isContainer || false,
                 violations: node.data.violations,
+                filePath: node.data.rootPath || '',
               },
             };
           }
@@ -86,6 +88,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
                 fileCount: node.data.fileCount || 0,
                 layerColor: node.data.layerColor || '#6b7280',
                 fileNames: node.data.fileNames || [],
+                filePaths: node.data.filePaths || [],
                 isContainer: node.data.isContainer || false,
                 violations: node.data.violations || [],
               },
@@ -105,6 +108,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
               framework: node.data.framework,
               fileCount: node.data.fileCount || 0,
               layers: node.data.layers || [],
+              rootPath: node.data.rootPath || '',
               violations: node.data.violations || [],
             },
           };
@@ -128,6 +132,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
 
         setNodes(graphNodes);
         setEdges(graphEdges);
+        setSavedCollapsedIds(data.collapsedIds);
       } else {
         // Service-level view (existing behavior)
         const graphNodes: Node[] = data.nodes.map((node) => {
@@ -162,7 +167,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
                   confidence: 1,
                   evidence: [],
                 })),
-                rootPath: node.data.rootPath || '',
+                rootPath: node.data.rootPath ?? '',
               },
               insightCount: 0,
               hasHighSeverity: false,
@@ -190,6 +195,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
 
         setNodes(graphNodes);
         setEdges(graphEdges);
+        setSavedCollapsedIds(data.collapsedIds);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch graph');
@@ -202,5 +208,5 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
     fetchGraph();
   }, [fetchGraph]);
 
-  return { nodes, edges, isLoading, error, refetch: fetchGraph, setNodes, setEdges };
+  return { nodes, edges, savedCollapsedIds, isLoading, error, refetch: fetchGraph, setNodes, setEdges };
 }

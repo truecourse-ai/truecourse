@@ -61,6 +61,7 @@ export type GraphResponse = {
       rootPath: string;
       layerColor?: string;
       fileNames?: string[];
+      filePaths?: string[];
       layerDeps?: Array<{ targetLayer: string; count: number; isViolation: boolean }>;
       violations?: Array<{ edgeId?: string; edgeIds?: string[]; sourceLayer?: string; targetLayer: string; reason: string }>;
       databaseType?: string;
@@ -102,6 +103,7 @@ export type GraphResponse = {
       violationReason?: string;
     };
   }>;
+  collapsedIds?: string[];
 };
 
 export type InsightResponse = {
@@ -197,9 +199,36 @@ export function resetGraphPositions(
   });
 }
 
-// Insights
-export function getInsights(repoId: string): Promise<InsightResponse[]> {
-  return fetchApi<InsightResponse[]>(`/api/repos/${repoId}/insights`);
+// Collapse state
+export function saveCollapsedIds(
+  repoId: string,
+  collapsedIds: string[],
+  branch?: string,
+  level?: string,
+): Promise<{ ok: boolean }> {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (level) params.set('level', level);
+  const qs = params.toString();
+  return fetchApi<{ ok: boolean }>(`/api/repos/${repoId}/graph/collapsed${qs ? `?${qs}` : ''}`, {
+    method: 'PUT',
+    body: JSON.stringify({ collapsedIds }),
+  });
+}
+
+// Files
+export type FilesResponse = {
+  root: string;
+  files: string[];
+};
+
+export function getFiles(repoId: string): Promise<FilesResponse> {
+  return fetchApi<FilesResponse>(`/api/repos/${repoId}/files`);
+}
+
+// Violations
+export function getViolations(repoId: string): Promise<InsightResponse[]> {
+  return fetchApi<InsightResponse[]>(`/api/repos/${repoId}/violations`);
 }
 
 // Databases
@@ -262,6 +291,45 @@ export type RuleResponse = {
 
 export function getRules(): Promise<RuleResponse[]> {
   return fetchApi<RuleResponse[]>('/api/rules');
+}
+
+// Diff Check
+export type DiffInsightItem = {
+  type: string;
+  title: string;
+  content: string;
+  severity: string;
+  targetServiceName: string | null;
+  targetModuleName: string | null;
+  targetMethodName: string | null;
+  fixPrompt: string | null;
+};
+
+export type DiffCheckResponse = {
+  changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
+  resolvedInsights: InsightResponse[];
+  newInsights: DiffInsightItem[];
+  summary: {
+    newCount: number;
+    resolvedCount: number;
+  };
+  affectedNodeIds: {
+    services: string[];
+    layers: string[];
+    modules: string[];
+    methods: string[];
+  };
+  isStale?: boolean;
+};
+
+export function runDiffCheck(repoId: string): Promise<DiffCheckResponse> {
+  return fetchApi<DiffCheckResponse>(`/api/repos/${repoId}/diff-check`, {
+    method: 'POST',
+  });
+}
+
+export function getDiffCheck(repoId: string): Promise<DiffCheckResponse | null> {
+  return fetchApi<DiffCheckResponse | null>(`/api/repos/${repoId}/diff-check`);
 }
 
 // Conversations

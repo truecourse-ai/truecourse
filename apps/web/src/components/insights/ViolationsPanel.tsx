@@ -1,50 +1,40 @@
 'use client';
 
 import { useCallback, useRef, useState, useMemo } from 'react';
-import { AlertTriangle, MessageCircle, Shield, Loader2, AlertCircle } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Loader2 } from 'lucide-react';
 import { InsightCard } from '@/components/insights/InsightCard';
-import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
-import { RulesPanel } from '@/components/rules/RulesPanel';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { InsightResponse, DiffCheckResponse } from '@/lib/api';
 
-type InsightsPanelProps = {
+type ViolationsPanelProps = {
   insights: InsightResponse[];
   isLoading: boolean;
   repoId: string;
   selectedService?: string | null;
   selectedServiceName?: string | null;
-  activeTab?: string;
-  onTabChange?: (tab: string) => void;
-  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string } | null;
-  onExplainHandled?: () => void;
   selectedDatabaseId?: string | null;
   isDiffMode?: boolean;
   diffResult?: DiffCheckResponse | null;
   onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
   resolveNodeIdByName?: (name: string, type?: string) => string | null;
+  selectedPath?: string | null;
+  nodeFilePathMap?: Map<string, string>;
 };
 
-export function InsightsPanel({
+export function ViolationsPanel({
   insights,
   isLoading,
   repoId,
   selectedService,
   selectedServiceName,
-  activeTab = 'insights',
-  onTabChange,
-  explainRequest,
-  onExplainHandled,
   selectedDatabaseId,
   isDiffMode,
   diffResult,
   onLocateNode,
   resolveNodeIdByName,
-}: InsightsPanelProps) {
-  const isChat = activeTab === 'chat';
-  const isRules = activeTab === 'rules';
-
+  selectedPath,
+  nodeFilePathMap,
+}: ViolationsPanelProps) {
   // Resizable ER panel
   const [erHeight, setErHeight] = useState(264);
   const isDraggingEr = useRef(false);
@@ -74,15 +64,13 @@ export function InsightsPanel({
     [erHeight],
   );
 
-  // Build diff insight cards: resolved insights (green badge) + new insights (amber badge)
+  // Build diff insight cards
   const diffInsightCards = useMemo(() => {
     if (!isDiffMode || !diffResult) return null;
 
     const cards: Array<{ insight: InsightResponse; diffStatus: 'new' | 'resolved' }> = [];
 
-    // New insights — convert DiffInsightItem to InsightResponse shape
     for (const item of diffResult.newInsights) {
-      // Resolve node IDs from names for the Locate button
       const targetServiceId = item.targetServiceName && resolveNodeIdByName
         ? resolveNodeIdByName(item.targetServiceName, 'service') : null;
       const targetModuleId = item.targetModuleName && resolveNodeIdByName
@@ -110,7 +98,6 @@ export function InsightsPanel({
       });
     }
 
-    // Resolved insights — already full InsightResponse objects from the GET endpoint
     for (const item of (diffResult.resolvedInsights || [])) {
       cards.push({
         insight: item,
@@ -118,7 +105,6 @@ export function InsightsPanel({
       });
     }
 
-    // Sort: new first, then resolved; within each group: severity → type → createdAt
     const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
     const typeOrder: Record<string, number> = { service: 0, module: 1, function: 2, database: 3 };
     cards.sort((a, b) => {
@@ -134,30 +120,30 @@ export function InsightsPanel({
     return cards;
   }, [isDiffMode, diffResult, resolveNodeIdByName]);
 
+  // Filter insights by selected file path
+  const pathFilteredInsights = useMemo(() => {
+    if (!selectedPath || !nodeFilePathMap) return insights;
+    return insights.filter((insight) => {
+      const targetId = insight.targetMethodId || insight.targetModuleId || insight.targetServiceId;
+      if (!targetId) return true;
+      const fp = nodeFilePathMap.get(targetId);
+      if (!fp) return true;
+      // Bidirectional match: fp contains selectedPath OR selectedPath starts with trailing segments of fp
+      if (fp.includes(selectedPath)) return true;
+      const parts = fp.split('/');
+      for (let i = parts.length - 1; i >= 1; i--) {
+        const suffix = parts.slice(i).join('/');
+        if (selectedPath.startsWith(suffix + '/') || selectedPath === suffix) return true;
+      }
+      return false;
+    });
+  }, [insights, selectedPath, nodeFilePathMap]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <Tabs value={activeTab} onValueChange={(v) => onTabChange?.(String(v))} className="flex flex-shrink-0 flex-col">
-        <TabsList variant="line" className="w-full">
-          <TabsTrigger value="insights">
-            <AlertTriangle className="h-4 w-4" />
-            Violations
-          </TabsTrigger>
-          <TabsTrigger value="rules">
-            <Shield className="h-4 w-4" />
-            Rules
-          </TabsTrigger>
-          <TabsTrigger value="chat">
-            <MessageCircle className="h-4 w-4" />
-            Chat
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {/* Insights / Diff content */}
-      <div className={`min-h-0 flex-1 flex flex-col overflow-hidden ${isChat || isRules ? 'hidden' : ''}`}>
+      <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
         <div className="overflow-y-auto p-3 flex-1">
           {isDiffMode && diffInsightCards !== null ? (
-            // Diff mode: show InsightCards with new/resolved badges
             <>
               {diffResult?.isStale && (
                 <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
@@ -187,7 +173,6 @@ export function InsightsPanel({
               )}
             </>
           ) : (
-            // Normal mode: show regular insights
             <>
               {selectedService && (
                 <div className="mb-3 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
@@ -201,18 +186,20 @@ export function InsightsPanel({
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : insights.length === 0 ? (
+              ) : pathFilteredInsights.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
-                    {selectedService
-                      ? 'No violations for this service'
-                      : 'No violations yet. Run an analysis to detect violations.'}
+                    {selectedPath
+                      ? 'No violations in this path'
+                      : selectedService
+                        ? 'No violations for this service'
+                        : 'No violations yet. Run an analysis to detect violations.'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {insights.map((insight) => (
+                  {pathFilteredInsights.map((insight) => (
                     <InsightCard key={insight.id} insight={insight} onLocateNode={onLocateNode} />
                   ))}
                 </div>
@@ -231,21 +218,6 @@ export function InsightsPanel({
             <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} insights={insights} />
           </div>
         )}
-      </div>
-
-      {/* Chat content — always mounted, hidden when not active */}
-      <div className={`min-h-0 flex-1 overflow-hidden ${isChat ? '' : 'hidden'}`}>
-        <ChatPanel
-          repoId={repoId}
-          selectedService={selectedService}
-          explainRequest={explainRequest}
-          onExplainHandled={onExplainHandled}
-        />
-      </div>
-
-      {/* Rules content */}
-      <div className={`min-h-0 flex-1 overflow-y-auto ${isRules ? '' : 'hidden'}`}>
-        <RulesPanel />
       </div>
     </div>
   );

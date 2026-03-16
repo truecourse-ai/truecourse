@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import RepoGraphPage from '@/components/pages/RepoGraphPage';
 
 export function generateStaticParams() {
@@ -5,5 +6,9 @@ export function generateStaticParams() {
 }
 
 export default function Page() {
-  return <RepoGraphPage />;
+  return (
+    <Suspense>
+      <RepoGraphPage />
+    </Suspense>
+  );
 }

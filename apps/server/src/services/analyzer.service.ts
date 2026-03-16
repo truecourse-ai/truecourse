@@ -36,101 +36,123 @@ export interface AnalysisResult {
 export async function runAnalysis(
   repoPath: string,
   _branch: string | undefined,
-  onProgress: AnalysisProgressCallback
+  onProgress: AnalysisProgressCallback,
+  options?: { skipStash?: boolean },
 ): Promise<AnalysisResult> {
   const git = simpleGit(repoPath);
 
   // Detect current branch (we never checkout — analyze whatever is checked out)
   const currentBranch = (await git.branch()).current;
 
-  onProgress({ step: 'discover', percent: 10, detail: 'Discovering files...' });
+  // Stash pending changes so the baseline reflects the committed state
+  let didStash = false;
+  const statusResult = await git.status();
+  const hasChanges = !statusResult.isClean();
 
-  // Dynamic import of the analyzer package
-  // The analyzer package exports these functions
-  const analyzer = await import('@truecourse/analyzer');
-
-  // Discover files in the repository
-  const files = await analyzer.discoverFiles(repoPath);
-  onProgress({
-    step: 'discover',
-    percent: 15,
-    detail: `Found ${files.length} files`,
-  });
-
-  // Analyze each file
-  onProgress({ step: 'analyze', percent: 20, detail: 'Analyzing files...' });
-  const fileAnalyses: FileAnalysis[] = [];
-  const totalFiles = files.length;
-
-  for (let i = 0; i < totalFiles; i++) {
-    const file = files[i];
+  if (hasChanges && !options?.skipStash) {
+    onProgress({ step: 'stash', percent: 2, detail: 'Stashing pending changes to analyze committed state...' });
     try {
-      const analysis = await analyzer.analyzeFile(file);
-      if (analysis) {
-        fileAnalyses.push(analysis);
-      }
+      const stashResult = await git.stash(['push', '--include-untracked', '-m', 'truecourse-analysis-stash']);
+      // git stash push prints "No local changes to save" if nothing to stash
+      didStash = !stashResult.includes('No local changes');
     } catch (error) {
-      console.warn(
-        `[Analyzer] Failed to analyze ${file}:`,
-        error instanceof Error ? error.message : String(error)
-      );
-    }
-
-    // Emit progress every 10 files or on the last file
-    if (i % 10 === 0 || i === totalFiles - 1) {
-      const analyzePercent = 20 + Math.round(((i + 1) / totalFiles) * 40);
-      onProgress({
-        step: 'analyze',
-        percent: analyzePercent,
-        detail: `Analyzed ${i + 1}/${totalFiles} files`,
-      });
+      console.warn('[Analyzer] Failed to stash changes, analyzing current state:', error instanceof Error ? error.message : String(error));
     }
   }
 
-  // Build dependency graph
-  onProgress({
-    step: 'dependencies',
-    percent: 65,
-    detail: 'Building dependency graph...',
-  });
-  const moduleDependencies = analyzer.buildDependencyGraph(fileAnalyses, repoPath);
+  try {
+    onProgress({ step: 'discover', percent: 10, detail: 'Discovering files...' });
 
-  // Detect services (split analysis)
-  onProgress({
-    step: 'services',
-    percent: 75,
-    detail: 'Detecting services...',
-  });
-  const splitResult = analyzer.performSplitAnalysis(
-    repoPath,
-    fileAnalyses,
-    moduleDependencies
-  );
+    const analyzer = await import('@truecourse/analyzer');
 
-  onProgress({
-    step: 'saving',
-    percent: 80,
-    detail: `Saving results: ${splitResult.services.length} services detected`,
-  });
+    const files = await analyzer.discoverFiles(repoPath);
+    onProgress({
+      step: 'discover',
+      percent: 15,
+      detail: `Found ${files.length} files`,
+    });
 
-  return {
-    architecture: splitResult.architecture,
-    services: splitResult.services,
-    dependencies: splitResult.dependencies,
-    layerDetails: splitResult.layerDetails,
-    layerDependencies: splitResult.layerDependencies,
-    databaseResult: splitResult.databaseResult,
-    modules: splitResult.modules,
-    methods: splitResult.methods,
-    moduleLevelDependencies: splitResult.moduleLevelDependencies,
-    methodLevelDependencies: splitResult.methodLevelDependencies,
-    fileAnalyses,
-    moduleDependencies,
-    metadata: {
-      totalFiles: files.length,
-      analyzedFiles: fileAnalyses.length,
-      branch: currentBranch || 'HEAD',
-      analyzedAt: new Date().toISOString(),
-    },
-  };
+    onProgress({ step: 'analyze', percent: 20, detail: 'Analyzing files...' });
+    const fileAnalyses: FileAnalysis[] = [];
+    const totalFiles = files.length;
+
+    for (let i = 0; i < totalFiles; i++) {
+      const file = files[i];
+      try {
+        const analysis = await analyzer.analyzeFile(file);
+        if (analysis) {
+          fileAnalyses.push(analysis);
+        }
+      } catch (error) {
+        console.warn(
+          `[Analyzer] Failed to analyze ${file}:`,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+
+      if (i % 10 === 0 || i === totalFiles - 1) {
+        const analyzePercent = 20 + Math.round(((i + 1) / totalFiles) * 40);
+        onProgress({
+          step: 'analyze',
+          percent: analyzePercent,
+          detail: `Analyzed ${i + 1}/${totalFiles} files`,
+        });
+      }
+    }
+
+    onProgress({
+      step: 'dependencies',
+      percent: 65,
+      detail: 'Building dependency graph...',
+    });
+    const moduleDependencies = analyzer.buildDependencyGraph(fileAnalyses, repoPath);
+
+    onProgress({
+      step: 'services',
+      percent: 75,
+      detail: 'Detecting services...',
+    });
+    const splitResult = analyzer.performSplitAnalysis(
+      repoPath,
+      fileAnalyses,
+      moduleDependencies
+    );
+
+    onProgress({
+      step: 'saving',
+      percent: 80,
+      detail: `Saving results: ${splitResult.services.length} services detected`,
+    });
+
+    return {
+      architecture: splitResult.architecture,
+      services: splitResult.services,
+      dependencies: splitResult.dependencies,
+      layerDetails: splitResult.layerDetails,
+      layerDependencies: splitResult.layerDependencies,
+      databaseResult: splitResult.databaseResult,
+      modules: splitResult.modules,
+      methods: splitResult.methods,
+      moduleLevelDependencies: splitResult.moduleLevelDependencies,
+      methodLevelDependencies: splitResult.methodLevelDependencies,
+      fileAnalyses,
+      moduleDependencies,
+      metadata: {
+        totalFiles: files.length,
+        analyzedFiles: fileAnalyses.length,
+        branch: currentBranch || 'HEAD',
+        analyzedAt: new Date().toISOString(),
+      },
+    };
+  } finally {
+    // Always restore stashed changes
+    if (didStash) {
+      onProgress({ step: 'unstash', percent: 82, detail: 'Restoring pending changes...' });
+      try {
+        await git.stash(['pop']);
+      } catch (error) {
+        console.error('[Analyzer] Failed to restore stashed changes. Run "git stash pop" manually.', error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
 }

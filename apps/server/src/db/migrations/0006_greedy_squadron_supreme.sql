@@ -1,2 +1,0 @@
-ALTER TABLE "insights" ADD COLUMN "target_module_id" uuid;--> statement-breakpoint
-ALTER TABLE "insights" ADD CONSTRAINT "insights_target_module_id_modules_id_fk" FOREIGN KEY ("target_module_id") REFERENCES "public"."modules"("id") ON DELETE set null ON UPDATE no action;

@@ -11,33 +11,67 @@
   <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
 </p>
 
-TrueCourse analyzes JavaScript/TypeScript repositories using tree-sitter, renders service-level dependency graphs with React Flow, and provides LLM-powered architectural insights.
+TrueCourse analyzes JavaScript/TypeScript repositories to detect architectural violations like circular dependencies, layer breaches, god modules, dead code, and more. It uses tree-sitter for static analysis and LLMs to surface violations with actionable fix suggestions. View results in the terminal or explore an interactive dependency graph in the web UI.
 
-## How it works
+<p align="center">
+  <img src="assets/screenshot.png" alt="TrueCourse Screenshot" width="100%" />
+</p>
 
-1. Point TrueCourse at a local repo folder
-2. The analyzer scans all JS/TS files using tree-sitter, detects services, layers, dependencies, and databases
-3. Results render as an interactive graph — services as nodes, dependencies as animated edges, databases as infrastructure nodes with ER diagrams
-4. An AI agent explains your architecture and answers questions about your codebase
+## What it catches
 
-## Prerequisites
-
-- Node.js >= 20
-- pnpm >= 9
-
-No database setup required — an embedded PostgreSQL instance is created automatically on first run.
+- **Circular dependencies** between services and modules
+- **Layer violations** like data layer calling API layer, skipping service layer, etc.
+- **God modules** with too many exports or responsibilities
+- **Dead modules** that are unused and should be removed
+- **Database issues** like missing indexes, raw SQL bypassing ORM, schema problems
+- **Dependency concerns** like tight coupling, missing abstractions, unstable interfaces
+- **Git Diff mode** to see which violations your uncommitted changes introduce or resolve
 
 ## Quick Start
 
 ```bash
+# 1. Start TrueCourse (first run walks you through setup)
 npx truecourse
+
+# 2. In another terminal, cd into your repo and analyze
+cd /path/to/your/repo
+npx truecourse analyze
 ```
 
-That's it. On first run, the setup wizard walks you through LLM provider configuration. An embedded PostgreSQL database is created automatically — no Docker or external database required.
+On first run, the setup wizard configures your LLM provider. An embedded PostgreSQL database is created automatically, no Docker or external database required.
 
-The web app opens at **http://localhost:3000** and the API server runs at **http://localhost:3001**.
+Violations print directly in your terminal. The web UI at **http://localhost:3001** shows an interactive dependency graph with violations highlighted.
 
-### Development Setup
+## CLI Commands
+
+**Starting the server**
+
+`npx truecourse` runs setup (first time only) then starts the server. You can also run them separately:
+
+```bash
+npx truecourse          # Setup + start (all-in-one)
+npx truecourse setup    # Just configure LLM keys
+npx truecourse start    # Just start the server
+```
+
+**Analyzing repos** (server must be running)
+
+```bash
+npx truecourse analyze        # Analyze current repo, show violations
+npx truecourse analyze --diff # Show new/resolved violations from uncommitted changes
+npx truecourse list           # Show violations from latest analysis
+npx truecourse list --diff    # Show saved diff check results
+npx truecourse add            # Register repo without analyzing
+```
+
+## Prerequisites
+
+- Node.js >= 20
+- An OpenAI or Anthropic API key
+
+No database setup, no Docker. Everything runs locally out of the box.
+
+## Development Setup
 
 If you want to contribute or run from source:
 
@@ -47,152 +81,19 @@ cd truecourse
 pnpm install
 
 cp .env.example .env
-# Edit .env — add your ANTHROPIC_API_KEY or OPENAI_API_KEY
+# Edit .env with your ANTHROPIC_API_KEY or OPENAI_API_KEY
 
 pnpm dev
 ```
 
-### Langfuse Setup (optional)
+## Analysis Rules
 
-LLM prompts work out of the box without Langfuse (using local definitions). To enable tracing and prompt management via Langfuse:
+TrueCourse ships with two types of rules:
 
-1. Start the Langfuse infrastructure: `docker-compose up -d`
-2. Open Langfuse at **http://localhost:3002**
-3. Create an account and a project
-4. Go to **Settings > API Keys** and create a new key pair
-5. Add the keys to your `.env`:
-   ```
-   LANGFUSE_PUBLIC_KEY=pk-lf-...
-   LANGFUSE_SECRET_KEY=sk-lf-...
-   LANGFUSE_BASE_URL=http://localhost:3002
-   ```
-6. Push the prompt definitions to Langfuse:
-   ```bash
-   pnpm prompts:push
-   ```
-7. Restart the dev server — all LLM calls will now be traced and prompts managed in Langfuse
+- **Deterministic rules** that are checked programmatically during analysis (layer violations, circular deps, dead modules)
+- **LLM rules** for architectural and database analysis, passed to the LLM for deeper inspection with fix suggestions
 
-> **Note:** Docker is only needed for Langfuse tracing. The app itself runs without Docker.
-
-## Ports
-
-| Port | Service | Notes |
-|---|---|---|
-| 3000 | TrueCourse web UI | Next.js frontend |
-| 3001 | TrueCourse API | Express backend |
-| 5434 | Embedded PostgreSQL | Managed automatically, data in `~/.truecourse/data/` |
-| 3002 | Langfuse UI | Optional — LLM tracing dashboard (requires Docker) |
-
-## CLI Commands
-
-```bash
-npx truecourse          # First run: setup wizard → start. Subsequent runs: just start.
-npx truecourse setup    # Re-run setup wizard (reconfigure LLM keys, etc.)
-npx truecourse start    # Skip setup, just start
-npx truecourse add      # Register the current directory as a repo (server must be running)
-```
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js 15 (App Router), React Flow, Tailwind CSS, shadcn/ui |
-| Backend | Express, Socket.io, Drizzle ORM |
-| Database | Embedded PostgreSQL (no Docker required) |
-| Analysis | tree-sitter (JS/TS) |
-| LLM | Vercel AI SDK (OpenAI, Anthropic), Langfuse tracing |
-| Monorepo | Turborepo, pnpm workspaces |
-
-## Project Structure
-
-```
-truecourse/
-  apps/
-    web/            Next.js frontend — graph UI, repo selector, chat panel
-    server/         Express backend — REST API, WebSocket, LLM providers
-  packages/
-    shared/         Shared types and Zod validation schemas
-    analyzer/       Tree-sitter analysis engine (adapted from SpecMind)
-      src/rules/    Analysis rules (deterministic + LLM)
-  tools/
-    cli/            Setup wizard and start command
-  tests/
-    fixtures/       Sample multi-service project for tests
-    shared/         Schema validation tests
-    analyzer/       Parser, file analysis, service/layer detection tests
-    server/         Graph service, analysis integration tests
-```
-
-## Packages
-
-### `@truecourse/analyzer`
-
-Tree-sitter-based code analysis engine. Detects services (monorepo structure, Docker Compose, entry points), architectural layers (data, API, service, external), databases (Prisma, Drizzle, Mongoose, raw drivers, Docker Compose), and builds module dependency graphs.
-
-**Analysis rules** live in `packages/analyzer/src/rules/`:
-
-| File | What |
-|---|---|
-| `deterministic-rules.ts` | 3 layer violation rules — checked programmatically during analysis |
-| `llm-rules.ts` | 9 LLM rules (4 architecture + 5 database) — passed as guidance to the LLM prompt |
-
-The folder contains only rule definitions — no code. The aggregator (`rule-engine.ts`) lives in the parent `src/` directory. To add a new rule, add an entry to the appropriate file and submit a PR. All rules are visible in the **Rules** tab in the web UI.
-
-### `@truecourse/shared`
-
-Zod schemas and TypeScript types shared across frontend and backend. Covers file analysis results, service/layer/entity types, insight types, and API request validation.
-
-### `@truecourse/server`
-
-Express API with Socket.io for real-time analysis progress. Embedded PostgreSQL with Drizzle ORM manages 7 tables — no Docker or external database required. Uses Vercel AI SDK for unified LLM access (OpenAI, Anthropic) with structured output via Zod schemas. Chokidar watches repos for file changes.
-
-### `@truecourse/web`
-
-Next.js App Router frontend. React Flow renders the service graph with custom nodes (service cards with type icons, framework badges, layer indicators) and animated dependency edges. Includes an AI chat panel with node context injection.
-
-## API Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/api/repos` | Register a repository |
-| GET | `/api/repos` | List all repositories |
-| GET | `/api/repos/:id` | Repository details + latest analysis |
-| DELETE | `/api/repos/:id` | Remove a repository |
-| POST | `/api/repos/:id/analyze` | Trigger analysis (progress via WebSocket) |
-| GET | `/api/repos/:id/graph` | Graph data (nodes + edges) |
-| POST | `/api/repos/:id/insights` | Generate LLM insights |
-| GET | `/api/repos/:id/insights` | Get insights |
-| GET | `/api/repos/:id/databases` | List detected databases |
-| GET | `/api/repos/:id/databases/:dbId/schema` | Database schema (tables, columns, relations) |
-| POST | `/api/repos/:id/chat` | Chat with AI agent (SSE streaming) |
-| GET | `/api/rules` | List all analysis rules |
-
-## Testing
-
-```bash
-# Run all tests
-pnpm test
-
-# Watch mode
-pnpm test:watch
-```
-
-Tests cover schema validation, tree-sitter parsing, file analysis, dependency graph building, service/layer detection, database detection, schema parsing, graph layout, and end-to-end analysis.
-
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `DATABASE_URL` | No | PostgreSQL connection string (auto-configured with embedded Postgres) |
-| `ANTHROPIC_API_KEY` | No* | Anthropic API key for insights/chat |
-| `OPENAI_API_KEY` | No* | OpenAI API key for insights/chat |
-| `LLM_PROVIDER` | No | Default provider: `anthropic` or `openai` |
-| `LANGFUSE_PUBLIC_KEY` | No | Langfuse project public key (optional) |
-| `LANGFUSE_SECRET_KEY` | No | Langfuse project secret key (optional) |
-| `LANGFUSE_BASE_URL` | No | Langfuse URL (default: `http://localhost:3002`) |
-| `PORT` | No | Server port (default: 3001) |
-
-*At least one LLM key is needed for insights and chat features.
+All rules are visible and configurable in the **Rules** tab in the web UI. To add a custom rule, add an entry to `packages/analyzer/src/rules/` and submit a PR.
 
 ## License
 

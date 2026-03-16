@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const RuleCategorySchema = z.enum(['architecture', 'database', 'module'])
+export const RuleCategorySchema = z.enum(['service', 'database', 'module'])
 export type RuleCategory = z.infer<typeof RuleCategorySchema>
 
 export const RuleSeveritySchema = z.enum(['info', 'low', 'medium', 'high', 'critical'])

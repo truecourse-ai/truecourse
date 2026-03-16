@@ -1,2 +1,0 @@
-ALTER TABLE "insights" ADD COLUMN "target_database_id" uuid;--> statement-breakpoint
-ALTER TABLE "insights" ADD CONSTRAINT "insights_target_database_id_databases_id_fk" FOREIGN KEY ("target_database_id") REFERENCES "public"."databases"("id") ON DELETE set null ON UPDATE no action;

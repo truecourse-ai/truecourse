@@ -5,6 +5,9 @@ import type {
   ArchitectureInsightContext,
   DatabaseInsightContext,
   ModuleInsightContext,
+  DiffArchitectureContext,
+  DiffDatabaseContext,
+  DiffModuleContext,
 } from './provider.js';
 
 // ---------------------------------------------------------------------------
@@ -12,7 +15,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export const PROMPT_DEFINITIONS = {
-  'insights-architecture': {
+  'violations-architecture': {
     prompt: `Analyze the following codebase architecture and identify violations and issues that need to be fixed.
 
 Architecture: {{architecture}}
@@ -47,7 +50,7 @@ Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  'insights-database': {
+  'violations-database': {
     prompt: `Analyze the following database schemas and identify violations and issues that need to be fixed.
 
 Databases:
@@ -75,7 +78,7 @@ Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  'insights-module': {
+  'violations-module': {
     prompt: `Analyze the following modules and methods and identify violations and issues that need to be fixed.
 
 Modules:
@@ -89,7 +92,7 @@ Module Dependencies:
 {{violations}}
 {{llmRules}}
 
-IMPORTANT: When referencing a module or method, use the exact id from the Modules or Methods list above. Do not fabricate or modify ids. Set targetServiceId, targetModuleId, and targetMethodId to link insights to the correct entities.
+IMPORTANT: When referencing a module or method, use the exact id from the Modules or Methods list above. Do not fabricate or modify ids. Set targetServiceId, targetModuleId, and targetMethodId to link violations to the correct entities.
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
@@ -100,7 +103,96 @@ Focus on:
 4. Mixed abstraction levels in methods
 5. Code organization issues
 
-If violations are listed above, generate an insight for each violation with a concrete fixPrompt that an AI coding assistant could use to fix the issue. The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt. Example: "Split UserService into UserQueryService and UserCommandService by separating read and write methods".
+If violations are listed above, generate a violation entry for each with a concrete fixPrompt that an AI coding assistant could use to fix the issue. The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt. Example: "Split UserService into UserQueryService and UserCommandService by separating read and write methods".
+
+Return your findings as structured data using the provided schema.`,
+    config: {
+      model: 'gpt-4o',
+      max_tokens: 4096,
+    },
+    labels: ['production'],
+  },
+
+  'violations-diff-architecture': {
+    prompt: `Analyze the following codebase architecture and compare it against the existing known violations listed below. Identify ONLY new violations that are NOT already covered by existing violations, and identify which existing violations are now resolved.
+
+Architecture: {{architecture}}
+
+Services:
+{{serviceList}}
+
+Dependencies:
+{{depList}}
+{{violations}}
+{{llmRules}}
+
+Existing violations (with IDs — reference these when marking resolved):
+{{existingViolations}}
+
+IMPORTANT:
+- Return ONLY genuinely new violations not already covered by an existing violation.
+- Return IDs of existing violations that are now resolved (the issue no longer exists in the current code).
+- Do NOT re-report violations that match existing ones.
+- Use exact service names from the Services list. Do not fabricate ids.
+- For each new violation, provide a fixPrompt that an AI coding assistant could use to fix it.
+
+Return your findings as structured data using the provided schema.`,
+    config: {
+      model: 'gpt-4o',
+      max_tokens: 4096,
+    },
+    labels: ['production'],
+  },
+
+  'violations-diff-database': {
+    prompt: `Analyze the following database schemas and compare against the existing known violations listed below. Identify ONLY new violations not already covered, and identify which existing violations are now resolved.
+
+Databases:
+{{databaseList}}
+{{llmRules}}
+
+Existing violations (with IDs — reference these when marking resolved):
+{{existingViolations}}
+
+IMPORTANT:
+- Return ONLY genuinely new violations not already covered by an existing violation.
+- Return IDs of existing violations that are now resolved.
+- Do NOT re-report violations that match existing ones.
+- For each new violation, provide a fixPrompt using human-readable names.
+
+Return your findings as structured data using the provided schema.`,
+    config: {
+      model: 'gpt-4o',
+      max_tokens: 4096,
+    },
+    labels: ['production'],
+  },
+
+  'violations-diff-module': {
+    prompt: `Analyze the following modules and methods and compare against the existing known violations listed below. Identify ONLY new violations not already covered, and identify which existing violations are now resolved.
+
+Modules:
+{{moduleList}}
+
+Methods:
+{{methodList}}
+
+Module Dependencies:
+{{moduleDependencyList}}
+{{violations}}
+{{llmRules}}
+
+Existing violations (with IDs — reference these when marking resolved):
+{{existingViolations}}
+
+IMPORTANT:
+- Return ONLY genuinely new violations not already covered by an existing violation.
+- Return IDs of existing violations that are now resolved.
+- Do NOT re-report violations that match existing ones.
+- Use exact service/module/method names. Do not fabricate ids.
+- For each new violation, provide a fixPrompt using human-readable names.
+
+If deterministic violations are listed above that are NOT covered by existing violations, generate a new violation entry for each with a concrete fixPrompt.
 
 Return your findings as structured data using the provided schema.`,
     config: {
@@ -207,7 +299,7 @@ export function buildTemplateVars(context: ArchitectureContext): Record<string, 
   return { architecture: context.architecture, serviceList, depList, violations, databases, llmRules };
 }
 
-/** Build template vars for insights-architecture prompt. */
+/** Build template vars for violations-architecture prompt. */
 export function buildArchitectureTemplateVars(context: ArchitectureInsightContext): Record<string, string> {
   const serviceList = context.services
     .map(
@@ -236,7 +328,7 @@ export function buildArchitectureTemplateVars(context: ArchitectureInsightContex
   return { architecture: context.architecture, serviceList, depList, violations, llmRules };
 }
 
-/** Build template vars for insights-database prompt. */
+/** Build template vars for violations-database prompt. */
 export function buildDatabaseTemplateVars(context: DatabaseInsightContext): Record<string, string> {
   const databaseList = context.databases.map((d) => {
     let dbStr = `- ${d.name} [id: ${d.id}] (${d.type}, driver: ${d.driver}, tables: ${d.tableCount}, used by: ${d.connectedServices.join(', ') || 'none'})`;
@@ -271,7 +363,7 @@ export function buildDatabaseTemplateVars(context: DatabaseInsightContext): Reco
   return { databaseList, llmRules };
 }
 
-/** Build template vars for insights-module prompt. */
+/** Build template vars for violations-module prompt. */
 export function buildModuleTemplateVars(context: ModuleInsightContext): Record<string, string> {
   const moduleList = context.modules
     .map(
@@ -294,7 +386,7 @@ export function buildModuleTemplateVars(context: ModuleInsightContext): Record<s
     .join('\n') || '(none)';
 
   const violations = context.violations?.length
-    ? `\nDeterministic violations detected (generate an insight with fixPrompt for each, and link to the correct service/module/method using their ids):\n${context.violations.map(
+    ? `\nDeterministic violations detected (generate a violation with fixPrompt for each, and link to the correct service/module/method using their ids):\n${context.violations.map(
         (v) => `- [${v.severity.toUpperCase()}] ${v.title}: ${v.description} (rule: ${v.ruleKey}, service: ${v.serviceName}${v.serviceId ? ` [serviceId: ${v.serviceId}]` : ''}${v.moduleName ? `, module: ${v.moduleName}` : ''}${v.moduleId ? ` [moduleId: ${v.moduleId}]` : ''}${v.methodName ? `, method: ${v.methodName}` : ''}${v.methodId ? ` [methodId: ${v.methodId}]` : ''})`
       ).join('\n')}`
     : '';
@@ -306,6 +398,44 @@ export function buildModuleTemplateVars(context: ModuleInsightContext): Record<s
     : '';
 
   return { moduleList, methodList, moduleDependencyList, violations, llmRules };
+}
+
+// ---------------------------------------------------------------------------
+// Diff template variable helpers
+// ---------------------------------------------------------------------------
+
+function formatExistingViolations(violations: { id: string; type: string; title: string; content: string; severity: string }[]): string {
+  if (!violations.length) return '(none)';
+  return violations.map(
+    (v) => `- [id: ${v.id}] [${v.severity.toUpperCase()}] ${v.title}: ${v.content}`
+  ).join('\n');
+}
+
+/** Build template vars for violations-diff-architecture prompt. */
+export function buildDiffArchitectureTemplateVars(context: DiffArchitectureContext): Record<string, string> {
+  const base = buildArchitectureTemplateVars(context);
+  return {
+    ...base,
+    existingViolations: formatExistingViolations(context.existingViolations),
+  };
+}
+
+/** Build template vars for violations-diff-database prompt. */
+export function buildDiffDatabaseTemplateVars(context: DiffDatabaseContext): Record<string, string> {
+  const base = buildDatabaseTemplateVars(context);
+  return {
+    ...base,
+    existingViolations: formatExistingViolations(context.existingViolations),
+  };
+}
+
+/** Build template vars for violations-diff-module prompt. */
+export function buildDiffModuleTemplateVars(context: DiffModuleContext): Record<string, string> {
+  const base = buildModuleTemplateVars(context);
+  return {
+    ...base,
+    existingViolations: formatExistingViolations(context.existingViolations),
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -149,3 +149,58 @@ export const LayerDependencyInfoSchema = z.object({
 })
 
 export type LayerDependencyInfo = z.infer<typeof LayerDependencyInfoSchema>
+
+// ---------------------------------------------------------------------------
+// Violation Diff (Phase 5: Git Pending Changes)
+// ---------------------------------------------------------------------------
+
+export type ViolationDiffStatus = 'new' | 'resolved' | 'unchanged'
+
+export type ViolationDiffItem = {
+  sourceServiceName: string
+  sourceLayer: string
+  targetServiceName: string
+  targetLayer: string
+  violationReason: string
+  status: ViolationDiffStatus
+  dependencyCount: number
+}
+
+export type ModuleViolationDiffItem = {
+  ruleKey: string
+  title: string
+  description: string
+  severity: string
+  serviceName: string
+  moduleName?: string
+  methodName?: string
+  filePath: string
+  status: ViolationDiffStatus
+}
+
+export type DiffCheckResult = {
+  changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>
+  resolvedInsightIds: string[]
+  newInsights: DiffInsightItem[]
+  summary: {
+    newCount: number
+    resolvedCount: number
+  }
+  affectedNodeIds: {
+    services: string[]
+    layers: string[]
+    modules: string[]   // "serviceName::moduleName"
+    methods: string[]   // "serviceName::moduleName::methodName"
+  }
+}
+
+export type DiffInsightItem = {
+  type: string
+  title: string
+  content: string
+  severity: string
+  targetServiceName: string | null
+  targetModuleName: string | null
+  targetMethodName: string | null
+  fixPrompt: string | null
+}

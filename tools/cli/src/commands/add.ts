@@ -1,11 +1,5 @@
 import * as p from "@clack/prompts";
-
-const DEFAULT_PORT = 3001;
-
-function getServerUrl(): string {
-  const port = process.env.PORT || DEFAULT_PORT;
-  return `http://localhost:${port}`;
-}
+import { getServerUrl } from "./helpers.js";
 
 export async function runAdd(): Promise<void> {
   const repoPath = process.cwd();

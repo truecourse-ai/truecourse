@@ -24,7 +24,7 @@ export const repos = pgTable('repos', {
 
 export const reposRelations = relations(repos, ({ many }) => ({
   analyses: many(analyses),
-  insights: many(insights),
+  violations: many(violations),
   conversations: many(conversations),
 }));
 
@@ -53,7 +53,7 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   serviceDependencies: many(serviceDependencies),
   layers: many(layers),
   layerDependencies: many(layerDependencies),
-  insights: many(insights),
+  violations: many(violations),
   databases: many(databases),
   modules: many(modules),
   methods: many(methods),
@@ -87,7 +87,7 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
   sourceEdges: many(serviceDependencies, { relationName: 'sourceService' }),
   targetEdges: many(serviceDependencies, { relationName: 'targetService' }),
   layers: many(layers),
-  insights: many(insights),
+  violations: many(violations),
 }));
 
 // ---------------------------------------------------------------------------
@@ -186,10 +186,10 @@ export const layerDependenciesRelations = relations(layerDependencies, ({ one })
 }));
 
 // ---------------------------------------------------------------------------
-// insights
+// violations
 // ---------------------------------------------------------------------------
 
-export const insights = pgTable('insights', {
+export const violations = pgTable('violations', {
   id: uuid('id').defaultRandom().primaryKey(),
   repoId: uuid('repo_id')
     .notNull()
@@ -218,29 +218,29 @@ export const insights = pgTable('insights', {
   createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
 });
 
-export const insightsRelations = relations(insights, ({ one }) => ({
+export const violationsRelations = relations(violations, ({ one }) => ({
   repo: one(repos, {
-    fields: [insights.repoId],
+    fields: [violations.repoId],
     references: [repos.id],
   }),
   analysis: one(analyses, {
-    fields: [insights.analysisId],
+    fields: [violations.analysisId],
     references: [analyses.id],
   }),
   targetService: one(services, {
-    fields: [insights.targetServiceId],
+    fields: [violations.targetServiceId],
     references: [services.id],
   }),
   targetDatabase: one(databases, {
-    fields: [insights.targetDatabaseId],
+    fields: [violations.targetDatabaseId],
     references: [databases.id],
   }),
   targetModule: one(modules, {
-    fields: [insights.targetModuleId],
+    fields: [violations.targetModuleId],
     references: [modules.id],
   }),
   targetMethod: one(methods, {
-    fields: [insights.targetMethodId],
+    fields: [violations.targetMethodId],
     references: [methods.id],
   }),
 }));
@@ -499,5 +499,53 @@ export const methodDepsRelations = relations(methodDeps, ({ one }) => ({
     fields: [methodDeps.targetMethodId],
     references: [methods.id],
     relationName: 'targetMethod',
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// rules (analysis rules — seeded from defaults, configurable per instance)
+// ---------------------------------------------------------------------------
+
+export const rules = pgTable('rules', {
+  key: text('key').primaryKey(),
+  category: text('category').notNull(), // 'service' | 'module' | 'database'
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  prompt: text('prompt'),
+  enabled: boolean('enabled').notNull().default(true),
+  severity: text('severity').notNull(), // 'info' | 'low' | 'medium' | 'high' | 'critical'
+  type: text('type').notNull(), // 'deterministic' | 'llm'
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// diff_checks (persisted diff analysis results)
+// ---------------------------------------------------------------------------
+
+export const diffChecks = pgTable('diff_checks', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  repoId: uuid('repo_id')
+    .notNull()
+    .references(() => repos.id, { onDelete: 'cascade' }),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  changedFiles: jsonb('changed_files').notNull(), // Array<{ path, status }>
+  resolvedInsightIds: jsonb('resolved_insight_ids').notNull(), // string[]
+  newInsights: jsonb('new_insights').notNull(), // InsightResponse[]
+  affectedNodeIds: jsonb('affected_node_ids').notNull(), // { services, layers, modules, methods }
+  summary: jsonb('summary').notNull(), // { newCount, resolvedCount }
+  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+});
+
+export const diffChecksRelations = relations(diffChecks, ({ one }) => ({
+  repo: one(repos, {
+    fields: [diffChecks.repoId],
+    references: [repos.id],
+  }),
+  analysis: one(analyses, {
+    fields: [diffChecks.analysisId],
+    references: [analyses.id],
   }),
 }));

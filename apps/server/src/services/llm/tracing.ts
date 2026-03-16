@@ -6,10 +6,14 @@ import type {
   ArchitectureInsightContext,
   DatabaseInsightContext,
   ModuleInsightContext,
+  DiffArchitectureContext,
+  DiffDatabaseContext,
+  DiffModuleContext,
   ChatMessage,
   ArchitectureInsightsResult,
   DatabaseInsightsResult,
   ModuleInsightsResult,
+  DiffInsightsResult,
 } from './provider.js';
 
 function isLangfuseConfigured(): boolean {
@@ -44,13 +48,13 @@ class TracedLLMProvider implements LLMProvider {
     }
 
     const trace = langfuse.trace({
-      name: 'llm-insights-architecture',
+      name: 'llm-violations-architecture',
       input: context,
     });
 
     try {
       const generation = trace.generation({
-        name: 'llm-insights-architecture',
+        name: 'llm-violations-architecture',
         input: context,
       });
 
@@ -76,13 +80,13 @@ class TracedLLMProvider implements LLMProvider {
     }
 
     const trace = langfuse.trace({
-      name: 'llm-insights-database',
+      name: 'llm-violations-database',
       input: context,
     });
 
     try {
       const generation = trace.generation({
-        name: 'llm-insights-database',
+        name: 'llm-violations-database',
         input: context,
       });
 
@@ -108,17 +112,53 @@ class TracedLLMProvider implements LLMProvider {
     }
 
     const trace = langfuse.trace({
-      name: 'llm-insights-module',
+      name: 'llm-violations-module',
       input: context,
     });
 
     try {
       const generation = trace.generation({
-        name: 'llm-insights-module',
+        name: 'llm-violations-module',
         input: context,
       });
 
       const result = await this.inner.generateModuleInsights(context);
+
+      generation.end({ output: result });
+      await langfuse.flushAsync();
+
+      return result;
+    } catch (error) {
+      trace.update({
+        output: { error: error instanceof Error ? error.message : String(error) },
+      });
+      await langfuse.flushAsync();
+      throw error;
+    }
+  }
+
+  async generateDiffInsights(contexts: {
+    architecture?: DiffArchitectureContext;
+    database?: DiffDatabaseContext;
+    module?: DiffModuleContext;
+  }): Promise<DiffInsightsResult> {
+    const langfuse = getLangfuse();
+    if (!langfuse) {
+      return this.inner.generateDiffInsights(contexts);
+    }
+
+    const trace = langfuse.trace({
+      name: 'llm-diff-violations',
+      input: contexts,
+    });
+
+    try {
+      const generation = trace.generation({
+        name: 'llm-diff-violations',
+        input: contexts,
+      });
+
+      const result = await this.inner.generateDiffInsights(contexts);
 
       generation.end({ output: result });
       await langfuse.flushAsync();

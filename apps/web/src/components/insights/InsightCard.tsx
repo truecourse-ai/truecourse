@@ -10,6 +10,8 @@ import type { InsightResponse } from '@/lib/api';
 type InsightCardProps = {
   insight: InsightResponse;
   onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
+  isResolved?: boolean;
+  diffStatus?: 'new' | 'resolved';
 };
 
 const severityColors: Record<string, string> = {
@@ -28,7 +30,7 @@ const severityBadgeColors: Record<string, string> = {
   critical: 'bg-red-600/10 text-red-700 dark:text-red-500',
 };
 
-export function InsightCard({ insight, onLocateNode }: InsightCardProps) {
+export function InsightCard({ insight, onLocateNode, isResolved, diffStatus }: InsightCardProps) {
   const [copied, setCopied] = useState(false);
   const [showFix, setShowFix] = useState(false);
 
@@ -54,6 +56,15 @@ export function InsightCard({ insight, onLocateNode }: InsightCardProps) {
     >
       <CardContent className="p-0">
         <div className="mb-1.5 flex items-center gap-2">
+          {diffStatus && (
+            <Badge className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase ${
+              diffStatus === 'new'
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+            }`}>
+              {diffStatus}
+            </Badge>
+          )}
           <Badge
             className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase ${
               severityBadgeColors[insight.severity] || ''
@@ -82,7 +93,7 @@ export function InsightCard({ insight, onLocateNode }: InsightCardProps) {
           )}
         </div>
 
-        <h4 className="text-sm font-bold text-foreground">
+        <h4 className={`text-sm font-bold ${isResolved ? 'line-through opacity-60 text-muted-foreground' : 'text-foreground'}`}>
           {insight.title}
         </h4>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -114,7 +125,7 @@ export function InsightCard({ insight, onLocateNode }: InsightCardProps) {
           </p>
         )}
 
-        {insight.fixPrompt && (
+        {insight.fixPrompt && !isResolved && (
           <div className="mt-2">
             <div className="flex items-center gap-1.5">
               <Button

@@ -165,5 +165,5 @@ export async function runSetup(): Promise<void> {
   p.log.info("Embedded PostgreSQL will start automatically when the server runs.");
   p.log.info("Database migrations are applied on server startup.");
 
-  p.outro("Setup complete! Run `npx truecourse` to start.");
+  p.outro("Setup complete!");
 }

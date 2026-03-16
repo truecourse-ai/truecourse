@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { eq, desc } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { repos, analyses, services, serviceDependencies, insights, conversations, messages } from '../db/schema.js';
+import { repos, analyses, services, serviceDependencies, violations, conversations, messages } from '../db/schema.js';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { simpleGit } from 'simple-git';
@@ -194,7 +194,7 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
       .where(eq(analyses.repoId, id));
 
     for (const analysis of repoAnalyses) {
-      await db.delete(insights).where(eq(insights.analysisId, analysis.id));
+      await db.delete(violations).where(eq(violations.analysisId, analysis.id));
       await db.delete(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id));
       await db.delete(services).where(eq(services.analysisId, analysis.id));
     }

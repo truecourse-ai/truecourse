@@ -29,11 +29,12 @@ import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
 import { ZoomControls } from '@/components/graph/controls/ZoomControls';
 import { DepthToggle } from '@/components/graph/controls/DepthToggle';
-import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network } from 'lucide-react';
+import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network, Loader2 } from 'lucide-react';
 import * as api from '@/lib/api';
 import { useCollapseState } from '@/hooks/useCollapseState';
 import { applyCollapseState } from '@/lib/collapse';
 import type { DepthLevel } from '@/types/graph';
+import type { DiffCheckResponse } from '@/lib/api';
 
 type GraphCanvasProps = {
   initialNodes: Node[];
@@ -48,6 +49,14 @@ type GraphCanvasProps = {
   onDepthChange: (level: DepthLevel) => void;
   focusNodeId?: string | null;
   focusKey?: number;
+  isDiffMode?: boolean;
+  diffResult?: DiffCheckResponse | null;
+  isDiffChecking?: boolean;
+  hasProgressBar?: boolean;
+  onEnterDiffMode?: () => void;
+  onExitDiffMode?: () => void;
+  highlightedNodeIds?: Set<string> | null;
+  savedCollapsedIds?: string[];
 };
 
 const nodeTypes: NodeTypes = {
@@ -79,31 +88,67 @@ function GraphCanvasInner({
   onDepthChange,
   focusNodeId,
   focusKey,
+  isDiffMode,
+  diffResult,
+  isDiffChecking,
+  hasProgressBar,
+  onEnterDiffMode,
+  onExitDiffMode,
+  highlightedNodeIds,
+  savedCollapsedIds,
 }: GraphCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(() => {
     if (typeof window === 'undefined') return true;
-    return localStorage.getItem(`truecourse:animations:${depthLevel}`) !== 'off';
+    return localStorage.getItem('truecourse:animations') !== 'off';
   });
   const [edgeStyle, setEdgeStyle] = useState<'bezier' | 'step'>(() => {
     if (typeof window === 'undefined') return 'bezier';
-    return (localStorage.getItem(`truecourse:edgeStyle:${depthLevel}`) as 'bezier' | 'step') || 'bezier';
+    return (localStorage.getItem('truecourse:edgeStyle') as 'bezier' | 'step') || 'bezier';
   });
   const [focusMode, setFocusMode] = useState(() => {
     if (typeof window === 'undefined') return false;
-    return localStorage.getItem(`truecourse:focusMode:${depthLevel}`) === 'on';
+    return localStorage.getItem('truecourse:focusMode') === 'on';
   });
   const [panMode, setPanMode] = useState(true);
   const nodesRef = useRef<Node[]>([]);
-  const prevDepthRef = useRef(depthLevel);
   const { fitView } = useReactFlow();
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
   // Collapse state for modules/methods modes
-  const { collapsedIds, toggle: toggleCollapse, expandAll, collapseAll, isBulkAction } = useCollapseState(repoId, depthLevel, initialNodes);
-  const relayoutRef = useRef(false);
+  const { collapsedIds, toggle: toggleCollapseRaw, expandAll: expandAllRaw, collapseAll: collapseAllRaw, isBulkAction } = useCollapseState(repoId, depthLevel, initialNodes, branch, savedCollapsedIds);
+
+  // Save top-level node positions after a delay (lets dagre relayout settle)
+  const savePositionsAfterCollapse = useCallback(() => {
+    setTimeout(() => {
+      const positions: Record<string, { x: number; y: number }> = {};
+      for (const node of nodesRef.current) {
+        if (node.type === 'layer' || node.type === 'module' || node.type === 'method') continue;
+        positions[node.id] = node.position;
+      }
+      if (Object.keys(positions).length > 0) {
+        api.saveGraphPositions(repoId, positions, branch, depthLevel);
+      }
+    }, 600);
+  }, [repoId, branch, depthLevel]);
+
+  // Wrap collapse actions to also save positions
+  const toggleCollapse = useCallback((id: string) => {
+    toggleCollapseRaw(id);
+    savePositionsAfterCollapse();
+  }, [toggleCollapseRaw, savePositionsAfterCollapse]);
+
+  const expandAll = useCallback(() => {
+    expandAllRaw();
+    savePositionsAfterCollapse();
+  }, [expandAllRaw, savePositionsAfterCollapse]);
+
+  const collapseAll = useCallback(() => {
+    collapseAllRaw();
+    savePositionsAfterCollapse();
+  }, [collapseAllRaw, savePositionsAfterCollapse]);
 
   // Keep ref in sync with current nodes
   nodesRef.current = nodes;
@@ -167,30 +212,39 @@ function GraphCanvasInner({
 
     let processedEdges = initialEdges.map((e) => ({ ...e, data: { ...e.data, edgeStyle, hidden: focusMode } }));
 
-    // Apply collapse transform for non-services modes
-    if (depthLevel !== 'services' && collapsedIds.size > 0) {
-      const relayout = relayoutRef.current;
-      relayoutRef.current = false;
-      const collapsed = applyCollapseState(processedNodes, processedEdges, collapsedIds, depthLevel, relayout);
+    // Apply collapse transform for non-services modes — always relayout to reposition
+    if (depthLevel !== 'services') {
+      const collapsed = applyCollapseState(processedNodes, processedEdges, collapsedIds, depthLevel, true);
       processedNodes = collapsed.nodes;
       processedEdges = collapsed.edges.map((e) => ({ ...e, data: { ...e.data, edgeStyle, hidden: focusMode } }));
     }
 
+    // Apply path-based edge dimming (same logic as hover, but for a set of highlighted nodes)
+    if (highlightedNodeIds && highlightedNodeIds.size > 0) {
+      // Find edges connected to highlighted nodes or their children
+      const connectedEdgeIds = new Set<string>();
+      for (const e of processedEdges) {
+        if (highlightedNodeIds.has(e.source) || highlightedNodeIds.has(e.target)) {
+          connectedEdgeIds.add(e.id);
+        }
+      }
+      processedEdges = processedEdges.map((e) => ({
+        ...e,
+        data: {
+          ...e.data,
+          dimmed: !connectedEdgeIds.has(e.id),
+          hidden: focusMode ? !connectedEdgeIds.has(e.id) : e.data?.hidden,
+        },
+      }));
+    }
+
     setNodes(processedNodes);
     setEdges(processedEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId, focusNodeId, depthLevel, edgeStyle, collapsedIds, toggleCollapse, moduleCountByLayer, focusMode]);
+  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId, focusNodeId, depthLevel, edgeStyle, collapsedIds, toggleCollapse, moduleCountByLayer, focusMode, highlightedNodeIds]);
+
 
   const animDuration = animationsEnabled ? 300 : 0;
 
-  // Load saved edge style and animation preference when depth level changes
-  useEffect(() => {
-    const saved = localStorage.getItem(`truecourse:edgeStyle:${depthLevel}`) as 'bezier' | 'step' | null;
-    setEdgeStyle(saved || 'bezier');
-    const savedAnim = localStorage.getItem(`truecourse:animations:${depthLevel}`);
-    setAnimationsEnabled(savedAnim !== 'off');
-    const savedFocus = localStorage.getItem(`truecourse:focusMode:${depthLevel}`);
-    setFocusMode(savedFocus === 'on');
-  }, [depthLevel]);
 
   // Fit view when depth level changes, new data arrives, or bulk collapse/expand
   useEffect(() => {
@@ -199,6 +253,22 @@ function GraphCanvasInner({
     });
     return () => cancelAnimationFrame(raf);
   }, [depthLevel, initialNodes, fitView, animDuration]);
+
+  // Zoom to highlighted nodes when file path filter changes, or fit all when cleared
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      if (highlightedNodeIds && highlightedNodeIds.size > 0) {
+        fitView({
+          nodes: [...highlightedNodeIds].map((id) => ({ id })),
+          padding: 0.3,
+          duration: animDuration,
+        });
+      } else {
+        fitView({ padding: 0.3, duration: animDuration });
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [highlightedNodeIds, fitView, animDuration]);
 
   // Fit view on bulk collapse/expand only (not individual toggles)
   useEffect(() => {
@@ -357,20 +427,9 @@ function GraphCanvasInner({
     <div className={`h-full w-full${animationsEnabled ? '' : ' no-animations'}`}>
       <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 flex items-center gap-2">
         <DepthToggle level={depthLevel} onChange={onDepthChange} />
-        <button
-          onClick={() => setEdgeStyle((s) => {
-            const next = s === 'bezier' ? 'step' : 'bezier';
-            localStorage.setItem(`truecourse:edgeStyle:${depthLevel}`, next);
-            return next;
-          })}
-          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
-          title={edgeStyle === 'bezier' ? 'Switch to L-shaped edges' : 'Switch to curved edges'}
-        >
-          {edgeStyle === 'bezier' ? <CornerDownRight className="h-3.5 w-3.5" /> : <Spline className="h-3.5 w-3.5" />}
-        </button>
         {depthLevel !== 'services' && (
           <button
-            onClick={() => { relayoutRef.current = true; collapsedIds.size > 0 ? expandAll() : collapseAll(); }}
+            onClick={() => { collapsedIds.size > 0 ? expandAll() : collapseAll(); }}
             className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
             title={collapsedIds.size > 0 ? 'Expand All' : 'Collapse All'}
           >
@@ -380,7 +439,7 @@ function GraphCanvasInner({
         <button
           onClick={() => setFocusMode((v) => {
             const next = !v;
-            localStorage.setItem(`truecourse:focusMode:${depthLevel}`, next ? 'on' : 'off');
+            localStorage.setItem('truecourse:focusMode', next ? 'on' : 'off');
             return next;
           })}
           className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -389,9 +448,20 @@ function GraphCanvasInner({
           <Network className={`h-3.5 w-3.5 ${focusMode ? 'opacity-40' : ''}`} />
         </button>
         <button
+          onClick={() => setEdgeStyle((s) => {
+            const next = s === 'bezier' ? 'step' : 'bezier';
+            localStorage.setItem('truecourse:edgeStyle', next);
+            return next;
+          })}
+          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+          title={edgeStyle === 'bezier' ? 'Switch to L-shaped edges' : 'Switch to curved edges'}
+        >
+          {edgeStyle === 'bezier' ? <CornerDownRight className="h-3.5 w-3.5" /> : <Spline className="h-3.5 w-3.5" />}
+        </button>
+        <button
           onClick={() => setAnimationsEnabled((v) => {
             const next = !v;
-            localStorage.setItem(`truecourse:animations:${depthLevel}`, next ? 'on' : 'off');
+            localStorage.setItem('truecourse:animations', next ? 'on' : 'off');
             return next;
           })}
           className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -432,6 +502,31 @@ function GraphCanvasInner({
         />
         <ZoomControls onAutoLayout={handleAutoLayout} panMode={panMode} onTogglePanMode={() => setPanMode((v) => !v)} />
       </ReactFlow>
+
+      {/* Diff mode banner */}
+      {isDiffMode && !diffResult && !isDiffChecking && (
+        <div className={`absolute ${hasProgressBar ? 'bottom-24' : 'bottom-4'} left-1/2 z-20 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-card px-4 py-2.5 shadow-lg text-xs text-muted-foreground`}>
+          Diff mode — click <span className="font-medium text-foreground">Analyze</span> to compare pending changes against your last analysis
+        </div>
+      )}
+
+      {isDiffMode && isDiffChecking && (
+        <div className={`absolute ${hasProgressBar ? 'bottom-24' : 'bottom-4'} left-1/2 z-20 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-card px-4 py-2.5 shadow-lg text-xs text-muted-foreground flex items-center gap-2`}>
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Scanning pending changes...
+        </div>
+      )}
+
+      {isDiffMode && diffResult && !isDiffChecking && (
+        <div className={`absolute ${hasProgressBar ? 'bottom-24' : 'bottom-4'} left-1/2 z-20 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-card px-4 py-2 shadow-lg flex items-center gap-3 text-xs`}>
+          <span className="text-amber-500 font-medium">+{diffResult.summary.newCount} new</span>
+          <span className="text-emerald-500 font-medium">-{diffResult.summary.resolvedCount} resolved</span>
+          <span className="border-l border-border pl-3 text-muted-foreground">
+            {diffResult.changedFiles.length} file{diffResult.changedFiles.length !== 1 ? 's' : ''} changed
+          </span>
+        </div>
+      )}
+
     </div>
   );
 }

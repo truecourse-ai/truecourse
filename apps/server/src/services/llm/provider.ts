@@ -11,6 +11,9 @@ import {
   buildArchitectureTemplateVars,
   buildDatabaseTemplateVars,
   buildModuleTemplateVars,
+  buildDiffArchitectureTemplateVars,
+  buildDiffDatabaseTemplateVars,
+  buildDiffModuleTemplateVars,
 } from './prompts.js';
 import { wrapWithTracing } from './tracing.js';
 
@@ -144,6 +147,46 @@ export interface ModuleInsightContext {
 }
 
 // ---------------------------------------------------------------------------
+// Diff insight context types (extend normal contexts with existing insights)
+// ---------------------------------------------------------------------------
+
+interface ExistingViolation {
+  id: string;
+  type: string;
+  title: string;
+  content: string;
+  severity: string;
+}
+
+export interface DiffArchitectureContext extends ArchitectureInsightContext {
+  existingViolations: ExistingViolation[];
+}
+
+export interface DiffDatabaseContext extends DatabaseInsightContext {
+  existingViolations: ExistingViolation[];
+}
+
+export interface DiffModuleContext extends ModuleInsightContext {
+  existingViolations: ExistingViolation[];
+}
+
+export interface DiffInsightItem {
+  type: string;
+  title: string;
+  content: string;
+  severity: string;
+  targetServiceName: string | null;
+  targetModuleName: string | null;
+  targetMethodName: string | null;
+  fixPrompt: string | null;
+}
+
+export interface DiffInsightsResult {
+  resolvedInsightIds: string[];
+  newInsights: DiffInsightItem[];
+}
+
+// ---------------------------------------------------------------------------
 // Common types
 // ---------------------------------------------------------------------------
 
@@ -158,27 +201,32 @@ export interface ServiceDescription {
 }
 
 export interface InsightsResult {
-  insights: Insight[];
+  violations: Insight[];
   serviceDescriptions: ServiceDescription[];
 }
 
 export interface ArchitectureInsightsResult {
-  insights: Insight[];
+  violations: Insight[];
   serviceDescriptions: ServiceDescription[];
 }
 
 export interface DatabaseInsightsResult {
-  insights: Insight[];
+  violations: Insight[];
 }
 
 export interface ModuleInsightsResult {
-  insights: Insight[];
+  violations: Insight[];
 }
 
 export interface LLMProvider {
   generateArchitectureInsights(context: ArchitectureInsightContext): Promise<ArchitectureInsightsResult>;
   generateDatabaseInsights(context: DatabaseInsightContext): Promise<DatabaseInsightsResult>;
   generateModuleInsights(context: ModuleInsightContext): Promise<ModuleInsightsResult>;
+  generateDiffInsights(contexts: {
+    architecture?: DiffArchitectureContext;
+    database?: DiffDatabaseContext;
+    module?: DiffModuleContext;
+  }): Promise<DiffInsightsResult>;
   summarizeArchitecture(context: ArchitectureContext): Promise<string>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
 }
@@ -188,13 +236,13 @@ export interface LLMProvider {
 // ---------------------------------------------------------------------------
 
 const ArchitectureInsightOutputSchema = z.object({
-  insights: z.array(
+  violations: z.array(
     z.object({
       type: z.literal('service'),
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
-      targetServiceId: z.string().nullable().describe('The id of the service this insight applies to, must be an exact id from the Services list'),
+      targetServiceId: z.string().nullable().describe('The id of the service this violation applies to, must be an exact id from the Services list'),
       fixPrompt: z.string().nullable(),
     })
   ),
@@ -207,29 +255,45 @@ const ArchitectureInsightOutputSchema = z.object({
 });
 
 const DatabaseInsightOutputSchema = z.object({
-  insights: z.array(
+  violations: z.array(
     z.object({
       type: z.literal('database'),
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
-      targetDatabaseId: z.string().nullable().describe('The id of the database this insight applies to, must be an exact id from the Databases list'),
-      targetTable: z.string().nullable().describe('The exact table name this insight applies to'),
+      targetDatabaseId: z.string().nullable().describe('The id of the database this violation applies to, must be an exact id from the Databases list'),
+      targetTable: z.string().nullable().describe('The exact table name this violation applies to'),
       fixPrompt: z.string().nullable(),
     })
   ),
 });
 
 const ModuleInsightOutputSchema = z.object({
-  insights: z.array(
+  violations: z.array(
     z.object({
-      type: z.enum(['module', 'function']).describe('Use "function" when the issue targets a specific function/method, use "module" when it targets the module/class itself'),
+      type: z.enum(['module', 'function']).describe('Use "function" when the violation targets a specific function/method, use "module" when it targets the module/class itself'),
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
-      targetServiceId: z.string().nullable().describe('The id of the service this insight applies to, must be an exact id from the Services list'),
-      targetModuleId: z.string().nullable().describe('The id of the module this insight applies to, must be an exact id from the Modules list'),
-      targetMethodId: z.string().nullable().describe('The id of the method this insight applies to, must be an exact id from the Methods list'),
+      targetServiceId: z.string().nullable().describe('The id of the service this violation applies to, must be an exact id from the Services list'),
+      targetModuleId: z.string().nullable().describe('The id of the module this violation applies to, must be an exact id from the Modules list'),
+      targetMethodId: z.string().nullable().describe('The id of the method this violation applies to, must be an exact id from the Methods list'),
+      fixPrompt: z.string().nullable(),
+    })
+  ),
+});
+
+const DiffInsightOutputSchema = z.object({
+  resolvedInsightIds: z.array(z.string()).describe('IDs of existing insights that are now resolved'),
+  newInsights: z.array(
+    z.object({
+      type: z.enum(['service', 'database', 'module', 'function']),
+      title: z.string(),
+      content: z.string(),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      targetServiceName: z.string().nullable(),
+      targetModuleName: z.string().nullable(),
+      targetMethodName: z.string().nullable(),
       fixPrompt: z.string().nullable(),
     })
   ),
@@ -268,7 +332,7 @@ function getModel(): LanguageModel {
 
 class AISDKProvider implements LLMProvider {
   async generateArchitectureInsights(context: ArchitectureInsightContext): Promise<ArchitectureInsightsResult> {
-    const prompt = await getPrompt('insights-architecture', buildArchitectureTemplateVars(context));
+    const prompt = await getPrompt('violations-architecture', buildArchitectureTemplateVars(context));
     const model = getModel();
 
     const { object } = await generateObject({
@@ -278,14 +342,14 @@ class AISDKProvider implements LLMProvider {
     });
 
     return {
-      insights: object.insights.map((insight) => ({
+      violations: object.violations.map((v) => ({
         id: uuidv4(),
-        type: insight.type,
-        title: insight.title,
-        content: insight.content,
-        severity: insight.severity,
-        targetServiceId: insight.targetServiceId ?? undefined,
-        fixPrompt: insight.fixPrompt ?? undefined,
+        type: v.type,
+        title: v.title,
+        content: v.content,
+        severity: v.severity,
+        targetServiceId: v.targetServiceId ?? undefined,
+        fixPrompt: v.fixPrompt ?? undefined,
         createdAt: new Date().toISOString(),
       })),
       serviceDescriptions: object.serviceDescriptions,
@@ -293,7 +357,7 @@ class AISDKProvider implements LLMProvider {
   }
 
   async generateDatabaseInsights(context: DatabaseInsightContext): Promise<DatabaseInsightsResult> {
-    const prompt = await getPrompt('insights-database', buildDatabaseTemplateVars(context));
+    const prompt = await getPrompt('violations-database', buildDatabaseTemplateVars(context));
     const model = getModel();
 
     const { object } = await generateObject({
@@ -303,22 +367,22 @@ class AISDKProvider implements LLMProvider {
     });
 
     return {
-      insights: object.insights.map((insight) => ({
+      violations: object.violations.map((v) => ({
         id: uuidv4(),
-        type: insight.type,
-        title: insight.title,
-        content: insight.content,
-        severity: insight.severity,
-        targetDatabaseId: insight.targetDatabaseId ?? undefined,
-        targetTable: insight.targetTable ?? undefined,
-        fixPrompt: insight.fixPrompt ?? undefined,
+        type: v.type,
+        title: v.title,
+        content: v.content,
+        severity: v.severity,
+        targetDatabaseId: v.targetDatabaseId ?? undefined,
+        targetTable: v.targetTable ?? undefined,
+        fixPrompt: v.fixPrompt ?? undefined,
         createdAt: new Date().toISOString(),
       })),
     };
   }
 
   async generateModuleInsights(context: ModuleInsightContext): Promise<ModuleInsightsResult> {
-    const prompt = await getPrompt('insights-module', buildModuleTemplateVars(context));
+    const prompt = await getPrompt('violations-module', buildModuleTemplateVars(context));
     const model = getModel();
 
     const { object } = await generateObject({
@@ -328,19 +392,107 @@ class AISDKProvider implements LLMProvider {
     });
 
     return {
-      insights: object.insights.map((insight) => ({
+      violations: object.violations.map((v) => ({
         id: uuidv4(),
-        type: insight.type,
-        title: insight.title,
-        content: insight.content,
-        severity: insight.severity,
-        targetServiceId: insight.targetServiceId ?? undefined,
-        targetModuleId: insight.targetModuleId ?? undefined,
-        targetMethodId: insight.targetMethodId ?? undefined,
-        fixPrompt: insight.fixPrompt ?? undefined,
+        type: v.type,
+        title: v.title,
+        content: v.content,
+        severity: v.severity,
+        targetServiceId: v.targetServiceId ?? undefined,
+        targetModuleId: v.targetModuleId ?? undefined,
+        targetMethodId: v.targetMethodId ?? undefined,
+        fixPrompt: v.fixPrompt ?? undefined,
         createdAt: new Date().toISOString(),
       })),
     };
+  }
+
+  async generateDiffInsights(contexts: {
+    architecture?: DiffArchitectureContext;
+    database?: DiffDatabaseContext;
+    module?: DiffModuleContext;
+  }): Promise<DiffInsightsResult> {
+    const model = getModel();
+    const promises: Promise<{ resolvedInsightIds: string[]; newInsights: DiffInsightItem[] }>[] = [];
+
+    if (contexts.architecture) {
+      const ctx = contexts.architecture;
+      promises.push(
+        getPrompt('violations-diff-architecture', buildDiffArchitectureTemplateVars(ctx)).then(async (prompt) => {
+          const { object } = await generateObject({
+            model,
+            schema: DiffInsightOutputSchema,
+            prompt,
+          });
+          return {
+            resolvedInsightIds: object.resolvedInsightIds,
+            newInsights: object.newInsights.map((i) => ({
+              ...i,
+              targetModuleName: i.targetModuleName ?? null,
+              targetMethodName: i.targetMethodName ?? null,
+            })),
+          };
+        })
+      );
+    }
+
+    if (contexts.database) {
+      const ctx = contexts.database;
+      promises.push(
+        getPrompt('violations-diff-database', buildDiffDatabaseTemplateVars(ctx)).then(async (prompt) => {
+          const { object } = await generateObject({
+            model,
+            schema: DiffInsightOutputSchema,
+            prompt,
+          });
+          return {
+            resolvedInsightIds: object.resolvedInsightIds,
+            newInsights: object.newInsights.map((i) => ({
+              ...i,
+              targetModuleName: i.targetModuleName ?? null,
+              targetMethodName: i.targetMethodName ?? null,
+            })),
+          };
+        })
+      );
+    }
+
+    if (contexts.module) {
+      const ctx = contexts.module;
+      promises.push(
+        getPrompt('violations-diff-module', buildDiffModuleTemplateVars(ctx)).then(async (prompt) => {
+          const { object } = await generateObject({
+            model,
+            schema: DiffInsightOutputSchema,
+            prompt,
+          });
+          return {
+            resolvedInsightIds: object.resolvedInsightIds,
+            newInsights: object.newInsights.map((i) => ({
+              ...i,
+              targetModuleName: i.targetModuleName ?? null,
+              targetMethodName: i.targetMethodName ?? null,
+            })),
+          };
+        })
+      );
+    }
+
+    const results = await Promise.allSettled(promises);
+
+    const allResolved: string[] = [];
+    const allNew: DiffInsightItem[] = [];
+
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        allResolved.push(...result.value.resolvedInsightIds);
+        allNew.push(...result.value.newInsights);
+      } else {
+        console.error('[DiffInsights] LLM call failed:', result.reason);
+      }
+    }
+
+    return { resolvedInsightIds: allResolved, newInsights: allNew };
   }
 
   async summarizeArchitecture(context: ArchitectureContext): Promise<string> {

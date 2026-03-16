@@ -1,19 +1,24 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, redirect } from 'next/navigation';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useSearchParams, useRouter, redirect } from 'next/navigation';
 import { Loader2, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
+import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
-import { InsightsPanel } from '@/components/insights/InsightsPanel';
+import { ViolationsPanel } from '@/components/insights/ViolationsPanel';
+import { RulesPanel } from '@/components/rules/RulesPanel';
+import { FileTree } from '@/components/files/FileTree';
+import { ChatPanel } from '@/components/chat/ChatPanel';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useInsights } from '@/hooks/useInsights';
+import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { Progress, ProgressLabel, ProgressValue } from '@/components/ui/progress';
+import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
 import type { RepoResponse } from '@/lib/api';
 import type { GraphNode, GraphEdge, DepthLevel } from '@/types/graph';
@@ -21,23 +26,45 @@ import type { Node, Edge } from '@xyflow/react';
 
 export default function RepoGraphPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const repoId = Array.isArray(params.slug) ? params.slug[0] : '';
   const [repo, setRepo] = useState<RepoResponse | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
-  const [depthLevel, setDepthLevel] = useState<DepthLevel>('services');
+
+  // Map URL terms (functions) ↔ internal terms (methods)
+  const urlToDepth: Record<string, DepthLevel> = { services: 'services', modules: 'modules', functions: 'methods' };
+  const depthToUrl: Record<DepthLevel, string> = { services: 'services', modules: 'modules', methods: 'functions' };
+  const modeFromUrl = searchParams?.get('mode') || '';
+  const initialMode = urlToDepth[modeFromUrl] || 'services';
+  const [depthLevel, setDepthLevelState] = useState<DepthLevel>(initialMode);
+
+  const setDepthLevel = useCallback((level: DepthLevel) => {
+    setDepthLevelState(level);
+    const url = new URL(window.location.href);
+    if (level === 'services') {
+      url.searchParams.delete('mode');
+    } else {
+      url.searchParams.set('mode', depthToUrl[level]);
+    }
+    router.replace(url.pathname + url.search, { scroll: false });
+  }, [router]);
   const [filteredNodes, setFilteredNodes] = useState<Node[]>([]);
   const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [activeTab, setActiveTab] = useState('insights');
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string } | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [leftTab, setLeftTab] = useState<LeftTab | null>('violations');
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
+  const [isDiffMode, setIsDiffMode] = useState(false);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   const currentBranch = repo?.defaultBranch;
-  const { nodes, edges, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
+  const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
     useGraph(repoId, currentBranch, depthLevel);
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
   const { insights, isLoading: insightsLoading, refetch: refetchInsights } = useInsights(repoId, selectedService ?? undefined);
+  const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
 
   // Fetch repo details
   useEffect(() => {
@@ -52,11 +79,12 @@ export default function RepoGraphPage() {
   }, [nodes, edges]);
 
   // Sync isAnalyzing with server-side progress (handles page refresh mid-analysis)
+  // Skip in diff mode — diff check uses isDiffChecking instead
   useEffect(() => {
-    if (analysisProgress && !isAnalyzing) {
+    if (analysisProgress && !isAnalyzing && !isDiffMode) {
       setIsAnalyzing(true);
     }
-  }, [analysisProgress, isAnalyzing]);
+  }, [analysisProgress, isAnalyzing, isDiffMode]);
 
   // Listen for analysis complete to refetch
   useEffect(() => {
@@ -67,9 +95,9 @@ export default function RepoGraphPage() {
     return unsub;
   }, [onEvent, refetchGraph]);
 
-  // Listen for insights ready
+  // Listen for violations ready
   useEffect(() => {
-    const unsub = onEvent('insights:ready', () => {
+    const unsub = onEvent('violations:ready', () => {
       setIsAnalyzing(false);
       refetchInsights();
     });
@@ -77,11 +105,15 @@ export default function RepoGraphPage() {
   }, [onEvent, refetchInsights]);
 
   const handleAnalyze = async () => {
-    try {
-      setIsAnalyzing(true);
-      await api.analyzeRepo(repoId);
-    } catch {
-      setIsAnalyzing(false);
+    if (isDiffMode) {
+      runDiffCheckAnalysis();
+    } else {
+      try {
+        setIsAnalyzing(true);
+        await api.analyzeRepo(repoId);
+      } catch {
+        setIsAnalyzing(false);
+      }
     }
   };
 
@@ -90,12 +122,11 @@ export default function RepoGraphPage() {
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedService(nodeId);
 
-    // Check if clicked node is a database node
     if (nodeId) {
       const clickedNode = nodes.find((n) => n.id === nodeId);
       if (clickedNode && clickedNode.type === 'database') {
         setSelectedDatabaseId(nodeId);
-        setActiveTab('insights');
+        setLeftTab('violations');
         return;
       }
     }
@@ -106,7 +137,7 @@ export default function RepoGraphPage() {
     const node = nodes.find((n) => n.id === nodeId);
     const nodeName = (node?.data as Record<string, unknown>)?.label as string || nodeId;
     setSelectedService(nodeId);
-    setActiveTab('chat');
+    setIsChatOpen(true);
     setExplainRequest({ nodeId, nodeName, nodeType: node?.type });
   }, [nodes]);
 
@@ -135,21 +166,18 @@ export default function RepoGraphPage() {
           }
         }
       } else {
-        // Hierarchical modes: serviceGroup > layer > module > method
         const parentMap = new Map<string, string>();
         for (const n of nodes) {
           const pid = (n as Record<string, unknown>).parentId as string | undefined;
           if (pid) parentMap.set(n.id, pid);
         }
 
-        // Hide databases
         if (!filters.showDatabases) {
           for (const n of nodes) {
             if (n.type === 'database') hiddenIds.add(n.id);
           }
         }
 
-        // Hide service groups by type/framework
         for (const n of nodes) {
           if (n.type !== 'serviceGroup') continue;
           const d = n.data as Record<string, unknown>;
@@ -161,7 +189,6 @@ export default function RepoGraphPage() {
           }
         }
 
-        // Hide layers by layer type
         if (filters.excludedLayers.size > 0) {
           for (const n of nodes) {
             if (n.type !== 'layer') continue;
@@ -172,7 +199,6 @@ export default function RepoGraphPage() {
           }
         }
 
-        // Cascade: hide children of hidden parents
         let changed = true;
         while (changed) {
           changed = false;
@@ -186,7 +212,6 @@ export default function RepoGraphPage() {
           }
         }
 
-        // Search: match labels, keep matching nodes + ancestors + descendants
         if (filters.searchQuery) {
           const query = filters.searchQuery.toLowerCase();
           const matchingIds = new Set<string>();
@@ -201,7 +226,6 @@ export default function RepoGraphPage() {
             }
           }
 
-          // Keep all children of matching nodes visible
           let expandChanged = true;
           while (expandChanged) {
             expandChanged = false;
@@ -221,7 +245,6 @@ export default function RepoGraphPage() {
           }
         }
 
-        // Remove empty service groups
         for (const n of nodes) {
           if (n.type !== 'serviceGroup' || hiddenIds.has(n.id)) continue;
           const hasChild = nodes.some((c) => parentMap.get(c.id) === n.id && !hiddenIds.has(c.id));
@@ -239,15 +262,296 @@ export default function RepoGraphPage() {
     [nodes, edges, depthLevel],
   );
 
+  const handleEnterDiffMode = useCallback(() => {
+    setIsDiffMode(true);
+    loadDiffCheck();
+  }, [loadDiffCheck]);
+
+  const handleExitDiffMode = useCallback(() => {
+    setIsDiffMode(false);
+  }, []);
+
+  // Transform nodes when diff mode is active with results
+  const diffFilteredNodes = useMemo(() => {
+    if (!isDiffMode || !diffResult) return filteredNodes;
+
+    const affectedServiceSet = new Set(diffResult.affectedNodeIds.services);
+    const affectedLayerSet = new Set(diffResult.affectedNodeIds.layers);
+    const affectedModuleSet = new Set(diffResult.affectedNodeIds.modules);
+    const affectedMethodSet = new Set(diffResult.affectedNodeIds.methods);
+
+    const newByService = new Map<string, number>();
+    const resolvedByService = new Map<string, number>();
+    const newByModule = new Map<string, number>();
+    const newByMethod = new Map<string, number>();
+    const resolvedByModule = new Map<string, number>();
+    const resolvedByMethod = new Map<string, number>();
+
+    for (const insight of diffResult.newInsights) {
+      if (insight.targetServiceName) {
+        newByService.set(insight.targetServiceName, (newByService.get(insight.targetServiceName) || 0) + 1);
+      }
+      if (insight.targetModuleName && insight.targetServiceName) {
+        const key = `${insight.targetServiceName}::${insight.targetModuleName}`;
+        newByModule.set(key, (newByModule.get(key) || 0) + 1);
+      }
+      if (insight.targetMethodName && insight.targetModuleName && insight.targetServiceName) {
+        const key = `${insight.targetServiceName}::${insight.targetModuleName}::${insight.targetMethodName}`;
+        newByMethod.set(key, (newByMethod.get(key) || 0) + 1);
+      }
+    }
+
+    for (const insight of (diffResult.resolvedInsights || [])) {
+      if (insight.targetServiceName) {
+        resolvedByService.set(insight.targetServiceName, (resolvedByService.get(insight.targetServiceName) || 0) + 1);
+      }
+      if (insight.targetModuleName && insight.targetServiceName) {
+        const key = `${insight.targetServiceName}::${insight.targetModuleName}`;
+        resolvedByModule.set(key, (resolvedByModule.get(key) || 0) + 1);
+      }
+      if (insight.targetMethodName && insight.targetModuleName && insight.targetServiceName) {
+        const key = `${insight.targetServiceName}::${insight.targetModuleName}::${insight.targetMethodName}`;
+        resolvedByMethod.set(key, (resolvedByMethod.get(key) || 0) + 1);
+      }
+    }
+
+    const getServiceName = (node: Node): string => {
+      let current = node;
+      while (true) {
+        const pid = (current as Record<string, unknown>).parentId as string | undefined;
+        if (!pid) return '';
+        const parent = filteredNodes.find((n) => n.id === pid);
+        if (!parent) return '';
+        if (parent.type === 'serviceGroup') {
+          return (parent.data as Record<string, unknown>).label as string;
+        }
+        current = parent;
+      }
+    };
+
+    return filteredNodes.map((node) => {
+      const d = node.data as Record<string, unknown>;
+      const label = d.label as string;
+
+      if (node.type === 'service' || node.type === 'serviceGroup') {
+        const serviceName = label;
+        const isAffected = affectedServiceSet.has(serviceName);
+        return {
+          ...node,
+          data: {
+            ...d,
+            diffBadge: isAffected ? {
+              newCount: newByService.get(serviceName) || 0,
+              resolvedCount: resolvedByService.get(serviceName) || 0,
+            } : undefined,
+          },
+          style: isAffected ? node.style : { ...node.style, opacity: 0.4 },
+        };
+      }
+
+      if (node.type === 'layer') {
+        const parentId = (node as Record<string, unknown>).parentId as string | undefined;
+        const parent = parentId ? filteredNodes.find((n) => n.id === parentId) : undefined;
+        const serviceName = parent ? (parent.data as Record<string, unknown>).label as string : '';
+        const layerKey = `${serviceName}::${label}`;
+        const isAffected = affectedLayerSet.has(layerKey);
+        return {
+          ...node,
+          data: {
+            ...d,
+            diffBadge: isAffected ? { newCount: 0, resolvedCount: 0 } : undefined,
+          },
+          style: isAffected ? node.style : { ...node.style, opacity: 0.4 },
+        };
+      }
+
+      if (node.type === 'module') {
+        const serviceName = getServiceName(node);
+        const moduleKey = `${serviceName}::${label}`;
+        const isAffected = affectedModuleSet.has(moduleKey);
+        return {
+          ...node,
+          data: {
+            ...d,
+            diffBadge: isAffected ? {
+              newCount: newByModule.get(moduleKey) || 0,
+              resolvedCount: resolvedByModule.get(moduleKey) || 0,
+            } : undefined,
+          },
+          style: isAffected ? node.style : { ...node.style, opacity: 0.4 },
+        };
+      }
+
+      if (node.type === 'method') {
+        const serviceName = getServiceName(node);
+        const pid = (node as Record<string, unknown>).parentId as string | undefined;
+        const parentModule = pid ? filteredNodes.find((n) => n.id === pid) : undefined;
+        const moduleName = parentModule ? (parentModule.data as Record<string, unknown>).label as string : '';
+        const methodKey = `${serviceName}::${moduleName}::${label}`;
+        const isAffected = affectedMethodSet.has(methodKey);
+        return {
+          ...node,
+          data: {
+            ...d,
+            diffBadge: isAffected ? {
+              newCount: newByMethod.get(methodKey) || 0,
+              resolvedCount: resolvedByMethod.get(methodKey) || 0,
+            } : undefined,
+          },
+          style: isAffected ? node.style : { ...node.style, opacity: 0.4 },
+        };
+      }
+
+      return {
+        ...node,
+        style: { ...node.style, opacity: 0.4 },
+      };
+    });
+  }, [filteredNodes, isDiffMode, diffResult]);
+
+  // Check if a node's absolute file path relates to the selected relative path.
+  // Handles both directions:
+  //   - selectedPath is inside the node's path (e.g. selecting a file inside a service dir)
+  //   - selectedPath is a parent of the node's path (e.g. selecting a folder containing the file)
+  const pathMatches = useCallback((absPath: string, relSelected: string): boolean => {
+    if (!absPath || !relSelected) return false;
+    // Direct substring match covers most cases (module filePaths are absolute and long)
+    if (absPath.includes(relSelected)) return true;
+    // For service rootPaths that are shorter than the selected file path:
+    // check if the selected path starts with the trailing segments of the absolute path
+    const absParts = absPath.split('/');
+    for (let i = absParts.length - 1; i >= 1; i--) {
+      const suffix = absParts.slice(i).join('/');
+      if (relSelected.startsWith(suffix + '/') || relSelected === suffix) return true;
+    }
+    return false;
+  }, []);
+
+  // Path-based filtering: dim nodes not matching selectedPath
+  const pathFilteredNodes = useMemo(() => {
+    const base = isDiffMode ? diffFilteredNodes : filteredNodes;
+    if (!selectedPath) return base;
+
+    const parentMap = new Map<string, string>();
+    for (const n of base) {
+      const pid = (n as Record<string, unknown>).parentId as string | undefined;
+      if (pid) parentMap.set(n.id, pid);
+    }
+
+    const matchingIds = new Set<string>();
+
+    for (const n of base) {
+      const d = n.data as Record<string, unknown>;
+      let matches = false;
+
+      if (n.type === 'module' || n.type === 'method') {
+        const fp = (d.filePath as string) || (d.rootPath as string) || '';
+        if (pathMatches(fp, selectedPath)) matches = true;
+      } else if (n.type === 'layer') {
+        const fps = d.filePaths as string[] | undefined;
+        if (fps?.some((fp) => pathMatches(fp, selectedPath))) matches = true;
+      } else if (n.type === 'serviceGroup') {
+        const rp = (d.rootPath as string) || '';
+        if (pathMatches(rp, selectedPath)) matches = true;
+      } else if (n.type === 'service') {
+        const info = d.serviceInfo as Record<string, unknown> | undefined;
+        const rp = (info?.rootPath as string) || '';
+        if (pathMatches(rp, selectedPath)) matches = true;
+      }
+
+      if (matches) {
+        matchingIds.add(n.id);
+        // Include all ancestors
+        let pid = parentMap.get(n.id);
+        while (pid) {
+          matchingIds.add(pid);
+          pid = parentMap.get(pid);
+        }
+      }
+    }
+
+    // Also include children of matching container nodes
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const n of base) {
+        if (matchingIds.has(n.id)) continue;
+        const pid = parentMap.get(n.id);
+        if (!pid || !matchingIds.has(pid)) continue;
+        // Check if this child also matches the path
+        const d = n.data as Record<string, unknown>;
+        if (n.type === 'module' || n.type === 'method') {
+          const fp = (d.filePath as string) || (d.rootPath as string) || '';
+          if (pathMatches(fp, selectedPath)) {
+            matchingIds.add(n.id);
+            changed = true;
+          }
+        } else if (n.type === 'layer') {
+          const fps = d.filePaths as string[] | undefined;
+          if (fps?.some((fp) => pathMatches(fp, selectedPath))) {
+            matchingIds.add(n.id);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    return base.map((n) =>
+      matchingIds.has(n.id) ? n : { ...n, style: { ...n.style, opacity: 0.15 } }
+    );
+  }, [filteredNodes, diffFilteredNodes, isDiffMode, selectedPath, pathMatches]);
+
+  // Set of node IDs that are highlighted (not dimmed) by path filter
+  const highlightedNodeIds = useMemo(() => {
+    if (!selectedPath) return null;
+    const ids = new Set<string>();
+    for (const n of pathFilteredNodes) {
+      if ((n.style as Record<string, unknown>)?.opacity !== 0.15) {
+        ids.add(n.id);
+      }
+    }
+    return ids;
+  }, [pathFilteredNodes, selectedPath]);
+
+  // Build nodeId → filePath map for violation filtering
+  const nodeFilePathMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const n of nodes) {
+      const d = n.data as Record<string, unknown>;
+      let fp = (d.filePath as string) || (d.rootPath as string);
+      // Services depth: rootPath is inside serviceInfo
+      if (!fp && n.type === 'service') {
+        const info = d.serviceInfo as Record<string, unknown> | undefined;
+        fp = (info?.rootPath as string) || '';
+      }
+      if (fp) map.set(n.id, fp);
+    }
+    return map;
+  }, [nodes]);
+
+
   if (!repoId) {
     redirect('/');
   }
+
+  const resolveNodeIdByName = useCallback((name: string, type?: string): string | null => {
+    const matchTypes = type === 'service' ? ['service', 'serviceGroup']
+      : type === 'module' ? ['module']
+      : type === 'method' ? ['method']
+      : undefined;
+    const node = nodes.find((n) => {
+      const label = (n.data as Record<string, unknown>).label as string;
+      if (label !== name) return false;
+      if (matchTypes && !matchTypes.includes(n.type || '')) return false;
+      return true;
+    });
+    return node?.id ?? null;
+  }, [nodes]);
 
   const selectedServiceName = selectedService
     ? ((nodes.find((n) => n.id === selectedService)?.data as Record<string, unknown>)?.label as string) ?? null
     : null;
 
-  // Extract filter options from nodes
   const hasDatabases = nodes.some((n) => n.type === 'database');
   const typeSet = new Set<string>();
   const fwSet = new Set<string>();
@@ -273,6 +577,15 @@ export default function RepoGraphPage() {
   const frameworks = [...fwSet];
   const layerTypes = [...layerSet];
 
+  const handleLocateNode = useCallback((nodeId: string, requiredDepth?: string) => {
+    if (requiredDepth && requiredDepth !== depthLevel) {
+      setDepthLevel(requiredDepth as DepthLevel);
+      setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
+    } else {
+      setFocusRequest({ nodeId, key: Date.now() });
+    }
+  }, [depthLevel]);
+
   return (
     <div className="flex h-screen flex-col">
       <Header
@@ -282,11 +595,78 @@ export default function RepoGraphPage() {
         isAnalyzing={isAnalyzing}
         showBack
         backHref="/"
-        isSidebarOpen={isSidebarOpen}
-        onToggleSidebar={() => setIsSidebarOpen((v) => !v)}
+        isChatOpen={isChatOpen}
+        onToggleChat={() => setIsChatOpen((v) => !v)}
+        isDiffMode={isDiffMode}
+        onEnterDiffMode={handleEnterDiffMode}
+        onExitDiffMode={handleExitDiffMode}
       />
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Left sidebar: icon rail + violations/rules panel */}
+        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab}>
+          {leftTab === 'violations' && (
+            <ViolationsPanel
+              insights={insights}
+              isLoading={insightsLoading}
+              repoId={repoId}
+              selectedService={selectedService}
+              selectedServiceName={selectedServiceName}
+              selectedDatabaseId={selectedDatabaseId}
+              isDiffMode={isDiffMode}
+              diffResult={diffResult}
+              onLocateNode={handleLocateNode}
+              resolveNodeIdByName={resolveNodeIdByName}
+              selectedPath={selectedPath}
+              nodeFilePathMap={nodeFilePathMap}
+            />
+          )}
+          {leftTab === 'rules' && <RulesPanel />}
+          {leftTab === 'files' && (
+            <FileTree
+              repoId={repoId}
+              selectedPath={selectedPath}
+              onSelectPath={(path) => {
+                setSelectedPath(path);
+                if (!path) {
+                  handleNodeSelect(null);
+                  return;
+                }
+                // Find the service/serviceGroup whose rootPath is a prefix match of the selected path
+                // rootPath is absolute (e.g. /a/b/services/user-service)
+                // path is relative (e.g. services/user-service/src/foo.ts)
+                // We check: does the relative path start with the last N segments of rootPath?
+                let bestMatch: { id: string; depth: number } | null = null;
+                for (const n of nodes) {
+                  if (n.type !== 'service' && n.type !== 'serviceGroup') continue;
+                  const d = n.data as Record<string, unknown>;
+                  let rp = '';
+                  if (n.type === 'service') {
+                    const info = d.serviceInfo as Record<string, unknown> | undefined;
+                    rp = (info?.rootPath as string) || '';
+                  } else {
+                    rp = (d.rootPath as string) || '';
+                  }
+                  if (!rp) continue;
+                  // Try progressively longer suffixes of rootPath
+                  const rpParts = rp.split('/');
+                  for (let i = rpParts.length - 1; i >= 0; i--) {
+                    const suffix = rpParts.slice(i).join('/');
+                    if (path.startsWith(suffix) || path.startsWith(suffix + '/')) {
+                      const depth = rpParts.length - i;
+                      if (!bestMatch || depth > bestMatch.depth) {
+                        bestMatch = { id: n.id, depth };
+                      }
+                      break;
+                    }
+                  }
+                }
+                handleNodeSelect(bestMatch?.id ?? null);
+              }}
+            />
+          )}
+        </LeftSidebar>
+
         {/* Graph area */}
         <div className="relative flex-1">
           {/* Analysis progress */}
@@ -299,7 +679,6 @@ export default function RepoGraphPage() {
                     <ProgressLabel className="text-[11px] font-medium capitalize">
                       {analysisProgress.step}
                     </ProgressLabel>
-                    {/* <ProgressValue className="text-[11px]" /> */}
                   </div>
                 </Progress>
               </div>
@@ -367,6 +746,12 @@ export default function RepoGraphPage() {
                   {isAnalyzing && <Loader2 className="h-4 w-4 animate-spin" />}
                   {isAnalyzing ? 'Analyzing...' : 'Analyze Repository'}
                 </Button>
+                {isDiffMode && diffError && (
+                  <Alert className="mt-3 max-w-sm border-amber-500/30 text-amber-500">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription className="text-amber-500/90">{diffError}</AlertDescription>
+                  </Alert>
+                )}
               </div>
             </div>
           ) : (
@@ -380,7 +765,7 @@ export default function RepoGraphPage() {
                 onFilterChange={handleFilterChange}
               />
               <GraphCanvas
-                initialNodes={filteredNodes}
+                initialNodes={pathFilteredNodes}
                 initialEdges={filteredEdges}
                 onNodeSelect={handleNodeSelect}
                 onExplainNode={handleExplainNode}
@@ -392,32 +777,26 @@ export default function RepoGraphPage() {
                 onDepthChange={setDepthLevel}
                 focusNodeId={focusRequest?.nodeId ?? null}
                 focusKey={focusRequest?.key ?? 0}
+                isDiffMode={isDiffMode}
+                diffResult={diffResult}
+                isDiffChecking={isDiffChecking}
+                hasProgressBar={!!analysisProgress}
+                onEnterDiffMode={handleEnterDiffMode}
+                onExitDiffMode={handleExitDiffMode}
+                highlightedNodeIds={highlightedNodeIds}
+                savedCollapsedIds={savedCollapsedIds}
               />
             </>
           )}
         </div>
 
-        {/* Sidebar */}
-        <Sidebar isOpen={isSidebarOpen}>
-          <InsightsPanel
-            insights={insights}
-            isLoading={insightsLoading}
+        {/* Right sidebar: Chat only */}
+        <Sidebar isOpen={isChatOpen}>
+          <ChatPanel
             repoId={repoId}
             selectedService={selectedService}
-            selectedServiceName={selectedServiceName}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
             explainRequest={explainRequest}
             onExplainHandled={() => setExplainRequest(null)}
-            selectedDatabaseId={selectedDatabaseId}
-            onLocateNode={(nodeId, requiredDepth) => {
-              if (requiredDepth && requiredDepth !== depthLevel) {
-                setDepthLevel(requiredDepth as DepthLevel);
-                setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
-              } else {
-                setFocusRequest({ nodeId, key: Date.now() });
-              }
-            }}
           />
         </Sidebar>
       </div>

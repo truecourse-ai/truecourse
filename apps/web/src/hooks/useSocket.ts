@@ -31,7 +31,11 @@ export function useSocket(repoId?: string) {
     }
 
     function onAnalysisProgress(data: AnalysisProgress) {
-      setAnalysisProgress(data);
+      if (data.percent >= 100) {
+        setAnalysisProgress(null);
+      } else {
+        setAnalysisProgress(data);
+      }
     }
 
     function onAnalysisComplete(data: unknown) {
@@ -46,9 +50,9 @@ export function useSocket(repoId?: string) {
     socket.on('files:changed', (data: unknown) => {
       handlersRef.current.get('files:changed')?.forEach((h) => h(data));
     });
-    socket.on('insights:ready', (data: unknown) => {
+    socket.on('violations:ready', (data: unknown) => {
       setAnalysisProgress(null);
-      handlersRef.current.get('insights:ready')?.forEach((h) => h(data));
+      handlersRef.current.get('violations:ready')?.forEach((h) => h(data));
     });
 
     if (socket.connected && repoId) {

@@ -95,7 +95,7 @@ export async function generateInsights(
   const provider = createLLMProvider();
 
   // Partition rules by category
-  const archRules = (input.llmRules || []).filter((r) => r.category === 'architecture');
+  const archRules = (input.llmRules || []).filter((r) => r.category === 'service');
   const dbRules = (input.llmRules || []).filter((r) => r.category === 'database');
   const moduleRules = (input.llmRules || []).filter((r) => r.category === 'module');
 
@@ -184,9 +184,9 @@ export async function generateInsights(
   // Architecture result
   const archResult = results[idx++];
   if (archResult.status === 'fulfilled') {
-    const arch = archResult.value as { insights: Insight[]; serviceDescriptions: { id: string; description: string }[] };
+    const arch = archResult.value as { violations: Insight[]; serviceDescriptions: { id: string; description: string }[] };
     // Validate service IDs
-    for (const insight of arch.insights) {
+    for (const insight of arch.violations) {
       if (insight.targetServiceId && !validServiceIds.has(insight.targetServiceId)) {
         insight.targetServiceId = undefined;
       }
@@ -201,8 +201,8 @@ export async function generateInsights(
   if (hasDBs) {
     const dbResult = results[idx++];
     if (dbResult.status === 'fulfilled') {
-      const dbData = dbResult.value as { insights: Insight[] };
-      for (const insight of dbData.insights) {
+      const dbData = dbResult.value as { violations: Insight[] };
+      for (const insight of dbData.violations) {
         if (insight.targetDatabaseId && !validDatabaseIds.has(insight.targetDatabaseId)) {
           insight.targetDatabaseId = undefined;
         }
@@ -217,8 +217,8 @@ export async function generateInsights(
   if (hasModules) {
     const moduleResult = results[idx++];
     if (moduleResult.status === 'fulfilled') {
-      const modData = moduleResult.value as { insights: Insight[] };
-      for (const insight of modData.insights) {
+      const modData = moduleResult.value as { violations: Insight[] };
+      for (const insight of modData.violations) {
         if (insight.targetServiceId && !validServiceIds.has(insight.targetServiceId)) {
           insight.targetServiceId = undefined;
         }
@@ -235,7 +235,7 @@ export async function generateInsights(
     }
   }
 
-  return { insights: allInsights, serviceDescriptions };
+  return { violations: allInsights, serviceDescriptions };
 }
 
 function extractLayerNames(layerSummary: unknown): string[] {

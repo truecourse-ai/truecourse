@@ -8,26 +8,29 @@ import {
   serviceDependencies,
   layers,
   layerDependencies,
-  insights,
+  violations,
   databases,
   databaseConnections,
   modules,
   methods,
   moduleDeps,
   methodDeps,
+  diffChecks,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { simpleGit } from 'simple-git';
 import { runAnalysis } from '../services/analyzer.service.js';
+import { runDiffCheck } from '../services/diff-check.service.js';
 import {
   emitAnalysisProgress,
   emitAnalysisComplete,
-  emitInsightsReady,
+  emitViolationsReady,
 } from '../socket/handlers.js';
 import { buildGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
-import { getAllDefaultRules, checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
+import { checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
+import { getEnabledRules } from '../services/rules.service.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router: Router = Router();
@@ -322,11 +325,13 @@ router.post(
           }
         }
 
+        // Load rules from database
+        const allRules = await getEnabledRules();
+
         // Check deterministic module rules
         let moduleViolations: ModuleViolation[] = [];
         if (result.modules && result.methods) {
-          const allRules = getAllDefaultRules();
-          const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic' && r.enabled);
+          const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
 
           // Build set of module keys connected to databases so they aren't flagged as dead
           const dbConnectedModuleKeys = new Set<string>();
@@ -444,9 +449,8 @@ router.post(
             .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
 
           // Gather enabled LLM rules with category for insight generation
-          const allRules = getAllDefaultRules();
           const enabledLlmRules = allRules
-            .filter((r) => r.type === 'llm' && r.enabled && r.prompt)
+            .filter((r) => r.type === 'llm' && r.prompt)
             .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
           // Build module data for insight generation
@@ -487,7 +491,7 @@ router.post(
             };
           });
 
-          const { insights: generatedInsights, serviceDescriptions } = await generateInsights({
+          const { violations: generatedInsights, serviceDescriptions } = await generateInsights({
             architecture: result.architecture,
             services: analysisServices,
             dependencies: analysisDeps,
@@ -541,7 +545,7 @@ router.post(
           });
 
           for (const insight of generatedInsights) {
-            await db.insert(insights).values({
+            await db.insert(violations).values({
               id: uuidv4(),
               repoId: id,
               analysisId: analysis.id,
@@ -568,7 +572,7 @@ router.post(
             }
           }
 
-          emitInsightsReady(id, analysis.id);
+          emitViolationsReady(id, analysis.id);
         } catch (insightError) {
           console.error(
             `[Insights] Failed for repo ${id}:`,
@@ -740,7 +744,12 @@ router.get(
         }
       }
 
-      res.json(graphData);
+      // Include collapsed IDs for this level
+      const collapsed = (allPositions?.collapsedIds as Record<string, string[]>) || {};
+      const collapsedIds = collapsed[level] || [];
+
+      res.set('Cache-Control', 'no-store');
+      res.json({ ...graphData, collapsedIds });
     } catch (error) {
       next(error);
     }
@@ -833,6 +842,81 @@ router.delete(
   }
 );
 
+// PUT /api/repos/:id/graph/collapsed - Save collapsed node IDs for a mode
+router.put(
+  '/:id/graph/collapsed',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+      const branch = req.query.branch as string | undefined;
+      const level = (req.query.level as string) || 'modules';
+      const { collapsedIds: ids } = req.body as { collapsedIds: string[] };
+
+      if (!Array.isArray(ids)) {
+        throw createAppError('Invalid collapsedIds data', 400);
+      }
+
+      const conditions = [eq(analyses.repoId, id)];
+      if (branch) {
+        conditions.push(eq(analyses.branch, branch));
+      }
+
+      const latestAnalysis = await db
+        .select()
+        .from(analyses)
+        .where(and(...conditions))
+        .orderBy(desc(analyses.createdAt))
+        .limit(1);
+
+      if (latestAnalysis.length === 0) {
+        throw createAppError('No analysis found', 404);
+      }
+
+      const existing = (latestAnalysis[0].nodePositions as Record<string, unknown>) || {};
+      const existingCollapsed = (existing.collapsedIds as Record<string, string[]>) || {};
+      const merged = { ...existing, collapsedIds: { ...existingCollapsed, [level]: ids } };
+
+      await db
+        .update(analyses)
+        .set({ nodePositions: merged })
+        .where(eq(analyses.id, latestAnalysis[0].id));
+
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// GET /api/repos/:id/files - File tree from the actual repository
+router.get(
+  '/:id/files',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+
+      const [repo] = await db
+        .select()
+        .from(repos)
+        .where(eq(repos.id, id))
+        .limit(1);
+
+      if (!repo) {
+        throw createAppError('Repo not found', 404);
+      }
+
+      const git = simpleGit(repo.path);
+      // Use git ls-files to get tracked files (respects .gitignore)
+      const result = await git.raw(['ls-files']);
+      const files = result.split('\n').filter((f) => f.length > 0);
+
+      res.json({ root: repo.path, files });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // GET /api/repos/:id/changes - Pending git changes
 router.get(
   '/:id/changes',
@@ -902,6 +986,215 @@ router.get(
       }
 
       res.json({ changedFiles, affectedServices });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/repos/:id/diff-check - Run diff analysis with LLM diffing
+router.post(
+  '/:id/diff-check',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+
+      const [repo] = await db
+        .select()
+        .from(repos)
+        .where(eq(repos.id, id))
+        .limit(1);
+
+      if (!repo) {
+        throw createAppError('Repo not found', 404);
+      }
+
+      // Find latest normal analysis
+      const [latestAnalysis] = await db
+        .select({ id: analyses.id })
+        .from(analyses)
+        .where(eq(analyses.repoId, id))
+        .orderBy(desc(analyses.createdAt))
+        .limit(1);
+
+      if (!latestAnalysis) {
+        res.status(409).json({ error: 'Switch to Normal mode and run an analysis first' });
+        return;
+      }
+
+      // Load existing insights for this analysis as baseline
+      const baselineInsights = await db
+        .select()
+        .from(violations)
+        .where(eq(violations.analysisId, latestAnalysis.id));
+
+      // Resolve service/module/method names for insights
+      const analysisServices = await db.select().from(services).where(eq(services.analysisId, latestAnalysis.id));
+      const analysisModules = await db.select().from(modules).where(eq(modules.analysisId, latestAnalysis.id));
+      const analysisMethods = await db.select().from(methods).where(eq(methods.analysisId, latestAnalysis.id));
+
+      const serviceNameMap = new Map(analysisServices.map((s) => [s.id, s.name]));
+      const moduleNameMap = new Map(analysisModules.map((m) => [m.id, m.name]));
+      const methodNameMap = new Map(analysisMethods.map((m) => [m.id, m.name]));
+
+      const insightsWithNames = baselineInsights.map((i) => ({
+        id: i.id,
+        type: i.type,
+        title: i.title,
+        content: i.content,
+        severity: i.severity,
+        targetServiceId: i.targetServiceId ?? undefined,
+        targetServiceName: i.targetServiceId ? serviceNameMap.get(i.targetServiceId) : undefined,
+        targetModuleId: i.targetModuleId ?? undefined,
+        targetModuleName: i.targetModuleId ? moduleNameMap.get(i.targetModuleId) : undefined,
+        targetMethodId: i.targetMethodId ?? undefined,
+        targetMethodName: i.targetMethodId ? methodNameMap.get(i.targetMethodId) : undefined,
+        fixPrompt: i.fixPrompt ?? undefined,
+        createdAt: i.createdAt.toISOString(),
+      }));
+
+      const git = simpleGit(repo.path);
+      const branch = (await git.branch()).current || undefined;
+
+      const result = await runDiffCheck({
+        repoPath: repo.path,
+        branch,
+        baselineInsights: insightsWithNames,
+        onProgress: (progress) => {
+          emitAnalysisProgress(id, progress);
+        },
+      });
+
+      // Delete old diff_check for this repo (upsert behavior)
+      await db.delete(diffChecks).where(eq(diffChecks.repoId, id));
+
+      // Insert new diff_check
+      await db.insert(diffChecks).values({
+        repoId: id,
+        analysisId: latestAnalysis.id,
+        changedFiles: result.changedFiles,
+        resolvedInsightIds: result.resolvedInsightIds,
+        newInsights: result.newInsights,
+        affectedNodeIds: result.affectedNodeIds,
+        summary: result.summary,
+      });
+
+      // Build resolved insights for the response
+      const resolvedSet = new Set(result.resolvedInsightIds);
+      const resolvedInsights = insightsWithNames
+        .filter((i) => resolvedSet.has(i.id))
+        .map((i) => ({
+          ...i,
+          targetDatabaseId: null,
+          targetDatabaseName: null,
+          targetTable: null,
+        }));
+
+      // Clear progress bar
+      emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
+
+      res.json({
+        changedFiles: result.changedFiles,
+        resolvedInsights,
+        newInsights: result.newInsights,
+        affectedNodeIds: result.affectedNodeIds,
+        summary: result.summary,
+        isStale: false,
+      });
+    } catch (error) {
+      const repoId = req.params.id as string;
+      emitAnalysisProgress(repoId, { step: 'error', percent: -1, detail: error instanceof Error ? error.message : 'Diff check failed' });
+      next(error);
+    }
+  }
+);
+
+// GET /api/repos/:id/diff-check - Load saved diff check from DB
+router.get(
+  '/:id/diff-check',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+
+      const [repo] = await db
+        .select()
+        .from(repos)
+        .where(eq(repos.id, id))
+        .limit(1);
+
+      if (!repo) {
+        throw createAppError('Repo not found', 404);
+      }
+
+      // Load latest diff_check for this repo
+      const [diffCheck] = await db
+        .select()
+        .from(diffChecks)
+        .where(eq(diffChecks.repoId, id))
+        .orderBy(desc(diffChecks.createdAt))
+        .limit(1);
+
+      if (!diffCheck) {
+        res.json(null);
+        return;
+      }
+
+      // Check staleness: compare diffCheck.analysisId vs latest normal analysis
+      const [latestAnalysis] = await db
+        .select({ id: analyses.id })
+        .from(analyses)
+        .where(eq(analyses.repoId, id))
+        .orderBy(desc(analyses.createdAt))
+        .limit(1);
+
+      const isStale = latestAnalysis ? diffCheck.analysisId !== latestAnalysis.id : false;
+
+      // Load resolved insights from DB for full InsightResponse objects
+      const resolvedIds = diffCheck.resolvedInsightIds as string[];
+      let resolvedInsights: Array<Record<string, unknown>> = [];
+      if (resolvedIds.length > 0) {
+        const allInsights = await db
+          .select()
+          .from(violations)
+          .where(eq(violations.analysisId, diffCheck.analysisId));
+
+        const resolvedSet = new Set(resolvedIds);
+        const analysisServices2 = await db.select().from(services).where(eq(services.analysisId, diffCheck.analysisId));
+        const analysisModules2 = await db.select().from(modules).where(eq(modules.analysisId, diffCheck.analysisId));
+        const analysisMethods2 = await db.select().from(methods).where(eq(methods.analysisId, diffCheck.analysisId));
+        const svcMap = new Map(analysisServices2.map((s) => [s.id, s.name]));
+        const modMap = new Map(analysisModules2.map((m) => [m.id, m.name]));
+        const methMap = new Map(analysisMethods2.map((m) => [m.id, m.name]));
+
+        resolvedInsights = allInsights
+          .filter((i) => resolvedSet.has(i.id))
+          .map((i) => ({
+            id: i.id,
+            type: i.type,
+            title: i.title,
+            content: i.content,
+            severity: i.severity,
+            targetServiceId: i.targetServiceId,
+            targetServiceName: i.targetServiceId ? svcMap.get(i.targetServiceId) : null,
+            targetModuleId: i.targetModuleId,
+            targetModuleName: i.targetModuleId ? modMap.get(i.targetModuleId) : null,
+            targetMethodId: i.targetMethodId,
+            targetMethodName: i.targetMethodId ? methMap.get(i.targetMethodId) : null,
+            targetDatabaseId: i.targetDatabaseId,
+            targetTable: i.targetTable,
+            fixPrompt: i.fixPrompt,
+            createdAt: i.createdAt.toISOString(),
+          }));
+      }
+
+      res.json({
+        resolvedInsights,
+        newInsights: diffCheck.newInsights,
+        affectedNodeIds: diffCheck.affectedNodeIds,
+        summary: diffCheck.summary,
+        changedFiles: diffCheck.changedFiles,
+        isStale,
+      });
     } catch (error) {
       next(error);
     }

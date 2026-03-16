@@ -13,7 +13,8 @@
   "dependencies": {
     "commander": "^12.1.0",
     "@clack/prompts": "^0.9.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "socket.io-client": "^4.7.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
