@@ -1,7 +1,6 @@
-'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useSearchParams, useRouter, redirect } from 'next/navigation';
+import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -25,10 +24,9 @@ import type { GraphNode, GraphEdge, DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
 
 export default function RepoGraphPage() {
-  const params = useParams();
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const repoId = Array.isArray(params.slug) ? params.slug[0] : '';
+  const { repoId = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [repo, setRepo] = useState<RepoResponse | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
@@ -47,12 +45,12 @@ export default function RepoGraphPage() {
     } else {
       url.searchParams.set('mode', depthToUrl[level]);
     }
-    router.replace(url.pathname + url.search, { scroll: false });
-  }, [router]);
+    navigate(url.pathname + url.search, { replace: true });
+  }, [navigate]);
   const [filteredNodes, setFilteredNodes] = useState<Node[]>([]);
   const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string } | null>(null);
+  const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [leftTab, setLeftTab] = useState<LeftTab | null>('violations');
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
@@ -135,11 +133,41 @@ export default function RepoGraphPage() {
 
   const handleExplainNode = useCallback((nodeId: string) => {
     const node = nodes.find((n) => n.id === nodeId);
-    const nodeName = (node?.data as Record<string, unknown>)?.label as string || nodeId;
+    const data = node?.data as Record<string, unknown> | undefined;
+    const nodeName = (data?.label as string) || nodeId;
+
+    // Build context from node data and its connections
+    const nodeContext: Record<string, unknown> = {};
+    if (data) {
+      const { onExplain, onToggleCollapse, isCollapsed, isContainer, ...relevant } = data as Record<string, unknown>;
+      Object.assign(nodeContext, relevant);
+    }
+
+    // Add parent info
+    if (node?.parentId) {
+      const parent = nodes.find((n) => n.id === node.parentId);
+      if (parent) {
+        nodeContext.parentName = (parent.data as Record<string, unknown>)?.label;
+        nodeContext.parentType = parent.type;
+      }
+    }
+
+    // Add dependencies (edges to/from this node)
+    const inbound = edges.filter((e) => e.target === nodeId).map((e) => {
+      const source = nodes.find((n) => n.id === e.source);
+      return { from: (source?.data as Record<string, unknown>)?.label, type: (e.data as Record<string, unknown>)?.dependencyType };
+    });
+    const outbound = edges.filter((e) => e.source === nodeId).map((e) => {
+      const target = nodes.find((n) => n.id === e.target);
+      return { to: (target?.data as Record<string, unknown>)?.label, type: (e.data as Record<string, unknown>)?.dependencyType };
+    });
+    if (inbound.length) nodeContext.dependedOnBy = inbound;
+    if (outbound.length) nodeContext.dependsOn = outbound;
+
     setSelectedService(nodeId);
     setIsChatOpen(true);
-    setExplainRequest({ nodeId, nodeName, nodeType: node?.type });
-  }, [nodes]);
+    setExplainRequest({ nodeId, nodeName, nodeType: node?.type, nodeContext });
+  }, [nodes, edges]);
 
   const handleFilterChange = useCallback(
     (filters: FilterState) => {
@@ -531,7 +559,7 @@ export default function RepoGraphPage() {
 
 
   if (!repoId) {
-    redirect('/');
+    return <Navigate to="/" replace />;
   }
 
   const resolveNodeIdByName = useCallback((name: string, type?: string): string | null => {

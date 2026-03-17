@@ -1,4 +1,3 @@
-'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { connectSocket, disconnectSocket, joinRepoRoom, leaveRepoRoom, getSocket } from '@/lib/socket';

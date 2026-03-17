@@ -1,6 +1,5 @@
-'use client';
 
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { Folder, Clock, Trash2, ArrowRight } from 'lucide-react';
 import type { RepoResponse } from '@/lib/api';
 
@@ -40,7 +39,7 @@ export function RepoList({ repos, onDelete }: RepoListProps) {
       {repos.map((repo) => (
         <Link
           key={repo.id}
-          href={`/repos/${repo.id}`}
+          to={`/repos/${repo.id}`}
           className="group relative flex flex-col rounded-xl border border-border bg-card p-4 ring-1 ring-foreground/10 transition-all hover:shadow-md hover:ring-primary/30"
         >
           {/* Delete button */}

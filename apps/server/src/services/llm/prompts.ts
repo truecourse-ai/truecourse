@@ -43,10 +43,6 @@ For each issue, provide a fixPrompt that an external AI coding assistant could u
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
 
 Return your findings as structured data using the provided schema.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 
@@ -71,10 +67,6 @@ Focus on:
 For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
 
 Return your findings as structured data using the provided schema.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 
@@ -106,10 +98,6 @@ Focus on:
 If violations are listed above, generate a violation entry for each with a concrete fixPrompt that an AI coding assistant could use to fix the issue. The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt. Example: "Split UserService into UserQueryService and UserCommandService by separating read and write methods".
 
 Return your findings as structured data using the provided schema.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 
@@ -137,10 +125,6 @@ IMPORTANT:
 - For each new violation, provide a fixPrompt that an AI coding assistant could use to fix it.
 
 Return your findings as structured data using the provided schema.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 
@@ -161,10 +145,6 @@ IMPORTANT:
 - For each new violation, provide a fixPrompt using human-readable names.
 
 Return your findings as structured data using the provided schema.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 
@@ -195,10 +175,6 @@ IMPORTANT:
 If deterministic violations are listed above that are NOT covered by existing violations, generate a new violation entry for each with a concrete fixPrompt.
 
 Return your findings as structured data using the provided schema.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 
@@ -214,10 +190,6 @@ Dependencies:
 {{depList}}
 {{violations}}
 {{databases}}`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 2048,
-    },
     labels: ['production'],
   },
 
@@ -225,15 +197,12 @@ Dependencies:
     prompt: `You are TrueCourse, an AI assistant that helps developers understand their codebase architecture.
 
 You have deep knowledge about the project's architecture, services, dependencies, and layers.
-When a user asks about a specific service or node, use the context provided to give detailed, accurate answers.
+When a user asks about a specific service, module, function, or layer, use the context provided to give detailed, accurate answers.
+Messages may include a [Node Context] block with structured data about the node being discussed (signature, parameters, complexity metrics, parent module/service, dependencies, violations, etc.). Use this data to give specific, grounded answers rather than generic ones.
 
 Be concise but thorough. Reference specific services, dependencies, and architectural patterns when relevant.
-If you notice potential issues (circular dependencies, layer violations, tight coupling), proactively mention them.
+If you notice potential issues (circular dependencies, layer violations, tight coupling, high complexity), proactively mention them.
 When suggesting improvements, provide actionable advice that could be passed to an AI coding assistant.`,
-    config: {
-      model: 'gpt-4o',
-      max_tokens: 4096,
-    },
     labels: ['production'],
   },
 } as const;

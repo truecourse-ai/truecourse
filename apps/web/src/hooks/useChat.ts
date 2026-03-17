@@ -1,4 +1,3 @@
-'use client';
 
 import { useState, useCallback, useRef } from 'react';
 import { streamChat, getConversations, getConversationHistory } from '@/lib/api';
@@ -82,16 +81,66 @@ export function useChat(repoId: string) {
   );
 
   const explainNode = useCallback(
-    (nodeId: string, nodeName: string, nodeType?: string) => {
+    (nodeId: string, nodeName: string, nodeType?: string, nodeContext?: Record<string, unknown>) => {
+      if (isStreaming) return;
+
       const kind =
-        nodeType === 'methodNode' ? 'function' :
-        nodeType === 'moduleNode' ? 'module' :
-        nodeType === 'layerNode' ? 'layer' : 'service';
-      sendMessage(
-        `Explain the "${nodeName}" ${kind} — what does it do, how does it fit into the architecture, and are there any concerns?`,
+        nodeType === 'method' ? 'function' :
+        nodeType === 'module' ? 'module' :
+        nodeType === 'layer' ? 'layer' : 'service';
+      const content = `Explain the "${nodeName}" ${kind}. What does it do, how does it fit into the architecture, and are there any concerns?`;
+
+      const userMsg: DisplayMessage = {
+        id: nextId(),
+        role: 'user',
+        content,
+        timestamp: new Date(),
+      };
+
+      const assistantId = nextId();
+      const assistantMsg: DisplayMessage = {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setIsStreaming(true);
+
+      abortRef.current = streamChat(
+        repoId,
+        content,
+        (chunk) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantId
+                ? { ...msg, content: msg.content + chunk }
+                : msg,
+            ),
+          );
+        },
+        (convId) => {
+          if (convId) conversationIdRef.current = convId;
+          setIsStreaming(false);
+        },
+        (error) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantId
+                ? { ...msg, content: `Error: ${error.message}` }
+                : msg,
+            ),
+          );
+          setIsStreaming(false);
+        },
+        {
+          nodeContext,
+          conversationId: conversationIdRef.current,
+        },
       );
     },
-    [sendMessage],
+    [repoId, isStreaming],
   );
 
   const newConversation = useCallback(() => {

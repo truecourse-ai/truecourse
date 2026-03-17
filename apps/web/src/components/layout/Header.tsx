@@ -1,7 +1,6 @@
-'use client';
 
 import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info } from 'lucide-react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 
@@ -50,13 +49,13 @@ export function Header({
       <div className="flex items-center gap-3">
         {showBack && (
           <Link
-            href={backHref}
+            to={backHref}
             className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
         )}
-        <Link href="/" className="flex items-center gap-2 text-lg font-bold text-foreground">
+        <Link to="/" className="flex items-center gap-2 text-lg font-bold text-foreground">
           <img src="/logo.svg" alt="TrueCourse" className="h-7 w-7" />
           TrueCourse
         </Link>

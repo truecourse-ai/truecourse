@@ -1,4 +1,3 @@
-'use client';
 
 import { useCallback, useRef, useState, useMemo } from 'react';
 import { AlertTriangle, AlertCircle, Loader2 } from 'lucide-react';

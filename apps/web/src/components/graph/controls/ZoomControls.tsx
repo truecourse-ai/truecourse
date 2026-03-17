@@ -1,4 +1,3 @@
-'use client';
 
 import { useReactFlow } from '@xyflow/react';
 import { ZoomIn, ZoomOut, Maximize2, LayoutGrid, Hand, Move } from 'lucide-react';

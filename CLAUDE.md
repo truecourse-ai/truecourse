@@ -7,11 +7,11 @@
 
 ## Project Layout
 
-- `apps/web/` — Next.js 15 frontend (React Flow graph, Tailwind CSS, dark mode)
+- `apps/web/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
 - `apps/server/` — Express + Socket.io backend (Drizzle ORM, LLM providers)
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `packages/analyzer/` — Tree-sitter analysis engine (adapted from SpecMind, TS/JS only)
-- `tools/cli/` — Setup wizard and start command
+- `tools/cli/` — CLI commands (setup, start, analyze, list, add)
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
 - `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
 

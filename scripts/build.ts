@@ -48,7 +48,7 @@ run('pnpm --filter @truecourse/analyzer build');
 
 // 2. Build web (static export)
 console.log('\n=== Building frontend (static export) ===');
-run('STATIC_EXPORT=1 pnpm --filter @truecourse/web build');
+run('pnpm --filter @truecourse/web build');
 
 // 3. Bundle server with esbuild
 console.log('\n=== Bundling server ===');
@@ -74,7 +74,7 @@ run(
 
 // 4. Copy static frontend
 console.log('\n=== Copying frontend to dist/public/ ===');
-const webOut = path.join(ROOT, 'apps/web/out');
+const webOut = path.join(ROOT, 'apps/web/dist');
 const distPublic = path.join(DIST, 'public');
 copyDir(webOut, distPublic);
 

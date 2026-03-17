@@ -1,4 +1,3 @@
-'use client';
 
 import { AlertTriangle, AlertCircle, Info } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';

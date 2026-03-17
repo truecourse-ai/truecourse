@@ -1,4 +1,3 @@
-'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, MessageCircle, Plus, Clock, ArrowLeft } from 'lucide-react';
@@ -9,7 +8,7 @@ import { useChat, type DisplayMessage } from '@/hooks/useChat';
 type ChatPanelProps = {
   repoId: string;
   selectedService?: string | null;
-  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string } | null;
+  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null;
   onExplainHandled?: () => void;
 };
 
@@ -41,7 +40,7 @@ export function ChatPanel({ repoId, explainRequest, onExplainHandled }: ChatPane
   useEffect(() => {
     if (explainRequest && explainRequest.nodeId !== lastExplainRef.current) {
       lastExplainRef.current = explainRequest.nodeId;
-      explainNode(explainRequest.nodeId, explainRequest.nodeName, explainRequest.nodeType);
+      explainNode(explainRequest.nodeId, explainRequest.nodeName, explainRequest.nodeType, explainRequest.nodeContext);
       onExplainHandled?.();
     }
   }, [explainRequest, explainNode, onExplainHandled]);

@@ -32,7 +32,6 @@ async function pushPrompts() {
       await langfuse.createPrompt({
         name,
         prompt: def.prompt,
-        config: def.config,
         labels: [...def.labels],
         type: 'text',
       });

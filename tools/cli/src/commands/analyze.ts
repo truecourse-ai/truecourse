@@ -94,7 +94,7 @@ export async function runAnalyze(): Promise<void> {
     renderViolations(violations);
 
     const repoUrl = `${serverUrl}/repos/${repo.id}`;
-    const link = `\x1b[4m\x1b[34m${repoUrl}\x1b[0m`;
+    const link = `\x1b[4m\x1b[38;5;75m${repoUrl}\x1b[0m`;
     p.outro(`Open ${link} to see violations and architecture diagrams in the UI`);
   } catch (err) {
     spinner.stop("Analysis failed");

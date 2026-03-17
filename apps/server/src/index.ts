@@ -73,17 +73,8 @@ async function main() {
   const staticDir = path.join(__dirname, 'public');
   if (fs.existsSync(staticDir)) {
     app.use(express.static(staticDir));
-    // SPA fallback — Next.js static export generates e.g. repos.html for /repos/[[...slug]].
-    // Match the first path segment to a .html file, otherwise serve index.html.
-    app.get('*', (req, res) => {
-      const firstSegment = req.path.split('/')[1];
-      if (firstSegment) {
-        const pageFile = path.join(staticDir, `${firstSegment}.html`);
-        if (fs.existsSync(pageFile)) {
-          res.sendFile(pageFile);
-          return;
-        }
-      }
+    // SPA fallback — serve index.html for all non-API routes
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(staticDir, 'index.html'));
     });
   }
@@ -116,9 +107,9 @@ async function main() {
       console.log('   ~~~~~~~~~~~~~~');
       console.log('');
       console.log(`   Charting your course...`);
-      console.log(`   Open \x1b[4m\x1b[34mhttp://localhost:${config.port}\x1b[0m to sail`);
+      console.log(`   Open \x1b[4m\x1b[38;5;75mhttp://localhost:${config.port}\x1b[0m to sail`);
       console.log('');
-      console.log('   To analyze a repo from your terminal:');
+      console.log('   or analyze a repo from your terminal:');
       console.log('     cd /path/to/your/repo');
       console.log('     npx truecourse analyze');
       console.log('');

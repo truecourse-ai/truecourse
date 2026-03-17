@@ -1,4 +1,3 @@
-'use client';
 
 import { useState, useRef } from 'react';
 import { ArrowUp } from 'lucide-react';

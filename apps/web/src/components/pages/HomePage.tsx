@@ -1,5 +1,3 @@
-'use client';
-
 import { Header } from '@/components/layout/Header';
 import { RepoSelector } from '@/components/repo/RepoSelector';
 import { RepoList } from '@/components/repo/RepoList';

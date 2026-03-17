@@ -1,4 +1,3 @@
-'use client';
 
 import { useCallback, useRef, useState, useMemo } from 'react';
 import { AlertTriangle, MessageCircle, Shield, Loader2, AlertCircle } from 'lucide-react';
@@ -17,7 +16,7 @@ type InsightsPanelProps = {
   selectedServiceName?: string | null;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
-  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string } | null;
+  explainRequest?: { nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null;
   onExplainHandled?: () => void;
   selectedDatabaseId?: string | null;
   isDiffMode?: boolean;

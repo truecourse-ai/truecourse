@@ -1,4 +1,3 @@
-'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
