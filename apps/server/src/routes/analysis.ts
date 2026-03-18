@@ -28,7 +28,7 @@ import {
   emitViolationsReady,
 } from '../socket/handlers.js';
 import { buildGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
-import { generateInsights } from '../services/insight.service.js';
+import { generateViolations } from '../services/violation.service.js';
 import type { ModuleViolation } from '@truecourse/analyzer';
 import { getEnabledRules } from '../services/rules.service.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -381,7 +381,7 @@ router.post(
           .set({ lastAnalyzedAt: new Date(), updatedAt: new Date() })
           .where(eq(repos.id, id));
 
-        // Generate LLM insights before completing
+        // Generate LLM violations before completing
         try {
           const callParts: string[] = ['architecture'];
           if (result.databaseResult && result.databaseResult.databases.length > 0) callParts.push('database');
@@ -414,13 +414,13 @@ router.post(
             .filter((d) => d.isViolation)
             .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
 
-          // Gather enabled LLM rules with category for insight generation
+          // Gather enabled LLM rules with category for violation generation
           const enabledLlmRules = allRules
             .filter((r) => r.type === 'llm' && r.prompt)
             .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
-          // Build module data for insight generation
-          const insightModules = result.modules?.map((m) => ({
+          // Build module data for violation generation
+          const violationModules = result.modules?.map((m) => ({
             id: moduleIdMap.get(`${m.serviceName}::${m.name}::${m.filePath}`) || '',
             name: m.name,
             kind: m.kind,
@@ -434,7 +434,7 @@ router.post(
             lineCount: m.lineCount || undefined,
           })).filter((m) => m.id); // exclude modules that weren't saved
 
-          const insightMethods = result.methods?.map((m) => ({
+          const violationMethods = result.methods?.map((m) => ({
             id: methodIdMap.get(`${m.serviceName}::${m.moduleName}::${m.name}::${m.filePath}`) || undefined,
             moduleName: m.moduleName,
             name: m.name,
@@ -447,7 +447,7 @@ router.post(
             maxNestingDepth: m.maxNestingDepth || undefined,
           }));
 
-          const insightModuleDeps = result.moduleLevelDependencies?.map((d) => {
+          const violationModuleDeps = result.moduleLevelDependencies?.map((d) => {
             const srcName = result.modules?.find((m) => m.serviceName === d.sourceService && m.name === d.sourceModule)?.name;
             const tgtName = result.modules?.find((m) => m.serviceName === d.targetService && m.name === d.targetModule)?.name;
             return {
@@ -457,7 +457,7 @@ router.post(
             };
           });
 
-          const { violations: generatedInsights, serviceDescriptions } = await generateInsights({
+          const { violations: generatedViolations, serviceDescriptions } = await generateViolations({
             architecture: result.architecture,
             services: analysisServices,
             dependencies: analysisDeps,
@@ -487,9 +487,16 @@ router.post(
               })),
             })),
             llmRules: enabledLlmRules,
-            modules: insightModules,
-            methods: insightMethods,
-            moduleDependencies: insightModuleDeps,
+            modules: violationModules,
+            methods: violationMethods,
+            moduleDependencies: violationModuleDeps,
+            methodDependencies: (result.methodLevelDependencies || []).map((d) => ({
+              callerMethod: d.callerMethod,
+              callerModule: d.callerModule,
+              calleeMethod: d.calleeMethod,
+              calleeModule: d.calleeModule,
+              callCount: d.callCount,
+            })),
             moduleViolations: moduleViolations.map((v) => {
               const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}::${v.filePath}` : undefined;
               const methodKey = v.methodName && v.moduleName
@@ -510,21 +517,21 @@ router.post(
             });
           });
 
-          for (const insight of generatedInsights) {
+          for (const violation of generatedViolations) {
             await db.insert(violations).values({
               id: uuidv4(),
               repoId: id,
               analysisId: analysis.id,
-              type: insight.type,
-              title: insight.title,
-              content: insight.content,
-              severity: insight.severity,
-              targetServiceId: insight.targetServiceId || null,
-              targetDatabaseId: insight.targetDatabaseId || null,
-              targetModuleId: insight.targetModuleId || null,
-              targetMethodId: insight.targetMethodId || null,
-              targetTable: insight.targetTable || null,
-              fixPrompt: insight.fixPrompt || null,
+              type: violation.type,
+              title: violation.title,
+              content: violation.content,
+              severity: violation.severity,
+              targetServiceId: violation.targetServiceId || null,
+              targetDatabaseId: violation.targetDatabaseId || null,
+              targetModuleId: violation.targetModuleId || null,
+              targetMethodId: violation.targetMethodId || null,
+              targetTable: violation.targetTable || null,
+              fixPrompt: violation.fixPrompt || null,
             });
           }
 
@@ -539,10 +546,10 @@ router.post(
           }
 
           emitViolationsReady(id, analysis.id);
-        } catch (insightError) {
+        } catch (violationError) {
           console.error(
-            `[Insights] Failed for repo ${id}:`,
-            insightError instanceof Error ? insightError.message : String(insightError)
+            `[Violations] Failed for repo ${id}:`,
+            violationError instanceof Error ? violationError.message : String(violationError)
           );
         }
 
@@ -1040,13 +1047,13 @@ router.post(
         return;
       }
 
-      // Load existing insights for this analysis as baseline
-      const baselineInsights = await db
+      // Load existing violations for this analysis as baseline
+      const baselineViolationRows = await db
         .select()
         .from(violations)
         .where(eq(violations.analysisId, latestAnalysis.id));
 
-      // Resolve service/module/method names for insights
+      // Resolve service/module/method names for violations
       const analysisServices = await db.select().from(services).where(eq(services.analysisId, latestAnalysis.id));
       const analysisModules = await db.select().from(modules).where(eq(modules.analysisId, latestAnalysis.id));
       const analysisMethods = await db.select().from(methods).where(eq(methods.analysisId, latestAnalysis.id));
@@ -1065,7 +1072,7 @@ router.post(
       const moduleNameMap = new Map(analysisModules.map((m) => [m.id, m.name]));
       const methodNameMap = new Map(analysisMethods.map((m) => [m.id, m.name]));
 
-      const insightsWithNames = baselineInsights.map((i) => ({
+      const violationsWithNames = baselineViolationRows.map((i) => ({
         id: i.id,
         type: i.type,
         title: i.title,
@@ -1087,7 +1094,7 @@ router.post(
       const result = await runDiffCheck({
         repoPath: repo.path,
         branch,
-        baselineInsights: insightsWithNames,
+        baselineViolations: violationsWithNames,
         baselineLayerViolations: baselineLayerViolationDescriptions,
         onProgress: (progress) => {
           emitAnalysisProgress(id, progress);
@@ -1102,15 +1109,15 @@ router.post(
         repoId: id,
         analysisId: latestAnalysis.id,
         changedFiles: result.changedFiles,
-        resolvedInsightIds: result.resolvedInsightIds,
-        newInsights: result.newInsights,
+        resolvedViolationIds: result.resolvedViolationIds,
+        newViolations: result.newViolations,
         affectedNodeIds: result.affectedNodeIds,
         summary: result.summary,
       });
 
-      // Build resolved insights for the response
-      const resolvedSet = new Set(result.resolvedInsightIds);
-      const resolvedInsights = insightsWithNames
+      // Build resolved violations for the response
+      const resolvedSet = new Set(result.resolvedViolationIds);
+      const resolvedViolations = violationsWithNames
         .filter((i) => resolvedSet.has(i.id))
         .map((i) => ({
           ...i,
@@ -1124,8 +1131,8 @@ router.post(
 
       res.json({
         changedFiles: result.changedFiles,
-        resolvedInsights,
-        newInsights: result.newInsights,
+        resolvedViolations,
+        newViolations: result.newViolations,
         affectedNodeIds: result.affectedNodeIds,
         summary: result.summary,
         isStale: false,
@@ -1178,11 +1185,11 @@ router.get(
 
       const isStale = latestAnalysis ? diffCheck.analysisId !== latestAnalysis.id : false;
 
-      // Load resolved insights from DB for full InsightResponse objects
-      const resolvedIds = diffCheck.resolvedInsightIds as string[];
-      let resolvedInsights: Array<Record<string, unknown>> = [];
+      // Load resolved violations from DB for full ViolationResponse objects
+      const resolvedIds = diffCheck.resolvedViolationIds as string[];
+      let resolvedViolations: Array<Record<string, unknown>> = [];
       if (resolvedIds.length > 0) {
-        const allInsights = await db
+        const allViolationRows = await db
           .select()
           .from(violations)
           .where(eq(violations.analysisId, diffCheck.analysisId));
@@ -1195,7 +1202,7 @@ router.get(
         const modMap = new Map(analysisModules2.map((m) => [m.id, m.name]));
         const methMap = new Map(analysisMethods2.map((m) => [m.id, m.name]));
 
-        resolvedInsights = allInsights
+        resolvedViolations = allViolationRows
           .filter((i) => resolvedSet.has(i.id))
           .map((i) => ({
             id: i.id,
@@ -1217,8 +1224,8 @@ router.get(
       }
 
       res.json({
-        resolvedInsights,
-        newInsights: diffCheck.newInsights,
+        resolvedViolations,
+        newViolations: diffCheck.newViolations,
         affectedNodeIds: diffCheck.affectedNodeIds,
         summary: diffCheck.summary,
         changedFiles: diffCheck.changedFiles,

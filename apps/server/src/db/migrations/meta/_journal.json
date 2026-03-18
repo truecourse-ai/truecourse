@@ -15,6 +15,13 @@
       "when": 1773790723030,
       "tag": "0001_abnormal_random",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773799270461,
+      "tag": "0002_slippery_fallen_one",
+      "breakpoints": true
     }
   ]
 }

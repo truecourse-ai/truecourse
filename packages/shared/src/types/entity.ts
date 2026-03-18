@@ -180,8 +180,8 @@ export type ModuleViolationDiffItem = {
 
 export type DiffCheckResult = {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>
-  resolvedInsightIds: string[]
-  newInsights: DiffInsightItem[]
+  resolvedViolationIds: string[]
+  newViolations: DiffViolationItem[]
   summary: {
     newCount: number
     resolvedCount: number
@@ -194,7 +194,7 @@ export type DiffCheckResult = {
   }
 }
 
-export type DiffInsightItem = {
+export type DiffViolationItem = {
   type: string
   title: string
   content: string

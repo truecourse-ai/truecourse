@@ -13,7 +13,7 @@ export function RepoList({ repos, onDelete }: RepoListProps) {
     e.preventDefault();
     e.stopPropagation();
     const message = repo.lastAnalyzed
-      ? `Delete "${repo.name}"? This will remove all analyses, insights, and chat history.`
+      ? `Delete "${repo.name}"? This will remove all analyses, violations, and chat history.`
       : `Delete "${repo.name}"?`;
     if (confirm(message)) {
       onDelete(repo.id);

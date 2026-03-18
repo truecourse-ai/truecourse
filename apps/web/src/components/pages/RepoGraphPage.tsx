@@ -6,14 +6,14 @@ import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
-import { ViolationsPanel } from '@/components/insights/ViolationsPanel';
+import { ViolationsPanel } from '@/components/violations/ViolationsPanel';
 import { RulesPanel } from '@/components/rules/RulesPanel';
 import { FileTree } from '@/components/files/FileTree';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
-import { useInsights } from '@/hooks/useInsights';
+import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { useAnalysisList } from '@/hooks/useAnalysisList';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
 import type { RepoResponse } from '@/lib/api';
-import type { GraphNode, GraphEdge, DepthLevel } from '@/types/graph';
+import type { DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
 
 export default function RepoGraphPage() {
@@ -63,7 +63,7 @@ export default function RepoGraphPage() {
   const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
     useGraph(repoId, currentBranch, depthLevel, selectedAnalysisId ?? undefined);
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
-  const { insights, allInsights, isLoading: insightsLoading, refetch: refetchInsights } = useInsights(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
+  const { violations, allViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
   const { analyses, refetch: refetchAnalyses } = useAnalysisList(repoId);
 
@@ -104,10 +104,10 @@ export default function RepoGraphPage() {
   useEffect(() => {
     const unsub = onEvent('violations:ready', () => {
       setIsAnalyzing(false);
-      refetchInsights();
+      refetchViolations();
     });
     return unsub;
-  }, [onEvent, refetchInsights]);
+  }, [onEvent, refetchViolations]);
 
   const handleAnalyze = async () => {
     if (isDiffMode) {
@@ -322,30 +322,30 @@ export default function RepoGraphPage() {
     const resolvedByModule = new Map<string, number>();
     const resolvedByMethod = new Map<string, number>();
 
-    for (const insight of diffResult.newInsights) {
-      if (insight.targetServiceName) {
-        newByService.set(insight.targetServiceName, (newByService.get(insight.targetServiceName) || 0) + 1);
+    for (const v of diffResult.newViolations) {
+      if (v.targetServiceName) {
+        newByService.set(v.targetServiceName, (newByService.get(v.targetServiceName) || 0) + 1);
       }
-      if (insight.targetModuleName && insight.targetServiceName) {
-        const key = `${insight.targetServiceName}::${insight.targetModuleName}`;
+      if (v.targetModuleName && v.targetServiceName) {
+        const key = `${v.targetServiceName}::${v.targetModuleName}`;
         newByModule.set(key, (newByModule.get(key) || 0) + 1);
       }
-      if (insight.targetMethodName && insight.targetModuleName && insight.targetServiceName) {
-        const key = `${insight.targetServiceName}::${insight.targetModuleName}::${insight.targetMethodName}`;
+      if (v.targetMethodName && v.targetModuleName && v.targetServiceName) {
+        const key = `${v.targetServiceName}::${v.targetModuleName}::${v.targetMethodName}`;
         newByMethod.set(key, (newByMethod.get(key) || 0) + 1);
       }
     }
 
-    for (const insight of (diffResult.resolvedInsights || [])) {
-      if (insight.targetServiceName) {
-        resolvedByService.set(insight.targetServiceName, (resolvedByService.get(insight.targetServiceName) || 0) + 1);
+    for (const v of (diffResult.resolvedViolations || [])) {
+      if (v.targetServiceName) {
+        resolvedByService.set(v.targetServiceName, (resolvedByService.get(v.targetServiceName) || 0) + 1);
       }
-      if (insight.targetModuleName && insight.targetServiceName) {
-        const key = `${insight.targetServiceName}::${insight.targetModuleName}`;
+      if (v.targetModuleName && v.targetServiceName) {
+        const key = `${v.targetServiceName}::${v.targetModuleName}`;
         resolvedByModule.set(key, (resolvedByModule.get(key) || 0) + 1);
       }
-      if (insight.targetMethodName && insight.targetModuleName && insight.targetServiceName) {
-        const key = `${insight.targetServiceName}::${insight.targetModuleName}::${insight.targetMethodName}`;
+      if (v.targetMethodName && v.targetModuleName && v.targetServiceName) {
+        const key = `${v.targetServiceName}::${v.targetModuleName}::${v.targetMethodName}`;
         resolvedByMethod.set(key, (resolvedByMethod.get(key) || 0) + 1);
       }
     }
@@ -645,12 +645,12 @@ export default function RepoGraphPage() {
         <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} badgeCounts={{
           violations: isDiffMode && diffResult
             ? diffResult.summary.newCount + diffResult.summary.resolvedCount
-            : allInsights.length,
+            : allViolations.length,
         }}>
           {leftTab === 'violations' && (
             <ViolationsPanel
-              insights={insights}
-              isLoading={insightsLoading}
+              violations={violations}
+              isLoading={violationsLoading}
               repoId={repoId}
               selectedService={selectedService}
               selectedServiceName={selectedServiceName}

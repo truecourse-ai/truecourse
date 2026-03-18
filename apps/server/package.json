@@ -15,6 +15,9 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.58",
     "@ai-sdk/openai": "^3.0.41",
+    "@langfuse/otel": "^5.0.1",
+    "@langfuse/tracing": "^5.0.1",
+    "@opentelemetry/sdk-node": "^0.213.0",
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "ai": "^6.0.116",

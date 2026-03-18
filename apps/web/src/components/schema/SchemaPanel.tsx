@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Database, Table, Key, Link, ChevronDown, ChevronRight, List, GitFork, Fullscreen, X } from 'lucide-react';
 import { ERDiagram } from '@/components/schema/ERDiagram';
@@ -8,10 +8,10 @@ import * as api from '@/lib/api';
 type SchemaPanelProps = {
   repoId: string;
   databaseId: string;
-  insights?: import('@/lib/api').InsightResponse[];
+  violations?: import('@/lib/api').ViolationResponse[];
 };
 
-export function SchemaPanel({ repoId, databaseId, insights = [] }: SchemaPanelProps) {
+export function SchemaPanel({ repoId, databaseId, violations = [] }: SchemaPanelProps) {
   const [schema, setSchema] = useState<api.DatabaseSchemaResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
@@ -102,7 +102,7 @@ export function SchemaPanel({ repoId, databaseId, insights = [] }: SchemaPanelPr
       {/* ER Diagram view */}
       {view === 'diagram' && (
         <div className="flex-1 min-h-0">
-          <ERDiagram schema={schema} insights={insights} isFullscreen={false} />
+          <ERDiagram schema={schema} violations={violations} isFullscreen={false} />
         </div>
       )}
 
@@ -211,7 +211,7 @@ export function SchemaPanel({ repoId, databaseId, insights = [] }: SchemaPanelPr
           </div>
           {/* Fullscreen ER diagram */}
           <div className="flex-1 min-h-0">
-            <ERDiagram schema={schema} insights={insights} isFullscreen />
+            <ERDiagram schema={schema} violations={violations} isFullscreen />
           </div>
         </div>,
         document.body,

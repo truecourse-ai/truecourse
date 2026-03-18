@@ -532,8 +532,8 @@ export const diffChecks = pgTable('diff_checks', {
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
   changedFiles: jsonb('changed_files').notNull(), // Array<{ path, status }>
-  resolvedInsightIds: jsonb('resolved_insight_ids').notNull(), // string[]
-  newInsights: jsonb('new_insights').notNull(), // InsightResponse[]
+  resolvedViolationIds: jsonb('resolved_violation_ids').notNull(), // string[]
+  newViolations: jsonb('new_violations').notNull(), // ViolationResponse[]
   affectedNodeIds: jsonb('affected_node_ids').notNull(), // { services, layers, modules, methods }
   summary: jsonb('summary').notNull(), // { newCount, resolvedCount }
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),

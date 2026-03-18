@@ -13,7 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(__dirname, '../../../../../.env') });
 
 import { Langfuse } from 'langfuse';
-import { PROMPT_DEFINITIONS, type PromptName } from './prompts.js';
+import { PROMPT_DEFINITIONS } from './prompts.js';
 
 const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
 const secretKey = process.env.LANGFUSE_SECRET_KEY;

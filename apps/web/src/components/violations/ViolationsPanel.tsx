@@ -1,12 +1,12 @@
 
 import { useCallback, useRef, useState, useMemo } from 'react';
 import { AlertTriangle, AlertCircle, Loader2 } from 'lucide-react';
-import { InsightCard } from '@/components/insights/InsightCard';
+import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
-import type { InsightResponse, DiffCheckResponse } from '@/lib/api';
+import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
 type ViolationsPanelProps = {
-  insights: InsightResponse[];
+  violations: ViolationResponse[];
   isLoading: boolean;
   repoId: string;
   selectedService?: string | null;
@@ -21,7 +21,7 @@ type ViolationsPanelProps = {
 };
 
 export function ViolationsPanel({
-  insights,
+  violations,
   isLoading,
   repoId,
   selectedService,
@@ -63,13 +63,13 @@ export function ViolationsPanel({
     [erHeight],
   );
 
-  // Build diff insight cards
-  const diffInsightCards = useMemo(() => {
+  // Build diff violation cards
+  const diffViolationCards = useMemo(() => {
     if (!isDiffMode || !diffResult) return null;
 
-    const cards: Array<{ insight: InsightResponse; diffStatus: 'new' | 'resolved' }> = [];
+    const cards: Array<{ violation: ViolationResponse; diffStatus: 'new' | 'resolved' }> = [];
 
-    for (const item of diffResult.newInsights) {
+    for (const item of diffResult.newViolations) {
       const targetServiceId = item.targetServiceName && resolveNodeIdByName
         ? resolveNodeIdByName(item.targetServiceName, 'service') : null;
       const targetModuleId = item.targetModuleName && resolveNodeIdByName
@@ -78,7 +78,7 @@ export function ViolationsPanel({
         ? resolveNodeIdByName(item.targetMethodName, 'method') : null;
 
       cards.push({
-        insight: {
+        violation: {
           id: `new-${cards.length}`,
           type: item.type,
           title: item.title,
@@ -97,9 +97,9 @@ export function ViolationsPanel({
       });
     }
 
-    for (const item of (diffResult.resolvedInsights || [])) {
+    for (const item of (diffResult.resolvedViolations || [])) {
       cards.push({
-        insight: item,
+        violation: item,
         diffStatus: 'resolved',
       });
     }
@@ -109,21 +109,21 @@ export function ViolationsPanel({
     cards.sort((a, b) => {
       const statusDiff = (a.diffStatus === 'new' ? 0 : 1) - (b.diffStatus === 'new' ? 0 : 1);
       if (statusDiff !== 0) return statusDiff;
-      const sevDiff = (severityOrder[a.insight.severity] ?? 5) - (severityOrder[b.insight.severity] ?? 5);
+      const sevDiff = (severityOrder[a.violation.severity] ?? 5) - (severityOrder[b.violation.severity] ?? 5);
       if (sevDiff !== 0) return sevDiff;
-      const typeDiff = (typeOrder[a.insight.type] ?? 9) - (typeOrder[b.insight.type] ?? 9);
+      const typeDiff = (typeOrder[a.violation.type] ?? 9) - (typeOrder[b.violation.type] ?? 9);
       if (typeDiff !== 0) return typeDiff;
-      return new Date(b.insight.createdAt).getTime() - new Date(a.insight.createdAt).getTime();
+      return new Date(b.violation.createdAt).getTime() - new Date(a.violation.createdAt).getTime();
     });
 
     return cards;
   }, [isDiffMode, diffResult, resolveNodeIdByName]);
 
-  // Filter insights by selected file path
-  const pathFilteredInsights = useMemo(() => {
-    if (!selectedPath || !nodeFilePathMap) return insights;
-    return insights.filter((insight) => {
-      const targetId = insight.targetMethodId || insight.targetModuleId || insight.targetServiceId;
+  // Filter violations by selected file path
+  const pathFilteredViolations = useMemo(() => {
+    if (!selectedPath || !nodeFilePathMap) return violations;
+    return violations.filter((violation) => {
+      const targetId = violation.targetMethodId || violation.targetModuleId || violation.targetServiceId;
       if (!targetId) return true;
       const fp = nodeFilePathMap.get(targetId);
       if (!fp) return true;
@@ -136,13 +136,13 @@ export function ViolationsPanel({
       }
       return false;
     });
-  }, [insights, selectedPath, nodeFilePathMap]);
+  }, [violations, selectedPath, nodeFilePathMap]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
         <div className="overflow-y-auto p-3 flex-1">
-          {isDiffMode && diffInsightCards !== null ? (
+          {isDiffMode && diffViolationCards !== null ? (
             <>
               {diffResult?.isStale && (
                 <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
@@ -150,7 +150,7 @@ export function ViolationsPanel({
                   Baseline analysis has changed. Click Analyze to refresh.
                 </div>
               )}
-              {diffInsightCards.length === 0 ? (
+              {diffViolationCards.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
@@ -159,10 +159,10 @@ export function ViolationsPanel({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {diffInsightCards.map(({ insight, diffStatus }) => (
-                    <InsightCard
-                      key={insight.id}
-                      insight={insight}
+                  {diffViolationCards.map(({ violation, diffStatus }) => (
+                    <ViolationCard
+                      key={violation.id}
+                      violation={violation}
                       onLocateNode={onLocateNode}
                       isResolved={diffStatus === 'resolved'}
                       diffStatus={diffStatus}
@@ -185,7 +185,7 @@ export function ViolationsPanel({
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : pathFilteredInsights.length === 0 ? (
+              ) : pathFilteredViolations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
@@ -198,8 +198,8 @@ export function ViolationsPanel({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {pathFilteredInsights.map((insight) => (
-                    <InsightCard key={insight.id} insight={insight} onLocateNode={onLocateNode} />
+                  {pathFilteredViolations.map((violation) => (
+                    <ViolationCard key={violation.id} violation={violation} onLocateNode={onLocateNode} />
                   ))}
                 </div>
               )}
@@ -214,7 +214,7 @@ export function ViolationsPanel({
               className="absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize hover:bg-primary/30 active:bg-primary/50"
               onMouseDown={handleErResizeDown}
             />
-            <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} insights={insights} />
+            <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} violations={violations} />
           </div>
         )}
       </div>

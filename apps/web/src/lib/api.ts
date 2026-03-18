@@ -106,7 +106,7 @@ export type GraphResponse = {
   collapsedIds?: string[];
 };
 
-export type InsightResponse = {
+export type ViolationResponse = {
   id: string;
   type: string;
   title: string;
@@ -240,11 +240,11 @@ export function getFiles(repoId: string): Promise<FilesResponse> {
 }
 
 // Violations
-export function getViolations(repoId: string, analysisId?: string): Promise<InsightResponse[]> {
+export function getViolations(repoId: string, analysisId?: string): Promise<ViolationResponse[]> {
   const params = new URLSearchParams();
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
-  return fetchApi<InsightResponse[]>(`/api/repos/${repoId}/violations${qs ? `?${qs}` : ''}`);
+  return fetchApi<ViolationResponse[]>(`/api/repos/${repoId}/violations${qs ? `?${qs}` : ''}`);
 }
 
 // Databases
@@ -310,7 +310,7 @@ export function getRules(): Promise<RuleResponse[]> {
 }
 
 // Diff Check
-export type DiffInsightItem = {
+export type DiffViolationItem = {
   type: string;
   title: string;
   content: string;
@@ -323,8 +323,8 @@ export type DiffInsightItem = {
 
 export type DiffCheckResponse = {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
-  resolvedInsights: InsightResponse[];
-  newInsights: DiffInsightItem[];
+  resolvedViolations: ViolationResponse[];
+  newViolations: DiffViolationItem[];
   summary: {
     newCount: number;
     resolvedCount: number;

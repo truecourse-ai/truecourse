@@ -1,9 +1,10 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { generateObject, streamText, type LanguageModel } from 'ai';
+import { generateText, Output, streamText, type LanguageModel } from 'ai';
+import { observe } from '@langfuse/tracing';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import type { Insight } from '@truecourse/shared';
+import type { Violation } from '@truecourse/shared';
 import { config } from '../../config/index.js';
 import {
   getPrompt,
@@ -15,13 +16,22 @@ import {
   buildDiffDatabaseTemplateVars,
   buildDiffModuleTemplateVars,
 } from './prompts.js';
-import { wrapWithTracing } from './tracing.js';
 
 // ---------------------------------------------------------------------------
-// Types — kept for summarizeArchitecture() and chat()
+// Telemetry helper
 // ---------------------------------------------------------------------------
 
-export interface ArchitectureContext {
+const telemetry = (functionId: string, langfusePrompt?: string | null) => ({
+  isEnabled: true,
+  functionId,
+  metadata: langfusePrompt ? { langfusePrompt } : undefined,
+});
+
+// ---------------------------------------------------------------------------
+// Types — kept for summarizeServices() and chat()
+// ---------------------------------------------------------------------------
+
+export interface ServiceSummaryContext {
   architecture: string;
   services: {
     id: string;
@@ -59,10 +69,10 @@ export interface ArchitectureContext {
 }
 
 // ---------------------------------------------------------------------------
-// Focused insight context types (one per LLM call)
+// Focused violation context types (one per LLM call)
 // ---------------------------------------------------------------------------
 
-export interface ServiceInsightContext {
+export interface ServiceViolationContext {
   architecture: string;
   services: {
     id: string;
@@ -82,7 +92,7 @@ export interface ServiceInsightContext {
   llmRules: { name: string; severity: string; prompt: string }[];
 }
 
-export interface DatabaseInsightContext {
+export interface DatabaseViolationContext {
   databases: {
     id: string;
     name: string;
@@ -99,8 +109,7 @@ export interface DatabaseInsightContext {
   llmRules: { name: string; severity: string; prompt: string }[];
 }
 
-export interface ModuleInsightContext {
-  services: { id: string; name: string }[];
+export interface ModuleViolationContext {
   modules: {
     id: string;
     name: string;
@@ -131,6 +140,13 @@ export interface ModuleInsightContext {
     targetModule: string;
     importedNames: string[];
   }[];
+  methodDependencies: {
+    callerMethod: string;
+    callerModule: string;
+    calleeMethod: string;
+    calleeModule: string;
+    callCount: number;
+  }[];
   llmRules: { name: string; severity: string; prompt: string }[];
   violations?: {
     ruleKey: string;
@@ -147,7 +163,7 @@ export interface ModuleInsightContext {
 }
 
 // ---------------------------------------------------------------------------
-// Diff insight context types (extend normal contexts with existing insights)
+// Diff violation context types (extend normal contexts with existing violations)
 // ---------------------------------------------------------------------------
 
 interface ExistingViolation {
@@ -158,23 +174,23 @@ interface ExistingViolation {
   severity: string;
 }
 
-export interface DiffServiceContext extends ServiceInsightContext {
+export interface DiffServiceContext extends ServiceViolationContext {
   existingViolations: ExistingViolation[];
   changedFiles: string[];
   baselineViolations?: string[];
 }
 
-export interface DiffDatabaseContext extends DatabaseInsightContext {
+export interface DiffDatabaseContext extends DatabaseViolationContext {
   existingViolations: ExistingViolation[];
   changedFiles: string[];
 }
 
-export interface DiffModuleContext extends ModuleInsightContext {
+export interface DiffModuleContext extends ModuleViolationContext {
   existingViolations: ExistingViolation[];
   changedFiles: string[];
 }
 
-export interface DiffInsightItem {
+export interface DiffViolationItem {
   type: string;
   title: string;
   content: string;
@@ -185,9 +201,9 @@ export interface DiffInsightItem {
   fixPrompt: string | null;
 }
 
-export interface DiffInsightsResult {
-  resolvedInsightIds: string[];
-  newInsights: DiffInsightItem[];
+export interface DiffViolationsResult {
+  resolvedViolationIds: string[];
+  newViolations: DiffViolationItem[];
 }
 
 // ---------------------------------------------------------------------------
@@ -204,34 +220,47 @@ export interface ServiceDescription {
   description: string;
 }
 
-export interface InsightsResult {
-  violations: Insight[];
+export interface ViolationsResult {
+  violations: Violation[];
   serviceDescriptions: ServiceDescription[];
 }
 
-export interface ServiceInsightsResult {
-  violations: Insight[];
+export interface ServiceViolationsResult {
+  violations: Violation[];
   serviceDescriptions: ServiceDescription[];
 }
 
-export interface DatabaseInsightsResult {
-  violations: Insight[];
+export interface DatabaseViolationsResult {
+  violations: Violation[];
 }
 
-export interface ModuleInsightsResult {
-  violations: Insight[];
+export interface ModuleViolationsResult {
+  violations: Violation[];
+}
+
+export interface AllViolationsInput {
+  service?: ServiceViolationContext;
+  database?: DatabaseViolationContext;
+  module?: ModuleViolationContext;
+}
+
+export interface AllViolationsResult {
+  service?: ServiceViolationsResult;
+  database?: DatabaseViolationsResult;
+  module?: ModuleViolationsResult;
 }
 
 export interface LLMProvider {
-  generateServiceInsights(context: ServiceInsightContext): Promise<ServiceInsightsResult>;
-  generateDatabaseInsights(context: DatabaseInsightContext): Promise<DatabaseInsightsResult>;
-  generateModuleInsights(context: ModuleInsightContext): Promise<ModuleInsightsResult>;
-  generateDiffInsights(contexts: {
+  generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult>;
+  generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult>;
+  generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult>;
+  generateAllViolations(contexts: AllViolationsInput): Promise<AllViolationsResult>;
+  generateDiffViolations(contexts: {
     service?: DiffServiceContext;
     database?: DiffDatabaseContext;
     module?: DiffModuleContext;
-  }): Promise<DiffInsightsResult>;
-  summarizeArchitecture(context: ArchitectureContext): Promise<string>;
+  }): Promise<DiffViolationsResult>;
+  summarizeServices(context: ServiceSummaryContext): Promise<string>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
 }
 
@@ -239,7 +268,7 @@ export interface LLMProvider {
 // Zod schemas — scoped per call to prevent ID mixing
 // ---------------------------------------------------------------------------
 
-const ArchitectureInsightOutputSchema = z.object({
+const ServiceViolationOutputSchema = z.object({
   violations: z.array(
     z.object({
       type: z.literal('service'),
@@ -258,7 +287,7 @@ const ArchitectureInsightOutputSchema = z.object({
   ),
 });
 
-const DatabaseInsightOutputSchema = z.object({
+const DatabaseViolationOutputSchema = z.object({
   violations: z.array(
     z.object({
       type: z.literal('database'),
@@ -272,7 +301,7 @@ const DatabaseInsightOutputSchema = z.object({
   ),
 });
 
-const ModuleInsightOutputSchema = z.object({
+const ModuleViolationOutputSchema = z.object({
   violations: z.array(
     z.object({
       type: z.enum(['module', 'function']).describe('Use "function" when the violation targets a specific function/method, use "module" when it targets the module/class itself'),
@@ -287,9 +316,9 @@ const ModuleInsightOutputSchema = z.object({
   ),
 });
 
-const DiffInsightOutputSchema = z.object({
-  resolvedInsightIds: z.array(z.string()).describe('IDs of existing insights that are now resolved'),
-  newInsights: z.array(
+const DiffViolationOutputSchema = z.object({
+  resolvedViolationIds: z.array(z.string()).describe('IDs of existing violations that are now resolved'),
+  newViolations: z.array(
     z.object({
       type: z.enum(['service', 'database', 'module', 'function']),
       title: z.string(),
@@ -335,18 +364,19 @@ function getModel(): LanguageModel {
 // ---------------------------------------------------------------------------
 
 class AISDKProvider implements LLMProvider {
-  async generateServiceInsights(context: ServiceInsightContext): Promise<ServiceInsightsResult> {
-    const prompt = await getPrompt('violations-service', buildServiceTemplateVars(context));
+  async generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult> {
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-service', buildServiceTemplateVars(context));
     const model = getModel();
 
-    console.log('[LLM] Service insights call starting...');
+    console.log('[LLM] Service violations call starting...');
     const t0 = Date.now();
-    const { object } = await generateObject({
+    const { output: object } = await generateText({
       model,
-      schema: ArchitectureInsightOutputSchema,
+      output: Output.object({ schema: ServiceViolationOutputSchema }),
       prompt,
+      experimental_telemetry: telemetry('violations-service', langfusePrompt),
     });
-    console.log(`[LLM] Service insights call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    console.log(`[LLM] Service violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
       violations: object.violations.map((v) => ({
@@ -363,18 +393,19 @@ class AISDKProvider implements LLMProvider {
     };
   }
 
-  async generateDatabaseInsights(context: DatabaseInsightContext): Promise<DatabaseInsightsResult> {
-    const prompt = await getPrompt('violations-database', buildDatabaseTemplateVars(context));
+  async generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult> {
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-database', buildDatabaseTemplateVars(context));
     const model = getModel();
 
-    console.log('[LLM] Database insights call starting...');
+    console.log('[LLM] Database violations call starting...');
     const t0 = Date.now();
-    const { object } = await generateObject({
+    const { output: object } = await generateText({
       model,
-      schema: DatabaseInsightOutputSchema,
+      output: Output.object({ schema: DatabaseViolationOutputSchema }),
       prompt,
+      experimental_telemetry: telemetry('violations-database', langfusePrompt),
     });
-    console.log(`[LLM] Database insights call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    console.log(`[LLM] Database violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
       violations: object.violations.map((v) => ({
@@ -391,18 +422,19 @@ class AISDKProvider implements LLMProvider {
     };
   }
 
-  async generateModuleInsights(context: ModuleInsightContext): Promise<ModuleInsightsResult> {
-    const prompt = await getPrompt('violations-module', buildModuleTemplateVars(context));
+  async generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult> {
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-module', buildModuleTemplateVars(context));
     const model = getModel();
 
-    console.log('[LLM] Module insights call starting...');
+    console.log('[LLM] Module violations call starting...');
     const t0 = Date.now();
-    const { object } = await generateObject({
+    const { output: object } = await generateText({
       model,
-      schema: ModuleInsightOutputSchema,
+      output: Output.object({ schema: ModuleViolationOutputSchema }),
       prompt,
+      experimental_telemetry: telemetry('violations-module', langfusePrompt),
     });
-    console.log(`[LLM] Module insights call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    console.log(`[LLM] Module violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
       violations: object.violations.map((v) => ({
@@ -420,114 +452,153 @@ class AISDKProvider implements LLMProvider {
     };
   }
 
-  async generateDiffInsights(contexts: {
-    service?: DiffServiceContext;
-    database?: DiffDatabaseContext;
-    module?: DiffModuleContext;
-  }): Promise<DiffInsightsResult> {
-    const model = getModel();
-    const promises: Promise<{ resolvedInsightIds: string[]; newInsights: DiffInsightItem[] }>[] = [];
+  generateAllViolations = observe(
+    async (contexts: AllViolationsInput): Promise<AllViolationsResult> => {
+      const promises: [string, Promise<unknown>][] = [];
 
-    const diffT0 = Date.now();
-    console.log('[LLM] Diff insights starting...');
-
-    if (contexts.service) {
-      const ctx = contexts.service;
-      promises.push(
-        getPrompt('violations-diff-service', buildDiffServiceTemplateVars(ctx)).then(async (prompt) => {
-          console.log('[LLM] Diff service call starting...');
-          const t0 = Date.now();
-          const { object } = await generateObject({
-            model,
-            schema: DiffInsightOutputSchema,
-            prompt,
-          });
-          console.log(`[LLM] Diff service call done in ${Date.now() - t0}ms — resolved: ${object.resolvedInsightIds.length}, new: ${object.newInsights.length}`);
-          return {
-            resolvedInsightIds: object.resolvedInsightIds,
-            newInsights: object.newInsights.map((i) => ({
-              ...i,
-              targetModuleName: i.targetModuleName ?? null,
-              targetMethodName: i.targetMethodName ?? null,
-            })),
-          };
-        })
-      );
-    }
-
-    if (contexts.database) {
-      const ctx = contexts.database;
-      promises.push(
-        getPrompt('violations-diff-database', buildDiffDatabaseTemplateVars(ctx)).then(async (prompt) => {
-          console.log('[LLM] Diff database call starting...');
-          const t0 = Date.now();
-          const { object } = await generateObject({
-            model,
-            schema: DiffInsightOutputSchema,
-            prompt,
-          });
-          console.log(`[LLM] Diff database call done in ${Date.now() - t0}ms — resolved: ${object.resolvedInsightIds.length}, new: ${object.newInsights.length}`);
-          return {
-            resolvedInsightIds: object.resolvedInsightIds,
-            newInsights: object.newInsights.map((i) => ({
-              ...i,
-              targetModuleName: i.targetModuleName ?? null,
-              targetMethodName: i.targetMethodName ?? null,
-            })),
-          };
-        })
-      );
-    }
-
-    if (contexts.module) {
-      const ctx = contexts.module;
-      promises.push(
-        getPrompt('violations-diff-module', buildDiffModuleTemplateVars(ctx)).then(async (prompt) => {
-          console.log('[LLM] Diff module call starting...');
-          const t0 = Date.now();
-          const { object } = await generateObject({
-            model,
-            schema: DiffInsightOutputSchema,
-            prompt,
-          });
-          console.log(`[LLM] Diff module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedInsightIds.length}, new: ${object.newInsights.length}`);
-          return {
-            resolvedInsightIds: object.resolvedInsightIds,
-            newInsights: object.newInsights.map((i) => ({
-              ...i,
-              targetModuleName: i.targetModuleName ?? null,
-              targetMethodName: i.targetMethodName ?? null,
-            })),
-          };
-        })
-      );
-    }
-
-    const results = await Promise.allSettled(promises);
-
-    const allResolved: string[] = [];
-    const allNew: DiffInsightItem[] = [];
-
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        allResolved.push(...result.value.resolvedInsightIds);
-        allNew.push(...result.value.newInsights);
-      } else {
-        console.error('[DiffInsights] LLM call failed:', result.reason);
+      if (contexts.service) {
+        promises.push(['service', this.generateServiceViolations(contexts.service)]);
       }
-    }
+      if (contexts.database) {
+        promises.push(['database', this.generateDatabaseViolations(contexts.database)]);
+      }
+      if (contexts.module) {
+        promises.push(['module', this.generateModuleViolations(contexts.module)]);
+      }
 
-    console.log(`[LLM] Diff insights total: ${Date.now() - diffT0}ms — resolved: ${allResolved.length}, new: ${allNew.length}`);
-    return { resolvedInsightIds: allResolved, newInsights: allNew };
-  }
+      const settled = await Promise.allSettled(promises.map(([, p]) => p));
 
-  async summarizeArchitecture(context: ArchitectureContext): Promise<string> {
-    const prompt = await getPrompt('architecture-summary', buildTemplateVars(context));
+      const result: AllViolationsResult = {};
+      for (let i = 0; i < promises.length; i++) {
+        const [key] = promises[i];
+        const outcome = settled[i];
+        if (outcome.status === 'fulfilled') {
+          (result as Record<string, unknown>)[key] = outcome.value;
+        } else {
+          console.error(`[Violations] ${key} call failed:`, outcome.reason);
+        }
+      }
+
+      return result;
+    },
+    { name: 'generate-all-violations' },
+  );
+
+  generateDiffViolations = observe(
+    async (contexts: {
+      service?: DiffServiceContext;
+      database?: DiffDatabaseContext;
+      module?: DiffModuleContext;
+    }): Promise<DiffViolationsResult> => {
+      const model = getModel();
+      const promises: Promise<{ resolvedViolationIds: string[]; newViolations: DiffViolationItem[] }>[] = [];
+
+      const diffT0 = Date.now();
+      console.log('[LLM] Diff violations starting...');
+
+      if (contexts.service) {
+        const ctx = contexts.service;
+        promises.push(
+          getPrompt('violations-diff-service', buildDiffServiceTemplateVars(ctx)).then(async ({ text: prompt, langfusePrompt }) => {
+            console.log('[LLM] Diff service call starting...');
+            const t0 = Date.now();
+            const { output: object } = await generateText({
+              model,
+              output: Output.object({ schema: DiffViolationOutputSchema }),
+              prompt,
+              experimental_telemetry: telemetry('violations-diff-service', langfusePrompt),
+            });
+            console.log(`[LLM] Diff service call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            return {
+              resolvedViolationIds: object.resolvedViolationIds,
+              newViolations: object.newViolations.map((i) => ({
+                ...i,
+                targetModuleName: i.targetModuleName ?? null,
+                targetMethodName: i.targetMethodName ?? null,
+              })),
+            };
+          })
+        );
+      }
+
+      if (contexts.database) {
+        const ctx = contexts.database;
+        promises.push(
+          getPrompt('violations-diff-database', buildDiffDatabaseTemplateVars(ctx)).then(async ({ text: prompt, langfusePrompt }) => {
+            console.log('[LLM] Diff database call starting...');
+            const t0 = Date.now();
+            const { output: object } = await generateText({
+              model,
+              output: Output.object({ schema: DiffViolationOutputSchema }),
+              prompt,
+              experimental_telemetry: telemetry('violations-diff-database', langfusePrompt),
+            });
+            console.log(`[LLM] Diff database call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            return {
+              resolvedViolationIds: object.resolvedViolationIds,
+              newViolations: object.newViolations.map((i) => ({
+                ...i,
+                targetModuleName: i.targetModuleName ?? null,
+                targetMethodName: i.targetMethodName ?? null,
+              })),
+            };
+          })
+        );
+      }
+
+      if (contexts.module) {
+        const ctx = contexts.module;
+        promises.push(
+          getPrompt('violations-diff-module', buildDiffModuleTemplateVars(ctx)).then(async ({ text: prompt, langfusePrompt }) => {
+            console.log('[LLM] Diff module call starting...');
+            const t0 = Date.now();
+            const { output: object } = await generateText({
+              model,
+              output: Output.object({ schema: DiffViolationOutputSchema }),
+              prompt,
+              experimental_telemetry: telemetry('violations-diff-module', langfusePrompt),
+            });
+            console.log(`[LLM] Diff module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            return {
+              resolvedViolationIds: object.resolvedViolationIds,
+              newViolations: object.newViolations.map((i) => ({
+                ...i,
+                targetModuleName: i.targetModuleName ?? null,
+                targetMethodName: i.targetMethodName ?? null,
+              })),
+            };
+          })
+        );
+      }
+
+      const results = await Promise.allSettled(promises);
+
+      const allResolved: string[] = [];
+      const allNew: DiffViolationItem[] = [];
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          allResolved.push(...result.value.resolvedViolationIds);
+          allNew.push(...result.value.newViolations);
+        } else {
+          console.error('[DiffViolations] LLM call failed:', result.reason);
+        }
+      }
+
+      console.log(`[LLM] Diff violations total: ${Date.now() - diffT0}ms — resolved: ${allResolved.length}, new: ${allNew.length}`);
+      return { resolvedViolationIds: allResolved, newViolations: allNew };
+    },
+    { name: 'generate-diff-violations' },
+  );
+
+  async summarizeServices(context: ServiceSummaryContext): Promise<string> {
+    const { text: prompt, langfusePrompt } = await getPrompt('service-summary', buildTemplateVars(context));
     const model = getModel();
 
     const { text } = await streamText({
       model,
       prompt,
+      experimental_telemetry: telemetry('summarize-services', langfusePrompt),
     });
 
     return text;
@@ -546,6 +617,7 @@ class AISDKProvider implements LLMProvider {
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content,
       })),
+      experimental_telemetry: telemetry('chat'),
     });
 
     for await (const chunk of textStream) {
@@ -559,5 +631,5 @@ class AISDKProvider implements LLMProvider {
 // ---------------------------------------------------------------------------
 
 export function createLLMProvider(): LLMProvider {
-  return wrapWithTracing(new AISDKProvider());
+  return new AISDKProvider();
 }

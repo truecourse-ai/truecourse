@@ -39,7 +39,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleNodeData }) {
-  const { label, moduleKind, methodCount, layerColor, isDead, isContainer, isCollapsed, onToggleCollapse, violations, onExplain } = data;
+  const { label, moduleKind, methodCount, isDead, isContainer, isCollapsed, onToggleCollapse, violations, onExplain } = data;
   const Icon = KIND_ICONS[moduleKind] || FileCode;
   const { setEdges } = useReactFlow();
 

@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
-import type { GraphNode, GraphEdge, ServiceNodeData, DepthLevel } from '@/types/graph';
+import type { ServiceNodeData, DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
 
 export function useGraph(repoId: string, branch?: string, level: DepthLevel = 'services', analysisId?: string) {
@@ -168,7 +168,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
                 })),
                 rootPath: node.data.rootPath ?? '',
               },
-              insightCount: 0,
+              violationCount: 0,
               hasHighSeverity: false,
             } as ServiceNodeData,
           };

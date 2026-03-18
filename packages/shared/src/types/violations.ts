@@ -2,10 +2,10 @@ import { z } from 'zod'
 import { ArchitectureSchema, ServiceTypeSchema } from './entity.js'
 
 // ---------------------------------------------------------------------------
-// Insight Type
+// Violation Type
 // ---------------------------------------------------------------------------
 
-export const InsightTypeSchema = z.enum([
+export const ViolationTypeSchema = z.enum([
   'architecture',
   'dependency',
   'violation',
@@ -16,31 +16,31 @@ export const InsightTypeSchema = z.enum([
   'service',
   'function',
 ])
-export type InsightType = z.infer<typeof InsightTypeSchema>
+export type ViolationType = z.infer<typeof ViolationTypeSchema>
 
 // ---------------------------------------------------------------------------
-// Insight Severity
+// Violation Severity
 // ---------------------------------------------------------------------------
 
-export const InsightSeveritySchema = z.enum([
+export const ViolationSeveritySchema = z.enum([
   'info',
   'low',
   'medium',
   'high',
   'critical',
 ])
-export type InsightSeverity = z.infer<typeof InsightSeveritySchema>
+export type ViolationSeverity = z.infer<typeof ViolationSeveritySchema>
 
 // ---------------------------------------------------------------------------
-// Insight
+// Violation
 // ---------------------------------------------------------------------------
 
-export const InsightSchema = z.object({
+export const ViolationSchema = z.object({
   id: z.string(),
-  type: InsightTypeSchema,
+  type: ViolationTypeSchema,
   title: z.string(),
   content: z.string(),
-  severity: InsightSeveritySchema,
+  severity: ViolationSeveritySchema,
   targetServiceId: z.string().optional(),
   targetDatabaseId: z.string().optional(),
   targetModuleId: z.string().optional(),
@@ -50,7 +50,7 @@ export const InsightSchema = z.object({
   createdAt: z.string(),
 })
 
-export type Insight = z.infer<typeof InsightSchema>
+export type Violation = z.infer<typeof ViolationSchema>
 
 // ---------------------------------------------------------------------------
 // Architecture Summary
@@ -70,7 +70,7 @@ export const ArchitectureSummarySchema = z.object({
   architecture: ArchitectureSchema,
   totalServices: z.number(),
   totalFiles: z.number(),
-  insights: z.array(InsightSchema),
+  violations: z.array(ViolationSchema),
   services: z.array(ArchitectureSummaryServiceSchema),
 })
 

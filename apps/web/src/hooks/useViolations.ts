@@ -1,32 +1,32 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as api from '@/lib/api';
-import type { InsightResponse } from '@/lib/api';
+import type { ViolationResponse } from '@/lib/api';
 
-export function useInsights(repoId: string, selectedServiceId?: string, analysisId?: string) {
-  const [insights, setInsights] = useState<InsightResponse[]>([]);
+export function useViolations(repoId: string, selectedServiceId?: string, analysisId?: string) {
+  const [violations, setViolations] = useState<ViolationResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchInsights = useCallback(async () => {
+  const fetchViolations = useCallback(async () => {
     if (!repoId) return;
     setIsLoading(true);
     setError(null);
     try {
       const data = await api.getViolations(repoId, analysisId);
-      setInsights(data);
+      setViolations(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch insights');
+      setError(err instanceof Error ? err.message : 'Failed to fetch violations');
     } finally {
       setIsLoading(false);
     }
   }, [repoId, analysisId]);
 
   useEffect(() => {
-    fetchInsights();
-  }, [fetchInsights]);
+    fetchViolations();
+  }, [fetchViolations]);
 
-  const filteredInsights = useMemo(() => {
+  const filteredViolations = useMemo(() => {
     const severityOrder: Record<string, number> = {
       critical: 0,
       high: 1,
@@ -40,7 +40,7 @@ export function useInsights(repoId: string, selectedServiceId?: string, analysis
       function: 2,
       database: 3,
     };
-    const sorted = [...insights].sort((a, b) => {
+    const sorted = [...violations].sort((a, b) => {
       const sevDiff = (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5);
       if (sevDiff !== 0) return sevDiff;
       const typeDiff = (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9);
@@ -49,19 +49,19 @@ export function useInsights(repoId: string, selectedServiceId?: string, analysis
     });
     if (!selectedServiceId) return sorted;
     return sorted.filter(
-      (insight) =>
-        insight.targetServiceId === selectedServiceId ||
-        insight.targetDatabaseId === selectedServiceId ||
-        insight.targetModuleId === selectedServiceId ||
-        insight.targetMethodId === selectedServiceId,
+      (violation) =>
+        violation.targetServiceId === selectedServiceId ||
+        violation.targetDatabaseId === selectedServiceId ||
+        violation.targetModuleId === selectedServiceId ||
+        violation.targetMethodId === selectedServiceId,
     );
-  }, [insights, selectedServiceId]);
+  }, [violations, selectedServiceId]);
 
   return {
-    insights: filteredInsights,
-    allInsights: insights,
+    violations: filteredViolations,
+    allViolations: violations,
     isLoading,
     error,
-    refetch: fetchInsights,
+    refetch: fetchViolations,
   };
 }

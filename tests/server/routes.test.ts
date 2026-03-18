@@ -17,7 +17,7 @@ import * as schema from '../../apps/server/src/db/schema';
 vi.mock('../../apps/server/src/socket/handlers', () => ({
   emitAnalysisProgress: vi.fn(),
   emitAnalysisComplete: vi.fn(),
-  emitInsightsReady: vi.fn(),
+  emitViolationsReady: vi.fn(),
   emitFilesChanged: vi.fn(),
 }));
 

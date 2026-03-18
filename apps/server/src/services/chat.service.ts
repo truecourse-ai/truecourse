@@ -1,11 +1,12 @@
 import { eq, asc } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
+import { observe } from '@langfuse/tracing';
 import { db } from '../config/database.js';
 import { conversations, messages } from '../db/schema.js';
 import { createLLMProvider, type ChatMessage } from './llm/provider.js';
 import { getPrompt } from './llm/prompts.js';
 
-export async function sendMessage(
+export const sendMessage = observe(async function sendMessage(
   repoId: string,
   conversationId: string | undefined,
   message: string,
@@ -56,7 +57,7 @@ export async function sendMessage(
   });
 
   // Build system prompt with repo context
-  let systemPrompt = await getPrompt('chat-system');
+  let systemPrompt = (await getPrompt('chat-system')).text;
   if (repoContext) {
     systemPrompt += `\n\nCurrent project context:\n`;
     if (repoContext.architecture) {
@@ -103,7 +104,7 @@ export async function sendMessage(
     conversationId: finalConvId,
     stream: wrappedStream(),
   };
-}
+}, { name: 'chat' });
 
 export async function getConversationHistory(
   conversationId: string

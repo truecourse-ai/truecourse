@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   CreateRepoSchema,
   AnalyzeRepoSchema,
-  GenerateInsightsSchema,
+  GenerateViolationsSchema,
   ChatMessageSchema,
 } from '../../packages/shared/src/schemas/index';
 import {
@@ -26,8 +26,8 @@ import {
   LayerDependencyInfoSchema,
 } from '../../packages/shared/src/types/entity';
 import {
-  InsightSchema,
-} from '../../packages/shared/src/types/insights';
+  ViolationSchema,
+} from '../../packages/shared/src/types/violations';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -74,16 +74,16 @@ describe('AnalyzeRepoSchema', () => {
   });
 });
 
-describe('GenerateInsightsSchema', () => {
+describe('GenerateViolationsSchema', () => {
   it('accepts { analysisId: valid-uuid }', () => {
-    const result = GenerateInsightsSchema.safeParse({
+    const result = GenerateViolationsSchema.safeParse({
       analysisId: '550e8400-e29b-41d4-a716-446655440000',
     });
     expect(result.success).toBe(true);
   });
 
   it('rejects { analysisId: "not-a-uuid" }', () => {
-    const result = GenerateInsightsSchema.safeParse({
+    const result = GenerateViolationsSchema.safeParse({
       analysisId: 'not-a-uuid',
     });
     expect(result.success).toBe(false);
@@ -289,12 +289,12 @@ describe('EntitySchema', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Insight Schema
+// Violation Schema
 // ---------------------------------------------------------------------------
 
-describe('InsightSchema', () => {
-  it('accepts valid insight', () => {
-    const result = InsightSchema.safeParse({
+describe('ViolationSchema', () => {
+  it('accepts valid violation', () => {
+    const result = ViolationSchema.safeParse({
       id: 'ins-1',
       type: 'architecture',
       title: 'Microservices detected',
@@ -305,8 +305,8 @@ describe('InsightSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts insight with optional fields', () => {
-    const result = InsightSchema.safeParse({
+  it('accepts violation with optional fields', () => {
+    const result = ViolationSchema.safeParse({
       id: 'ins-2',
       type: 'violation',
       title: 'Circular dependency',
@@ -320,7 +320,7 @@ describe('InsightSchema', () => {
   });
 
   it('rejects missing required fields', () => {
-    const result = InsightSchema.safeParse({
+    const result = ViolationSchema.safeParse({
       id: 'ins-3',
       type: 'architecture',
     });
@@ -328,7 +328,7 @@ describe('InsightSchema', () => {
   });
 
   it('rejects invalid type', () => {
-    const result = InsightSchema.safeParse({
+    const result = ViolationSchema.safeParse({
       id: 'ins-4',
       type: 'invalid-type',
       title: 'Test',
@@ -340,7 +340,7 @@ describe('InsightSchema', () => {
   });
 
   it('rejects invalid severity', () => {
-    const result = InsightSchema.safeParse({
+    const result = ViolationSchema.safeParse({
       id: 'ins-5',
       type: 'architecture',
       title: 'Test',

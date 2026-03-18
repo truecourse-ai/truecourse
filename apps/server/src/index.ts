@@ -20,10 +20,14 @@ import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { seedRules } from './services/rules.service.js';
+import { initTelemetry, shutdownTelemetry } from './services/llm/telemetry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
+  // 0. Initialize OTel telemetry (Langfuse)
+  initTelemetry();
+
   // 1. Start embedded PostgreSQL (no-op if DATABASE_URL is set)
   const databaseUrl = await startEmbeddedPostgres();
   console.log(`[Database] Connected: ${databaseUrl.replace(/\/\/.*@/, '//<credentials>@')}`);
@@ -121,6 +125,7 @@ async function main() {
   async function shutdown() {
     console.log('\n[Server] Shutting down...');
     stopAllWatchers();
+    await shutdownTelemetry();
     httpServer.closeAllConnections();
     httpServer.close();
     await closeDatabase();

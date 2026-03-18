@@ -16,11 +16,11 @@ export const AnalyzeRepoSchema = z.object({
 
 export type AnalyzeRepoInput = z.infer<typeof AnalyzeRepoSchema>
 
-export const GenerateInsightsSchema = z.object({
+export const GenerateViolationsSchema = z.object({
   analysisId: z.string().uuid().optional(),
 })
 
-export type GenerateInsightsInput = z.infer<typeof GenerateInsightsSchema>
+export type GenerateViolationsInput = z.infer<typeof GenerateViolationsSchema>
 
 export const ChatMessageSchema = z.object({
   message: z.string().min(1),

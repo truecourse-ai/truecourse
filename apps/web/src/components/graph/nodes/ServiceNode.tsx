@@ -20,7 +20,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: ServiceNodeData & { diffBadge?: DiffBadge } }) {
-  const { label, description, serviceInfo, insightCount, hasHighSeverity, onExplain, diffBadge } = data;
+  const { label, description, serviceInfo, violationCount, hasHighSeverity, onExplain, diffBadge } = data;
   const Icon = typeIcons[serviceInfo.type] || Package;
 
   const topConnections = useNodeConnections({ handleType: 'target', handleId: 'top' });
@@ -109,9 +109,9 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
           </div>
         )}
 
-        {insightCount > 0 && (
+        {violationCount > 0 && (
           <div className="mt-2 rounded-md bg-muted px-2 py-1 text-center text-[10px] text-muted-foreground">
-            {insightCount} insight{insightCount !== 1 ? 's' : ''}
+            {violationCount} violation{violationCount !== 1 ? 's' : ''}
           </div>
         )}
         <div className="mx-auto mt-2 w-2/3 border-t border-border" />

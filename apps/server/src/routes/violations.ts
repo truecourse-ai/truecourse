@@ -13,7 +13,7 @@ import {
   violations,
 } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
-import { generateInsights } from '../services/insight.service.js';
+import { generateViolations } from '../services/violation.service.js';
 import { emitViolationsReady } from '../socket/handlers.js';
 
 const router: Router = Router();
@@ -70,13 +70,8 @@ router.post(
         analysisServices.map((s) => [s.id, s.name])
       );
 
-      // Build database ID map
-      const dbIdMap = new Map(
-        analysisDatabases.map((d) => [d.name, d.id])
-      );
-
       // Generate violations via LLM
-      const generatedInsights = await generateInsights({
+      const generatedViolations = await generateViolations({
         architecture: analysis.architecture,
         services: analysisServices.map((s) => ({
           id: s.id,
@@ -104,29 +99,29 @@ router.post(
         })),
       });
 
-      const { violations: generatedInsightsList, serviceDescriptions } = generatedInsights;
+      const { violations: generatedViolationsList, serviceDescriptions } = generatedViolations;
 
       // Save violations to database
-      const savedInsights = [];
-      for (const insight of generatedInsightsList) {
+      const savedViolations = [];
+      for (const violation of generatedViolationsList) {
         const [saved] = await db
           .insert(violations)
           .values({
             id: uuidv4(),
             repoId: id,
             analysisId: analysis.id,
-            type: insight.type,
-            title: insight.title,
-            content: insight.content,
-            severity: insight.severity,
-            targetServiceId: insight.targetServiceId || null,
-            targetDatabaseId: insight.targetDatabaseId || null,
-            targetTable: insight.targetTable || null,
-            fixPrompt: insight.fixPrompt || null,
+            type: violation.type,
+            title: violation.title,
+            content: violation.content,
+            severity: violation.severity,
+            targetServiceId: violation.targetServiceId || null,
+            targetDatabaseId: violation.targetDatabaseId || null,
+            targetTable: violation.targetTable || null,
+            fixPrompt: violation.fixPrompt || null,
           })
           .returning();
 
-        savedInsights.push(saved);
+        savedViolations.push(saved);
       }
 
       // Save service descriptions
@@ -141,7 +136,7 @@ router.post(
 
       emitViolationsReady(id, analysis.id);
 
-      res.status(201).json(savedInsights);
+      res.status(201).json(savedViolations);
     } catch (error) {
       next(error);
     }
@@ -201,7 +196,7 @@ router.get(
         analysis = latestAnalysis[0];
       }
 
-      const analysisInsights = await db
+      const analysisViolations = await db
         .select({
           id: violations.id,
           type: violations.type,
@@ -228,7 +223,7 @@ router.get(
         .where(eq(violations.analysisId, analysis.id))
         .orderBy(desc(violations.createdAt));
 
-      res.json(analysisInsights);
+      res.json(analysisViolations);
     } catch (error) {
       next(error);
     }

@@ -17,11 +17,11 @@ import {
 import dagre from 'dagre';
 import { Key, Link, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { ZoomControls } from '@/components/graph/controls/ZoomControls';
-import type { DatabaseSchemaResponse, InsightResponse } from '@/lib/api';
+import type { DatabaseSchemaResponse, ViolationResponse } from '@/lib/api';
 
 // ── Table node ──────────────────────────────────────────────────────────────
 
-type TableInsight = {
+type TableViolation = {
   title: string;
   severity: string;
 };
@@ -32,17 +32,17 @@ type TableNodeData = {
   primaryKey?: string;
   hasSourceEdge?: boolean;
   hasTargetEdge?: boolean;
-  insights?: TableInsight[];
+  violations?: TableViolation[];
 };
 
 function TableNode({ data, selected }: { data: TableNodeData; selected?: boolean }) {
-  const insightCount = data.insights?.length ?? 0;
-  const hasHighSeverity = data.insights?.some((i) => i.severity === 'high' || i.severity === 'critical');
+  const violationCount = data.violations?.length ?? 0;
+  const hasHighSeverity = data.violations?.some((i) => i.severity === 'high' || i.severity === 'critical');
 
   return (
     <div
       className={`relative rounded-lg border bg-card shadow-md min-w-[180px] max-w-[260px] ${
-        selected ? 'border-primary ring-1 ring-primary/30' : insightCount > 0 ? 'border-amber-500/50' : 'border-border'
+        selected ? 'border-primary ring-1 ring-primary/30' : violationCount > 0 ? 'border-amber-500/50' : 'border-border'
       }`}
     >
       {data.hasTargetEdge && <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-primary !border-background" />}
@@ -51,16 +51,16 @@ function TableNode({ data, selected }: { data: TableNodeData; selected?: boolean
       {/* Header */}
       <div className="flex items-center gap-1.5 border-b border-border bg-amber-500/10 px-3 py-1.5 rounded-t-lg">
         <span className="text-xs font-semibold text-foreground flex-1">{data.label}</span>
-        {insightCount > 0 && (
+        {violationCount > 0 && (
           <div className="group relative flex items-center gap-1">
             <AlertTriangle className={`h-3 w-3 ${hasHighSeverity ? 'text-red-500' : 'text-amber-500'}`} />
             <span className={`text-[9px] font-medium ${hasHighSeverity ? 'text-red-500' : 'text-amber-500'}`}>
-              {insightCount}
+              {violationCount}
             </span>
             {/* Tooltip */}
             <div className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 hidden group-hover:block">
               <div className="rounded-md border border-border bg-card px-2.5 py-2 shadow-lg w-[260px]">
-                {data.insights!.map((ins, i) => (
+                {data.violations!.map((ins, i) => (
                   <div key={i} className="text-[10px] text-muted-foreground leading-tight py-0.5">
                     <span className={`font-medium ${
                       ins.severity === 'critical' || ins.severity === 'high' ? 'text-red-500' :
@@ -248,14 +248,14 @@ function layoutNodes(
 
 type ERDiagramProps = {
   schema: DatabaseSchemaResponse;
-  insights?: InsightResponse[];
+  violations?: ViolationResponse[];
   isFullscreen?: boolean;
 };
 
-function DatabaseInsightsBanner({ insights, isFullscreen }: { insights: TableInsight[]; isFullscreen?: boolean }) {
+function DatabaseViolationsBanner({ violations, isFullscreen }: { violations: TableViolation[]; isFullscreen?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const { zoom } = useViewport();
-  const hasHighSeverity = insights.some((i) => i.severity === 'high' || i.severity === 'critical');
+  const hasHighSeverity = violations.some((i) => i.severity === 'high' || i.severity === 'critical');
 
   return (
     <div
@@ -269,22 +269,22 @@ function DatabaseInsightsBanner({ insights, isFullscreen }: { insights: TableIns
             ? 'border-red-500/30 bg-red-500/10 text-red-500'
             : 'border-amber-500/30 bg-amber-500/10 text-amber-500'
         }`}
-        title={!isFullscreen ? `${insights.length} database issue${insights.length !== 1 ? 's' : ''}` : undefined}
+        title={!isFullscreen ? `${violations.length} database issue${violations.length !== 1 ? 's' : ''}` : undefined}
       >
         <AlertTriangle className="h-3 w-3" />
         {isFullscreen && (
           <>
-            {insights.length} database issue{insights.length !== 1 ? 's' : ''}
+            {violations.length} database issue{violations.length !== 1 ? 's' : ''}
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </>
         )}
         {!isFullscreen && (
-          <span className="text-[9px]">{insights.length}</span>
+          <span className="text-[9px]">{violations.length}</span>
         )}
       </button>
       {expanded && isFullscreen && (
         <div className="mt-1 rounded-md border border-border bg-card px-2.5 py-2 shadow-lg w-[280px]">
-          {insights.map((ins, i) => (
+          {violations.map((ins, i) => (
             <div key={i} className="text-[10px] text-muted-foreground leading-tight py-0.5">
               <span className={`font-medium ${
                 ins.severity === 'critical' || ins.severity === 'high' ? 'text-red-500' :
@@ -301,18 +301,18 @@ function DatabaseInsightsBanner({ insights, isFullscreen }: { insights: TableIns
   );
 }
 
-function ERDiagramInner({ schema, insights = [], isFullscreen }: ERDiagramProps) {
+function ERDiagramInner({ schema, violations = [], isFullscreen }: ERDiagramProps) {
   const { initialNodes, edges } = useMemo(() => {
     const sourceTables = new Set(schema.relations.map((r) => r.sourceTable));
     const targetTables = new Set(schema.relations.map((r) => r.targetTable));
 
-    // Group insights by table name
-    const insightsByTable = new Map<string, TableInsight[]>();
-    for (const ins of insights) {
+    // Group violations by table name
+    const violationsByTable = new Map<string, TableViolation[]>();
+    for (const ins of violations) {
       if (ins.targetTable) {
-        const existing = insightsByTable.get(ins.targetTable) || [];
+        const existing = violationsByTable.get(ins.targetTable) || [];
         existing.push({ title: ins.title, severity: ins.severity });
-        insightsByTable.set(ins.targetTable, existing);
+        violationsByTable.set(ins.targetTable, existing);
       }
     }
 
@@ -325,7 +325,7 @@ function ERDiagramInner({ schema, insights = [], isFullscreen }: ERDiagramProps)
         primaryKey: table.primaryKey,
         hasSourceEdge: sourceTables.has(table.name),
         hasTargetEdge: targetTables.has(table.name),
-        insights: insightsByTable.get(table.name),
+        violations: violationsByTable.get(table.name),
       } satisfies TableNodeData,
       position: { x: 0, y: 0 },
       sourcePosition: Position.Right,
@@ -354,14 +354,14 @@ function ERDiagramInner({ schema, insights = [], isFullscreen }: ERDiagramProps)
 
     const laidOut = layoutNodes(rawNodes, rawEdges, heights);
     return { initialNodes: laidOut, edges: rawEdges };
-  }, [schema, insights]);
+  }, [schema, violations]);
 
-  // Database-level insights (no specific table)
-  const dbLevelInsights = useMemo(() =>
-    insights
+  // Database-level violations (no specific table)
+  const dbLevelViolations = useMemo(() =>
+    violations
       .filter((ins) => ins.targetDatabaseId && !ins.targetTable)
       .map((ins) => ({ title: ins.title, severity: ins.severity })),
-    [insights],
+    [violations],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -376,8 +376,8 @@ function ERDiagramInner({ schema, insights = [], isFullscreen }: ERDiagramProps)
 
   return (
     <div className="h-full w-full relative">
-      {dbLevelInsights.length > 0 && (
-        <DatabaseInsightsBanner insights={dbLevelInsights} isFullscreen={isFullscreen} />
+      {dbLevelViolations.length > 0 && (
+        <DatabaseViolationsBanner violations={dbLevelViolations} isFullscreen={isFullscreen} />
       )}
       <ReactFlow
         nodes={nodes}
@@ -401,10 +401,10 @@ function ERDiagramInner({ schema, insights = [], isFullscreen }: ERDiagramProps)
   );
 }
 
-export function ERDiagram({ schema, insights, isFullscreen }: ERDiagramProps) {
+export function ERDiagram({ schema, violations, isFullscreen }: ERDiagramProps) {
   return (
     <ReactFlowProvider>
-      <ERDiagramInner schema={schema} insights={insights} isFullscreen={isFullscreen} />
+      <ERDiagramInner schema={schema} violations={violations} isFullscreen={isFullscreen} />
     </ReactFlowProvider>
   );
 }

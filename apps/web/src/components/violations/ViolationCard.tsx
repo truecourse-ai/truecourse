@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import type { InsightResponse } from '@/lib/api';
+import type { ViolationResponse } from '@/lib/api';
 
-type InsightCardProps = {
-  insight: InsightResponse;
+type ViolationCardProps = {
+  violation: ViolationResponse;
   onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
   isResolved?: boolean;
   diffStatus?: 'new' | 'resolved';
@@ -29,28 +29,28 @@ const severityBadgeColors: Record<string, string> = {
   critical: 'bg-red-600/10 text-red-700 dark:text-red-500',
 };
 
-export function InsightCard({ insight, onLocateNode, isResolved, diffStatus }: InsightCardProps) {
+export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus }: ViolationCardProps) {
   const [copied, setCopied] = useState(false);
   const [showFix, setShowFix] = useState(false);
 
   const handleCopyFix = async () => {
-    if (!insight.fixPrompt) return;
-    await navigator.clipboard.writeText(insight.fixPrompt);
+    if (!violation.fixPrompt) return;
+    await navigator.clipboard.writeText(violation.fixPrompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   // Most specific target: method > module > database > service
-  const locateTargetId = insight.targetMethodId || insight.targetModuleId || insight.targetDatabaseId || insight.targetServiceId;
-  const locateTargetName = insight.targetMethodName || insight.targetModuleName || insight.targetDatabaseName || insight.targetServiceName;
-  const locateDepth = insight.targetMethodId ? 'methods'
-    : insight.targetModuleId ? 'modules'
+  const locateTargetId = violation.targetMethodId || violation.targetModuleId || violation.targetDatabaseId || violation.targetServiceId;
+  const locateTargetName = violation.targetMethodName || violation.targetModuleName || violation.targetDatabaseName || violation.targetServiceName;
+  const locateDepth = violation.targetMethodId ? 'methods'
+    : violation.targetModuleId ? 'modules'
     : undefined;
 
   return (
     <Card
       className={`border-l-4 rounded-sm p-3 ${
-        severityColors[insight.severity] || 'border-l-gray-500'
+        severityColors[violation.severity] || 'border-l-gray-500'
       }`}
     >
       <CardContent className="p-0">
@@ -66,17 +66,17 @@ export function InsightCard({ insight, onLocateNode, isResolved, diffStatus }: I
           )}
           <Badge
             className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase ${
-              severityBadgeColors[insight.severity] || ''
+              severityBadgeColors[violation.severity] || ''
             }`}
           >
-            {insight.type}
+            {violation.type}
           </Badge>
           <Badge
             className={`rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${
-              severityBadgeColors[insight.severity] || ''
+              severityBadgeColors[violation.severity] || ''
             }`}
           >
-            {insight.severity}
+            {violation.severity}
           </Badge>
           {onLocateNode && locateTargetId && (
             <Button
@@ -93,38 +93,38 @@ export function InsightCard({ insight, onLocateNode, isResolved, diffStatus }: I
         </div>
 
         <h4 className={`text-sm font-bold ${isResolved ? 'line-through opacity-60 text-muted-foreground' : 'text-foreground'}`}>
-          {insight.title}
+          {violation.title}
         </h4>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          {insight.content}
+          {violation.content}
         </p>
 
-        {(insight.targetServiceName || insight.targetDatabaseName) && (
+        {(violation.targetServiceName || violation.targetDatabaseName) && (
           <p className="mt-2 text-[10px] text-muted-foreground">
             Target:{' '}
             <span className="font-medium text-foreground">
-              {insight.targetServiceName || insight.targetDatabaseName}
+              {violation.targetServiceName || violation.targetDatabaseName}
             </span>
-            {insight.targetModuleName && (
+            {violation.targetModuleName && (
               <>
                 {' / '}
                 <span className="font-medium text-foreground">
-                  {insight.targetModuleName}
+                  {violation.targetModuleName}
                 </span>
               </>
             )}
-            {insight.targetMethodName && (
+            {violation.targetMethodName && (
               <>
                 {' / '}
                 <span className="font-medium text-foreground">
-                  {insight.targetMethodName}
+                  {violation.targetMethodName}
                 </span>
               </>
             )}
           </p>
         )}
 
-        {insight.fixPrompt && !isResolved && (
+        {violation.fixPrompt && !isResolved && (
           <div className="mt-2">
             <div className="flex items-center gap-1.5">
               <Button
@@ -157,7 +157,7 @@ export function InsightCard({ insight, onLocateNode, isResolved, diffStatus }: I
             </div>
             {showFix && (
               <pre className="mt-1.5 rounded-md bg-muted px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
-                {insight.fixPrompt}
+                {violation.fixPrompt}
               </pre>
             )}
           </div>

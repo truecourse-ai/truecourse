@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { connectSocket, disconnectSocket, joinRepoRoom, leaveRepoRoom, getSocket } from '@/lib/socket';
+import { connectSocket, disconnectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 
 export type AnalysisProgress = {
   step: string;

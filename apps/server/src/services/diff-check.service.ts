@@ -1,9 +1,9 @@
 import path from 'path';
 import { simpleGit } from 'simple-git';
 import { runAnalysis, runDeterministicModuleChecks, type AnalysisProgressCallback } from './analyzer.service.js';
-import { createLLMProvider, type DiffInsightItem } from './llm/provider.js';
+import { createLLMProvider, type DiffViolationItem } from './llm/provider.js';
 import { getEnabledRules } from './rules.service.js';
-export interface BaselineInsight {
+export interface BaselineViolation {
   id: string;
   type: string;
   title: string;
@@ -22,15 +22,15 @@ export interface BaselineInsight {
 export interface DiffCheckInput {
   repoPath: string;
   branch: string | undefined;
-  baselineInsights: BaselineInsight[];
+  baselineViolations: BaselineViolation[];
   baselineLayerViolations: string[];
   onProgress: AnalysisProgressCallback;
 }
 
 export interface DiffCheckOutput {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
-  resolvedInsightIds: string[];
-  newInsights: DiffInsightItem[];
+  resolvedViolationIds: string[];
+  newViolations: DiffViolationItem[];
   affectedNodeIds: {
     services: string[];
     layers: string[];
@@ -44,7 +44,7 @@ export interface DiffCheckOutput {
 }
 
 export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutput> {
-  const { repoPath, branch, baselineInsights, baselineLayerViolations, onProgress } = input;
+  const { repoPath, branch, baselineViolations, baselineLayerViolations, onProgress } = input;
 
   // 1. Full analysis on dirty state (no stash)
   onProgress({ step: 'analyzing', percent: 10, detail: 'Analyzing dirty working tree...' });
@@ -66,8 +66,8 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
   if (changedFiles.length === 0) {
     return {
       changedFiles: [],
-      resolvedInsightIds: [],
-      newInsights: [],
+      resolvedViolationIds: [],
+      newViolations: [],
       affectedNodeIds: { services: [], layers: [], modules: [], methods: [] },
       summary: { newCount: 0, resolvedCount: 0 },
     };
@@ -82,10 +82,10 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
 
   const moduleViolations = runDeterministicModuleChecks(result, enabledDeterministic);
 
-  // 4. Partition existing insights by category
-  const archInsights = baselineInsights.filter((i) => i.type === 'service');
-  const dbInsights = baselineInsights.filter((i) => i.type === 'database');
-  const moduleInsights = baselineInsights.filter((i) => i.type === 'module' || i.type === 'function');
+  // 4. Partition existing violations by category
+  const serviceBaseline = baselineViolations.filter((i) => i.type === 'service');
+  const dbBaseline = baselineViolations.filter((i) => i.type === 'database');
+  const moduleBaseline = baselineViolations.filter((i) => i.type === 'module' || i.type === 'function');
 
   // 5. Build LLM contexts
   const archRules = enabledLlmRules.filter((r) => r.category === 'service');
@@ -117,8 +117,8 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
 
   onProgress({ step: 'analyzing', percent: 85, detail: 'Running diff checks...' });
 
-  const diffResult = await provider.generateDiffInsights({
-    architecture: {
+  const diffResult = await provider.generateDiffViolations({
+    service: {
       architecture: result.architecture,
       services: serviceDtos,
       dependencies: depDtos,
@@ -126,7 +126,7 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
       baselineViolations: baselineLayerViolations,
       llmRules: archRules,
       changedFiles: changedFilePaths,
-      existingViolations: archInsights.map((i) => ({
+      existingViolations: serviceBaseline.map((i) => ({
         id: i.id, type: i.type, title: i.title, content: i.content, severity: i.severity,
       })),
     },
@@ -152,12 +152,11 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
       })),
       llmRules: dbRules,
       changedFiles: changedFilePaths,
-      existingViolations: dbInsights.map((i) => ({
+      existingViolations: dbBaseline.map((i) => ({
         id: i.id, type: i.type, title: i.title, content: i.content, severity: i.severity,
       })),
     } : undefined,
     module: result.modules && result.modules.length > 0 ? {
-      services: serviceDtos.map((s) => ({ id: s.id, name: s.name })),
       modules: result.modules.map((m) => ({
         id: `${m.serviceName}::${m.name}`,
         name: m.name,
@@ -187,6 +186,13 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
         targetModule: d.targetModule,
         importedNames: d.importedNames,
       })),
+      methodDependencies: (result.methodLevelDependencies || []).map((d) => ({
+        callerMethod: d.callerMethod,
+        callerModule: d.callerModule,
+        calleeMethod: d.calleeMethod,
+        calleeModule: d.calleeModule,
+        callCount: d.callCount,
+      })),
       llmRules: moduleRules,
       changedFiles: changedFilePaths,
       violations: moduleViolations.map((v) => ({
@@ -198,7 +204,7 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
         moduleName: v.moduleName,
         methodName: v.methodName,
       })),
-      existingViolations: moduleInsights.map((i) => ({
+      existingViolations: moduleBaseline.map((i) => ({
         id: i.id, type: i.type, title: i.title, content: i.content, severity: i.severity,
       })),
     } : undefined,
@@ -207,8 +213,8 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
   // 6. Post-process LLM results: deduplicate new violations and filter false resolves
 
   // 6a. Remove "new" violations that duplicate existing ones (title match)
-  const existingTitles = new Set(baselineInsights.map((i) => i.title.toLowerCase().trim()));
-  const dedupedNewInsights = diffResult.newInsights.filter((n) => {
+  const existingTitles = new Set(baselineViolations.map((i) => i.title.toLowerCase().trim()));
+  const dedupedNewViolations = diffResult.newViolations.filter((n) => {
     return !existingTitles.has(n.title.toLowerCase().trim());
   });
 
@@ -224,12 +230,12 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
     }
   }
 
-  const validResolvedIds = diffResult.resolvedInsightIds.filter((id) => {
-    const insight = baselineInsights.find((i) => i.id === id);
-    if (!insight) return false;
-    // If the insight has a target service, only allow resolve if that service was affected
-    if (insight.targetServiceName) {
-      return changedServices.has(insight.targetServiceName);
+  const validResolvedIds = diffResult.resolvedViolationIds.filter((id) => {
+    const violation = baselineViolations.find((v) => v.id === id);
+    if (!violation) return false;
+    // If the violation has a target service, only allow resolve if that service was affected
+    if (violation.targetServiceName) {
+      return changedServices.has(violation.targetServiceName);
     }
     // No target service — allow it (can't scope it)
     return true;
@@ -237,34 +243,34 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
 
   onProgress({ step: 'analyzing', percent: 95, detail: 'Computing affected nodes...' });
 
-  // 7. Compute affected node IDs from changed files + new/resolved insights
+  // 7. Compute affected node IDs from changed files + new/resolved violations
   const affectedServices = new Set(changedServices);
   const affectedLayers = new Set<string>();
   const affectedModules = new Set<string>();
   const affectedMethods = new Set<string>();
 
-  // Map new insights to affected nodes
-  for (const insight of dedupedNewInsights) {
-    if (insight.targetServiceName) affectedServices.add(insight.targetServiceName);
-    if (insight.targetModuleName && insight.targetServiceName) {
-      affectedModules.add(`${insight.targetServiceName}::${insight.targetModuleName}`);
+  // Map new violations to affected nodes
+  for (const v of dedupedNewViolations) {
+    if (v.targetServiceName) affectedServices.add(v.targetServiceName);
+    if (v.targetModuleName && v.targetServiceName) {
+      affectedModules.add(`${v.targetServiceName}::${v.targetModuleName}`);
     }
-    if (insight.targetMethodName && insight.targetModuleName && insight.targetServiceName) {
-      affectedMethods.add(`${insight.targetServiceName}::${insight.targetModuleName}::${insight.targetMethodName}`);
+    if (v.targetMethodName && v.targetModuleName && v.targetServiceName) {
+      affectedMethods.add(`${v.targetServiceName}::${v.targetModuleName}::${v.targetMethodName}`);
     }
   }
 
-  // Map resolved insights to affected nodes
+  // Map resolved violations to affected nodes
   const resolvedSet = new Set(validResolvedIds);
-  for (const insight of baselineInsights) {
-    if (!resolvedSet.has(insight.id)) continue;
-    if (insight.targetServiceName) affectedServices.add(insight.targetServiceName);
+  for (const v of baselineViolations) {
+    if (!resolvedSet.has(v.id)) continue;
+    if (v.targetServiceName) affectedServices.add(v.targetServiceName);
   }
 
   return {
     changedFiles,
-    resolvedInsightIds: validResolvedIds,
-    newInsights: dedupedNewInsights,
+    resolvedViolationIds: validResolvedIds,
+    newViolations: dedupedNewViolations,
     affectedNodeIds: {
       services: [...affectedServices],
       layers: [...affectedLayers],
@@ -272,7 +278,7 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
       methods: [...affectedMethods],
     },
     summary: {
-      newCount: dedupedNewInsights.length,
+      newCount: dedupedNewViolations.length,
       resolvedCount: validResolvedIds.length,
     },
   };

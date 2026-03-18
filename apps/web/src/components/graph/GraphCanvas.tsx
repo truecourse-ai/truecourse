@@ -278,7 +278,7 @@ function GraphCanvasInner({
     return () => cancelAnimationFrame(raf);
   }, [collapsedIds, fitView, animDuration, isBulkAction]);
 
-  // Focus on a specific node when requested from insights panel
+  // Focus on a specific node when requested from violations panel
   useEffect(() => {
     if (!focusNodeId) return;
 

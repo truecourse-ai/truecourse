@@ -1,10 +1,10 @@
 import { Langfuse } from 'langfuse';
 import { config } from '../../config/index.js';
 import type {
-  ArchitectureContext,
-  ServiceInsightContext,
-  DatabaseInsightContext,
-  ModuleInsightContext,
+  ServiceSummaryContext,
+  ServiceViolationContext,
+  DatabaseViolationContext,
+  ModuleViolationContext,
   DiffServiceContext,
   DiffDatabaseContext,
   DiffModuleContext,
@@ -32,12 +32,6 @@ IMPORTANT: When referencing a service, use the exact id from the Services list a
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
-Focus on:
-1. Architecture anti-patterns
-2. Dependency issues (circular dependencies, tight coupling)
-3. Layer violations
-4. Potential risks or code smells
-
 For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (service names, file paths) in fixPrompts — never include internal ids.
 
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
@@ -57,13 +51,6 @@ IMPORTANT: When referencing a database, use the exact id from the Databases list
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
-Focus on:
-1. Schema design issues (missing foreign keys, missing indexes)
-2. Naming convention inconsistencies
-3. Missing audit columns (created_at, updated_at)
-4. Overly nullable schemas
-5. Referential integrity concerns
-
 For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
 
 Return your findings as structured data using the provided schema.`,
@@ -81,19 +68,15 @@ Methods:
 
 Module Dependencies:
 {{moduleDependencyList}}
+
+Method Dependencies:
+{{methodDependencyList}}
 {{violations}}
 {{llmRules}}
 
 IMPORTANT: When referencing a module or method, use the exact id from the Modules or Methods list above. Do not fabricate or modify ids. Set targetServiceId, targetModuleId, and targetMethodId to link violations to the correct entities.
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
-
-Focus on:
-1. Circular module dependencies
-2. Deep inheritance chains
-3. Excessive fan-out or fan-in
-4. Mixed abstraction levels in methods
-5. Code organization issues
 
 If violations are listed above, generate a violation entry for each with a concrete fixPrompt that an AI coding assistant could use to fix the issue. The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt. Example: "Split UserService into UserQueryService and UserCommandService by separating read and write methods".
 
@@ -173,6 +156,9 @@ Methods:
 
 Module Dependencies:
 {{moduleDependencyList}}
+
+Method Dependencies:
+{{methodDependencyList}}
 {{violations}}
 {{llmRules}}
 
@@ -198,7 +184,7 @@ Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  'architecture-summary': {
+  'service-summary': {
     prompt: `Provide a brief summary of the following codebase architecture. Be concise but informative.
 
 Architecture: {{architecture}}
@@ -233,8 +219,8 @@ export type PromptName = keyof typeof PROMPT_DEFINITIONS;
 // Template variable helpers
 // ---------------------------------------------------------------------------
 
-/** Build template vars for architecture-summary prompt (unchanged). */
-export function buildTemplateVars(context: ArchitectureContext): Record<string, string> {
+/** Build template vars for service-summary prompt. */
+export function buildTemplateVars(context: ServiceSummaryContext): Record<string, string> {
   const serviceList = context.services
     .map(
       (s) =>
@@ -288,8 +274,8 @@ export function buildTemplateVars(context: ArchitectureContext): Record<string, 
   return { architecture: context.architecture, serviceList, depList, violations, databases, llmRules };
 }
 
-/** Build template vars for violations-architecture prompt. */
-export function buildArchitectureTemplateVars(context: ArchitectureInsightContext): Record<string, string> {
+/** Build template vars for violations-service prompt. */
+export function buildServiceTemplateVars(context: ServiceViolationContext): Record<string, string> {
   const serviceList = context.services
     .map(
       (s) =>
@@ -318,7 +304,7 @@ export function buildArchitectureTemplateVars(context: ArchitectureInsightContex
 }
 
 /** Build template vars for violations-database prompt. */
-export function buildDatabaseTemplateVars(context: DatabaseInsightContext): Record<string, string> {
+export function buildDatabaseTemplateVars(context: DatabaseViolationContext): Record<string, string> {
   const databaseList = context.databases.map((d) => {
     let dbStr = `- ${d.name} [id: ${d.id}] (${d.type}, driver: ${d.driver}, tables: ${d.tableCount}, used by: ${d.connectedServices.join(', ') || 'none'})`;
     if (d.tables?.length) {
@@ -353,7 +339,7 @@ export function buildDatabaseTemplateVars(context: DatabaseInsightContext): Reco
 }
 
 /** Build template vars for violations-module prompt. */
-export function buildModuleTemplateVars(context: ModuleInsightContext): Record<string, string> {
+export function buildModuleTemplateVars(context: ModuleViolationContext): Record<string, string> {
   const moduleList = context.modules
     .map(
       (m) =>
@@ -374,6 +360,12 @@ export function buildModuleTemplateVars(context: ModuleInsightContext): Record<s
     )
     .join('\n') || '(none)';
 
+  const methodDependencyList = context.methodDependencies
+    .map(
+      (d) => `- ${d.callerModule}.${d.callerMethod} -> ${d.calleeModule}.${d.calleeMethod} (calls: ${d.callCount})`
+    )
+    .join('\n') || '(none)';
+
   const violations = context.violations?.length
     ? `\nDeterministic violations detected (generate a violation with fixPrompt for each, and link to the correct service/module/method using their ids):\n${context.violations.map(
         (v) => `- [${v.severity.toUpperCase()}] ${v.title}: ${v.description} (rule: ${v.ruleKey}, service: ${v.serviceName}${v.serviceId ? ` [serviceId: ${v.serviceId}]` : ''}${v.moduleName ? `, module: ${v.moduleName}` : ''}${v.moduleId ? ` [moduleId: ${v.moduleId}]` : ''}${v.methodName ? `, method: ${v.methodName}` : ''}${v.methodId ? ` [methodId: ${v.methodId}]` : ''})`
@@ -386,7 +378,7 @@ export function buildModuleTemplateVars(context: ModuleInsightContext): Record<s
       ).join('\n')}`
     : '';
 
-  return { moduleList, methodList, moduleDependencyList, violations, llmRules };
+  return { moduleList, methodList, moduleDependencyList, methodDependencyList, violations, llmRules };
 }
 
 // ---------------------------------------------------------------------------
@@ -405,9 +397,9 @@ function formatChangedFiles(files: string[]): string {
   return files.map((f) => `- ${f}`).join('\n');
 }
 
-/** Build template vars for violations-diff-architecture prompt. */
-export function buildDiffArchitectureTemplateVars(context: DiffArchitectureContext): Record<string, string> {
-  const base = buildArchitectureTemplateVars(context);
+/** Build template vars for violations-diff-service prompt. */
+export function buildDiffServiceTemplateVars(context: DiffServiceContext): Record<string, string> {
+  const base = buildServiceTemplateVars(context);
 
   const baselineViolations = context.baselineViolations?.length
     ? `\nBaseline deterministic violations (from the previous analysis — if an item here is NOT in "Current deterministic violations" above, the issue has been fixed):\n${context.baselineViolations.map((v) => `- ${v}`).join('\n')}`
@@ -461,13 +453,20 @@ function getLangfuse(): Langfuse | null {
   return langfuseInstance;
 }
 
+export interface PromptResult {
+  text: string;
+  /** Langfuse prompt JSON string for telemetry linkage (null when using local fallback). */
+  langfusePrompt: string | null;
+}
+
 /**
  * Get a compiled prompt string from Langfuse (falls back to local definition).
+ * Returns the compiled text and optional Langfuse prompt metadata for trace linkage.
  */
 export async function getPrompt(
   name: PromptName,
   variables?: Record<string, string>
-): Promise<string> {
+): Promise<PromptResult> {
   const langfuse = getLangfuse();
   const localDef = PROMPT_DEFINITIONS[name];
 
@@ -477,7 +476,7 @@ export async function getPrompt(
         type: 'text',
       });
       const compiled = prompt.compile(variables || {});
-      return compiled;
+      return { text: compiled, langfusePrompt: prompt.toJSON() };
     } catch {
       // Fallback to local definition
     }
@@ -490,5 +489,5 @@ export async function getPrompt(
       text = text.replaceAll(`{{${key}}}`, value);
     }
   }
-  return text;
+  return { text, langfusePrompt: null };
 }

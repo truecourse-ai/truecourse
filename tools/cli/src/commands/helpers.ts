@@ -172,8 +172,8 @@ export function renderViolations(violations: Violation[]): void {
 
 export type DiffResult = {
   changedFiles: Array<{ path: string; status: "new" | "modified" | "deleted" }>;
-  newInsights: Array<Violation & { fixPrompt?: string | null }>;
-  resolvedInsights: Violation[];
+  newViolations: Array<Violation & { fixPrompt?: string | null }>;
+  resolvedViolations: Violation[];
   summary: { newCount: number; resolvedCount: number };
   isStale?: boolean;
 };
@@ -198,10 +198,10 @@ export function renderDiffResults(result: DiffResult): void {
   }
 
   // New issues
-  if (result.newInsights.length > 0) {
-    console.log(`  NEW ISSUES (${result.newInsights.length})`);
+  if (result.newViolations.length > 0) {
+    console.log(`  NEW ISSUES (${result.newViolations.length})`);
     console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-    for (const v of result.newInsights) {
+    for (const v of result.newViolations) {
       const icon = severityIcon(v.severity);
       const color = severityColor(v.severity);
       const label = v.severity.toUpperCase();
@@ -226,10 +226,10 @@ export function renderDiffResults(result: DiffResult): void {
   }
 
   // Resolved
-  if (result.resolvedInsights.length > 0) {
-    console.log(`  RESOLVED (${result.resolvedInsights.length})`);
+  if (result.resolvedViolations.length > 0) {
+    console.log(`  RESOLVED (${result.resolvedViolations.length})`);
     console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
-    for (const v of result.resolvedInsights) {
+    for (const v of result.resolvedViolations) {
       const target = buildTargetPath(v);
       const color = severityColor(v.severity);
       const label = v.severity.toUpperCase();

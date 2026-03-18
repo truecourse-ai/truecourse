@@ -13,7 +13,7 @@ export type ServiceNodeData = {
   label: string;
   description?: string;
   serviceInfo: ServiceNodeInfo;
-  insightCount: number;
+  violationCount: number;
   hasHighSeverity: boolean;
   onExplain?: (nodeId: string) => void;
 };
