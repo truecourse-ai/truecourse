@@ -10,6 +10,7 @@ type LeftSidebarProps = {
   children: React.ReactNode;
   defaultWidth?: number;
   minWidth?: number;
+  badgeCounts?: Partial<Record<LeftTab, number>>;
 };
 
 const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
@@ -24,6 +25,7 @@ export function LeftSidebar({
   children,
   defaultWidth = 350,
   minWidth = 260,
+  badgeCounts,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
@@ -86,6 +88,11 @@ export function LeftSidebar({
                 <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-primary" />
               )}
               <Icon className="h-5 w-5" />
+              {badgeCounts?.[tab.id] != null && badgeCounts[tab.id]! > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+                  {badgeCounts[tab.id]}
+                </span>
+              )}
             </button>
           );
         })}
@@ -98,10 +105,15 @@ export function LeftSidebar({
           style={{ width }}
         >
           {/* Panel header */}
-          <div className="flex h-10 items-center border-b border-border px-3">
+          <div className="flex h-10 items-center gap-2 border-b border-border px-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : 'Files'}
             </span>
+            {activeTab && badgeCounts?.[activeTab] != null && badgeCounts[activeTab]! > 0 && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {badgeCounts[activeTab]}
+              </span>
+            )}
           </div>
 
           {/* Panel content */}

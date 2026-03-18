@@ -8,10 +8,10 @@ import { config } from '../../config/index.js';
 import {
   getPrompt,
   buildTemplateVars,
-  buildArchitectureTemplateVars,
+  buildServiceTemplateVars,
   buildDatabaseTemplateVars,
   buildModuleTemplateVars,
-  buildDiffArchitectureTemplateVars,
+  buildDiffServiceTemplateVars,
   buildDiffDatabaseTemplateVars,
   buildDiffModuleTemplateVars,
 } from './prompts.js';
@@ -62,7 +62,7 @@ export interface ArchitectureContext {
 // Focused insight context types (one per LLM call)
 // ---------------------------------------------------------------------------
 
-export interface ArchitectureInsightContext {
+export interface ServiceInsightContext {
   architecture: string;
   services: {
     id: string;
@@ -158,16 +158,20 @@ interface ExistingViolation {
   severity: string;
 }
 
-export interface DiffArchitectureContext extends ArchitectureInsightContext {
+export interface DiffServiceContext extends ServiceInsightContext {
   existingViolations: ExistingViolation[];
+  changedFiles: string[];
+  baselineViolations?: string[];
 }
 
 export interface DiffDatabaseContext extends DatabaseInsightContext {
   existingViolations: ExistingViolation[];
+  changedFiles: string[];
 }
 
 export interface DiffModuleContext extends ModuleInsightContext {
   existingViolations: ExistingViolation[];
+  changedFiles: string[];
 }
 
 export interface DiffInsightItem {
@@ -205,7 +209,7 @@ export interface InsightsResult {
   serviceDescriptions: ServiceDescription[];
 }
 
-export interface ArchitectureInsightsResult {
+export interface ServiceInsightsResult {
   violations: Insight[];
   serviceDescriptions: ServiceDescription[];
 }
@@ -219,11 +223,11 @@ export interface ModuleInsightsResult {
 }
 
 export interface LLMProvider {
-  generateArchitectureInsights(context: ArchitectureInsightContext): Promise<ArchitectureInsightsResult>;
+  generateServiceInsights(context: ServiceInsightContext): Promise<ServiceInsightsResult>;
   generateDatabaseInsights(context: DatabaseInsightContext): Promise<DatabaseInsightsResult>;
   generateModuleInsights(context: ModuleInsightContext): Promise<ModuleInsightsResult>;
   generateDiffInsights(contexts: {
-    architecture?: DiffArchitectureContext;
+    service?: DiffServiceContext;
     database?: DiffDatabaseContext;
     module?: DiffModuleContext;
   }): Promise<DiffInsightsResult>;
@@ -307,7 +311,7 @@ const MODEL_CONFIG: Record<string, { provider: () => LanguageModel }> = {
   openai: {
     provider: () => {
       const openai = createOpenAI({ apiKey: config.openaiApiKey });
-      return openai('gpt-5.2');
+      return openai('gpt-5.3-codex');
     },
   },
   anthropic: {
@@ -331,15 +335,18 @@ function getModel(): LanguageModel {
 // ---------------------------------------------------------------------------
 
 class AISDKProvider implements LLMProvider {
-  async generateArchitectureInsights(context: ArchitectureInsightContext): Promise<ArchitectureInsightsResult> {
-    const prompt = await getPrompt('violations-architecture', buildArchitectureTemplateVars(context));
+  async generateServiceInsights(context: ServiceInsightContext): Promise<ServiceInsightsResult> {
+    const prompt = await getPrompt('violations-service', buildServiceTemplateVars(context));
     const model = getModel();
 
+    console.log('[LLM] Service insights call starting...');
+    const t0 = Date.now();
     const { object } = await generateObject({
       model,
       schema: ArchitectureInsightOutputSchema,
       prompt,
     });
+    console.log(`[LLM] Service insights call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
       violations: object.violations.map((v) => ({
@@ -360,11 +367,14 @@ class AISDKProvider implements LLMProvider {
     const prompt = await getPrompt('violations-database', buildDatabaseTemplateVars(context));
     const model = getModel();
 
+    console.log('[LLM] Database insights call starting...');
+    const t0 = Date.now();
     const { object } = await generateObject({
       model,
       schema: DatabaseInsightOutputSchema,
       prompt,
     });
+    console.log(`[LLM] Database insights call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
       violations: object.violations.map((v) => ({
@@ -385,11 +395,14 @@ class AISDKProvider implements LLMProvider {
     const prompt = await getPrompt('violations-module', buildModuleTemplateVars(context));
     const model = getModel();
 
+    console.log('[LLM] Module insights call starting...');
+    const t0 = Date.now();
     const { object } = await generateObject({
       model,
       schema: ModuleInsightOutputSchema,
       prompt,
     });
+    console.log(`[LLM] Module insights call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
       violations: object.violations.map((v) => ({
@@ -408,22 +421,28 @@ class AISDKProvider implements LLMProvider {
   }
 
   async generateDiffInsights(contexts: {
-    architecture?: DiffArchitectureContext;
+    service?: DiffServiceContext;
     database?: DiffDatabaseContext;
     module?: DiffModuleContext;
   }): Promise<DiffInsightsResult> {
     const model = getModel();
     const promises: Promise<{ resolvedInsightIds: string[]; newInsights: DiffInsightItem[] }>[] = [];
 
-    if (contexts.architecture) {
-      const ctx = contexts.architecture;
+    const diffT0 = Date.now();
+    console.log('[LLM] Diff insights starting...');
+
+    if (contexts.service) {
+      const ctx = contexts.service;
       promises.push(
-        getPrompt('violations-diff-architecture', buildDiffArchitectureTemplateVars(ctx)).then(async (prompt) => {
+        getPrompt('violations-diff-service', buildDiffServiceTemplateVars(ctx)).then(async (prompt) => {
+          console.log('[LLM] Diff service call starting...');
+          const t0 = Date.now();
           const { object } = await generateObject({
             model,
             schema: DiffInsightOutputSchema,
             prompt,
           });
+          console.log(`[LLM] Diff service call done in ${Date.now() - t0}ms — resolved: ${object.resolvedInsightIds.length}, new: ${object.newInsights.length}`);
           return {
             resolvedInsightIds: object.resolvedInsightIds,
             newInsights: object.newInsights.map((i) => ({
@@ -440,11 +459,14 @@ class AISDKProvider implements LLMProvider {
       const ctx = contexts.database;
       promises.push(
         getPrompt('violations-diff-database', buildDiffDatabaseTemplateVars(ctx)).then(async (prompt) => {
+          console.log('[LLM] Diff database call starting...');
+          const t0 = Date.now();
           const { object } = await generateObject({
             model,
             schema: DiffInsightOutputSchema,
             prompt,
           });
+          console.log(`[LLM] Diff database call done in ${Date.now() - t0}ms — resolved: ${object.resolvedInsightIds.length}, new: ${object.newInsights.length}`);
           return {
             resolvedInsightIds: object.resolvedInsightIds,
             newInsights: object.newInsights.map((i) => ({
@@ -461,11 +483,14 @@ class AISDKProvider implements LLMProvider {
       const ctx = contexts.module;
       promises.push(
         getPrompt('violations-diff-module', buildDiffModuleTemplateVars(ctx)).then(async (prompt) => {
+          console.log('[LLM] Diff module call starting...');
+          const t0 = Date.now();
           const { object } = await generateObject({
             model,
             schema: DiffInsightOutputSchema,
             prompt,
           });
+          console.log(`[LLM] Diff module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedInsightIds.length}, new: ${object.newInsights.length}`);
           return {
             resolvedInsightIds: object.resolvedInsightIds,
             newInsights: object.newInsights.map((i) => ({
@@ -492,6 +517,7 @@ class AISDKProvider implements LLMProvider {
       }
     }
 
+    console.log(`[LLM] Diff insights total: ${Date.now() - diffT0}ms — resolved: ${allResolved.length}, new: ${allNew.length}`);
     return { resolvedInsightIds: allResolved, newInsights: allNew };
   }
 

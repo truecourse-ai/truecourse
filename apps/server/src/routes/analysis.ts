@@ -20,7 +20,7 @@ import {
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { simpleGit } from 'simple-git';
-import { runAnalysis } from '../services/analyzer.service.js';
+import { runAnalysis, runDeterministicModuleChecks } from '../services/analyzer.service.js';
 import { runDiffCheck } from '../services/diff-check.service.js';
 import {
   emitAnalysisProgress,
@@ -29,7 +29,7 @@ import {
 } from '../socket/handlers.js';
 import { buildGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
 import { generateInsights } from '../services/insight.service.js';
-import { checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
+import type { ModuleViolation } from '@truecourse/analyzer';
 import { getEnabledRules } from '../services/rules.service.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -329,42 +329,8 @@ router.post(
         const allRules = await getEnabledRules();
 
         // Check deterministic module rules
-        let moduleViolations: ModuleViolation[] = [];
-        if (result.modules && result.methods) {
-          const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
-
-          // Build set of module keys connected to databases so they aren't flagged as dead
-          const dbConnectedModuleKeys = new Set<string>();
-          if (result.databaseResult) {
-            for (const conn of result.databaseResult.connections) {
-              const driverLower = conn.driver.toLowerCase();
-              const dbNameLower = conn.databaseName.toLowerCase();
-              const dataModules = result.modules.filter(
-                (m) => m.serviceName === conn.serviceName && m.layerName === 'data',
-              );
-              if (dataModules.length > 0) {
-                const matched = dataModules.find((m) => {
-                  const nameLower = m.name.toLowerCase();
-                  return nameLower.includes(driverLower) || driverLower.includes(nameLower)
-                    || nameLower.includes(dbNameLower) || dbNameLower.includes(nameLower);
-                });
-                const mod = matched || dataModules[0];
-                dbConnectedModuleKeys.add(`${mod.serviceName}::${mod.name}`);
-              }
-            }
-          }
-
-          moduleViolations = checkModuleRules(
-            result.modules,
-            result.methods,
-            result.moduleDependencies || [],
-            enabledDeterministic,
-            result.moduleLevelDependencies || [],
-            dbConnectedModuleKeys,
-            result.methodLevelDependencies || [],
-          );
-
-        }
+        const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
+        const moduleViolations: ModuleViolation[] = runDeterministicModuleChecks(result, enabledDeterministic);
 
         // Carry over node positions from previous analysis (namespaced)
         const carryOver: Record<string, unknown> = {};
@@ -598,6 +564,42 @@ router.post(
   }
 );
 
+// GET /api/repos/:id/analyses - List past analyses
+router.get(
+  '/:id/analyses',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+
+      const [repo] = await db
+        .select()
+        .from(repos)
+        .where(eq(repos.id, id))
+        .limit(1);
+
+      if (!repo) {
+        throw createAppError('Repo not found', 404);
+      }
+
+      const analysisList = await db
+        .select({
+          id: analyses.id,
+          branch: analyses.branch,
+          architecture: analyses.architecture,
+          createdAt: analyses.createdAt,
+        })
+        .from(analyses)
+        .where(eq(analyses.repoId, id))
+        .orderBy(desc(analyses.createdAt))
+        .limit(20);
+
+      res.json(analysisList);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // GET /api/repos/:id/graph - Get graph data
 router.get(
   '/:id/graph',
@@ -616,25 +618,41 @@ router.get(
         throw createAppError('Repo not found', 404);
       }
 
-      // Find the latest analysis for the branch
-      const conditions = [eq(analyses.repoId, id)];
-      if (branch) {
-        conditions.push(eq(analyses.branch, branch));
+      // If analysisId is provided, load that specific analysis (verify it belongs to repo)
+      const analysisId = req.query.analysisId as string | undefined;
+      let analysis;
+
+      if (analysisId) {
+        const [specific] = await db
+          .select()
+          .from(analyses)
+          .where(and(eq(analyses.id, analysisId), eq(analyses.repoId, id)))
+          .limit(1);
+        if (!specific) {
+          res.json({ nodes: [], edges: [] });
+          return;
+        }
+        analysis = specific;
+      } else {
+        // Find the latest analysis for the branch
+        const conditions = [eq(analyses.repoId, id)];
+        if (branch) {
+          conditions.push(eq(analyses.branch, branch));
+        }
+
+        const latestAnalysis = await db
+          .select()
+          .from(analyses)
+          .where(and(...conditions))
+          .orderBy(desc(analyses.createdAt))
+          .limit(1);
+
+        if (latestAnalysis.length === 0) {
+          res.json({ nodes: [], edges: [] });
+          return;
+        }
+        analysis = latestAnalysis[0];
       }
-
-      const latestAnalysis = await db
-        .select()
-        .from(analyses)
-        .where(and(...conditions))
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
-
-      if (latestAnalysis.length === 0) {
-        res.json({ nodes: [], edges: [] });
-        return;
-      }
-
-      const analysis = latestAnalysis[0];
 
       const level = (req.query.level as string) || 'services';
 
@@ -1033,6 +1051,16 @@ router.post(
       const analysisModules = await db.select().from(modules).where(eq(modules.analysisId, latestAnalysis.id));
       const analysisMethods = await db.select().from(methods).where(eq(methods.analysisId, latestAnalysis.id));
 
+      // Load baseline layer violations for diff comparison
+      const baselineLayerViolations = await db
+        .select()
+        .from(layerDependencies)
+        .where(eq(layerDependencies.analysisId, latestAnalysis.id));
+
+      const baselineLayerViolationDescriptions = baselineLayerViolations
+        .filter((d) => d.isViolation)
+        .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
+
       const serviceNameMap = new Map(analysisServices.map((s) => [s.id, s.name]));
       const moduleNameMap = new Map(analysisModules.map((m) => [m.id, m.name]));
       const methodNameMap = new Map(analysisMethods.map((m) => [m.id, m.name]));
@@ -1060,6 +1088,7 @@ router.post(
         repoPath: repo.path,
         branch,
         baselineInsights: insightsWithNames,
+        baselineLayerViolations: baselineLayerViolationDescriptions,
         onProgress: (progress) => {
           emitAnalysisProgress(id, progress);
         },

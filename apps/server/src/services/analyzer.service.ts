@@ -12,6 +12,8 @@ import type {
   ModuleLevelDependency,
   MethodLevelDependency,
 } from '@truecourse/shared';
+import { checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
+import type { AnalysisRule } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
   (progress: { step: string; percent: number; detail?: string }): void;
@@ -31,6 +33,49 @@ export interface AnalysisResult {
   fileAnalyses: FileAnalysis[];
   moduleDependencies: ModuleDependency[];
   metadata: Record<string, unknown>;
+}
+
+/**
+ * Run deterministic module-level checks on an AnalysisResult.
+ * Shared by normal analysis and diff-check so the logic stays in one place.
+ */
+export function runDeterministicModuleChecks(
+  result: AnalysisResult,
+  enabledDeterministic: AnalysisRule[],
+): ModuleViolation[] {
+  if (!result.modules || !result.methods) return [];
+
+  // Build set of module keys connected to databases so they aren't flagged as dead
+  const dbConnectedModuleKeys = new Set<string>();
+  if (result.databaseResult) {
+    for (const conn of result.databaseResult.connections) {
+      const driverLower = conn.driver.toLowerCase();
+      const dbNameLower = conn.databaseName.toLowerCase();
+      const dataModules = result.modules.filter(
+        (m) => m.serviceName === conn.serviceName && m.layerName === 'data',
+      );
+      if (dataModules.length > 0) {
+        const matched = dataModules.find((m) => {
+          const nameLower = m.name.toLowerCase();
+          return nameLower.includes(driverLower) || driverLower.includes(nameLower)
+            || nameLower.includes(dbNameLower) || dbNameLower.includes(nameLower);
+        });
+        const mod = matched || dataModules[0];
+        dbConnectedModuleKeys.add(`${mod.serviceName}::${mod.name}`);
+      }
+    }
+  }
+
+  return checkModuleRules(
+    result.modules,
+    result.methods,
+    result.moduleDependencies || [],
+    enabledDeterministic,
+    result.moduleLevelDependencies || [],
+    dbConnectedModuleKeys,
+    result.methodLevelDependencies || [],
+    result.fileAnalyses,
+  );
 }
 
 export async function runAnalysis(

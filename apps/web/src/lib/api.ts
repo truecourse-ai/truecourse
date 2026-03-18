@@ -157,14 +157,27 @@ export function analyzeRepo(id: string, branch?: string): Promise<{ jobId: strin
   });
 }
 
+// Analyses
+export type AnalysisSummary = {
+  id: string;
+  branch: string | null;
+  architecture: string;
+  createdAt: string;
+};
+
+export function getAnalyses(repoId: string): Promise<AnalysisSummary[]> {
+  return fetchApi<AnalysisSummary[]>(`/api/repos/${repoId}/analyses`);
+}
+
 // Graph
 export function getGraph(
   repoId: string,
-  options?: { branch?: string; level?: 'services' | 'modules' | 'methods' },
+  options?: { branch?: string; level?: 'services' | 'modules' | 'methods'; analysisId?: string },
 ): Promise<GraphResponse> {
   const params = new URLSearchParams();
   if (options?.branch) params.set('branch', options.branch);
   if (options?.level) params.set('level', options.level);
+  if (options?.analysisId) params.set('analysisId', options.analysisId);
   const qs = params.toString();
   return fetchApi<GraphResponse>(`/api/repos/${repoId}/graph${qs ? `?${qs}` : ''}`);
 }
@@ -227,8 +240,11 @@ export function getFiles(repoId: string): Promise<FilesResponse> {
 }
 
 // Violations
-export function getViolations(repoId: string): Promise<InsightResponse[]> {
-  return fetchApi<InsightResponse[]>(`/api/repos/${repoId}/violations`);
+export function getViolations(repoId: string, analysisId?: string): Promise<InsightResponse[]> {
+  const params = new URLSearchParams();
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<InsightResponse[]>(`/api/repos/${repoId}/violations${qs ? `?${qs}` : ''}`);
 }
 
 // Databases

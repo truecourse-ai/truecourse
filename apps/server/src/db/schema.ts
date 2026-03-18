@@ -17,9 +17,9 @@ export const repos = pgTable('repos', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   path: text('path').notNull().unique(),
-  lastAnalyzedAt: timestamp('last_analyzed_at', { mode: 'date' }),
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  lastAnalyzedAt: timestamp('last_analyzed_at', { mode: 'date', withTimezone: true }),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const reposRelations = relations(repos, ({ many }) => ({
@@ -41,7 +41,7 @@ export const analyses = pgTable('analyses', {
   architecture: text('architecture').notNull(), // 'monolith' | 'microservices'
   metadata: jsonb('metadata'),
   nodePositions: jsonb('node_positions'), // { [serviceId]: { x, y } }
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const analysesRelations = relations(analyses, ({ one, many }) => ({
@@ -76,7 +76,7 @@ export const services = pgTable('services', {
   fileCount: integer('file_count'),
   description: text('description'),
   layerSummary: jsonb('layer_summary'),
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const servicesRelations = relations(services, ({ one, many }) => ({
@@ -215,7 +215,7 @@ export const violations = pgTable('violations', {
   }),
   targetTable: text('target_table'),
   fixPrompt: text('fix_prompt'),
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const violationsRelations = relations(violations, ({ one }) => ({
@@ -255,8 +255,8 @@ export const conversations = pgTable('conversations', {
     .notNull()
     .references(() => repos.id, { onDelete: 'cascade' }),
   branch: text('branch'),
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const conversationsRelations = relations(
@@ -282,7 +282,7 @@ export const messages = pgTable('messages', {
   role: text('role').notNull(), // 'user' | 'assistant' | 'system'
   content: text('content').notNull(),
   nodeContext: jsonb('node_context'),
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const messagesRelations = relations(messages, ({ one }) => ({
@@ -308,7 +308,7 @@ export const databases = pgTable('databases', {
   tables: jsonb('tables'), // TableInfo[]
   dbRelations: jsonb('db_relations'), // RelationInfo[]
   connectedServices: jsonb('connected_services'), // string[]
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const databasesRelations = relations(databases, ({ one, many }) => ({
@@ -515,8 +515,8 @@ export const rules = pgTable('rules', {
   enabled: boolean('enabled').notNull().default(true),
   severity: text('severity').notNull(), // 'info' | 'low' | 'medium' | 'high' | 'critical'
   type: text('type').notNull(), // 'deterministic' | 'llm'
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 // ---------------------------------------------------------------------------
@@ -536,7 +536,7 @@ export const diffChecks = pgTable('diff_checks', {
   newInsights: jsonb('new_insights').notNull(), // InsightResponse[]
   affectedNodeIds: jsonb('affected_node_ids').notNull(), // { services, layers, modules, methods }
   summary: jsonb('summary').notNull(), // { newCount, resolvedCount }
-  createdAt: timestamp('created_at', { mode: 'date' }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const diffChecksRelations = relations(diffChecks, ({ one }) => ({

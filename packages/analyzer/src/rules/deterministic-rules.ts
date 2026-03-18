@@ -93,4 +93,13 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'low',
     type: 'deterministic',
   },
+  {
+    key: 'arch/orphan-file',
+    category: 'module',
+    name: 'Orphan file',
+    description: 'Source file is never imported by any other file in the codebase.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
 ]

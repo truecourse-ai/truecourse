@@ -1,4 +1,4 @@
-import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule } from '@truecourse/shared'
+import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
 
 export interface ModuleViolation {
   ruleKey: string
@@ -27,6 +27,7 @@ export function checkModuleRules(
   moduleLevelDeps?: ModuleLevelDependency[],
   dbConnectedModuleKeys?: Set<string>,
   methodLevelDeps?: MethodLevelDependency[],
+  fileAnalyses?: FileAnalysis[],
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -192,6 +193,36 @@ export function checkModuleRules(
           filePath: method.filePath,
         })
       }
+    }
+  }
+
+  // Orphan file
+  if (ruleKeys.has('arch/orphan-file') && fileAnalyses) {
+    const ENTRY_POINT_PATTERN = /(?:^|\/)(?:index|main|app|server)\.[^/]+$|(?:^|\/)route[^/]*\.[^/]+$|\.config\.[^/]+$|\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|(?:^|\/)migrations\/|(?:^|\/)seeds\/|(?:^|\/)bin\/|(?:^|\/)scripts\//
+
+    // Build set of all imported file paths (targets of dependencies)
+    const importedFiles = new Set<string>()
+    for (const dep of fileDependencies) {
+      importedFiles.add(dep.target)
+    }
+
+    for (const fa of fileAnalyses) {
+      if (importedFiles.has(fa.filePath)) continue
+      if (ENTRY_POINT_PATTERN.test(fa.filePath)) continue
+
+      // Determine which service this file belongs to
+      const matchingModule = modules.find((m) => m.filePath === fa.filePath)
+      const serviceName = matchingModule?.serviceName || 'unknown'
+      const fileName = fa.filePath.split('/').pop() || fa.filePath
+
+      violations.push({
+        ruleKey: 'arch/orphan-file',
+        title: `Orphan file: ${fileName}`,
+        description: `${fa.filePath} is never imported by any other file in the codebase. It may be an unused module or a missing entry point.`,
+        severity: 'low',
+        serviceName,
+        filePath: fa.filePath,
+      })
     }
   }
 

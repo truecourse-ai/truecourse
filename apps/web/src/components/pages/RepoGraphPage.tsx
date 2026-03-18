@@ -15,6 +15,7 @@ import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useInsights } from '@/hooks/useInsights';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
+import { useAnalysisList } from '@/hooks/useAnalysisList';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
@@ -56,13 +57,18 @@ export default function RepoGraphPage() {
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
 
   const currentBranch = repo?.defaultBranch;
   const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
-    useGraph(repoId, currentBranch, depthLevel);
+    useGraph(repoId, currentBranch, depthLevel, selectedAnalysisId ?? undefined);
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
-  const { insights, isLoading: insightsLoading, refetch: refetchInsights } = useInsights(repoId, selectedService ?? undefined);
+  const { insights, allInsights, isLoading: insightsLoading, refetch: refetchInsights } = useInsights(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
+  const { analyses, refetch: refetchAnalyses } = useAnalysisList(repoId);
+
+  const isViewingHistory = !!selectedAnalysisId;
+  const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
 
   // Fetch repo details
   useEffect(() => {
@@ -89,9 +95,10 @@ export default function RepoGraphPage() {
     const unsub = onEvent('analysis:complete', () => {
       setIsAnalyzing(false);
       refetchGraph();
+      refetchAnalyses();
     });
     return unsub;
-  }, [onEvent, refetchGraph]);
+  }, [onEvent, refetchGraph, refetchAnalyses]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -619,20 +626,27 @@ export default function RepoGraphPage() {
       <Header
         repoName={repo?.name}
         currentBranch={currentBranch}
-        onAnalyze={handleAnalyze}
-        isAnalyzing={isAnalyzing}
+        onAnalyze={isViewingHistory ? undefined : handleAnalyze}
+        isAnalyzing={isAnalyzing || isDiffChecking}
         showBack
         backHref="/"
         isChatOpen={isChatOpen}
         onToggleChat={() => setIsChatOpen((v) => !v)}
         isDiffMode={isDiffMode}
-        onEnterDiffMode={handleEnterDiffMode}
-        onExitDiffMode={handleExitDiffMode}
+        onEnterDiffMode={isViewingHistory ? undefined : handleEnterDiffMode}
+        onExitDiffMode={isViewingHistory ? undefined : handleExitDiffMode}
+        analyses={analyses}
+        selectedAnalysisId={selectedAnalysisId}
+        onSelectAnalysis={setSelectedAnalysisId}
       />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab}>
+        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} badgeCounts={{
+          violations: isDiffMode && diffResult
+            ? diffResult.summary.newCount + diffResult.summary.resolvedCount
+            : allInsights.length,
+        }}>
           {leftTab === 'violations' && (
             <ViolationsPanel
               insights={insights}
@@ -696,7 +710,28 @@ export default function RepoGraphPage() {
         </LeftSidebar>
 
         {/* Graph area */}
-        <div className="relative flex-1">
+        <div className="flex flex-1 flex-col overflow-hidden">
+          {/* Historical analysis banner */}
+          {isViewingHistory && selectedAnalysis && (
+            <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+              <span>
+                Viewing analysis from{' '}
+                {new Date(selectedAnalysis.createdAt).toLocaleString([], {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}{' '}
+                — not the latest
+              </span>
+              <button
+                className="underline hover:text-amber-400 transition-colors"
+                onClick={() => setSelectedAnalysisId(null)}
+              >
+                Return to latest
+              </button>
+            </div>
+          )}
+
+          <div className="relative flex-1">
           {/* Analysis progress */}
           {analysisProgress && (
             <div className="absolute bottom-4 left-1/2 z-20 w-72 -translate-x-1/2 rounded-lg border border-border bg-card p-3 shadow-lg">
@@ -816,6 +851,7 @@ export default function RepoGraphPage() {
               />
             </>
           )}
+          </div>
         </div>
 
         {/* Right sidebar: Chat only */}

@@ -1,8 +1,9 @@
 
-import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info } from 'lucide-react';
+import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info, ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
+import type { AnalysisSummary } from '@/lib/api';
 
 type HeaderProps = {
   repoName?: string;
@@ -16,6 +17,9 @@ type HeaderProps = {
   isDiffMode?: boolean;
   onEnterDiffMode?: () => void;
   onExitDiffMode?: () => void;
+  analyses?: AnalysisSummary[];
+  selectedAnalysisId?: string | null;
+  onSelectAnalysis?: (analysisId: string | null) => void;
 };
 
 export function Header({
@@ -30,12 +34,27 @@ export function Header({
   isDiffMode,
   onEnterDiffMode,
   onExitDiffMode,
+  analyses,
+  selectedAnalysisId,
+  onSelectAnalysis,
 }: HeaderProps) {
   const [isDark, setIsDark] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    };
+    if (historyOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [historyOpen]);
 
   const toggleTheme = () => {
     const next = !isDark;
@@ -69,6 +88,49 @@ export function Header({
         )}
         {currentBranch && (
           <span className="text-xs text-muted-foreground font-mono">{currentBranch}</span>
+        )}
+        {analyses && analyses.length > 1 && onSelectAnalysis && (
+          <div className="relative" ref={historyRef}>
+            <button
+              className="flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setHistoryOpen((v) => !v)}
+            >
+              {selectedAnalysisId ? 'Past analysis' : 'Latest'}
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            {historyOpen && (
+              <div className="absolute left-0 top-full mt-1 z-50 min-w-56 rounded-md border border-border bg-popover shadow-lg">
+                <div className="max-h-64 overflow-y-auto py-1">
+                  <button
+                    className={`w-full whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
+                      !selectedAnalysisId ? 'bg-accent/50 font-medium text-foreground' : 'text-muted-foreground'
+                    }`}
+                    onClick={() => { onSelectAnalysis(null); setHistoryOpen(false); }}
+                  >
+                    Latest
+                  </button>
+                  {analyses.map((a, i) => {
+                    const date = new Date(a.createdAt);
+                    const label = `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                    const isLatest = i === 0;
+                    return (
+                      <button
+                        key={a.id}
+                        className={`w-full whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
+                          (isLatest ? !selectedAnalysisId : selectedAnalysisId === a.id) ? 'bg-accent/50 font-medium text-foreground' : 'text-muted-foreground'
+                        }`}
+                        onClick={() => { onSelectAnalysis(isLatest ? null : a.id); setHistoryOpen(false); }}
+                      >
+                        <span>{label}</span>
+                        {a.branch && <span className="ml-1.5 font-mono opacity-60">{a.branch}</span>}
+                        {i === 0 && <span className="ml-1.5 text-primary/70">(latest)</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {onEnterDiffMode && (
           <div className="flex items-center gap-1.5">

@@ -757,37 +757,130 @@ type DiffCheckResult = {
 
 ---
 
-## Phase 6: Advanced Insights & Fix Prompts `STATUS: BACKLOG`
+## Phase 6: Orphan Detection & Analysis History `STATUS: DONE`
 
-- Circular dependency detection, god services, orphan files
-- Each warning has a "Copy Fix Prompt" button
-- Insight history — compare analyses over time
-- Deterministic violation detector + LLM-enhanced descriptions
+**Already completed in earlier phases:** circular dependency detection, god service detection, fix prompts with "Copy Fix Prompt" button, deterministic violation detector, LLM-enhanced descriptions.
 
-### Test Plan (Phase 6) `STATUS: BACKLOG`
-- Circular dependency detection: given a dependency graph with cycles, correctly identifies all circular paths
-- God service detection: services exceeding file/dependency thresholds are flagged
-- Orphan file detection: files not imported by any other file are identified
-- Fix prompt generation: each violation type produces a well-formed prompt with context
-- Insight comparison: two analysis snapshots produce a correct diff (new violations, resolved violations, unchanged)
-- Deterministic detector: same input always produces same violations (no LLM randomness)
-- LLM-enhanced descriptions: violations are enriched with human-readable explanations
+### 6.1 Orphan File Detection `STATUS: DONE`
+- Deterministic rule `arch/orphan-file`: detect files not imported by any other file in the codebase
+- Exclude entry points (index.*, main.*, app.*, server.*, route*.*, *.config.*, *.test.*, *.spec.*, __tests__/, migrations/, seeds/, bin/, scripts/) from flagging
+- Show orphan files as low-severity violations linked to their service/module
+- `checkModuleRules` accepts optional `fileAnalyses` param; `runDeterministicModuleChecks` passes it through
+
+### 6.2 Analysis History `STATUS: DONE`
+- `GET /:id/analyses` returns past analyses (id, branch, architecture, createdAt) ordered by createdAt DESC, limit 20
+- `GET /:id/graph?analysisId=` loads a specific analysis's graph (verifies repo ownership)
+- `GET /:id/violations?analysisId=` loads violations for a specific analysis
+- Renamed `insights.ts` → `violations.ts` (import already used `violationsRouter`)
+- Frontend: `useAnalysisList` hook, `getAnalyses()` API, `analysisId` param on `getGraph()`/`getViolations()`
+- Header dropdown shows past analyses with date/time/branch; "Latest" option at top
+- `RepoGraphPage`: amber banner "Viewing analysis from {date} — not the latest" with "Return to latest" link
+- When viewing history: Analyze button and diff mode toggle are disabled
+- Analysis list refetched on `analysis:complete`
+
+### Test Plan (Phase 6) `STATUS: DONE`
+- Orphan file detection: files not imported by any other file are flagged ✓
+- Orphan file detection: entry points (index.ts, main.ts) are excluded ✓
+- Orphan file detection: imported files are not flagged ✓
+- Orphan file detection: rule disabled → no violations ✓
+- Analysis history: API returns list of past analyses with timestamps
+- Analysis history: loading a past analysis returns correct graph/violations for that snapshot
+- Analysis history: UI shows banner when viewing old analysis
 
 ### Verification (Phase 6)
-1. Analyze a repo with known circular dependencies → warnings appear on graph
-2. Click a warning → insight card shows description + "Copy Fix Prompt" button
-3. Copy prompt → paste into AI coding assistant → produces valid fix
-4. Re-analyze after changes → compare view shows resolved/new issues
+1. Analyze a repo with orphan files → low-severity violations appear
+2. Entry points are not flagged as orphans
+3. Run multiple analyses → history dropdown shows all past analyses
+4. Select an old analysis → graph and violations load for that snapshot with "old version" banner
+5. Switch back to latest → banner disappears
 
 ---
 
-## Phase 7: Multi-Language Support `STATUS: BACKLOG`
+## Phase 7: Code-Level Analysis & Code Viewer `STATUS: BACKLOG`
+
+Extend the analyzer to detect code-level issues (like SonarQube) and add a code viewer to the frontend for browsing source files with inline violation annotations.
+
+### Code-Level Analysis
+
+Add AST-based rule visitors that walk tree-sitter syntax nodes to detect code-quality issues. Unlike the current architecture-level rules (which operate on module/dependency summaries), these rules inspect actual code patterns:
+
+**Rule visitor architecture:**
+1. Parse source into AST (already done via tree-sitter)
+2. Each rule registers which node types it cares about (catch blocks, if statements, assignments, etc.)
+3. Walker visits matching nodes and fires rule logic
+4. Violations include file path, line number, column, and code snippet
+
+**Example rules:**
+- Empty catch blocks
+- Console.log left in production code
+- Duplicated code blocks (token-hash comparison across files)
+- Magic numbers / hardcoded strings
+- Unused variables / imports (beyond current export-level checks)
+- Inconsistent error handling patterns
+- TODO/FIXME/HACK comments
+
+**Security rules:**
+- Hardcoded secrets — API keys, tokens, passwords, connection strings in source code (regex patterns for common key formats: AWS, Stripe, GitHub, JWT, base64 secrets)
+- SQL injection — string concatenation or template literals in SQL queries instead of parameterized queries
+- XSS vulnerabilities — unsanitized user input rendered in HTML (e.g. `innerHTML`, `dangerouslySetInnerHTML`, unescaped template output)
+- Command injection — user input passed to `exec`, `spawn`, `eval`, `Function()` without sanitization
+- Path traversal — user input used in file paths without validation (`fs.readFile(userInput)`)
+- Insecure dependencies — `http://` URLs in fetch/axios calls where `https://` should be used
+- Missing authentication checks — route handlers without auth middleware (heuristic: public routes that access DB directly)
+- Exposed error details — full stack traces or internal error messages returned in HTTP responses
+- Insecure randomness — `Math.random()` used for tokens/IDs instead of `crypto.randomBytes`
+
+Each violation stores:
+- File path + line range
+- Code snippet (5-10 lines around the issue)
+- Rule key, severity, description, fix prompt
+
+### Code Viewer
+
+Add a source code viewer panel to the frontend using a library like Monaco Editor or CodeMirror:
+
+- **File explorer integration** — clicking a file in the existing file explorer opens the code viewer
+- **Syntax highlighting** — language-aware highlighting via the editor library
+- **Violation gutter markers** — inline annotations on lines with violations (colored markers in the gutter, hover for details)
+- **Click-to-navigate** — clicking a violation in the violations panel opens the code viewer at the relevant line
+- **Read-only** — viewer is for inspection, not editing
+
+### New Tables
+- `code_violations` — id, analysisId, filePath, lineStart, lineEnd, columnStart, columnEnd, ruleKey, severity, title, content, snippet, fixPrompt
+
+### API
+- `GET /api/repos/:id/files/:path` — returns file content for the code viewer
+- `GET /api/repos/:id/code-violations?file=path` — returns code-level violations for a file
+
+### Test Plan (Phase 7) `STATUS: BACKLOG`
+- Rule visitors correctly detect empty catch blocks, console.log, magic numbers in fixture code
+- Duplicated code detection: two functions with same structure (different variable names) are flagged
+- Security: hardcoded secrets detected (API key strings, password assignments in source)
+- Security: SQL injection detected (string concatenation in query calls)
+- Security: XSS detected (innerHTML assignments with user-controlled data)
+- Security: command injection detected (exec/eval with dynamic input)
+- Code violations include correct file path, line numbers, and snippet
+- API returns file content and code violations
+- Code viewer renders with syntax highlighting and gutter markers
+- Clicking a violation navigates to the correct line in the viewer
+
+### Verification (Phase 7)
+1. Analyze a repo → code-level violations appear alongside architectural violations
+2. Click a code violation → code viewer opens at the flagged line
+3. Gutter markers highlight all violations in the visible file
+4. Duplicated code blocks are detected across different files
+5. Security violations flagged with high severity (hardcoded tokens, injection risks)
+6. Fix prompts for code violations are contextual (include the snippet)
+
+---
+
+## Phase 8: Multi-Language Support `STATUS: BACKLOG`
 
 - Re-enable Python, C# extractors from SpecMind
 - Language-specific import resolution and pattern detection
 - Incremental analysis (content-hash cache, only re-analyze changed files)
 
-### Test Plan (Phase 7) `STATUS: BACKLOG`
+### Test Plan (Phase 8) `STATUS: BACKLOG`
 - Python parser: parses `.py` files, extracts functions, classes, imports (decorators, type hints)
 - C# parser: parses `.cs` files, extracts classes, methods, using statements, attributes
 - Python import resolution: resolves relative imports, `__init__.py`, package imports
@@ -797,7 +890,7 @@ type DiffCheckResult = {
 - Cache invalidation: modifying a file updates its hash and triggers re-analysis
 - Mixed-language repo: a repo with both TS and Python files produces correct combined analysis
 
-### Verification (Phase 7)
+### Verification (Phase 8)
 1. Analyze a Python repo → services, layers, files detected correctly
 2. Analyze a C# repo → same
 3. Modify a single file in a large repo → only that file re-analyzed (check logs)
@@ -805,14 +898,14 @@ type DiffCheckResult = {
 
 ---
 
-## Phase 8: Cloud Version (Future) `STATUS: BACKLOG`
+## Phase 9: Cloud Version (Future) `STATUS: BACKLOG`
 
 - Auth (NextAuth.js), GitHub integration
 - GitHub webhooks replacing file watcher
 - Landing page, dashboard, team features
 - Managed Postgres deployment
 
-### Test Plan (Phase 8) `STATUS: BACKLOG`
+### Test Plan (Phase 9) `STATUS: BACKLOG`
 - Auth flow: NextAuth.js sign-in/sign-out, session persistence, token refresh
 - GitHub OAuth: mock OAuth flow, verify user creation and repo access scoping
 - Webhook handler: GitHub push event triggers analysis for correct repo and branch
@@ -821,7 +914,7 @@ type DiffCheckResult = {
 - Team access: shared repo analyses are visible to all team members
 - Cloud DB: migrations run cleanly on managed Postgres (connection pooling, SSL)
 
-### Verification (Phase 8)
+### Verification (Phase 9)
 1. Sign up / sign in via OAuth
 2. Connect a GitHub repo → webhook triggers analysis on push
 3. Graph renders in cloud-hosted UI

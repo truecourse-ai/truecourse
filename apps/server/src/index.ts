@@ -14,7 +14,7 @@ import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import reposRouter from './routes/repos.js';
 import analysisRouter from './routes/analysis.js';
-import violationsRouter from './routes/insights.js';
+import violationsRouter from './routes/violations.js';
 import chatRouter from './routes/chat.js';
 import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule } from '../../packages/shared/src/types';
+import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '../../packages/shared/src/types';
 import { checkModuleRules } from '../../packages/analyzer/src/rules/module-rules-checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/deterministic-rules';
 
@@ -255,5 +255,79 @@ describe('checkModuleRules', () => {
 
     const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
     expect(deadViolations).toHaveLength(0);
+  });
+
+  // Orphan file detection
+  function makeFileAnalysis(filePath: string): FileAnalysis {
+    return {
+      filePath,
+      language: 'typescript',
+      functions: [],
+      classes: [],
+      imports: [],
+      exports: [],
+      calls: [],
+      httpCalls: [],
+    };
+  }
+
+  it('detects orphan file (never imported)', () => {
+    const modules = [makeModule({ name: 'Orphan', filePath: '/repo/svc/src/orphan.ts', serviceName: 'svc' })];
+    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/orphan.ts')];
+    const fileDeps: ModuleDependency[] = [];
+
+    const violations = checkModuleRules(modules, [], fileDeps, enabledRules, undefined, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(1);
+    expect(orphanViolations[0].title).toContain('orphan.ts');
+    expect(orphanViolations[0].serviceName).toBe('svc');
+  });
+
+  it('does not flag file that is imported', () => {
+    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/used.ts')];
+    const fileDeps: ModuleDependency[] = [
+      { source: '/repo/svc/src/main.ts', target: '/repo/svc/src/used.ts', importedNames: ['something'] },
+    ];
+
+    const violations = checkModuleRules([], [], fileDeps, enabledRules, undefined, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(0);
+  });
+
+  it('does not flag entry point files', () => {
+    const fileAnalyses = [
+      makeFileAnalysis('/repo/svc/src/index.ts'),
+      makeFileAnalysis('/repo/svc/src/main.ts'),
+      makeFileAnalysis('/repo/svc/src/app.ts'),
+      makeFileAnalysis('/repo/svc/src/server.ts'),
+      makeFileAnalysis('/repo/svc/src/routes/route.ts'),
+      makeFileAnalysis('/repo/svc/vite.config.ts'),
+      makeFileAnalysis('/repo/svc/src/utils.test.ts'),
+      makeFileAnalysis('/repo/svc/src/utils.spec.ts'),
+      makeFileAnalysis('/repo/svc/__tests__/foo.ts'),
+      makeFileAnalysis('/repo/svc/migrations/001.ts'),
+      makeFileAnalysis('/repo/svc/seeds/seed.ts'),
+      makeFileAnalysis('/repo/svc/bin/cli.ts'),
+      makeFileAnalysis('/repo/svc/scripts/build.ts'),
+    ];
+
+    const violations = checkModuleRules([], [], [], enabledRules, undefined, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(0);
+  });
+
+  it('does not detect orphan files when rule is disabled', () => {
+    const onlyOrphanDisabled = enabledRules.map((r) =>
+      r.key === 'arch/orphan-file' ? { ...r, enabled: false } : r
+    );
+    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/orphan.ts')];
+
+    const violations = checkModuleRules([], [], [], onlyOrphanDisabled, undefined, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(0);
   });
 });

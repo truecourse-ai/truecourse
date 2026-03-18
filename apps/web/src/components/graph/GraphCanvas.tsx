@@ -509,8 +509,8 @@ function GraphCanvasInner({
         </div>
       )}
 
-      {isDiffMode && isDiffChecking && (
-        <div className={`absolute ${hasProgressBar ? 'bottom-24' : 'bottom-4'} left-1/2 z-20 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-card px-4 py-2.5 shadow-lg text-xs text-muted-foreground flex items-center gap-2`}>
+      {isDiffMode && isDiffChecking && !hasProgressBar && (
+        <div className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-card px-4 py-2.5 shadow-lg text-xs text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-3 w-3 animate-spin" />
           Scanning pending changes...
         </div>

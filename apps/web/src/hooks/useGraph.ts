@@ -4,7 +4,7 @@ import * as api from '@/lib/api';
 import type { GraphNode, GraphEdge, ServiceNodeData, DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
 
-export function useGraph(repoId: string, branch?: string, level: DepthLevel = 'services') {
+export function useGraph(repoId: string, branch?: string, level: DepthLevel = 'services', analysisId?: string) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [savedCollapsedIds, setSavedCollapsedIds] = useState<string[] | undefined>(undefined);
@@ -16,7 +16,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.getGraph(repoId, { branch, level });
+      const data = await api.getGraph(repoId, { branch, level, analysisId });
 
       if (level === 'modules' || level === 'methods') {
         // Layer-level view: mix of serviceGroupNode, layerNode, and databaseNode types
@@ -201,7 +201,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, branch, level]);
+  }, [repoId, branch, level, analysisId]);
 
   useEffect(() => {
     fetchGraph();

@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as api from '@/lib/api';
 import type { InsightResponse } from '@/lib/api';
 
-export function useInsights(repoId: string, selectedServiceId?: string) {
+export function useInsights(repoId: string, selectedServiceId?: string, analysisId?: string) {
   const [insights, setInsights] = useState<InsightResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,14 +13,14 @@ export function useInsights(repoId: string, selectedServiceId?: string) {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.getViolations(repoId);
+      const data = await api.getViolations(repoId, analysisId);
       setInsights(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch insights');
     } finally {
       setIsLoading(false);
     }
-  }, [repoId]);
+  }, [repoId, analysisId]);
 
   useEffect(() => {
     fetchInsights();

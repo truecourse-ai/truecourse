@@ -2,10 +2,10 @@ import { Langfuse } from 'langfuse';
 import { config } from '../../config/index.js';
 import type {
   ArchitectureContext,
-  ArchitectureInsightContext,
+  ServiceInsightContext,
   DatabaseInsightContext,
   ModuleInsightContext,
-  DiffArchitectureContext,
+  DiffServiceContext,
   DiffDatabaseContext,
   DiffModuleContext,
 } from './provider.js';
@@ -15,7 +15,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export const PROMPT_DEFINITIONS = {
-  'violations-architecture': {
+  'violations-service': {
     prompt: `Analyze the following codebase architecture and identify violations and issues that need to be fixed.
 
 Architecture: {{architecture}}
@@ -101,7 +101,7 @@ Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  'violations-diff-architecture': {
+  'violations-diff-service': {
     prompt: `Analyze the following codebase architecture and compare it against the existing known violations listed below. Identify ONLY new violations that are NOT already covered by existing violations, and identify which existing violations are now resolved.
 
 Architecture: {{architecture}}
@@ -111,16 +111,25 @@ Services:
 
 Dependencies:
 {{depList}}
+
+Current deterministic violations (layer violations detected by static analysis on the current code):
 {{violations}}
+{{baselineViolations}}
 {{llmRules}}
+
+Changed files (ONLY these files were modified):
+{{changedFiles}}
 
 Existing violations (with IDs — reference these when marking resolved):
 {{existingViolations}}
 
 IMPORTANT:
-- Return ONLY genuinely new violations not already covered by an existing violation.
+- ONLY report new violations that are DIRECTLY CAUSED BY or RELATED TO the changed files listed above. Do NOT report issues in parts of the architecture unaffected by the changes.
+- Return ONLY genuinely new violations not already covered by an existing violation. If an existing violation already describes the same issue (even with slightly different wording or numbers), do NOT create a new one.
 - Return IDs of existing violations that are now resolved (the issue no longer exists in the current code).
-- Do NOT re-report violations that match existing ones.
+- ONLY mark a violation as resolved if the data above clearly shows the underlying issue is gone. Do NOT resolve violations for areas unaffected by the changed files.
+- If a "Baseline deterministic violation" was present but is NOT listed under "Current deterministic violations", that means the issue has been fixed — mark the matching existing violation as resolved.
+- If an existing violation mentions a specific count (e.g. "4 dependencies") and the current data shows a different count, the old violation is stale — mark it as resolved and create a new violation with the updated information.
 - Use exact service names from the Services list. Do not fabricate ids.
 - For each new violation, provide a fixPrompt that an AI coding assistant could use to fix it.
 
@@ -135,12 +144,17 @@ Databases:
 {{databaseList}}
 {{llmRules}}
 
+Changed files (ONLY these files were modified):
+{{changedFiles}}
+
 Existing violations (with IDs — reference these when marking resolved):
 {{existingViolations}}
 
 IMPORTANT:
-- Return ONLY genuinely new violations not already covered by an existing violation.
+- ONLY report new violations that are DIRECTLY CAUSED BY or RELATED TO the changed files listed above. Do NOT report issues found in the broader schema that are unrelated to the changes. If a table, column, or relationship was not affected by the changed files, do NOT flag it.
+- Return ONLY genuinely new violations not already covered by an existing violation. If an existing violation already describes the same issue (even with slightly different wording), do NOT create a new one.
 - Return IDs of existing violations that are now resolved.
+- ONLY mark a violation as resolved if the database schema data above clearly shows the underlying issue is fixed. Do NOT resolve violations for tables/columns unaffected by the changed files.
 - Do NOT re-report violations that match existing ones.
 - For each new violation, provide a fixPrompt using human-readable names.
 
@@ -162,12 +176,18 @@ Module Dependencies:
 {{violations}}
 {{llmRules}}
 
+Changed files (ONLY these files were modified):
+{{changedFiles}}
+
 Existing violations (with IDs — reference these when marking resolved):
 {{existingViolations}}
 
 IMPORTANT:
-- Return ONLY genuinely new violations not already covered by an existing violation.
+- ONLY report new violations that are DIRECTLY CAUSED BY or RELATED TO the changed files listed above. Do NOT report issues in modules, methods, or dependencies unaffected by the changes.
+- Return ONLY genuinely new violations not already covered by an existing violation. If an existing violation already describes the same issue (even with slightly different wording), do NOT create a new one.
 - Return IDs of existing violations that are now resolved.
+- ONLY mark a violation as resolved if the module/dependency data above clearly shows the underlying issue is gone (e.g., a circular dependency chain is broken because a dependency no longer exists). Do NOT resolve violations for modules unaffected by the changed files.
+- When checking for circular dependencies, verify the FULL chain exists in the Module Dependencies list. If any link in the chain is missing, the cycle is broken and the violation should be resolved.
 - Do NOT re-report violations that match existing ones.
 - Use exact service/module/method names. Do not fabricate ids.
 - For each new violation, provide a fixPrompt using human-readable names.
@@ -380,12 +400,24 @@ function formatExistingViolations(violations: { id: string; type: string; title:
   ).join('\n');
 }
 
+function formatChangedFiles(files: string[]): string {
+  if (!files.length) return '(none)';
+  return files.map((f) => `- ${f}`).join('\n');
+}
+
 /** Build template vars for violations-diff-architecture prompt. */
 export function buildDiffArchitectureTemplateVars(context: DiffArchitectureContext): Record<string, string> {
   const base = buildArchitectureTemplateVars(context);
+
+  const baselineViolations = context.baselineViolations?.length
+    ? `\nBaseline deterministic violations (from the previous analysis — if an item here is NOT in "Current deterministic violations" above, the issue has been fixed):\n${context.baselineViolations.map((v) => `- ${v}`).join('\n')}`
+    : '';
+
   return {
     ...base,
     existingViolations: formatExistingViolations(context.existingViolations),
+    changedFiles: formatChangedFiles(context.changedFiles),
+    baselineViolations,
   };
 }
 
@@ -395,6 +427,7 @@ export function buildDiffDatabaseTemplateVars(context: DiffDatabaseContext): Rec
   return {
     ...base,
     existingViolations: formatExistingViolations(context.existingViolations),
+    changedFiles: formatChangedFiles(context.changedFiles),
   };
 }
 
@@ -404,6 +437,7 @@ export function buildDiffModuleTemplateVars(context: DiffModuleContext): Record<
   return {
     ...base,
     existingViolations: formatExistingViolations(context.existingViolations),
+    changedFiles: formatChangedFiles(context.changedFiles),
   };
 }
 

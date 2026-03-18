@@ -155,6 +155,7 @@ router.get(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
+      const analysisIdParam = req.query.analysisId as string | undefined;
 
       const [repo] = await db
         .select()
@@ -166,25 +167,39 @@ router.get(
         throw createAppError('Repo not found', 404);
       }
 
-      // Find the relevant analysis
-      const conditions = [eq(analyses.repoId, id)];
-      if (branch) {
-        conditions.push(eq(analyses.branch, branch));
+      let analysis;
+
+      if (analysisIdParam) {
+        const [specific] = await db
+          .select()
+          .from(analyses)
+          .where(and(eq(analyses.id, analysisIdParam), eq(analyses.repoId, id)))
+          .limit(1);
+        if (!specific) {
+          res.json([]);
+          return;
+        }
+        analysis = specific;
+      } else {
+        // Find the relevant analysis
+        const conditions = [eq(analyses.repoId, id)];
+        if (branch) {
+          conditions.push(eq(analyses.branch, branch));
+        }
+
+        const latestAnalysis = await db
+          .select()
+          .from(analyses)
+          .where(and(...conditions))
+          .orderBy(desc(analyses.createdAt))
+          .limit(1);
+
+        if (latestAnalysis.length === 0) {
+          res.json([]);
+          return;
+        }
+        analysis = latestAnalysis[0];
       }
-
-      const latestAnalysis = await db
-        .select()
-        .from(analyses)
-        .where(and(...conditions))
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
-
-      if (latestAnalysis.length === 0) {
-        res.json([]);
-        return;
-      }
-
-      const analysis = latestAnalysis[0];
 
       const analysisInsights = await db
         .select({
