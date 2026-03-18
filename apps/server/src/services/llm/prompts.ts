@@ -8,6 +8,7 @@ import type {
   DiffServiceContext,
   DiffDatabaseContext,
   DiffModuleContext,
+  CodeViolationContext,
 } from './provider.js';
 
 // ---------------------------------------------------------------------------
@@ -179,6 +180,29 @@ IMPORTANT:
 - For each new violation, provide a fixPrompt using human-readable names.
 
 If deterministic violations are listed above that are NOT covered by existing violations, generate a new violation entry for each with a concrete fixPrompt.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-code': {
+    prompt: `You are a senior code reviewer. Analyze the following source files and identify semantic code quality issues that AST-based linting cannot detect.
+
+Rules to evaluate:
+{{llmRules}}
+
+Files to analyze:
+{{fileList}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories.
+- For each violation, use the exact rule name from the rules list.
+- filePath must exactly match one of the file paths provided above.
+- Each line in the source files is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block. Do NOT group multiple functions or unrelated code into one wide-spanning violation. If the same issue appears in multiple functions, report each as a separate violation with its own line range.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue. For example, if a function on lines 10-20 has a problem on lines 14-16, use lineStart=14, lineEnd=16 — not the entire function.
+- Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
+- Do NOT report issues that overlap with deterministic linting (empty catch, console.log, hardcoded secrets, TODO comments, magic numbers, explicit any, SQL injection).
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -431,6 +455,29 @@ export function buildDiffModuleTemplateVars(context: DiffModuleContext): Record<
     existingViolations: formatExistingViolations(context.existingViolations),
     changedFiles: formatChangedFiles(context.changedFiles),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Code violation template variable helpers
+// ---------------------------------------------------------------------------
+
+/** Build template vars for violations-code prompt. */
+export function buildCodeTemplateVars(context: CodeViolationContext): Record<string, string> {
+  const llmRules = context.llmRules
+    .map((r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`)
+    .join('\n');
+
+  const fileList = context.files
+    .map((f) => {
+      const numbered = f.content
+        .split('\n')
+        .map((line, i) => `${i + 1}: ${line}`)
+        .join('\n');
+      return `=== ${f.path} ===\n${numbered}`;
+    })
+    .join('\n\n');
+
+  return { llmRules, fileList };
 }
 
 // ---------------------------------------------------------------------------

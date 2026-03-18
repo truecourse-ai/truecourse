@@ -29,6 +29,13 @@
       "when": 1773809898353,
       "tag": "0003_yielding_mad_thinker",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1773855913962,
+      "tag": "0004_eager_luckman",
+      "breakpoints": true
     }
   ]
 }

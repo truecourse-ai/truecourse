@@ -1,9 +1,9 @@
 
 import { useEffect, useState } from 'react';
-import { Shield, Network, Database, Box, Loader2 } from 'lucide-react';
+import { Shield, Network, Database, Box, FileCode, Loader2 } from 'lucide-react';
 import { getRules, type RuleResponse } from '@/lib/api';
 
-type CategoryFilter = 'all' | 'service' | 'database' | 'module';
+type CategoryFilter = 'all' | 'service' | 'database' | 'module' | 'code';
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -22,12 +22,14 @@ const categoryColors: Record<string, string> = {
   service: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
   module: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
   database: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  code: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
 };
 
 const categoryLabels: Record<string, string> = {
   service: 'Service',
   module: 'Module',
   database: 'Database',
+  code: 'Code',
 };
 
 export function RulesPanel() {
@@ -43,7 +45,7 @@ export function RulesPanel() {
   }, []);
 
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  const categoryOrder: Record<string, number> = { service: 0, module: 1, database: 2 };
+  const categoryOrder: Record<string, number> = { service: 0, module: 1, database: 2, code: 3 };
   const typeOrder: Record<string, number> = { deterministic: 0, llm: 1 };
   const filtered = (filter === 'all' ? rules : rules.filter((r) => r.category === filter))
     .slice()
@@ -58,6 +60,7 @@ export function RulesPanel() {
     { value: 'service', label: 'Service', icon: <Network className="h-3.5 w-3.5" /> },
     { value: 'module', label: 'Module', icon: <Box className="h-3.5 w-3.5" /> },
     { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
+    { value: 'code', label: 'Code', icon: <FileCode className="h-3.5 w-3.5" /> },
   ];
 
   if (loading) {

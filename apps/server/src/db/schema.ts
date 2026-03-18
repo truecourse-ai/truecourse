@@ -520,6 +520,36 @@ export const rules = pgTable('rules', {
 });
 
 // ---------------------------------------------------------------------------
+// code_violations (file/line-level code quality violations)
+// ---------------------------------------------------------------------------
+
+export const codeViolations = pgTable('code_violations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  filePath: text('file_path').notNull(),
+  lineStart: integer('line_start').notNull(),
+  lineEnd: integer('line_end').notNull(),
+  columnStart: integer('column_start').notNull(),
+  columnEnd: integer('column_end').notNull(),
+  ruleKey: text('rule_key').notNull(),
+  severity: text('severity').notNull(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  snippet: text('snippet').notNull(),
+  fixPrompt: text('fix_prompt'),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
+});
+
+export const codeViolationsRelations = relations(codeViolations, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [codeViolations.analysisId],
+    references: [analyses.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
 // diff_checks (persisted diff analysis results)
 // ---------------------------------------------------------------------------
 

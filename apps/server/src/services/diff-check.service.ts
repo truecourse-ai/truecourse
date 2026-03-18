@@ -1,8 +1,11 @@
 import path from 'path';
+import fs from 'node:fs';
 import { simpleGit } from 'simple-git';
 import { runAnalysis, runDeterministicModuleChecks, type AnalysisProgressCallback, type AnalysisResult } from './analyzer.service.js';
-import { createLLMProvider, type DiffViolationItem } from './llm/provider.js';
+import { createLLMProvider, type DiffViolationItem, type CodeViolationContext } from './llm/provider.js';
 import { getEnabledRules } from './rules.service.js';
+import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer';
+import type { CodeViolation } from '@truecourse/shared';
 export interface BaselineViolation {
   id: string;
   type: string;
@@ -30,12 +33,24 @@ export interface DiffAnalysisOutput {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
 }
 
+export interface BaselineCodeViolation {
+  id: string;
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  ruleKey: string;
+  severity: string;
+  title: string;
+  content: string;
+}
+
 export interface DiffViolationCheckInput {
   repoPath: string;
   analysisResult: AnalysisResult;
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
   baselineViolations: BaselineViolation[];
   baselineLayerViolations: string[];
+  baselineCodeViolations: BaselineCodeViolation[];
   serviceIdMap: Map<string, string>;
   moduleIdMap: Map<string, string>;
   methodIdMap: Map<string, string>;
@@ -46,6 +61,7 @@ export interface DiffCheckOutput {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
   resolvedViolationIds: string[];
   newViolations: DiffViolationItem[];
+  codeViolations: CodeViolation[];
   affectedNodeIds: {
     services: string[];
     layers: string[];
@@ -92,7 +108,7 @@ export async function runDiffAnalysis(input: DiffAnalysisInput): Promise<DiffAna
 export async function runDiffViolationCheck(input: DiffViolationCheckInput): Promise<DiffCheckOutput> {
   const {
     repoPath, analysisResult: result, changedFiles,
-    baselineViolations, baselineLayerViolations,
+    baselineViolations, baselineLayerViolations, baselineCodeViolations,
     serviceIdMap, moduleIdMap, methodIdMap,
     onProgress,
   } = input;
@@ -102,6 +118,7 @@ export async function runDiffViolationCheck(input: DiffViolationCheckInput): Pro
       changedFiles: [],
       resolvedViolationIds: [],
       newViolations: [],
+      codeViolations: [],
       affectedNodeIds: { services: [], layers: [], modules: [], methods: [] },
       summary: { newCount: 0, resolvedCount: 0 },
       analysisResult: result,
@@ -112,10 +129,76 @@ export async function runDiffViolationCheck(input: DiffViolationCheckInput): Pro
   const allRules = await getEnabledRules();
   const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
   const enabledLlmRules = allRules
-    .filter((r) => r.type === 'llm' && r.prompt)
+    .filter((r) => r.type === 'llm' && r.prompt && r.category !== 'code')
     .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
   const moduleViolations = runDeterministicModuleChecks(result, enabledDeterministic);
+
+  // 3b. Run code rules on changed files only
+  const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
+  const enabledLlmCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt);
+  const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
+  const codeViolations: CodeViolation[] = [];
+  const fileContents = new Map<string, { content: string; lineCount: number }>();
+
+  for (const relPath of changedFileSet) {
+    try {
+      const lang = detectLanguage(relPath);
+      if (!lang) continue;
+      const absPath = path.resolve(repoPath, relPath);
+      if (!fs.existsSync(absPath)) continue;
+      const content = fs.readFileSync(absPath, 'utf-8');
+      const lineCount = content.split('\n').length;
+      fileContents.set(absPath, { content, lineCount });
+
+      if (enabledCodeRules.length > 0) {
+        const tree = parseFile(relPath, content, lang);
+        const violations = checkCodeRules(tree, absPath, content, enabledCodeRules);
+        codeViolations.push(...violations);
+      }
+    } catch {
+      // Skip files that fail to parse
+    }
+  }
+
+  // Build LLM code violation batches from changed files
+  const MAX_CHARS_PER_BATCH = 100_000;
+  const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
+  const llmCodeBatches: CodeViolationContext[] = [];
+  const llmCodeRuleDtos = enabledLlmCodeRules.map((r) => ({
+    name: r.name,
+    severity: r.severity,
+    prompt: r.prompt!,
+  }));
+  const llmCodeRuleNameToKey = new Map(enabledLlmCodeRules.map((r) => [r.name, r.key]));
+
+  if (enabledLlmCodeRules.length > 0 && fileContents.size > 0) {
+    let currentBatch: { path: string; content: string }[] = [];
+    let currentChars = 0;
+
+    for (const [filePath, { content }] of fileContents) {
+      const fileChars = content.length;
+      if (fileChars > HALF_BATCH) {
+        if (currentBatch.length > 0) {
+          llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRuleDtos });
+          currentBatch = [];
+          currentChars = 0;
+        }
+        llmCodeBatches.push({ files: [{ path: filePath, content }], llmRules: llmCodeRuleDtos });
+        continue;
+      }
+      if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
+        llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRuleDtos });
+        currentBatch = [];
+        currentChars = 0;
+      }
+      currentBatch.push({ path: filePath, content });
+      currentChars += fileChars;
+    }
+    if (currentBatch.length > 0) {
+      llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRuleDtos });
+    }
+  }
 
   // 4. Partition existing violations by category
   const serviceBaseline = baselineViolations.filter((i) => i.type === 'service');
@@ -152,7 +235,12 @@ export async function runDiffViolationCheck(input: DiffViolationCheckInput): Pro
 
   onProgress({ step: 'analyzing', percent: 85, detail: 'Running diff checks...' });
 
-  const diffResult = await provider.generateDiffViolations({
+  // Run arch/module diff violations and LLM code violations in parallel
+  const llmCodePromise = llmCodeBatches.length > 0
+    ? provider.generateAllCodeViolations(llmCodeBatches)
+    : Promise.resolve({ violations: [] });
+
+  const diffPromise = provider.generateDiffViolations({
     service: {
       architecture: result.architecture,
       services: serviceDtos,
@@ -246,6 +334,37 @@ export async function runDiffViolationCheck(input: DiffViolationCheckInput): Pro
     } : undefined,
   });
 
+  const [diffResult, llmCodeResult] = await Promise.all([diffPromise, llmCodePromise]);
+
+  // Post-process LLM code violations
+  const validFilePaths = new Set(fileContents.keys());
+  for (const v of llmCodeResult.violations) {
+    if (!validFilePaths.has(v.filePath)) continue;
+    const fileInfo = fileContents.get(v.filePath)!;
+    const lineStart = Math.max(1, Math.min(v.lineStart, fileInfo.lineCount));
+    const lineEnd = Math.max(lineStart, Math.min(v.lineEnd, fileInfo.lineCount));
+    const lines = fileInfo.content.split('\n');
+    const snippet = lines.slice(lineStart - 1, lineEnd).join('\n');
+    const strippedName = v.ruleName.replace(/^\[(?:LOW|MEDIUM|HIGH|CRITICAL)\]\s*/i, '');
+    const ruleKey = llmCodeRuleNameToKey.get(v.ruleName)
+      || llmCodeRuleNameToKey.get(strippedName)
+      || v.ruleName;
+
+    codeViolations.push({
+      ruleKey,
+      filePath: v.filePath,
+      lineStart,
+      lineEnd,
+      columnStart: 0,
+      columnEnd: 0,
+      severity: v.severity,
+      title: v.title,
+      content: v.content,
+      snippet,
+      fixPrompt: v.fixPrompt ?? undefined,
+    });
+  }
+
   // 6. Post-process LLM results: deduplicate new violations and filter false resolves
 
   // 6a. Remove "new" violations that duplicate existing ones (title match)
@@ -307,6 +426,7 @@ export async function runDiffViolationCheck(input: DiffViolationCheckInput): Pro
     changedFiles,
     resolvedViolationIds: validResolvedIds,
     newViolations: dedupedNewViolations,
+    codeViolations,
     affectedNodeIds: {
       services: [...affectedServices],
       layers: [...affectedLayers],

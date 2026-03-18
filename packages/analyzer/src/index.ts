@@ -49,9 +49,10 @@ export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPa
 export { extractModulesAndMethods, type ModuleExtractionResult } from './module-extractor.js'
 
 // Rules
-export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES } from './rules/index.js'
+export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES, LLM_CODE_RULES, CODE_RULES } from './rules/index.js'
 export { getAllDefaultRules } from './rule-engine.js'
 export { checkModuleRules, type ModuleViolation } from './rules/module-rules-checker.js'
+export { checkCodeRules } from './rules/code-rules-checker.js'
 
 /**
  * High-level function to analyze an entire repository

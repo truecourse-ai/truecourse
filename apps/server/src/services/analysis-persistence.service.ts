@@ -12,8 +12,10 @@ import {
   methods,
   moduleDeps,
   methodDeps,
+  codeViolations,
 } from '../db/schema.js';
 import type { AnalysisResult } from './analyzer.service.js';
+import type { CodeViolation } from '@truecourse/shared';
 
 export interface PersistAnalysisParams {
   repoId: string;
@@ -239,4 +241,36 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
   }
 
   return { analysisId: analysis.id, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap };
+}
+
+/**
+ * Persist code-level violations (file/line-level) into the code_violations table.
+ */
+export async function persistCodeViolations(
+  analysisId: string,
+  violations: CodeViolation[],
+): Promise<void> {
+  if (violations.length === 0) return;
+
+  // Bulk insert in batches of 100
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < violations.length; i += BATCH_SIZE) {
+    const batch = violations.slice(i, i + BATCH_SIZE);
+    await db.insert(codeViolations).values(
+      batch.map((v) => ({
+        analysisId,
+        filePath: v.filePath,
+        lineStart: v.lineStart,
+        lineEnd: v.lineEnd,
+        columnStart: v.columnStart,
+        columnEnd: v.columnEnd,
+        ruleKey: v.ruleKey,
+        severity: v.severity,
+        title: v.title,
+        content: v.content,
+        snippet: v.snippet,
+        fixPrompt: v.fixPrompt || null,
+      })),
+    );
+  }
 }

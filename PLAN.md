@@ -796,7 +796,7 @@ type DiffCheckResult = {
 
 ---
 
-## Phase 7: Code-Level Analysis & Code Viewer `STATUS: BACKLOG`
+## Phase 7: Code-Level Analysis & Code Viewer `STATUS: DONE`
 
 Extend the analyzer to detect code-level issues (like SonarQube) and add a code viewer to the frontend for browsing source files with inline violation annotations.
 
@@ -852,7 +852,7 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 - `GET /api/repos/:id/files/:path` — returns file content for the code viewer
 - `GET /api/repos/:id/code-violations?file=path` — returns code-level violations for a file
 
-### Test Plan (Phase 7) `STATUS: BACKLOG`
+### Test Plan (Phase 7) `STATUS: DONE`
 - Rule visitors correctly detect empty catch blocks, console.log, magic numbers in fixture code
 - Duplicated code detection: two functions with same structure (different variable names) are flagged
 - Security: hardcoded secrets detected (API key strings, password assignments in source)
@@ -874,13 +874,34 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 
 ---
 
-## Phase 8: Multi-Language Support `STATUS: BACKLOG`
+## Phase 8: Custom Rule Generation `STATUS: BACKLOG`
+
+Add the ability to generate project-specific analysis rules via a CLI command. The LLM analyzes your codebase's patterns, conventions, and architecture to produce custom rules tailored to the project.
+
+### Scope
+- `npx truecourse rules generate` — analyzes the project and generates custom rules
+- LLM examines project structure, naming conventions, dependency patterns, and existing violations to suggest rules
+- Generated rules are saved to a local config file (e.g. `.truecourse/rules.yaml` or similar)
+- Custom rules integrate with the existing rules system (appear in Rules tab, used by analysis)
+- Rule enable/disable and severity editing in the web UI Rules tab
+- Support both deterministic and LLM rule types
+
+### Verification
+1. Run `npx truecourse rules generate` on a real project → generates relevant custom rules
+2. Generated rules appear in the Rules tab alongside built-in rules
+3. Re-running analysis uses custom rules and produces new violations
+4. Rules can be enabled/disabled and severity changed in the UI
+5. `pnpm build` and `pnpm test` pass
+
+---
+
+## Phase 9: Multi-Language Support `STATUS: BACKLOG`
 
 - Re-enable Python, C# extractors from SpecMind
 - Language-specific import resolution and pattern detection
 - Incremental analysis (content-hash cache, only re-analyze changed files)
 
-### Test Plan (Phase 8) `STATUS: BACKLOG`
+### Test Plan (Phase 10) `STATUS: BACKLOG`
 - Python parser: parses `.py` files, extracts functions, classes, imports (decorators, type hints)
 - C# parser: parses `.cs` files, extracts classes, methods, using statements, attributes
 - Python import resolution: resolves relative imports, `__init__.py`, package imports
@@ -890,7 +911,7 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 - Cache invalidation: modifying a file updates its hash and triggers re-analysis
 - Mixed-language repo: a repo with both TS and Python files produces correct combined analysis
 
-### Verification (Phase 8)
+### Verification (Phase 10)
 1. Analyze a Python repo → services, layers, files detected correctly
 2. Analyze a C# repo → same
 3. Modify a single file in a large repo → only that file re-analyzed (check logs)
@@ -898,14 +919,14 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 
 ---
 
-## Phase 9: Cloud Version (Future) `STATUS: BACKLOG`
+## Phase 10: Cloud Version (Future) `STATUS: BACKLOG`
 
 - Auth (NextAuth.js), GitHub integration
 - GitHub webhooks replacing file watcher
 - Landing page, dashboard, team features
 - Managed Postgres deployment
 
-### Test Plan (Phase 9) `STATUS: BACKLOG`
+### Test Plan (Phase 10) `STATUS: BACKLOG`
 - Auth flow: NextAuth.js sign-in/sign-out, session persistence, token refresh
 - GitHub OAuth: mock OAuth flow, verify user creation and repo access scoping
 - Webhook handler: GitHub push event triggers analysis for correct repo and branch
@@ -914,7 +935,7 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 - Team access: shared repo analyses are visible to all team members
 - Cloud DB: migrations run cleanly on managed Postgres (connection pooling, SSL)
 
-### Verification (Phase 9)
+### Verification (Phase 10)
 1. Sign up / sign in via OAuth
 2. Connect a GitHub repo → webhook triggers analysis on push
 3. Graph renders in cloud-hosted UI

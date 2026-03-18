@@ -5,6 +5,7 @@ import type { ViolationResponse } from '@/lib/api';
 
 export function useViolations(repoId: string, selectedServiceId?: string, analysisId?: string) {
   const [violations, setViolations] = useState<ViolationResponse[]>([]);
+  const [codeViolations, setCodeViolations] = useState<ViolationResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,8 +14,34 @@ export function useViolations(repoId: string, selectedServiceId?: string, analys
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.getViolations(repoId, analysisId);
-      setViolations(data);
+      const [archData, codeData] = await Promise.all([
+        api.getViolations(repoId, analysisId),
+        api.getCodeViolations(repoId, undefined, analysisId),
+      ]);
+      setViolations(archData);
+      // Normalize code violations into ViolationResponse shape
+      setCodeViolations(codeData.map((cv) => ({
+        id: cv.id,
+        type: 'code',
+        title: cv.title,
+        content: cv.content,
+        severity: cv.severity,
+        targetServiceId: null,
+        targetServiceName: null,
+        targetDatabaseId: null,
+        targetDatabaseName: null,
+        targetModuleId: null,
+        targetModuleName: null,
+        targetMethodId: null,
+        targetMethodName: null,
+        targetTable: null,
+        fixPrompt: cv.fixPrompt || null,
+        createdAt: new Date().toISOString(),
+        // Code-specific fields
+        filePath: cv.filePath,
+        lineStart: cv.lineStart,
+        ruleKey: cv.ruleKey,
+      } as ViolationResponse)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch violations');
     } finally {
@@ -25,6 +52,8 @@ export function useViolations(repoId: string, selectedServiceId?: string, analys
   useEffect(() => {
     fetchViolations();
   }, [fetchViolations]);
+
+  const allCombined = useMemo(() => [...violations, ...codeViolations], [violations, codeViolations]);
 
   const filteredViolations = useMemo(() => {
     const severityOrder: Record<string, number> = {
@@ -39,8 +68,9 @@ export function useViolations(repoId: string, selectedServiceId?: string, analys
       module: 1,
       function: 2,
       database: 3,
+      code: 4,
     };
-    const sorted = [...violations].sort((a, b) => {
+    const sorted = [...allCombined].sort((a, b) => {
       const sevDiff = (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5);
       if (sevDiff !== 0) return sevDiff;
       const typeDiff = (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9);
@@ -50,16 +80,17 @@ export function useViolations(repoId: string, selectedServiceId?: string, analys
     if (!selectedServiceId) return sorted;
     return sorted.filter(
       (violation) =>
+        violation.type === 'code' || // code violations aren't tied to graph nodes
         violation.targetServiceId === selectedServiceId ||
         violation.targetDatabaseId === selectedServiceId ||
         violation.targetModuleId === selectedServiceId ||
         violation.targetMethodId === selectedServiceId,
     );
-  }, [violations, selectedServiceId]);
+  }, [allCombined, selectedServiceId]);
 
   return {
     violations: filteredViolations,
-    allViolations: violations,
+    allViolations: allCombined,
     isLoading,
     error,
     refetch: fetchViolations,

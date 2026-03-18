@@ -16,13 +16,18 @@ import {
   moduleDeps,
   methodDeps,
   diffChecks,
+  codeViolations,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { simpleGit } from 'simple-git';
+import fs from 'node:fs';
+import path from 'node:path';
 import { runAnalysis, runDeterministicModuleChecks } from '../services/analyzer.service.js';
 import { runDiffAnalysis, runDiffViolationCheck } from '../services/diff-check.service.js';
-import { persistAnalysisResult } from '../services/analysis-persistence.service.js';
+import { persistAnalysisResult, persistCodeViolations } from '../services/analysis-persistence.service.js';
+import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer';
+import type { CodeViolation } from '@truecourse/shared';
 import {
   emitAnalysisProgress,
   emitAnalysisComplete,
@@ -33,6 +38,7 @@ import { generateViolations } from '../services/violation.service.js';
 import type { ModuleViolation } from '@truecourse/analyzer';
 import { getEnabledRules } from '../services/rules.service.js';
 import { v4 as uuidv4 } from 'uuid';
+import { createLLMProvider, type CodeViolationContext } from '../services/llm/provider.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -133,6 +139,39 @@ router.post(
         const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
         const moduleViolations: ModuleViolation[] = runDeterministicModuleChecks(result, enabledDeterministic);
 
+        // Run code-level rules (AST visitors) and collect file contents for LLM code rules
+        const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
+        const enabledLlmCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt);
+        const allCodeViolations: CodeViolation[] = [];
+        const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
+
+        if ((enabledCodeRules.length > 0 || enabledLlmCodeRules.length > 0) && result.fileAnalyses) {
+          emitAnalysisProgress(id, {
+            step: 'analyzing',
+            percent: 82,
+            detail: 'Running code checks...',
+          });
+
+          for (const fa of result.fileAnalyses) {
+            try {
+              const lang = detectLanguage(fa.filePath);
+              if (!lang) continue;
+              const absPath = path.isAbsolute(fa.filePath) ? fa.filePath : path.join(repo.path, fa.filePath);
+              const content = fs.readFileSync(absPath, 'utf-8');
+              const lineCount = content.split('\n').length;
+              fileContents.set(fa.filePath, { content, lineCount });
+
+              if (enabledCodeRules.length > 0) {
+                const tree = parseFile(fa.filePath, content, lang);
+                const violations = checkCodeRules(tree, fa.filePath, content, enabledCodeRules);
+                allCodeViolations.push(...violations);
+              }
+            } catch {
+              // Skip files that fail to parse
+            }
+          }
+        }
+
         // Carry over node positions from previous analysis (namespaced)
         const carryOver: Record<string, unknown> = {};
         if (Object.keys(prevPositionsByName).length > 0) {
@@ -184,10 +223,6 @@ router.post(
 
         // Generate LLM violations before completing
         try {
-          const callParts: string[] = ['architecture'];
-          if (result.databaseResult && result.databaseResult.databases.length > 0) callParts.push('database');
-          if (result.modules && result.modules.length > 0) callParts.push('module');
-
           let currentPercent = 85;
           emitAnalysisProgress(id, {
             step: 'analyzing',
@@ -215,9 +250,9 @@ router.post(
             .filter((d) => d.isViolation)
             .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
 
-          // Gather enabled LLM rules with category for violation generation
+          // Gather enabled LLM rules with category for violation generation (exclude code rules — handled separately)
           const enabledLlmRules = allRules
-            .filter((r) => r.type === 'llm' && r.prompt)
+            .filter((r) => r.type === 'llm' && r.prompt && r.category !== 'code')
             .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
           // Build module data for violation generation
@@ -258,7 +293,56 @@ router.post(
             };
           });
 
-          const { violations: generatedViolations, serviceDescriptions } = await generateViolations({
+          // Build LLM code violation batches from collected file contents
+          const MAX_CHARS_PER_BATCH = 100_000;
+          const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
+          const llmCodeBatches: CodeViolationContext[] = [];
+          const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
+            name: r.name,
+            severity: r.severity,
+            prompt: r.prompt!,
+          }));
+
+          if (enabledLlmCodeRules.length > 0 && fileContents.size > 0) {
+            let currentBatch: { path: string; content: string }[] = [];
+            let currentChars = 0;
+
+            for (const [filePath, { content }] of fileContents) {
+              const fileChars = content.length;
+
+              // Large files get their own batch
+              if (fileChars > HALF_BATCH) {
+                if (currentBatch.length > 0) {
+                  llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRulesDtos });
+                  currentBatch = [];
+                  currentChars = 0;
+                }
+                llmCodeBatches.push({ files: [{ path: filePath, content }], llmRules: llmCodeRulesDtos });
+                continue;
+              }
+
+              // Would exceed batch limit — flush current batch
+              if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
+                llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRulesDtos });
+                currentBatch = [];
+                currentChars = 0;
+              }
+
+              currentBatch.push({ path: filePath, content });
+              currentChars += fileChars;
+            }
+
+            if (currentBatch.length > 0) {
+              llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRulesDtos });
+            }
+          }
+
+          // Build name-to-key lookup for LLM code rules
+          const llmCodeRuleNameToKey = new Map(enabledLlmCodeRules.map((r) => [r.name, r.key]));
+          const validFilePaths = new Set(fileContents.keys());
+
+          // Run arch/db/module violations AND LLM code violations in parallel
+          const archViolationsPromise = generateViolations({
             architecture: result.architecture,
             services: analysisServices,
             dependencies: analysisDeps,
@@ -318,6 +402,14 @@ router.post(
             });
           });
 
+          const llmCodePromise = llmCodeBatches.length > 0
+            ? createLLMProvider().generateAllCodeViolations(llmCodeBatches)
+            : Promise.resolve({ violations: [] });
+
+          const [archResult, codeResult] = await Promise.all([archViolationsPromise, llmCodePromise]);
+
+          const { violations: generatedViolations, serviceDescriptions } = archResult;
+
           for (const violation of generatedViolations) {
             await db.insert(violations).values({
               id: uuidv4(),
@@ -346,12 +438,61 @@ router.post(
             }
           }
 
+          // Post-process LLM code violations and append to allCodeViolations
+          if (codeResult.violations.length > 0) {
+            for (const v of codeResult.violations) {
+              // Validate file path exists in input
+              if (!validFilePaths.has(v.filePath)) continue;
+
+              const fileInfo = fileContents.get(v.filePath)!;
+
+              // Clamp line numbers to actual file range
+              const lineStart = Math.max(1, Math.min(v.lineStart, fileInfo.lineCount));
+              const lineEnd = Math.max(lineStart, Math.min(v.lineEnd, fileInfo.lineCount));
+
+              // Extract snippet from file content
+              const lines = fileInfo.content.split('\n');
+              const snippet = lines.slice(lineStart - 1, lineEnd).join('\n');
+
+              // Map rule name to rule key — LLM may return with severity prefix like "[HIGH] Name"
+              const strippedName = v.ruleName.replace(/^\[(?:LOW|MEDIUM|HIGH|CRITICAL)\]\s*/i, '');
+              const ruleKey = llmCodeRuleNameToKey.get(v.ruleName)
+                || llmCodeRuleNameToKey.get(strippedName)
+                || v.ruleName;
+
+              allCodeViolations.push({
+                ruleKey,
+                filePath: v.filePath,
+                lineStart,
+                lineEnd,
+                columnStart: 0,
+                columnEnd: 0,
+                severity: v.severity,
+                title: v.title,
+                content: v.content,
+                snippet,
+                fixPrompt: v.fixPrompt ?? undefined,
+              });
+            }
+          }
+
+          // Persist all code violations (deterministic + LLM)
+          if (allCodeViolations.length > 0) {
+            await persistCodeViolations(newAnalysisId, allCodeViolations);
+          }
+
           emitViolationsReady(id, analysis.id);
         } catch (violationError) {
           console.error(
             `[Violations] Failed for repo ${id}:`,
             violationError instanceof Error ? violationError.message : String(violationError)
           );
+          // Still persist deterministic code violations if LLM failed
+          if (allCodeViolations.length > 0) {
+            try {
+              await persistCodeViolations(newAnalysisId, allCodeViolations);
+            } catch { /* ignore */ }
+          }
         }
 
         emitAnalysisComplete(id, analysis.id);
@@ -869,6 +1010,12 @@ router.post(
         .filter((d) => d.isViolation)
         .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
 
+      // Load baseline code violations for diff comparison
+      const baselineCodeViolationRows = await db
+        .select()
+        .from(codeViolations)
+        .where(eq(codeViolations.analysisId, latestAnalysis.id));
+
       const serviceNameMap = new Map(analysisServices.map((s) => [s.id, s.name]));
       const moduleNameMap = new Map(analysisModules.map((m) => [m.id, m.name]));
       const methodNameMap = new Map(analysisMethods.map((m) => [m.id, m.name]));
@@ -929,6 +1076,16 @@ router.post(
         changedFiles: diffAnalysis.changedFiles,
         baselineViolations: violationsWithNames,
         baselineLayerViolations: baselineLayerViolationDescriptions,
+        baselineCodeViolations: baselineCodeViolationRows.map((r) => ({
+          id: r.id,
+          filePath: r.filePath,
+          lineStart: r.lineStart,
+          lineEnd: r.lineEnd,
+          ruleKey: r.ruleKey,
+          severity: r.severity,
+          title: r.title,
+          content: r.content,
+        })),
         serviceIdMap: diffServiceIdMap,
         moduleIdMap: diffModuleIdMap,
         methodIdMap: diffMethodIdMap,
@@ -949,6 +1106,11 @@ router.post(
         summary: result.summary,
       });
 
+      // Persist code violations for the diff analysis
+      if (result.codeViolations.length > 0) {
+        await persistCodeViolations(diffAnalysisId, result.codeViolations);
+      }
+
       // Build resolved violations for the response
       const resolvedSet = new Set(result.resolvedViolationIds);
       const resolvedViolations = violationsWithNames
@@ -960,15 +1122,34 @@ router.post(
           targetTable: null,
         }));
 
+      // Convert code violations to diff violation items
+      const codeViolationItems = result.codeViolations.map((cv) => ({
+        type: 'code' as const,
+        title: cv.title,
+        content: cv.content,
+        severity: cv.severity,
+        targetServiceId: null,
+        targetModuleId: null,
+        targetMethodId: null,
+        targetServiceName: null,
+        targetModuleName: null,
+        targetMethodName: null,
+        fixPrompt: cv.fixPrompt || null,
+        filePath: cv.filePath,
+        lineStart: cv.lineStart,
+      }));
+
+      const allNewViolations = [...result.newViolations, ...codeViolationItems];
+
       // Clear progress bar
       emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
 
       res.json({
         changedFiles: result.changedFiles,
         resolvedViolations,
-        newViolations: result.newViolations,
+        newViolations: allNewViolations,
         affectedNodeIds: result.affectedNodeIds,
-        summary: result.summary,
+        summary: { ...result.summary, newCount: allNewViolations.length },
         isStale: false,
         diffAnalysisId,
       });
@@ -1067,6 +1248,63 @@ router.get(
         isStale,
         diffAnalysisId: diffCheck.diffAnalysisId,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// GET /api/repos/:id/file-content - Read a file from the repository
+router.get(
+  '/:id/file-content',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+      const filePath = req.query.path as string;
+
+      if (!filePath) {
+        throw createAppError('Missing "path" query parameter', 400);
+      }
+
+      const [repo] = await db
+        .select()
+        .from(repos)
+        .where(eq(repos.id, id))
+        .limit(1);
+
+      if (!repo) {
+        throw createAppError('Repo not found', 404);
+      }
+
+      // Resolve and validate path is within repo
+      const resolved = path.resolve(repo.path, filePath);
+      if (!resolved.startsWith(path.resolve(repo.path) + path.sep) && resolved !== path.resolve(repo.path)) {
+        throw createAppError('Path traversal not allowed', 403);
+      }
+
+      if (!fs.existsSync(resolved)) {
+        throw createAppError('File not found', 404);
+      }
+
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile()) {
+        throw createAppError('Path is not a file', 400);
+      }
+
+      const content = fs.readFileSync(resolved, 'utf-8');
+
+      // Detect language from extension
+      const ext = path.extname(resolved).slice(1).toLowerCase();
+      const langMap: Record<string, string> = {
+        ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+        json: 'json', md: 'markdown', css: 'css', html: 'html', yaml: 'yaml',
+        yml: 'yaml', sql: 'sql', sh: 'shell', py: 'python', go: 'go',
+        rs: 'rust', java: 'java', rb: 'ruby', php: 'php', c: 'c',
+        cpp: 'cpp', h: 'c', hpp: 'cpp',
+      };
+      const language = langMap[ext] || 'text';
+
+      res.json({ content, language });
     } catch (error) {
       next(error);
     }

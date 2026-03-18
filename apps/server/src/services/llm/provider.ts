@@ -15,6 +15,7 @@ import {
   buildDiffServiceTemplateVars,
   buildDiffDatabaseTemplateVars,
   buildDiffModuleTemplateVars,
+  buildCodeTemplateVars,
 } from './prompts.js';
 
 // ---------------------------------------------------------------------------
@@ -190,6 +191,26 @@ export interface DiffModuleContext extends ModuleViolationContext {
   changedFiles: string[];
 }
 
+export interface CodeViolationContext {
+  files: { path: string; content: string }[];
+  llmRules: { name: string; severity: string; prompt: string }[];
+}
+
+export interface CodeViolationRaw {
+  ruleName: string;
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  severity: string;
+  title: string;
+  content: string;
+  fixPrompt: string | null;
+}
+
+export interface CodeViolationsResult {
+  violations: CodeViolationRaw[];
+}
+
 export interface DiffViolationItem {
   type: string;
   title: string;
@@ -263,6 +284,8 @@ export interface LLMProvider {
     database?: DiffDatabaseContext;
     module?: DiffModuleContext;
   }): Promise<DiffViolationsResult>;
+  generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
+  generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
   summarizeServices(context: ServiceSummaryContext): Promise<string>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
 }
@@ -334,6 +357,21 @@ const DiffViolationOutputSchema = z.object({
       targetModuleName: z.string().nullable(),
       targetMethodName: z.string().nullable(),
       fixPrompt: z.string().nullable(),
+    })
+  ),
+});
+
+const CodeViolationOutputSchema = z.object({
+  violations: z.array(
+    z.object({
+      ruleName: z.string().describe('The exact rule name from the rules list'),
+      filePath: z.string().describe('The exact file path from the files list'),
+      lineStart: z.number().describe('The starting line number of the violation'),
+      lineEnd: z.number().describe('The ending line number of the violation'),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      title: z.string().describe('A concise title for the violation'),
+      content: z.string().describe('A detailed description of the issue and why it matters'),
+      fixPrompt: z.string().nullable().describe('A prompt an AI coding assistant could use to fix this issue'),
     })
   ),
 });
@@ -604,6 +642,60 @@ class AISDKProvider implements LLMProvider {
       return { resolvedViolationIds: allResolved, newViolations: allNew };
     },
     { name: 'generate-diff-violations' },
+  );
+
+  async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-code', buildCodeTemplateVars(context));
+    const model = getModel();
+
+    console.log(`[LLM] Code violations call starting (${context.files.length} files)...`);
+    const t0 = Date.now();
+    const { output: object } = await generateText({
+      model,
+      output: Output.object({ schema: CodeViolationOutputSchema }),
+      prompt,
+      experimental_telemetry: telemetry('violations-code', langfusePrompt),
+    });
+    console.log(`[LLM] Code violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+
+    return {
+      violations: object.violations.map((v) => ({
+        ruleName: v.ruleName,
+        filePath: v.filePath,
+        lineStart: v.lineStart,
+        lineEnd: v.lineEnd,
+        severity: v.severity,
+        title: v.title,
+        content: v.content,
+        fixPrompt: v.fixPrompt ?? null,
+      })),
+    };
+  }
+
+  generateAllCodeViolations = observe(
+    async (batches: CodeViolationContext[]): Promise<CodeViolationsResult> => {
+      if (batches.length === 0) return { violations: [] };
+
+      console.log(`[LLM] Code violations: ${batches.length} batch(es) starting...`);
+      const t0 = Date.now();
+
+      const results = await Promise.allSettled(
+        batches.map((batch) => this.generateCodeViolations(batch))
+      );
+
+      const allViolations: CodeViolationRaw[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          allViolations.push(...result.value.violations);
+        } else {
+          console.error('[CodeViolations] Batch call failed:', result.reason);
+        }
+      }
+
+      console.log(`[LLM] Code violations total: ${Date.now() - t0}ms — ${allViolations.length} violations`);
+      return { violations: allViolations };
+    },
+    { name: 'generate-all-code-violations' },
   );
 
   async summarizeServices(context: ServiceSummaryContext): Promise<string> {

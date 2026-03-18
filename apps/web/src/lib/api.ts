@@ -123,6 +123,10 @@ export type ViolationResponse = {
   targetTable?: string | null;
   fixPrompt?: string | null;
   createdAt: string;
+  // Code violation fields (type === 'code')
+  filePath?: string;
+  lineStart?: number;
+  ruleKey?: string;
 };
 
 export type ChatMessage = {
@@ -322,6 +326,8 @@ export type DiffViolationItem = {
   targetModuleName: string | null;
   targetMethodName: string | null;
   fixPrompt: string | null;
+  filePath?: string;
+  lineStart?: number;
 };
 
 export type DiffCheckResponse = {
@@ -350,6 +356,64 @@ export function runDiffCheck(repoId: string): Promise<DiffCheckResponse> {
 
 export function getDiffCheck(repoId: string): Promise<DiffCheckResponse | null> {
   return fetchApi<DiffCheckResponse | null>(`/api/repos/${repoId}/diff-check`);
+}
+
+// Code Violations
+export type CodeViolationResponse = {
+  id: string;
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  columnStart: number;
+  columnEnd: number;
+  ruleKey: string;
+  severity: string;
+  title: string;
+  content: string;
+  snippet: string;
+  fixPrompt?: string;
+};
+
+export type CodeViolationSummary = {
+  total: number;
+  byFile: Record<string, number>;
+  bySeverity: Record<string, number>;
+  highestSeverityByFile: Record<string, string>;
+};
+
+export function getFileContent(
+  repoId: string,
+  filePath: string,
+): Promise<{ content: string; language: string }> {
+  return fetchApi<{ content: string; language: string }>(
+    `/api/repos/${repoId}/file-content?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+export function getCodeViolations(
+  repoId: string,
+  file?: string,
+  analysisId?: string,
+): Promise<CodeViolationResponse[]> {
+  const params = new URLSearchParams();
+  if (file) params.set('file', file);
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<CodeViolationResponse[]>(
+    `/api/repos/${repoId}/code-violations${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export function getCodeViolationSummary(
+  repoId: string,
+  analysisId?: string,
+): Promise<CodeViolationSummary> {
+  const params = new URLSearchParams();
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<CodeViolationSummary>(
+    `/api/repos/${repoId}/code-violations/summary${qs ? `?${qs}` : ''}`,
+  );
 }
 
 // Conversations

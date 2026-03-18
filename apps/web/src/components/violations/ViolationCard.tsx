@@ -1,5 +1,5 @@
 
-import { Copy, Check, ChevronDown, ChevronUp, Crosshair } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronUp, Crosshair, FileCode } from 'lucide-react';
 import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import type { ViolationResponse } from '@/lib/api';
 type ViolationCardProps = {
   violation: ViolationResponse;
   onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
+  onOpenFile?: (path: string, pinned: boolean, scrollToLine?: number) => void;
   isResolved?: boolean;
   diffStatus?: 'new' | 'resolved';
 };
@@ -29,7 +30,7 @@ const severityBadgeColors: Record<string, string> = {
   critical: 'bg-red-600/10 text-red-700 dark:text-red-500',
 };
 
-export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus }: ViolationCardProps) {
+export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved, diffStatus }: ViolationCardProps) {
   const [copied, setCopied] = useState(false);
   const [showFix, setShowFix] = useState(false);
 
@@ -40,6 +41,8 @@ export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus 
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const isCodeViolation = violation.type === 'code';
+
   // Most specific target: method > module > database > service
   const locateTargetId = violation.targetMethodId || violation.targetModuleId || violation.targetDatabaseId || violation.targetServiceId;
   const locateTargetName = violation.targetMethodName || violation.targetModuleName || violation.targetDatabaseName || violation.targetServiceName;
@@ -49,9 +52,7 @@ export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus 
 
   return (
     <Card
-      className={`border-l-4 rounded-sm p-3 ${
-        severityColors[violation.severity] || 'border-l-gray-500'
-      }`}
+      className="rounded-sm p-3"
     >
       <CardContent className="p-0">
         <div className="mb-1.5 flex items-center gap-2">
@@ -78,7 +79,19 @@ export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus 
           >
             {violation.severity}
           </Badge>
-          {onLocateNode && locateTargetId && (
+          {/* Locate button: open file for code violations, focus graph node for arch violations */}
+          {isCodeViolation && violation.filePath && onOpenFile ? (
+            <Button
+              variant="outline"
+              size="xs"
+              onClick={() => onOpenFile(violation.filePath!, true, violation.lineStart)}
+              className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+              title={`Open ${violation.filePath}:${violation.lineStart}`}
+            >
+              <FileCode className="h-3 w-3" />
+              Open
+            </Button>
+          ) : onLocateNode && locateTargetId ? (
             <Button
               variant="outline"
               size="xs"
@@ -89,7 +102,7 @@ export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus 
               <Crosshair className="h-3 w-3" />
               Locate
             </Button>
-          )}
+          ) : null}
         </div>
 
         <h4 className={`text-sm font-bold ${isResolved ? 'line-through opacity-60 text-muted-foreground' : 'text-foreground'}`}>
@@ -99,7 +112,21 @@ export function ViolationCard({ violation, onLocateNode, isResolved, diffStatus 
           {violation.content}
         </p>
 
-        {(violation.targetServiceName || violation.targetDatabaseName) && (
+        {/* Code violation: show file path + line */}
+        {isCodeViolation && violation.filePath && (
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            File:{' '}
+            <span className="font-medium text-foreground">
+              {violation.filePath}
+            </span>
+            {violation.lineStart && (
+              <span className="text-muted-foreground">:{violation.lineStart}</span>
+            )}
+          </p>
+        )}
+
+        {/* Arch violation: show target service/module/method */}
+        {!isCodeViolation && (violation.targetServiceName || violation.targetDatabaseName) && (
           <p className="mt-2 text-[10px] text-muted-foreground">
             Target:{' '}
             <span className="font-medium text-foreground">

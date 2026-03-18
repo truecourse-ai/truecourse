@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
@@ -10,12 +10,14 @@ import { ViolationsPanel } from '@/components/violations/ViolationsPanel';
 import { RulesPanel } from '@/components/rules/RulesPanel';
 import { FileTree } from '@/components/files/FileTree';
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { useAnalysisList } from '@/hooks/useAnalysisList';
+import { useCodeViolationSummary } from '@/hooks/useCodeViolationSummary';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
@@ -23,6 +25,12 @@ import * as api from '@/lib/api';
 import type { RepoResponse } from '@/lib/api';
 import type { DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
+
+type OpenFile = {
+  path: string;
+  pinned: boolean;
+  scrollToLine?: number;
+};
 
 export default function RepoGraphPage() {
   const { repoId = '' } = useParams();
@@ -53,11 +61,69 @@ export default function RepoGraphPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<LeftTab | null>('violations');
+  const [leftTab, setLeftTab] = useState<LeftTab | null>(searchParams?.get('file') ? 'files' : 'violations');
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
   const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
+
+  // Multi-tab file viewer state — restore from URL
+  const fileFromUrl = searchParams?.get('file') || null;
+  const [openFiles, setOpenFiles] = useState<OpenFile[]>(() =>
+    fileFromUrl ? [{ path: fileFromUrl, pinned: true }] : []
+  );
+  const [activeFilePath, setActiveFilePathState] = useState<string | null>(fileFromUrl);
+
+  const setActiveFilePath = useCallback((path: string | null) => {
+    setActiveFilePathState(path);
+    const url = new URL(window.location.href);
+    if (path) {
+      url.searchParams.set('file', path);
+    } else {
+      url.searchParams.delete('file');
+    }
+    navigate(url.pathname + url.search, { replace: true });
+  }, [navigate]);
+
+  const handleOpenFile = useCallback((path: string, pinned: boolean, scrollToLine?: number) => {
+    setOpenFiles((prev) => {
+      const existing = prev.find((f) => f.path === path);
+      if (existing) {
+        return prev.map((f) => f.path === path
+          ? { ...f, pinned: pinned || f.pinned, scrollToLine: scrollToLine ?? f.scrollToLine }
+          : f);
+      }
+
+      if (pinned) {
+        return [...prev, { path, pinned: true, scrollToLine }];
+      }
+
+      const hasUnpinned = prev.find((f) => !f.pinned);
+      if (hasUnpinned) {
+        return prev.map((f) => !f.pinned ? { path, pinned: false, scrollToLine } : f);
+      }
+      return [...prev, { path, pinned: false, scrollToLine }];
+    });
+    setActiveFilePath(path);
+    setLeftTab('files');
+  }, []);
+
+  const handleCloseFile = useCallback((path: string) => {
+    setOpenFiles((prev) => {
+      const next = prev.filter((f) => f.path !== path);
+      return next;
+    });
+    setActiveFilePath((current) => {
+      if (current !== path) return current;
+      // Switch to another tab or back to graph
+      const remaining = openFiles.filter((f) => f.path !== path);
+      return remaining.length > 0 ? remaining[remaining.length - 1].path : null;
+    });
+  }, [openFiles]);
+
+  const handleSelectTab = useCallback((path: string | null) => {
+    setActiveFilePath(path);
+  }, []);
 
   const currentBranch = repo?.defaultBranch;
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
@@ -69,6 +135,8 @@ export default function RepoGraphPage() {
     : selectedAnalysisId ?? undefined;
   const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
     useGraph(repoId, currentBranch, depthLevel, graphAnalysisId);
+
+  const { summary: codeViolationSummary, refetch: refetchCodeViolationSummary } = useCodeViolationSummary(repoId, graphAnalysisId);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -104,18 +172,20 @@ export default function RepoGraphPage() {
       setIsAnalyzing(false);
       refetchGraph();
       refetchAnalyses();
+      refetchCodeViolationSummary();
     });
     return unsub;
-  }, [onEvent, refetchGraph, refetchAnalyses]);
+  }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary]);
 
   // Listen for violations ready
   useEffect(() => {
     const unsub = onEvent('violations:ready', () => {
       setIsAnalyzing(false);
       refetchViolations();
+      refetchCodeViolationSummary();
     });
     return unsub;
-  }, [onEvent, refetchViolations]);
+  }, [onEvent, refetchViolations, refetchCodeViolationSummary]);
 
   const handleAnalyze = async () => {
     if (isDiffMode) {
@@ -464,15 +534,9 @@ export default function RepoGraphPage() {
   }, [filteredNodes, isDiffMode, diffResult]);
 
   // Check if a node's absolute file path relates to the selected relative path.
-  // Handles both directions:
-  //   - selectedPath is inside the node's path (e.g. selecting a file inside a service dir)
-  //   - selectedPath is a parent of the node's path (e.g. selecting a folder containing the file)
   const pathMatches = useCallback((absPath: string, relSelected: string): boolean => {
     if (!absPath || !relSelected) return false;
-    // Direct substring match covers most cases (module filePaths are absolute and long)
     if (absPath.includes(relSelected)) return true;
-    // For service rootPaths that are shorter than the selected file path:
-    // check if the selected path starts with the trailing segments of the absolute path
     const absParts = absPath.split('/');
     for (let i = absParts.length - 1; i >= 1; i--) {
       const suffix = absParts.slice(i).join('/');
@@ -515,7 +579,6 @@ export default function RepoGraphPage() {
 
       if (matches) {
         matchingIds.add(n.id);
-        // Include all ancestors
         let pid = parentMap.get(n.id);
         while (pid) {
           matchingIds.add(pid);
@@ -524,7 +587,6 @@ export default function RepoGraphPage() {
       }
     }
 
-    // Also include children of matching container nodes
     let changed = true;
     while (changed) {
       changed = false;
@@ -532,7 +594,6 @@ export default function RepoGraphPage() {
         if (matchingIds.has(n.id)) continue;
         const pid = parentMap.get(n.id);
         if (!pid || !matchingIds.has(pid)) continue;
-        // Check if this child also matches the path
         const d = n.data as Record<string, unknown>;
         if (n.type === 'module' || n.type === 'method') {
           const fp = (d.filePath as string) || (d.rootPath as string) || '';
@@ -573,7 +634,6 @@ export default function RepoGraphPage() {
     for (const n of nodes) {
       const d = n.data as Record<string, unknown>;
       let fp = (d.filePath as string) || (d.rootPath as string);
-      // Services depth: rootPath is inside serviceInfo
       if (!fp && n.type === 'service') {
         const info = d.serviceInfo as Record<string, unknown> | undefined;
         fp = (info?.rootPath as string) || '';
@@ -626,6 +686,9 @@ export default function RepoGraphPage() {
     }
   }, [depthLevel]);
 
+  // Whether we're showing a file tab (code viewer) instead of graph
+  const showingCodeViewer = activeFilePath !== null;
+
   return (
     <div className="flex h-screen flex-col">
       <Header
@@ -663,6 +726,8 @@ export default function RepoGraphPage() {
               isDiffMode={isDiffMode}
               diffResult={diffResult}
               onLocateNode={handleLocateNode}
+              onOpenFile={handleOpenFile}
+              onClearFilter={() => { handleNodeSelect(null); setSelectedPath(null); }}
               selectedPath={selectedPath}
               nodeFilePathMap={nodeFilePathMap}
             />
@@ -672,16 +737,16 @@ export default function RepoGraphPage() {
             <FileTree
               repoId={repoId}
               selectedPath={selectedPath}
+              onOpenFile={handleOpenFile}
+              violationCounts={codeViolationSummary?.byFile}
+              violationSeverities={codeViolationSummary?.highestSeverityByFile}
+              revealPath={activeFilePath}
               onSelectPath={(path) => {
                 setSelectedPath(path);
                 if (!path) {
                   handleNodeSelect(null);
                   return;
                 }
-                // Find the service/serviceGroup whose rootPath is a prefix match of the selected path
-                // rootPath is absolute (e.g. /a/b/services/user-service)
-                // path is relative (e.g. services/user-service/src/foo.ts)
-                // We check: does the relative path start with the last N segments of rootPath?
                 let bestMatch: { id: string; depth: number } | null = null;
                 for (const n of nodes) {
                   if (n.type !== 'service' && n.type !== 'serviceGroup') continue;
@@ -694,7 +759,6 @@ export default function RepoGraphPage() {
                     rp = (d.rootPath as string) || '';
                   }
                   if (!rp) continue;
-                  // Try progressively longer suffixes of rootPath
                   const rpParts = rp.split('/');
                   for (let i = rpParts.length - 1; i >= 0; i--) {
                     const suffix = rpParts.slice(i).join('/');
@@ -713,10 +777,57 @@ export default function RepoGraphPage() {
           )}
         </LeftSidebar>
 
-        {/* Graph area */}
+        {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Historical analysis banner */}
-          {isViewingHistory && selectedAnalysis && (
+          {/* Tab bar when files are open */}
+          {openFiles.length > 0 && (
+            <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
+              {/* Graph tab */}
+              <button
+                onClick={() => handleSelectTab(null)}
+                className={`shrink-0 px-3 py-1.5 border-r border-border transition-colors ${
+                  !showingCodeViewer
+                    ? 'bg-background text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                Graph
+              </button>
+              {/* File tabs */}
+              {openFiles.map((file) => {
+                const fileName = file.path.split('/').pop() || file.path;
+                const isActive = activeFilePath === file.path;
+                return (
+                  <div
+                    key={file.path}
+                    onClick={() => handleSelectTab(file.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={file.path}
+                  >
+                    <span className={file.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseFile(file.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Historical analysis banner — only on graph tab */}
+          {!showingCodeViewer && isViewingHistory && selectedAnalysis && (
             <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
               <span>
                 Viewing analysis from{' '}
@@ -735,15 +846,15 @@ export default function RepoGraphPage() {
             </div>
           )}
 
-          {/* Diff mode banner */}
-          {isDiffMode && diffResult?.diffAnalysisId && (
+          {/* Diff mode banner — only on graph tab */}
+          {!showingCodeViewer && isDiffMode && diffResult?.diffAnalysisId && (
             <div className="flex shrink-0 items-center justify-center gap-2 bg-blue-500/10 border-b border-blue-500/30 px-4 py-1.5 text-xs text-blue-400">
               <span>Showing working tree state (uncommitted changes)</span>
             </div>
           )}
 
-          <div className="relative flex-1">
-          {/* Analysis progress */}
+          <div className="relative flex-1 overflow-hidden">
+          {/* Analysis progress — always visible */}
           {analysisProgress && (
             <div className="absolute bottom-4 left-1/2 z-20 w-72 -translate-x-1/2 rounded-lg border border-border bg-card p-3 shadow-lg">
               <div className="flex items-center gap-2.5">
@@ -763,6 +874,18 @@ export default function RepoGraphPage() {
               )}
             </div>
           )}
+
+          {/* Code viewer */}
+          {showingCodeViewer && activeFilePath ? (
+            <CodeViewerPanel
+              repoId={repoId}
+              filePath={activeFilePath}
+              analysisId={graphAnalysisId}
+              scrollToLine={openFiles.find((f) => f.path === activeFilePath)?.scrollToLine}
+              onClose={() => handleCloseFile(activeFilePath)}
+            />
+          ) : (
+          <>
 
           {/* Connection status */}
           <div className="absolute right-3 top-2 z-20 flex items-center gap-1.5 rounded-full bg-card px-2 py-1 text-[10px] shadow-sm border border-border">
@@ -861,6 +984,8 @@ export default function RepoGraphPage() {
                 savedCollapsedIds={savedCollapsedIds}
               />
             </>
+          )}
+          </>
           )}
           </div>
         </div>
