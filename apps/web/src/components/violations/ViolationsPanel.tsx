@@ -15,7 +15,6 @@ type ViolationsPanelProps = {
   isDiffMode?: boolean;
   diffResult?: DiffCheckResponse | null;
   onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
-  resolveNodeIdByName?: (name: string, type?: string) => string | null;
   selectedPath?: string | null;
   nodeFilePathMap?: Map<string, string>;
 };
@@ -30,7 +29,6 @@ export function ViolationsPanel({
   isDiffMode,
   diffResult,
   onLocateNode,
-  resolveNodeIdByName,
   selectedPath,
   nodeFilePathMap,
 }: ViolationsPanelProps) {
@@ -70,13 +68,6 @@ export function ViolationsPanel({
     const cards: Array<{ violation: ViolationResponse; diffStatus: 'new' | 'resolved' }> = [];
 
     for (const item of diffResult.newViolations) {
-      const targetServiceId = item.targetServiceName && resolveNodeIdByName
-        ? resolveNodeIdByName(item.targetServiceName, 'service') : null;
-      const targetModuleId = item.targetModuleName && resolveNodeIdByName
-        ? resolveNodeIdByName(item.targetModuleName, 'module') : null;
-      const targetMethodId = item.targetMethodName && resolveNodeIdByName
-        ? resolveNodeIdByName(item.targetMethodName, 'method') : null;
-
       cards.push({
         violation: {
           id: `new-${cards.length}`,
@@ -84,11 +75,11 @@ export function ViolationsPanel({
           title: item.title,
           content: item.content,
           severity: item.severity,
-          targetServiceId,
+          targetServiceId: item.targetServiceId ?? null,
           targetServiceName: item.targetServiceName,
-          targetModuleId,
+          targetModuleId: item.targetModuleId ?? null,
           targetModuleName: item.targetModuleName,
-          targetMethodId,
+          targetMethodId: item.targetMethodId ?? null,
           targetMethodName: item.targetMethodName,
           fixPrompt: item.fixPrompt,
           createdAt: new Date().toISOString(),
@@ -117,7 +108,7 @@ export function ViolationsPanel({
     });
 
     return cards;
-  }, [isDiffMode, diffResult, resolveNodeIdByName]);
+  }, [isDiffMode, diffResult]);
 
   // Filter violations by selected file path
   const pathFilteredViolations = useMemo(() => {

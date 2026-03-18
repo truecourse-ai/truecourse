@@ -10,7 +10,7 @@ type LeftSidebarProps = {
   children: React.ReactNode;
   defaultWidth?: number;
   minWidth?: number;
-  badgeCounts?: Partial<Record<LeftTab, number>>;
+  badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
 };
 
 const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
@@ -88,11 +88,28 @@ export function LeftSidebar({
                 <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-primary" />
               )}
               <Icon className="h-5 w-5" />
-              {badgeCounts?.[tab.id] != null && badgeCounts[tab.id]! > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
-                  {badgeCounts[tab.id]}
-                </span>
-              )}
+              {(() => {
+                const badge = badgeCounts?.[tab.id];
+                if (badge == null) return null;
+                if (typeof badge === 'number') {
+                  return badge > 0 ? (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+                      {badge}
+                    </span>
+                  ) : null;
+                }
+                const total = badge.newCount + badge.resolvedCount;
+                return total > 0 ? (
+                  <span className="absolute -right-1 -top-1 flex items-center gap-px rounded-full bg-card border border-border px-1 py-px">
+                    {badge.newCount > 0 && (
+                      <span className="text-[8px] font-bold text-red-400">+{badge.newCount}</span>
+                    )}
+                    {badge.resolvedCount > 0 && (
+                      <span className="text-[8px] font-bold text-emerald-400">-{badge.resolvedCount}</span>
+                    )}
+                  </span>
+                ) : null;
+              })()}
             </button>
           );
         })}
@@ -109,11 +126,28 @@ export function LeftSidebar({
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : 'Files'}
             </span>
-            {activeTab && badgeCounts?.[activeTab] != null && badgeCounts[activeTab]! > 0 && (
-              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {badgeCounts[activeTab]}
-              </span>
-            )}
+            {(() => {
+              const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
+              if (badge == null) return null;
+              if (typeof badge === 'number') {
+                return badge > 0 ? (
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {badge}
+                  </span>
+                ) : null;
+              }
+              const total = badge.newCount + badge.resolvedCount;
+              return total > 0 ? (
+                <span className="flex items-center gap-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                  {badge.newCount > 0 && (
+                    <span className="text-red-400">+{badge.newCount} new</span>
+                  )}
+                  {badge.resolvedCount > 0 && (
+                    <span className="text-emerald-400">-{badge.resolvedCount} resolved</span>
+                  )}
+                </span>
+              ) : null;
+            })()}
           </div>
 
           {/* Panel content */}

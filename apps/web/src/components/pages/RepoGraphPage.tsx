@@ -55,17 +55,20 @@ export default function RepoGraphPage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [leftTab, setLeftTab] = useState<LeftTab | null>('violations');
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
-  const [isDiffMode, setIsDiffMode] = useState(false);
+  const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
 
   const currentBranch = repo?.defaultBranch;
-  const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
-    useGraph(repoId, currentBranch, depthLevel, selectedAnalysisId ?? undefined);
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
   const { violations, allViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
   const { analyses, refetch: refetchAnalyses } = useAnalysisList(repoId);
+  const graphAnalysisId = isDiffMode && diffResult?.diffAnalysisId
+    ? diffResult.diffAnalysisId
+    : selectedAnalysisId ?? undefined;
+  const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
+    useGraph(repoId, currentBranch, depthLevel, graphAnalysisId);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -75,6 +78,11 @@ export default function RepoGraphPage() {
     if (!repoId) return;
     api.getRepo(repoId).then(setRepo).catch(() => {});
   }, [repoId]);
+
+  // Load saved diff check on mount when URL has view=diff
+  useEffect(() => {
+    if (isDiffMode) loadDiffCheck();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initialize filtered data
   useEffect(() => {
@@ -297,14 +305,25 @@ export default function RepoGraphPage() {
     [nodes, edges, depthLevel],
   );
 
+  const setIsDiffMode = useCallback((diff: boolean) => {
+    setIsDiffModeState(diff);
+    const url = new URL(window.location.href);
+    if (diff) {
+      url.searchParams.set('view', 'diff');
+    } else {
+      url.searchParams.delete('view');
+    }
+    navigate(url.pathname + url.search, { replace: true });
+  }, [navigate]);
+
   const handleEnterDiffMode = useCallback(() => {
     setIsDiffMode(true);
     loadDiffCheck();
-  }, [loadDiffCheck]);
+  }, [setIsDiffMode, loadDiffCheck]);
 
   const handleExitDiffMode = useCallback(() => {
     setIsDiffMode(false);
-  }, []);
+  }, [setIsDiffMode]);
 
   // Transform nodes when diff mode is active with results
   const diffFilteredNodes = useMemo(() => {
@@ -569,20 +588,6 @@ export default function RepoGraphPage() {
     return <Navigate to="/" replace />;
   }
 
-  const resolveNodeIdByName = useCallback((name: string, type?: string): string | null => {
-    const matchTypes = type === 'service' ? ['service', 'serviceGroup']
-      : type === 'module' ? ['module']
-      : type === 'method' ? ['method']
-      : undefined;
-    const node = nodes.find((n) => {
-      const label = (n.data as Record<string, unknown>).label as string;
-      if (label !== name) return false;
-      if (matchTypes && !matchTypes.includes(n.type || '')) return false;
-      return true;
-    });
-    return node?.id ?? null;
-  }, [nodes]);
-
   const selectedServiceName = selectedService
     ? ((nodes.find((n) => n.id === selectedService)?.data as Record<string, unknown>)?.label as string) ?? null
     : null;
@@ -644,7 +649,7 @@ export default function RepoGraphPage() {
         {/* Left sidebar: icon rail + violations/rules panel */}
         <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} badgeCounts={{
           violations: isDiffMode && diffResult
-            ? diffResult.summary.newCount + diffResult.summary.resolvedCount
+            ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
         }}>
           {leftTab === 'violations' && (
@@ -658,7 +663,6 @@ export default function RepoGraphPage() {
               isDiffMode={isDiffMode}
               diffResult={diffResult}
               onLocateNode={handleLocateNode}
-              resolveNodeIdByName={resolveNodeIdByName}
               selectedPath={selectedPath}
               nodeFilePathMap={nodeFilePathMap}
             />
@@ -728,6 +732,13 @@ export default function RepoGraphPage() {
               >
                 Return to latest
               </button>
+            </div>
+          )}
+
+          {/* Diff mode banner */}
+          {isDiffMode && diffResult?.diffAnalysisId && (
+            <div className="flex shrink-0 items-center justify-center gap-2 bg-blue-500/10 border-b border-blue-500/30 px-4 py-1.5 text-xs text-blue-400">
+              <span>Showing working tree state (uncommitted changes)</span>
             </div>
           )}
 

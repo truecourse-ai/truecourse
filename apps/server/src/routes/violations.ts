@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../config/database.js';
 import {
@@ -15,6 +15,9 @@ import {
 import { createAppError } from '../middleware/error.js';
 import { generateViolations } from '../services/violation.service.js';
 import { emitViolationsReady } from '../socket/handlers.js';
+
+/** SQL filter to exclude diff analyses */
+const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
 
 const router: Router = Router();
 
@@ -35,11 +38,11 @@ router.post(
         throw createAppError('Repo not found', 404);
       }
 
-      // Get latest analysis
+      // Get latest non-diff analysis
       const latestAnalysis = await db
         .select()
         .from(analyses)
-        .where(eq(analyses.repoId, id))
+        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -176,8 +179,8 @@ router.get(
         }
         analysis = specific;
       } else {
-        // Find the relevant analysis
-        const conditions = [eq(analyses.repoId, id)];
+        // Find the latest non-diff analysis
+        const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
         if (branch) {
           conditions.push(eq(analyses.branch, branch));
         }

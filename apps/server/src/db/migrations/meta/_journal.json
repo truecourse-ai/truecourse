@@ -22,6 +22,13 @@
       "when": 1773799270461,
       "tag": "0002_slippery_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1773809898353,
+      "tag": "0003_yielding_mad_thinker",
+      "breakpoints": true
     }
   ]
 }

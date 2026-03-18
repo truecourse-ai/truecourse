@@ -195,6 +195,9 @@ export interface DiffViolationItem {
   title: string;
   content: string;
   severity: string;
+  targetServiceId: string | null;
+  targetModuleId: string | null;
+  targetMethodId: string | null;
   targetServiceName: string | null;
   targetModuleName: string | null;
   targetMethodName: string | null;
@@ -324,6 +327,9 @@ const DiffViolationOutputSchema = z.object({
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
+      targetServiceId: z.string().nullable().describe('The id of the service this violation applies to, must be an exact id from the Services list'),
+      targetModuleId: z.string().nullable().describe('The id of the module this violation applies to, must be an exact id from the Modules list'),
+      targetMethodId: z.string().nullable().describe('The id of the method this violation applies to, must be an exact id from the Methods list'),
       targetServiceName: z.string().nullable(),
       targetModuleName: z.string().nullable(),
       targetMethodName: z.string().nullable(),
@@ -513,6 +519,9 @@ class AISDKProvider implements LLMProvider {
               resolvedViolationIds: object.resolvedViolationIds,
               newViolations: object.newViolations.map((i) => ({
                 ...i,
+                targetServiceId: i.targetServiceId ?? null,
+                targetModuleId: i.targetModuleId ?? null,
+                targetMethodId: i.targetMethodId ?? null,
                 targetModuleName: i.targetModuleName ?? null,
                 targetMethodName: i.targetMethodName ?? null,
               })),
@@ -538,6 +547,9 @@ class AISDKProvider implements LLMProvider {
               resolvedViolationIds: object.resolvedViolationIds,
               newViolations: object.newViolations.map((i) => ({
                 ...i,
+                targetServiceId: i.targetServiceId ?? null,
+                targetModuleId: i.targetModuleId ?? null,
+                targetMethodId: i.targetMethodId ?? null,
                 targetModuleName: i.targetModuleName ?? null,
                 targetMethodName: i.targetMethodName ?? null,
               })),
@@ -563,6 +575,9 @@ class AISDKProvider implements LLMProvider {
               resolvedViolationIds: object.resolvedViolationIds,
               newViolations: object.newViolations.map((i) => ({
                 ...i,
+                targetServiceId: i.targetServiceId ?? null,
+                targetModuleId: i.targetModuleId ?? null,
+                targetMethodId: i.targetMethodId ?? null,
                 targetModuleName: i.targetModuleName ?? null,
                 targetMethodName: i.targetMethodName ?? null,
               })),

@@ -531,6 +531,7 @@ export const diffChecks = pgTable('diff_checks', {
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
+  diffAnalysisId: uuid('diff_analysis_id').references(() => analyses.id, { onDelete: 'set null' }),
   changedFiles: jsonb('changed_files').notNull(), // Array<{ path, status }>
   resolvedViolationIds: jsonb('resolved_violation_ids').notNull(), // string[]
   newViolations: jsonb('new_violations').notNull(), // ViolationResponse[]

@@ -199,6 +199,9 @@ export type DiffViolationItem = {
   title: string
   content: string
   severity: string
+  targetServiceId: string | null
+  targetModuleId: string | null
+  targetMethodId: string | null
   targetServiceName: string | null
   targetModuleName: string | null
   targetMethodName: string | null

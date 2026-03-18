@@ -1,6 +1,6 @@
 import path from 'path';
 import { simpleGit } from 'simple-git';
-import { runAnalysis, runDeterministicModuleChecks, type AnalysisProgressCallback } from './analyzer.service.js';
+import { runAnalysis, runDeterministicModuleChecks, type AnalysisProgressCallback, type AnalysisResult } from './analyzer.service.js';
 import { createLLMProvider, type DiffViolationItem } from './llm/provider.js';
 import { getEnabledRules } from './rules.service.js';
 export interface BaselineViolation {
@@ -19,11 +19,26 @@ export interface BaselineViolation {
   createdAt: string;
 }
 
-export interface DiffCheckInput {
+export interface DiffAnalysisInput {
   repoPath: string;
   branch: string | undefined;
+  onProgress: AnalysisProgressCallback;
+}
+
+export interface DiffAnalysisOutput {
+  analysisResult: AnalysisResult;
+  changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
+}
+
+export interface DiffViolationCheckInput {
+  repoPath: string;
+  analysisResult: AnalysisResult;
+  changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
   baselineViolations: BaselineViolation[];
   baselineLayerViolations: string[];
+  serviceIdMap: Map<string, string>;
+  moduleIdMap: Map<string, string>;
+  methodIdMap: Map<string, string>;
   onProgress: AnalysisProgressCallback;
 }
 
@@ -41,10 +56,15 @@ export interface DiffCheckOutput {
     newCount: number;
     resolvedCount: number;
   };
+  analysisResult: AnalysisResult;
 }
 
-export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutput> {
-  const { repoPath, branch, baselineViolations, baselineLayerViolations, onProgress } = input;
+/**
+ * Phase 1: Run analysis on dirty tree + get changed files.
+ * No LLM calls — persistence happens between this and the violation check.
+ */
+export async function runDiffAnalysis(input: DiffAnalysisInput): Promise<DiffAnalysisOutput> {
+  const { repoPath, branch, onProgress } = input;
 
   // 1. Full analysis on dirty state (no stash)
   onProgress({ step: 'analyzing', percent: 10, detail: 'Analyzing dirty working tree...' });
@@ -63,6 +83,20 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
   }
   for (const f of statusResult.deleted) changedFiles.push({ path: f, status: 'deleted' });
 
+  return { analysisResult: result, changedFiles };
+}
+
+/**
+ * Phase 2: Run LLM violation check using real DB IDs from persistence.
+ */
+export async function runDiffViolationCheck(input: DiffViolationCheckInput): Promise<DiffCheckOutput> {
+  const {
+    repoPath, analysisResult: result, changedFiles,
+    baselineViolations, baselineLayerViolations,
+    serviceIdMap, moduleIdMap, methodIdMap,
+    onProgress,
+  } = input;
+
   if (changedFiles.length === 0) {
     return {
       changedFiles: [],
@@ -70,6 +104,7 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
       newViolations: [],
       affectedNodeIds: { services: [], layers: [], modules: [], methods: [] },
       summary: { newCount: 0, resolvedCount: 0 },
+      analysisResult: result,
     };
   }
 
@@ -87,13 +122,13 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
   const dbBaseline = baselineViolations.filter((i) => i.type === 'database');
   const moduleBaseline = baselineViolations.filter((i) => i.type === 'module' || i.type === 'function');
 
-  // 5. Build LLM contexts
+  // 5. Build LLM contexts using real DB IDs
   const archRules = enabledLlmRules.filter((r) => r.category === 'service');
   const dbRules = enabledLlmRules.filter((r) => r.category === 'database');
   const moduleRules = enabledLlmRules.filter((r) => r.category === 'module');
 
   const serviceDtos = result.services.map((s) => ({
-    id: s.name, // Use name as ID since we don't have DB IDs yet
+    id: serviceIdMap.get(s.name) || s.name,
     name: s.name,
     type: s.type,
     framework: s.framework || undefined,
@@ -158,7 +193,7 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
     } : undefined,
     module: result.modules && result.modules.length > 0 ? {
       modules: result.modules.map((m) => ({
-        id: `${m.serviceName}::${m.name}`,
+        id: moduleIdMap.get(`${m.serviceName}::${m.name}::${m.filePath}`) || `${m.serviceName}::${m.name}`,
         name: m.name,
         kind: m.kind,
         serviceName: m.serviceName,
@@ -171,6 +206,7 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
         lineCount: m.lineCount || undefined,
       })),
       methods: (result.methods || []).map((m) => ({
+        id: methodIdMap.get(`${m.serviceName}::${m.moduleName}::${m.name}::${m.filePath}`) || undefined,
         moduleName: m.moduleName,
         name: m.name,
         signature: m.signature,
@@ -281,5 +317,6 @@ export async function runDiffCheck(input: DiffCheckInput): Promise<DiffCheckOutp
       newCount: dedupedNewViolations.length,
       resolvedCount: validResolvedIds.length,
     },
+    analysisResult: result,
   };
 }

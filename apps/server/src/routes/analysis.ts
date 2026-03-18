@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import {
   repos,
@@ -21,7 +21,8 @@ import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { simpleGit } from 'simple-git';
 import { runAnalysis, runDeterministicModuleChecks } from '../services/analyzer.service.js';
-import { runDiffCheck } from '../services/diff-check.service.js';
+import { runDiffAnalysis, runDiffViolationCheck } from '../services/diff-check.service.js';
+import { persistAnalysisResult } from '../services/analysis-persistence.service.js';
 import {
   emitAnalysisProgress,
   emitAnalysisComplete,
@@ -32,6 +33,9 @@ import { generateViolations } from '../services/violation.service.js';
 import type { ModuleViolation } from '@truecourse/analyzer';
 import { getEnabledRules } from '../services/rules.service.js';
 import { v4 as uuidv4 } from 'uuid';
+
+/** SQL filter to exclude diff analyses */
+const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
 
 const router: Router = Router();
 
@@ -77,7 +81,7 @@ router.post(
         });
 
         // Get previous analysis positions (mapped by service name)
-        const prevConditions = [eq(analyses.repoId, id)];
+        const prevConditions = [eq(analyses.repoId, id), notDiffAnalysis];
         if (branch) prevConditions.push(eq(analyses.branch, branch));
         const prevAnalyses = await db
           .select()
@@ -104,226 +108,23 @@ router.post(
           }
         }
 
-        // Save analysis to database
-        const [analysis] = await db
-          .insert(analyses)
-          .values({
-            repoId: id,
-            branch: branch || null,
-            architecture: result.architecture,
-            metadata: result.metadata,
-          })
-          .returning();
-
-        // Save services
-        const serviceIdMap = new Map<string, string>();
-
-        for (const svc of result.services) {
-          const [savedService] = await db
-            .insert(services)
-            .values({
-              analysisId: analysis.id,
-              name: svc.name,
-              rootPath: svc.rootPath,
-              type: svc.type,
-              framework: svc.framework || null,
-              fileCount: svc.fileCount,
-              layerSummary: svc.layers,
-            })
-            .returning();
-
-          serviceIdMap.set(svc.name, savedService.id);
-        }
-
-        // Save service dependencies
-        for (const dep of result.dependencies) {
-          const sourceId = serviceIdMap.get(dep.source);
-          const targetId = serviceIdMap.get(dep.target);
-
-          if (sourceId && targetId) {
-            const depType = dep.httpCalls && dep.httpCalls.length > 0 ? 'http' : 'import';
-            const depCount = dep.dependencies.length + (dep.httpCalls?.length || 0);
-
-            await db.insert(serviceDependencies).values({
-              analysisId: analysis.id,
-              sourceServiceId: sourceId,
-              targetServiceId: targetId,
-              dependencyCount: depCount,
-              dependencyType: depType,
-            });
+        // Clean up old diff analysis and diff check for this repo
+        const oldDiffChecks = await db
+          .select({ diffAnalysisId: diffChecks.diffAnalysisId })
+          .from(diffChecks)
+          .where(eq(diffChecks.repoId, id));
+        for (const dc of oldDiffChecks) {
+          if (dc.diffAnalysisId) {
+            await db.delete(analyses).where(eq(analyses.id, dc.diffAnalysisId));
           }
         }
+        await db.delete(diffChecks).where(eq(diffChecks.repoId, id));
 
-        // Save layer details
-        if (result.layerDetails) {
-          for (const detail of result.layerDetails) {
-            const serviceId = serviceIdMap.get(detail.serviceName);
-            if (serviceId) {
-              await db.insert(layers).values({
-                analysisId: analysis.id,
-                serviceId,
-                serviceName: detail.serviceName,
-                layer: detail.layer,
-                fileCount: detail.fileCount,
-                filePaths: detail.filePaths,
-                confidence: Math.round(detail.confidence * 100),
-                evidence: detail.evidence,
-              });
-            }
-          }
-        }
+        // Persist analysis using shared service
+        const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
+          await persistAnalysisResult({ repoId: id, branch, result });
 
-        // Save layer dependencies
-        if (result.layerDependencies) {
-          for (const dep of result.layerDependencies) {
-            await db.insert(layerDependencies).values({
-              analysisId: analysis.id,
-              sourceServiceName: dep.sourceServiceName,
-              sourceLayer: dep.sourceLayer,
-              targetServiceName: dep.targetServiceName,
-              targetLayer: dep.targetLayer,
-              dependencyCount: dep.dependencyCount,
-              isViolation: dep.isViolation,
-              violationReason: dep.violationReason || null,
-            });
-          }
-
-        }
-
-        // Save detected databases
-        const dbIdMap = new Map<string, string>();
-        if (result.databaseResult && result.databaseResult.databases.length > 0) {
-
-          for (const dbInfo of result.databaseResult.databases) {
-            const [savedDb] = await db.insert(databases).values({
-              analysisId: analysis.id,
-              name: dbInfo.name,
-              type: dbInfo.type,
-              driver: dbInfo.driver,
-              connectionConfig: dbInfo.connectionEnvVar ? { envVar: dbInfo.connectionEnvVar } : null,
-              tables: dbInfo.tables,
-              dbRelations: dbInfo.relations,
-              connectedServices: dbInfo.connectedServices,
-            }).returning();
-
-            dbIdMap.set(dbInfo.name, savedDb.id);
-          }
-
-          for (const conn of result.databaseResult.connections) {
-            const serviceId = serviceIdMap.get(conn.serviceName);
-            const databaseId = dbIdMap.get(conn.databaseName);
-            if (serviceId && databaseId) {
-              await db.insert(databaseConnections).values({
-                analysisId: analysis.id,
-                serviceId,
-                databaseId,
-                driver: conn.driver,
-              });
-            }
-          }
-        }
-
-        // Save modules
-        // Key includes filePath to avoid collisions when multiple files produce
-        // modules with the same name (e.g. Next.js route.ts files).
-        const moduleIdMap = new Map<string, string>(); // "serviceName::moduleName::filePath" → dbId
-        if (result.modules && result.modules.length > 0) {
-          // Build layer lookup: "serviceName::layerName" → layerId
-          const layerIdLookup = new Map<string, string>();
-          const savedLayers = await db
-            .select()
-            .from(layers)
-            .where(eq(layers.analysisId, analysis.id));
-          for (const l of savedLayers) {
-            layerIdLookup.set(`${l.serviceName}::${l.layer}`, l.id);
-          }
-
-          for (const mod of result.modules) {
-            const serviceId = serviceIdMap.get(mod.serviceName);
-            const layerId = layerIdLookup.get(`${mod.serviceName}::${mod.layerName}`);
-            if (!serviceId || !layerId) continue;
-
-            const [saved] = await db.insert(modules).values({
-              analysisId: analysis.id,
-              layerId,
-              serviceId,
-              name: mod.name,
-              kind: mod.kind,
-              filePath: mod.filePath,
-              methodCount: mod.methodCount,
-              propertyCount: mod.propertyCount,
-              importCount: mod.importCount,
-              exportCount: mod.exportCount,
-              superClass: mod.superClass || null,
-              lineCount: mod.lineCount || null,
-            }).returning();
-
-            moduleIdMap.set(`${mod.serviceName}::${mod.name}::${mod.filePath}`, saved.id);
-          }
-        }
-
-        // Save methods (and build methodIdMap for method deps)
-        const methodIdMap = new Map<string, string>();
-        if (result.methods && result.methods.length > 0) {
-          for (const method of result.methods) {
-            const moduleKey = `${method.serviceName}::${method.moduleName}::${method.filePath}`;
-            const moduleId = moduleIdMap.get(moduleKey);
-            if (!moduleId) continue;
-
-            const [saved] = await db.insert(methods).values({
-              analysisId: analysis.id,
-              moduleId,
-              name: method.name,
-              signature: method.signature,
-              paramCount: method.paramCount,
-              returnType: method.returnType || null,
-              isAsync: method.isAsync,
-              isExported: method.isExported,
-              lineCount: method.lineCount || null,
-              statementCount: method.statementCount || null,
-              maxNestingDepth: method.maxNestingDepth || null,
-            }).returning();
-
-            methodIdMap.set(`${method.serviceName}::${method.moduleName}::${method.name}::${method.filePath}`, saved.id);
-          }
-        }
-
-        // Save module dependencies
-        console.log(`[Analysis] File dependencies: ${result.dependencies.length}, Module-level deps: ${result.moduleLevelDependencies?.length ?? 0}, Modules: ${result.modules?.length ?? 0}`);
-        if (result.moduleLevelDependencies && result.moduleLevelDependencies.length > 0) {
-          for (const dep of result.moduleLevelDependencies) {
-            const srcId = moduleIdMap.get(`${dep.sourceService}::${dep.sourceModule}::${dep.sourceFilePath || ''}`);
-            const tgtId = moduleIdMap.get(`${dep.targetService}::${dep.targetModule}::${dep.targetFilePath || ''}`);
-            if (!srcId || !tgtId) {
-              console.log(`[Analysis] Skipped module dep: ${dep.sourceService}::${dep.sourceModule} → ${dep.targetService}::${dep.targetModule} (srcId=${!!srcId}, tgtId=${!!tgtId})`);
-              continue;
-            }
-
-            await db.insert(moduleDeps).values({
-              analysisId: analysis.id,
-              sourceModuleId: srcId,
-              targetModuleId: tgtId,
-              importedNames: dep.importedNames,
-              dependencyCount: dep.importedNames.length || 1,
-            });
-          }
-        }
-
-        // Save method dependencies
-        if (result.methodLevelDependencies && result.methodLevelDependencies.length > 0) {
-          for (const dep of result.methodLevelDependencies) {
-            const srcId = methodIdMap.get(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}::${dep.callerFilePath || ''}`);
-            const tgtId = methodIdMap.get(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}::${dep.calleeFilePath || ''}`);
-            if (!srcId || !tgtId) continue;
-
-            await db.insert(methodDeps).values({
-              analysisId: analysis.id,
-              sourceMethodId: srcId,
-              targetMethodId: tgtId,
-              callCount: dep.callCount,
-            });
-          }
-        }
+        const analysis = { id: newAnalysisId };
 
         // Load rules from database
         const allRules = await getEnabledRules();
@@ -596,7 +397,7 @@ router.get(
           createdAt: analyses.createdAt,
         })
         .from(analyses)
-        .where(eq(analyses.repoId, id))
+        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
         .orderBy(desc(analyses.createdAt))
         .limit(20);
 
@@ -641,8 +442,8 @@ router.get(
         }
         analysis = specific;
       } else {
-        // Find the latest analysis for the branch
-        const conditions = [eq(analyses.repoId, id)];
+        // Find the latest non-diff analysis for the branch
+        const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
         if (branch) {
           conditions.push(eq(analyses.branch, branch));
         }
@@ -795,7 +596,7 @@ router.put(
         throw createAppError('Invalid positions data', 400);
       }
 
-      const conditions = [eq(analyses.repoId, id)];
+      const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
       if (branch) {
         conditions.push(eq(analyses.branch, branch));
       }
@@ -835,7 +636,7 @@ router.delete(
       const branch = req.query.branch as string | undefined;
       const level = (req.query.level as string) || 'services';
 
-      const conditions = [eq(analyses.repoId, id)];
+      const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
       if (branch) {
         conditions.push(eq(analyses.branch, branch));
       }
@@ -881,7 +682,7 @@ router.put(
         throw createAppError('Invalid collapsedIds data', 400);
       }
 
-      const conditions = [eq(analyses.repoId, id)];
+      const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
       if (branch) {
         conditions.push(eq(analyses.branch, branch));
       }
@@ -983,11 +784,11 @@ router.get(
         changedFiles.push({ path: f, status: 'deleted' });
       }
 
-      // Find latest analysis and its services to match affected services
+      // Find latest normal analysis and its services to match affected services
       const latestAnalysis = await db
         .select()
         .from(analyses)
-        .where(eq(analyses.repoId, id))
+        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -1034,11 +835,11 @@ router.post(
         throw createAppError('Repo not found', 404);
       }
 
-      // Find latest normal analysis
+      // Find latest normal analysis (exclude diff analyses)
       const [latestAnalysis] = await db
         .select({ id: analyses.id })
         .from(analyses)
-        .where(eq(analyses.repoId, id))
+        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -1091,23 +892,56 @@ router.post(
       const git = simpleGit(repo.path);
       const branch = (await git.branch()).current || undefined;
 
-      const result = await runDiffCheck({
+      // Phase 1: Run analysis + get changed files (no LLM yet)
+      const diffAnalysis = await runDiffAnalysis({
         repoPath: repo.path,
         branch,
-        baselineViolations: violationsWithNames,
-        baselineLayerViolations: baselineLayerViolationDescriptions,
         onProgress: (progress) => {
           emitAnalysisProgress(id, progress);
         },
       });
 
-      // Delete old diff_check for this repo (upsert behavior)
+      // Delete old diff check and its diff analysis
+      const oldDiffChecks = await db
+        .select({ diffAnalysisId: diffChecks.diffAnalysisId })
+        .from(diffChecks)
+        .where(eq(diffChecks.repoId, id));
+      for (const dc of oldDiffChecks) {
+        if (dc.diffAnalysisId) {
+          await db.delete(analyses).where(eq(analyses.id, dc.diffAnalysisId));
+        }
+      }
       await db.delete(diffChecks).where(eq(diffChecks.repoId, id));
 
-      // Insert new diff_check
+      // Persist the diff analysis first — get real DB IDs
+      const { analysisId: diffAnalysisId, serviceIdMap: diffServiceIdMap, moduleIdMap: diffModuleIdMap, methodIdMap: diffMethodIdMap } =
+        await persistAnalysisResult({
+          repoId: id,
+          branch: branch || null,
+          result: diffAnalysis.analysisResult,
+          metadata: { isDiffAnalysis: true },
+        });
+
+      // Phase 2: Run LLM violation check with real DB IDs
+      const result = await runDiffViolationCheck({
+        repoPath: repo.path,
+        analysisResult: diffAnalysis.analysisResult,
+        changedFiles: diffAnalysis.changedFiles,
+        baselineViolations: violationsWithNames,
+        baselineLayerViolations: baselineLayerViolationDescriptions,
+        serviceIdMap: diffServiceIdMap,
+        moduleIdMap: diffModuleIdMap,
+        methodIdMap: diffMethodIdMap,
+        onProgress: (progress) => {
+          emitAnalysisProgress(id, progress);
+        },
+      });
+
+      // Insert new diff_check with diffAnalysisId
       await db.insert(diffChecks).values({
         repoId: id,
         analysisId: latestAnalysis.id,
+        diffAnalysisId,
         changedFiles: result.changedFiles,
         resolvedViolationIds: result.resolvedViolationIds,
         newViolations: result.newViolations,
@@ -1136,6 +970,7 @@ router.post(
         affectedNodeIds: result.affectedNodeIds,
         summary: result.summary,
         isStale: false,
+        diffAnalysisId,
       });
     } catch (error) {
       const repoId = req.params.id as string;
@@ -1179,7 +1014,7 @@ router.get(
       const [latestAnalysis] = await db
         .select({ id: analyses.id })
         .from(analyses)
-        .where(eq(analyses.repoId, id))
+        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -1230,6 +1065,7 @@ router.get(
         summary: diffCheck.summary,
         changedFiles: diffCheck.changedFiles,
         isStale,
+        diffAnalysisId: diffCheck.diffAnalysisId,
       });
     } catch (error) {
       next(error);

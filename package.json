@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.1.2",
+  "version": "0.1.9",
   "private": true,
   "scripts": {
     "dev": "turbo dev",
