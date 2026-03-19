@@ -16,12 +16,13 @@ export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer
 export { parseCode, parseFile, getParser } from './parser.js'
 
 // Language configuration
-export { detectLanguage, getLanguageConfig, isFrameworkEntryFile, type LanguageConfig } from './language-config.js'
+export { detectLanguage, getLanguageConfig, isFrameworkEntryFile, normalizeUrl, type LanguageConfig } from './language-config.js'
 export { TYPESCRIPT_CONFIG, JAVASCRIPT_CONFIG } from './language-config.js'
 
 // Extractors
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
+export { extractRouteRegistrations } from './extractors/route-registrations.js'
 export { shouldExtractEntities, extractEntities } from './extractors/entities.js'
 export {
   extractTypeScriptFunctions,
@@ -47,6 +48,9 @@ export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPa
 
 // Module extraction
 export { extractModulesAndMethods, type ModuleExtractionResult } from './module-extractor.js'
+
+// Flow tracing
+export { traceFlows, type TracedFlow, type TracedFlowStep, type TraceFlowsInput, type CrossServiceCall, type RouteHandler } from './flow-tracer.js'
 
 // Rules
 export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES, LLM_CODE_RULES, CODE_RULES } from './rules/index.js'

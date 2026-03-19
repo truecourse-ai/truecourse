@@ -874,7 +874,104 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 
 ---
 
-## Phase 8: Custom Rule Generation `STATUS: BACKLOG`
+## Phase 8: Claude Code Skills `STATUS: DONE`
+
+Add Claude Code skills that let users invoke TrueCourse commands conversationally from within Claude Code. Skills are bundled with the npm package and installed into the user's project via `truecourse add`.
+
+### 8.1 Skill Templates `STATUS: DONE`
+
+Three skills in `tools/cli/skills/truecourse/`:
+
+| Skill | Triggers | Action |
+|---|---|---|
+| `truecourse-analyze` | "analyze this repo", "run analysis", "check my code", "run a diff check" | Runs `npx truecourse analyze` or `analyze --diff`, summarizes results |
+| `truecourse-list` | "show violations", "list issues", "what violations were found", "show diff results" | Runs `npx truecourse list` or `list --diff` |
+| `truecourse-fix` | "fix violations", "apply fixes", "fix my code" | Fetches violations with `fixPrompt`, lets user pick which to fix, applies changes to codebase |
+
+### 8.2 Skill Installation via `truecourse add` `STATUS: DONE`
+
+After adding a repo, `truecourse add` prompts:
+> "Would you like to install Claude Code skills? (y/n)"
+
+If yes: copies bundled `skills/truecourse/` to `<project>/.claude/skills/truecourse/` using recursive copy. Lists installed skills on success.
+
+- `tools/cli/src/commands/add.ts` — clack confirm prompt + `cpSync` logic
+- `tools/cli/package.json` — `"files"` field includes `skills/` so it ships with npm
+
+### Verification (Phase 8)
+1. `npx truecourse add` in a project → prompt appears after repo is added
+2. Accept → `.claude/skills/truecourse/` created with 3 SKILL.md files
+3. Decline → no `.claude/` directory created
+4. Open Claude Code in the project → skills appear and trigger correctly
+
+---
+
+## Phase 9: Background Service Mode `STATUS: IN PROGRESS`
+
+Run TrueCourse as a background service (daemon) instead of keeping a terminal open. Uses native OS service managers — no third-party process managers (pm2 is AGPL, incompatible with MIT + commercial cloud).
+
+### Setup Integration
+
+During `truecourse setup`, add a new prompt step after LLM configuration:
+
+```
+? How would you like to run TrueCourse?
+  ○ Console (keep terminal open) — default
+  ○ Background service (runs automatically, no terminal needed)
+```
+
+Selection is saved to `~/.truecourse/config.json` (`"runMode": "console" | "service"`). Can be changed later via `truecourse setup` or `truecourse service install/uninstall`.
+
+### CLI Commands
+
+| Command | Description |
+|---|---|
+| `truecourse service install` | Register + start as background service |
+| `truecourse service uninstall` | Stop + remove service registration |
+| `truecourse service status` | Check if service is running (PID, uptime) |
+| `truecourse service logs` | Tail the service log file |
+
+When `runMode` is `service`, `truecourse start` installs and starts the service (instead of running in foreground). `truecourse stop` stops the service.
+
+### Platform Implementations
+
+**macOS (launchd):**
+- Generate `~/Library/LaunchAgents/com.truecourse.server.plist`
+- Points to the bundled `server.mjs` entry point
+- Configured for: auto-start on login, restart on crash, stdout/stderr to `~/.truecourse/logs/`
+- Install/uninstall via `launchctl load/unload`
+
+**Windows (Windows Service):**
+- Use `node-windows` (MIT licensed) to register as a Windows Service
+- Visible in `services.msc`, supports auto-start and restart on failure
+- Logs to `~/.truecourse/logs/`
+- Alternative: direct `sc.exe` commands if `node-windows` adds too much weight
+
+**Linux (systemd):**
+- Generate `~/.config/systemd/user/truecourse.service` unit file
+- `systemctl --user enable/start/stop/disable truecourse`
+- Logs via `journalctl --user -u truecourse` or file-based fallback
+
+### Log Management
+
+- Logs written to `~/.truecourse/logs/truecourse.log`
+- Log rotation: keep last 5 files, 10MB max per file
+- `truecourse service logs` tails the active log file
+- Structured JSON logs when running as service (vs. pretty-printed in console mode)
+
+### Verification
+1. `truecourse setup` → select "Background service" → service installs and starts
+2. Close terminal → TrueCourse still accessible at `http://localhost:3001`
+3. `truecourse service status` → shows running with PID and uptime
+4. `truecourse service logs` → shows recent log output
+5. `truecourse service uninstall` → service stops and is removed
+6. Reboot → service auto-starts (macOS/Linux/Windows)
+7. Service crashes → auto-restarts within seconds
+8. `truecourse setup` → switch back to "Console" → service uninstalled, runs in foreground again
+
+---
+
+## Phase 10: Custom Rule Generation `STATUS: BACKLOG`
 
 Add the ability to generate project-specific analysis rules via a CLI command. The LLM analyzes your codebase's patterns, conventions, and architecture to produce custom rules tailored to the project.
 
@@ -895,13 +992,13 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 
 ---
 
-## Phase 9: Multi-Language Support `STATUS: BACKLOG`
+## Phase 11: Multi-Language Support `STATUS: BACKLOG`
 
 - Re-enable Python, C# extractors from SpecMind
 - Language-specific import resolution and pattern detection
 - Incremental analysis (content-hash cache, only re-analyze changed files)
 
-### Test Plan (Phase 10) `STATUS: BACKLOG`
+### Test Plan (Phase 11) `STATUS: BACKLOG`
 - Python parser: parses `.py` files, extracts functions, classes, imports (decorators, type hints)
 - C# parser: parses `.cs` files, extracts classes, methods, using statements, attributes
 - Python import resolution: resolves relative imports, `__init__.py`, package imports
@@ -911,7 +1008,7 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 - Cache invalidation: modifying a file updates its hash and triggers re-analysis
 - Mixed-language repo: a repo with both TS and Python files produces correct combined analysis
 
-### Verification (Phase 10)
+### Verification (Phase 11)
 1. Analyze a Python repo → services, layers, files detected correctly
 2. Analyze a C# repo → same
 3. Modify a single file in a large repo → only that file re-analyzed (check logs)
@@ -919,14 +1016,82 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 
 ---
 
-## Phase 10: Cloud Version (Future) `STATUS: BACKLOG`
+## Phase 12: Interaction Diagrams `STATUS: DONE`
+
+Detect and visualize all request/data flows in the project as animated interaction diagrams (sequence diagrams). Each flow shows how data moves step-by-step through services, modules, and methods — from entry point to response.
+
+### Flow Detection
+
+Use static analysis + LLM to trace execution paths through the codebase:
+
+1. **Entry point discovery** — identify HTTP route handlers, event listeners, queue consumers, cron jobs, CLI commands, and exported API functions
+2. **Call chain tracing** — for each entry point, follow the call graph through service → module → method boundaries, tracking:
+   - Method calls (direct, via dependency injection, via class instance)
+   - Async boundaries (await, callbacks, event emitters)
+   - Database reads/writes (which tables, read vs write)
+   - External HTTP calls (to other services or third-party APIs)
+   - Message queue publish/subscribe
+3. **LLM enrichment** — send traced call chains to the LLM to:
+   - Name each flow with a human-readable label (e.g. "User Registration", "Order Checkout")
+   - Identify the data being passed at each step (request body → validated DTO → entity → response)
+   - Detect branching paths (error cases, conditional logic, early returns)
+   - Group related flows (CRUD operations on the same resource)
+
+### Data Model
+
+```
+flows table:
+  id, analysisId, name, description, entryPoint (service + method),
+  category (e.g. "user", "order"), trigger (http/event/cron/manual)
+
+flow_steps table:
+  id, flowId, stepOrder, sourceService, sourceModule, sourceMethod,
+  targetService, targetModule, targetMethod, stepType (call/db-read/db-write/http/event),
+  dataDescription, isAsync, isConditional, conditionLabel
+```
+
+### Interaction Diagram UI
+
+Render flows as animated sequence diagrams in the web UI:
+
+- **Flow list panel** — browse all detected flows, grouped by category, searchable
+- **Diagram view** — vertical sequence diagram with participant columns (services/modules) and message arrows between them
+- **Step-by-step animation** — data flows animate from source to target with:
+  - Moving dot/pulse along the arrow path
+  - Step highlight showing the current position in the flow
+  - Data label appearing at each step (what data is being passed)
+  - Configurable speed (slow for presentations, fast for overview)
+- **Playback controls** — play/pause, step forward/backward, speed slider, restart
+- **Interactive** — click any step to jump to the source code in the code viewer, click a participant to focus it in the dependency graph
+- **Branching visualization** — conditional paths shown as forking arrows with condition labels, error paths in red
+- **Database/external calls** — distinct visual style for DB operations (cylinder icon) and external HTTP calls (cloud icon)
+
+### Integration
+
+- Accessible from a new "Flows" tab in the left sidebar
+- Clicking a service/module in the dependency graph offers "Show flows through this node"
+- Flows re-detected on each analysis (stored per analysis like violations)
+- CLI: `npx truecourse flows` lists detected flows in the terminal
+
+### Verification
+1. Analyze a repo → flows detected and listed in the Flows tab
+2. Select a flow → animated sequence diagram renders with correct participants and steps
+3. Play animation → data flows step-by-step with moving indicators
+4. Click a step → code viewer opens at the relevant method
+5. Database and HTTP steps visually distinguished
+6. Conditional/error branches rendered as forking paths
+7. `pnpm build` and `pnpm test` pass
+
+---
+
+## Phase 13: Cloud Version (Future) `STATUS: BACKLOG`
 
 - Auth (NextAuth.js), GitHub integration
 - GitHub webhooks replacing file watcher
 - Landing page, dashboard, team features
 - Managed Postgres deployment
 
-### Test Plan (Phase 10) `STATUS: BACKLOG`
+### Test Plan (Phase 13) `STATUS: BACKLOG`
 - Auth flow: NextAuth.js sign-in/sign-out, session persistence, token refresh
 - GitHub OAuth: mock OAuth flow, verify user creation and repo access scoping
 - Webhook handler: GitHub push event triggers analysis for correct repo and branch
@@ -935,7 +1100,7 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 - Team access: shared repo analyses are visible to all team members
 - Cloud DB: migrations run cleanly on managed Postgres (connection pooling, SSL)
 
-### Verification (Phase 10)
+### Verification (Phase 13)
 1. Sign up / sign in via OAuth
 2. Connect a GitHub repo → webhook triggers analysis on push
 3. Graph renders in cloud-hosted UI

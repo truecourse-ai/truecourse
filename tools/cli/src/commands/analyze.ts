@@ -5,8 +5,8 @@ import {
   ensureRepo,
   getServerUrl,
   connectSocket,
-  renderViolations,
-  renderDiffResults,
+  renderViolationsSummary,
+  renderDiffResultsSummary,
 } from "./helpers.js";
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
@@ -91,7 +91,7 @@ export async function runAnalyze(): Promise<void> {
     }
 
     const violations = (await res.json()) as Violation[];
-    renderViolations(violations);
+    renderViolationsSummary(violations);
 
     const repoUrl = `${serverUrl}/repos/${repo.id}`;
     const link = `\x1b[4m\x1b[38;5;75m${repoUrl}\x1b[0m`;
@@ -146,7 +146,7 @@ export async function runAnalyzeDiff(): Promise<void> {
     spinner.stop("Diff check complete");
 
     const result = (await res.json()) as DiffResult;
-    renderDiffResults(result);
+    renderDiffResultsSummary(result);
   } catch (err) {
     spinner.stop("Diff check failed");
     const message = err instanceof Error ? err.message : String(err);

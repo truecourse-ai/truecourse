@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import * as p from "@clack/prompts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -9,6 +10,9 @@ import { runStart } from "./commands/start.js";
 import { runAdd } from "./commands/add.js";
 import { runAnalyze, runAnalyzeDiff } from "./commands/analyze.js";
 import { runList, runListDiff } from "./commands/list.js";
+import { registerServiceCommand } from "./commands/service/index.js";
+import { readConfig } from "./commands/helpers.js";
+import { getPlatform } from "./commands/service/platform.js";
 
 const program = new Command();
 
@@ -59,6 +63,32 @@ program
       await runListDiff();
     } else {
       await runList();
+    }
+  });
+
+// Register service subcommands
+registerServiceCommand(program);
+
+// Top-level stop command
+program
+  .command("stop")
+  .description("Stop the TrueCourse background service")
+  .action(async () => {
+    const config = readConfig();
+
+    if (config.runMode === "service") {
+      const platform = getPlatform();
+      const { running } = await platform.status();
+      if (running) {
+        p.log.step("Stopping background service...");
+        await platform.stop();
+        p.log.success("Service stopped.");
+      } else {
+        p.log.info("Service is not running.");
+      }
+    } else {
+      p.log.info("TrueCourse is running in console mode.");
+      p.log.info("Press Ctrl+C in the terminal where TrueCourse is running.");
     }
   });
 

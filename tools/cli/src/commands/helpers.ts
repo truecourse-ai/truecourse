@@ -1,7 +1,40 @@
 import * as p from "@clack/prompts";
 import { io, type Socket } from "socket.io-client";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
 const DEFAULT_PORT = 3001;
+
+// --- Config utilities ---
+
+export type TrueCourseConfig = { runMode: "console" | "service" };
+
+const DEFAULT_CONFIG: TrueCourseConfig = { runMode: "console" };
+
+export function getConfigPath(): string {
+  return path.join(os.homedir(), ".truecourse", "config.json");
+}
+
+export function readConfig(): TrueCourseConfig {
+  const configPath = getConfigPath();
+  try {
+    const raw = fs.readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+
+export function writeConfig(partial: Partial<TrueCourseConfig>): void {
+  const configPath = getConfigPath();
+  const dir = path.dirname(configPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const current = readConfig();
+  const merged = { ...current, ...partial };
+  fs.writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+}
 
 export function getServerUrl(): string {
   const port = process.env.PORT || DEFAULT_PORT;
@@ -170,6 +203,32 @@ export function renderViolations(violations: Violation[]): void {
   console.log("");
 }
 
+export function renderViolationsSummary(violations: Violation[]): void {
+  if (violations.length === 0) {
+    p.log.info("No violations found.");
+    return;
+  }
+
+  const counts: Record<string, number> = {};
+  for (const v of violations) {
+    const sev = v.severity.toLowerCase();
+    counts[sev] = (counts[sev] || 0) + 1;
+  }
+
+  const parts: string[] = [];
+  for (const sev of ["critical", "high", "medium", "low", "info"]) {
+    if (counts[sev]) {
+      const color = severityColor(sev);
+      parts.push(color(`${counts[sev]} ${sev}`));
+    }
+  }
+
+  console.log("");
+  console.log(`  ${violations.length} violations (${parts.join(", ")})`);
+  console.log("");
+  p.log.info("Run `truecourse list` to see full details.");
+}
+
 export type DiffResult = {
   changedFiles: Array<{ path: string; status: "new" | "modified" | "deleted" }>;
   newViolations: Array<Violation & { fixPrompt?: string | null }>;
@@ -250,4 +309,28 @@ export function renderDiffResults(result: DiffResult): void {
   console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   console.log(`  Summary: ${result.summary.newCount} new issues, ${result.summary.resolvedCount} resolved`);
   console.log("");
+}
+
+export function renderDiffResultsSummary(result: DiffResult): void {
+  console.log("");
+
+  // Changed files summary
+  const modified = result.changedFiles.filter((f) => f.status === "modified").length;
+  const newFiles = result.changedFiles.filter((f) => f.status === "new").length;
+  const deleted = result.changedFiles.filter((f) => f.status === "deleted").length;
+  const fileParts: string[] = [];
+  if (modified) fileParts.push(`${modified} modified`);
+  if (newFiles) fileParts.push(`${newFiles} new`);
+  if (deleted) fileParts.push(`${deleted} deleted`);
+  console.log(`  Changed files: ${result.changedFiles.length} (${fileParts.join(", ")})`);
+  console.log("");
+
+  if (result.isStale) {
+    console.log(`  \x1b[33m\u26A0 Results may be stale \u2014 baseline analysis has changed.\x1b[0m`);
+    console.log("");
+  }
+
+  console.log(`  Summary: ${result.summary.newCount} new issues, ${result.summary.resolvedCount} resolved`);
+  console.log("");
+  p.log.info("Run `truecourse list --diff` to see full details.");
 }

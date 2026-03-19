@@ -26,6 +26,7 @@ import { errorHandler } from '../../apps/server/src/middleware/error';
 import { initDatabase, closeDatabase } from '../../apps/server/src/config/database';
 import reposRouter from '../../apps/server/src/routes/repos';
 import analysisRouter from '../../apps/server/src/routes/analysis';
+import flowsRouter from '../../apps/server/src/routes/flows';
 
 // ---------------------------------------------------------------------------
 // Fixture path
@@ -54,6 +55,7 @@ function createTestApp(): express.Express {
   app.use(express.json());
   app.use('/api/repos', reposRouter);
   app.use('/api/repos', analysisRouter);
+  app.use('/api/repos', flowsRouter);
   app.use(errorHandler);
   return app;
 }
@@ -85,6 +87,10 @@ async function cleanupFixtureRepo(): Promise<void> {
       await db
         .delete(schema.services)
         .where(eq(schema.services.analysisId, analysis.id));
+      // Flows and flow_steps cascade from analyses, but clean up explicitly just in case
+      await db
+        .delete(schema.flows)
+        .where(eq(schema.flows.analysisId, analysis.id));
     }
 
     await db
@@ -327,6 +333,67 @@ describe('API routes (integration)', () => {
     expect(firstNode).toHaveProperty('position');
     expect(firstNode).toHaveProperty('data');
     expect(firstNode.data).toHaveProperty('label');
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/flows — returns flows after analysis
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/flows — returns flow list with severities', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}/flows`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('flows');
+    expect(res.body).toHaveProperty('severities');
+    expect(Array.isArray(res.body.flows)).toBe(true);
+    expect(res.body.flows.length).toBeGreaterThan(0);
+
+    const firstFlow = res.body.flows[0];
+    expect(firstFlow).toHaveProperty('id');
+    expect(firstFlow).toHaveProperty('name');
+    expect(firstFlow).toHaveProperty('trigger');
+    expect(firstFlow).toHaveProperty('stepCount');
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/flows/:flowId — returns flow with steps
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/flows/:flowId — returns flow with steps', async () => {
+    // First get the flow list
+    const listRes = await request(app)
+      .get(`/api/repos/${createdRepoId}/flows`)
+      .expect(200);
+
+    const flowId = listRes.body.flows[0].id;
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}/flows/${flowId}`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('id', flowId);
+    expect(res.body).toHaveProperty('name');
+    expect(res.body).toHaveProperty('steps');
+    expect(Array.isArray(res.body.steps)).toBe(true);
+    expect(res.body.steps.length).toBeGreaterThan(0);
+
+    // Steps should have expected fields
+    const step = res.body.steps[0];
+    expect(step).toHaveProperty('stepOrder');
+    expect(step).toHaveProperty('sourceService');
+    expect(step).toHaveProperty('targetService');
+    expect(step).toHaveProperty('stepType');
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/flows/:flowId — 404 for nonexistent flow
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/flows/:flowId — returns 404 for nonexistent flow', async () => {
+    const fakeFlowId = '00000000-0000-0000-0000-000000000000';
+    await request(app)
+      .get(`/api/repos/${createdRepoId}/flows/${fakeFlowId}`)
+      .expect(404);
   });
 
   // -----------------------------------------------------------------------

@@ -7,6 +7,7 @@ export const config = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   openaiApiKey: process.env.OPENAI_API_KEY || '',
   llmProvider: process.env.LLM_PROVIDER || 'anthropic',
+  llmModel: process.env.LLM_MODEL || '',
   langfuse: {
     publicKey: process.env.LANGFUSE_PUBLIC_KEY || '',
     secretKey: process.env.LANGFUSE_SECRET_KEY || '',

@@ -125,6 +125,20 @@ cp .env.example .env
 pnpm dev
 ```
 
+## Claude Code Skills
+
+TrueCourse includes [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that let you run analysis conversationally from within Claude Code.
+
+To install them, run `npx truecourse add` in your project and accept the prompt to install skills. This copies the skill files to `.claude/skills/truecourse/` in your project.
+
+### Available skills
+
+| Skill | Triggers | What it does |
+|---|---|---|
+| `/truecourse-analyze` | "analyze this repo", "run a diff check" | Runs `truecourse analyze` or `analyze --diff` and summarizes results |
+| `/truecourse-list` | "show violations", "list issues" | Runs `truecourse list` or `list --diff` to show full violation details |
+| `/truecourse-fix` | "fix violations", "apply fixes" | Lists fixable violations, lets you pick which to fix, applies changes |
+
 ## Analysis Rules
 
 TrueCourse ships with three types of rules:

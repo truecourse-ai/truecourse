@@ -16,6 +16,8 @@ import {
   buildDiffDatabaseTemplateVars,
   buildDiffModuleTemplateVars,
   buildCodeTemplateVars,
+  buildFlowTemplateVars,
+  type FlowEnrichmentContext,
 } from './prompts.js';
 
 // ---------------------------------------------------------------------------
@@ -274,6 +276,12 @@ export interface AllViolationsResult {
   module?: ModuleViolationsResult;
 }
 
+export interface FlowEnrichmentResult {
+  name: string;
+  description: string;
+  stepDescriptions: { stepOrder: number; dataDescription: string }[];
+}
+
 export interface LLMProvider {
   generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult>;
   generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult>;
@@ -286,6 +294,7 @@ export interface LLMProvider {
   }): Promise<DiffViolationsResult>;
   generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
+  enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   summarizeServices(context: ServiceSummaryContext): Promise<string>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
 }
@@ -376,21 +385,37 @@ const CodeViolationOutputSchema = z.object({
   ),
 });
 
+const FlowEnrichmentOutputSchema = z.object({
+  name: z.string().describe('A human-readable name for this flow (e.g. "User Registration")'),
+  description: z.string().describe('A concise description of what this flow does'),
+  stepDescriptions: z.array(
+    z.object({
+      stepOrder: z.number().describe('The step number'),
+      dataDescription: z.string().describe('What data flows in this step'),
+    })
+  ),
+});
+
 // ---------------------------------------------------------------------------
 // Model configuration
 // ---------------------------------------------------------------------------
 
-const MODEL_CONFIG: Record<string, { provider: () => LanguageModel }> = {
+const DEFAULT_MODELS: Record<string, string> = {
+  openai: 'gpt-5.3-codex',
+  anthropic: 'claude-sonnet-4-20250514',
+};
+
+const MODEL_CONFIG: Record<string, { provider: (model: string) => LanguageModel }> = {
   openai: {
-    provider: () => {
+    provider: (model) => {
       const openai = createOpenAI({ apiKey: config.openaiApiKey });
-      return openai('gpt-5.3-codex');
+      return openai(model);
     },
   },
   anthropic: {
-    provider: () => {
+    provider: (model) => {
       const anthropic = createAnthropic({ apiKey: config.anthropicApiKey });
-      return anthropic('claude-sonnet-4-20250514');
+      return anthropic(model);
     },
   },
 };
@@ -400,7 +425,8 @@ function getModel(): LanguageModel {
   if (!providerConfig) {
     throw new Error(`Unknown LLM provider: ${config.llmProvider}`);
   }
-  return providerConfig.provider();
+  const model = config.llmModel || DEFAULT_MODELS[config.llmProvider];
+  return providerConfig.provider(model);
 }
 
 // ---------------------------------------------------------------------------
@@ -697,6 +723,27 @@ class AISDKProvider implements LLMProvider {
     },
     { name: 'generate-all-code-violations' },
   );
+
+  async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {
+    const { text: prompt, langfusePrompt } = await getPrompt('flow-enrichment', buildFlowTemplateVars(context));
+    const model = getModel();
+
+    console.log(`[LLM] Flow enrichment call starting for ${context.flowName}...`);
+    const t0 = Date.now();
+    const { output: object } = await generateText({
+      model,
+      output: Output.object({ schema: FlowEnrichmentOutputSchema }),
+      prompt,
+      experimental_telemetry: telemetry('flow-enrichment', langfusePrompt),
+    });
+    console.log(`[LLM] Flow enrichment done in ${Date.now() - t0}ms`);
+
+    return {
+      name: object.name,
+      description: object.description,
+      stepDescriptions: object.stepDescriptions,
+    };
+  }
 
   async summarizeServices(context: ServiceSummaryContext): Promise<string> {
     const { text: prompt, langfusePrompt } = await getPrompt('service-summary', buildTemplateVars(context));

@@ -495,15 +495,28 @@ function buildMethodDependencies(
 
       let targetMethod: MethodInfo | undefined
 
-      // Strategy 1: Check if callee receiver matches an imported class/module name
+      // Strategy 1: Check if callee receiver matches an imported class/module name.
+      // Prefer same-service matches to avoid incorrectly linking to identically-named
+      // classes in other services (e.g., both services having a `UserService`).
       if (calleeParts.length >= 2) {
         const receiverName = calleeParts[calleeParts.length - 2]
 
-        // Look for a module with that name across all services
+        // First pass: same service only
         for (const mod of allModules) {
+          if (mod.serviceName !== serviceName) continue
           if (mod.name === receiverName || matchesLowerCase(mod.name, receiverName)) {
             targetMethod = methodLookup.get(`${mod.serviceName}::${mod.name}::${calleeMethodName}`)
             if (targetMethod) break
+          }
+        }
+        // Second pass: cross-service (only if no same-service match)
+        if (!targetMethod) {
+          for (const mod of allModules) {
+            if (mod.serviceName === serviceName) continue
+            if (mod.name === receiverName || matchesLowerCase(mod.name, receiverName)) {
+              targetMethod = methodLookup.get(`${mod.serviceName}::${mod.name}::${calleeMethodName}`)
+              if (targetMethod) break
+            }
           }
         }
       }
@@ -529,12 +542,24 @@ function buildMethodDependencies(
       }
 
       // Strategy 3: Simple function call matching an imported name (e.g. `findAll()`)
+      // Prefer same-service matches first.
       if (!targetMethod && calleeParts.length === 1 && importedNames.has(calleeMethodName)) {
         for (const mod of allModules) {
+          if (mod.serviceName !== serviceName) continue
           const candidate = methodLookup.get(`${mod.serviceName}::${mod.name}::${calleeMethodName}`)
           if (candidate && candidate.isExported) {
             targetMethod = candidate
             break
+          }
+        }
+        if (!targetMethod) {
+          for (const mod of allModules) {
+            if (mod.serviceName === serviceName) continue
+            const candidate = methodLookup.get(`${mod.serviceName}::${mod.name}::${calleeMethodName}`)
+            if (candidate && candidate.isExported) {
+              targetMethod = candidate
+              break
+            }
           }
         }
       }

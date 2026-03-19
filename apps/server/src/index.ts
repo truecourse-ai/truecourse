@@ -18,6 +18,7 @@ import violationsRouter from './routes/violations.js';
 import chatRouter from './routes/chat.js';
 import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
+import flowsRouter from './routes/flows.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { seedRules } from './services/rules.service.js';
 import { initTelemetry, shutdownTelemetry } from './services/llm/telemetry.js';
@@ -64,6 +65,7 @@ async function main() {
   app.use('/api/repos', violationsRouter);
   app.use('/api/repos', chatRouter);
   app.use('/api/repos', databasesRouter);
+  app.use('/api/repos', flowsRouter);
   app.use('/api/rules', rulesRouter);
 
   app.get('/api/health', (_req, res) => {

@@ -223,6 +223,22 @@ Dependencies:
     labels: ['production'],
   },
 
+  'flow-enrichment': {
+    prompt: `You are analyzing an execution flow through a codebase. Generate human-readable names and descriptions.
+
+Flow: {{flowName}}
+Entry: {{entryService}}.{{entryMethod}} (trigger: {{trigger}})
+
+Steps:
+{{stepList}}
+
+For each step, describe what data flows between the source and target methods.
+Return a human-readable flow name, a description of the overall flow purpose, and a data description for each step.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
   'chat-system': {
     prompt: `You are TrueCourse, an AI assistant that helps developers understand their codebase architecture.
 
@@ -478,6 +494,46 @@ export function buildCodeTemplateVars(context: CodeViolationContext): Record<str
     .join('\n\n');
 
   return { llmRules, fileList };
+}
+
+// ---------------------------------------------------------------------------
+// Flow enrichment template variable helpers
+// ---------------------------------------------------------------------------
+
+export interface FlowEnrichmentContext {
+  flowName: string;
+  entryService: string;
+  entryMethod: string;
+  trigger: string;
+  steps: {
+    stepOrder: number;
+    sourceService: string;
+    sourceModule: string;
+    sourceMethod: string;
+    targetService: string;
+    targetModule: string;
+    targetMethod: string;
+    stepType: string;
+    isAsync: boolean;
+  }[];
+}
+
+/** Build template vars for flow-enrichment prompt. */
+export function buildFlowTemplateVars(context: FlowEnrichmentContext): Record<string, string> {
+  const stepList = context.steps
+    .map(
+      (s) =>
+        `${s.stepOrder}. ${s.sourceService}::${s.sourceModule}.${s.sourceMethod} → ${s.targetService}::${s.targetModule}.${s.targetMethod} (${s.stepType}${s.isAsync ? ', async' : ''})`
+    )
+    .join('\n');
+
+  return {
+    flowName: context.flowName,
+    entryService: context.entryService,
+    entryMethod: context.entryMethod,
+    trigger: context.trigger,
+    stepList,
+  };
 }
 
 // ---------------------------------------------------------------------------

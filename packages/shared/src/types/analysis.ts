@@ -134,6 +134,27 @@ export const HttpCallSchema = z.object({
 export type HttpCall = z.infer<typeof HttpCallSchema>
 
 // ---------------------------------------------------------------------------
+// Route Registration
+// ---------------------------------------------------------------------------
+
+export const RouteRegistrationSchema = z.object({
+  httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'ALL']),
+  path: z.string(),
+  handlerName: z.string(),
+  location: SourceLocationSchema,
+})
+
+export type RouteRegistration = z.infer<typeof RouteRegistrationSchema>
+
+export const RouterMountSchema = z.object({
+  path: z.string(),
+  routerName: z.string(),
+  location: SourceLocationSchema,
+})
+
+export type RouterMount = z.infer<typeof RouterMountSchema>
+
+// ---------------------------------------------------------------------------
 // File Analysis
 // ---------------------------------------------------------------------------
 
@@ -146,6 +167,8 @@ export const FileAnalysisSchema = z.object({
   exports: z.array(ExportStatementSchema),
   calls: z.array(CallExpressionSchema),
   httpCalls: z.array(HttpCallSchema),
+  routeRegistrations: z.array(RouteRegistrationSchema).optional(),
+  routerMounts: z.array(RouterMountSchema).optional(),
 })
 
 export type FileAnalysis = z.infer<typeof FileAnalysisSchema>

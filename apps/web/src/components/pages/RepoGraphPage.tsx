@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
@@ -9,6 +9,8 @@ import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { ViolationsPanel } from '@/components/violations/ViolationsPanel';
 import { RulesPanel } from '@/components/rules/RulesPanel';
 import { FileTree } from '@/components/files/FileTree';
+import { FlowList } from '@/components/flows/FlowList';
+import { FlowDiagramPanel } from '@/components/flows/FlowDiagramPanel';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
@@ -18,6 +20,7 @@ import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { useAnalysisList } from '@/hooks/useAnalysisList';
 import { useCodeViolationSummary } from '@/hooks/useCodeViolationSummary';
+import { useFlows } from '@/hooks/useFlows';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
@@ -30,6 +33,12 @@ type OpenFile = {
   path: string;
   pinned: boolean;
   scrollToLine?: number;
+};
+
+type OpenFlow = {
+  id: string;
+  name: string;
+  pinned: boolean;
 };
 
 export default function RepoGraphPage() {
@@ -61,7 +70,7 @@ export default function RepoGraphPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<LeftTab | null>(searchParams?.get('file') ? 'files' : 'violations');
+  const [leftTab, setLeftTab] = useState<LeftTab | null>(searchParams?.get('flow') ? 'flows' : searchParams?.get('file') ? 'files' : 'violations');
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
   const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -113,17 +122,62 @@ export default function RepoGraphPage() {
       const next = prev.filter((f) => f.path !== path);
       return next;
     });
-    setActiveFilePath((current) => {
-      if (current !== path) return current;
-      // Switch to another tab or back to graph
+    if (activeFilePath === path) {
       const remaining = openFiles.filter((f) => f.path !== path);
-      return remaining.length > 0 ? remaining[remaining.length - 1].path : null;
-    });
-  }, [openFiles]);
+      setActiveFilePath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
+    }
+  }, [openFiles, activeFilePath, setActiveFilePath]);
 
   const handleSelectTab = useCallback((path: string | null) => {
     setActiveFilePath(path);
+    if (path) setActiveFlowIdState(null);
   }, []);
+
+  // Multi-tab flow viewer state — restore from URL
+  const flowFromUrl = searchParams?.get('flow') || null;
+  const [openFlows, setOpenFlows] = useState<OpenFlow[]>(() =>
+    flowFromUrl ? [{ id: flowFromUrl, name: 'Flow', pinned: true }] : []
+  );
+  const [activeFlowId, setActiveFlowIdState] = useState<string | null>(flowFromUrl);
+
+  const setActiveFlowId = useCallback((id: string | null) => {
+    setActiveFlowIdState(id);
+    const url = new URL(window.location.href);
+    if (id) {
+      url.searchParams.set('flow', id);
+      url.searchParams.delete('file');
+    } else {
+      url.searchParams.delete('flow');
+    }
+    navigate(url.pathname + url.search, { replace: true });
+  }, [navigate]);
+
+  const handleOpenFlow = useCallback((flowId: string, pinned: boolean) => {
+    setOpenFlows((prev) => {
+      const existing = prev.find((f) => f.id === flowId);
+      if (existing) {
+        return prev.map((f) => f.id === flowId ? { ...f, pinned: pinned || f.pinned } : f);
+      }
+      if (pinned) {
+        return [...prev, { id: flowId, name: 'Flow', pinned: true }];
+      }
+      const hasUnpinned = prev.find((f) => !f.pinned);
+      if (hasUnpinned) {
+        return prev.map((f) => !f.pinned ? { id: flowId, name: 'Flow', pinned: false } : f);
+      }
+      return [...prev, { id: flowId, name: 'Flow', pinned: false }];
+    });
+    setActiveFlowId(flowId);
+    setActiveFilePathState(null);
+  }, [setActiveFlowId]);
+
+  const handleCloseFlow = useCallback((flowId: string) => {
+    setOpenFlows((prev) => prev.filter((f) => f.id !== flowId));
+    if (activeFlowId === flowId) {
+      const remaining = openFlows.filter((f) => f.id !== flowId);
+      setActiveFlowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+    }
+  }, [openFlows, activeFlowId, setActiveFlowId]);
 
   const currentBranch = repo?.defaultBranch;
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
@@ -137,6 +191,7 @@ export default function RepoGraphPage() {
     useGraph(repoId, currentBranch, depthLevel, graphAnalysisId);
 
   const { summary: codeViolationSummary, refetch: refetchCodeViolationSummary } = useCodeViolationSummary(repoId, graphAnalysisId);
+  const { flows: flowList, severities: flowSeverities, isLoading: flowsLoading, refetch: refetchFlows } = useFlows(repoId);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -173,9 +228,10 @@ export default function RepoGraphPage() {
       refetchGraph();
       refetchAnalyses();
       refetchCodeViolationSummary();
+      refetchFlows();
     });
     return unsub;
-  }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary]);
+  }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -686,8 +742,20 @@ export default function RepoGraphPage() {
     }
   }, [depthLevel]);
 
-  // Whether we're showing a file tab (code viewer) instead of graph
+  // Whether we're showing a file tab (code viewer) or flow diagram instead of graph
   const showingCodeViewer = activeFilePath !== null;
+  const showingFlow = activeFlowId !== null && !showingCodeViewer;
+
+  // Update flow names when flow list loads
+  useEffect(() => {
+    if (flowList.length === 0) return;
+    setOpenFlows((prev) =>
+      prev.map((f) => {
+        const match = flowList.find((fl) => fl.id === f.id);
+        return match ? { ...f, name: match.name } : f;
+      })
+    );
+  }, [flowList]);
 
   return (
     <div className="flex h-screen flex-col">
@@ -714,6 +782,7 @@ export default function RepoGraphPage() {
           violations: isDiffMode && diffResult
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
+          flows: flowList.length,
         }}>
           {leftTab === 'violations' && (
             <ViolationsPanel
@@ -733,6 +802,15 @@ export default function RepoGraphPage() {
             />
           )}
           {leftTab === 'rules' && <RulesPanel />}
+          {leftTab === 'flows' && (
+            <FlowList
+              flows={flowList}
+              isLoading={flowsLoading}
+              onSelectFlow={handleOpenFlow}
+              activeFlowId={activeFlowId}
+              flowSeverities={flowSeverities}
+            />
+          )}
           {leftTab === 'files' && (
             <FileTree
               repoId={repoId}
@@ -779,14 +857,14 @@ export default function RepoGraphPage() {
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar when files are open */}
-          {openFiles.length > 0 && (
+          {/* Tab bar when files or flows are open */}
+          {(openFiles.length > 0 || openFlows.length > 0) && (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* Graph tab */}
               <button
-                onClick={() => handleSelectTab(null)}
+                onClick={() => { handleSelectTab(null); setActiveFlowId(null); }}
                 className={`shrink-0 px-3 py-1.5 border-r border-border transition-colors ${
-                  !showingCodeViewer
+                  !showingCodeViewer && !showingFlow
                     ? 'bg-background text-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
@@ -800,7 +878,7 @@ export default function RepoGraphPage() {
                 return (
                   <div
                     key={file.path}
-                    onClick={() => handleSelectTab(file.path)}
+                    onClick={() => { handleSelectTab(file.path); setActiveFlowIdState(null); }}
                     className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-background text-foreground'
@@ -813,6 +891,36 @@ export default function RepoGraphPage() {
                       onClick={(e) => {
                         e.stopPropagation();
                         handleCloseFile(file.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Flow tabs */}
+              {openFlows.map((flow) => {
+                const isActive = activeFlowId === flow.id && !showingCodeViewer;
+                return (
+                  <div
+                    key={flow.id}
+                    onClick={() => { setActiveFlowId(flow.id); setActiveFilePathState(null); }}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={flow.name}
+                  >
+                    <Workflow className="h-3 w-3 shrink-0" />
+                    <span className={flow.pinned ? 'font-medium' : 'italic'}>{flow.name}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseFlow(flow.id);
                       }}
                       className={`rounded p-0.5 hover:bg-muted transition-opacity ${
                         isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -883,6 +991,11 @@ export default function RepoGraphPage() {
               analysisId={graphAnalysisId}
               scrollToLine={openFiles.find((f) => f.path === activeFilePath)?.scrollToLine}
               onClose={() => handleCloseFile(activeFilePath)}
+            />
+          ) : showingFlow && activeFlowId ? (
+            <FlowDiagramPanel
+              repoId={repoId}
+              flowId={activeFlowId}
             />
           ) : (
           <>

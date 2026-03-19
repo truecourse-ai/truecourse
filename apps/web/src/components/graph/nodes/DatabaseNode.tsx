@@ -2,6 +2,7 @@
 import { memo } from 'react';
 import { Handle, Position, useNodeConnections, type NodeProps } from '@xyflow/react';
 import { Database, Zap } from 'lucide-react';
+import { DB_TYPE_COLORS, DB_TYPE_LABELS } from '@/lib/database-colors';
 
 type DatabaseNodeData = {
   label: string;
@@ -10,22 +11,6 @@ type DatabaseNodeData = {
   connectedServices: string[];
   framework?: string; // driver name
   onExplain?: (nodeId: string) => void;
-};
-
-const DB_TYPE_COLORS: Record<string, string> = {
-  postgres: '#336791',
-  redis: '#DC382D',
-  mongodb: '#47A248',
-  mysql: '#4479A1',
-  sqlite: '#003B57',
-};
-
-const DB_TYPE_LABELS: Record<string, string> = {
-  postgres: 'PostgreSQL',
-  redis: 'Redis',
-  mongodb: 'MongoDB',
-  mysql: 'MySQL',
-  sqlite: 'SQLite',
 };
 
 const HIDDEN_CLASS = '!invisible';

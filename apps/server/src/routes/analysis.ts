@@ -26,6 +26,7 @@ import path from 'node:path';
 import { runAnalysis, runDeterministicModuleChecks } from '../services/analyzer.service.js';
 import { runDiffAnalysis, runDiffViolationCheck } from '../services/diff-check.service.js';
 import { persistAnalysisResult, persistCodeViolations } from '../services/analysis-persistence.service.js';
+import { detectAndPersistFlows } from '../services/flow.service.js';
 import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import {
@@ -131,6 +132,13 @@ router.post(
           await persistAnalysisResult({ repoId: id, branch, result });
 
         const analysis = { id: newAnalysisId };
+
+        // Detect and persist flows
+        try {
+          await detectAndPersistFlows(newAnalysisId, result);
+        } catch (flowError) {
+          console.error('[Flows] Detection failed:', flowError instanceof Error ? flowError.message : String(flowError));
+        }
 
         // Load rules from database
         const allRules = await getEnabledRules();

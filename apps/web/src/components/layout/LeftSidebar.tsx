@@ -1,8 +1,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Shield, FolderTree } from 'lucide-react';
+import { AlertTriangle, Shield, FolderTree, Workflow } from 'lucide-react';
 
-export type LeftTab = 'violations' | 'rules' | 'files';
+export type LeftTab = 'violations' | 'rules' | 'files' | 'flows';
 
 type LeftSidebarProps = {
   activeTab: LeftTab | null;
@@ -17,6 +17,7 @@ const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
   { id: 'violations', icon: AlertTriangle, label: 'Violations' },
   { id: 'rules', icon: Shield, label: 'Rules' },
   { id: 'files', icon: FolderTree, label: 'Files' },
+  { id: 'flows', icon: Workflow, label: 'Flows' },
 ];
 
 export function LeftSidebar({
@@ -124,7 +125,7 @@ export function LeftSidebar({
           {/* Panel header */}
           <div className="flex h-10 items-center gap-2 border-b border-border px-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : 'Files'}
+              {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : activeTab === 'flows' ? 'Flows' : 'Files'}
             </span>
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;

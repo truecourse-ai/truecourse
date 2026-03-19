@@ -58,6 +58,7 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   modules: many(modules),
   methods: many(methods),
   moduleDeps: many(moduleDeps),
+  flows: many(flows),
 }));
 
 // ---------------------------------------------------------------------------
@@ -578,5 +579,61 @@ export const diffChecksRelations = relations(diffChecks, ({ one }) => ({
   analysis: one(analyses, {
     fields: [diffChecks.analysisId],
     references: [analyses.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// flows (execution paths from entry points through call graph)
+// ---------------------------------------------------------------------------
+
+export const flows = pgTable('flows', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  entryService: text('entry_service').notNull(),
+  entryMethod: text('entry_method').notNull(),
+  category: text('category').notNull(),
+  trigger: text('trigger').notNull(), // 'http' | 'event' | 'cron' | 'startup'
+  stepCount: integer('step_count').notNull().default(0),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
+});
+
+export const flowsRelations = relations(flows, ({ one, many }) => ({
+  analysis: one(analyses, {
+    fields: [flows.analysisId],
+    references: [analyses.id],
+  }),
+  steps: many(flowSteps),
+}));
+
+// ---------------------------------------------------------------------------
+// flow_steps (individual steps within a flow)
+// ---------------------------------------------------------------------------
+
+export const flowSteps = pgTable('flow_steps', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  flowId: uuid('flow_id')
+    .notNull()
+    .references(() => flows.id, { onDelete: 'cascade' }),
+  stepOrder: integer('step_order').notNull(),
+  sourceService: text('source_service').notNull(),
+  sourceModule: text('source_module').notNull(),
+  sourceMethod: text('source_method').notNull(),
+  targetService: text('target_service').notNull(),
+  targetModule: text('target_module').notNull(),
+  targetMethod: text('target_method').notNull(),
+  stepType: text('step_type').notNull(), // 'call' | 'http' | 'db-read' | 'db-write' | 'event'
+  dataDescription: text('data_description'),
+  isAsync: boolean('is_async').notNull().default(false),
+  isConditional: boolean('is_conditional').notNull().default(false),
+});
+
+export const flowStepsRelations = relations(flowSteps, ({ one }) => ({
+  flow: one(flows, {
+    fields: [flowSteps.flowId],
+    references: [flows.id],
   }),
 }));

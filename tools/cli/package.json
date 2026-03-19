@@ -5,6 +5,10 @@
   "bin": {
     "truecourse": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "skills"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "echo 'CLI is not used in dev mode'",
@@ -15,6 +19,9 @@
     "@clack/prompts": "^0.9.0",
     "dotenv": "^16.4.0",
     "socket.io-client": "^4.7.0"
+  },
+  "optionalDependencies": {
+    "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

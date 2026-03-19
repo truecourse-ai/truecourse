@@ -94,6 +94,7 @@ run(
     '--target=node20',
     '--format=esm',
     '--outfile=dist/cli.mjs',
+    '--external:node-windows',
     '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
   ].join(' '),
 );
@@ -126,6 +127,9 @@ const publishPkg = {
     'postgres': '^3.4.0',
     'commander': '^12.1.0',
     '@clack/prompts': '^0.9.0',
+  },
+  optionalDependencies: {
+    'node-windows': '^1.0.0-beta.8',
   },
   license: 'MIT',
   repository: {

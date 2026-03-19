@@ -25,6 +25,18 @@ export interface LanguageConfig {
   // Framework entry file patterns (files invoked by the framework, not by user code)
   frameworkEntryPatterns: RegExp[]
 
+  // URL interpolation patterns — how this language embeds variables in URL strings.
+  // Used to normalize raw URLs from source code into language-agnostic route patterns.
+  // See ADDING_A_LANGUAGE.md for details.
+  urlInterpolation: {
+    // Regex matching a base-URL variable (e.g., `${BASE_URL}` in JS, `{baseUrl}` in C#)
+    baseUrlVar: RegExp
+    // Regex matching any interpolated variable (e.g., `${id}` in JS, `{id}` in C#)
+    paramVar: RegExp
+    // Characters to strip from raw URL strings (e.g., backticks for JS template literals)
+    stripChars?: RegExp
+  }
+
   // Optional: Custom tree-sitter query strings
   functionQuery?: string
   classQuery?: string
@@ -74,6 +86,12 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
     /\bworker\.tsx?$/,
     /\binstrument\.tsx?$/,
   ],
+
+  urlInterpolation: {
+    baseUrlVar: /\$\{[^}]*URL[^}]*\}/gi,
+    paramVar: /\$\{[^}]+\}/g,
+    stripChars: /`/g,
+  },
 
   // Simplified queries - just capture node types
   functionQuery: `
@@ -167,4 +185,28 @@ export function detectLanguage(filePath: string): SupportedLanguage | null {
   const ext = filePath.substring(filePath.lastIndexOf('.'))
   const config = LANGUAGE_CONFIGS.find((c) => c.fileExtensions.includes(ext))
   return config?.name ?? null
+}
+
+/**
+ * Normalize a raw URL string from source code into a language-agnostic route pattern.
+ * Uses the language's urlInterpolation config to handle language-specific syntax.
+ *
+ * Example (TypeScript): `${USER_SERVICE_URL}/users/${id}` → `/users/:param`
+ *
+ * The result uses `:param` for path parameters and has no language-specific syntax.
+ */
+export function normalizeUrl(url: string, language: SupportedLanguage): string {
+  const config = getLanguageConfig(language)
+  const { baseUrlVar, paramVar, stripChars } = config.urlInterpolation
+
+  let normalized = url
+  if (stripChars) normalized = normalized.replace(stripChars, '')
+  normalized = normalized
+    .replace(baseUrlVar, '')               // remove base URL vars
+    .replace(paramVar, ':param')           // remaining vars → :param
+    .replace(/https?:\/\/[^/]*/g, '')      // remove protocol+host
+    .replace(/\/+/g, '/')                  // collapse slashes
+    .replace(/\/$/, '')                    // remove trailing slash
+
+  return normalized || '/'
 }

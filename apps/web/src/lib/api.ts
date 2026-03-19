@@ -416,6 +416,58 @@ export function getCodeViolationSummary(
   );
 }
 
+// Flows
+export type FlowResponse = {
+  id: string;
+  name: string;
+  description: string | null;
+  entryService: string;
+  entryMethod: string;
+  category: string;
+  trigger: string;
+  stepCount: number;
+  createdAt: string;
+};
+
+export type FlowStepResponse = {
+  id: string;
+  flowId: string;
+  stepOrder: number;
+  sourceService: string;
+  sourceModule: string;
+  sourceMethod: string;
+  targetService: string;
+  targetModule: string;
+  targetMethod: string;
+  stepType: string;
+  dataDescription: string | null;
+  isAsync: boolean;
+  isConditional: boolean;
+};
+
+export type FlowDetailResponse = FlowResponse & {
+  steps: FlowStepResponse[];
+};
+
+export type FlowListResponse = {
+  flows: FlowResponse[];
+  severities: Record<string, string>;
+};
+
+export function getFlows(repoId: string): Promise<FlowListResponse> {
+  return fetchApi<FlowListResponse>(`/api/repos/${repoId}/flows`);
+}
+
+export function getFlow(repoId: string, flowId: string): Promise<FlowDetailResponse> {
+  return fetchApi<FlowDetailResponse>(`/api/repos/${repoId}/flows/${flowId}`);
+}
+
+export function enrichFlow(repoId: string, flowId: string): Promise<FlowDetailResponse> {
+  return fetchApi<FlowDetailResponse>(`/api/repos/${repoId}/flows/${flowId}/enrich`, {
+    method: 'POST',
+  });
+}
+
 // Conversations
 export type ConversationSummary = {
   id: string;

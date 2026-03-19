@@ -3,8 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+const DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-20250514",
+  openai: "gpt-5.3-codex",
+};
+
 function buildEnvContents(config: {
   provider?: string;
+  model?: string;
   anthropicKey?: string;
   openaiKey?: string;
   langfusePublicKey?: string;
@@ -18,6 +24,10 @@ function buildEnvContents(config: {
 
   if (config.provider) {
     lines.push(`LLM_PROVIDER=${config.provider}`);
+  }
+
+  if (config.model) {
+    lines.push(`LLM_MODEL=${config.model}`);
   }
 
   if (config.anthropicKey) {
@@ -59,6 +69,7 @@ export async function runSetup(): Promise<void> {
 
   const config: {
     provider?: string;
+    model?: string;
     anthropicKey?: string;
     openaiKey?: string;
     langfusePublicKey?: string;
@@ -107,6 +118,22 @@ export async function runSetup(): Promise<void> {
     }
 
     config.openaiKey = openaiKey;
+  }
+
+  // Select LLM model
+  if (provider === "anthropic" || provider === "openai") {
+    const defaultModel = DEFAULT_MODELS[provider];
+    const model = await p.text({
+      message: `Enter the model to use (default: ${defaultModel}):`,
+      placeholder: defaultModel,
+    });
+
+    if (p.isCancel(model)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    config.model = model?.trim() || defaultModel;
   }
 
   // Langfuse tracing
@@ -161,6 +188,27 @@ export async function runSetup(): Promise<void> {
   const envPath = path.join(configDir, ".env");
   fs.writeFileSync(envPath, buildEnvContents(config), "utf-8");
   p.log.success(`Configuration saved to ${envPath}`);
+
+  // Run mode selection
+  const runMode = await p.select({
+    message: "How would you like to run TrueCourse?",
+    options: [
+      { value: "console" as const, label: "Console (keep terminal open)" },
+      { value: "service" as const, label: "Background service (runs automatically, no terminal needed)" },
+    ],
+  });
+
+  if (p.isCancel(runMode)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  const { writeConfig } = await import("./helpers.js");
+  writeConfig({ runMode });
+
+  if (runMode === "service") {
+    p.log.info("Background service selected. Run `truecourse start` to install and start the service.");
+  }
 
   p.log.info("Embedded PostgreSQL will start automatically when the server runs.");
   p.log.info("Database migrations are applied on server startup.");

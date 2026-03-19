@@ -4,6 +4,7 @@ import { detectLanguage } from './language-config.js'
 import { parseFile } from './parser.js'
 import { extractCalls, buildFunctionContext } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
+import { extractRouteRegistrations } from './extractors/route-registrations.js'
 import {
   extractTypeScriptFunctions,
   extractTypeScriptClasses,
@@ -58,6 +59,7 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
     const functionContext = buildFunctionContext(functions, classes)
     const calls = extractCalls(tree, filePath, language, functionContext)
     const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
+    const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
 
     return {
       filePath,
@@ -68,6 +70,8 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
       exports,
       calls,
       httpCalls,
+      ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
+      ...(routerMounts.length > 0 ? { routerMounts } : {}),
     }
   } catch (error) {
     throw new Error(
@@ -113,6 +117,7 @@ export function analyzeFileContent(
   const functionContext = buildFunctionContext(functions, classes)
   const calls = extractCalls(tree, filePath, language, functionContext)
   const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
+  const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
 
   return {
     filePath,
@@ -123,5 +128,7 @@ export function analyzeFileContent(
     exports,
     calls,
     httpCalls,
+    ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
+    ...(routerMounts.length > 0 ? { routerMounts } : {}),
   }
 }

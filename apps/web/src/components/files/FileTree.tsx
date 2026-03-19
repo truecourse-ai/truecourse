@@ -3,14 +3,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Folder, X, Loader2, Crosshair } from 'lucide-react';
 import { buildFileTree, type FileTreeNode } from '@/lib/file-tree';
 import * as api from '@/lib/api';
-
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: '#dc2626',
-  high: '#ef4444',
-  medium: '#f97316',
-  low: '#f59e0b',
-  info: '#3b82f6',
-};
+import { SEVERITY_COLORS } from '@/lib/severity-colors';
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
 
@@ -276,7 +269,7 @@ function TreeNodeRow({ node, depth, selectedPath, onSelectPath, onOpenFile, viol
         {/* Name — colored by highest violation severity */}
         <span
           className="truncate flex-1 text-left"
-          style={severityColor && !isSelected ? { color: severityColor } : undefined}
+          style={severityColor ? { color: severityColor } : undefined}
         >
           {node.name}
         </span>
