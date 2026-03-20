@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildMethodGraphData } from '../../apps/server/src/services/graph.service';
+import { buildUnifiedGraph, type UnifiedInput } from '../../apps/server/src/services/graph.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,11 +78,27 @@ function makeMethodDep(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeInput(overrides: Partial<UnifiedInput> = {}): UnifiedInput {
+  return {
+    services: [],
+    serviceDeps: [],
+    layers: [],
+    layerDeps: [],
+    modules: [],
+    moduleDeps: [],
+    methods: [],
+    methodDeps: [],
+    databases: [],
+    dbConnections: [],
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('buildMethodGraphData', () => {
+describe('buildUnifiedGraph (method level)', () => {
   it('creates service group, layer, module container, and method nodes', () => {
     const services = [makeService()];
     const layers = [makeLayer()];
@@ -92,7 +108,7 @@ describe('buildMethodGraphData', () => {
       makeMethod({ id: 'mth-2', name: 'create' }),
     ];
 
-    const result = buildMethodGraphData(services, layers, modules, methods, []);
+    const result = buildUnifiedGraph('method', makeInput({ services, layers, modules, methods }));
 
     const serviceGroup = result.nodes.find((n) => n.type === 'serviceGroupNode');
     expect(serviceGroup).toBeDefined();
@@ -115,7 +131,7 @@ describe('buildMethodGraphData', () => {
     const modules = [makeModule()];
     const methods = [makeMethod()];
 
-    const result = buildMethodGraphData(services, layers, modules, methods, []);
+    const result = buildUnifiedGraph('method', makeInput({ services, layers, modules, methods }));
 
     const methodNode = result.nodes.find((n) => n.type === 'methodNode') as Record<string, unknown>;
     expect(methodNode).toBeDefined();
@@ -138,7 +154,7 @@ describe('buildMethodGraphData', () => {
     ];
     const methodDeps = [makeMethodDep({ sourceMethodId: 'mth-1', targetMethodId: 'mth-2' })];
 
-    const result = buildMethodGraphData(services, layers, modules, methods, [], undefined, undefined, undefined, methodDeps);
+    const result = buildUnifiedGraph('method', makeInput({ services, layers, modules, methods, methodDeps }));
 
     const methodEdges = result.edges.filter(
       (e) => e.source === 'mth-1' && e.target === 'mth-2'
@@ -159,7 +175,7 @@ describe('buildMethodGraphData', () => {
       maxNestingDepth: 3,
     })];
 
-    const result = buildMethodGraphData(services, layers, modules, methods, []);
+    const result = buildUnifiedGraph('method', makeInput({ services, layers, modules, methods }));
 
     const methodNode = result.nodes.find((n) => n.type === 'methodNode');
     expect(methodNode).toBeDefined();
@@ -194,7 +210,7 @@ describe('buildMethodGraphData', () => {
       dependencyCount: 1,
     }];
 
-    const result = buildMethodGraphData(services, layers, modules, methods, moduleDeps);
+    const result = buildUnifiedGraph('method', makeInput({ services, layers, modules, methods, moduleDeps }));
 
     // Module dep edge appears as fallback since no method-level edges exist
     const modEdges = result.edges.filter(
@@ -226,7 +242,7 @@ describe('buildMethodGraphData', () => {
     }];
     const methodDeps = [makeMethodDep({ sourceMethodId: 'mth-1', targetMethodId: 'mth-2' })];
 
-    const result = buildMethodGraphData(services, layers, modules, methods, moduleDeps, undefined, undefined, undefined, methodDeps);
+    const result = buildUnifiedGraph('method', makeInput({ services, layers, modules, methods, moduleDeps, methodDeps }));
 
     // Only method edge, no duplicate module dep edge
     const modEdges = result.edges.filter(
@@ -236,7 +252,7 @@ describe('buildMethodGraphData', () => {
   });
 
   it('returns empty graph for no services', () => {
-    const result = buildMethodGraphData([], [], [], [], []);
+    const result = buildUnifiedGraph('method', makeInput());
     expect(result.nodes).toHaveLength(0);
     expect(result.edges).toHaveLength(0);
   });

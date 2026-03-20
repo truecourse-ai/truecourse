@@ -34,7 +34,7 @@ import {
   emitAnalysisComplete,
   emitViolationsReady,
 } from '../socket/handlers.js';
-import { buildGraphData, buildModuleGraphData, buildMethodGraphData } from '../services/graph.service.js';
+import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
 import { generateViolations } from '../services/violation.service.js';
 import type { ModuleViolation } from '@truecourse/analyzer';
 import { getEnabledRules } from '../services/rules.service.js';
@@ -612,100 +612,56 @@ router.get(
       }
 
       const level = (req.query.level as string) || 'services';
+      const graphLevel = level.replace(/s$/, '') as GraphLevel;
 
-      const analysisServices = await db
-        .select()
-        .from(services)
-        .where(eq(services.analysisId, analysis.id));
+      // Fetch all data in parallel
+      const [
+        analysisServices,
+        analysisDeps,
+        analysisDatabases,
+        analysisDbConnections,
+        analysisLayers,
+        analysisLayerDeps,
+        analysisModules,
+        analysisModuleDeps,
+        analysisMethods,
+        analysisMethodDeps,
+      ] = await Promise.all([
+        db.select().from(services).where(eq(services.analysisId, analysis.id)),
+        db.select().from(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id)),
+        db.select().from(databases).where(eq(databases.analysisId, analysis.id)),
+        db.select().from(databaseConnections).where(eq(databaseConnections.analysisId, analysis.id)),
+        db.select().from(layers).where(eq(layers.analysisId, analysis.id)),
+        db.select().from(layerDependencies).where(eq(layerDependencies.analysisId, analysis.id)),
+        db.select().from(modules).where(eq(modules.analysisId, analysis.id)),
+        db.select().from(moduleDeps).where(eq(moduleDeps.analysisId, analysis.id)),
+        db.select().from(methods).where(eq(methods.analysisId, analysis.id)),
+        db.select().from(methodDeps).where(eq(methodDeps.analysisId, analysis.id)),
+      ]);
 
-      const analysisDeps = await db
-        .select()
-        .from(serviceDependencies)
-        .where(eq(serviceDependencies.analysisId, analysis.id));
+      const layerData = analysisLayers.map((l) => ({
+        id: l.id,
+        serviceName: l.serviceName,
+        serviceId: l.serviceId,
+        layer: l.layer,
+        fileCount: l.fileCount,
+        filePaths: l.filePaths as string[],
+        confidence: l.confidence,
+        evidence: l.evidence as string[],
+      }));
 
-      // Fetch databases for this analysis
-      const analysisDatabases = await db
-        .select()
-        .from(databases)
-        .where(eq(databases.analysisId, analysis.id));
-
-      const analysisDbConnections = await db
-        .select()
-        .from(databaseConnections)
-        .where(eq(databaseConnections.analysisId, analysis.id));
-
-      let graphData;
-
-      if (level === 'modules' || level === 'methods') {
-        const analysisLayers = await db
-          .select()
-          .from(layers)
-          .where(eq(layers.analysisId, analysis.id));
-
-        const analysisLayerDeps = await db
-          .select()
-          .from(layerDependencies)
-          .where(eq(layerDependencies.analysisId, analysis.id));
-
-        const analysisModules = await db
-          .select()
-          .from(modules)
-          .where(eq(modules.analysisId, analysis.id));
-
-        const analysisModuleDeps = await db
-          .select()
-          .from(moduleDeps)
-          .where(eq(moduleDeps.analysisId, analysis.id));
-
-        const layerData = analysisLayers.map((l) => ({
-          id: l.id,
-          serviceName: l.serviceName,
-          serviceId: l.serviceId,
-          layer: l.layer,
-          fileCount: l.fileCount,
-          filePaths: l.filePaths as string[],
-          confidence: l.confidence,
-          evidence: l.evidence as string[],
-        }));
-
-        if (level === 'methods') {
-          const analysisMethods = await db
-            .select()
-            .from(methods)
-            .where(eq(methods.analysisId, analysis.id));
-
-          const analysisMethodDeps = await db
-            .select()
-            .from(methodDeps)
-            .where(eq(methodDeps.analysisId, analysis.id));
-
-          graphData = buildMethodGraphData(
-            analysisServices,
-            layerData,
-            analysisModules,
-            analysisMethods,
-            analysisModuleDeps,
-            analysisDatabases,
-            analysisDbConnections,
-            analysisLayerDeps,
-            analysisMethodDeps,
-            analysisDeps,
-          );
-        } else {
-          graphData = buildModuleGraphData(
-            analysisServices,
-            layerData,
-            analysisModules,
-            analysisModuleDeps,
-            analysisDatabases,
-            analysisDbConnections,
-            analysisLayerDeps,
-            analysisDeps,
-          );
-        }
-      } else {
-        graphData = buildGraphData(analysisServices, analysisDeps, analysisDatabases, analysisDbConnections);
-      }
+      const graphData = buildUnifiedGraph(graphLevel, {
+        services: analysisServices,
+        serviceDeps: analysisDeps,
+        layers: layerData,
+        layerDeps: analysisLayerDeps,
+        modules: analysisModules,
+        moduleDeps: analysisModuleDeps,
+        methods: analysisMethods,
+        methodDeps: analysisMethodDeps,
+        databases: analysisDatabases,
+        dbConnections: analysisDbConnections,
+      });
 
       // Include saved node positions if any (namespaced by level)
       const allPositions = analysis.nodePositions as Record<string, unknown> | null;

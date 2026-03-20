@@ -1,7 +1,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { flows, flowSteps, violations, methods as methodsTable, modules as modulesTable } from '../db/schema.js';
-import { traceFlows, normalizeUrl, type TraceFlowsInput, type CrossServiceCall, type RouteHandler } from '@truecourse/analyzer';
+import { traceFlows, normalizeUrl, AnalysisGraph, type CrossServiceCall, type RouteHandler } from '@truecourse/analyzer';
 import type { AnalysisResult } from './analyzer.service.js';
 import type { FileAnalysis, SupportedLanguage } from '@truecourse/shared';
 
@@ -86,7 +86,7 @@ export async function detectAndPersistFlows(
   // Build route handler lookup from file analyses
   const routeHandlers = buildRouteHandlerLookup(result);
 
-  const input: TraceFlowsInput = {
+  const graph = new AnalysisGraph({
     methods: result.methods,
     methodDependencies: result.methodLevelDependencies,
     modules: result.modules,
@@ -98,9 +98,9 @@ export async function detectAndPersistFlows(
       databaseType: dbTypeMap.get(c.databaseName) || 'unknown',
     })),
     routeHandlers: routeHandlers.size > 0 ? routeHandlers : undefined,
-  };
+  });
 
-  const traced = traceFlows(input);
+  const traced = traceFlows(graph);
 
   if (traced.length === 0) return { flowCount: 0 };
 

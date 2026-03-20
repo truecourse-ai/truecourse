@@ -971,7 +971,119 @@ When `runMode` is `service`, `truecourse start` installs and starts the service 
 
 ---
 
-## Phase 10: Custom Rule Generation `STATUS: BACKLOG`
+## Phase 10: Violation Lifecycle & Analytics Dashboard `STATUS: BACKLOG`
+
+Persistent violation tracking across analyses and an analytics dashboard showing violation trends over time.
+
+### 10.1 Persistent Violation Lifecycle `STATUS: BACKLOG`
+
+Currently, each full analysis creates entirely new violations and discards the old ones. This loses history and makes trending impossible. Change the full analysis flow to match what diff mode does — create, resolve, and carry forward violations across analyses.
+
+**Violation matching:**
+- After the LLM/deterministic checks produce a new set of violations, compare them against the previous analysis's active violations
+- Match violations using a composite key: `type + targetServiceId + targetModuleId + targetMethodId + title` (or a normalized content hash)
+- **Matched** → violation carries forward (same DB row, updated `analysisId` to current)
+- **Unmatched new** → create new violation row with `status: 'active'`, `firstSeenAnalysisId`, `firstSeenAt`
+- **Unmatched old** → mark as `status: 'resolved'`, set `resolvedAt` and `resolvedAnalysisId`
+
+**Schema changes to `violations` table:**
+- Add `status` enum: `'active' | 'resolved'` (default `'active'`)
+- Add `firstSeenAnalysisId` — the analysis that first detected this violation
+- Add `firstSeenAt` — timestamp when first detected
+- Add `resolvedAnalysisId` — the analysis where this violation disappeared (null while active)
+- Add `resolvedAt` — timestamp when resolved (null while active)
+- Add `matchKey` — computed composite key for deduplication across analyses
+
+**Schema changes to `codeViolations` table:**
+- Same lifecycle fields: `status`, `firstSeenAnalysisId`, `firstSeenAt`, `resolvedAnalysisId`, `resolvedAt`, `matchKey`
+- Match key: `ruleKey + filePath + lineStart + title` (line-level matching with fuzzy tolerance for small shifts)
+
+**Analysis flow changes:**
+- `POST /api/repos/:id/analyze` — after generating violations, run the matching algorithm before inserting
+- Carry-forward violations keep their original `id` so any external references remain stable
+- The `analysisId` on active violations always points to the latest analysis (so existing queries still work)
+- Resolved violations retain their last `analysisId` for history
+
+**Diff mode integration:**
+- Diff mode (`POST /api/repos/:id/diff-check`) continues to work as before — it already compares against baseline
+- Diff results now reference stable violation IDs (since violations persist across analyses)
+- New violations from diff that get confirmed in the next full analysis inherit the same `matchKey`
+
+**API changes:**
+- `GET /api/repos/:id/violations` — default: returns active violations only. Add `?status=resolved` or `?status=all` filter
+- `GET /api/repos/:id/violations/summary` — returns counts by status, by type, by severity for a given analysis
+- `GET /api/repos/:id/violations/history` — returns violation count per analysis over time (for trending)
+
+### 10.2 Analytics Dashboard `STATUS: BACKLOG`
+
+A new "Analytics" tab in the frontend showing violation trends and breakdowns across analyses.
+
+**Trending chart (line/area chart):**
+- X-axis: analysis date/time
+- Y-axis: violation count
+- Lines: total active, new (introduced), resolved
+- Hover tooltip: analysis details + counts
+- Shows whether the codebase is improving or degrading over time
+
+**Violation type breakdown (pie/donut chart):**
+- Segments by violation type (architecture, module, code, security)
+- Or by rule key for more granular view
+- Toggle between current snapshot and historical average
+
+**Severity distribution (bar chart):**
+- Grouped by severity: critical, high, medium, low
+- Compare current analysis vs previous analysis (side-by-side bars)
+
+**Top offenders (table/list):**
+- Services/modules with the most active violations
+- Sortable by total count, new count, or severity-weighted score
+
+**Resolution velocity:**
+- Average time from `firstSeenAt` to `resolvedAt`
+- Violations that persist the longest (stale violations)
+- Resolution rate per analysis (% of violations resolved)
+
+**Frontend components:**
+- `AnalyticsDashboard` — main container with chart grid layout
+- `TrendChart` — line/area chart using a chart library (recharts or chart.js)
+- `TypePieChart` — pie/donut chart for violation type distribution
+- `SeverityBarChart` — severity comparison bar chart
+- `TopOffendersTable` — sortable table of worst services/modules
+- `ResolutionMetrics` — resolution velocity stats
+
+**API endpoints:**
+- `GET /api/repos/:id/analytics/trend` — violation counts per analysis (time series data)
+- `GET /api/repos/:id/analytics/breakdown` — current type/severity breakdown
+- `GET /api/repos/:id/analytics/top-offenders` — services/modules ranked by violation count
+- `GET /api/repos/:id/analytics/resolution` — resolution velocity metrics
+
+### Test Plan (Phase 10) `STATUS: BACKLOG`
+- Violation matching: re-analyzing the same code produces the same violations (no duplicates, same IDs)
+- Violation matching: adding a new violation in code → new violation appears with `status: 'active'`
+- Violation matching: fixing a violation in code → violation marked `status: 'resolved'` with `resolvedAt`
+- Violation matching: unchanged violations carry forward with stable IDs
+- Code violation matching: same lifecycle for code-level violations with line-shift tolerance
+- Analytics trend API: returns correct counts per analysis over time
+- Analytics breakdown API: returns correct type/severity distribution
+- Analytics top-offenders: returns services ranked by violation count
+- Analytics resolution: calculates correct resolution velocity from timestamps
+- Frontend: trend chart renders with correct data points
+- Frontend: pie chart shows violation type distribution
+- Frontend: switching repos updates all analytics data
+
+### Verification (Phase 10)
+1. Run analysis twice on unchanged code → same violations, same IDs, zero new/resolved
+2. Introduce a new violation → re-analyze → new violation appears in trend as +1
+3. Fix a violation → re-analyze → violation marked resolved, trend shows -1
+4. Analytics tab shows trending chart with data points per analysis
+5. Pie chart accurately reflects current violation type breakdown
+6. Top offenders table highlights the most problematic services
+7. Resolution velocity shows average time-to-fix
+8. Historical analyses contribute to the trend (backfilled from existing data)
+
+---
+
+## Phase 11: Custom Rule Generation `STATUS: BACKLOG`
 
 Add the ability to generate project-specific analysis rules via a CLI command. The LLM analyzes your codebase's patterns, conventions, and architecture to produce custom rules tailored to the project.
 
@@ -992,13 +1104,13 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 
 ---
 
-## Phase 11: Multi-Language Support `STATUS: BACKLOG`
+## Phase 12: Multi-Language Support `STATUS: BACKLOG`
 
 - Re-enable Python, C# extractors from SpecMind
 - Language-specific import resolution and pattern detection
 - Incremental analysis (content-hash cache, only re-analyze changed files)
 
-### Test Plan (Phase 11) `STATUS: BACKLOG`
+### Test Plan (Phase 12) `STATUS: BACKLOG`
 - Python parser: parses `.py` files, extracts functions, classes, imports (decorators, type hints)
 - C# parser: parses `.cs` files, extracts classes, methods, using statements, attributes
 - Python import resolution: resolves relative imports, `__init__.py`, package imports
@@ -1008,7 +1120,7 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 - Cache invalidation: modifying a file updates its hash and triggers re-analysis
 - Mixed-language repo: a repo with both TS and Python files produces correct combined analysis
 
-### Verification (Phase 11)
+### Verification (Phase 12)
 1. Analyze a Python repo → services, layers, files detected correctly
 2. Analyze a C# repo → same
 3. Modify a single file in a large repo → only that file re-analyzed (check logs)
@@ -1016,7 +1128,7 @@ Add the ability to generate project-specific analysis rules via a CLI command. T
 
 ---
 
-## Phase 12: Interaction Diagrams `STATUS: DONE`
+## Phase 13: Interaction Diagrams `STATUS: DONE`
 
 Detect and visualize all request/data flows in the project as animated interaction diagrams (sequence diagrams). Each flow shows how data moves step-by-step through services, modules, and methods — from entry point to response.
 
@@ -1084,14 +1196,14 @@ Render flows as animated sequence diagrams in the web UI:
 
 ---
 
-## Phase 13: Cloud Version (Future) `STATUS: BACKLOG`
+## Phase 14: Cloud Version (Future) `STATUS: BACKLOG`
 
 - Auth (NextAuth.js), GitHub integration
 - GitHub webhooks replacing file watcher
 - Landing page, dashboard, team features
 - Managed Postgres deployment
 
-### Test Plan (Phase 13) `STATUS: BACKLOG`
+### Test Plan (Phase 14) `STATUS: BACKLOG`
 - Auth flow: NextAuth.js sign-in/sign-out, session persistence, token refresh
 - GitHub OAuth: mock OAuth flow, verify user creation and repo access scoping
 - Webhook handler: GitHub push event triggers analysis for correct repo and branch
@@ -1100,7 +1212,7 @@ Render flows as animated sequence diagrams in the web UI:
 - Team access: shared repo analyses are visible to all team members
 - Cloud DB: migrations run cleanly on managed Postgres (connection pooling, SSL)
 
-### Verification (Phase 13)
+### Verification (Phase 14)
 1. Sign up / sign in via OAuth
 2. Connect a GitHub repo → webhook triggers analysis on push
 3. Graph renders in cloud-hosted UI

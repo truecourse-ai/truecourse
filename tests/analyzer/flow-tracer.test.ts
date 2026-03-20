@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { traceFlows, type TraceFlowsInput, type RouteHandler } from '../../packages/analyzer/src/flow-tracer'
+import { traceFlows, type RouteHandler } from '../../packages/analyzer/src/flow-tracer'
+import { AnalysisGraph, type AnalysisGraphInput } from '../../packages/analyzer/src/analysis-graph'
 import type { MethodInfo, MethodLevelDependency, ModuleInfo } from '../../packages/shared/src/types/analysis'
 
 function makeModule(overrides: Partial<ModuleInfo>): ModuleInfo {
@@ -44,15 +45,19 @@ function makeDep(overrides: Partial<MethodLevelDependency>): MethodLevelDependen
   }
 }
 
+function buildGraph(input: AnalysisGraphInput): AnalysisGraph {
+  return new AnalysisGraph(input)
+}
+
 describe('traceFlows', () => {
   it('returns empty array when no entry points exist', () => {
-    const input: TraceFlowsInput = {
+    const graph = buildGraph({
       methods: [makeMethod({ isExported: false })],
       methodDependencies: [],
       modules: [makeModule({ layerName: 'service' })],
       services: [{ name: 'my-service' }],
-    }
-    const flows = traceFlows(input)
+    })
+    const flows = traceFlows(graph)
     expect(flows).toHaveLength(0)
   })
 
@@ -72,12 +77,13 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'findUser', callerModule: 'UserService', callerService: 'user-svc', calleeMethod: 'findById', calleeModule: 'UserRepository', calleeService: 'user-svc' }),
     ]
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
       services: [{ name: 'user-svc' }],
     })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     expect(flows[0].name).toBe('UserController.getUser')
@@ -120,12 +126,13 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'handle', callerModule: 'ApiCtrl', callerService: 'backend', calleeMethod: 'doWork', calleeModule: 'Svc', calleeService: 'backend' }),
     ]
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
       services: [{ name: 'backend' }, { name: 'frontend', type: 'frontend' }],
     })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     expect(flows[0].steps[0].sourceService).toBe('Browser')
@@ -144,7 +151,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'create', callerModule: 'ApiController', callerService: 'svc', calleeMethod: 'saveUser', calleeModule: 'DataRepo', calleeService: 'svc' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     // Step 0: trigger, step 1: controller → data repo (call), step 2: repo → DB (db-write)
@@ -167,7 +175,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'proxy', callerModule: 'GatewayCtrl', callerService: 'gateway', calleeMethod: 'handle', calleeModule: 'UserSvc', calleeService: 'user-svc' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'gateway' }, { name: 'user-svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'gateway' }, { name: 'user-svc' }] })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     // Step 1 (after trigger) is the cross-service call
@@ -191,7 +200,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'doB', callerModule: 'B', callerService: 'svc', calleeMethod: 'doA', calleeModule: 'A', calleeService: 'svc' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     // 3 steps: trigger + start→doA + doA→doB (cycle stopped)
@@ -206,7 +216,8 @@ describe('traceFlows', () => {
       makeMethod({ name: 'check', moduleName: 'HealthCtrl', serviceName: 'svc', isExported: true }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: [], modules, services: [{ name: 'svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: [], modules, services: [{ name: 'svc' }] })
+    const flows = traceFlows(graph)
     expect(flows).toHaveLength(0)
   })
 
@@ -227,7 +238,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'getById', callerModule: 'UserController', callerService: 'api-gw', calleeMethod: 'findById', calleeModule: 'UserService', calleeService: 'api-gw' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'api-gw' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'api-gw' }] })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(2)
     const names = flows.map((f) => f.name).sort()
@@ -250,7 +262,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'internal', callerModule: 'InternalCtrl', callerService: 'svc', calleeMethod: 'doWork', calleeModule: 'Svc', calleeService: 'svc' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const flows = traceFlows(graph)
     expect(flows).toHaveLength(0)
   })
 
@@ -267,7 +280,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'crawl', callerModule: 'CrawlerService', callerService: 'crawler', calleeMethod: 'saveResult', calleeModule: 'CrawlerRepo', calleeService: 'crawler' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'crawler' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'crawler' }] })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     expect(flows[0].name).toBe('CrawlerService.crawl')
@@ -294,7 +308,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'process', callerModule: 'WorkerSvc', callerService: 'svc', calleeMethod: 'save', calleeModule: 'Repo', calleeService: 'svc' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const flows = traceFlows(graph)
 
     // Only the API entry point flow, not the service-layer one
     expect(flows).toHaveLength(1)
@@ -322,7 +337,7 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'getUserById', callerModule: 'UserHandler', callerService: 'user-service', calleeMethod: 'findById', calleeModule: 'UserRepo', calleeService: 'user-service' }),
     ]
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
@@ -337,6 +352,7 @@ describe('traceFlows', () => {
         },
       ],
     })
+    const flows = traceFlows(graph)
 
     // Should have 1 flow starting from api-gateway that crosses into user-service
     const gwFlow = flows.find((f) => f.entryService === 'api-gateway')
@@ -354,7 +370,6 @@ describe('traceFlows', () => {
     expect(crossServiceStep!.targetMethod).toBe('getUserById')
 
     // Deduplication: user-service's getUserById should NOT have its own standalone flow
-    // since it's already reachable via the cross-service flow
     const userFlow = flows.find((f) => f.entryService === 'user-service' && f.entryMethod === 'getUserById')
     expect(userFlow).toBeUndefined()
   })
@@ -375,7 +390,7 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'handle', callerModule: 'Ctrl', callerService: 'svc-a', calleeMethod: 'callRemote', calleeModule: 'Proxy', calleeService: 'svc-a' }),
     ]
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
@@ -390,11 +405,12 @@ describe('traceFlows', () => {
         },
       ],
     })
+    const flows = traceFlows(graph)
 
     // Flow exists but doesn't cross into svc-b (no matching handler)
     expect(flows).toHaveLength(1)
-    const services = new Set(flows[0].steps.map((s) => s.targetService))
-    expect(services.has('svc-b')).toBe(false)
+    const svcNames = new Set(flows[0].steps.map((s) => s.targetService))
+    expect(svcNames.has('svc-b')).toBe(false)
   })
 
   it('marks async steps correctly', () => {
@@ -410,7 +426,8 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'trigger', callerModule: 'Ctrl', callerService: 'svc', calleeMethod: 'process', calleeModule: 'Worker', calleeService: 'svc' }),
     ]
 
-    const flows = traceFlows({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const graph = buildGraph({ methods, methodDependencies: deps, modules, services: [{ name: 'svc' }] })
+    const flows = traceFlows(graph)
 
     expect(flows).toHaveLength(1)
     // Step 1 (after trigger) is the async call
@@ -418,8 +435,6 @@ describe('traceFlows', () => {
   })
 
   it('uses sourceMethod to key cross-service calls to the correct method', () => {
-    // Scenario: UserService module has multiple methods making different HTTP calls
-    // sourceMethod lets us match each method to its specific HTTP call
     const modules = [
       makeModule({ name: 'GatewayCtrl', layerName: 'api', serviceName: 'api-gateway' }),
       makeModule({ name: 'UserService', layerName: 'service', serviceName: 'api-gateway' }),
@@ -436,13 +451,12 @@ describe('traceFlows', () => {
       makeDep({ callerMethod: 'getUser', callerModule: 'GatewayCtrl', callerService: 'api-gateway', calleeMethod: 'findById', calleeModule: 'UserService', calleeService: 'api-gateway' }),
     ]
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
       services: [{ name: 'api-gateway' }, { name: 'user-service' }],
       crossServiceCalls: [
-        // sourceMethod is set: findById makes GET /users/:id
         {
           sourceService: 'api-gateway',
           sourceModule: 'UserService',
@@ -451,7 +465,6 @@ describe('traceFlows', () => {
           url: '/users/:param',
           targetService: 'user-service',
         },
-        // sourceMethod is set: findAll makes GET /users
         {
           sourceService: 'api-gateway',
           sourceModule: 'UserService',
@@ -462,6 +475,7 @@ describe('traceFlows', () => {
         },
       ],
     })
+    const flows = traceFlows(graph)
 
     const gwFlow = flows.find((f) => f.entryService === 'api-gateway')
     expect(gwFlow).toBeDefined()
@@ -496,7 +510,7 @@ describe('traceFlows', () => {
       ['user-service::GET::/users', { handlerName: 'getUsers', moduleName: 'UserHandler' }],
     ])
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
@@ -513,6 +527,7 @@ describe('traceFlows', () => {
       ],
       routeHandlers,
     })
+    const flows = traceFlows(graph)
 
     const gwFlow = flows.find((f) => f.entryService === 'api-gateway')
     expect(gwFlow).toBeDefined()
@@ -545,7 +560,7 @@ describe('traceFlows', () => {
       ['svc-c::GET::/unrelated', { handlerName: 'unrelated', moduleName: 'Unrelated' }],
     ])
 
-    const flows = traceFlows({
+    const graph = buildGraph({
       methods,
       methodDependencies: deps,
       modules,
@@ -562,15 +577,10 @@ describe('traceFlows', () => {
       ],
       routeHandlers,
     })
+    const flows = traceFlows(graph)
 
     const flow = flows.find((f) => f.entryService === 'svc-a')
     expect(flow).toBeDefined()
-
-    // Should still find the handler via heuristic fallback
-    const crossStep = flow!.steps.find(
-      (s) => s.stepType === 'http' && s.targetService === 'svc-b',
-    )
     // heuristic may or may not match — just verify no crash
-    // The OrderController would match "order" resource with GET prefix
   })
 })

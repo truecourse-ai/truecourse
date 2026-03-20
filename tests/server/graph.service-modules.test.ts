@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildModuleGraphData } from '../../apps/server/src/services/graph.service';
+import { buildUnifiedGraph, type UnifiedInput } from '../../apps/server/src/services/graph.service';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,17 +62,33 @@ function makeModuleDep(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeInput(overrides: Partial<UnifiedInput> = {}): UnifiedInput {
+  return {
+    services: [],
+    serviceDeps: [],
+    layers: [],
+    layerDeps: [],
+    modules: [],
+    moduleDeps: [],
+    methods: [],
+    methodDeps: [],
+    databases: [],
+    dbConnections: [],
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('buildModuleGraphData', () => {
+describe('buildUnifiedGraph (module level)', () => {
   it('creates service group, layer container, and module nodes', () => {
     const services = [makeService()];
     const layers = [makeLayer()];
     const modules = [makeModule()];
 
-    const result = buildModuleGraphData(services, layers, modules, []);
+    const result = buildUnifiedGraph('module', makeInput({ services, layers, modules }));
 
     // Should have: 1 service group + 1 layer container + 1 module node
     expect(result.nodes.length).toBe(3);
@@ -101,7 +117,7 @@ describe('buildModuleGraphData', () => {
     ];
     const deps = [makeModuleDep({ sourceModuleId: 'mod-1', targetModuleId: 'mod-2' })];
 
-    const result = buildModuleGraphData(services, layers, modules, deps);
+    const result = buildUnifiedGraph('module', makeInput({ services, layers, modules, moduleDeps: deps }));
 
     // Should have at least one edge between modules
     const moduleEdges = result.edges.filter(
@@ -124,7 +140,7 @@ describe('buildModuleGraphData', () => {
       makeModule({ id: 'm2', layerId: 'l2', serviceId: 'svc-2', name: 'UserService' }),
     ];
 
-    const result = buildModuleGraphData(services, layers, modules, []);
+    const result = buildUnifiedGraph('module', makeInput({ services, layers, modules }));
 
     const serviceGroups = result.nodes.filter((n) => n.type === 'serviceGroupNode');
     expect(serviceGroups).toHaveLength(2);
@@ -138,7 +154,7 @@ describe('buildModuleGraphData', () => {
     const layers = [makeLayer()];
     const modules = [makeModule()];
 
-    const result = buildModuleGraphData(services, layers, modules, []);
+    const result = buildUnifiedGraph('module', makeInput({ services, layers, modules }));
 
     const moduleNode = result.nodes.find((n) => n.type === 'moduleNode') as Record<string, unknown>;
     const layerNode = result.nodes.find((n) => n.type === 'layerNode');
@@ -148,7 +164,7 @@ describe('buildModuleGraphData', () => {
   });
 
   it('returns empty graph for no services', () => {
-    const result = buildModuleGraphData([], [], [], []);
+    const result = buildUnifiedGraph('module', makeInput());
     expect(result.nodes).toHaveLength(0);
     expect(result.edges).toHaveLength(0);
   });
@@ -158,7 +174,7 @@ describe('buildModuleGraphData', () => {
     const layers = [makeLayer()];
     const modules = [makeModule({ kind: 'class', methodCount: 5, propertyCount: 2 })];
 
-    const result = buildModuleGraphData(services, layers, modules, []);
+    const result = buildUnifiedGraph('module', makeInput({ services, layers, modules }));
 
     const moduleNode = result.nodes.find((n) => n.type === 'moduleNode');
     expect(moduleNode).toBeDefined();

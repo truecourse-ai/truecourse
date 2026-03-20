@@ -50,7 +50,8 @@ export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPa
 export { extractModulesAndMethods, type ModuleExtractionResult } from './module-extractor.js'
 
 // Flow tracing
-export { traceFlows, type TracedFlow, type TracedFlowStep, type TraceFlowsInput, type CrossServiceCall, type RouteHandler } from './flow-tracer.js'
+export { traceFlows, type TracedFlow, type TracedFlowStep, type CrossServiceCall, type RouteHandler } from './flow-tracer.js'
+export { AnalysisGraph, type AnalysisGraphInput } from './analysis-graph.js'
 
 // Rules
 export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES, LLM_CODE_RULES, CODE_RULES } from './rules/index.js'
