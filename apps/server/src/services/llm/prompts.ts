@@ -12,6 +12,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export const PROMPT_DEFINITIONS = {
+  // --- Service prompts ---
   'violations-service': {
     prompt: `Analyze the following codebase architecture and identify violations and issues that need to be fixed.
 
@@ -22,42 +23,130 @@ Services:
 
 Dependencies:
 {{depList}}
-{{violations}}
-{{lifecycleContext}}
+
+Analysis Rules:
 {{llmRules}}
 
 IMPORTANT: When referencing a service, use the exact id from the Services list above. Do not fabricate or modify ids. Set targetServiceId to link violations to the correct service.
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
-For each "Current deterministic detection", produce a final violation with proper wording and a concrete fixPrompt. Set deterministicViolationId to the detId from the detection. If a previous LLM violation already covers the same deterministic detection (same issue, same target), put that previous violation's ID in unchangedViolationIds instead of creating a duplicate.
+Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
 
 The fixPrompt should be specific and actionable, using human-readable names (service names, file paths) — never include internal ids in fixPrompt.
-{{lifecycleInstructions}}
+
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
+  'violations-service-lifecycle': {
+    prompt: `Analyze the following codebase architecture and identify violations and issues that need to be fixed.
+
+Architecture: {{architecture}}
+
+Services:
+{{serviceList}}
+
+Dependencies:
+{{depList}}
+
+Previous LLM violations (final violations from the PREVIOUS analysis):
+{{existingViolations}}
+
+Analysis Rules:
+{{llmRules}}
+
+IMPORTANT: When referencing a service, use the exact id from the Services list above. Do not fabricate or modify ids. Set targetServiceId to link violations to the correct service.
+
+Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
+
+Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
+
+DE-DUPLICATION AND LIFECYCLE RULES:
+- Every previous LLM violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
+- Create a newViolations item only when the current issue is not already covered by any previous LLM violation.
+- Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- Only mark a previous violation as resolved when the current data clearly shows the underlying issue no longer exists.
+
+For previous LLM violations:
+- Re-evaluate them against the current services and dependency data.
+- Mark them resolved only if the current data clearly shows the issue no longer exists.
+- If the current data is insufficient to prove the issue is gone, keep them in unchangedViolationIds.
+
+ID population rules:
+- Set targetServiceId whenever the corresponding service is identifiable from the input.
+- Use null only when the relevant target cannot be determined from the provided data.
+- Every ID copied into the output must exactly match an ID from the input.
+
+The fixPrompt should be specific and actionable, using human-readable names (service names, file paths) — never include internal ids in fixPrompt.
+
+Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
+
+Before returning the final answer, perform a completeness check:
+- Verify that every previous LLM violation ID appears exactly once in either resolvedViolationIds or unchangedViolationIds.
+- Verify that every ID copied into the output exactly matches an ID from the input.
+- Verify that no issue is represented in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- If any item is missing, duplicated, or uses an invalid ID, correct it before returning.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  // --- Database prompts ---
   'violations-database': {
     prompt: `Analyze the following database schemas and identify violations and issues that need to be fixed.
 
 Databases:
 {{databaseList}}
-{{lifecycleContext}}
+
+Analysis Rules:
 {{llmRules}}
 
 IMPORTANT: When referencing a database, use the exact id from the Databases list above. Do not fabricate or modify ids.
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
+Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
+
 For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
-{{lifecycleInstructions}}
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
+  'violations-database-lifecycle': {
+    prompt: `Analyze the following database schemas and identify violations and issues that need to be fixed.
+
+Databases:
+{{databaseList}}
+
+Previous LLM violations (final violations from the PREVIOUS analysis):
+{{existingViolations}}
+
+Analysis Rules:
+{{llmRules}}
+
+IMPORTANT: When referencing a database, use the exact id from the Databases list above. Do not fabricate or modify ids.
+
+Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
+
+Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
+
+DE-DUPLICATION AND LIFECYCLE RULES:
+- Every previous LLM violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
+- Create a newViolations item only when the current issue is not already covered by any previous LLM violation.
+- Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- Only mark a previous violation as resolved when the database schema data clearly shows the underlying issue no longer exists.
+
+For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  // --- Module prompts ---
   'violations-module': {
     prompt: `Analyze the following modules and methods and identify violations and issues that need to be fixed.
 
@@ -72,22 +161,79 @@ Module Dependencies:
 
 Method Dependencies:
 {{methodDependencyList}}
-{{violations}}
-{{lifecycleContext}}
+
+Analysis Rules:
 {{llmRules}}
 
 IMPORTANT: When referencing a module or method, use the exact id from the Modules or Methods list above. Do not fabricate or modify ids. Set targetModuleId and targetMethodId to link violations to the correct entities.
 
 Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
 
-For each "Current deterministic detection", produce a final violation with proper wording and a concrete fixPrompt. Set deterministicViolationId to the detId from the detection. If a previous LLM violation already covers the same deterministic detection (same issue, same target), put that previous violation's ID in unchangedViolationIds instead of creating a duplicate.
+Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
 
 The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt.
-{{lifecycleInstructions}}
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
+  'violations-module-lifecycle': {
+    prompt: `Analyze the following modules and methods and identify violations and issues that need to be fixed.
+
+Modules:
+{{moduleList}}
+
+Methods:
+{{methodList}}
+
+Module Dependencies:
+{{moduleDependencyList}}
+
+Method Dependencies:
+{{methodDependencyList}}
+
+Previous LLM violations (final violations from the PREVIOUS analysis):
+{{existingViolations}}
+
+Analysis Rules:
+{{llmRules}}
+
+IMPORTANT: When referencing a module or method, use the exact id from the Modules or Methods list above. Do not fabricate or modify ids. Set targetModuleId and targetMethodId to link violations to the correct entities.
+
+Only report actionable issues — do NOT include positive observations, compliments, or informational notes. Every item must describe a problem that needs fixing.
+
+Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
+
+DE-DUPLICATION AND LIFECYCLE RULES:
+- Every previous LLM violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
+- Create a newViolations item only when the current issue is not already covered by any previous LLM violation.
+- Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- Only mark a previous violation as resolved when the current data clearly shows the underlying issue no longer exists.
+
+For previous LLM violations:
+- Re-evaluate them against the current modules, methods, and dependency data.
+- Mark them resolved only if the current data clearly shows the issue no longer exists.
+- If the current data is insufficient to prove the issue is gone, keep them in unchangedViolationIds.
+
+ID population rules:
+- Set targetServiceId, targetModuleId, and targetMethodId whenever the corresponding entity is identifiable from the input.
+- Use null only when the relevant target cannot be determined from the provided data.
+- Do not leave targetServiceId null when the service is explicitly given in the module or detection data.
+- Every ID copied into the output must exactly match an ID from the input.
+
+The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt.
+
+Before returning the final answer, perform a completeness check:
+- Verify that every previous LLM violation ID appears exactly once in either resolvedViolationIds or unchangedViolationIds.
+- Verify that every ID copied into the output exactly matches an ID from the input.
+- Verify that no issue is represented in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- If any item is missing, duplicated, or uses an invalid ID, correct it before returning.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  // --- Code prompts ---
   'violations-code': {
     prompt: `You are a senior code reviewer. Analyze the following source files and identify semantic code quality issues that AST-based linting cannot detect.
 
@@ -96,17 +242,70 @@ Rules to evaluate:
 
 Files to analyze:
 {{fileList}}
-{{lifecycleContext}}
+
 IMPORTANT:
-- Only report issues from the rules listed above. Do not invent new rule categories.
-- For each violation, use the exact rule name from the rules list.
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
 - filePath must exactly match one of the file paths provided above.
 - Each line in the source files is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
 - Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block. Do NOT group multiple functions or unrelated code into one wide-spanning violation. If the same issue appears in multiple functions, report each as a separate violation with its own line range.
 - lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue. For example, if a function on lines 10-20 has a problem on lines 14-16, use lineStart=14, lineEnd=16 — not the entire function.
 - Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
 - Do NOT report issues that overlap with deterministic linting (empty catch, console.log, hardcoded secrets, TODO comments, magic numbers, explicit any, SQL injection).
-{{lifecycleInstructions}}
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-code-lifecycle': {
+    prompt: `You are a senior code reviewer. Analyze the following source files and identify semantic code quality issues that AST-based linting cannot detect.
+
+Rules to evaluate:
+{{llmRules}}
+
+Files to analyze:
+{{fileList}}
+
+Previous code violations (from the PREVIOUS analysis):
+{{existingViolations}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Each line in the source files is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block. Do NOT group multiple functions or unrelated code into one wide-spanning violation. If the same issue appears in multiple functions, report each as a separate violation with its own line range.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue. For example, if a function on lines 10-20 has a problem on lines 14-16, use lineStart=14, lineEnd=16 — not the entire function.
+- Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
+- Do NOT report issues that overlap with deterministic linting (empty catch, console.log, hardcoded secrets, TODO comments, magic numbers, explicit any, SQL injection).
+
+DE-DUPLICATION AND LIFECYCLE RULES:
+- Every previous code violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
+- Create a newViolations item only when the current issue is not already covered by any previous code violation.
+- Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-enrich-deterministic': {
+    prompt: `Given these raw code analysis detections, produce a final violation for each with a clear title, detailed content, and actionable fixPrompt.
+
+Detections:
+{{detections}}
+
+Architecture context:
+{{context}}
+
+For each detection, write:
+- id: copy the exact id from the detection — do NOT modify or fabricate ids
+- title: a clear, concise title describing the issue
+- content: a detailed explanation of what is wrong and why it matters
+- fixPrompt: a specific, actionable prompt that an AI coding assistant could use to fix the issue. Use human-readable names (service names, file paths) — never include internal ids in fixPrompt.
+
+You MUST return exactly one enriched violation per input detection, with the matching id.
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
@@ -144,15 +343,46 @@ When suggesting improvements, provide actionable advice that could be passed to 
 export type PromptName = keyof typeof PROMPT_DEFINITIONS;
 
 // ---------------------------------------------------------------------------
+// Prompt ID mapping — short IDs for LLM prompts instead of UUIDs
+// ---------------------------------------------------------------------------
+
+/** Maps short prompt IDs (e.g. svc-0) back to real UUIDs */
+export type PromptIdMap = Map<string, string>;
+
+function assignId(prefix: string, index: number, realId: string, idMap: PromptIdMap): string {
+  const shortId = `${prefix}-${index}`;
+  idMap.set(shortId, realId);
+  return shortId;
+}
+
+/** Resolve a short ID back to a real UUID. Returns the original if not found. */
+export function resolveId(shortId: string | null | undefined, idMap: PromptIdMap): string | null {
+  if (!shortId) return null;
+  return idMap.get(shortId) ?? shortId;
+}
+
+/** Resolve an array of short IDs back to real UUIDs. */
+export function resolveIds(shortIds: string[], idMap: PromptIdMap): string[] {
+  return shortIds.map((id) => idMap.get(id) ?? id);
+}
+
+export interface TemplateVarsResult {
+  vars: Record<string, string>;
+  idMap: PromptIdMap;
+}
+
+// ---------------------------------------------------------------------------
 // Template variable helpers
 // ---------------------------------------------------------------------------
 
 /** Build template vars for violations-service prompt. */
-export function buildServiceTemplateVars(context: ServiceViolationContext): Record<string, string> {
+export function buildServiceTemplateVars(context: ServiceViolationContext): TemplateVarsResult {
+  const idMap: PromptIdMap = new Map();
+
   const serviceList = context.services
     .map(
-      (s) =>
-        `- ${s.name} [id: ${s.id}] (type: ${s.type}, framework: ${s.framework || 'none'}, files: ${s.fileCount}, layers: ${s.layers.join(', ') || 'none'})`
+      (s, i) =>
+        `- ${s.name} [id: ${assignId('svc', i, s.id, idMap)}] (type: ${s.type}, framework: ${s.framework || 'none'}, files: ${s.fileCount}, layers: ${s.layers.join(', ') || 'none'})`
     )
     .join('\n');
 
@@ -163,49 +393,26 @@ export function buildServiceTemplateVars(context: ServiceViolationContext): Reco
     )
     .join('\n') || '(none)';
 
-  const violations = context.violations?.length
-    ? `\nCurrent deterministic detections (raw signals from static analysis on the CURRENT code — you must produce a final violation for each):\n${context.violations.map(
-        (v) => `- ${v.deterministicViolationId ? `[detId: ${v.deterministicViolationId}] ` : ''}[${v.severity.toUpperCase()}] ${v.title}: ${v.description} (rule: ${v.ruleKey}, service: ${v.serviceName})`
-      ).join('\n')}`
-    : '';
-
   const llmRules = context.llmRules.length
-    ? `\nAnalysis Rules (evaluate the architecture against these):\n${context.llmRules.map(
-        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
-      ).join('\n')}`
-    : '';
+    ? context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] [key: ${r.key}] ${r.name}: ${r.prompt}`
+      ).join('\n')
+    : '(none)';
 
-  // Lifecycle context: only present on 2nd+ analysis
-  let lifecycleContext = '';
-  let lifecycleInstructions = '';
+  const existingViolations = context.existingViolations?.length
+    ? formatExistingViolations(context.existingViolations, 'prev', idMap)
+    : '(none)';
 
-  if (context.existingViolations?.length) {
-    const parts: string[] = [];
-
-    if (context.baselineViolations?.length) {
-      parts.push(`\nPrevious deterministic detections (raw signals from the PREVIOUS analysis — each one already has a corresponding final violation in "Previous LLM violations" below. If an item here is missing from "Current deterministic detections" above, the issue has been fixed and its corresponding previous violation should be marked resolved):\n${context.baselineViolations.join('\n')}`);
-    }
-
-    parts.push(`\nPrevious LLM violations (final violations from the PREVIOUS analysis — includes both deterministic-based and LLM-discovered violations):\n${formatExistingViolations(context.existingViolations)}`);
-
-    lifecycleContext = parts.join('\n');
-
-    lifecycleInstructions = `
-LIFECYCLE RULES (comparing against previous analysis):
-- For each previous LLM violation, decide: is it RESOLVED (issue no longer exists in current data) or UNCHANGED (issue still exists)?
-- Return the ID of each previous violation in EITHER resolvedViolationIds OR unchangedViolationIds. Every previous violation ID must appear in exactly one of these lists.
-- Only add to "newViolations" issues that are genuinely new — not already described by any previous LLM violation.
-- ONLY mark a violation as resolved if the data clearly shows the underlying issue is gone.
-`;
-  }
-
-  return { architecture: context.architecture, serviceList, depList, violations, llmRules, lifecycleContext, lifecycleInstructions };
+  return { vars: { architecture: context.architecture, serviceList, depList, llmRules, existingViolations }, idMap };
 }
 
 /** Build template vars for violations-database prompt. */
-export function buildDatabaseTemplateVars(context: DatabaseViolationContext): Record<string, string> {
-  const databaseList = context.databases.map((d) => {
-    let dbStr = `- ${d.name} [id: ${d.id}] (${d.type}, driver: ${d.driver}, tables: ${d.tableCount}, used by: ${d.connectedServices.join(', ') || 'none'})`;
+export function buildDatabaseTemplateVars(context: DatabaseViolationContext): TemplateVarsResult {
+  const idMap: PromptIdMap = new Map();
+
+  const databaseList = context.databases.map((d, i) => {
+    const shortId = assignId('db', i, d.id, idMap);
+    let dbStr = `- ${d.name} [id: ${shortId}] (${d.type}, driver: ${d.driver}, tables: ${d.tableCount}, used by: ${d.connectedServices.join(', ') || 'none'})`;
     if (d.tables?.length) {
       dbStr += '\n  Schema:';
       for (const t of d.tables) {
@@ -229,42 +436,34 @@ export function buildDatabaseTemplateVars(context: DatabaseViolationContext): Re
   }).join('\n');
 
   const llmRules = context.llmRules.length
-    ? `\nAnalysis Rules (evaluate the databases against these):\n${context.llmRules.map(
-        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
-      ).join('\n')}`
-    : '';
+    ? context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] [key: ${r.key}] ${r.name}: ${r.prompt}`
+      ).join('\n')
+    : '(none)';
 
-  let lifecycleContext = '';
-  let lifecycleInstructions = '';
+  const existingViolations = context.existingViolations?.length
+    ? formatExistingViolations(context.existingViolations, 'prev', idMap)
+    : '(none)';
 
-  if (context.existingViolations?.length) {
-    lifecycleContext = `\nPrevious LLM violations (final violations from the PREVIOUS analysis — includes both deterministic-based and LLM-discovered violations):\n${formatExistingViolations(context.existingViolations)}`;
-
-    lifecycleInstructions = `
-LIFECYCLE RULES (comparing against previous analysis):
-- For each previous LLM violation, decide: is it RESOLVED (issue no longer exists in current data) or UNCHANGED (issue still exists)?
-- Return the ID of each previous violation in EITHER resolvedViolationIds OR unchangedViolationIds. Every previous violation ID must appear in exactly one of these lists.
-- Only add to "newViolations" issues that are genuinely new — not already described by any previous LLM violation.
-- ONLY mark a violation as resolved if the database schema data clearly shows the underlying issue is fixed.
-`;
-  }
-
-  return { databaseList, llmRules, lifecycleContext, lifecycleInstructions };
+  return { vars: { databaseList, llmRules, existingViolations }, idMap };
 }
 
 /** Build template vars for violations-module prompt. */
-export function buildModuleTemplateVars(context: ModuleViolationContext): Record<string, string> {
+export function buildModuleTemplateVars(context: ModuleViolationContext): TemplateVarsResult {
+  const idMap: PromptIdMap = new Map();
+
   const moduleList = context.modules
     .map(
-      (m) =>
-        `- ${m.name} [id: ${m.id}] (kind: ${m.kind}, service: ${m.serviceName}, layer: ${m.layerName}, methods: ${m.methodCount}, properties: ${m.propertyCount}, imports: ${m.importCount}, exports: ${m.exportCount}${m.superClass ? `, extends: ${m.superClass}` : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''})`
+      (m, i) =>
+        `- ${m.name} [id: ${assignId('mod', i, m.id, idMap)}] (kind: ${m.kind}, service: ${m.serviceName}, layer: ${m.layerName}, methods: ${m.methodCount}, properties: ${m.propertyCount}, imports: ${m.importCount}, exports: ${m.exportCount}${m.superClass ? `, extends: ${m.superClass}` : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''})`
     )
     .join('\n') || '(none)';
 
+  let methodIndex = 0;
   const methodList = context.methods
     .map(
       (m) =>
-        `- ${m.moduleName}.${m.name}${m.id ? ` [id: ${m.id}]` : ''}: ${m.signature} (params: ${m.paramCount}${m.returnType ? `, returns: ${m.returnType}` : ''}${m.isAsync ? ', async' : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''}${m.statementCount ? `, statements: ${m.statementCount}` : ''}${m.maxNestingDepth ? `, nesting: ${m.maxNestingDepth}` : ''})`
+        `- ${m.moduleName}.${m.name}${m.id ? ` [id: ${assignId('mth', methodIndex++, m.id, idMap)}]` : ''}: ${m.signature} (params: ${m.paramCount}${m.returnType ? `, returns: ${m.returnType}` : ''}${m.isAsync ? ', async' : ''}${m.lineCount ? `, lines: ${m.lineCount}` : ''}${m.statementCount ? `, statements: ${m.statementCount}` : ''}${m.maxNestingDepth ? `, nesting: ${m.maxNestingDepth}` : ''})`
     )
     .join('\n') || '(none)';
 
@@ -280,52 +479,64 @@ export function buildModuleTemplateVars(context: ModuleViolationContext): Record
     )
     .join('\n') || '(none)';
 
-  const violations = context.violations?.length
-    ? `\nCurrent deterministic detections (raw signals from static analysis on the CURRENT code — you must produce a final violation for each):\n${context.violations.map(
-        (v) => `- ${v.deterministicViolationId ? `[detId: ${v.deterministicViolationId}] ` : ''}[${v.severity.toUpperCase()}] ${v.title}: ${v.description} (rule: ${v.ruleKey}, service: ${v.serviceName}${v.serviceId ? ` [serviceId: ${v.serviceId}]` : ''}${v.moduleName ? `, module: ${v.moduleName}` : ''}${v.moduleId ? ` [moduleId: ${v.moduleId}]` : ''}${v.methodName ? `, method: ${v.methodName}` : ''}${v.methodId ? ` [methodId: ${v.methodId}]` : ''})`
-      ).join('\n')}`
-    : '';
-
   const llmRules = context.llmRules.length
-    ? `\nAnalysis Rules (evaluate the modules against these):\n${context.llmRules.map(
-        (r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`
-      ).join('\n')}`
-    : '';
+    ? context.llmRules.map(
+        (r) => `- [${r.severity.toUpperCase()}] [key: ${r.key}] ${r.name}: ${r.prompt}`
+      ).join('\n')
+    : '(none)';
 
-  let lifecycleContext = '';
-  let lifecycleInstructions = '';
+  const existingViolations = context.existingViolations?.length
+    ? formatExistingViolations(context.existingViolations, 'prev', idMap)
+    : '(none)';
 
-  if (context.existingViolations?.length) {
-    const parts: string[] = [];
+  return { vars: { moduleList, methodList, moduleDependencyList, methodDependencyList, llmRules, existingViolations }, idMap };
+}
 
-    if (context.baselineViolations?.length) {
-      parts.push(`\nPrevious deterministic detections (raw signals from the PREVIOUS analysis — each one already has a corresponding final violation in "Previous LLM violations" below. If an item here is missing from "Current deterministic detections" above, the issue has been fixed and its corresponding previous violation should be marked resolved):\n${context.baselineViolations.join('\n')}`);
-    }
+// ---------------------------------------------------------------------------
+// Deterministic enrichment template variable helpers
+// ---------------------------------------------------------------------------
 
-    parts.push(`\nPrevious LLM violations (final violations from the PREVIOUS analysis — includes both deterministic-based and LLM-discovered violations):\n${formatExistingViolations(context.existingViolations)}`);
+export interface DeterministicDetectionForEnrichment {
+  id: string;
+  ruleKey: string;
+  title: string;
+  description: string;
+  severity: string;
+  category: string;
+  serviceName: string;
+  moduleName?: string;
+  methodName?: string;
+}
 
-    lifecycleContext = parts.join('\n');
+/** Build template vars for violations-enrich-deterministic prompt. */
+export function buildEnrichmentTemplateVars(
+  detections: DeterministicDetectionForEnrichment[],
+  architectureContext: string,
+): TemplateVarsResult {
+  const idMap: PromptIdMap = new Map();
 
-    lifecycleInstructions = `
-LIFECYCLE RULES (comparing against previous analysis):
-- For each previous LLM violation, decide: is it RESOLVED (issue no longer exists in current data) or UNCHANGED (issue still exists)?
-- Return the ID of each previous violation in EITHER resolvedViolationIds OR unchangedViolationIds. Every previous violation ID must appear in exactly one of these lists.
-- Only add to "newViolations" issues that are genuinely new — not already described by any previous LLM violation.
-- ONLY mark a violation as resolved if the data clearly shows the underlying issue is gone.
-`;
-  }
+  const detectionsList = detections
+    .map(
+      (d, i) =>
+        `- [id: ${assignId('det', i, d.id, idMap)}] [${d.severity.toUpperCase()}] ${d.title}: ${d.description} (rule: ${d.ruleKey}, category: ${d.category}, service: ${d.serviceName}${d.moduleName ? `, module: ${d.moduleName}` : ''}${d.methodName ? `, method: ${d.methodName}` : ''})`
+    )
+    .join('\n');
 
-  return { moduleList, methodList, moduleDependencyList, methodDependencyList, violations, llmRules, lifecycleContext, lifecycleInstructions };
+  return { vars: { detections: detectionsList, context: architectureContext }, idMap };
 }
 
 // ---------------------------------------------------------------------------
 // Diff template variable helpers
 // ---------------------------------------------------------------------------
 
-function formatExistingViolations(violations: { id: string; type: string; title: string; content: string; severity: string }[]): string {
+function formatExistingViolations(
+  violations: { id: string; type: string; title: string; content: string; severity: string }[],
+  prefix: string,
+  idMap: PromptIdMap,
+): string {
   if (!violations.length) return '(none)';
   return violations.map(
-    (v) => `- [id: ${v.id}] [${v.severity.toUpperCase()}] ${v.title}: ${v.content}`
+    (v, i) => `- [id: ${assignId(prefix, i, v.id, idMap)}] [${v.severity.toUpperCase()}] ${v.title}: ${v.content}`
   ).join('\n');
 }
 
@@ -334,9 +545,11 @@ function formatExistingViolations(violations: { id: string; type: string; title:
 // ---------------------------------------------------------------------------
 
 /** Build template vars for violations-code prompt. */
-export function buildCodeTemplateVars(context: CodeViolationContext): Record<string, string> {
+export function buildCodeTemplateVars(context: CodeViolationContext): TemplateVarsResult {
+  const idMap: PromptIdMap = new Map();
+
   const llmRules = context.llmRules
-    .map((r) => `- [${r.severity.toUpperCase()}] ${r.name}: ${r.prompt}`)
+    .map((r) => `- [${r.severity.toUpperCase()}] [key: ${r.key}] ${r.name}: ${r.prompt}`)
     .join('\n');
 
   const fileList = context.files
@@ -349,24 +562,13 @@ export function buildCodeTemplateVars(context: CodeViolationContext): Record<str
     })
     .join('\n\n');
 
-  let lifecycleContext = '';
-  let lifecycleInstructions = '';
+  const existingViolations = context.existingViolations?.length
+    ? context.existingViolations.map(
+        (v, i) => `- [id: ${assignId('cv', i, v.id, idMap)}] [${v.severity.toUpperCase()}] ${v.title}: ${v.content} (rule: ${v.ruleKey}, file: ${v.filePath}, lines: ${v.lineStart}-${v.lineEnd})`
+      ).join('\n')
+    : '(none)';
 
-  if (context.existingViolations?.length) {
-    lifecycleContext = `\nPrevious code violations (from the PREVIOUS analysis — for lifecycle comparison only):\n${context.existingViolations.map(
-      (v) => `- [id: ${v.id}] [${v.severity.toUpperCase()}] ${v.title}: ${v.content} (rule: ${v.ruleKey}, file: ${v.filePath}, lines: ${v.lineStart}-${v.lineEnd})`
-    ).join('\n')}`;
-
-    lifecycleInstructions = `
-LIFECYCLE RULES (comparing against previous analysis):
-- For each previous code violation, decide: is it RESOLVED (issue no longer exists in the current code) or UNCHANGED (issue still exists)?
-- Return the ID of each previous violation in EITHER resolvedViolationIds OR unchangedViolationIds. Every previous violation ID must appear in exactly one of these lists.
-- Only add to "newViolations" issues that are genuinely new — not already described by any previous code violation.
-- ONLY mark a violation as resolved if the code clearly shows the underlying issue is fixed.
-`;
-  }
-
-  return { llmRules, fileList, lifecycleContext, lifecycleInstructions };
+  return { vars: { llmRules, fileList, existingViolations }, idMap };
 }
 
 // ---------------------------------------------------------------------------

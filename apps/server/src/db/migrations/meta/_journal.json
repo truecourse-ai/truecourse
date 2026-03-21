@@ -50,6 +50,20 @@
       "when": 1774040580198,
       "tag": "0006_whole_shadowcat",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1774120205798,
+      "tag": "0007_fair_katie_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1774121664073,
+      "tag": "0008_medical_la_nuit",
+      "breakpoints": true
     }
   ]
 }

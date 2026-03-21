@@ -1,0 +1,1 @@
+ALTER TABLE "violations" ALTER COLUMN "rule_key" SET NOT NULL;

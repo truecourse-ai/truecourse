@@ -14,7 +14,7 @@ import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
 import { getEnabledRules } from './rules.service.js';
-import { createLLMProvider, type CodeViolationContext, type CodeViolationsResult } from './llm/provider.js';
+import { createLLMProvider, type CodeViolationContext, type CodeViolationsResult, type DiffViolationItem } from './llm/provider.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
   persistViolationsWithLifecycle,
@@ -50,6 +50,8 @@ export interface ViolationPipelineInput {
     targetMethodName: string | null;
     targetTable: string | null;
     fixPrompt: string | null;
+    ruleKey: string;
+    deterministicViolationId: string | null;
     firstSeenAnalysisId: string | null;
     firstSeenAt: Date | null;
   }[];
@@ -90,8 +92,8 @@ export interface ViolationPipelineInput {
 
 export interface ViolationPipelineResult {
   serviceDescriptions: { id: string; description: string }[];
-  /** For diff mode: new violations from LLM */
-  newViolations?: import('./llm/provider.js').DiffViolationItem[];
+  /** For diff mode: new violations from LLM + enriched deterministic */
+  newViolations?: DiffViolationItem[];
   /** For diff mode: resolved violation IDs */
   resolvedViolationIds?: string[];
   /** All new code violations (deterministic + LLM) */
@@ -101,12 +103,61 @@ export interface ViolationPipelineResult {
 }
 
 // ---------------------------------------------------------------------------
+// Deterministic comparison
+// ---------------------------------------------------------------------------
+
+function getDetComparisonKey(v: { ruleKey: string; serviceName: string; title: string; moduleName?: string | null; methodName?: string | null }): string {
+  return `${v.ruleKey}::${v.serviceName}::${v.moduleName || ''}::${v.methodName || ''}::${v.title}`;
+}
+
+export function compareDeterministicViolations<
+  T extends { ruleKey: string; serviceName: string; title: string; moduleName?: string | null; methodName?: string | null },
+  P extends { ruleKey: string; serviceName: string; title: string; moduleName?: string | null; methodName?: string | null },
+>(
+  current: T[],
+  previous: P[],
+): {
+  newDetections: T[];
+  unchangedDetections: { current: T; previous: P }[];
+  resolvedDetections: P[];
+} {
+  const currentByKey = new Map<string, T>();
+  for (const v of current) currentByKey.set(getDetComparisonKey(v), v);
+
+  const previousByKey = new Map<string, P>();
+  for (const v of previous) previousByKey.set(getDetComparisonKey(v), v);
+
+  const newDetections: T[] = [];
+  const unchangedDetections: { current: T; previous: P }[] = [];
+  const resolvedDetections: P[] = [];
+
+  for (const [key, cur] of currentByKey) {
+    const prev = previousByKey.get(key);
+    if (prev) {
+      unchangedDetections.push({ current: cur, previous: prev });
+    } else {
+      newDetections.push(cur);
+    }
+  }
+
+  for (const [key, prev] of previousByKey) {
+    if (!currentByKey.has(key)) {
+      resolvedDetections.push(prev);
+    }
+  }
+
+  return { newDetections, unchangedDetections, resolvedDetections };
+}
+
+// ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
 
 /**
  * Shared violation pipeline used by both normal and diff analysis routes.
- * Runs deterministic checks, persists them, runs LLM violations, persists results.
+ * Two separate flows:
+ * 1. Deterministic: code-handled lifecycle (compare programmatically, enrich new only)
+ * 2. LLM rules: LLM-handled lifecycle (only LLM-discovered previous violations)
  */
 export async function runViolationPipeline(input: ViolationPipelineInput): Promise<ViolationPipelineResult> {
   const {
@@ -119,13 +170,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // 1. Load rules
   const allRules = await getEnabledRules();
 
+  onProgress?.({ step: 'analyzing', percent: 80, detail: 'Running deterministic checks...' });
+
   // 2. Run all deterministic checks (service, module, method)
   const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
   const serviceViolationResults: ServiceViolation[] = runDeterministicServiceChecks(result, enabledDeterministic);
   const moduleViolationResults: ModuleViolation[] = runDeterministicModuleChecks(result, enabledDeterministic);
   const methodViolationResults: ModuleViolation[] = runDeterministicMethodChecks(result, enabledDeterministic);
 
-  // 3. Persist deterministic violations
+  // 3. Persist deterministic violations to deterministic_violations table
   const detViolationIdMap = new Map<string, string>();
   for (const v of serviceViolationResults) {
     const [row] = await db.insert(deterministicViolations).values({
@@ -196,11 +249,14 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
+
   // 5. Build LLM code violation batches
   const MAX_CHARS_PER_BATCH = 100_000;
   const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
   const llmCodeBatches: CodeViolationContext[] = [];
   const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
+    key: r.key,
     name: r.name,
     severity: r.severity,
     prompt: r.prompt!,
@@ -255,15 +311,226 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  const llmCodeRuleNameToKey = new Map(enabledLlmCodeRules.map((r) => [r.name, r.key]));
   const validFilePaths = new Set(fileContents.keys());
 
-  // 6. Build violation generation input
-  onProgress?.({ step: 'analyzing', percent: 85, detail: 'Running checks...' });
+  // =========================================================================
+  // 6. FLOW 1: Deterministic enrichment (code-handled lifecycle)
+  // =========================================================================
+
+  // Monotonic progress: parallel tasks can finish in any order, so we
+  // track the highest percent emitted and never go backwards.
+  let highWaterMark = 84;
+  const emitProgress = (percent: number, detail: string) => {
+    const prev = highWaterMark;
+    if (percent > highWaterMark) highWaterMark = percent;
+    const emitted = highWaterMark;
+    onProgress?.({ step: 'analyzing', percent: emitted, detail });
+  };
+
+  emitProgress(85, 'Enriching & analyzing violations...');
+
+  // Build flat list of all current deterministic violations with resolved target IDs
+  interface DetEntry {
+    ruleKey: string;
+    category: string;
+    title: string;
+    description: string;
+    severity: string;
+    serviceName: string;
+    moduleName?: string;
+    methodName?: string;
+    detViolationId: string;
+    targetServiceId: string | null;
+    targetModuleId: string | null;
+    targetMethodId: string | null;
+    violationType: string; // 'service' | 'module' | 'function'
+  }
+
+  const allDetEntries: DetEntry[] = [];
+  for (const v of serviceViolationResults) {
+    const detKey = `service::${v.ruleKey}::${v.serviceName}::${v.title}`;
+    allDetEntries.push({
+      ruleKey: v.ruleKey, category: 'service', title: v.title, description: v.description,
+      severity: v.severity, serviceName: v.serviceName,
+      detViolationId: detViolationIdMap.get(detKey)!,
+      targetServiceId: serviceIdMap.get(v.serviceName) || null,
+      targetModuleId: null, targetMethodId: null,
+      violationType: 'service',
+    });
+  }
+  for (const v of [...moduleViolationResults, ...methodViolationResults]) {
+    const category = v.methodName ? 'method' : 'module';
+    const detKey = `${category}::${v.ruleKey}::${v.serviceName}::${v.title}`;
+    const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}::${v.filePath}` : undefined;
+    const methodKey = v.methodName && v.moduleName
+      ? `${v.serviceName}::${v.moduleName}::${v.methodName}::${v.filePath}` : undefined;
+    allDetEntries.push({
+      ruleKey: v.ruleKey, category, title: v.title, description: v.description,
+      severity: v.severity, serviceName: v.serviceName,
+      moduleName: v.moduleName || undefined, methodName: v.methodName || undefined,
+      detViolationId: detViolationIdMap.get(detKey)!,
+      targetServiceId: serviceIdMap.get(v.serviceName) || null,
+      targetModuleId: moduleKey ? (moduleIdMap.get(moduleKey) || null) : null,
+      targetMethodId: methodKey ? (methodIdMap.get(methodKey) || null) : null,
+      violationType: v.methodName ? 'function' : 'module',
+    });
+  }
+
+  // Build lookup: previous det violation ID → previous violation row
+  const prevViolationByDetId = new Map<string, typeof previousActiveViolations[0]>();
+  for (const v of previousActiveViolations) {
+    if (v.deterministicViolationId) {
+      prevViolationByDetId.set(v.deterministicViolationId, v);
+    }
+  }
+
+  // Architecture context for enrichment
+  const architectureContext = `Architecture: ${result.architecture}\nServices: ${result.services.map((s) => `${s.name} (${s.type})`).join(', ')}`;
+
+  const provider = createLLMProvider();
+  const now = new Date();
+  const allNewViolations: DiffViolationItem[] = [];
+  const allResolvedViolationIds: string[] = [];
+
+  // Deterministic enrichment promise
+  const deterministicPromise = (async () => {
+    let detectionsToEnrich: DetEntry[];
+
+    if (previousDeterministicViolations.length > 0) {
+      // 2nd+ run: compare programmatically
+      const comparison = compareDeterministicViolations(allDetEntries, previousDeterministicViolations);
+      detectionsToEnrich = comparison.newDetections;
+
+      // Carry forward unchanged deterministic violations
+      for (const { previous } of comparison.unchangedDetections) {
+        const prevViolation = prevViolationByDetId.get(previous.id);
+        if (!prevViolation) continue;
+        // Find matching current entry to get current det violation ID
+        const curEntry = allDetEntries.find((e) => getDetComparisonKey(e) === getDetComparisonKey(previous));
+        if (!curEntry) continue;
+
+        await db.insert(violations).values({
+          id: uuidv4(),
+          repoId,
+          analysisId,
+          type: prevViolation.type,
+          title: prevViolation.title,
+          content: prevViolation.content,
+          severity: prevViolation.severity,
+          status: 'unchanged',
+          targetServiceId: curEntry.targetServiceId,
+          targetModuleId: curEntry.targetModuleId,
+          targetMethodId: curEntry.targetMethodId,
+          targetTable: prevViolation.targetTable,
+          fixPrompt: prevViolation.fixPrompt,
+          ruleKey: curEntry.ruleKey,
+          deterministicViolationId: curEntry.detViolationId,
+          firstSeenAnalysisId: prevViolation.firstSeenAnalysisId,
+          firstSeenAt: prevViolation.firstSeenAt,
+          previousViolationId: prevViolation.id,
+        });
+      }
+
+      // Mark resolved deterministic violations
+      for (const resolved of comparison.resolvedDetections) {
+        const prevViolation = prevViolationByDetId.get(resolved.id);
+        if (!prevViolation) continue;
+        allResolvedViolationIds.push(prevViolation.id);
+
+        await db.insert(violations).values({
+          id: uuidv4(),
+          repoId,
+          analysisId,
+          type: prevViolation.type,
+          title: prevViolation.title,
+          content: prevViolation.content,
+          severity: prevViolation.severity,
+          status: 'resolved',
+          targetServiceId: prevViolation.targetServiceId,
+          targetModuleId: prevViolation.targetModuleId,
+          targetMethodId: prevViolation.targetMethodId,
+          targetTable: prevViolation.targetTable,
+          fixPrompt: prevViolation.fixPrompt,
+          ruleKey: prevViolation.ruleKey,
+          deterministicViolationId: null,
+          firstSeenAnalysisId: prevViolation.firstSeenAnalysisId,
+          firstSeenAt: prevViolation.firstSeenAt,
+          previousViolationId: prevViolation.id,
+          resolvedAt: now,
+        });
+      }
+
+      console.log(`[Pipeline] Deterministic comparison: ${comparison.newDetections.length} new, ${comparison.unchangedDetections.length} unchanged, ${comparison.resolvedDetections.length} resolved`);
+    } else {
+      // 1st run: enrich all
+      detectionsToEnrich = allDetEntries;
+    }
+
+    // Enrich new/all detections via LLM
+    if (detectionsToEnrich.length > 0) {
+      // Build lookup by detViolationId for matching enrichment results
+      const detByViolationId = new Map(detectionsToEnrich.map((d) => [d.detViolationId, d]));
+
+      const enrichmentResult = await provider.enrichDeterministicViolations(
+        detectionsToEnrich.map((d) => ({
+          id: d.detViolationId, ruleKey: d.ruleKey, title: d.title, description: d.description,
+          severity: d.severity, category: d.category,
+          serviceName: d.serviceName, moduleName: d.moduleName, methodName: d.methodName,
+        })),
+        architectureContext,
+      );
+
+      // Persist enriched violations — match by ID echoed back from LLM
+      for (const enriched of enrichmentResult.enrichedViolations) {
+        const det = detByViolationId.get(enriched.id);
+        if (!det) continue;
+
+        const violationId = uuidv4();
+        await db.insert(violations).values({
+          id: violationId,
+          repoId,
+          analysisId,
+          type: det.violationType,
+          title: enriched.title,
+          content: enriched.content,
+          severity: det.severity,
+          status: 'new',
+          targetServiceId: det.targetServiceId,
+          targetModuleId: det.targetModuleId,
+          targetMethodId: det.targetMethodId,
+          fixPrompt: enriched.fixPrompt,
+          ruleKey: det.ruleKey,
+          deterministicViolationId: det.detViolationId,
+          firstSeenAnalysisId: analysisId,
+          firstSeenAt: now,
+        });
+
+        allNewViolations.push({
+          type: det.violationType,
+          title: enriched.title,
+          content: enriched.content,
+          severity: det.severity,
+          targetServiceId: det.targetServiceId,
+          targetModuleId: det.targetModuleId,
+          targetMethodId: det.targetMethodId,
+          targetServiceName: det.serviceName || null,
+          targetModuleName: det.moduleName || null,
+          targetMethodName: det.methodName || null,
+          fixPrompt: enriched.fixPrompt,
+          ruleKey: det.ruleKey,
+        });
+      }
+      emitProgress(88, 'Deterministic violations enriched');
+    }
+  })();
+
+  // =========================================================================
+  // 7. FLOW 2: LLM rule analysis (LLM-handled lifecycle)
+  // =========================================================================
 
   const enabledLlmRules = allRules
     .filter((r) => r.type === 'llm' && r.prompt && r.category !== 'code')
-    .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
+    .map((r) => ({ key: r.key, name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
   const analysisServices = result.services.map((s) => ({
     id: serviceIdMap.get(s.name)!,
@@ -318,18 +585,21 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     };
   });
 
-  // Partition existing violations by category
-  const existingServiceViolations = previousActiveViolations
+  // Filter previous violations to LLM-only (deterministicViolationId IS NULL)
+  const llmOnlyPreviousViolations = previousActiveViolations.filter((v) => !v.deterministicViolationId);
+
+  // Partition LLM-only existing violations by category
+  const existingServiceViolations = llmOnlyPreviousViolations
     .filter((v) => v.type === 'service')
     .map((v) => ({ id: v.id, type: v.type, title: v.title, content: v.content, severity: v.severity }));
-  const existingDatabaseViolations = previousActiveViolations
+  const existingDatabaseViolations = llmOnlyPreviousViolations
     .filter((v) => v.type === 'database')
     .map((v) => ({ id: v.id, type: v.type, title: v.title, content: v.content, severity: v.severity }));
-  const existingModuleViolations = previousActiveViolations
+  const existingModuleViolations = llmOnlyPreviousViolations
     .filter((v) => v.type === 'module' || v.type === 'function')
     .map((v) => ({ id: v.id, type: v.type, title: v.title, content: v.content, severity: v.severity }));
 
-  const hasExistingViolations = previousActiveViolations.length > 0;
+  const hasLlmOnlyExistingViolations = llmOnlyPreviousViolations.length > 0;
 
   const violationInput = {
     architecture: result.architecture,
@@ -370,127 +640,114 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       calleeModule: d.calleeModule,
       callCount: d.callCount,
     })),
-    moduleViolations: [...moduleViolationResults, ...methodViolationResults].map((v) => {
-      const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}::${v.filePath}` : undefined;
-      const methodKey = v.methodName && v.moduleName
-        ? `${v.serviceName}::${v.moduleName}::${v.methodName}::${v.filePath}` : undefined;
-      const category = v.methodName ? 'method' : 'module';
-      const detKey = `${category}::${v.ruleKey}::${v.serviceName}::${v.title}`;
-      return {
-        ...v,
-        serviceId: serviceIdMap.get(v.serviceName),
-        moduleId: moduleKey ? moduleIdMap.get(moduleKey) : undefined,
-        methodId: methodKey ? methodIdMap.get(methodKey) : undefined,
-        deterministicViolationId: detViolationIdMap.get(detKey),
-      };
-    }),
-    serviceViolations: serviceViolationResults.map((v) => ({
-      ...v,
-      deterministicViolationId: detViolationIdMap.get(`service::${v.ruleKey}::${v.serviceName}::${v.title}`),
-    })),
-    existingServiceViolations: hasExistingViolations ? existingServiceViolations : undefined,
-    existingDatabaseViolations: hasExistingViolations ? existingDatabaseViolations : undefined,
-    existingModuleViolations: hasExistingViolations ? existingModuleViolations : undefined,
-    baselineServiceViolations: previousDeterministicViolations.length > 0
-      ? previousDeterministicViolations
-          .filter((d) => d.category === 'service')
-          .map((d) => `- [detId: ${d.id}] [${d.severity.toUpperCase()}] ${d.title}: ${d.description} (rule: ${d.ruleKey}, service: ${d.serviceName})`)
-      : undefined,
-    baselineModuleViolations: previousDeterministicViolations.length > 0
-      ? previousDeterministicViolations
-          .filter((d) => d.category === 'module' || d.category === 'method')
-          .map((d) => `- [detId: ${d.id}] [${d.severity.toUpperCase()}] ${d.title}: ${d.description} (rule: ${d.ruleKey}, service: ${d.serviceName}${d.moduleName ? `, module: ${d.moduleName}` : ''}${d.methodName ? `, method: ${d.methodName}` : ''})`)
-      : undefined,
+    existingServiceViolations: hasLlmOnlyExistingViolations ? existingServiceViolations : undefined,
+    existingDatabaseViolations: hasLlmOnlyExistingViolations ? existingDatabaseViolations : undefined,
+    existingModuleViolations: hasLlmOnlyExistingViolations ? existingModuleViolations : undefined,
   };
 
-  // 7. Run LLM violations + code violations in parallel
+  // LLM code violations promise
   const llmCodePromise = llmCodeBatches.length > 0
-    ? createLLMProvider().generateAllCodeViolations(llmCodeBatches)
+    ? provider.generateAllCodeViolations(llmCodeBatches)
     : Promise.resolve({ violations: [] } as CodeViolationsResult);
 
   let serviceDescriptions: { id: string; description: string }[] = [];
-  let newViolations: import('./llm/provider.js').DiffViolationItem[] | undefined;
-  let resolvedViolationIds: string[] | undefined;
   let llmCodeResolvedIds: string[] = [];
   let llmCodeUnchangedIds: string[] = [];
 
-  if (hasExistingViolations) {
-    const archViolationsPromise = generateViolationsWithLifecycle(violationInput);
-    const [archResult, codeResult] = await Promise.all([archViolationsPromise, llmCodePromise]);
-    serviceDescriptions = archResult.serviceDescriptions;
-    newViolations = archResult.newViolations;
-    resolvedViolationIds = archResult.resolvedViolationIds;
+  emitProgress(86, 'Analyzing architecture & modules...');
 
-    const serviceNameToId = new Map(result.services.map((s) => [s.name, serviceIdMap.get(s.name)!]));
-    const moduleNameToId = new Map([...moduleIdMap.entries()].map(([key, mid]) => {
-      const parts = key.split('::');
-      return [parts[1], mid] as [string, string];
-    }));
-    const methodNameToId = new Map([...methodIdMap.entries()].map(([key, mid]) => {
-      const parts = key.split('::');
-      return [parts[2], mid] as [string, string];
-    }));
-
-    await persistViolationsWithLifecycle({
-      analysisId,
-      repoId,
-      newViolations: archResult.newViolations,
-      resolvedViolationIds: archResult.resolvedViolationIds,
-      previousActiveViolations,
-      serviceNameToId,
-      moduleNameToId,
-      methodNameToId,
-    });
-
-    processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeRuleNameToKey, allCodeViolations);
-    llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
-    llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
-  } else {
-    const archViolationsPromise = generateViolations(violationInput);
-    const [archResult, codeResult] = await Promise.all([archViolationsPromise, llmCodePromise]);
-    serviceDescriptions = archResult.serviceDescriptions;
-
-    // First run: convert to lifecycle format for consistent return type
-    newViolations = archResult.violations.map((v: import('@truecourse/shared').Violation) => ({
-      type: v.type,
-      title: v.title,
-      content: v.content,
-      severity: v.severity,
-      targetServiceId: v.targetServiceId ?? null,
-      targetModuleId: v.targetModuleId ?? null,
-      targetMethodId: v.targetMethodId ?? null,
-      targetServiceName: null,
-      targetModuleName: null,
-      targetMethodName: null,
-      fixPrompt: v.fixPrompt ?? null,
-      deterministicViolationId: v.deterministicViolationId ?? null,
-    }));
-    resolvedViolationIds = [];
-
-    for (const violation of archResult.violations) {
-      await db.insert(violations).values({
-        id: uuidv4(),
-        repoId,
-        analysisId,
-        type: violation.type,
-        title: violation.title,
-        content: violation.content,
-        severity: violation.severity,
-        status: 'new',
-        targetServiceId: violation.targetServiceId || null,
-        targetDatabaseId: violation.targetDatabaseId || null,
-        targetModuleId: violation.targetModuleId || null,
-        targetMethodId: violation.targetMethodId || null,
-        targetTable: violation.targetTable || null,
-        fixPrompt: violation.fixPrompt || null,
-        deterministicViolationId: violation.deterministicViolationId || null,
-        firstSeenAnalysisId: analysisId,
-        firstSeenAt: new Date(),
+  // LLM rule analysis promise (runs in parallel with deterministic enrichment)
+  let llmStepCount = 0;
+  const llmRulePromise = (async () => {
+    if (hasLlmOnlyExistingViolations) {
+      const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
+        llmStepCount++;
+        emitProgress(87 + llmStepCount * 2, step);
       });
-    }
+      serviceDescriptions = archResult.serviceDescriptions;
+      allResolvedViolationIds.push(...archResult.resolvedViolationIds);
+      allNewViolations.push(...archResult.newViolations);
 
-    processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeRuleNameToKey, allCodeViolations);
-  }
+      const serviceNameToId = new Map(result.services.map((s) => [s.name, serviceIdMap.get(s.name)!]));
+      const moduleNameToId = new Map([...moduleIdMap.entries()].map(([key, mid]) => {
+        const parts = key.split('::');
+        return [parts[1], mid] as [string, string];
+      }));
+      const methodNameToId = new Map([...methodIdMap.entries()].map(([key, mid]) => {
+        const parts = key.split('::');
+        return [parts[2], mid] as [string, string];
+      }));
+
+      await persistViolationsWithLifecycle({
+        analysisId,
+        repoId,
+        newViolations: archResult.newViolations,
+        resolvedViolationIds: archResult.resolvedViolationIds,
+        previousActiveViolations: llmOnlyPreviousViolations,
+        serviceNameToId,
+        moduleNameToId,
+        methodNameToId,
+      });
+    } else {
+      const archResult = await generateViolations(violationInput, (step) => {
+        llmStepCount++;
+        emitProgress(87 + llmStepCount * 2, step);
+      });
+      serviceDescriptions = archResult.serviceDescriptions;
+
+      // LLM first-run violations
+      for (const violation of archResult.violations) {
+        await db.insert(violations).values({
+          id: uuidv4(),
+          repoId,
+          analysisId,
+          type: violation.type,
+          title: violation.title,
+          content: violation.content,
+          severity: violation.severity,
+          status: 'new',
+          targetServiceId: violation.targetServiceId || null,
+          targetDatabaseId: violation.targetDatabaseId || null,
+          targetModuleId: violation.targetModuleId || null,
+          targetMethodId: violation.targetMethodId || null,
+          targetTable: violation.targetTable || null,
+          fixPrompt: violation.fixPrompt || null,
+          ruleKey: violation.ruleKey || 'unknown',
+          firstSeenAnalysisId: analysisId,
+          firstSeenAt: now,
+        });
+
+        allNewViolations.push({
+          type: violation.type,
+          title: violation.title,
+          content: violation.content,
+          severity: violation.severity,
+          targetServiceId: violation.targetServiceId ?? null,
+          targetModuleId: violation.targetModuleId ?? null,
+          targetMethodId: violation.targetMethodId ?? null,
+          targetServiceName: null,
+          targetModuleName: null,
+          targetMethodName: null,
+          fixPrompt: violation.fixPrompt ?? null,
+          ruleKey: violation.ruleKey || 'unknown',
+        });
+      }
+    }
+  })();
+
+  // Run deterministic enrichment, LLM rules, and code violations in parallel
+  const codePromise = llmCodePromise.then((r) => {
+    emitProgress(94, 'Code analysis done');
+    return r;
+  });
+
+  const [,, codeResult] = await Promise.all([deterministicPromise, llmRulePromise, codePromise]);
+
+  processLlmCodeViolations(codeResult, validFilePaths, fileContents, allCodeViolations);
+  llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
+  llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
+
+  emitProgress(95, 'Analysis complete');
 
   // 8. Save service descriptions
   for (const desc of serviceDescriptions) {
@@ -502,6 +759,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  emitProgress(97, 'Persisting violations...');
+
   // 9. Persist code violations with lifecycle tracking
   // Three groups:
   // a) LLM code violations with lifecycle decisions → use LLM's unchanged/resolved
@@ -510,7 +769,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   const scannedFilePaths = new Set(fileContents.keys());
   const llmLifecycleIds = new Set([...llmCodeUnchangedIds, ...llmCodeResolvedIds]);
-  const now = new Date();
   let codeResolvedCount = 0;
 
   // a) LLM lifecycle: carry forward unchanged, mark resolved
@@ -611,8 +869,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   return {
     serviceDescriptions,
-    newViolations,
-    resolvedViolationIds,
+    newViolations: allNewViolations,
+    resolvedViolationIds: allResolvedViolationIds,
     codeViolations: allCodeViolations,
     codeResolvedCount,
   };
@@ -623,10 +881,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 // ---------------------------------------------------------------------------
 
 function processLlmCodeViolations(
-  codeResult: { violations: { ruleName: string; filePath: string; lineStart: number; lineEnd: number; severity: string; title: string; content: string; fixPrompt: string | null }[] },
+  codeResult: { violations: { ruleKey: string; filePath: string; lineStart: number; lineEnd: number; severity: string; title: string; content: string; fixPrompt: string | null }[] },
   validFilePaths: Set<string>,
   fileContents: Map<string, { content: string; lineCount: number }>,
-  llmCodeRuleNameToKey: Map<string, string>,
   allCodeViolations: CodeViolation[],
 ) {
   if (codeResult.violations.length === 0) return;
@@ -638,10 +895,7 @@ function processLlmCodeViolations(
     const lineEnd = Math.max(lineStart, Math.min(v.lineEnd, fileInfo.lineCount));
     const lines = fileInfo.content.split('\n');
     const snippet = lines.slice(lineStart - 1, lineEnd).join('\n');
-    const strippedName = v.ruleName.replace(/^\[(?:LOW|MEDIUM|HIGH|CRITICAL)\]\s*/i, '');
-    const ruleKey = llmCodeRuleNameToKey.get(v.ruleName)
-      || llmCodeRuleNameToKey.get(strippedName)
-      || v.ruleName;
+    const ruleKey = v.ruleKey;
 
     allCodeViolations.push({
       ruleKey,

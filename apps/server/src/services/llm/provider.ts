@@ -13,7 +13,12 @@ import {
   buildModuleTemplateVars,
   buildCodeTemplateVars,
   buildFlowTemplateVars,
+  buildEnrichmentTemplateVars,
+  resolveId,
+  resolveIds,
   type FlowEnrichmentContext,
+  type DeterministicDetectionForEnrichment,
+  type PromptIdMap,
 } from './prompts.js';
 
 // ---------------------------------------------------------------------------
@@ -46,20 +51,9 @@ export interface ServiceViolationContext {
     count: number;
     type?: string;
   }[];
-  llmRules: { name: string; severity: string; prompt: string }[];
-  /** Service deterministic violations (e.g. circular dependency, god service) */
-  violations?: {
-    ruleKey: string;
-    title: string;
-    description: string;
-    severity: string;
-    serviceName: string;
-    deterministicViolationId?: string;
-  }[];
+  llmRules: { key: string; name: string; severity: string; prompt: string }[];
   /** When provided, switches to diff prompt/schema to produce lifecycle results */
   existingViolations?: ExistingViolation[];
-  /** Previous deterministic service violations for lifecycle comparison */
-  baselineViolations?: string[];
 }
 
 export interface DatabaseViolationContext {
@@ -76,7 +70,7 @@ export interface DatabaseViolationContext {
     }[];
     relations?: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[];
   }[];
-  llmRules: { name: string; severity: string; prompt: string }[];
+  llmRules: { key: string; name: string; severity: string; prompt: string }[];
   /** When provided, switches to diff prompt/schema to produce lifecycle results */
   existingViolations?: ExistingViolation[];
 }
@@ -120,24 +114,9 @@ export interface ModuleViolationContext {
     calleeModule: string;
     callCount: number;
   }[];
-  llmRules: { name: string; severity: string; prompt: string }[];
-  violations?: {
-    ruleKey: string;
-    title: string;
-    description: string;
-    severity: string;
-    serviceName: string;
-    serviceId?: string;
-    moduleName?: string;
-    moduleId?: string;
-    methodName?: string;
-    methodId?: string;
-    deterministicViolationId?: string;
-  }[];
+  llmRules: { key: string; name: string; severity: string; prompt: string }[];
   /** When provided, switches to diff prompt/schema to produce lifecycle results */
   existingViolations?: ExistingViolation[];
-  /** Previous deterministic module violations for lifecycle comparison */
-  baselineViolations?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +133,7 @@ export interface ExistingViolation {
 
 export interface CodeViolationContext {
   files: { path: string; content: string }[];
-  llmRules: { name: string; severity: string; prompt: string }[];
+  llmRules: { key: string; name: string; severity: string; prompt: string }[];
   /** Previous code violations for lifecycle comparison */
   existingViolations?: {
     id: string;
@@ -169,7 +148,7 @@ export interface CodeViolationContext {
 }
 
 export interface CodeViolationRaw {
-  ruleName: string;
+  ruleKey: string;
   filePath: string;
   lineStart: number;
   lineEnd: number;
@@ -197,7 +176,18 @@ export interface DiffViolationItem {
   targetModuleName: string | null;
   targetMethodName: string | null;
   fixPrompt: string | null;
-  deterministicViolationId: string | null;
+  ruleKey: string;
+}
+
+export interface EnrichedDeterministicViolation {
+  id: string;
+  title: string;
+  content: string;
+  fixPrompt: string;
+}
+
+export interface EnrichmentResult {
+  enrichedViolations: EnrichedDeterministicViolation[];
 }
 
 export interface DiffViolationsResult {
@@ -241,6 +231,7 @@ export interface AllViolationsInput {
   service?: ServiceViolationContext;
   database?: DatabaseViolationContext;
   module?: ModuleViolationContext;
+  onStepComplete?: (step: string) => void;
 }
 
 export interface AllViolationsResult {
@@ -267,9 +258,10 @@ export interface LLMProvider {
   generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult>;
   generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult>;
   generateAllViolations(contexts: AllViolationsInput): Promise<AllViolationsResult>;
-  generateAllViolationsWithLifecycle(contexts: AllViolationsInput): Promise<AllViolationsLifecycleResult>;
+  generateAllViolationsWithLifecycle(contexts: AllViolationsInput, onStepComplete?: (step: string) => void): Promise<AllViolationsLifecycleResult>;
   generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
+  enrichDeterministicViolations(detections: DeterministicDetectionForEnrichment[], architectureContext: string): Promise<EnrichmentResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
 }
@@ -287,6 +279,7 @@ const ServiceViolationOutputSchema = z.object({
       severity: z.enum(['low', 'medium', 'high', 'critical']),
       targetServiceId: z.string().nullable().describe('The id of the service this violation applies to, must be an exact id from the Services list'),
       fixPrompt: z.string().nullable(),
+      ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
     })
   ),
   serviceDescriptions: z.array(
@@ -307,6 +300,7 @@ const DatabaseViolationOutputSchema = z.object({
       targetDatabaseId: z.string().nullable().describe('The id of the database this violation applies to, must be an exact id from the Databases list'),
       targetTable: z.string().nullable().describe('The exact table name this violation applies to'),
       fixPrompt: z.string().nullable(),
+      ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
     })
   ),
 });
@@ -321,7 +315,7 @@ const ModuleViolationOutputSchema = z.object({
       targetModuleId: z.string().nullable().describe('The id of the module this violation applies to, must be an exact id from the Modules list'),
       targetMethodId: z.string().nullable().describe('The id of the method this violation applies to, must be an exact id from the Methods list'),
       fixPrompt: z.string().nullable(),
-      deterministicViolationId: z.string().nullable().describe('If this violation was generated from a deterministic detection, the detId from that detection. Null for LLM-discovered violations.'),
+      ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
     })
   ),
 });
@@ -342,7 +336,7 @@ const DiffViolationOutputSchema = z.object({
       targetModuleName: z.string().nullable(),
       targetMethodName: z.string().nullable(),
       fixPrompt: z.string().nullable(),
-      deterministicViolationId: z.string().nullable().describe('If this violation was generated from a deterministic detection, the detId from that detection. Null for LLM-discovered violations.'),
+      ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
     })
   ),
 });
@@ -363,7 +357,7 @@ const LifecycleServiceOutputSchema = z.object({
       targetModuleName: z.string().nullable(),
       targetMethodName: z.string().nullable(),
       fixPrompt: z.string().nullable(),
-      deterministicViolationId: z.string().nullable().describe('If this violation was generated from a deterministic detection, the detId from that detection. Null for LLM-discovered violations.'),
+      ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
     })
   ),
   serviceDescriptions: z.array(
@@ -374,10 +368,21 @@ const LifecycleServiceOutputSchema = z.object({
   ),
 });
 
+const EnrichmentOutputSchema = z.object({
+  enrichedViolations: z.array(
+    z.object({
+      id: z.string().describe('The exact id from the input detection — must match one of the detection ids'),
+      title: z.string().describe('A clear, concise title for the violation'),
+      content: z.string().describe('A detailed description of what is wrong and why it matters'),
+      fixPrompt: z.string().describe('A specific, actionable prompt for an AI coding assistant to fix the issue'),
+    })
+  ),
+});
+
 const CodeViolationOutputSchema = z.object({
   violations: z.array(
     z.object({
-      ruleName: z.string().describe('The exact rule name from the rules list'),
+      ruleKey: z.string().describe('The exact key from the rules list'),
       filePath: z.string().describe('The exact file path from the files list'),
       lineStart: z.number().describe('The starting line number of the violation'),
       lineEnd: z.number().describe('The ending line number of the violation'),
@@ -394,7 +399,7 @@ const CodeViolationLifecycleOutputSchema = z.object({
   unchangedViolationIds: z.array(z.string()).describe('IDs of previous code violations that still exist unchanged — every previous violation ID must appear in either resolvedViolationIds or unchangedViolationIds'),
   newViolations: z.array(
     z.object({
-      ruleName: z.string().describe('The exact rule name from the rules list'),
+      ruleKey: z.string().describe('The exact key from the rules list'),
       filePath: z.string().describe('The exact file path from the files list'),
       lineStart: z.number().describe('The starting line number of the violation'),
       lineEnd: z.number().describe('The ending line number of the violation'),
@@ -422,8 +427,8 @@ const FlowEnrichmentOutputSchema = z.object({
 // ---------------------------------------------------------------------------
 
 const DEFAULT_MODELS: Record<string, string> = {
-  openai: 'gpt-5.3-codex',
-  anthropic: 'claude-sonnet-4-20250514',
+  openai: 'gpt-5-mini',
+  anthropic: 'claude-haiku-4-5-20251001',
 };
 
 const MODEL_CONFIG: Record<string, { provider: (model: string) => LanguageModel }> = {
@@ -456,7 +461,8 @@ function getModel(): LanguageModel {
 
 class AISDKProvider implements LLMProvider {
   async generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult> {
-    const { text: prompt, langfusePrompt } = await getPrompt('violations-service', buildServiceTemplateVars(context));
+    const { vars, idMap } = buildServiceTemplateVars(context);
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-service', vars);
     const model = getModel();
 
     console.log('[LLM] Service violations call starting...');
@@ -476,16 +482,21 @@ class AISDKProvider implements LLMProvider {
         title: v.title,
         content: v.content,
         severity: v.severity,
-        targetServiceId: v.targetServiceId ?? undefined,
+        targetServiceId: resolveId(v.targetServiceId, idMap) ?? undefined,
         fixPrompt: v.fixPrompt ?? undefined,
+        ruleKey: v.ruleKey ?? undefined,
         createdAt: new Date().toISOString(),
       })),
-      serviceDescriptions: object.serviceDescriptions,
+      serviceDescriptions: object.serviceDescriptions.map((d) => ({
+        id: resolveId(d.id, idMap) || d.id,
+        description: d.description,
+      })),
     };
   }
 
   async generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult> {
-    const { text: prompt, langfusePrompt } = await getPrompt('violations-database', buildDatabaseTemplateVars(context));
+    const { vars, idMap } = buildDatabaseTemplateVars(context);
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-database', vars);
     const model = getModel();
 
     console.log('[LLM] Database violations call starting...');
@@ -505,16 +516,18 @@ class AISDKProvider implements LLMProvider {
         title: v.title,
         content: v.content,
         severity: v.severity,
-        targetDatabaseId: v.targetDatabaseId ?? undefined,
+        targetDatabaseId: resolveId(v.targetDatabaseId, idMap) ?? undefined,
         targetTable: v.targetTable ?? undefined,
         fixPrompt: v.fixPrompt ?? undefined,
+        ruleKey: v.ruleKey ?? undefined,
         createdAt: new Date().toISOString(),
       })),
     };
   }
 
   async generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult> {
-    const { text: prompt, langfusePrompt } = await getPrompt('violations-module', buildModuleTemplateVars(context));
+    const { vars, idMap } = buildModuleTemplateVars(context);
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-module', vars);
     const model = getModel();
 
     // Build moduleId → serviceId lookup from context
@@ -534,7 +547,7 @@ class AISDKProvider implements LLMProvider {
 
     return {
       violations: object.violations.map((v) => {
-        const targetModuleId = v.targetModuleId ?? undefined;
+        const targetModuleId = resolveId(v.targetModuleId, idMap) ?? undefined;
         const targetServiceId = targetModuleId ? moduleIdToServiceId.get(targetModuleId) : undefined;
         return {
           id: uuidv4(),
@@ -544,9 +557,9 @@ class AISDKProvider implements LLMProvider {
           severity: v.severity,
           targetServiceId,
           targetModuleId,
-          targetMethodId: v.targetMethodId ?? undefined,
+          targetMethodId: resolveId(v.targetMethodId, idMap) ?? undefined,
           fixPrompt: v.fixPrompt ?? undefined,
-          deterministicViolationId: v.deterministicViolationId ?? undefined,
+          ruleKey: v.ruleKey ?? undefined,
           createdAt: new Date().toISOString(),
         };
       }),
@@ -555,6 +568,7 @@ class AISDKProvider implements LLMProvider {
 
   generateAllViolations = observe(
     async (contexts: AllViolationsInput): Promise<AllViolationsResult> => {
+      const onStepComplete = contexts.onStepComplete;
       const promises: [string, Promise<unknown>][] = [];
 
       if (contexts.service) {
@@ -567,7 +581,15 @@ class AISDKProvider implements LLMProvider {
         promises.push(['module', this.generateModuleViolations(contexts.module)]);
       }
 
-      const settled = await Promise.allSettled(promises.map(([, p]) => p));
+      const stepLabels: Record<string, string> = {
+        service: 'Service architecture checks done',
+        database: 'Database schema checks done',
+        module: 'Module & function checks done',
+      };
+
+      const settled = await Promise.allSettled(promises.map(([key, p]) =>
+        p.then((v) => { onStepComplete?.(stepLabels[key] || `${key} done`); return v; })
+      ));
 
       const result: AllViolationsResult = {};
       for (let i = 0; i < promises.length; i++) {
@@ -590,24 +612,23 @@ class AISDKProvider implements LLMProvider {
    * that compare against existing violations to produce new + resolved results.
    */
   generateAllViolationsWithLifecycle = observe(
-    async (contexts: AllViolationsInput): Promise<AllViolationsLifecycleResult> => {
+    async (contexts: AllViolationsInput, onStepComplete?: (step: string) => void): Promise<AllViolationsLifecycleResult> => {
       const model = getModel();
       const allResolved: string[] = [];
       const allNew: DiffViolationItem[] = [];
       let serviceDescriptions: ServiceDescription[] = [];
 
       const promises: [string, Promise<unknown>][] = [];
+      const idMaps: Record<string, PromptIdMap> = {};
 
-      // Service call — uses LifecycleServiceOutputSchema when existing violations present,
-      // normal ServiceViolationOutputSchema otherwise. Same prompt, different output schema.
+      // Service call
       if (contexts.service) {
         const ctx = contexts.service;
         if (ctx.existingViolations && ctx.existingViolations.length > 0) {
           promises.push(['service', (async () => {
-            const { text: prompt, langfusePrompt } = await getPrompt(
-              'violations-service',
-              buildServiceTemplateVars(ctx),
-            );
+            const { vars, idMap } = buildServiceTemplateVars(ctx);
+            idMaps.service = idMap;
+            const { text: prompt, langfusePrompt } = await getPrompt('violations-service-lifecycle', vars);
             console.log('[LLM] Lifecycle service call starting...');
             const t0 = Date.now();
             const { output: object } = await generateText({
@@ -629,10 +650,9 @@ class AISDKProvider implements LLMProvider {
         const ctx = contexts.database;
         if (ctx.existingViolations && ctx.existingViolations.length > 0) {
           promises.push(['database', (async () => {
-            const { text: prompt, langfusePrompt } = await getPrompt(
-              'violations-database',
-              buildDatabaseTemplateVars(ctx),
-            );
+            const { vars, idMap } = buildDatabaseTemplateVars(ctx);
+            idMaps.database = idMap;
+            const { text: prompt, langfusePrompt } = await getPrompt('violations-database-lifecycle', vars);
             console.log('[LLM] Lifecycle database call starting...');
             const t0 = Date.now();
             const { output: object } = await generateText({
@@ -657,10 +677,9 @@ class AISDKProvider implements LLMProvider {
             ctx.modules.filter((m) => m.serviceId).map((m) => [m.id, m.serviceId!]),
           );
           promises.push(['module', (async () => {
-            const { text: prompt, langfusePrompt } = await getPrompt(
-              'violations-module',
-              buildModuleTemplateVars(ctx),
-            );
+            const { vars, idMap } = buildModuleTemplateVars(ctx);
+            idMaps.module = idMap;
+            const { text: prompt, langfusePrompt } = await getPrompt('violations-module-lifecycle', vars);
             console.log('[LLM] Lifecycle module call starting...');
             const t0 = Date.now();
             const { output: object } = await generateText({
@@ -671,15 +690,18 @@ class AISDKProvider implements LLMProvider {
             });
             console.log(`[LLM] Lifecycle module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
             return {
-              resolvedViolationIds: object.resolvedViolationIds,
-              newViolations: object.newViolations.map((i) => ({
-                ...i,
-                targetServiceId: (i.targetModuleId ? modIdToSvcId.get(i.targetModuleId) : null) ?? null,
-                targetModuleId: i.targetModuleId ?? null,
-                targetMethodId: i.targetMethodId ?? null,
-                targetModuleName: i.targetModuleName ?? null,
-                targetMethodName: i.targetMethodName ?? null,
-              })),
+              resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
+              newViolations: object.newViolations.map((i) => {
+                const realModuleId = resolveId(i.targetModuleId, idMap);
+                return {
+                  ...i,
+                  targetServiceId: (realModuleId ? modIdToSvcId.get(realModuleId) : null) ?? null,
+                  targetModuleId: realModuleId ?? null,
+                  targetMethodId: resolveId(i.targetMethodId, idMap) ?? null,
+                  targetModuleName: i.targetModuleName ?? null,
+                  targetMethodName: i.targetMethodName ?? null,
+                };
+              }),
             };
           })()]);
         } else {
@@ -687,7 +709,18 @@ class AISDKProvider implements LLMProvider {
         }
       }
 
-      const settled = await Promise.allSettled(promises.map(([, p]) => p));
+      const stepLabels: Record<string, string> = {
+        service: 'Service checks done',
+        'service-normal': 'Service checks done',
+        database: 'Database checks done',
+        'database-normal': 'Database checks done',
+        module: 'Module checks done',
+        'module-normal': 'Module checks done',
+      };
+
+      const settled = await Promise.allSettled(promises.map(([key, p]) =>
+        p.then((v) => { onStepComplete?.(stepLabels[key] || `${key} done`); return v; })
+      ));
 
       for (let i = 0; i < promises.length; i++) {
         const [key] = promises[i];
@@ -698,9 +731,38 @@ class AISDKProvider implements LLMProvider {
         }
 
         if (key === 'service') {
-          // Lifecycle service result — has resolvedViolationIds, newViolations, serviceDescriptions
+          const idMap = idMaps.service;
           const result = outcome.value as { resolvedViolationIds: string[]; newViolations: DiffViolationItem[]; serviceDescriptions: ServiceDescription[] };
-          allResolved.push(...result.resolvedViolationIds);
+          allResolved.push(...resolveIds(result.resolvedViolationIds, idMap));
+          allNew.push(...result.newViolations.map((v) => ({
+            ...v,
+            targetServiceId: resolveId(v.targetServiceId, idMap) ?? null,
+            targetModuleId: v.targetModuleId ?? null,
+            targetMethodId: v.targetMethodId ?? null,
+            targetServiceName: v.targetServiceName ?? null,
+            targetModuleName: v.targetModuleName ?? null,
+            targetMethodName: v.targetMethodName ?? null,
+          })));
+          serviceDescriptions = result.serviceDescriptions.map((d) => ({
+            id: resolveId(d.id, idMap) || d.id,
+            description: d.description,
+          }));
+        } else if (key === 'service-normal') {
+          const result = outcome.value as ServiceViolationsResult;
+          serviceDescriptions = result.serviceDescriptions;
+          for (const v of result.violations) {
+            allNew.push({
+              type: v.type, title: v.title, content: v.content, severity: v.severity,
+              targetServiceId: v.targetServiceId ?? null, targetModuleId: v.targetModuleId ?? null,
+              targetMethodId: v.targetMethodId ?? null, targetServiceName: null,
+              targetModuleName: null, targetMethodName: null, fixPrompt: v.fixPrompt ?? null,
+              ruleKey: (v as Violation).ruleKey || 'unknown',
+            });
+          }
+        } else if (key === 'database') {
+          const idMap = idMaps.database;
+          const result = outcome.value as DiffViolationsResult;
+          allResolved.push(...resolveIds(result.resolvedViolationIds, idMap));
           allNew.push(...result.newViolations.map((v) => ({
             ...v,
             targetServiceId: v.targetServiceId ?? null,
@@ -710,22 +772,8 @@ class AISDKProvider implements LLMProvider {
             targetModuleName: v.targetModuleName ?? null,
             targetMethodName: v.targetMethodName ?? null,
           })));
-          serviceDescriptions = result.serviceDescriptions;
-        } else if (key === 'service-normal') {
-          // Normal service result — convert to lifecycle format
-          const result = outcome.value as ServiceViolationsResult;
-          serviceDescriptions = result.serviceDescriptions;
-          for (const v of result.violations) {
-            allNew.push({
-              type: v.type, title: v.title, content: v.content, severity: v.severity,
-              targetServiceId: v.targetServiceId ?? null, targetModuleId: v.targetModuleId ?? null,
-              targetMethodId: v.targetMethodId ?? null, targetServiceName: null,
-              targetModuleName: null, targetMethodName: null, fixPrompt: v.fixPrompt ?? null,
-              deterministicViolationId: null,
-            });
-          }
-        } else if (key === 'database' || key === 'module') {
-          // Lifecycle diff result
+        } else if (key === 'module') {
+          // Module lifecycle — IDs already resolved inside the promise
           const result = outcome.value as DiffViolationsResult;
           allResolved.push(...result.resolvedViolationIds);
           allNew.push(...result.newViolations.map((v) => ({
@@ -738,7 +786,7 @@ class AISDKProvider implements LLMProvider {
             targetMethodName: v.targetMethodName ?? null,
           })));
         } else {
-          // Normal database/module result — convert to new violations
+          // Normal database/module result — IDs already resolved by generate methods
           const result = outcome.value as DatabaseViolationsResult | ModuleViolationsResult;
           for (const v of result.violations) {
             allNew.push({
@@ -748,7 +796,7 @@ class AISDKProvider implements LLMProvider {
               targetMethodId: (v as Violation).targetMethodId ?? null,
               targetServiceName: null, targetModuleName: null, targetMethodName: null,
               fixPrompt: (v as Violation).fixPrompt ?? null,
-              deterministicViolationId: null,
+              ruleKey: (v as Violation).ruleKey || 'unknown',
             });
           }
         }
@@ -760,9 +808,11 @@ class AISDKProvider implements LLMProvider {
   );
 
   async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
-    const { text: prompt, langfusePrompt } = await getPrompt('violations-code', buildCodeTemplateVars(context));
     const model = getModel();
     const hasExisting = context.existingViolations && context.existingViolations.length > 0;
+    const promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
+    const { vars, idMap } = buildCodeTemplateVars(context);
+    const { text: prompt, langfusePrompt } = await getPrompt(promptName, vars);
 
     console.log(`[LLM] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
     const t0 = Date.now();
@@ -778,7 +828,7 @@ class AISDKProvider implements LLMProvider {
 
       return {
         violations: object.newViolations.map((v) => ({
-          ruleName: v.ruleName,
+          ruleKey: v.ruleKey,
           filePath: v.filePath,
           lineStart: v.lineStart,
           lineEnd: v.lineEnd,
@@ -787,8 +837,8 @@ class AISDKProvider implements LLMProvider {
           content: v.content,
           fixPrompt: v.fixPrompt ?? null,
         })),
-        resolvedViolationIds: object.resolvedViolationIds,
-        unchangedViolationIds: object.unchangedViolationIds,
+        resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
+        unchangedViolationIds: resolveIds(object.unchangedViolationIds, idMap),
       };
     }
 
@@ -802,7 +852,7 @@ class AISDKProvider implements LLMProvider {
 
     return {
       violations: object.violations.map((v) => ({
-        ruleName: v.ruleName,
+        ruleKey: v.ruleKey,
         filePath: v.filePath,
         lineStart: v.lineStart,
         lineEnd: v.lineEnd,
@@ -847,6 +897,34 @@ class AISDKProvider implements LLMProvider {
     },
     { name: 'generate-all-code-violations' },
   );
+
+  async enrichDeterministicViolations(
+    detections: DeterministicDetectionForEnrichment[],
+    architectureContext: string,
+  ): Promise<EnrichmentResult> {
+    if (detections.length === 0) return { enrichedViolations: [] };
+
+    const { vars, idMap } = buildEnrichmentTemplateVars(detections, architectureContext);
+    const { text: prompt, langfusePrompt } = await getPrompt('violations-enrich-deterministic', vars);
+    const model = getModel();
+
+    console.log(`[LLM] Enrichment call starting for ${detections.length} detections...`);
+    const t0 = Date.now();
+    const { output: object } = await generateText({
+      model,
+      output: Output.object({ schema: EnrichmentOutputSchema }),
+      prompt,
+      experimental_telemetry: telemetry('violations-enrich-deterministic', langfusePrompt),
+    });
+    console.log(`[LLM] Enrichment call done in ${Date.now() - t0}ms — ${object.enrichedViolations.length} enriched`);
+
+    return {
+      enrichedViolations: object.enrichedViolations.map((e) => ({
+        ...e,
+        id: resolveId(e.id, idMap) || e.id,
+      })),
+    };
+  }
 
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {
     const { text: prompt, langfusePrompt } = await getPrompt('flow-enrichment', buildFlowTemplateVars(context));

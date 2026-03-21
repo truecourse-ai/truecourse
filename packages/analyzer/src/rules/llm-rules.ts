@@ -2,28 +2,6 @@ import type { AnalysisRule } from '@truecourse/shared'
 
 export const LLM_ARCHITECTURE_RULES: AnalysisRule[] = [
   {
-    key: 'llm/arch-circular-dependency',
-    category: 'service',
-    name: 'Circular service dependency',
-    description: 'Detect circular dependency chains between services.',
-    prompt:
-      'Detect circular dependency chains between services. A circular dependency exists when service A depends on service B, and service B (directly or transitively) depends back on service A. Flag any cycles found and list the full dependency chain. Circular dependencies make services harder to deploy independently and create tight coupling.',
-    enabled: true,
-    severity: 'high',
-    type: 'llm',
-  },
-  {
-    key: 'llm/arch-god-service',
-    category: 'service',
-    name: 'God service with too many responsibilities',
-    description: 'Identify services that have too many responsibilities.',
-    prompt:
-      'Identify services that have too many responsibilities. A "god service" typically has a very high file count relative to other services, connects to many other services, spans many layers, or handles unrelated domains. Flag services that appear to do too much and suggest how they could be split.',
-    enabled: true,
-    severity: 'medium',
-    type: 'llm',
-  },
-  {
     key: 'llm/arch-tight-coupling',
     category: 'service',
     name: 'Tightly coupled service pair',

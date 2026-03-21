@@ -122,6 +122,7 @@ router.post(
             targetDatabaseId: violation.targetDatabaseId || null,
             targetTable: violation.targetTable || null,
             fixPrompt: violation.fixPrompt || null,
+            ruleKey: violation.ruleKey || 'unknown',
           })
           .returning();
 

@@ -223,7 +223,7 @@ export async function runAnalysis(
   } finally {
     // Always restore stashed changes
     if (didStash) {
-      onProgress({ step: 'unstash', percent: 82, detail: 'Restoring pending changes...' });
+      onProgress({ step: 'unstash', percent: 80, detail: 'Restoring pending changes...' });
       try {
         await git.stash(['pop']);
       } catch (error) {

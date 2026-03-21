@@ -223,6 +223,7 @@ export const violations = pgTable('violations', {
   }),
   targetTable: text('target_table'),
   fixPrompt: text('fix_prompt'),
+  ruleKey: text('rule_key').notNull(),
   deterministicViolationId: uuid('deterministic_violation_id').references(() => deterministicViolations.id, {
     onDelete: 'set null',
   }),

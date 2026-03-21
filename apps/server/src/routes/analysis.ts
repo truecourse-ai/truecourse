@@ -166,6 +166,8 @@ router.post(
               targetMethodName: methods.name,
               targetTable: violations.targetTable,
               fixPrompt: violations.fixPrompt,
+              ruleKey: violations.ruleKey,
+              deterministicViolationId: violations.deterministicViolationId,
               firstSeenAnalysisId: violations.firstSeenAnalysisId,
               firstSeenAt: violations.firstSeenAt,
             })
@@ -777,6 +779,8 @@ router.post(
           targetMethodName: methods.name,
           targetTable: violations.targetTable,
           fixPrompt: violations.fixPrompt,
+          ruleKey: violations.ruleKey,
+          deterministicViolationId: violations.deterministicViolationId,
           firstSeenAnalysisId: violations.firstSeenAnalysisId,
           firstSeenAt: violations.firstSeenAt,
         })
@@ -958,7 +962,6 @@ router.post(
           targetModuleName: null as string | null,
           targetMethodName: null as string | null,
           fixPrompt: cv.fixPrompt,
-          deterministicViolationId: null as string | null,
           filePath: cv.filePath,
           lineStart: cv.lineStart,
         }));

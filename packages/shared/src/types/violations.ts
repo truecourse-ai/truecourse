@@ -55,6 +55,7 @@ export const ViolationSchema = z.object({
   targetMethodId: z.string().optional(),
   targetTable: z.string().optional(),
   fixPrompt: z.string().optional(),
+  ruleKey: z.string().optional(),
   deterministicViolationId: z.string().optional(),
   firstSeenAt: z.string().optional(),
   resolvedAt: z.string().optional(),

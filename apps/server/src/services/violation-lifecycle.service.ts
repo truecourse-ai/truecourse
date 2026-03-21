@@ -35,6 +35,8 @@ export interface ActiveViolation {
   targetMethodName: string | null;
   targetTable: string | null;
   fixPrompt: string | null;
+  ruleKey: string;
+  deterministicViolationId: string | null;
   firstSeenAnalysisId: string | null;
   firstSeenAt: Date | null;
 }
@@ -94,6 +96,8 @@ export async function loadActiveViolations(
       targetMethodName: methods.name,
       targetTable: violations.targetTable,
       fixPrompt: violations.fixPrompt,
+      ruleKey: violations.ruleKey,
+      deterministicViolationId: violations.deterministicViolationId,
       firstSeenAnalysisId: violations.firstSeenAnalysisId,
       firstSeenAt: violations.firstSeenAt,
     })
@@ -230,6 +234,7 @@ export async function persistViolationsWithLifecycle(
         targetMethodId: remapped.targetMethodId,
         targetTable: prev.targetTable,
         fixPrompt: prev.fixPrompt,
+        ruleKey: prev.ruleKey,
         firstSeenAnalysisId: prev.firstSeenAnalysisId,
         firstSeenAt: prev.firstSeenAt,
         previousViolationId: prev.id,
@@ -252,6 +257,7 @@ export async function persistViolationsWithLifecycle(
         targetMethodId: remapped.targetMethodId,
         targetTable: prev.targetTable,
         fixPrompt: prev.fixPrompt,
+        ruleKey: prev.ruleKey,
         firstSeenAnalysisId: prev.firstSeenAnalysisId,
         firstSeenAt: prev.firstSeenAt,
         previousViolationId: prev.id,
@@ -277,8 +283,6 @@ export async function persistViolationsWithLifecycle(
       targetMethodId = methodNameToId.get(v.targetMethodName) ?? null;
     }
 
-    console.log(`[ViolationLifecycle] Inserting new violation: "${v.title}" — targetServiceId: ${targetServiceId}, targetModuleId: ${targetModuleId}, v.targetServiceId: ${v.targetServiceId}, v.targetServiceName: ${v.targetServiceName}`);
-
     await db.insert(violations).values({
       id: uuidv4(),
       repoId,
@@ -292,7 +296,7 @@ export async function persistViolationsWithLifecycle(
       targetModuleId,
       targetMethodId,
       fixPrompt: v.fixPrompt,
-      deterministicViolationId: v.deterministicViolationId || null,
+      ruleKey: v.ruleKey,
       firstSeenAnalysisId: analysisId,
       firstSeenAt: now,
     });

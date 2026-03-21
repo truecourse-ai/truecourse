@@ -1,0 +1,1 @@
+ALTER TABLE "violations" ADD COLUMN "rule_key" text;

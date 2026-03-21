@@ -39,6 +39,7 @@ export interface ViolationGenerationInput {
     relations?: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[];
   }[];
   llmRules?: {
+    key: string;
     name: string;
     severity: string;
     prompt: string;
@@ -81,36 +82,10 @@ export interface ViolationGenerationInput {
     calleeModule: string;
     callCount: number;
   }[];
-  moduleViolations?: {
-    ruleKey: string;
-    title: string;
-    description: string;
-    severity: string;
-    serviceName: string;
-    serviceId?: string;
-    moduleName?: string;
-    moduleId?: string;
-    methodName?: string;
-    methodId?: string;
-    deterministicViolationId?: string;
-  }[];
-  /** Service deterministic violations */
-  serviceViolations?: {
-    ruleKey: string;
-    title: string;
-    description: string;
-    severity: string;
-    serviceName: string;
-    deterministicViolationId?: string;
-  }[];
-  /** Existing violations per category for lifecycle mode */
+  /** Existing violations per category for lifecycle mode (LLM-only, no deterministic) */
   existingServiceViolations?: ExistingViolation[];
   existingDatabaseViolations?: ExistingViolation[];
   existingModuleViolations?: ExistingViolation[];
-  /** Previous deterministic service violations for lifecycle comparison */
-  baselineServiceViolations?: string[];
-  /** Previous deterministic module violations for lifecycle comparison */
-  baselineModuleViolations?: string[];
 }
 
 export async function generateViolations(
@@ -153,7 +128,6 @@ export async function generateViolations(
     services: serviceDtos,
     dependencies: depDtos,
     llmRules: archRules,
-    violations: input.serviceViolations,
   };
 
   const hasDBs = input.databases && input.databases.length > 0;
@@ -171,7 +145,6 @@ export async function generateViolations(
         moduleDependencies: input.moduleDependencies || [],
         methodDependencies: input.methodDependencies || [],
         llmRules: moduleRules,
-        violations: input.moduleViolations,
       }
     : undefined;
 
@@ -180,6 +153,7 @@ export async function generateViolations(
     service: serviceContext,
     database: dbContext,
     module: moduleContext,
+    onStepComplete: onProgress,
   });
 
   // --- Merge results ---
@@ -188,7 +162,6 @@ export async function generateViolations(
 
   // Service result
   if (results.service) {
-    onProgress?.('Service architecture checks done');
     for (const violation of results.service.violations) {
       if (violation.targetServiceId && !validServiceIds.has(violation.targetServiceId)) {
         violation.targetServiceId = undefined;
@@ -200,7 +173,6 @@ export async function generateViolations(
 
   // Database result
   if (results.database) {
-    onProgress?.('Database schema checks done');
     for (const violation of results.database.violations) {
       if (violation.targetDatabaseId && !validDatabaseIds.has(violation.targetDatabaseId)) {
         violation.targetDatabaseId = undefined;
@@ -211,7 +183,6 @@ export async function generateViolations(
 
   // Module result
   if (results.module) {
-    onProgress?.('Module & function checks done');
     for (const violation of results.module.violations) {
       if (violation.targetServiceId && !validServiceIds.has(violation.targetServiceId)) {
         violation.targetServiceId = undefined;
@@ -264,9 +235,7 @@ export async function generateViolationsWithLifecycle(
     services: serviceDtos,
     dependencies: depDtos,
     llmRules: archRules,
-    violations: input.serviceViolations,
     existingViolations: input.existingServiceViolations,
-    baselineViolations: input.baselineServiceViolations,
   };
 
   const hasDBs = input.databases && input.databases.length > 0;
@@ -284,9 +253,7 @@ export async function generateViolationsWithLifecycle(
         moduleDependencies: input.moduleDependencies || [],
         methodDependencies: input.methodDependencies || [],
         llmRules: moduleRules,
-        violations: input.moduleViolations,
         existingViolations: input.existingModuleViolations,
-        baselineViolations: input.baselineModuleViolations,
       }
     : undefined;
 
@@ -294,9 +261,10 @@ export async function generateViolationsWithLifecycle(
     service: serviceContext,
     database: dbContext,
     module: moduleContext,
+  }, (step) => {
+    onProgress?.(step);
   });
 
-  onProgress?.('All checks done');
   return result;
 }
 
