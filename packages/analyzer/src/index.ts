@@ -56,7 +56,8 @@ export { AnalysisGraph, type AnalysisGraphInput } from './analysis-graph.js'
 // Rules
 export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES, LLM_CODE_RULES, CODE_RULES } from './rules/index.js'
 export { getAllDefaultRules } from './rule-engine.js'
-export { checkModuleRules, type ModuleViolation } from './rules/module-rules-checker.js'
+export { checkModuleRules, checkMethodRules, type ModuleViolation } from './rules/module-rules-checker.js'
+export { checkServiceRules, type ServiceViolation } from './rules/service-rules-checker.js'
 export { checkCodeRules } from './rules/code-rules-checker.js'
 
 /**
@@ -80,7 +81,6 @@ export async function analyzeRepository(rootPath: string): Promise<{
         dependencies: [],
         architecture: 'monolith',
         layerDetails: [],
-        layerDependencies: [],
         databaseResult: { databases: [], connections: [] },
         modules: [],
         methods: [],

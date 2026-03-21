@@ -9,12 +9,11 @@ export interface ModuleViolation {
   moduleName?: string
   methodName?: string
   filePath: string
+  /** For dependency violations: the module on the other end of the edge */
+  relatedModuleName?: string
 }
 
 const GOD_MODULE_THRESHOLD = 15
-const LONG_METHOD_STATEMENTS = 30
-const TOO_MANY_PARAMS = 5
-const DEEP_NESTING_THRESHOLD = 4
 
 /**
  * Check deterministic module-level rules and return violations.
@@ -26,8 +25,8 @@ export function checkModuleRules(
   enabledRules: AnalysisRule[],
   moduleLevelDeps?: ModuleLevelDependency[],
   dbConnectedModuleKeys?: Set<string>,
-  methodLevelDeps?: MethodLevelDependency[],
   fileAnalyses?: FileAnalysis[],
+  libraryServiceNames?: Set<string>,
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -48,6 +47,173 @@ export function checkModuleRules(
       }
     }
   }
+
+  // Unused export
+  if (ruleKeys.has('arch/unused-export')) {
+    const importedTargets = new Set<string>()
+    for (const dep of fileDependencies) {
+      for (const name of dep.importedNames) {
+        importedTargets.add(name)
+      }
+    }
+
+    for (const method of methods) {
+      if (method.isExported && !importedTargets.has(method.name)) {
+        violations.push({
+          ruleKey: 'arch/unused-export',
+          title: `Unused export: ${method.name}`,
+          description: `${method.name} is exported from ${method.moduleName} but never imported elsewhere in the codebase.`,
+          severity: 'low',
+          serviceName: method.serviceName,
+          moduleName: method.moduleName,
+          methodName: method.name,
+          filePath: method.filePath,
+        })
+      }
+    }
+
+    for (const mod of modules) {
+      if (mod.kind === 'class' && mod.exportCount > 0 && !importedTargets.has(mod.name)) {
+        violations.push({
+          ruleKey: 'arch/unused-export',
+          title: `Unused export: ${mod.name}`,
+          description: `Class ${mod.name} appears exported but is never imported elsewhere in the codebase.`,
+          severity: 'low',
+          serviceName: mod.serviceName,
+          moduleName: mod.name,
+          filePath: mod.filePath,
+        })
+      }
+    }
+  }
+
+  // Dead module
+  if (ruleKeys.has('arch/dead-module') && moduleLevelDeps) {
+    const connectedModules = new Set<string>()
+    for (const dep of moduleLevelDeps) {
+      connectedModules.add(`${dep.sourceService}::${dep.sourceModule}`)
+      connectedModules.add(`${dep.targetService}::${dep.targetModule}`)
+    }
+
+    for (const mod of modules) {
+      const key = `${mod.serviceName}::${mod.name}`
+      if (!connectedModules.has(key) && !dbConnectedModuleKeys?.has(key)) {
+        violations.push({
+          ruleKey: 'arch/dead-module',
+          title: `Dead module: ${mod.name}`,
+          description: `${mod.name} in ${mod.serviceName} has no incoming or outgoing dependencies — it may be unused.`,
+          severity: 'low',
+          serviceName: mod.serviceName,
+          moduleName: mod.name,
+          filePath: mod.filePath,
+        })
+      }
+    }
+  }
+
+  // Orphan file
+  if (ruleKeys.has('arch/orphan-file') && fileAnalyses) {
+    const ENTRY_POINT_PATTERN = /(?:^|\/)(?:index|main|app|server)\.[^/]+$|(?:^|\/)route[^/]*\.[^/]+$|\.config\.[^/]+$|\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|(?:^|\/)migrations\/|(?:^|\/)seeds\/|(?:^|\/)bin\/|(?:^|\/)scripts\//
+
+    const importedFiles = new Set<string>()
+    for (const dep of fileDependencies) {
+      importedFiles.add(dep.target)
+    }
+
+    for (const fa of fileAnalyses) {
+      if (importedFiles.has(fa.filePath)) continue
+      if (ENTRY_POINT_PATTERN.test(fa.filePath)) continue
+
+      const matchingModule = modules.find((m) => m.filePath === fa.filePath)
+      const serviceName = matchingModule?.serviceName || 'unknown'
+      const fileName = fa.filePath.split('/').pop() || fa.filePath
+
+      violations.push({
+        ruleKey: 'arch/orphan-file',
+        title: `Orphan file: ${fileName}`,
+        description: `${fa.filePath} is never imported by any other file in the codebase. It may be an unused module or a missing entry point.`,
+        severity: 'low',
+        serviceName,
+        filePath: fa.filePath,
+      })
+    }
+  }
+
+  // Layer violations
+  if (moduleLevelDeps) {
+    const layerViolationRules: [string, string, string][] = []
+    if (ruleKeys.has('arch/module-layer-data-api')) layerViolationRules.push(['arch/module-layer-data-api', 'data', 'api'])
+    if (ruleKeys.has('arch/module-layer-data-external')) layerViolationRules.push(['arch/module-layer-data-external', 'data', 'external'])
+    if (ruleKeys.has('arch/module-layer-external-api')) layerViolationRules.push(['arch/module-layer-external-api', 'external', 'api'])
+
+    const moduleByKey = new Map(modules.map(m => [`${m.serviceName}::${m.name}`, m]))
+
+    if (layerViolationRules.length > 0) {
+      for (const dep of moduleLevelDeps) {
+        const srcMod = moduleByKey.get(`${dep.sourceService}::${dep.sourceModule}`)
+        const tgtMod = moduleByKey.get(`${dep.targetService}::${dep.targetModule}`)
+        if (!srcMod || !tgtMod) continue
+
+        for (const [ruleKey, srcLayer, tgtLayer] of layerViolationRules) {
+          if (srcMod.layerName === srcLayer && tgtMod.layerName === tgtLayer) {
+            violations.push({
+              ruleKey,
+              title: `Layer violation: ${srcMod.name} → ${tgtMod.name}`,
+              description: `${srcMod.name} (${srcLayer} layer) imports from ${tgtMod.name} (${tgtLayer} layer) in ${srcMod.serviceName}. ${srcLayer} layer should not depend on ${tgtLayer} layer.`,
+              severity: ruleKey === 'arch/module-layer-data-api' ? 'high' : 'medium',
+              serviceName: srcMod.serviceName,
+              moduleName: srcMod.name,
+              filePath: srcMod.filePath,
+              relatedModuleName: tgtMod.name,
+            })
+          }
+        }
+      }
+    }
+
+    // Cross-service internal import (skip library services — their internals are public)
+    if (ruleKeys.has('arch/cross-service-internal-import')) {
+      const internalLayers = new Set(['data', 'service', 'external'])
+
+      for (const dep of moduleLevelDeps) {
+        if (dep.sourceService === dep.targetService) continue
+        if (libraryServiceNames?.has(dep.targetService)) continue
+        const srcMod = moduleByKey.get(`${dep.sourceService}::${dep.sourceModule}`)
+        const tgtMod = moduleByKey.get(`${dep.targetService}::${dep.targetModule}`)
+        if (!srcMod || !tgtMod) continue
+        if (!internalLayers.has(tgtMod.layerName)) continue
+
+        violations.push({
+          ruleKey: 'arch/cross-service-internal-import',
+          title: `Cross-service internal import: ${srcMod.name} → ${tgtMod.name}`,
+          description: `${srcMod.name} in ${srcMod.serviceName} imports ${tgtMod.name} from ${tgtMod.serviceName}'s ${tgtMod.layerName} layer. Services should only depend on each other's API layer, not internal modules.`,
+          severity: 'high',
+          serviceName: srcMod.serviceName,
+          moduleName: srcMod.name,
+          filePath: srcMod.filePath,
+          relatedModuleName: tgtMod.name,
+        })
+      }
+    }
+  }
+
+  return violations
+}
+
+const LONG_METHOD_STATEMENTS = 30
+const TOO_MANY_PARAMS = 5
+const DEEP_NESTING_THRESHOLD = 4
+
+/**
+ * Check deterministic method-level rules and return violations.
+ */
+export function checkMethodRules(
+  methods: MethodInfo[],
+  enabledRules: AnalysisRule[],
+  methodLevelDeps?: MethodLevelDependency[],
+): ModuleViolation[] {
+  const violations: ModuleViolation[] = []
+  const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
 
   // Long method
   if (ruleKeys.has('arch/long-method')) {
@@ -103,74 +269,6 @@ export function checkModuleRules(
     }
   }
 
-  // Unused export
-  if (ruleKeys.has('arch/unused-export')) {
-    // Build set of all imported names across the codebase
-    const importedTargets = new Set<string>()
-    for (const dep of fileDependencies) {
-      for (const name of dep.importedNames) {
-        importedTargets.add(name)
-      }
-    }
-
-    // Check exported functions/classes that are never imported
-    for (const method of methods) {
-      if (method.isExported && !importedTargets.has(method.name)) {
-        violations.push({
-          ruleKey: 'arch/unused-export',
-          title: `Unused export: ${method.name}`,
-          description: `${method.name} is exported from ${method.moduleName} but never imported elsewhere in the codebase.`,
-          severity: 'low',
-          serviceName: method.serviceName,
-          moduleName: method.moduleName,
-          methodName: method.name,
-          filePath: method.filePath,
-        })
-      }
-    }
-
-    // Check exported classes
-    for (const mod of modules) {
-      if (mod.kind === 'class' && !importedTargets.has(mod.name)) {
-        if (mod.exportCount > 0 && !importedTargets.has(mod.name)) {
-          violations.push({
-            ruleKey: 'arch/unused-export',
-            title: `Unused export: ${mod.name}`,
-            description: `Class ${mod.name} appears exported but is never imported elsewhere in the codebase.`,
-            severity: 'low',
-            serviceName: mod.serviceName,
-            moduleName: mod.name,
-            filePath: mod.filePath,
-          })
-        }
-      }
-    }
-  }
-
-  // Dead module
-  if (ruleKeys.has('arch/dead-module') && moduleLevelDeps) {
-    const connectedModules = new Set<string>()
-    for (const dep of moduleLevelDeps) {
-      connectedModules.add(`${dep.sourceService}::${dep.sourceModule}`)
-      connectedModules.add(`${dep.targetService}::${dep.targetModule}`)
-    }
-
-    for (const mod of modules) {
-      const key = `${mod.serviceName}::${mod.name}`
-      if (!connectedModules.has(key) && !dbConnectedModuleKeys?.has(key)) {
-        violations.push({
-          ruleKey: 'arch/dead-module',
-          title: `Dead module: ${mod.name}`,
-          description: `${mod.name} in ${mod.serviceName} has no incoming or outgoing dependencies — it may be unused.`,
-          severity: 'low',
-          serviceName: mod.serviceName,
-          moduleName: mod.name,
-          filePath: mod.filePath,
-        })
-      }
-    }
-  }
-
   // Dead method
   if (ruleKeys.has('arch/dead-method') && methodLevelDeps) {
     const connectedMethods = new Set<string>()
@@ -193,36 +291,6 @@ export function checkModuleRules(
           filePath: method.filePath,
         })
       }
-    }
-  }
-
-  // Orphan file
-  if (ruleKeys.has('arch/orphan-file') && fileAnalyses) {
-    const ENTRY_POINT_PATTERN = /(?:^|\/)(?:index|main|app|server)\.[^/]+$|(?:^|\/)route[^/]*\.[^/]+$|\.config\.[^/]+$|\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|(?:^|\/)migrations\/|(?:^|\/)seeds\/|(?:^|\/)bin\/|(?:^|\/)scripts\//
-
-    // Build set of all imported file paths (targets of dependencies)
-    const importedFiles = new Set<string>()
-    for (const dep of fileDependencies) {
-      importedFiles.add(dep.target)
-    }
-
-    for (const fa of fileAnalyses) {
-      if (importedFiles.has(fa.filePath)) continue
-      if (ENTRY_POINT_PATTERN.test(fa.filePath)) continue
-
-      // Determine which service this file belongs to
-      const matchingModule = modules.find((m) => m.filePath === fa.filePath)
-      const serviceName = matchingModule?.serviceName || 'unknown'
-      const fileName = fa.filePath.split('/').pop() || fa.filePath
-
-      violations.push({
-        ruleKey: 'arch/orphan-file',
-        title: `Orphan file: ${fileName}`,
-        description: `${fa.filePath} is never imported by any other file in the codebase. It may be an unused module or a missing entry point.`,
-        severity: 'low',
-        serviceName,
-        filePath: fa.filePath,
-      })
     }
   }
 

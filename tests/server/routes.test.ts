@@ -397,6 +397,152 @@ describe('API routes (integration)', () => {
   });
 
   // -----------------------------------------------------------------------
+  // GET /api/repos/:id/files — returns tracked files (default)
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/files — returns tracked files', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}/files`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('root');
+    expect(res.body).toHaveProperty('files');
+    expect(Array.isArray(res.body.files)).toBe(true);
+    expect(res.body.files.length).toBeGreaterThan(0);
+    // Should contain a known fixture file
+    expect(res.body.files.some((f: string) => f.includes('package.json'))).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/files?ref=working-tree — includes untracked files
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/files?ref=working-tree — includes untracked files', async () => {
+    // Create an untracked file in the fixture
+    const untrackedPath = resolve(FIXTURE_PATH, '_test_untracked.txt');
+    require('fs').writeFileSync(untrackedPath, 'untracked content');
+
+    try {
+      // Default mode should NOT include the untracked file
+      const defaultRes = await request(app)
+        .get(`/api/repos/${createdRepoId}/files`)
+        .expect(200);
+
+      expect(defaultRes.body.files).not.toContain('_test_untracked.txt');
+
+      // Working-tree mode SHOULD include the untracked file
+      const wtRes = await request(app)
+        .get(`/api/repos/${createdRepoId}/files?ref=working-tree`)
+        .expect(200);
+
+      expect(wtRes.body.files).toContain('_test_untracked.txt');
+    } finally {
+      require('fs').unlinkSync(untrackedPath);
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/file-content — returns committed content by default
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/file-content — returns committed content by default', async () => {
+    const res = await request(app)
+      .get(`/api/repos/${createdRepoId}/file-content?path=package.json`)
+      .expect(200);
+
+    expect(res.body).toHaveProperty('content');
+    expect(res.body).toHaveProperty('language', 'json');
+    // Content should be valid JSON (the fixture package.json)
+    expect(() => JSON.parse(res.body.content)).not.toThrow();
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/file-content?ref=working-tree — returns filesystem content
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/file-content?ref=working-tree — returns working tree content', async () => {
+    const testFile = resolve(FIXTURE_PATH, '_test_wt_file.txt');
+    require('fs').writeFileSync(testFile, 'working tree content here');
+
+    try {
+      // Default mode: new untracked file should still be readable (fallback)
+      const defaultRes = await request(app)
+        .get(`/api/repos/${createdRepoId}/file-content?path=_test_wt_file.txt`)
+        .expect(200);
+
+      expect(defaultRes.body.content).toBe('working tree content here');
+
+      // Working-tree mode: should read from filesystem
+      const wtRes = await request(app)
+        .get(`/api/repos/${createdRepoId}/file-content?path=_test_wt_file.txt&ref=working-tree`)
+        .expect(200);
+
+      expect(wtRes.body.content).toBe('working tree content here');
+    } finally {
+      require('fs').unlinkSync(testFile);
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/file-content — committed vs working tree difference
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/file-content — default returns committed, not working tree edits', async () => {
+    const fs = require('fs');
+    const targetFile = 'package.json';
+    const fullPath = resolve(FIXTURE_PATH, targetFile);
+
+    // Read the original committed content
+    const committedRes = await request(app)
+      .get(`/api/repos/${createdRepoId}/file-content?path=${targetFile}`)
+      .expect(200);
+
+    const originalContent = fs.readFileSync(fullPath, 'utf-8');
+
+    // Modify the file on disk
+    fs.writeFileSync(fullPath, originalContent + '\n// local edit');
+
+    try {
+      // Default mode should still return committed content (no local edit)
+      const defaultRes = await request(app)
+        .get(`/api/repos/${createdRepoId}/file-content?path=${targetFile}`)
+        .expect(200);
+
+      expect(defaultRes.body.content).not.toContain('// local edit');
+
+      // Working-tree mode should include the local edit
+      const wtRes = await request(app)
+        .get(`/api/repos/${createdRepoId}/file-content?path=${targetFile}&ref=working-tree`)
+        .expect(200);
+
+      expect(wtRes.body.content).toContain('// local edit');
+    } finally {
+      // Restore original content
+      fs.writeFileSync(fullPath, originalContent);
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/file-content — missing path returns 400
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/file-content — missing path returns 400', async () => {
+    await request(app)
+      .get(`/api/repos/${createdRepoId}/file-content`)
+      .expect(400);
+  });
+
+  // -----------------------------------------------------------------------
+  // GET /api/repos/:id/file-content — nonexistent file returns 404
+  // -----------------------------------------------------------------------
+
+  it('GET /api/repos/:id/file-content — nonexistent file returns 404', async () => {
+    await request(app)
+      .get(`/api/repos/${createdRepoId}/file-content?path=does-not-exist.xyz&ref=working-tree`)
+      .expect(404);
+  });
+
+  // -----------------------------------------------------------------------
   // DELETE /api/repos/:id — removes repo and cascades
   // -----------------------------------------------------------------------
 

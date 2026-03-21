@@ -874,7 +874,7 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 
 ---
 
-## Phase 8: Claude Code Skills `STATUS: DONE`
+## Phase 8: Claude Code Skills `STATUS: TESTING`
 
 Add Claude Code skills that let users invoke TrueCourse commands conversationally from within Claude Code. Skills are bundled with the npm package and installed into the user's project via `truecourse add`.
 
@@ -899,14 +899,21 @@ If yes: copies bundled `skills/truecourse/` to `<project>/.claude/skills/truecou
 - `tools/cli/package.json` — `"files"` field includes `skills/` so it ships with npm
 
 ### Verification (Phase 8)
-1. `npx truecourse add` in a project → prompt appears after repo is added
-2. Accept → `.claude/skills/truecourse/` created with 3 SKILL.md files
-3. Decline → no `.claude/` directory created
-4. Open Claude Code in the project → skills appear and trigger correctly
+1. Start the TrueCourse server (`pnpm dev`)
+2. `cd` into a test project directory
+3. Run `npx truecourse add` → repo is added, skills prompt appears
+4. Decline skills → verify no `.claude/` directory is created in the test project
+5. Run `npx truecourse add` again → accept skills prompt
+6. Verify `.claude/skills/truecourse/` is created with 3 subdirectories, each containing a SKILL.md
+7. Verify skill file contents: `truecourse-analyze/SKILL.md`, `truecourse-list/SKILL.md`, `truecourse-fix/SKILL.md` all have correct frontmatter (name, description, triggers) and instructions
+8. Open Claude Code in the test project → verify all 3 skills appear in the skill list
+9. Run `/truecourse-analyze` → triggers `npx truecourse analyze`, outputs summary, mentions `/truecourse-list` for details
+10. Run `/truecourse-list` → triggers `npx truecourse list`, shows formatted violations
+11. Run `/truecourse-fix` → lists fixable violations (those with `fixPrompt`), lets user pick, applies changes
 
 ---
 
-## Phase 9: Background Service Mode `STATUS: IN PROGRESS`
+## Phase 9: Background Service Mode `STATUS: TESTING`
 
 Run TrueCourse as a background service (daemon) instead of keeping a terminal open. Uses native OS service managers — no third-party process managers (pm2 is AGPL, incompatible with MIT + commercial cloud).
 
@@ -959,60 +966,107 @@ When `runMode` is `service`, `truecourse start` installs and starts the service 
 - `truecourse service logs` tails the active log file
 - Structured JSON logs when running as service (vs. pretty-printed in console mode)
 
-### Verification
-1. `truecourse setup` → select "Background service" → service installs and starts
-2. Close terminal → TrueCourse still accessible at `http://localhost:3001`
-3. `truecourse service status` → shows running with PID and uptime
-4. `truecourse service logs` → shows recent log output
-5. `truecourse service uninstall` → service stops and is removed
-6. Reboot → service auto-starts (macOS/Linux/Windows)
-7. Service crashes → auto-restarts within seconds
-8. `truecourse setup` → switch back to "Console" → service uninstalled, runs in foreground again
+### Test Plan (Phase 9) `STATUS: DONE`
+- Config: `readConfig` returns defaults when no config file exists
+- Config: `writeConfig` creates file and `readConfig` reads it back
+- Config: `writeConfig` merges with existing config
+- Config: `getConfigPath` points to `~/.truecourse/config.json`
+- Config: `writeConfig` creates intermediate directories
+- Config: `readConfig` handles corrupted JSON gracefully
+- Env parsing: returns empty object for nonexistent file
+- Env parsing: parses simple key=value pairs
+- Env parsing: skips comments and empty lines
+- Env parsing: strips surrounding quotes from values
+- Env parsing: handles values with equals signs
+- Env parsing: skips lines without equals sign
+- Log rotation: does nothing when log file does not exist
+- Log rotation: does nothing when log file is under 10MB
+- Log rotation: rotates when log file exceeds 10MB
+- Log rotation: shifts existing rotated files
+- Log rotation: deletes oldest file when max rotation count reached
+- Log rotation: error log rotation works the same way
+- Platform factory: returns a platform with the expected interface
+- Platform factory: returns MacOSService on darwin
+
+### Verification (Phase 9)
+1. `pnpm build:dist` → build completes successfully
+2. `truecourse setup` → select "Background service" → verify `~/.truecourse/config.json` has `"runMode": "service"`
+3. `truecourse start` → installs launchd plist and starts the service, prints URL
+4. Close terminal → `http://localhost:3001` still accessible
+5. `truecourse service status` → shows running with PID
+6. `truecourse service logs` → tails log output
+7. `truecourse service stop` → service stops, URL no longer accessible
+8. `truecourse service start` → service starts again
+9. `truecourse service uninstall` → removes the service, `config.json` reverts to `"runMode": "console"`
+10. `truecourse start` → runs in foreground (console mode restored)
+11. `truecourse setup` → switch to service mode → service installed automatically
+12. Reboot → service auto-starts (macOS/Linux/Windows)
+13. Service crashes → auto-restarts within seconds
+14. `pnpm build` and `pnpm test` pass
 
 ---
 
-## Phase 10: Violation Lifecycle & Analytics Dashboard `STATUS: BACKLOG`
+## Phase 10: Violation Lifecycle & Analytics Dashboard `STATUS: IN PROGRESS`
 
 Persistent violation tracking across analyses and an analytics dashboard showing violation trends over time.
 
-### 10.1 Persistent Violation Lifecycle `STATUS: BACKLOG`
+### 10.1 Unified Violation Lifecycle `STATUS: DONE`
 
-Currently, each full analysis creates entirely new violations and discards the old ones. This loses history and makes trending impossible. Change the full analysis flow to match what diff mode does — create, resolve, and carry forward violations across analyses.
+Currently, full analysis creates fresh violations every time, and diff mode stores results separately in the `diffChecks` table as JSON blobs. Unify both into a single model: every analysis (full or diff) stores violations as real rows in the `violations` table, each with a `status` indicating whether it's new, unchanged, or resolved relative to the previous analysis.
 
-**Violation matching:**
-- After the LLM/deterministic checks produce a new set of violations, compare them against the previous analysis's active violations
-- Match violations using a composite key: `type + targetServiceId + targetModuleId + targetMethodId + title` (or a normalized content hash)
-- **Matched** → violation carries forward (same DB row, updated `analysisId` to current)
-- **Unmatched new** → create new violation row with `status: 'active'`, `firstSeenAnalysisId`, `firstSeenAt`
-- **Unmatched old** → mark as `status: 'resolved'`, set `resolvedAt` and `resolvedAnalysisId`
+**Unified model — one approach for both full and diff analysis:**
+- Every analysis (full or diff) creates an `analysis` record (diff already does this with `metadata.isDiffAnalysis`)
+- Before generating violations, load active violations from the previous analysis (status `new` or `unchanged`)
+- Pass them into the LLM prompt — the LLM classifies each as **new**, **unchanged**, or **resolved** (diff mode already does this in `runDiffViolationCheck`)
+- Deterministic violations (code rules, module checks) use programmatic comparison: same rule key + target = unchanged, missing = resolved, extra = new
+- All violations are inserted as real rows in `violations`/`codeViolations` tables with the appropriate status
+- The `diffChecks` table is **removed** — diff metadata (`changedFiles`, `affectedNodeIds`) moves to `analyses.metadata`
+
+**Each analysis gets its own set of violation rows:**
+
+| Status | Meaning | What happens in DB |
+|---|---|---|
+| `new` | First time this violation is detected | New row, `firstSeenAnalysisId` = this analysis |
+| `unchanged` | Same violation carried forward from previous analysis | New row, `previousViolationId` → previous analysis's row, inherits `firstSeenAnalysisId` |
+| `resolved` | Was active in previous analysis, no longer present | New row, `previousViolationId` → previous analysis's row, `resolvedAt` = now |
+
+This gives us:
+- **Per-analysis snapshot** — `WHERE analysisId = X` shows exactly what that analysis saw
+- **Trending** — count violations by status per analysis over time
+- **Stable history chain** — follow `previousViolationId` to trace a violation's full lifecycle
+- **Active violations** — `WHERE analysisId = X AND status IN ('new', 'unchanged')`
+- **Works identically for full and diff** — diff analysis just analyzes fewer files, but stores violations the same way
 
 **Schema changes to `violations` table:**
-- Add `status` enum: `'active' | 'resolved'` (default `'active'`)
-- Add `firstSeenAnalysisId` — the analysis that first detected this violation
-- Add `firstSeenAt` — timestamp when first detected
-- Add `resolvedAnalysisId` — the analysis where this violation disappeared (null while active)
-- Add `resolvedAt` — timestamp when resolved (null while active)
-- Add `matchKey` — computed composite key for deduplication across analyses
+- Add `status`: `'new' | 'unchanged' | 'resolved'` (default `'new'`)
+- Add `firstSeenAnalysisId` — the analysis that originally detected this violation (carried forward on `unchanged`)
+- Add `firstSeenAt` — timestamp when first detected (carried forward on `unchanged`)
+- Add `previousViolationId` — self-referencing FK to the same violation's row in the previous analysis (null for brand-new violations)
+- Add `resolvedAt` — timestamp when resolved (null unless status = `resolved`)
 
 **Schema changes to `codeViolations` table:**
-- Same lifecycle fields: `status`, `firstSeenAnalysisId`, `firstSeenAt`, `resolvedAnalysisId`, `resolvedAt`, `matchKey`
-- Match key: `ruleKey + filePath + lineStart + title` (line-level matching with fuzzy tolerance for small shifts)
+- Same lifecycle fields: `status`, `firstSeenAnalysisId`, `firstSeenAt`, `previousViolationId`, `resolvedAt`
 
-**Analysis flow changes:**
-- `POST /api/repos/:id/analyze` — after generating violations, run the matching algorithm before inserting
-- Carry-forward violations keep their original `id` so any external references remain stable
-- The `analysisId` on active violations always points to the latest analysis (so existing queries still work)
-- Resolved violations retain their last `analysisId` for history
+**Remove `diffChecks` table:**
+- `changedFiles` and `affectedNodeIds` move to `analyses.metadata` (already a JSONB column)
+- `resolvedViolationIds` and `newViolations` JSON blobs are replaced by real violation rows with status
+- `summary` counts are derived from querying violation statuses
 
-**Diff mode integration:**
-- Diff mode (`POST /api/repos/:id/diff-check`) continues to work as before — it already compares against baseline
-- Diff results now reference stable violation IDs (since violations persist across analyses)
-- New violations from diff that get confirmed in the next full analysis inherit the same `matchKey`
+**Analysis flow (unified for full and diff):**
+1. Create new `analysis` record (diff sets `metadata.isDiffAnalysis = true`)
+2. Load previous analysis's active violations (`status IN ('new', 'unchanged')`)
+3. Pass existing violations to LLM alongside analysis context
+4. LLM returns violations classified as new/unchanged/resolved
+5. Insert all as rows in `violations` table with appropriate status
+6. For `unchanged`: copy `firstSeenAnalysisId`/`firstSeenAt` from previous, set `previousViolationId`
+7. For `resolved`: set `resolvedAt`, set `previousViolationId`
+8. For `new`: set `firstSeenAnalysisId` = current analysis
 
 **API changes:**
-- `GET /api/repos/:id/violations` — default: returns active violations only. Add `?status=resolved` or `?status=all` filter
+- `GET /api/repos/:id/violations` — returns active violations (new + unchanged) for latest analysis. Add `?status=resolved` or `?status=all` filter
 - `GET /api/repos/:id/violations/summary` — returns counts by status, by type, by severity for a given analysis
-- `GET /api/repos/:id/violations/history` — returns violation count per analysis over time (for trending)
+- `GET /api/repos/:id/violations/history` — returns violation counts per analysis over time (for trending)
+- Remove diff-check-specific violation endpoints — diff results are now queried the same way as full analysis results
 
 ### 10.2 Analytics Dashboard `STATUS: BACKLOG`
 
@@ -1058,11 +1112,15 @@ A new "Analytics" tab in the frontend showing violation trends and breakdowns ac
 - `GET /api/repos/:id/analytics/resolution` — resolution velocity metrics
 
 ### Test Plan (Phase 10) `STATUS: BACKLOG`
-- Violation matching: re-analyzing the same code produces the same violations (no duplicates, same IDs)
-- Violation matching: adding a new violation in code → new violation appears with `status: 'active'`
-- Violation matching: fixing a violation in code → violation marked `status: 'resolved'` with `resolvedAt`
-- Violation matching: unchanged violations carry forward with stable IDs
-- Code violation matching: same lifecycle for code-level violations with line-shift tolerance
+- Unified lifecycle: both full and diff analysis store violations as real rows with status field
+- Unified lifecycle: LLM receives previous active violations in prompt and returns new/unchanged/resolved classifications
+- Unified lifecycle: re-analyzing unchanged code → all violations have status `unchanged`, `previousViolationId` links to prior rows
+- Unified lifecycle: new violation detected → row with `status: 'new'`, `firstSeenAnalysisId` = current
+- Unified lifecycle: violation no longer present → row with `status: 'resolved'`, `resolvedAt` set
+- Unified lifecycle: `previousViolationId` chain is correct across multiple analyses
+- Unified lifecycle: diff analysis stores violations identically to full analysis (no JSON blobs)
+- Unified lifecycle: `diffChecks` table removed, `changedFiles`/`affectedNodeIds` in `analyses.metadata`
+- Code violation lifecycle: deterministic comparison of previous vs current code violations (same rule key + target)
 - Analytics trend API: returns correct counts per analysis over time
 - Analytics breakdown API: returns correct type/severity distribution
 - Analytics top-offenders: returns services ranked by violation count
@@ -1072,14 +1130,17 @@ A new "Analytics" tab in the frontend showing violation trends and breakdowns ac
 - Frontend: switching repos updates all analytics data
 
 ### Verification (Phase 10)
-1. Run analysis twice on unchanged code → same violations, same IDs, zero new/resolved
-2. Introduce a new violation → re-analyze → new violation appears in trend as +1
-3. Fix a violation → re-analyze → violation marked resolved, trend shows -1
-4. Analytics tab shows trending chart with data points per analysis
-5. Pie chart accurately reflects current violation type breakdown
-6. Top offenders table highlights the most problematic services
-7. Resolution velocity shows average time-to-fix
-8. Historical analyses contribute to the trend (backfilled from existing data)
+1. Run full analysis → violations stored with `status: 'new'` (first analysis, all are new)
+2. Run full analysis again on unchanged code → violations have `status: 'unchanged'`, `previousViolationId` links back
+3. Introduce a new violation → re-analyze → new violation appears with `status: 'new'` alongside unchanged ones
+4. Fix a violation → re-analyze → resolved violation row with `status: 'resolved'` and `resolvedAt`
+5. Run diff analysis → violations stored the same way (real rows, not JSON blobs)
+6. Query `GET /violations?status=all` → returns new + unchanged + resolved for any analysis
+7. Analytics tab shows trending chart with data points per analysis
+8. Pie chart accurately reflects current violation type breakdown
+9. Top offenders table highlights the most problematic services
+10. Resolution velocity shows average time-to-fix
+11. `previousViolationId` chain can be followed to trace a violation's full history across analyses
 
 ---
 

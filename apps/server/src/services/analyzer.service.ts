@@ -6,13 +6,12 @@ import type {
   ServiceDependencyInfo,
   Architecture,
   LayerDetail,
-  LayerDependencyInfo,
   ModuleInfo,
   MethodInfo,
   ModuleLevelDependency,
   MethodLevelDependency,
 } from '@truecourse/shared';
-import { checkModuleRules, type ModuleViolation } from '@truecourse/analyzer';
+import { checkModuleRules, checkMethodRules, checkServiceRules, type ModuleViolation, type ServiceViolation } from '@truecourse/analyzer';
 import type { AnalysisRule } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
@@ -24,7 +23,6 @@ export interface AnalysisResult {
   services: ServiceInfo[];
   dependencies: ServiceDependencyInfo[];
   layerDetails: LayerDetail[];
-  layerDependencies: LayerDependencyInfo[];
   databaseResult: import('@truecourse/shared').DatabaseDetectionResult;
   modules: ModuleInfo[];
   methods: MethodInfo[];
@@ -66,6 +64,11 @@ export function runDeterministicModuleChecks(
     }
   }
 
+  // Build set of library service names so cross-service import check skips them
+  const libraryServiceNames = new Set(
+    result.services.filter((s) => s.type === 'library').map((s) => s.name),
+  );
+
   return checkModuleRules(
     result.modules,
     result.methods,
@@ -73,8 +76,37 @@ export function runDeterministicModuleChecks(
     enabledDeterministic,
     result.moduleLevelDependencies || [],
     dbConnectedModuleKeys,
-    result.methodLevelDependencies || [],
     result.fileAnalyses,
+    libraryServiceNames,
+  );
+}
+
+/**
+ * Run deterministic method-level checks on an AnalysisResult.
+ */
+export function runDeterministicMethodChecks(
+  result: AnalysisResult,
+  enabledDeterministic: AnalysisRule[],
+): ModuleViolation[] {
+  if (!result.methods) return [];
+  return checkMethodRules(
+    result.methods,
+    enabledDeterministic,
+    result.methodLevelDependencies || [],
+  );
+}
+
+/**
+ * Run deterministic service-level checks on an AnalysisResult.
+ */
+export function runDeterministicServiceChecks(
+  result: AnalysisResult,
+  enabledDeterministic: AnalysisRule[],
+): ServiceViolation[] {
+  return checkServiceRules(
+    result.services,
+    result.dependencies,
+    enabledDeterministic,
   );
 }
 
@@ -174,7 +206,6 @@ export async function runAnalysis(
       services: splitResult.services,
       dependencies: splitResult.dependencies,
       layerDetails: splitResult.layerDetails,
-      layerDependencies: splitResult.layerDependencies,
       databaseResult: splitResult.databaseResult,
       modules: splitResult.modules,
       methods: splitResult.methods,
@@ -200,4 +231,40 @@ export async function runAnalysis(
       }
     }
   }
+}
+
+export interface DiffAnalysisInput {
+  repoPath: string;
+  branch: string | undefined;
+  onProgress: AnalysisProgressCallback;
+}
+
+export interface DiffAnalysisOutput {
+  analysisResult: AnalysisResult;
+  changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
+}
+
+/**
+ * Run analysis on dirty tree + get changed files.
+ * No LLM calls — persistence happens after this.
+ */
+export async function runDiffAnalysis(input: DiffAnalysisInput): Promise<DiffAnalysisOutput> {
+  const { repoPath, branch, onProgress } = input;
+
+  onProgress({ step: 'analyzing', percent: 10, detail: 'Analyzing dirty working tree...' });
+  const result = await runAnalysis(repoPath, branch, onProgress, { skipStash: true });
+
+  const git = simpleGit(repoPath);
+  const statusResult = await git.status();
+
+  const changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }> = [];
+  for (const f of statusResult.not_added) changedFiles.push({ path: f, status: 'new' });
+  for (const f of statusResult.created) changedFiles.push({ path: f, status: 'new' });
+  for (const f of statusResult.modified) changedFiles.push({ path: f, status: 'modified' });
+  for (const f of statusResult.staged) {
+    if (!changedFiles.some((cf) => cf.path === f)) changedFiles.push({ path: f, status: 'modified' });
+  }
+  for (const f of statusResult.deleted) changedFiles.push({ path: f, status: 'deleted' });
+
+  return { analysisResult: result, changedFiles };
 }

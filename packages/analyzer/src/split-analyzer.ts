@@ -10,7 +10,6 @@ import type {
   HttpCall,
   Entity,
   LayerDetail,
-  LayerDependencyInfo,
   DatabaseDetectionResult,
   ModuleInfo,
   MethodInfo,
@@ -22,7 +21,6 @@ import { detectServices, type Service } from './service-detector.js'
 import { shouldExtractEntities, extractEntities } from './extractors/entities.js'
 import { detectDatabases } from './database-detector.js'
 import { extractModulesAndMethods } from './module-extractor.js'
-import { DETERMINISTIC_RULES } from './rules/deterministic-rules.js'
 
 /**
  * Result of the split analysis
@@ -32,7 +30,6 @@ export interface SplitAnalysisResult {
   dependencies: ServiceDependencyInfo[]
   architecture: Architecture
   layerDetails: LayerDetail[]
-  layerDependencies: LayerDependencyInfo[]
   databaseResult: DatabaseDetectionResult
   modules: ModuleInfo[]
   methods: MethodInfo[]
@@ -209,77 +206,7 @@ export function performSplitAnalysis(
     }
   }
 
-  // 6. Compute cross-layer dependencies with violation detection
-  const layerDependencies: LayerDependencyInfo[] = []
-
-  // Build file-to-layer lookup (file → { serviceName, layer })
-  const fileLayerLookup = new Map<string, { serviceName: string; layer: Layer }>()
-  for (const detail of layerDetails) {
-    for (const filePath of detail.filePaths) {
-      // A file may belong to multiple layers; use the first (primary) one
-      if (!fileLayerLookup.has(filePath)) {
-        fileLayerLookup.set(filePath, { serviceName: detail.serviceName, layer: detail.layer })
-      }
-    }
-  }
-
-  // Aggregate cross-layer dependencies from module dependencies
-  const layerDepKey = (src: string, srcLayer: Layer, tgt: string, tgtLayer: Layer) =>
-    `${src}::${srcLayer}::${tgt}::${tgtLayer}`
-
-  const layerDepCounts = new Map<string, { count: number; srcService: string; srcLayer: Layer; tgtService: string; tgtLayer: Layer }>()
-
-  for (const dep of dependencies) {
-    const srcInfo = fileLayerLookup.get(dep.source)
-    const tgtInfo = fileLayerLookup.get(dep.target)
-    if (!srcInfo || !tgtInfo) continue
-    // Skip same-layer within same service
-    if (srcInfo.serviceName === tgtInfo.serviceName && srcInfo.layer === tgtInfo.layer) continue
-
-    const key = layerDepKey(srcInfo.serviceName, srcInfo.layer, tgtInfo.serviceName, tgtInfo.layer)
-    if (!layerDepCounts.has(key)) {
-      layerDepCounts.set(key, {
-        count: 0,
-        srcService: srcInfo.serviceName,
-        srcLayer: srcInfo.layer,
-        tgtService: tgtInfo.serviceName,
-        tgtLayer: tgtInfo.layer,
-      })
-    }
-    layerDepCounts.get(key)!.count += dep.importedNames.length || 1
-  }
-
-  // Build violation pairs from enabled deterministic rules matching arch/layer-violation-*
-  const violationPairs: [Layer, Layer][] = DETERMINISTIC_RULES
-    .filter((r) => r.enabled && r.key.startsWith('arch/layer-violation-'))
-    .map((r) => {
-      const suffix = r.key.replace('arch/layer-violation-', '')
-      const [src, tgt] = suffix.split('-') as [Layer, Layer]
-      return [src, tgt]
-    })
-
-  for (const [, data] of layerDepCounts.entries()) {
-    const isViolation = violationPairs.some(
-      ([src, tgt]) => data.srcLayer === src && data.tgtLayer === tgt
-    )
-
-    let violationReason: string | undefined
-    if (isViolation) {
-      violationReason = `${data.srcLayer} layer should not depend on ${data.tgtLayer} layer`
-    }
-
-    layerDependencies.push({
-      sourceServiceName: data.srcService,
-      sourceLayer: data.srcLayer,
-      targetServiceName: data.tgtService,
-      targetLayer: data.tgtLayer,
-      dependencyCount: data.count,
-      isViolation,
-      violationReason,
-    })
-  }
-
-  // 7. Extract modules and methods per layer
+  // 6. Extract modules and methods per layer
   const moduleResult = extractModulesAndMethods(analyses, layerDetails, dependencies)
 
   // 8. Detect databases
@@ -290,7 +217,6 @@ export function performSplitAnalysis(
     dependencies: serviceDependencies,
     architecture,
     layerDetails,
-    layerDependencies,
     databaseResult,
     modules: moduleResult.modules,
     methods: moduleResult.methods,

@@ -1,7 +1,6 @@
 
 import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { Database, Table, Key, Link, ChevronDown, ChevronRight, List, GitFork, Fullscreen, X } from 'lucide-react';
+import { Database, Table, Key, Link, ChevronDown, ChevronRight, List, GitFork, Maximize2 } from 'lucide-react';
 import { ERDiagram } from '@/components/schema/ERDiagram';
 import * as api from '@/lib/api';
 
@@ -9,24 +8,16 @@ type SchemaPanelProps = {
   repoId: string;
   databaseId: string;
   violations?: import('@/lib/api').ViolationResponse[];
+  onOpenInTab?: (dbId: string, dbName: string) => void;
+  /** When rendered as a full tab, hides the header and uses all available space */
+  isTab?: boolean;
 };
 
-export function SchemaPanel({ repoId, databaseId, violations = [] }: SchemaPanelProps) {
+export function SchemaPanel({ repoId, databaseId, violations = [], onOpenInTab, isTab = false }: SchemaPanelProps) {
   const [schema, setSchema] = useState<api.DatabaseSchemaResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
   const [view, setView] = useState<'list' | 'diagram'>('diagram');
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // Close fullscreen on Escape
-  useEffect(() => {
-    if (!isFullscreen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [isFullscreen]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -61,6 +52,7 @@ export function SchemaPanel({ repoId, databaseId, violations = [] }: SchemaPanel
         <span className="text-sm font-semibold text-foreground">{schema.name}</span>
         <span className="text-xs text-muted-foreground">
           {schema.tables.length} table{schema.tables.length !== 1 ? 's' : ''}
+          {isTab && schema.relations.length > 0 && ` · ${schema.relations.length} relation${schema.relations.length !== 1 ? 's' : ''}`}
         </span>
 
         {/* View toggle + expand */}
@@ -89,20 +81,22 @@ export function SchemaPanel({ repoId, databaseId, violations = [] }: SchemaPanel
               <List className="h-3 w-3" />
             </button>
           </div>
-          <button
-            onClick={() => { setView('diagram'); setIsFullscreen(true); }}
-            className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            title="Expand to fullscreen"
-          >
-            <Fullscreen className="h-3.5 w-3.5" />
-          </button>
+          {onOpenInTab && (
+            <button
+              onClick={() => onOpenInTab(databaseId, schema.name)}
+              className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              title="Open in tab"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* ER Diagram view */}
       {view === 'diagram' && (
         <div className="flex-1 min-h-0">
-          <ERDiagram schema={schema} violations={violations} isFullscreen={false} />
+          <ERDiagram schema={schema} violations={violations} isFullscreen={isTab} />
         </div>
       )}
 
@@ -189,32 +183,6 @@ export function SchemaPanel({ repoId, databaseId, violations = [] }: SchemaPanel
             );
           })}
         </div>
-      )}
-      {/* Fullscreen overlay */}
-      {isFullscreen && createPortal(
-        <div className="fixed inset-0 z-50 flex flex-col bg-background">
-          {/* Fullscreen header */}
-          <div className="flex items-center gap-2 border-b border-border px-6 py-3">
-            <Database className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold text-foreground">{schema.name}</span>
-            <span className="text-xs text-muted-foreground">
-              {schema.tables.length} table{schema.tables.length !== 1 ? 's' : ''}
-              {schema.relations.length > 0 && ` · ${schema.relations.length} relation${schema.relations.length !== 1 ? 's' : ''}`}
-            </span>
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="ml-auto rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              title="Close (Esc)"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          {/* Fullscreen ER diagram */}
-          <div className="flex-1 min-h-0">
-            <ERDiagram schema={schema} violations={violations} isFullscreen />
-          </div>
-        </div>,
-        document.body,
       )}
     </div>
   );

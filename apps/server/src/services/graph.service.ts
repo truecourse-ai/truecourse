@@ -116,17 +116,6 @@ export interface MethodDepRow {
   callCount: number;
 }
 
-export interface LayerDepRow {
-  id: string;
-  sourceServiceName: string;
-  sourceLayer: string;
-  targetServiceName: string;
-  targetLayer: string;
-  dependencyCount: number;
-  isViolation: boolean;
-  violationReason: string | null;
-}
-
 export interface DbRow {
   id: string;
   name: string;
@@ -143,17 +132,30 @@ export interface DbConnRow {
   driver: string;
 }
 
+export interface DetViolationRow {
+  id: string;
+  ruleKey: string;
+  category: string;
+  title: string;
+  severity: string;
+  serviceName: string;
+  moduleName: string | null;
+  relatedModuleName: string | null;
+  relatedServiceName: string | null;
+  isDependencyViolation: boolean;
+}
+
 export interface UnifiedInput {
   services: ServiceRow[];
   serviceDeps: DepRow[];
   layers: LayerRow[];
-  layerDeps: LayerDepRow[];
   modules: ModuleRow[];
   moduleDeps: ModuleDepRow[];
   methods: MethodRow[];
   methodDeps: MethodDepRow[];
   databases: DbRow[];
   dbConnections: DbConnRow[];
+  deterministicViolations?: DetViolationRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +204,7 @@ const SVC_PAD_X = 20;
 export function buildUnifiedGraph(level: GraphLevel, input: UnifiedInput): GraphData {
   const {
     services, serviceDeps, layers, modules, moduleDeps,
-    methods, methodDeps, layerDeps, databases, dbConnections,
+    methods, methodDeps, databases, dbConnections,
   } = input;
 
   const nodes: GraphNode[] = [];
@@ -322,6 +324,7 @@ export function buildUnifiedGraph(level: GraphLevel, input: UnifiedInput): Graph
             layers: [layer.layer],
             rootPath: svc.rootPath,
             layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
+            isContainer: true,
           },
           style: { width: layerWidth, height: layerHeight },
         } as GraphNode);
@@ -423,9 +426,9 @@ export function buildUnifiedGraph(level: GraphLevel, input: UnifiedInput): Graph
     markDeadMethods(nodes, methodDeps);
   }
 
-  // ── Violation injection ──────────────────────────────────────────────
-  if (level !== 'service') {
-    injectViolations(nodes, edges, layerDeps, modules, layers, services);
+  // ── Violation marking on edges ───────────────────────────────────────
+  if (input.deterministicViolations && input.deterministicViolations.length > 0) {
+    markDependencyViolations(edges, modules, input.deterministicViolations);
   }
 
   return { nodes, edges };
@@ -847,62 +850,35 @@ function markDeadMethods(nodes: GraphNode[], methodDeps: MethodDepRow[]) {
   }
 }
 
-function injectViolations(
-  nodes: GraphNode[],
+function markDependencyViolations(
   edges: GraphEdge[],
-  layerDeps: LayerDepRow[],
   modules: ModuleRow[],
-  layers: LayerRow[],
-  services: ServiceRow[],
+  detViolations: DetViolationRow[],
 ) {
-  const violations = layerDeps.filter((d) => d.isViolation);
-  if (violations.length === 0) return;
+  const depViolations = detViolations.filter((v) => v.isDependencyViolation);
+  if (depViolations.length === 0) return;
 
-  const layerNodeByServiceLayer = new Map<string, string>();
-  for (const l of layers) {
-    layerNodeByServiceLayer.set(`${l.serviceName}::${l.layer}`, l.id);
-  }
-
-  const moduleToLayer = new Map<string, LayerRow>();
+  // Build module name → id lookup
+  const moduleNameToId = new Map<string, string>();
   for (const mod of modules) {
-    const l = layers.find((l) => l.id === mod.layerId);
-    if (l) moduleToLayer.set(mod.id, l);
+    moduleNameToId.set(mod.name, mod.id);
   }
 
-  const serviceByName = new Map(services.map((s) => [s.name, s]));
+  for (const v of depViolations) {
+    const sourceId = v.moduleName ? moduleNameToId.get(v.moduleName) : null;
+    const targetId = v.relatedModuleName ? moduleNameToId.get(v.relatedModuleName) : null;
 
-  // Tag edges that cross violation boundaries
-  for (const edge of edges) {
-    const srcLayer = moduleToLayer.get(edge.source);
-    const tgtLayer = moduleToLayer.get(edge.target);
-    if (!srcLayer || !tgtLayer) continue;
-    if (srcLayer.serviceId !== tgtLayer.serviceId) continue;
+    if (!sourceId || !targetId) continue;
 
-    const v = violations.find(
-      (v) => v.sourceServiceName === srcLayer.serviceName &&
-        v.sourceLayer === srcLayer.layer &&
-        v.targetServiceName === tgtLayer.serviceName &&
-        v.targetLayer === tgtLayer.layer,
-    );
-    if (v) {
-      (edge.data as Record<string, unknown>).isViolation = true;
-      (edge.data as Record<string, unknown>).dependencyType = 'violation';
-      (edge.data as Record<string, unknown>).violationReason = v.violationReason;
+    // Find edges between source and target module (in either direction)
+    for (const edge of edges) {
+      if ((edge.source === sourceId && edge.target === targetId) ||
+          (edge.source === targetId && edge.target === sourceId)) {
+        const data = edge.data as Record<string, unknown>;
+        data.isViolation = true;
+        data.violationReason = v.title;
+      }
     }
   }
-
-  // Inject violation data into service group nodes
-  for (const v of violations) {
-    const svc = serviceByName.get(v.sourceServiceName);
-    if (!svc) continue;
-    const node = nodes.find((n) => n.id === svc.id && n.type === 'serviceGroupNode');
-    if (!node) continue;
-    const data = node.data as Record<string, unknown>;
-    if (!data.violations) data.violations = [];
-    (data.violations as unknown[]).push({
-      sourceLayer: v.sourceLayer,
-      targetLayer: v.targetLayer,
-      reason: v.violationReason,
-    });
-  }
 }
+

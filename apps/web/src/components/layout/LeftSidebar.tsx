@@ -1,8 +1,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Shield, FolderTree, Workflow } from 'lucide-react';
+import { AlertTriangle, Shield, FolderTree, Workflow, Database } from 'lucide-react';
 
-export type LeftTab = 'violations' | 'rules' | 'files' | 'flows';
+export type LeftTab = 'violations' | 'rules' | 'files' | 'flows' | 'databases';
 
 type LeftSidebarProps = {
   activeTab: LeftTab | null;
@@ -18,6 +18,7 @@ const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
   { id: 'rules', icon: Shield, label: 'Rules' },
   { id: 'files', icon: FolderTree, label: 'Files' },
   { id: 'flows', icon: Workflow, label: 'Flows' },
+  { id: 'databases', icon: Database, label: 'Databases' },
 ];
 
 export function LeftSidebar({
@@ -89,6 +90,9 @@ export function LeftSidebar({
                 <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-primary" />
               )}
               <Icon className="h-5 w-5" />
+              <span className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md border border-border opacity-0 group-hover:opacity-100 transition-opacity z-50">
+                {tab.label}
+              </span>
               {(() => {
                 const badge = badgeCounts?.[tab.id];
                 if (badge == null) return null;
@@ -125,7 +129,7 @@ export function LeftSidebar({
           {/* Panel header */}
           <div className="flex h-10 items-center gap-2 border-b border-border px-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : activeTab === 'flows' ? 'Flows' : 'Files'}
+              {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : activeTab === 'flows' ? 'Flows' : activeTab === 'databases' ? 'Databases' : 'Files'}
             </span>
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;

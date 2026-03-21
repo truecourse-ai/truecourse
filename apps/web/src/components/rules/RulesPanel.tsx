@@ -4,7 +4,6 @@ import { Shield, Network, Database, Box, FileCode, Loader2 } from 'lucide-react'
 import { getRules, type RuleResponse } from '@/lib/api';
 
 type CategoryFilter = 'all' | 'service' | 'database' | 'module' | 'code';
-type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -37,7 +36,6 @@ export function RulesPanel() {
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<CategoryFilter>('all');
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
 
   useEffect(() => {
     getRules()
@@ -49,8 +47,7 @@ export function RulesPanel() {
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
   const categoryOrder: Record<string, number> = { service: 0, module: 1, database: 2, code: 3 };
   const typeOrder: Record<string, number> = { deterministic: 0, llm: 1 };
-  const categoryFiltered = filter === 'all' ? rules : rules.filter((r) => r.category === filter);
-  const filtered = (severityFilter === 'all' ? categoryFiltered : categoryFiltered.filter((r) => r.severity === severityFilter))
+  const filtered = (filter === 'all' ? rules : rules.filter((r) => r.category === filter))
     .slice()
     .sort((a, b) =>
       (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)
@@ -60,18 +57,6 @@ export function RulesPanel() {
 
   const categoryCounts: Record<string, number> = {};
   for (const r of rules) categoryCounts[r.category] = (categoryCounts[r.category] || 0) + 1;
-
-  const severityCounts: Record<string, number> = {};
-  for (const r of categoryFiltered) severityCounts[r.severity] = (severityCounts[r.severity] || 0) + 1;
-
-  const severities: { value: SeverityFilter; label: string }[] = [
-    { value: 'all', label: 'All' },
-    { value: 'critical', label: 'Critical' },
-    { value: 'high', label: 'High' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'low', label: 'Low' },
-    { value: 'info', label: 'Info' },
-  ];
 
   const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
     { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
@@ -92,7 +77,7 @@ export function RulesPanel() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Sticky filters */}
-      <div className="shrink-0 border-b border-border px-3 py-2 space-y-1.5">
+      <div className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-thin">
           {categories.map((cat) => {
             const count = cat.value === 'all' ? rules.length : categoryCounts[cat.value] || 0;
@@ -110,27 +95,6 @@ export function RulesPanel() {
                 {cat.label}
                 {count > 0 && (
                   <span className="ml-0.5 text-[10px] opacity-70">{count}</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex gap-1 overflow-x-auto scrollbar-thin">
-          {severities.map((sev) => {
-            const count = sev.value === 'all' ? categoryFiltered.length : severityCounts[sev.value] || 0;
-            return (
-              <button
-                key={sev.value}
-                onClick={() => setSeverityFilter(sev.value)}
-                className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                  severityFilter === sev.value
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-              >
-                {sev.label}
-                {count > 0 && (
-                  <span className="ml-0.5 opacity-70">{count}</span>
                 )}
               </button>
             );

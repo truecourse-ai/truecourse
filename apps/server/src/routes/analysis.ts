@@ -7,7 +7,7 @@ import {
   services,
   serviceDependencies,
   layers,
-  layerDependencies,
+  deterministicViolations,
   violations,
   databases,
   databaseConnections,
@@ -15,7 +15,6 @@ import {
   methods,
   moduleDeps,
   methodDeps,
-  diffChecks,
   codeViolations,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
@@ -23,23 +22,20 @@ import { createAppError } from '../middleware/error.js';
 import { simpleGit } from 'simple-git';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runAnalysis, runDeterministicModuleChecks } from '../services/analyzer.service.js';
-import { runDiffAnalysis, runDiffViolationCheck } from '../services/diff-check.service.js';
-import { persistAnalysisResult, persistCodeViolations } from '../services/analysis-persistence.service.js';
+import { runAnalysis, runDiffAnalysis } from '../services/analyzer.service.js';
+import { persistAnalysisResult } from '../services/analysis-persistence.service.js';
 import { detectAndPersistFlows } from '../services/flow.service.js';
-import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer';
-import type { CodeViolation } from '@truecourse/shared';
 import {
   emitAnalysisProgress,
   emitAnalysisComplete,
   emitViolationsReady,
 } from '../socket/handlers.js';
 import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
-import { generateViolations } from '../services/violation.service.js';
-import type { ModuleViolation } from '@truecourse/analyzer';
-import { getEnabledRules } from '../services/rules.service.js';
-import { v4 as uuidv4 } from 'uuid';
-import { createLLMProvider, type CodeViolationContext } from '../services/llm/provider.js';
+import {
+  loadActiveViolations,
+  loadActiveCodeViolations,
+} from '../services/violation-lifecycle.service.js';
+import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -115,17 +111,17 @@ router.post(
           }
         }
 
-        // Clean up old diff analysis and diff check for this repo
-        const oldDiffChecks = await db
-          .select({ diffAnalysisId: diffChecks.diffAnalysisId })
-          .from(diffChecks)
-          .where(eq(diffChecks.repoId, id));
-        for (const dc of oldDiffChecks) {
-          if (dc.diffAnalysisId) {
-            await db.delete(analyses).where(eq(analyses.id, dc.diffAnalysisId));
-          }
+        // Clean up old diff analyses and legacy diff checks for this repo
+        const oldDiffAnalyses = await db
+          .select({ id: analyses.id })
+          .from(analyses)
+          .where(and(
+            eq(analyses.repoId, id),
+            sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`,
+          ));
+        for (const da of oldDiffAnalyses) {
+          await db.delete(analyses).where(eq(analyses.id, da.id));
         }
-        await db.delete(diffChecks).where(eq(diffChecks.repoId, id));
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
@@ -133,51 +129,102 @@ router.post(
 
         const analysis = { id: newAnalysisId };
 
+        // Load previous active violations for lifecycle tracking.
+        // The new analysis we just created has no violations yet, so we fetch the 2 latest
+        // non-diff analyses and use the second one (the one before this run).
+        const prevConditionsForLifecycle = [eq(analyses.repoId, id), notDiffAnalysis];
+        if (branch) prevConditionsForLifecycle.push(eq(analyses.branch, branch));
+        const prevAnalysesForLifecycle = await db
+          .select({ id: analyses.id })
+          .from(analyses)
+          .where(and(...prevConditionsForLifecycle))
+          .orderBy(desc(analyses.createdAt))
+          .limit(2);
+        // The first one is the analysis we just created; get the second if it exists
+        const previousAnalysisId = prevAnalysesForLifecycle.length > 1 ? prevAnalysesForLifecycle[1].id : null;
+
+        let previousActiveViolations: Awaited<ReturnType<typeof loadActiveViolations>> = [];
+        let previousActiveCodeViolations: Awaited<ReturnType<typeof loadActiveCodeViolations>> = [];
+        let previousDeterministicViolations: { id: string; ruleKey: string; category: string; title: string; description: string; severity: string; serviceName: string; moduleName: string | null; methodName: string | null }[] = [];
+
+        if (previousAnalysisId) {
+          // Load violations from previous analysis directly
+          const prevViolationRows = await db
+            .select({
+              id: violations.id,
+              type: violations.type,
+              title: violations.title,
+              content: violations.content,
+              severity: violations.severity,
+              status: violations.status,
+              targetServiceId: violations.targetServiceId,
+              targetServiceName: services.name,
+              targetDatabaseId: violations.targetDatabaseId,
+              targetModuleId: violations.targetModuleId,
+              targetModuleName: modules.name,
+              targetMethodId: violations.targetMethodId,
+              targetMethodName: methods.name,
+              targetTable: violations.targetTable,
+              fixPrompt: violations.fixPrompt,
+              firstSeenAnalysisId: violations.firstSeenAnalysisId,
+              firstSeenAt: violations.firstSeenAt,
+            })
+            .from(violations)
+            .leftJoin(services, eq(violations.targetServiceId, services.id))
+            .leftJoin(modules, eq(violations.targetModuleId, modules.id))
+            .leftJoin(methods, eq(violations.targetMethodId, methods.id))
+            .where(eq(violations.analysisId, previousAnalysisId));
+
+          previousActiveViolations = prevViolationRows.filter(
+            (v) => v.status === 'new' || v.status === 'unchanged'
+          );
+
+          const prevCodeViolationRows = await db
+            .select()
+            .from(codeViolations)
+            .where(eq(codeViolations.analysisId, previousAnalysisId));
+
+          previousActiveCodeViolations = prevCodeViolationRows
+            .filter((v) => v.status === 'new' || v.status === 'unchanged')
+            .map((r) => ({
+              id: r.id,
+              filePath: r.filePath,
+              lineStart: r.lineStart,
+              lineEnd: r.lineEnd,
+              columnStart: r.columnStart,
+              columnEnd: r.columnEnd,
+              ruleKey: r.ruleKey,
+              severity: r.severity,
+              title: r.title,
+              content: r.content,
+              snippet: r.snippet,
+              fixPrompt: r.fixPrompt,
+              firstSeenAnalysisId: r.firstSeenAnalysisId,
+              firstSeenAt: r.firstSeenAt,
+            }));
+
+          // Load previous deterministic violations
+          previousDeterministicViolations = await db
+            .select({
+              id: deterministicViolations.id,
+              ruleKey: deterministicViolations.ruleKey,
+              category: deterministicViolations.category,
+              title: deterministicViolations.title,
+              description: deterministicViolations.description,
+              severity: deterministicViolations.severity,
+              serviceName: deterministicViolations.serviceName,
+              moduleName: deterministicViolations.moduleName,
+              methodName: deterministicViolations.methodName,
+            })
+            .from(deterministicViolations)
+            .where(eq(deterministicViolations.analysisId, previousAnalysisId));
+        }
+
         // Detect and persist flows
         try {
           await detectAndPersistFlows(newAnalysisId, result);
         } catch (flowError) {
           console.error('[Flows] Detection failed:', flowError instanceof Error ? flowError.message : String(flowError));
-        }
-
-        // Load rules from database
-        const allRules = await getEnabledRules();
-
-        // Check deterministic module rules
-        const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
-        const moduleViolations: ModuleViolation[] = runDeterministicModuleChecks(result, enabledDeterministic);
-
-        // Run code-level rules (AST visitors) and collect file contents for LLM code rules
-        const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
-        const enabledLlmCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt);
-        const allCodeViolations: CodeViolation[] = [];
-        const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
-
-        if ((enabledCodeRules.length > 0 || enabledLlmCodeRules.length > 0) && result.fileAnalyses) {
-          emitAnalysisProgress(id, {
-            step: 'analyzing',
-            percent: 82,
-            detail: 'Running code checks...',
-          });
-
-          for (const fa of result.fileAnalyses) {
-            try {
-              const lang = detectLanguage(fa.filePath);
-              if (!lang) continue;
-              const absPath = path.isAbsolute(fa.filePath) ? fa.filePath : path.join(repo.path, fa.filePath);
-              const content = fs.readFileSync(absPath, 'utf-8');
-              const lineCount = content.split('\n').length;
-              fileContents.set(fa.filePath, { content, lineCount });
-
-              if (enabledCodeRules.length > 0) {
-                const tree = parseFile(fa.filePath, content, lang);
-                const violations = checkCodeRules(tree, fa.filePath, content, enabledCodeRules);
-                allCodeViolations.push(...violations);
-              }
-            } catch {
-              // Skip files that fail to parse
-            }
-          }
         }
 
         // Carry over node positions from previous analysis (namespaced)
@@ -194,21 +241,17 @@ router.post(
           }
         }
         if (prevLayerPositions) {
-          // Layer positions use service group IDs which change on re-analysis;
-          // remap using service name → new ID
           const newLayerPositions: Record<string, { x: number; y: number }> = {};
           const prevServices = prevAnalyses.length > 0
             ? await db.select().from(services).where(eq(services.analysisId, prevAnalyses[0].id))
             : [];
           const prevIdToName = new Map(prevServices.map((s) => [s.id, s.name]));
           for (const [key, pos] of Object.entries(prevLayerPositions)) {
-            // Service group positions: old service ID → name → new service ID
             const name = prevIdToName.get(key);
             if (name) {
               const newId = serviceIdMap.get(name);
               if (newId) newLayerPositions[newId] = pos;
             } else {
-              // Database or other nodes — keep as-is
               newLayerPositions[key] = pos;
             }
           }
@@ -229,265 +272,22 @@ router.post(
           .set({ lastAnalyzedAt: new Date(), updatedAt: new Date() })
           .where(eq(repos.id, id));
 
-        // Generate LLM violations before completing
+        // Run violation pipeline (deterministic + LLM + code rules + persistence)
         try {
-          let currentPercent = 85;
-          emitAnalysisProgress(id, {
-            step: 'analyzing',
-            percent: currentPercent,
-            detail: 'Running checks...',
+          await runViolationPipeline({
+            repoId: id,
+            repoPath: repo.path,
+            analysisId: newAnalysisId,
+            result,
+            serviceIdMap,
+            moduleIdMap,
+            methodIdMap,
+            dbIdMap,
+            previousActiveViolations,
+            previousActiveCodeViolations,
+            previousDeterministicViolations,
+            onProgress: (progress) => emitAnalysisProgress(id, progress),
           });
-
-          const analysisServices = result.services.map((s) => ({
-            id: serviceIdMap.get(s.name)!,
-            name: s.name,
-            type: s.type,
-            framework: s.framework || undefined,
-            fileCount: s.fileCount,
-            layerSummary: s.layers,
-          }));
-
-          const analysisDeps = result.dependencies.map((d) => ({
-            sourceServiceName: d.source,
-            targetServiceName: d.target,
-            dependencyCount: d.dependencies.length + (d.httpCalls?.length || 0),
-            dependencyType: d.httpCalls && d.httpCalls.length > 0 ? 'http' : 'import',
-          }));
-
-          const violationDescriptions = (result.layerDependencies || [])
-            .filter((d) => d.isViolation)
-            .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
-
-          // Gather enabled LLM rules with category for violation generation (exclude code rules — handled separately)
-          const enabledLlmRules = allRules
-            .filter((r) => r.type === 'llm' && r.prompt && r.category !== 'code')
-            .map((r) => ({ name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
-
-          // Build module data for violation generation
-          const violationModules = result.modules?.map((m) => ({
-            id: moduleIdMap.get(`${m.serviceName}::${m.name}::${m.filePath}`) || '',
-            name: m.name,
-            kind: m.kind,
-            serviceName: m.serviceName,
-            layerName: m.layerName,
-            methodCount: m.methodCount,
-            propertyCount: m.propertyCount,
-            importCount: m.importCount,
-            exportCount: m.exportCount,
-            superClass: m.superClass || undefined,
-            lineCount: m.lineCount || undefined,
-          })).filter((m) => m.id); // exclude modules that weren't saved
-
-          const violationMethods = result.methods?.map((m) => ({
-            id: methodIdMap.get(`${m.serviceName}::${m.moduleName}::${m.name}::${m.filePath}`) || undefined,
-            moduleName: m.moduleName,
-            name: m.name,
-            signature: m.signature,
-            paramCount: m.paramCount,
-            returnType: m.returnType || undefined,
-            isAsync: m.isAsync,
-            lineCount: m.lineCount || undefined,
-            statementCount: m.statementCount || undefined,
-            maxNestingDepth: m.maxNestingDepth || undefined,
-          }));
-
-          const violationModuleDeps = result.moduleLevelDependencies?.map((d) => {
-            const srcName = result.modules?.find((m) => m.serviceName === d.sourceService && m.name === d.sourceModule)?.name;
-            const tgtName = result.modules?.find((m) => m.serviceName === d.targetService && m.name === d.targetModule)?.name;
-            return {
-              sourceModule: srcName || d.sourceModule,
-              targetModule: tgtName || d.targetModule,
-              importedNames: d.importedNames,
-            };
-          });
-
-          // Build LLM code violation batches from collected file contents
-          const MAX_CHARS_PER_BATCH = 100_000;
-          const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
-          const llmCodeBatches: CodeViolationContext[] = [];
-          const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
-            name: r.name,
-            severity: r.severity,
-            prompt: r.prompt!,
-          }));
-
-          if (enabledLlmCodeRules.length > 0 && fileContents.size > 0) {
-            let currentBatch: { path: string; content: string }[] = [];
-            let currentChars = 0;
-
-            for (const [filePath, { content }] of fileContents) {
-              const fileChars = content.length;
-
-              // Large files get their own batch
-              if (fileChars > HALF_BATCH) {
-                if (currentBatch.length > 0) {
-                  llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRulesDtos });
-                  currentBatch = [];
-                  currentChars = 0;
-                }
-                llmCodeBatches.push({ files: [{ path: filePath, content }], llmRules: llmCodeRulesDtos });
-                continue;
-              }
-
-              // Would exceed batch limit — flush current batch
-              if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
-                llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRulesDtos });
-                currentBatch = [];
-                currentChars = 0;
-              }
-
-              currentBatch.push({ path: filePath, content });
-              currentChars += fileChars;
-            }
-
-            if (currentBatch.length > 0) {
-              llmCodeBatches.push({ files: currentBatch, llmRules: llmCodeRulesDtos });
-            }
-          }
-
-          // Build name-to-key lookup for LLM code rules
-          const llmCodeRuleNameToKey = new Map(enabledLlmCodeRules.map((r) => [r.name, r.key]));
-          const validFilePaths = new Set(fileContents.keys());
-
-          // Run arch/db/module violations AND LLM code violations in parallel
-          const archViolationsPromise = generateViolations({
-            architecture: result.architecture,
-            services: analysisServices,
-            dependencies: analysisDeps,
-            violations: violationDescriptions,
-            databases: result.databaseResult?.databases.map((d) => ({
-              id: dbIdMap.get(d.name)!,
-              name: d.name,
-              type: d.type,
-              driver: d.driver,
-              tableCount: d.tables.length,
-              connectedServices: d.connectedServices,
-              tables: d.tables.map((t) => ({
-                name: t.name,
-                columns: t.columns.map((c) => ({
-                  name: c.name,
-                  type: c.type,
-                  isNullable: c.isNullable,
-                  isPrimaryKey: c.isPrimaryKey,
-                  isForeignKey: c.isForeignKey,
-                  referencesTable: c.referencesTable,
-                })),
-              })),
-              relations: d.relations.map((r) => ({
-                sourceTable: r.sourceTable,
-                targetTable: r.targetTable,
-                foreignKeyColumn: r.foreignKeyColumn,
-              })),
-            })),
-            llmRules: enabledLlmRules,
-            modules: violationModules,
-            methods: violationMethods,
-            moduleDependencies: violationModuleDeps,
-            methodDependencies: (result.methodLevelDependencies || []).map((d) => ({
-              callerMethod: d.callerMethod,
-              callerModule: d.callerModule,
-              calleeMethod: d.calleeMethod,
-              calleeModule: d.calleeModule,
-              callCount: d.callCount,
-            })),
-            moduleViolations: moduleViolations.map((v) => {
-              const moduleKey = v.moduleName ? `${v.serviceName}::${v.moduleName}::${v.filePath}` : undefined;
-              const methodKey = v.methodName && v.moduleName
-                ? `${v.serviceName}::${v.moduleName}::${v.methodName}::${v.filePath}` : undefined;
-              return {
-                ...v,
-                serviceId: serviceIdMap.get(v.serviceName),
-                moduleId: moduleKey ? moduleIdMap.get(moduleKey) : undefined,
-                methodId: methodKey ? methodIdMap.get(methodKey) : undefined,
-              };
-            }),
-          }, (step) => {
-            currentPercent += 3;
-            emitAnalysisProgress(id, {
-              step: 'analyzing',
-              percent: currentPercent,
-              detail: step,
-            });
-          });
-
-          const llmCodePromise = llmCodeBatches.length > 0
-            ? createLLMProvider().generateAllCodeViolations(llmCodeBatches)
-            : Promise.resolve({ violations: [] });
-
-          const [archResult, codeResult] = await Promise.all([archViolationsPromise, llmCodePromise]);
-
-          const { violations: generatedViolations, serviceDescriptions } = archResult;
-
-          for (const violation of generatedViolations) {
-            await db.insert(violations).values({
-              id: uuidv4(),
-              repoId: id,
-              analysisId: analysis.id,
-              type: violation.type,
-              title: violation.title,
-              content: violation.content,
-              severity: violation.severity,
-              targetServiceId: violation.targetServiceId || null,
-              targetDatabaseId: violation.targetDatabaseId || null,
-              targetModuleId: violation.targetModuleId || null,
-              targetMethodId: violation.targetMethodId || null,
-              targetTable: violation.targetTable || null,
-              fixPrompt: violation.fixPrompt || null,
-            });
-          }
-
-          // Save service descriptions
-          for (const desc of serviceDescriptions) {
-            if (desc.id) {
-              await db
-                .update(services)
-                .set({ description: desc.description })
-                .where(eq(services.id, desc.id));
-            }
-          }
-
-          // Post-process LLM code violations and append to allCodeViolations
-          if (codeResult.violations.length > 0) {
-            for (const v of codeResult.violations) {
-              // Validate file path exists in input
-              if (!validFilePaths.has(v.filePath)) continue;
-
-              const fileInfo = fileContents.get(v.filePath)!;
-
-              // Clamp line numbers to actual file range
-              const lineStart = Math.max(1, Math.min(v.lineStart, fileInfo.lineCount));
-              const lineEnd = Math.max(lineStart, Math.min(v.lineEnd, fileInfo.lineCount));
-
-              // Extract snippet from file content
-              const lines = fileInfo.content.split('\n');
-              const snippet = lines.slice(lineStart - 1, lineEnd).join('\n');
-
-              // Map rule name to rule key — LLM may return with severity prefix like "[HIGH] Name"
-              const strippedName = v.ruleName.replace(/^\[(?:LOW|MEDIUM|HIGH|CRITICAL)\]\s*/i, '');
-              const ruleKey = llmCodeRuleNameToKey.get(v.ruleName)
-                || llmCodeRuleNameToKey.get(strippedName)
-                || v.ruleName;
-
-              allCodeViolations.push({
-                ruleKey,
-                filePath: v.filePath,
-                lineStart,
-                lineEnd,
-                columnStart: 0,
-                columnEnd: 0,
-                severity: v.severity,
-                title: v.title,
-                content: v.content,
-                snippet,
-                fixPrompt: v.fixPrompt ?? undefined,
-              });
-            }
-          }
-
-          // Persist all code violations (deterministic + LLM)
-          if (allCodeViolations.length > 0) {
-            await persistCodeViolations(newAnalysisId, allCodeViolations);
-          }
 
           emitViolationsReady(id, analysis.id);
         } catch (violationError) {
@@ -495,12 +295,6 @@ router.post(
             `[Violations] Failed for repo ${id}:`,
             violationError instanceof Error ? violationError.message : String(violationError)
           );
-          // Still persist deterministic code violations if LLM failed
-          if (allCodeViolations.length > 0) {
-            try {
-              await persistCodeViolations(newAnalysisId, allCodeViolations);
-            } catch { /* ignore */ }
-          }
         }
 
         emitAnalysisComplete(id, analysis.id);
@@ -621,22 +415,22 @@ router.get(
         analysisDatabases,
         analysisDbConnections,
         analysisLayers,
-        analysisLayerDeps,
         analysisModules,
         analysisModuleDeps,
         analysisMethods,
         analysisMethodDeps,
+        analysisDetViolations,
       ] = await Promise.all([
         db.select().from(services).where(eq(services.analysisId, analysis.id)),
         db.select().from(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id)),
         db.select().from(databases).where(eq(databases.analysisId, analysis.id)),
         db.select().from(databaseConnections).where(eq(databaseConnections.analysisId, analysis.id)),
         db.select().from(layers).where(eq(layers.analysisId, analysis.id)),
-        db.select().from(layerDependencies).where(eq(layerDependencies.analysisId, analysis.id)),
         db.select().from(modules).where(eq(modules.analysisId, analysis.id)),
         db.select().from(moduleDeps).where(eq(moduleDeps.analysisId, analysis.id)),
         db.select().from(methods).where(eq(methods.analysisId, analysis.id)),
         db.select().from(methodDeps).where(eq(methodDeps.analysisId, analysis.id)),
+        db.select().from(deterministicViolations).where(eq(deterministicViolations.analysisId, analysis.id)),
       ]);
 
       const layerData = analysisLayers.map((l) => ({
@@ -654,13 +448,13 @@ router.get(
         services: analysisServices,
         serviceDeps: analysisDeps,
         layers: layerData,
-        layerDeps: analysisLayerDeps,
         modules: analysisModules,
         moduleDeps: analysisModuleDeps,
         methods: analysisMethods,
         methodDeps: analysisMethodDeps,
         databases: analysisDatabases,
         dbConnections: analysisDbConnections,
+        deterministicViolations: analysisDetViolations,
       });
 
       // Include saved node positions if any (namespaced by level)
@@ -825,6 +619,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
+      const ref = req.query.ref as string | undefined;
 
       const [repo] = await db
         .select()
@@ -840,6 +635,17 @@ router.get(
       // Use git ls-files to get tracked files (respects .gitignore)
       const result = await git.raw(['ls-files']);
       const files = result.split('\n').filter((f) => f.length > 0);
+
+      // In working-tree mode, also include untracked files
+      if (ref === 'working-tree') {
+        const untrackedResult = await git.raw(['ls-files', '--others', '--exclude-standard']);
+        const untrackedFiles = untrackedResult.split('\n').filter((f) => f.length > 0);
+        for (const f of untrackedFiles) {
+          if (!files.includes(f)) {
+            files.push(f);
+          }
+        }
+      }
 
       res.json({ root: repo.path, files });
     } catch (error) {
@@ -953,57 +759,66 @@ router.post(
         return;
       }
 
-      // Load existing violations for this analysis as baseline
-      const baselineViolationRows = await db
-        .select()
+      // Load previous active violations for lifecycle tracking
+      const prevViolationRows = await db
+        .select({
+          id: violations.id,
+          type: violations.type,
+          title: violations.title,
+          content: violations.content,
+          severity: violations.severity,
+          status: violations.status,
+          targetServiceId: violations.targetServiceId,
+          targetServiceName: services.name,
+          targetDatabaseId: violations.targetDatabaseId,
+          targetModuleId: violations.targetModuleId,
+          targetModuleName: modules.name,
+          targetMethodId: violations.targetMethodId,
+          targetMethodName: methods.name,
+          targetTable: violations.targetTable,
+          fixPrompt: violations.fixPrompt,
+          firstSeenAnalysisId: violations.firstSeenAnalysisId,
+          firstSeenAt: violations.firstSeenAt,
+        })
         .from(violations)
+        .leftJoin(services, eq(violations.targetServiceId, services.id))
+        .leftJoin(modules, eq(violations.targetModuleId, modules.id))
+        .leftJoin(methods, eq(violations.targetMethodId, methods.id))
         .where(eq(violations.analysisId, latestAnalysis.id));
 
-      // Resolve service/module/method names for violations
-      const analysisServices = await db.select().from(services).where(eq(services.analysisId, latestAnalysis.id));
-      const analysisModules = await db.select().from(modules).where(eq(modules.analysisId, latestAnalysis.id));
-      const analysisMethods = await db.select().from(methods).where(eq(methods.analysisId, latestAnalysis.id));
+      const previousActiveViolations = prevViolationRows.filter(
+        (v) => v.status === 'new' || v.status === 'unchanged'
+      );
 
-      // Load baseline layer violations for diff comparison
-      const baselineLayerViolations = await db
-        .select()
-        .from(layerDependencies)
-        .where(eq(layerDependencies.analysisId, latestAnalysis.id));
-
-      const baselineLayerViolationDescriptions = baselineLayerViolations
-        .filter((d) => d.isViolation)
-        .map((v) => `${v.sourceLayer} → ${v.targetLayer} in ${v.sourceServiceName}: ${v.violationReason || 'layer violation'}`);
-
-      // Load baseline code violations for diff comparison
-      const baselineCodeViolationRows = await db
+      // Load previous active code violations
+      const prevCodeViolationRows = await db
         .select()
         .from(codeViolations)
         .where(eq(codeViolations.analysisId, latestAnalysis.id));
 
-      const serviceNameMap = new Map(analysisServices.map((s) => [s.id, s.name]));
-      const moduleNameMap = new Map(analysisModules.map((m) => [m.id, m.name]));
-      const methodNameMap = new Map(analysisMethods.map((m) => [m.id, m.name]));
-
-      const violationsWithNames = baselineViolationRows.map((i) => ({
-        id: i.id,
-        type: i.type,
-        title: i.title,
-        content: i.content,
-        severity: i.severity,
-        targetServiceId: i.targetServiceId ?? undefined,
-        targetServiceName: i.targetServiceId ? serviceNameMap.get(i.targetServiceId) : undefined,
-        targetModuleId: i.targetModuleId ?? undefined,
-        targetModuleName: i.targetModuleId ? moduleNameMap.get(i.targetModuleId) : undefined,
-        targetMethodId: i.targetMethodId ?? undefined,
-        targetMethodName: i.targetMethodId ? methodNameMap.get(i.targetMethodId) : undefined,
-        fixPrompt: i.fixPrompt ?? undefined,
-        createdAt: i.createdAt.toISOString(),
-      }));
+      const previousActiveCodeViolations = prevCodeViolationRows
+        .filter((v) => v.status === 'new' || v.status === 'unchanged')
+        .map((r) => ({
+          id: r.id,
+          filePath: r.filePath,
+          lineStart: r.lineStart,
+          lineEnd: r.lineEnd,
+          columnStart: r.columnStart,
+          columnEnd: r.columnEnd,
+          ruleKey: r.ruleKey,
+          severity: r.severity,
+          title: r.title,
+          content: r.content,
+          snippet: r.snippet,
+          fixPrompt: r.fixPrompt,
+          firstSeenAnalysisId: r.firstSeenAnalysisId,
+          firstSeenAt: r.firstSeenAt,
+        }));
 
       const git = simpleGit(repo.path);
       const branch = (await git.branch()).current || undefined;
 
-      // Phase 1: Run analysis + get changed files (no LLM yet)
+      // Phase 1: Run analysis on dirty tree + get changed files
       const diffAnalysis = await runDiffAnalysis({
         repoPath: repo.path,
         branch,
@@ -1012,108 +827,197 @@ router.post(
         },
       });
 
-      // Delete old diff check and its diff analysis
-      const oldDiffChecks = await db
-        .select({ diffAnalysisId: diffChecks.diffAnalysisId })
-        .from(diffChecks)
-        .where(eq(diffChecks.repoId, id));
-      for (const dc of oldDiffChecks) {
-        if (dc.diffAnalysisId) {
-          await db.delete(analyses).where(eq(analyses.id, dc.diffAnalysisId));
-        }
-      }
-      await db.delete(diffChecks).where(eq(diffChecks.repoId, id));
+      const result = diffAnalysis.analysisResult;
+      const changedFiles = diffAnalysis.changedFiles;
 
-      // Persist the diff analysis first — get real DB IDs
-      const { analysisId: diffAnalysisId, serviceIdMap: diffServiceIdMap, moduleIdMap: diffModuleIdMap, methodIdMap: diffMethodIdMap } =
+      // Delete old diff analyses (cascade deletes their violations)
+      const oldDiffAnalyses = await db
+        .select({ id: analyses.id })
+        .from(analyses)
+        .where(and(
+          eq(analyses.repoId, id),
+          sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`,
+        ));
+      for (const da of oldDiffAnalyses) {
+        await db.delete(analyses).where(eq(analyses.id, da.id));
+      }
+
+      // Persist the diff analysis — get real DB IDs
+      const { analysisId: diffAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
         await persistAnalysisResult({
           repoId: id,
           branch: branch || null,
-          result: diffAnalysis.analysisResult,
+          result,
           metadata: { isDiffAnalysis: true },
         });
 
-      // Phase 2: Run LLM violation check with real DB IDs
-      const result = await runDiffViolationCheck({
-        repoPath: repo.path,
-        analysisResult: diffAnalysis.analysisResult,
-        changedFiles: diffAnalysis.changedFiles,
-        baselineViolations: violationsWithNames,
-        baselineLayerViolations: baselineLayerViolationDescriptions,
-        baselineCodeViolations: baselineCodeViolationRows.map((r) => ({
-          id: r.id,
-          filePath: r.filePath,
-          lineStart: r.lineStart,
-          lineEnd: r.lineEnd,
-          ruleKey: r.ruleKey,
-          severity: r.severity,
-          title: r.title,
-          content: r.content,
-        })),
-        serviceIdMap: diffServiceIdMap,
-        moduleIdMap: diffModuleIdMap,
-        methodIdMap: diffMethodIdMap,
-        onProgress: (progress) => {
-          emitAnalysisProgress(id, progress);
-        },
-      });
+      // Load previous deterministic violations for lifecycle
+      const prevDetViolations = await db
+        .select({
+          id: deterministicViolations.id,
+          ruleKey: deterministicViolations.ruleKey,
+          category: deterministicViolations.category,
+          title: deterministicViolations.title,
+          description: deterministicViolations.description,
+          severity: deterministicViolations.severity,
+          serviceName: deterministicViolations.serviceName,
+          moduleName: deterministicViolations.moduleName,
+          methodName: deterministicViolations.methodName,
+        })
+        .from(deterministicViolations)
+        .where(eq(deterministicViolations.analysisId, latestAnalysis.id));
 
-      // Insert new diff_check with diffAnalysisId
-      await db.insert(diffChecks).values({
+      const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
+
+      // Run violation pipeline
+      const pipelineResult = await runViolationPipeline({
         repoId: id,
-        analysisId: latestAnalysis.id,
-        diffAnalysisId,
-        changedFiles: result.changedFiles,
-        resolvedViolationIds: result.resolvedViolationIds,
-        newViolations: result.newViolations,
-        affectedNodeIds: result.affectedNodeIds,
-        summary: result.summary,
+        repoPath: repo.path,
+        analysisId: diffAnalysisId,
+        result,
+        serviceIdMap,
+        moduleIdMap,
+        methodIdMap,
+        dbIdMap,
+        previousActiveViolations,
+        previousActiveCodeViolations,
+        previousDeterministicViolations: prevDetViolations,
+        changedFileSet,
+        onProgress: (progress) => emitAnalysisProgress(id, progress),
       });
-
-      // Persist code violations for the diff analysis
-      if (result.codeViolations.length > 0) {
-        await persistCodeViolations(diffAnalysisId, result.codeViolations);
+      // Compute affected node IDs from changed files + new violations
+      const affectedServices = new Set<string>();
+      for (const svc of result.services) {
+        const relRoot = path.relative(repo.path, svc.rootPath);
+        for (const file of changedFiles) {
+          if (file.path.startsWith(relRoot + '/') || file.path === relRoot) {
+            affectedServices.add(svc.name);
+          }
+        }
       }
 
-      // Build resolved violations for the response
-      const resolvedSet = new Set(result.resolvedViolationIds);
-      const resolvedViolations = violationsWithNames
-        .filter((i) => resolvedSet.has(i.id))
-        .map((i) => ({
-          ...i,
-          targetDatabaseId: null,
+      const affectedModules = new Set<string>();
+      const affectedMethods = new Set<string>();
+      for (const v of (pipelineResult.newViolations || [])) {
+        if (v.targetServiceName) affectedServices.add(v.targetServiceName);
+        if (v.targetModuleName && v.targetServiceName) {
+          affectedModules.add(`${v.targetServiceName}::${v.targetModuleName}`);
+        }
+        if (v.targetMethodName && v.targetModuleName && v.targetServiceName) {
+          affectedMethods.add(`${v.targetServiceName}::${v.targetModuleName}::${v.targetMethodName}`);
+        }
+      }
+
+      const affectedNodeIds = {
+        services: [...affectedServices],
+        layers: [] as string[],
+        modules: [...affectedModules],
+        methods: [...affectedMethods],
+      };
+
+      // Build resolved arch violations for the response
+      const resolvedSet = new Set(pipelineResult.resolvedViolationIds || []);
+      const resolvedArchViolations = previousActiveViolations
+        .filter((v) => resolvedSet.has(v.id))
+        .map((v) => ({
+          id: v.id,
+          type: v.type,
+          title: v.title,
+          content: v.content,
+          severity: v.severity,
+          targetServiceId: v.targetServiceId,
+          targetServiceName: v.targetServiceName,
+          targetDatabaseId: v.targetDatabaseId ?? null,
           targetDatabaseName: null,
-          targetTable: null,
+          targetModuleId: v.targetModuleId,
+          targetModuleName: v.targetModuleName,
+          targetMethodId: v.targetMethodId,
+          targetMethodName: v.targetMethodName,
+          targetTable: v.targetTable ?? null,
+          fixPrompt: v.fixPrompt,
+          createdAt: v.firstSeenAt?.toISOString() ?? new Date().toISOString(),
         }));
 
-      // Convert code violations to diff violation items
-      const codeViolationItems = result.codeViolations.map((cv) => ({
-        type: 'code' as const,
-        title: cv.title,
-        content: cv.content,
-        severity: cv.severity,
-        targetServiceId: null,
-        targetModuleId: null,
-        targetMethodId: null,
-        targetServiceName: null,
-        targetModuleName: null,
-        targetMethodName: null,
-        fixPrompt: cv.fixPrompt || null,
-        filePath: cv.filePath,
-        lineStart: cv.lineStart,
-      }));
+      // Load code violations from DB (pipeline persisted them with lifecycle status)
+      const diffCodeViolationRows = await db
+        .select()
+        .from(codeViolations)
+        .where(eq(codeViolations.analysisId, diffAnalysisId));
 
-      const allNewViolations = [...result.newViolations, ...codeViolationItems];
+      const newCodeViolationItems = diffCodeViolationRows
+        .filter((cv) => cv.status === 'new')
+        .map((cv) => ({
+          type: 'code' as const,
+          title: cv.title,
+          content: cv.content,
+          severity: cv.severity,
+          targetServiceId: null as string | null,
+          targetModuleId: null as string | null,
+          targetMethodId: null as string | null,
+          targetServiceName: null as string | null,
+          targetModuleName: null as string | null,
+          targetMethodName: null as string | null,
+          fixPrompt: cv.fixPrompt,
+          deterministicViolationId: null as string | null,
+          filePath: cv.filePath,
+          lineStart: cv.lineStart,
+        }));
+
+      const resolvedCodeViolations = diffCodeViolationRows
+        .filter((cv) => cv.status === 'resolved')
+        .map((cv) => ({
+          id: cv.id,
+          type: 'code' as const,
+          title: cv.title,
+          content: cv.content,
+          severity: cv.severity,
+          targetServiceId: null,
+          targetServiceName: null,
+          targetDatabaseId: null,
+          targetDatabaseName: null,
+          targetModuleId: null,
+          targetModuleName: null,
+          targetMethodId: null,
+          targetMethodName: null,
+          targetTable: null,
+          fixPrompt: cv.fixPrompt,
+          filePath: cv.filePath,
+          lineStart: cv.lineStart,
+          createdAt: cv.createdAt.toISOString(),
+        }));
+
+      const allNewViolations = [...(pipelineResult.newViolations || []), ...newCodeViolationItems];
+      const allResolvedViolations = [...resolvedArchViolations, ...resolvedCodeViolations];
+
+      // Compute summary once — single source of truth
+      const summary = {
+        newCount: allNewViolations.length,
+        resolvedCount: allResolvedViolations.length,
+      };
+
+      // Store metadata in diff analysis (after all data is ready)
+      await db
+        .update(analyses)
+        .set({
+          metadata: {
+            isDiffAnalysis: true,
+            changedFiles,
+            affectedNodeIds,
+            summary,
+            baselineAnalysisId: latestAnalysis.id,
+          },
+        })
+        .where(eq(analyses.id, diffAnalysisId));
 
       // Clear progress bar
       emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
 
       res.json({
-        changedFiles: result.changedFiles,
-        resolvedViolations,
+        changedFiles,
+        resolvedViolations: allResolvedViolations,
         newViolations: allNewViolations,
-        affectedNodeIds: result.affectedNodeIds,
-        summary: { ...result.summary, newCount: allNewViolations.length },
+        affectedNodeIds,
+        summary,
         isStale: false,
         diffAnalysisId,
       });
@@ -1142,20 +1046,25 @@ router.get(
         throw createAppError('Repo not found', 404);
       }
 
-      // Load latest diff_check for this repo
-      const [diffCheck] = await db
+      // Find latest diff analysis (metadata.isDiffAnalysis = true)
+      const [diffAnalysis] = await db
         .select()
-        .from(diffChecks)
-        .where(eq(diffChecks.repoId, id))
-        .orderBy(desc(diffChecks.createdAt))
+        .from(analyses)
+        .where(and(
+          eq(analyses.repoId, id),
+          sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`,
+        ))
+        .orderBy(desc(analyses.createdAt))
         .limit(1);
 
-      if (!diffCheck) {
+      if (!diffAnalysis) {
         res.json(null);
         return;
       }
 
-      // Check staleness: compare diffCheck.analysisId vs latest normal analysis
+      const metadata = diffAnalysis.metadata as Record<string, unknown> | null;
+
+      // Check staleness: compare baselineAnalysisId vs latest normal analysis
       const [latestAnalysis] = await db
         .select({ id: analyses.id })
         .from(analyses)
@@ -1163,54 +1072,129 @@ router.get(
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
-      const isStale = latestAnalysis ? diffCheck.analysisId !== latestAnalysis.id : false;
+      const baselineAnalysisId = metadata?.baselineAnalysisId as string | undefined;
+      const isStale = latestAnalysis ? baselineAnalysisId !== latestAnalysis.id : false;
 
-      // Load resolved violations from DB for full ViolationResponse objects
-      const resolvedIds = diffCheck.resolvedViolationIds as string[];
-      let resolvedViolations: Array<Record<string, unknown>> = [];
-      if (resolvedIds.length > 0) {
-        const allViolationRows = await db
-          .select()
-          .from(violations)
-          .where(eq(violations.analysisId, diffCheck.analysisId));
+      // Load violations for the diff analysis, grouped by status
+      const diffViolationRows = await db
+        .select({
+          id: violations.id,
+          type: violations.type,
+          title: violations.title,
+          content: violations.content,
+          severity: violations.severity,
+          status: violations.status,
+          targetServiceId: violations.targetServiceId,
+          targetServiceName: services.name,
+          targetDatabaseId: violations.targetDatabaseId,
+          targetModuleId: violations.targetModuleId,
+          targetModuleName: modules.name,
+          targetMethodId: violations.targetMethodId,
+          targetMethodName: methods.name,
+          targetTable: violations.targetTable,
+          fixPrompt: violations.fixPrompt,
+          createdAt: violations.createdAt,
+        })
+        .from(violations)
+        .leftJoin(services, eq(violations.targetServiceId, services.id))
+        .leftJoin(modules, eq(violations.targetModuleId, modules.id))
+        .leftJoin(methods, eq(violations.targetMethodId, methods.id))
+        .where(eq(violations.analysisId, diffAnalysis.id));
 
-        const resolvedSet = new Set(resolvedIds);
-        const analysisServices2 = await db.select().from(services).where(eq(services.analysisId, diffCheck.analysisId));
-        const analysisModules2 = await db.select().from(modules).where(eq(modules.analysisId, diffCheck.analysisId));
-        const analysisMethods2 = await db.select().from(methods).where(eq(methods.analysisId, diffCheck.analysisId));
-        const svcMap = new Map(analysisServices2.map((s) => [s.id, s.name]));
-        const modMap = new Map(analysisModules2.map((m) => [m.id, m.name]));
-        const methMap = new Map(analysisMethods2.map((m) => [m.id, m.name]));
+      const newViolations = diffViolationRows
+        .filter((v) => v.status === 'new')
+        .map((v) => ({
+          type: v.type,
+          title: v.title,
+          content: v.content,
+          severity: v.severity,
+          targetServiceId: v.targetServiceId,
+          targetModuleId: v.targetModuleId,
+          targetMethodId: v.targetMethodId,
+          targetServiceName: v.targetServiceName,
+          targetModuleName: v.targetModuleName,
+          targetMethodName: v.targetMethodName,
+          fixPrompt: v.fixPrompt,
+        }));
 
-        resolvedViolations = allViolationRows
-          .filter((i) => resolvedSet.has(i.id))
-          .map((i) => ({
-            id: i.id,
-            type: i.type,
-            title: i.title,
-            content: i.content,
-            severity: i.severity,
-            targetServiceId: i.targetServiceId,
-            targetServiceName: i.targetServiceId ? svcMap.get(i.targetServiceId) : null,
-            targetModuleId: i.targetModuleId,
-            targetModuleName: i.targetModuleId ? modMap.get(i.targetModuleId) : null,
-            targetMethodId: i.targetMethodId,
-            targetMethodName: i.targetMethodId ? methMap.get(i.targetMethodId) : null,
-            targetDatabaseId: i.targetDatabaseId,
-            targetTable: i.targetTable,
-            fixPrompt: i.fixPrompt,
-            createdAt: i.createdAt.toISOString(),
-          }));
-      }
+      const resolvedViolations = diffViolationRows
+        .filter((v) => v.status === 'resolved')
+        .map((v) => ({
+          id: v.id,
+          type: v.type,
+          title: v.title,
+          content: v.content,
+          severity: v.severity,
+          targetServiceId: v.targetServiceId,
+          targetServiceName: v.targetServiceName,
+          targetDatabaseId: v.targetDatabaseId,
+          targetModuleId: v.targetModuleId,
+          targetModuleName: v.targetModuleName,
+          targetMethodId: v.targetMethodId,
+          targetMethodName: v.targetMethodName,
+          targetTable: v.targetTable,
+          fixPrompt: v.fixPrompt,
+          createdAt: v.createdAt.toISOString(),
+        }));
+
+      // Load new code violations for this diff analysis
+      const diffCodeViolationRows = await db
+        .select()
+        .from(codeViolations)
+        .where(eq(codeViolations.analysisId, diffAnalysis.id));
+
+      const newCodeViolations = diffCodeViolationRows
+        .filter((v) => v.status === 'new')
+        .map((cv) => ({
+          type: 'code' as const,
+          title: cv.title,
+          content: cv.content,
+          severity: cv.severity,
+          targetServiceId: null,
+          targetModuleId: null,
+          targetMethodId: null,
+          targetServiceName: null,
+          targetModuleName: null,
+          targetMethodName: null,
+          fixPrompt: cv.fixPrompt,
+          filePath: cv.filePath,
+          lineStart: cv.lineStart,
+        }));
+
+      const resolvedCodeViolations = diffCodeViolationRows
+        .filter((v) => v.status === 'resolved')
+        .map((cv) => ({
+          id: cv.id,
+          type: 'code' as const,
+          title: cv.title,
+          content: cv.content,
+          severity: cv.severity,
+          targetServiceId: null,
+          targetServiceName: null,
+          targetDatabaseId: null,
+          targetDatabaseName: null,
+          targetModuleId: null,
+          targetModuleName: null,
+          targetMethodId: null,
+          targetMethodName: null,
+          targetTable: null,
+          fixPrompt: cv.fixPrompt,
+          filePath: cv.filePath,
+          lineStart: cv.lineStart,
+          createdAt: cv.createdAt.toISOString(),
+        }));
+
+      const allNewViolations = [...newViolations, ...newCodeViolations];
+      const allResolvedViolations = [...resolvedViolations, ...resolvedCodeViolations];
 
       res.json({
-        resolvedViolations,
-        newViolations: diffCheck.newViolations,
-        affectedNodeIds: diffCheck.affectedNodeIds,
-        summary: diffCheck.summary,
-        changedFiles: diffCheck.changedFiles,
+        resolvedViolations: allResolvedViolations,
+        newViolations: allNewViolations,
+        affectedNodeIds: metadata?.affectedNodeIds || { services: [], layers: [], modules: [], methods: [] },
+        summary: metadata?.summary || { newCount: allNewViolations.length, resolvedCount: allResolvedViolations.length },
+        changedFiles: metadata?.changedFiles || [],
         isStale,
-        diffAnalysisId: diffCheck.diffAnalysisId,
+        diffAnalysisId: diffAnalysis.id,
       });
     } catch (error) {
       next(error);
@@ -1225,6 +1209,7 @@ router.get(
     try {
       const id = req.params.id as string;
       const filePath = req.query.path as string;
+      const ref = req.query.ref as string | undefined;
 
       if (!filePath) {
         throw createAppError('Missing "path" query parameter', 400);
@@ -1246,16 +1231,35 @@ router.get(
         throw createAppError('Path traversal not allowed', 403);
       }
 
-      if (!fs.existsSync(resolved)) {
-        throw createAppError('File not found', 404);
-      }
+      let content: string;
 
-      const stat = fs.statSync(resolved);
-      if (!stat.isFile()) {
-        throw createAppError('Path is not a file', 400);
+      if (ref === 'working-tree') {
+        // Working tree mode: read from filesystem
+        if (!fs.existsSync(resolved)) {
+          throw createAppError('File not found', 404);
+        }
+        const stat = fs.statSync(resolved);
+        if (!stat.isFile()) {
+          throw createAppError('Path is not a file', 400);
+        }
+        content = fs.readFileSync(resolved, 'utf-8');
+      } else {
+        // Default: read committed content from HEAD
+        const git = simpleGit(repo.path);
+        try {
+          content = await git.show([`HEAD:${filePath}`]);
+        } catch {
+          // File doesn't exist in HEAD (new untracked file) — fall back to filesystem
+          if (!fs.existsSync(resolved)) {
+            throw createAppError('File not found', 404);
+          }
+          const stat = fs.statSync(resolved);
+          if (!stat.isFile()) {
+            throw createAppError('Path is not a file', 400);
+          }
+          content = fs.readFileSync(resolved, 'utf-8');
+        }
       }
-
-      const content = fs.readFileSync(resolved, 'utf-8');
 
       // Detect language from extension
       const ext = path.extname(resolved).slice(1).toLowerCase();

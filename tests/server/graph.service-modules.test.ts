@@ -67,7 +67,6 @@ function makeInput(overrides: Partial<UnifiedInput> = {}): UnifiedInput {
     services: [],
     serviceDeps: [],
     layers: [],
-    layerDeps: [],
     modules: [],
     moduleDeps: [],
     methods: [],

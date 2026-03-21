@@ -52,7 +52,7 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   services: many(services),
   serviceDependencies: many(serviceDependencies),
   layers: many(layers),
-  layerDependencies: many(layerDependencies),
+  deterministicViolations: many(deterministicViolations),
   violations: many(violations),
   databases: many(databases),
   modules: many(modules),
@@ -162,26 +162,32 @@ export const layersRelations = relations(layers, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
-// layer_dependencies (cross-layer dependencies with violation detection)
+// deterministic_violations (raw deterministic check results per analysis)
 // ---------------------------------------------------------------------------
 
-export const layerDependencies = pgTable('layer_dependencies', {
+export const deterministicViolations = pgTable('deterministic_violations', {
   id: uuid('id').defaultRandom().primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
-  sourceServiceName: text('source_service_name').notNull(),
-  sourceLayer: text('source_layer').notNull(),
-  targetServiceName: text('target_service_name').notNull(),
-  targetLayer: text('target_layer').notNull(),
-  dependencyCount: integer('dependency_count').notNull(),
-  isViolation: boolean('is_violation').notNull().default(false),
-  violationReason: text('violation_reason'),
+  ruleKey: text('rule_key').notNull(),
+  category: text('category').notNull(), // 'service' | 'module' | 'method'
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  severity: text('severity').notNull(),
+  serviceName: text('service_name').notNull(),
+  moduleName: text('module_name'),
+  methodName: text('method_name'),
+  filePath: text('file_path'),
+  relatedModuleName: text('related_module_name'),
+  relatedServiceName: text('related_service_name'),
+  isDependencyViolation: boolean('is_dependency_violation').notNull().default(false),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
-export const layerDependenciesRelations = relations(layerDependencies, ({ one }) => ({
+export const deterministicViolationsRelations = relations(deterministicViolations, ({ one }) => ({
   analysis: one(analyses, {
-    fields: [layerDependencies.analysisId],
+    fields: [deterministicViolations.analysisId],
     references: [analyses.id],
   }),
 }));
@@ -202,6 +208,7 @@ export const violations = pgTable('violations', {
   title: text('title').notNull(),
   content: text('content').notNull(),
   severity: text('severity').notNull(),
+  status: text('status').notNull().default('new'), // 'new' | 'unchanged' | 'resolved'
   targetServiceId: uuid('target_service_id').references(() => services.id, {
     onDelete: 'set null',
   }),
@@ -216,6 +223,15 @@ export const violations = pgTable('violations', {
   }),
   targetTable: text('target_table'),
   fixPrompt: text('fix_prompt'),
+  deterministicViolationId: uuid('deterministic_violation_id').references(() => deterministicViolations.id, {
+    onDelete: 'set null',
+  }),
+  firstSeenAnalysisId: uuid('first_seen_analysis_id').references(() => analyses.id, {
+    onDelete: 'set null',
+  }),
+  firstSeenAt: timestamp('first_seen_at', { mode: 'date', withTimezone: true }),
+  previousViolationId: uuid('previous_violation_id'),
+  resolvedAt: timestamp('resolved_at', { mode: 'date', withTimezone: true }),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -516,6 +532,7 @@ export const rules = pgTable('rules', {
   enabled: boolean('enabled').notNull().default(true),
   severity: text('severity').notNull(), // 'info' | 'low' | 'medium' | 'high' | 'critical'
   type: text('type').notNull(), // 'deterministic' | 'llm'
+  isDependencyViolation: boolean('is_dependency_violation').notNull().default(false),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
@@ -536,48 +553,23 @@ export const codeViolations = pgTable('code_violations', {
   columnEnd: integer('column_end').notNull(),
   ruleKey: text('rule_key').notNull(),
   severity: text('severity').notNull(),
+  status: text('status').notNull().default('new'), // 'new' | 'unchanged' | 'resolved'
   title: text('title').notNull(),
   content: text('content').notNull(),
   snippet: text('snippet').notNull(),
   fixPrompt: text('fix_prompt'),
+  firstSeenAnalysisId: uuid('first_seen_analysis_id').references(() => analyses.id, {
+    onDelete: 'set null',
+  }),
+  firstSeenAt: timestamp('first_seen_at', { mode: 'date', withTimezone: true }),
+  previousCodeViolationId: uuid('previous_code_violation_id'),
+  resolvedAt: timestamp('resolved_at', { mode: 'date', withTimezone: true }),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
 export const codeViolationsRelations = relations(codeViolations, ({ one }) => ({
   analysis: one(analyses, {
     fields: [codeViolations.analysisId],
-    references: [analyses.id],
-  }),
-}));
-
-// ---------------------------------------------------------------------------
-// diff_checks (persisted diff analysis results)
-// ---------------------------------------------------------------------------
-
-export const diffChecks = pgTable('diff_checks', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  repoId: uuid('repo_id')
-    .notNull()
-    .references(() => repos.id, { onDelete: 'cascade' }),
-  analysisId: uuid('analysis_id')
-    .notNull()
-    .references(() => analyses.id, { onDelete: 'cascade' }),
-  diffAnalysisId: uuid('diff_analysis_id').references(() => analyses.id, { onDelete: 'set null' }),
-  changedFiles: jsonb('changed_files').notNull(), // Array<{ path, status }>
-  resolvedViolationIds: jsonb('resolved_violation_ids').notNull(), // string[]
-  newViolations: jsonb('new_violations').notNull(), // ViolationResponse[]
-  affectedNodeIds: jsonb('affected_node_ids').notNull(), // { services, layers, modules, methods }
-  summary: jsonb('summary').notNull(), // { newCount, resolvedCount }
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
-export const diffChecksRelations = relations(diffChecks, ({ one }) => ({
-  repo: one(repos, {
-    fields: [diffChecks.repoId],
-    references: [repos.id],
-  }),
-  analysis: one(analyses, {
-    fields: [diffChecks.analysisId],
     references: [analyses.id],
   }),
 }));

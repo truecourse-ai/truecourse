@@ -32,6 +32,13 @@ export const ViolationSeveritySchema = z.enum([
 export type ViolationSeverity = z.infer<typeof ViolationSeveritySchema>
 
 // ---------------------------------------------------------------------------
+// Violation Status
+// ---------------------------------------------------------------------------
+
+export const ViolationStatusSchema = z.enum(['new', 'unchanged', 'resolved'])
+export type ViolationStatus = z.infer<typeof ViolationStatusSchema>
+
+// ---------------------------------------------------------------------------
 // Violation
 // ---------------------------------------------------------------------------
 
@@ -41,12 +48,16 @@ export const ViolationSchema = z.object({
   title: z.string(),
   content: z.string(),
   severity: ViolationSeveritySchema,
+  status: ViolationStatusSchema.optional(),
   targetServiceId: z.string().optional(),
   targetDatabaseId: z.string().optional(),
   targetModuleId: z.string().optional(),
   targetMethodId: z.string().optional(),
   targetTable: z.string().optional(),
   fixPrompt: z.string().optional(),
+  deterministicViolationId: z.string().optional(),
+  firstSeenAt: z.string().optional(),
+  resolvedAt: z.string().optional(),
   createdAt: z.string(),
 })
 

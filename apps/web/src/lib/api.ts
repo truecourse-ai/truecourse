@@ -112,6 +112,7 @@ export type ViolationResponse = {
   title: string;
   content: string;
   severity: string;
+  status?: 'new' | 'unchanged' | 'resolved';
   targetServiceId?: string | null;
   targetServiceName?: string | null;
   targetDatabaseId?: string | null;
@@ -122,6 +123,7 @@ export type ViolationResponse = {
   targetMethodName?: string | null;
   targetTable?: string | null;
   fixPrompt?: string | null;
+  firstSeenAt?: string | null;
   createdAt: string;
   // Code violation fields (type === 'code')
   filePath?: string;
@@ -239,8 +241,9 @@ export type FilesResponse = {
   files: string[];
 };
 
-export function getFiles(repoId: string): Promise<FilesResponse> {
-  return fetchApi<FilesResponse>(`/api/repos/${repoId}/files`);
+export function getFiles(repoId: string, ref?: string): Promise<FilesResponse> {
+  const params = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+  return fetchApi<FilesResponse>(`/api/repos/${repoId}/files${params}`);
 }
 
 // Violations
@@ -384,9 +387,12 @@ export type CodeViolationSummary = {
 export function getFileContent(
   repoId: string,
   filePath: string,
+  ref?: string,
 ): Promise<{ content: string; language: string }> {
+  const params = new URLSearchParams({ path: filePath });
+  if (ref) params.set('ref', ref);
   return fetchApi<{ content: string; language: string }>(
-    `/api/repos/${repoId}/file-content?path=${encodeURIComponent(filePath)}`,
+    `/api/repos/${repoId}/file-content?${params.toString()}`,
   );
 }
 

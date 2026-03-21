@@ -73,35 +73,4 @@ describe('performSplitAnalysis — layer details (Phase 2)', () => {
     expect(dataLayers[0].fileCount).toBeGreaterThan(0);
   });
 
-  it('returns layerDependencies array', () => {
-    expect(Array.isArray(result.layerDependencies)).toBe(true);
-  });
-
-  it('each layerDependency has required fields', () => {
-    for (const dep of result.layerDependencies) {
-      expect(dep).toHaveProperty('sourceServiceName');
-      expect(dep).toHaveProperty('sourceLayer');
-      expect(dep).toHaveProperty('targetServiceName');
-      expect(dep).toHaveProperty('targetLayer');
-      expect(dep).toHaveProperty('dependencyCount');
-      expect(dep).toHaveProperty('isViolation');
-      expect(typeof dep.isViolation).toBe('boolean');
-      expect(dep.dependencyCount).toBeGreaterThan(0);
-    }
-  });
-
-  it('violations have a violationReason', () => {
-    const violations = result.layerDependencies.filter((d) => d.isViolation);
-    for (const v of violations) {
-      expect(v.violationReason).toBeDefined();
-      expect(v.violationReason!.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('non-violations do not have a violationReason', () => {
-    const nonViolations = result.layerDependencies.filter((d) => !d.isViolation);
-    for (const d of nonViolations) {
-      expect(d.violationReason).toBeUndefined();
-    }
-  });
 });

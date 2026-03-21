@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const RuleCategorySchema = z.enum(['service', 'database', 'module', 'code'])
+export const RuleCategorySchema = z.enum(['service', 'database', 'module', 'method', 'code'])
 export type RuleCategory = z.infer<typeof RuleCategorySchema>
 
 export const RuleSeveritySchema = z.enum(['info', 'low', 'medium', 'high', 'critical'])
@@ -18,6 +18,7 @@ export const AnalysisRuleSchema = z.object({
   enabled: z.boolean(),
   severity: RuleSeveritySchema,
   type: RuleTypeSchema,
+  isDependencyViolation: z.boolean().optional(),
 })
 
 export type AnalysisRule = z.infer<typeof AnalysisRuleSchema>

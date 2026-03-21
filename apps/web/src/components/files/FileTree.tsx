@@ -15,9 +15,10 @@ type FileTreeProps = {
   violationCounts?: Record<string, number>;
   violationSeverities?: Record<string, string>;
   revealPath?: string | null;
+  isDiffMode?: boolean;
 };
 
-export function FileTree({ repoId, selectedPath, onSelectPath, onOpenFile, violationCounts, violationSeverities, revealPath }: FileTreeProps) {
+export function FileTree({ repoId, selectedPath, onSelectPath, onOpenFile, violationCounts, violationSeverities, revealPath, isDiffMode }: FileTreeProps) {
   const [files, setFiles] = useState<string[]>([]);
   const [repoRoot, setRepoRoot] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
@@ -26,14 +27,14 @@ export function FileTree({ repoId, selectedPath, onSelectPath, onOpenFile, viola
 
   useEffect(() => {
     setIsLoading(true);
-    api.getFiles(repoId)
+    api.getFiles(repoId, isDiffMode ? 'working-tree' : undefined)
       .then((data) => {
         setFiles(data.files);
         setRepoRoot(data.root.endsWith('/') ? data.root : data.root + '/');
       })
       .catch(() => {})
       .finally(() => setIsLoading(false));
-  }, [repoId]);
+  }, [repoId, isDiffMode]);
 
   // Remap absolute-path keyed maps to relative paths matching the file tree
   const relViolationCounts = useMemo(() => {

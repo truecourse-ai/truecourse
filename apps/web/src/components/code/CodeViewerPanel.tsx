@@ -9,6 +9,7 @@ type CodeViewerPanelProps = {
   filePath: string;
   analysisId?: string;
   scrollToLine?: number;
+  isDiffMode?: boolean;
   onClose: () => void;
 };
 
@@ -17,6 +18,7 @@ export function CodeViewerPanel({
   filePath,
   analysisId,
   scrollToLine,
+  isDiffMode,
   onClose,
 }: CodeViewerPanelProps) {
   const [content, setContent] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export function CodeViewerPanel({
     setError(null);
 
     Promise.all([
-      api.getFileContent(repoId, filePath),
+      api.getFileContent(repoId, filePath, isDiffMode ? 'working-tree' : undefined),
       api.getCodeViolations(repoId, filePath, analysisId),
     ])
       .then(([fileData, violationData]) => {
@@ -49,7 +51,7 @@ export function CodeViewerPanel({
       });
 
     return () => { cancelled = true; };
-  }, [repoId, filePath, analysisId]);
+  }, [repoId, filePath, analysisId, isDiffMode]);
 
   const pathParts = filePath.split('/');
 

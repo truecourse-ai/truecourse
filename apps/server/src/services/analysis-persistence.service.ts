@@ -5,7 +5,6 @@ import {
   services,
   serviceDependencies,
   layers,
-  layerDependencies,
   databases,
   databaseConnections,
   modules,
@@ -97,22 +96,6 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
           evidence: detail.evidence,
         });
       }
-    }
-  }
-
-  // Save layer dependencies
-  if (result.layerDependencies) {
-    for (const dep of result.layerDependencies) {
-      await db.insert(layerDependencies).values({
-        analysisId: analysis.id,
-        sourceServiceName: dep.sourceServiceName,
-        sourceLayer: dep.sourceLayer,
-        targetServiceName: dep.targetServiceName,
-        targetLayer: dep.targetLayer,
-        dependencyCount: dep.dependencyCount,
-        isViolation: dep.isViolation,
-        violationReason: dep.violationReason || null,
-      });
     }
   }
 

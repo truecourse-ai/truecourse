@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc, and, sql, count } from 'drizzle-orm';
+import { eq, desc, and, sql, count, inArray } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../config/database.js';
 import {
@@ -200,6 +200,22 @@ router.get(
         analysis = latestAnalysis[0];
       }
 
+      // Build query conditions
+      const queryConditions = [eq(violations.analysisId, analysis.id)];
+
+      // Status filter: default to active violations only
+      const statusParam = req.query.status as string | undefined;
+      if (statusParam === 'resolved') {
+        queryConditions.push(eq(violations.status, 'resolved'));
+      } else if (statusParam === 'all') {
+        // No status filter — return all
+      } else {
+        // Default: active violations only (new + unchanged)
+        queryConditions.push(
+          sql`${violations.status} IN ('new', 'unchanged')`,
+        );
+      }
+
       const analysisViolations = await db
         .select({
           id: violations.id,
@@ -207,6 +223,7 @@ router.get(
           title: violations.title,
           content: violations.content,
           severity: violations.severity,
+          status: violations.status,
           targetServiceId: violations.targetServiceId,
           targetServiceName: services.name,
           targetDatabaseId: violations.targetDatabaseId,
@@ -217,6 +234,7 @@ router.get(
           targetMethodName: methods.name,
           targetTable: violations.targetTable,
           fixPrompt: violations.fixPrompt,
+          firstSeenAt: violations.firstSeenAt,
           createdAt: violations.createdAt,
         })
         .from(violations)
@@ -224,7 +242,7 @@ router.get(
         .leftJoin(databases, eq(violations.targetDatabaseId, databases.id))
         .leftJoin(modules, eq(violations.targetModuleId, modules.id))
         .leftJoin(methods, eq(violations.targetMethodId, methods.id))
-        .where(eq(violations.analysisId, analysis.id))
+        .where(and(...queryConditions))
         .orderBy(desc(violations.createdAt));
 
       res.json(analysisViolations);

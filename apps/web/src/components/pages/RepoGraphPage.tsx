@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
@@ -13,6 +13,8 @@ import { FlowList } from '@/components/flows/FlowList';
 import { FlowDiagramPanel } from '@/components/flows/FlowDiagramPanel';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
+import { SchemaPanel } from '@/components/schema/SchemaPanel';
+import { DatabaseList } from '@/components/schema/DatabaseList';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
@@ -36,6 +38,12 @@ type OpenFile = {
 };
 
 type OpenFlow = {
+  id: string;
+  name: string;
+  pinned: boolean;
+};
+
+type OpenDatabase = {
   id: string;
   name: string;
   pinned: boolean;
@@ -130,7 +138,7 @@ export default function RepoGraphPage() {
 
   const handleSelectTab = useCallback((path: string | null) => {
     setActiveFilePath(path);
-    if (path) setActiveFlowIdState(null);
+    if (path) { setActiveFlowIdState(null); setActiveDbIdState(null); }
   }, []);
 
   // Multi-tab flow viewer state — restore from URL
@@ -169,6 +177,7 @@ export default function RepoGraphPage() {
     });
     setActiveFlowId(flowId);
     setActiveFilePathState(null);
+    setActiveDbIdState(null);
   }, [setActiveFlowId]);
 
   const handleCloseFlow = useCallback((flowId: string) => {
@@ -178,6 +187,44 @@ export default function RepoGraphPage() {
       setActiveFlowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
     }
   }, [openFlows, activeFlowId, setActiveFlowId]);
+
+  // Multi-tab database viewer state
+  const [openDatabases, setOpenDatabases] = useState<OpenDatabase[]>([]);
+  const [activeDbId, setActiveDbIdState] = useState<string | null>(null);
+
+  const setActiveDbId = useCallback((id: string | null) => {
+    setActiveDbIdState(id);
+    if (id) {
+      setActiveFilePathState(null);
+      setActiveFlowIdState(null);
+    }
+  }, []);
+
+  const handleOpenDatabase = useCallback((dbId: string, dbName: string, pinned: boolean) => {
+    setOpenDatabases((prev) => {
+      const existing = prev.find((d) => d.id === dbId);
+      if (existing) {
+        return prev.map((d) => d.id === dbId ? { ...d, pinned: pinned || d.pinned } : d);
+      }
+      if (pinned) {
+        return [...prev, { id: dbId, name: dbName, pinned: true }];
+      }
+      const hasUnpinned = prev.find((d) => !d.pinned);
+      if (hasUnpinned) {
+        return prev.map((d) => !d.pinned ? { id: dbId, name: dbName, pinned: false } : d);
+      }
+      return [...prev, { id: dbId, name: dbName, pinned: false }];
+    });
+    setActiveDbId(dbId);
+  }, [setActiveDbId]);
+
+  const handleCloseDatabase = useCallback((dbId: string) => {
+    setOpenDatabases((prev) => prev.filter((d) => d.id !== dbId));
+    if (activeDbId === dbId) {
+      const remaining = openDatabases.filter((d) => d.id !== dbId);
+      setActiveDbId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+    }
+  }, [openDatabases, activeDbId, setActiveDbId]);
 
   const currentBranch = repo?.defaultBranch;
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
@@ -742,9 +789,10 @@ export default function RepoGraphPage() {
     }
   }, [depthLevel]);
 
-  // Whether we're showing a file tab (code viewer) or flow diagram instead of graph
+  // Whether we're showing a file tab (code viewer), flow diagram, or database tab instead of graph
   const showingCodeViewer = activeFilePath !== null;
   const showingFlow = activeFlowId !== null && !showingCodeViewer;
+  const showingDatabase = activeDbId !== null && !showingCodeViewer && !showingFlow;
 
   // Update flow names when flow list loads
   useEffect(() => {
@@ -783,6 +831,7 @@ export default function RepoGraphPage() {
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
           flows: flowList.length,
+          databases: nodes.filter((n) => n.type === 'database').length,
         }}>
           {leftTab === 'violations' && (
             <ViolationsPanel
@@ -799,6 +848,7 @@ export default function RepoGraphPage() {
               onClearFilter={() => { handleNodeSelect(null); setSelectedPath(null); }}
               selectedPath={selectedPath}
               nodeFilePathMap={nodeFilePathMap}
+              onOpenDatabaseInTab={(dbId, dbName) => handleOpenDatabase(dbId, dbName, true)}
             />
           )}
           {leftTab === 'rules' && <RulesPanel />}
@@ -811,6 +861,14 @@ export default function RepoGraphPage() {
               flowSeverities={flowSeverities}
             />
           )}
+          {leftTab === 'databases' && (
+            <DatabaseList
+              repoId={repoId}
+              branch={currentBranch}
+              activeDbId={activeDbId}
+              onSelectDatabase={handleOpenDatabase}
+            />
+          )}
           {leftTab === 'files' && (
             <FileTree
               repoId={repoId}
@@ -819,6 +877,7 @@ export default function RepoGraphPage() {
               violationCounts={codeViolationSummary?.byFile}
               violationSeverities={codeViolationSummary?.highestSeverityByFile}
               revealPath={activeFilePath}
+              isDiffMode={isDiffMode}
               onSelectPath={(path) => {
                 setSelectedPath(path);
                 if (!path) {
@@ -858,13 +917,13 @@ export default function RepoGraphPage() {
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Tab bar when files or flows are open */}
-          {(openFiles.length > 0 || openFlows.length > 0) && (
+          {(openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* Graph tab */}
               <button
-                onClick={() => { handleSelectTab(null); setActiveFlowId(null); }}
+                onClick={() => { handleSelectTab(null); setActiveFlowId(null); setActiveDbId(null); }}
                 className={`shrink-0 px-3 py-1.5 border-r border-border transition-colors ${
-                  !showingCodeViewer && !showingFlow
+                  !showingCodeViewer && !showingFlow && !showingDatabase
                     ? 'bg-background text-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
@@ -907,7 +966,7 @@ export default function RepoGraphPage() {
                 return (
                   <div
                     key={flow.id}
-                    onClick={() => { setActiveFlowId(flow.id); setActiveFilePathState(null); }}
+                    onClick={() => { setActiveFlowId(flow.id); setActiveFilePathState(null); setActiveDbIdState(null); }}
                     className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-background text-foreground'
@@ -921,6 +980,36 @@ export default function RepoGraphPage() {
                       onClick={(e) => {
                         e.stopPropagation();
                         handleCloseFlow(flow.id);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Database tabs */}
+              {openDatabases.map((db) => {
+                const isActive = activeDbId === db.id && !showingCodeViewer && !showingFlow;
+                return (
+                  <div
+                    key={db.id}
+                    onClick={() => { setActiveDbId(db.id); setActiveFilePathState(null); setActiveFlowIdState(null); }}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={db.name}
+                  >
+                    <Database className="h-3 w-3 shrink-0" />
+                    <span className={db.pinned ? 'font-medium' : 'italic'}>{db.name}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseDatabase(db.id);
                       }}
                       className={`rounded p-0.5 hover:bg-muted transition-opacity ${
                         isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
@@ -954,8 +1043,8 @@ export default function RepoGraphPage() {
             </div>
           )}
 
-          {/* Diff mode banner — only on graph tab */}
-          {!showingCodeViewer && isDiffMode && diffResult?.diffAnalysisId && (
+          {/* Diff mode banner */}
+          {isDiffMode && diffResult?.diffAnalysisId && (
             <div className="flex shrink-0 items-center justify-center gap-2 bg-blue-500/10 border-b border-blue-500/30 px-4 py-1.5 text-xs text-blue-400">
               <span>Showing working tree state (uncommitted changes)</span>
             </div>
@@ -990,12 +1079,20 @@ export default function RepoGraphPage() {
               filePath={activeFilePath}
               analysisId={graphAnalysisId}
               scrollToLine={openFiles.find((f) => f.path === activeFilePath)?.scrollToLine}
+              isDiffMode={isDiffMode}
               onClose={() => handleCloseFile(activeFilePath)}
             />
           ) : showingFlow && activeFlowId ? (
             <FlowDiagramPanel
               repoId={repoId}
               flowId={activeFlowId}
+            />
+          ) : showingDatabase && activeDbId ? (
+            <SchemaPanel
+              repoId={repoId}
+              databaseId={activeDbId}
+              violations={violations}
+              isTab
             />
           ) : (
           <>

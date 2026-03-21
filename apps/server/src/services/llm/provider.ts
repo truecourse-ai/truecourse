@@ -8,13 +8,9 @@ import type { Violation } from '@truecourse/shared';
 import { config } from '../../config/index.js';
 import {
   getPrompt,
-  buildTemplateVars,
   buildServiceTemplateVars,
   buildDatabaseTemplateVars,
   buildModuleTemplateVars,
-  buildDiffServiceTemplateVars,
-  buildDiffDatabaseTemplateVars,
-  buildDiffModuleTemplateVars,
   buildCodeTemplateVars,
   buildFlowTemplateVars,
   type FlowEnrichmentContext,
@@ -29,47 +25,6 @@ const telemetry = (functionId: string, langfusePrompt?: string | null) => ({
   functionId,
   metadata: langfusePrompt ? { langfusePrompt } : undefined,
 });
-
-// ---------------------------------------------------------------------------
-// Types — kept for summarizeServices() and chat()
-// ---------------------------------------------------------------------------
-
-export interface ServiceSummaryContext {
-  architecture: string;
-  services: {
-    id: string;
-    name: string;
-    type: string;
-    framework?: string;
-    fileCount: number;
-    layers: string[];
-  }[];
-  dependencies: {
-    source: string;
-    target: string;
-    count: number;
-    type?: string;
-  }[];
-  violations?: string[];
-  databases?: {
-    id: string;
-    name: string;
-    type: string;
-    driver: string;
-    tableCount: number;
-    connectedServices: string[];
-    tables?: {
-      name: string;
-      columns: { name: string; type: string; isNullable?: boolean; isPrimaryKey?: boolean; isForeignKey?: boolean; referencesTable?: string }[];
-    }[];
-    relations?: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[];
-  }[];
-  llmRules?: {
-    name: string;
-    severity: string;
-    prompt: string;
-  }[];
-}
 
 // ---------------------------------------------------------------------------
 // Focused violation context types (one per LLM call)
@@ -91,8 +46,20 @@ export interface ServiceViolationContext {
     count: number;
     type?: string;
   }[];
-  violations?: string[];
   llmRules: { name: string; severity: string; prompt: string }[];
+  /** Service deterministic violations (e.g. circular dependency, god service) */
+  violations?: {
+    ruleKey: string;
+    title: string;
+    description: string;
+    severity: string;
+    serviceName: string;
+    deterministicViolationId?: string;
+  }[];
+  /** When provided, switches to diff prompt/schema to produce lifecycle results */
+  existingViolations?: ExistingViolation[];
+  /** Previous deterministic service violations for lifecycle comparison */
+  baselineViolations?: string[];
 }
 
 export interface DatabaseViolationContext {
@@ -110,6 +77,8 @@ export interface DatabaseViolationContext {
     relations?: { sourceTable: string; targetTable: string; foreignKeyColumn: string }[];
   }[];
   llmRules: { name: string; severity: string; prompt: string }[];
+  /** When provided, switches to diff prompt/schema to produce lifecycle results */
+  existingViolations?: ExistingViolation[];
 }
 
 export interface ModuleViolationContext {
@@ -117,6 +86,7 @@ export interface ModuleViolationContext {
     id: string;
     name: string;
     kind: string;
+    serviceId?: string;
     serviceName: string;
     layerName: string;
     methodCount: number;
@@ -162,14 +132,19 @@ export interface ModuleViolationContext {
     moduleId?: string;
     methodName?: string;
     methodId?: string;
+    deterministicViolationId?: string;
   }[];
+  /** When provided, switches to diff prompt/schema to produce lifecycle results */
+  existingViolations?: ExistingViolation[];
+  /** Previous deterministic module violations for lifecycle comparison */
+  baselineViolations?: string[];
 }
 
 // ---------------------------------------------------------------------------
 // Diff violation context types (extend normal contexts with existing violations)
 // ---------------------------------------------------------------------------
 
-interface ExistingViolation {
+export interface ExistingViolation {
   id: string;
   type: string;
   title: string;
@@ -177,25 +152,20 @@ interface ExistingViolation {
   severity: string;
 }
 
-export interface DiffServiceContext extends ServiceViolationContext {
-  existingViolations: ExistingViolation[];
-  changedFiles: string[];
-  baselineViolations?: string[];
-}
-
-export interface DiffDatabaseContext extends DatabaseViolationContext {
-  existingViolations: ExistingViolation[];
-  changedFiles: string[];
-}
-
-export interface DiffModuleContext extends ModuleViolationContext {
-  existingViolations: ExistingViolation[];
-  changedFiles: string[];
-}
-
 export interface CodeViolationContext {
   files: { path: string; content: string }[];
   llmRules: { name: string; severity: string; prompt: string }[];
+  /** Previous code violations for lifecycle comparison */
+  existingViolations?: {
+    id: string;
+    filePath: string;
+    lineStart: number;
+    lineEnd: number;
+    ruleKey: string;
+    severity: string;
+    title: string;
+    content: string;
+  }[];
 }
 
 export interface CodeViolationRaw {
@@ -211,6 +181,8 @@ export interface CodeViolationRaw {
 
 export interface CodeViolationsResult {
   violations: CodeViolationRaw[];
+  resolvedViolationIds?: string[];
+  unchangedViolationIds?: string[];
 }
 
 export interface DiffViolationItem {
@@ -225,6 +197,7 @@ export interface DiffViolationItem {
   targetModuleName: string | null;
   targetMethodName: string | null;
   fixPrompt: string | null;
+  deterministicViolationId: string | null;
 }
 
 export interface DiffViolationsResult {
@@ -276,6 +249,13 @@ export interface AllViolationsResult {
   module?: ModuleViolationsResult;
 }
 
+/** Result when existing violations are provided — lifecycle mode */
+export interface AllViolationsLifecycleResult {
+  resolvedViolationIds: string[];
+  newViolations: DiffViolationItem[];
+  serviceDescriptions: ServiceDescription[];
+}
+
 export interface FlowEnrichmentResult {
   name: string;
   description: string;
@@ -287,15 +267,10 @@ export interface LLMProvider {
   generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult>;
   generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult>;
   generateAllViolations(contexts: AllViolationsInput): Promise<AllViolationsResult>;
-  generateDiffViolations(contexts: {
-    service?: DiffServiceContext;
-    database?: DiffDatabaseContext;
-    module?: DiffModuleContext;
-  }): Promise<DiffViolationsResult>;
+  generateAllViolationsWithLifecycle(contexts: AllViolationsInput): Promise<AllViolationsLifecycleResult>;
   generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
-  summarizeServices(context: ServiceSummaryContext): Promise<string>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
 }
 
@@ -343,16 +318,17 @@ const ModuleViolationOutputSchema = z.object({
       title: z.string(),
       content: z.string(),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
-      targetServiceId: z.string().nullable().describe('The id of the service this violation applies to, must be an exact id from the Services list'),
       targetModuleId: z.string().nullable().describe('The id of the module this violation applies to, must be an exact id from the Modules list'),
       targetMethodId: z.string().nullable().describe('The id of the method this violation applies to, must be an exact id from the Methods list'),
       fixPrompt: z.string().nullable(),
+      deterministicViolationId: z.string().nullable().describe('If this violation was generated from a deterministic detection, the detId from that detection. Null for LLM-discovered violations.'),
     })
   ),
 });
 
 const DiffViolationOutputSchema = z.object({
-  resolvedViolationIds: z.array(z.string()).describe('IDs of existing violations that are now resolved'),
+  resolvedViolationIds: z.array(z.string()).describe('IDs of previous violations that are now resolved — the issue no longer exists'),
+  unchangedViolationIds: z.array(z.string()).describe('IDs of previous violations that still exist unchanged — every previous violation ID must appear in either resolvedViolationIds or unchangedViolationIds'),
   newViolations: z.array(
     z.object({
       type: z.enum(['service', 'database', 'module', 'function']),
@@ -366,12 +342,57 @@ const DiffViolationOutputSchema = z.object({
       targetModuleName: z.string().nullable(),
       targetMethodName: z.string().nullable(),
       fixPrompt: z.string().nullable(),
+      deterministicViolationId: z.string().nullable().describe('If this violation was generated from a deterministic detection, the detId from that detection. Null for LLM-discovered violations.'),
+    })
+  ),
+});
+
+const LifecycleServiceOutputSchema = z.object({
+  resolvedViolationIds: z.array(z.string()).describe('IDs of previous violations that are now resolved — the issue no longer exists'),
+  unchangedViolationIds: z.array(z.string()).describe('IDs of previous violations that still exist unchanged — every previous violation ID must appear in either resolvedViolationIds or unchangedViolationIds'),
+  newViolations: z.array(
+    z.object({
+      type: z.enum(['service', 'database', 'module', 'function']),
+      title: z.string(),
+      content: z.string(),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      targetServiceId: z.string().nullable().describe('The id of the service this violation applies to, must be an exact id from the Services list'),
+      targetModuleId: z.string().nullable().describe('The id of the module this violation applies to, must be an exact id from the Modules list'),
+      targetMethodId: z.string().nullable().describe('The id of the method this violation applies to, must be an exact id from the Methods list'),
+      targetServiceName: z.string().nullable(),
+      targetModuleName: z.string().nullable(),
+      targetMethodName: z.string().nullable(),
+      fixPrompt: z.string().nullable(),
+      deterministicViolationId: z.string().nullable().describe('If this violation was generated from a deterministic detection, the detId from that detection. Null for LLM-discovered violations.'),
+    })
+  ),
+  serviceDescriptions: z.array(
+    z.object({
+      id: z.string().describe('The service id, must be an exact id from the Services list'),
+      description: z.string().describe('A concise 1-2 sentence description of what this service does'),
     })
   ),
 });
 
 const CodeViolationOutputSchema = z.object({
   violations: z.array(
+    z.object({
+      ruleName: z.string().describe('The exact rule name from the rules list'),
+      filePath: z.string().describe('The exact file path from the files list'),
+      lineStart: z.number().describe('The starting line number of the violation'),
+      lineEnd: z.number().describe('The ending line number of the violation'),
+      severity: z.enum(['low', 'medium', 'high', 'critical']),
+      title: z.string().describe('A concise title for the violation'),
+      content: z.string().describe('A detailed description of the issue and why it matters'),
+      fixPrompt: z.string().nullable().describe('A prompt an AI coding assistant could use to fix this issue'),
+    })
+  ),
+});
+
+const CodeViolationLifecycleOutputSchema = z.object({
+  resolvedViolationIds: z.array(z.string()).describe('IDs of previous code violations that are now resolved — the issue no longer exists in the current code'),
+  unchangedViolationIds: z.array(z.string()).describe('IDs of previous code violations that still exist unchanged — every previous violation ID must appear in either resolvedViolationIds or unchangedViolationIds'),
+  newViolations: z.array(
     z.object({
       ruleName: z.string().describe('The exact rule name from the rules list'),
       filePath: z.string().describe('The exact file path from the files list'),
@@ -496,6 +517,11 @@ class AISDKProvider implements LLMProvider {
     const { text: prompt, langfusePrompt } = await getPrompt('violations-module', buildModuleTemplateVars(context));
     const model = getModel();
 
+    // Build moduleId → serviceId lookup from context
+    const moduleIdToServiceId = new Map(
+      context.modules.filter((m) => m.serviceId).map((m) => [m.id, m.serviceId!]),
+    );
+
     console.log('[LLM] Module violations call starting...');
     const t0 = Date.now();
     const { output: object } = await generateText({
@@ -507,18 +533,23 @@ class AISDKProvider implements LLMProvider {
     console.log(`[LLM] Module violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
 
     return {
-      violations: object.violations.map((v) => ({
-        id: uuidv4(),
-        type: v.type,
-        title: v.title,
-        content: v.content,
-        severity: v.severity,
-        targetServiceId: v.targetServiceId ?? undefined,
-        targetModuleId: v.targetModuleId ?? undefined,
-        targetMethodId: v.targetMethodId ?? undefined,
-        fixPrompt: v.fixPrompt ?? undefined,
-        createdAt: new Date().toISOString(),
-      })),
+      violations: object.violations.map((v) => {
+        const targetModuleId = v.targetModuleId ?? undefined;
+        const targetServiceId = targetModuleId ? moduleIdToServiceId.get(targetModuleId) : undefined;
+        return {
+          id: uuidv4(),
+          type: v.type,
+          title: v.title,
+          content: v.content,
+          severity: v.severity,
+          targetServiceId,
+          targetModuleId,
+          targetMethodId: v.targetMethodId ?? undefined,
+          fixPrompt: v.fixPrompt ?? undefined,
+          deterministicViolationId: v.deterministicViolationId ?? undefined,
+          createdAt: new Date().toISOString(),
+        };
+      }),
     };
   }
 
@@ -554,128 +585,213 @@ class AISDKProvider implements LLMProvider {
     { name: 'generate-all-violations' },
   );
 
-  generateDiffViolations = observe(
-    async (contexts: {
-      service?: DiffServiceContext;
-      database?: DiffDatabaseContext;
-      module?: DiffModuleContext;
-    }): Promise<DiffViolationsResult> => {
+  /**
+   * Full analysis with lifecycle tracking — uses dedicated lifecycle prompts
+   * that compare against existing violations to produce new + resolved results.
+   */
+  generateAllViolationsWithLifecycle = observe(
+    async (contexts: AllViolationsInput): Promise<AllViolationsLifecycleResult> => {
       const model = getModel();
-      const promises: Promise<{ resolvedViolationIds: string[]; newViolations: DiffViolationItem[] }>[] = [];
-
-      const diffT0 = Date.now();
-      console.log('[LLM] Diff violations starting...');
-
-      if (contexts.service) {
-        const ctx = contexts.service;
-        promises.push(
-          getPrompt('violations-diff-service', buildDiffServiceTemplateVars(ctx)).then(async ({ text: prompt, langfusePrompt }) => {
-            console.log('[LLM] Diff service call starting...');
-            const t0 = Date.now();
-            const { output: object } = await generateText({
-              model,
-              output: Output.object({ schema: DiffViolationOutputSchema }),
-              prompt,
-              experimental_telemetry: telemetry('violations-diff-service', langfusePrompt),
-            });
-            console.log(`[LLM] Diff service call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
-            return {
-              resolvedViolationIds: object.resolvedViolationIds,
-              newViolations: object.newViolations.map((i) => ({
-                ...i,
-                targetServiceId: i.targetServiceId ?? null,
-                targetModuleId: i.targetModuleId ?? null,
-                targetMethodId: i.targetMethodId ?? null,
-                targetModuleName: i.targetModuleName ?? null,
-                targetMethodName: i.targetMethodName ?? null,
-              })),
-            };
-          })
-        );
-      }
-
-      if (contexts.database) {
-        const ctx = contexts.database;
-        promises.push(
-          getPrompt('violations-diff-database', buildDiffDatabaseTemplateVars(ctx)).then(async ({ text: prompt, langfusePrompt }) => {
-            console.log('[LLM] Diff database call starting...');
-            const t0 = Date.now();
-            const { output: object } = await generateText({
-              model,
-              output: Output.object({ schema: DiffViolationOutputSchema }),
-              prompt,
-              experimental_telemetry: telemetry('violations-diff-database', langfusePrompt),
-            });
-            console.log(`[LLM] Diff database call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
-            return {
-              resolvedViolationIds: object.resolvedViolationIds,
-              newViolations: object.newViolations.map((i) => ({
-                ...i,
-                targetServiceId: i.targetServiceId ?? null,
-                targetModuleId: i.targetModuleId ?? null,
-                targetMethodId: i.targetMethodId ?? null,
-                targetModuleName: i.targetModuleName ?? null,
-                targetMethodName: i.targetMethodName ?? null,
-              })),
-            };
-          })
-        );
-      }
-
-      if (contexts.module) {
-        const ctx = contexts.module;
-        promises.push(
-          getPrompt('violations-diff-module', buildDiffModuleTemplateVars(ctx)).then(async ({ text: prompt, langfusePrompt }) => {
-            console.log('[LLM] Diff module call starting...');
-            const t0 = Date.now();
-            const { output: object } = await generateText({
-              model,
-              output: Output.object({ schema: DiffViolationOutputSchema }),
-              prompt,
-              experimental_telemetry: telemetry('violations-diff-module', langfusePrompt),
-            });
-            console.log(`[LLM] Diff module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
-            return {
-              resolvedViolationIds: object.resolvedViolationIds,
-              newViolations: object.newViolations.map((i) => ({
-                ...i,
-                targetServiceId: i.targetServiceId ?? null,
-                targetModuleId: i.targetModuleId ?? null,
-                targetMethodId: i.targetMethodId ?? null,
-                targetModuleName: i.targetModuleName ?? null,
-                targetMethodName: i.targetMethodName ?? null,
-              })),
-            };
-          })
-        );
-      }
-
-      const results = await Promise.allSettled(promises);
-
       const allResolved: string[] = [];
       const allNew: DiffViolationItem[] = [];
+      let serviceDescriptions: ServiceDescription[] = [];
 
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          allResolved.push(...result.value.resolvedViolationIds);
-          allNew.push(...result.value.newViolations);
+      const promises: [string, Promise<unknown>][] = [];
+
+      // Service call — uses LifecycleServiceOutputSchema when existing violations present,
+      // normal ServiceViolationOutputSchema otherwise. Same prompt, different output schema.
+      if (contexts.service) {
+        const ctx = contexts.service;
+        if (ctx.existingViolations && ctx.existingViolations.length > 0) {
+          promises.push(['service', (async () => {
+            const { text: prompt, langfusePrompt } = await getPrompt(
+              'violations-service',
+              buildServiceTemplateVars(ctx),
+            );
+            console.log('[LLM] Lifecycle service call starting...');
+            const t0 = Date.now();
+            const { output: object } = await generateText({
+              model,
+              output: Output.object({ schema: LifecycleServiceOutputSchema }),
+              prompt,
+              experimental_telemetry: telemetry('violations-service-lifecycle', langfusePrompt),
+            });
+            console.log(`[LLM] Lifecycle service call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            return object;
+          })()]);
         } else {
-          console.error('[DiffViolations] LLM call failed:', result.reason);
+          promises.push(['service-normal', this.generateServiceViolations(ctx)]);
         }
       }
 
-      console.log(`[LLM] Diff violations total: ${Date.now() - diffT0}ms — resolved: ${allResolved.length}, new: ${allNew.length}`);
-      return { resolvedViolationIds: allResolved, newViolations: allNew };
+      // Database call
+      if (contexts.database) {
+        const ctx = contexts.database;
+        if (ctx.existingViolations && ctx.existingViolations.length > 0) {
+          promises.push(['database', (async () => {
+            const { text: prompt, langfusePrompt } = await getPrompt(
+              'violations-database',
+              buildDatabaseTemplateVars(ctx),
+            );
+            console.log('[LLM] Lifecycle database call starting...');
+            const t0 = Date.now();
+            const { output: object } = await generateText({
+              model,
+              output: Output.object({ schema: DiffViolationOutputSchema }),
+              prompt,
+              experimental_telemetry: telemetry('violations-database-lifecycle', langfusePrompt),
+            });
+            console.log(`[LLM] Lifecycle database call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            return object;
+          })()]);
+        } else {
+          promises.push(['database-normal', this.generateDatabaseViolations(ctx)]);
+        }
+      }
+
+      // Module call
+      if (contexts.module) {
+        const ctx = contexts.module;
+        if (ctx.existingViolations && ctx.existingViolations.length > 0) {
+          const modIdToSvcId = new Map(
+            ctx.modules.filter((m) => m.serviceId).map((m) => [m.id, m.serviceId!]),
+          );
+          promises.push(['module', (async () => {
+            const { text: prompt, langfusePrompt } = await getPrompt(
+              'violations-module',
+              buildModuleTemplateVars(ctx),
+            );
+            console.log('[LLM] Lifecycle module call starting...');
+            const t0 = Date.now();
+            const { output: object } = await generateText({
+              model,
+              output: Output.object({ schema: DiffViolationOutputSchema }),
+              prompt,
+              experimental_telemetry: telemetry('violations-module-lifecycle', langfusePrompt),
+            });
+            console.log(`[LLM] Lifecycle module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            return {
+              resolvedViolationIds: object.resolvedViolationIds,
+              newViolations: object.newViolations.map((i) => ({
+                ...i,
+                targetServiceId: (i.targetModuleId ? modIdToSvcId.get(i.targetModuleId) : null) ?? null,
+                targetModuleId: i.targetModuleId ?? null,
+                targetMethodId: i.targetMethodId ?? null,
+                targetModuleName: i.targetModuleName ?? null,
+                targetMethodName: i.targetMethodName ?? null,
+              })),
+            };
+          })()]);
+        } else {
+          promises.push(['module-normal', this.generateModuleViolations(ctx)]);
+        }
+      }
+
+      const settled = await Promise.allSettled(promises.map(([, p]) => p));
+
+      for (let i = 0; i < promises.length; i++) {
+        const [key] = promises[i];
+        const outcome = settled[i];
+        if (outcome.status !== 'fulfilled') {
+          console.error(`[ViolationsLifecycle] ${key} call failed:`, outcome.reason);
+          continue;
+        }
+
+        if (key === 'service') {
+          // Lifecycle service result — has resolvedViolationIds, newViolations, serviceDescriptions
+          const result = outcome.value as { resolvedViolationIds: string[]; newViolations: DiffViolationItem[]; serviceDescriptions: ServiceDescription[] };
+          allResolved.push(...result.resolvedViolationIds);
+          allNew.push(...result.newViolations.map((v) => ({
+            ...v,
+            targetServiceId: v.targetServiceId ?? null,
+            targetModuleId: v.targetModuleId ?? null,
+            targetMethodId: v.targetMethodId ?? null,
+            targetServiceName: v.targetServiceName ?? null,
+            targetModuleName: v.targetModuleName ?? null,
+            targetMethodName: v.targetMethodName ?? null,
+          })));
+          serviceDescriptions = result.serviceDescriptions;
+        } else if (key === 'service-normal') {
+          // Normal service result — convert to lifecycle format
+          const result = outcome.value as ServiceViolationsResult;
+          serviceDescriptions = result.serviceDescriptions;
+          for (const v of result.violations) {
+            allNew.push({
+              type: v.type, title: v.title, content: v.content, severity: v.severity,
+              targetServiceId: v.targetServiceId ?? null, targetModuleId: v.targetModuleId ?? null,
+              targetMethodId: v.targetMethodId ?? null, targetServiceName: null,
+              targetModuleName: null, targetMethodName: null, fixPrompt: v.fixPrompt ?? null,
+              deterministicViolationId: null,
+            });
+          }
+        } else if (key === 'database' || key === 'module') {
+          // Lifecycle diff result
+          const result = outcome.value as DiffViolationsResult;
+          allResolved.push(...result.resolvedViolationIds);
+          allNew.push(...result.newViolations.map((v) => ({
+            ...v,
+            targetServiceId: v.targetServiceId ?? null,
+            targetModuleId: v.targetModuleId ?? null,
+            targetMethodId: v.targetMethodId ?? null,
+            targetServiceName: v.targetServiceName ?? null,
+            targetModuleName: v.targetModuleName ?? null,
+            targetMethodName: v.targetMethodName ?? null,
+          })));
+        } else {
+          // Normal database/module result — convert to new violations
+          const result = outcome.value as DatabaseViolationsResult | ModuleViolationsResult;
+          for (const v of result.violations) {
+            allNew.push({
+              type: v.type, title: v.title, content: v.content, severity: v.severity,
+              targetServiceId: (v as Violation).targetServiceId ?? null,
+              targetModuleId: (v as Violation).targetModuleId ?? null,
+              targetMethodId: (v as Violation).targetMethodId ?? null,
+              targetServiceName: null, targetModuleName: null, targetMethodName: null,
+              fixPrompt: (v as Violation).fixPrompt ?? null,
+              deterministicViolationId: null,
+            });
+          }
+        }
+      }
+
+      return { resolvedViolationIds: allResolved, newViolations: allNew, serviceDescriptions };
     },
-    { name: 'generate-diff-violations' },
+    { name: 'generate-all-violations-lifecycle' },
   );
 
   async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
     const { text: prompt, langfusePrompt } = await getPrompt('violations-code', buildCodeTemplateVars(context));
     const model = getModel();
+    const hasExisting = context.existingViolations && context.existingViolations.length > 0;
 
-    console.log(`[LLM] Code violations call starting (${context.files.length} files)...`);
+    console.log(`[LLM] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
     const t0 = Date.now();
+
+    if (hasExisting) {
+      const { output: object } = await generateText({
+        model,
+        output: Output.object({ schema: CodeViolationLifecycleOutputSchema }),
+        prompt,
+        experimental_telemetry: telemetry('violations-code-lifecycle', langfusePrompt),
+      });
+      console.log(`[LLM] Code violations call done in ${Date.now() - t0}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
+
+      return {
+        violations: object.newViolations.map((v) => ({
+          ruleName: v.ruleName,
+          filePath: v.filePath,
+          lineStart: v.lineStart,
+          lineEnd: v.lineEnd,
+          severity: v.severity,
+          title: v.title,
+          content: v.content,
+          fixPrompt: v.fixPrompt ?? null,
+        })),
+        resolvedViolationIds: object.resolvedViolationIds,
+        unchangedViolationIds: object.unchangedViolationIds,
+      };
+    }
+
     const { output: object } = await generateText({
       model,
       output: Output.object({ schema: CodeViolationOutputSchema }),
@@ -710,16 +826,24 @@ class AISDKProvider implements LLMProvider {
       );
 
       const allViolations: CodeViolationRaw[] = [];
+      const allResolved: string[] = [];
+      const allUnchanged: string[] = [];
       for (const result of results) {
         if (result.status === 'fulfilled') {
           allViolations.push(...result.value.violations);
+          if (result.value.resolvedViolationIds) allResolved.push(...result.value.resolvedViolationIds);
+          if (result.value.unchangedViolationIds) allUnchanged.push(...result.value.unchangedViolationIds);
         } else {
           console.error('[CodeViolations] Batch call failed:', result.reason);
         }
       }
 
-      console.log(`[LLM] Code violations total: ${Date.now() - t0}ms — ${allViolations.length} violations`);
-      return { violations: allViolations };
+      console.log(`[LLM] Code violations total: ${Date.now() - t0}ms — new: ${allViolations.length}, resolved: ${allResolved.length}, unchanged: ${allUnchanged.length}`);
+      return {
+        violations: allViolations,
+        resolvedViolationIds: allResolved.length > 0 ? allResolved : undefined,
+        unchangedViolationIds: allUnchanged.length > 0 ? allUnchanged : undefined,
+      };
     },
     { name: 'generate-all-code-violations' },
   );
@@ -743,19 +867,6 @@ class AISDKProvider implements LLMProvider {
       description: object.description,
       stepDescriptions: object.stepDescriptions,
     };
-  }
-
-  async summarizeServices(context: ServiceSummaryContext): Promise<string> {
-    const { text: prompt, langfusePrompt } = await getPrompt('service-summary', buildTemplateVars(context));
-    const model = getModel();
-
-    const { text } = await streamText({
-      model,
-      prompt,
-      experimental_telemetry: telemetry('summarize-services', langfusePrompt),
-    });
-
-    return text;
   }
 
   async *chat(

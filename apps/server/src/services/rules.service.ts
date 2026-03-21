@@ -24,6 +24,7 @@ export async function seedRules(): Promise<void> {
         enabled: rule.enabled,
         severity: rule.severity,
         type: rule.type,
+        isDependencyViolation: rule.isDependencyViolation ?? false,
       })
       .onConflictDoUpdate({
         target: rules.key,
@@ -34,6 +35,7 @@ export async function seedRules(): Promise<void> {
           prompt: rule.prompt ?? null,
           severity: rule.severity,
           type: rule.type,
+          isDependencyViolation: rule.isDependencyViolation ?? false,
           updatedAt: new Date(),
         },
       });

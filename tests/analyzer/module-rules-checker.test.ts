@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '../../packages/shared/src/types';
-import { checkModuleRules } from '../../packages/analyzer/src/rules/module-rules-checker';
+import { checkModuleRules, checkMethodRules } from '../../packages/analyzer/src/rules/module-rules-checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/deterministic-rules';
 
 const enabledRules = DETERMINISTIC_RULES.filter((r) => r.enabled);
@@ -52,57 +52,8 @@ describe('checkModuleRules', () => {
     expect(godViolations).toHaveLength(0);
   });
 
-  it('detects long method (>30 statements)', () => {
-    const methods = [makeMethod({ name: 'longFn', statementCount: 35 })];
-    const violations = checkModuleRules([], methods, [], enabledRules);
-
-    const longViolations = violations.filter((v) => v.ruleKey === 'arch/long-method');
-    expect(longViolations).toHaveLength(1);
-    expect(longViolations[0].description).toContain('35 statements');
-  });
-
-  it('does not flag method with <=30 statements', () => {
-    const methods = [makeMethod({ statementCount: 30 })];
-    const violations = checkModuleRules([], methods, [], enabledRules);
-    const longViolations = violations.filter((v) => v.ruleKey === 'arch/long-method');
-    expect(longViolations).toHaveLength(0);
-  });
-
-  it('detects too many parameters (>=5)', () => {
-    const methods = [makeMethod({ name: 'manyParams', paramCount: 6 })];
-    const violations = checkModuleRules([], methods, [], enabledRules);
-
-    const paramViolations = violations.filter((v) => v.ruleKey === 'arch/too-many-parameters');
-    expect(paramViolations).toHaveLength(1);
-    expect(paramViolations[0].description).toContain('6 parameters');
-  });
-
-  it('does not flag method with <5 parameters', () => {
-    const methods = [makeMethod({ paramCount: 4 })];
-    const violations = checkModuleRules([], methods, [], enabledRules);
-    const paramViolations = violations.filter((v) => v.ruleKey === 'arch/too-many-parameters');
-    expect(paramViolations).toHaveLength(0);
-  });
-
-  it('detects deeply nested logic (>4 levels)', () => {
-    const methods = [makeMethod({ name: 'nested', maxNestingDepth: 6 })];
-    const violations = checkModuleRules([], methods, [], enabledRules);
-
-    const nestViolations = violations.filter((v) => v.ruleKey === 'arch/deeply-nested-logic');
-    expect(nestViolations).toHaveLength(1);
-    expect(nestViolations[0].description).toContain('nesting depth 6');
-  });
-
-  it('does not flag method with <=4 nesting depth', () => {
-    const methods = [makeMethod({ maxNestingDepth: 4 })];
-    const violations = checkModuleRules([], methods, [], enabledRules);
-    const nestViolations = violations.filter((v) => v.ruleKey === 'arch/deeply-nested-logic');
-    expect(nestViolations).toHaveLength(0);
-  });
-
   it('detects unused export', () => {
     const methods = [makeMethod({ name: 'unusedFn', isExported: true })];
-    // No dependencies importing 'unusedFn'
     const fileDeps: ModuleDependency[] = [];
     const violations = checkModuleRules([], methods, fileDeps, enabledRules);
 
@@ -127,23 +78,8 @@ describe('checkModuleRules', () => {
   it('respects disabled rules', () => {
     const allDisabled = enabledRules.map((r) => ({ ...r, enabled: false }));
     const modules = [makeModule({ methodCount: 100 })];
-    const methods = [makeMethod({ paramCount: 20, statementCount: 100, maxNestingDepth: 10 })];
-    const violations = checkModuleRules(modules, methods, [], allDisabled);
+    const violations = checkModuleRules(modules, [], [], allDisabled);
     expect(violations).toHaveLength(0);
-  });
-
-  it('detects multiple violations at once', () => {
-    const modules = [makeModule({ name: 'Big', methodCount: 20 })];
-    const methods = [
-      makeMethod({ name: 'fn1', paramCount: 7, statementCount: 50, maxNestingDepth: 6 }),
-    ];
-    const violations = checkModuleRules(modules, methods, [], enabledRules);
-
-    const ruleKeys = violations.map((v) => v.ruleKey);
-    expect(ruleKeys).toContain('arch/god-module');
-    expect(ruleKeys).toContain('arch/long-method');
-    expect(ruleKeys).toContain('arch/too-many-parameters');
-    expect(ruleKeys).toContain('arch/deeply-nested-logic');
   });
 
   // Dead module detection
@@ -200,7 +136,157 @@ describe('checkModuleRules', () => {
     expect(deadViolations).toHaveLength(0);
   });
 
-  // Dead method detection
+  // Orphan file detection
+  function makeFileAnalysis(filePath: string): FileAnalysis {
+    return {
+      filePath,
+      language: 'typescript',
+      functions: [],
+      classes: [],
+      imports: [],
+      exports: [],
+      calls: [],
+      httpCalls: [],
+    };
+  }
+
+  it('detects orphan file (never imported)', () => {
+    const modules = [makeModule({ name: 'Orphan', filePath: '/repo/svc/src/orphan.ts', serviceName: 'svc' })];
+    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/orphan.ts')];
+    const fileDeps: ModuleDependency[] = [];
+
+    const violations = checkModuleRules(modules, [], fileDeps, enabledRules, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(1);
+    expect(orphanViolations[0].title).toContain('orphan.ts');
+    expect(orphanViolations[0].serviceName).toBe('svc');
+  });
+
+  it('does not flag file that is imported', () => {
+    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/used.ts')];
+    const fileDeps: ModuleDependency[] = [
+      { source: '/repo/svc/src/main.ts', target: '/repo/svc/src/used.ts', importedNames: ['something'] },
+    ];
+
+    const violations = checkModuleRules([], [], fileDeps, enabledRules, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(0);
+  });
+
+  it('does not flag entry point files', () => {
+    const fileAnalyses = [
+      makeFileAnalysis('/repo/svc/src/index.ts'),
+      makeFileAnalysis('/repo/svc/src/main.ts'),
+      makeFileAnalysis('/repo/svc/src/app.ts'),
+      makeFileAnalysis('/repo/svc/src/server.ts'),
+      makeFileAnalysis('/repo/svc/src/routes.ts'),
+      makeFileAnalysis('/repo/svc/vite.config.ts'),
+      makeFileAnalysis('/repo/svc/src/__tests__/helper.ts'),
+    ];
+
+    const violations = checkModuleRules([], [], [], enabledRules, undefined, undefined, fileAnalyses);
+
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    expect(orphanViolations).toHaveLength(0);
+  });
+
+  // Layer violation detection
+  it('detects layer violation (data → api)', () => {
+    const modules = [
+      makeModule({ name: 'DataModule', serviceName: 'svc', layerName: 'data' }),
+      makeModule({ name: 'ApiModule', serviceName: 'svc', layerName: 'api' }),
+    ];
+    const moduleLevelDeps: ModuleLevelDependency[] = [
+      {
+        sourceModule: 'DataModule',
+        sourceService: 'svc',
+        targetModule: 'ApiModule',
+        targetService: 'svc',
+        importedNames: ['something'],
+      },
+    ];
+
+    const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
+
+    const layerViolations = violations.filter((v) => v.ruleKey === 'arch/module-layer-data-api');
+    expect(layerViolations).toHaveLength(1);
+    expect(layerViolations[0].title).toContain('DataModule');
+    expect(layerViolations[0].title).toContain('ApiModule');
+  });
+
+  it('does not flag valid layer dependency (api → service)', () => {
+    const modules = [
+      makeModule({ name: 'ApiModule', serviceName: 'svc', layerName: 'api' }),
+      makeModule({ name: 'ServiceModule', serviceName: 'svc', layerName: 'service' }),
+    ];
+    const moduleLevelDeps: ModuleLevelDependency[] = [
+      {
+        sourceModule: 'ApiModule',
+        sourceService: 'svc',
+        targetModule: 'ServiceModule',
+        targetService: 'svc',
+        importedNames: ['something'],
+      },
+    ];
+
+    const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
+
+    const layerViolations = violations.filter((v) => v.ruleKey.startsWith('arch/module-layer'));
+    expect(layerViolations).toHaveLength(0);
+  });
+});
+
+describe('checkMethodRules', () => {
+  it('detects long method (>30 statements)', () => {
+    const methods = [makeMethod({ name: 'longFn', statementCount: 35 })];
+    const violations = checkMethodRules(methods, enabledRules);
+
+    const longViolations = violations.filter((v) => v.ruleKey === 'arch/long-method');
+    expect(longViolations).toHaveLength(1);
+    expect(longViolations[0].description).toContain('35 statements');
+  });
+
+  it('does not flag method with <=30 statements', () => {
+    const methods = [makeMethod({ statementCount: 30 })];
+    const violations = checkMethodRules(methods, enabledRules);
+    const longViolations = violations.filter((v) => v.ruleKey === 'arch/long-method');
+    expect(longViolations).toHaveLength(0);
+  });
+
+  it('detects too many parameters (>=5)', () => {
+    const methods = [makeMethod({ name: 'manyParams', paramCount: 6 })];
+    const violations = checkMethodRules(methods, enabledRules);
+
+    const paramViolations = violations.filter((v) => v.ruleKey === 'arch/too-many-parameters');
+    expect(paramViolations).toHaveLength(1);
+    expect(paramViolations[0].description).toContain('6 parameters');
+  });
+
+  it('does not flag method with <5 parameters', () => {
+    const methods = [makeMethod({ paramCount: 4 })];
+    const violations = checkMethodRules(methods, enabledRules);
+    const paramViolations = violations.filter((v) => v.ruleKey === 'arch/too-many-parameters');
+    expect(paramViolations).toHaveLength(0);
+  });
+
+  it('detects deeply nested logic (>4 levels)', () => {
+    const methods = [makeMethod({ name: 'nested', maxNestingDepth: 6 })];
+    const violations = checkMethodRules(methods, enabledRules);
+
+    const nestViolations = violations.filter((v) => v.ruleKey === 'arch/deeply-nested-logic');
+    expect(nestViolations).toHaveLength(1);
+    expect(nestViolations[0].description).toContain('nesting depth 6');
+  });
+
+  it('does not flag method with <=4 nesting depth', () => {
+    const methods = [makeMethod({ maxNestingDepth: 4 })];
+    const violations = checkMethodRules(methods, enabledRules);
+    const nestViolations = violations.filter((v) => v.ruleKey === 'arch/deeply-nested-logic');
+    expect(nestViolations).toHaveLength(0);
+  });
+
   it('detects dead method (no incoming or outgoing calls)', () => {
     const methods = [
       makeMethod({ name: 'activeMethod', moduleName: 'Mod', serviceName: 'svc' }),
@@ -218,7 +304,7 @@ describe('checkModuleRules', () => {
       },
     ];
 
-    const violations = checkModuleRules([], methods, [], enabledRules, undefined, undefined, methodLevelDeps);
+    const violations = checkMethodRules(methods, enabledRules, methodLevelDeps);
 
     const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
     expect(deadViolations).toHaveLength(1);
@@ -242,7 +328,7 @@ describe('checkModuleRules', () => {
       },
     ];
 
-    const violations = checkModuleRules([], methods, [], enabledRules, undefined, undefined, methodLevelDeps);
+    const violations = checkMethodRules(methods, enabledRules, methodLevelDeps);
 
     const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
     expect(deadViolations).toHaveLength(0);
@@ -251,83 +337,28 @@ describe('checkModuleRules', () => {
   it('does not run dead method check when methodLevelDeps is undefined', () => {
     const methods = [makeMethod({ name: 'someMethod' })];
 
-    const violations = checkModuleRules([], methods, [], enabledRules);
+    const violations = checkMethodRules(methods, enabledRules);
 
     const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
     expect(deadViolations).toHaveLength(0);
   });
 
-  // Orphan file detection
-  function makeFileAnalysis(filePath: string): FileAnalysis {
-    return {
-      filePath,
-      language: 'typescript',
-      functions: [],
-      classes: [],
-      imports: [],
-      exports: [],
-      calls: [],
-      httpCalls: [],
-    };
-  }
-
-  it('detects orphan file (never imported)', () => {
-    const modules = [makeModule({ name: 'Orphan', filePath: '/repo/svc/src/orphan.ts', serviceName: 'svc' })];
-    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/orphan.ts')];
-    const fileDeps: ModuleDependency[] = [];
-
-    const violations = checkModuleRules(modules, [], fileDeps, enabledRules, undefined, undefined, undefined, fileAnalyses);
-
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
-    expect(orphanViolations).toHaveLength(1);
-    expect(orphanViolations[0].title).toContain('orphan.ts');
-    expect(orphanViolations[0].serviceName).toBe('svc');
-  });
-
-  it('does not flag file that is imported', () => {
-    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/used.ts')];
-    const fileDeps: ModuleDependency[] = [
-      { source: '/repo/svc/src/main.ts', target: '/repo/svc/src/used.ts', importedNames: ['something'] },
+  it('detects multiple violations at once', () => {
+    const methods = [
+      makeMethod({ name: 'fn1', paramCount: 7, statementCount: 50, maxNestingDepth: 6 }),
     ];
+    const violations = checkMethodRules(methods, enabledRules);
 
-    const violations = checkModuleRules([], [], fileDeps, enabledRules, undefined, undefined, undefined, fileAnalyses);
-
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
-    expect(orphanViolations).toHaveLength(0);
+    const ruleKeys = violations.map((v) => v.ruleKey);
+    expect(ruleKeys).toContain('arch/long-method');
+    expect(ruleKeys).toContain('arch/too-many-parameters');
+    expect(ruleKeys).toContain('arch/deeply-nested-logic');
   });
 
-  it('does not flag entry point files', () => {
-    const fileAnalyses = [
-      makeFileAnalysis('/repo/svc/src/index.ts'),
-      makeFileAnalysis('/repo/svc/src/main.ts'),
-      makeFileAnalysis('/repo/svc/src/app.ts'),
-      makeFileAnalysis('/repo/svc/src/server.ts'),
-      makeFileAnalysis('/repo/svc/src/routes/route.ts'),
-      makeFileAnalysis('/repo/svc/vite.config.ts'),
-      makeFileAnalysis('/repo/svc/src/utils.test.ts'),
-      makeFileAnalysis('/repo/svc/src/utils.spec.ts'),
-      makeFileAnalysis('/repo/svc/__tests__/foo.ts'),
-      makeFileAnalysis('/repo/svc/migrations/001.ts'),
-      makeFileAnalysis('/repo/svc/seeds/seed.ts'),
-      makeFileAnalysis('/repo/svc/bin/cli.ts'),
-      makeFileAnalysis('/repo/svc/scripts/build.ts'),
-    ];
-
-    const violations = checkModuleRules([], [], [], enabledRules, undefined, undefined, undefined, fileAnalyses);
-
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
-    expect(orphanViolations).toHaveLength(0);
-  });
-
-  it('does not detect orphan files when rule is disabled', () => {
-    const onlyOrphanDisabled = enabledRules.map((r) =>
-      r.key === 'arch/orphan-file' ? { ...r, enabled: false } : r
-    );
-    const fileAnalyses = [makeFileAnalysis('/repo/svc/src/orphan.ts')];
-
-    const violations = checkModuleRules([], [], [], onlyOrphanDisabled, undefined, undefined, undefined, fileAnalyses);
-
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
-    expect(orphanViolations).toHaveLength(0);
+  it('respects disabled rules', () => {
+    const allDisabled = enabledRules.map((r) => ({ ...r, enabled: false }));
+    const methods = [makeMethod({ paramCount: 20, statementCount: 100, maxNestingDepth: 10 })];
+    const violations = checkMethodRules(methods, allDisabled);
+    expect(violations).toHaveLength(0);
   });
 });

@@ -6,16 +6,6 @@ import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
 type CategoryFilter = 'all' | 'service' | 'module' | 'function' | 'database' | 'code';
-type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low' | 'info';
-
-const severityFilters: { value: SeverityFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'critical', label: 'Critical' },
-  { value: 'high', label: 'High' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'low', label: 'Low' },
-  { value: 'info', label: 'Info' },
-];
 
 type ViolationsPanelProps = {
   violations: ViolationResponse[];
@@ -31,6 +21,7 @@ type ViolationsPanelProps = {
   onClearFilter?: () => void;
   selectedPath?: string | null;
   nodeFilePathMap?: Map<string, string>;
+  onOpenDatabaseInTab?: (dbId: string, dbName: string) => void;
 };
 
 const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
@@ -56,9 +47,9 @@ export function ViolationsPanel({
   onClearFilter,
   selectedPath,
   nodeFilePathMap,
+  onOpenDatabaseInTab,
 }: ViolationsPanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
 
   // Resizable ER panel
   const [erHeight, setErHeight] = useState(264);
@@ -172,18 +163,8 @@ export function ViolationsPanel({
 
   // Apply category filter
   const categoryFilteredViolations = useMemo(() => {
-    let result = pathFilteredViolations;
-    if (categoryFilter !== 'all') result = result.filter((v) => v.type === categoryFilter);
-    if (severityFilter !== 'all') result = result.filter((v) => v.severity === severityFilter);
-    return result;
-  }, [pathFilteredViolations, categoryFilter, severityFilter]);
-
-  // Severity counts (within current category filter)
-  const severityCounts = useMemo(() => {
-    const base = categoryFilter === 'all' ? pathFilteredViolations : pathFilteredViolations.filter((v) => v.type === categoryFilter);
-    const counts: Record<string, number> = {};
-    for (const v of base) counts[v.severity] = (counts[v.severity] || 0) + 1;
-    return counts;
+    if (categoryFilter === 'all') return pathFilteredViolations;
+    return pathFilteredViolations.filter((v) => v.type === categoryFilter);
   }, [pathFilteredViolations, categoryFilter]);
 
   // Count violations per category for badge numbers (normal mode)
@@ -198,11 +179,9 @@ export function ViolationsPanel({
   // Filter and count for diff mode
   const filteredDiffCards = useMemo(() => {
     if (!diffViolationCards) return null;
-    let result = diffViolationCards;
-    if (categoryFilter !== 'all') result = result.filter((c) => c.violation.type === categoryFilter);
-    if (severityFilter !== 'all') result = result.filter((c) => c.violation.severity === severityFilter);
-    return result;
-  }, [diffViolationCards, categoryFilter, severityFilter]);
+    if (categoryFilter === 'all') return diffViolationCards;
+    return diffViolationCards.filter((c) => c.violation.type === categoryFilter);
+  }, [diffViolationCards, categoryFilter]);
 
   const diffCategoryCounts = useMemo(() => {
     if (!diffViolationCards) return {};
@@ -217,7 +196,7 @@ export function ViolationsPanel({
     <div className="flex h-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
         {/* Sticky filters */}
-        <div className="shrink-0 border-b border-border px-3 py-2 space-y-1.5">
+        <div className="shrink-0 border-b border-border px-3 py-2">
           <div className="flex gap-1 overflow-x-auto scrollbar-thin">
             {categories.map((cat) => {
               const counts = isDiffMode ? diffCategoryCounts : categoryCounts;
@@ -237,30 +216,6 @@ export function ViolationsPanel({
                   {cat.label}
                   {count > 0 && (
                     <span className="ml-0.5 text-[10px] opacity-70">{count}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex gap-1 overflow-x-auto scrollbar-thin">
-            {severityFilters.map((sev) => {
-              const base = categoryFilter === 'all'
-                ? pathFilteredViolations.length
-                : (categoryCounts[categoryFilter] || 0);
-              const count = sev.value === 'all' ? base : severityCounts[sev.value] || 0;
-              return (
-                <button
-                  key={sev.value}
-                  onClick={() => setSeverityFilter(sev.value)}
-                  className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                    severityFilter === sev.value
-                      ? 'bg-accent text-accent-foreground'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
-                >
-                  {sev.label}
-                  {count > 0 && (
-                    <span className="ml-0.5 opacity-70">{count}</span>
                   )}
                 </button>
               );
@@ -363,7 +318,7 @@ export function ViolationsPanel({
               className="absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize hover:bg-primary/30 active:bg-primary/50"
               onMouseDown={handleErResizeDown}
             />
-            <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} violations={violations} />
+            <SchemaPanel repoId={repoId} databaseId={selectedDatabaseId} violations={violations} onOpenInTab={onOpenDatabaseInTab} />
           </div>
         )}
       </div>

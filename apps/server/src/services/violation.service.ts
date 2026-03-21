@@ -4,6 +4,8 @@ import {
   type DatabaseViolationContext,
   type ModuleViolationContext,
   type ViolationsResult,
+  type AllViolationsLifecycleResult,
+  type ExistingViolation,
 } from './llm/provider.js';
 import type { Violation } from '@truecourse/shared';
 
@@ -23,7 +25,6 @@ export interface ViolationGenerationInput {
     dependencyCount: number | null;
     dependencyType: string | null;
   }[];
-  violations?: string[];
   databases?: {
     id: string;
     name: string;
@@ -91,7 +92,25 @@ export interface ViolationGenerationInput {
     moduleId?: string;
     methodName?: string;
     methodId?: string;
+    deterministicViolationId?: string;
   }[];
+  /** Service deterministic violations */
+  serviceViolations?: {
+    ruleKey: string;
+    title: string;
+    description: string;
+    severity: string;
+    serviceName: string;
+    deterministicViolationId?: string;
+  }[];
+  /** Existing violations per category for lifecycle mode */
+  existingServiceViolations?: ExistingViolation[];
+  existingDatabaseViolations?: ExistingViolation[];
+  existingModuleViolations?: ExistingViolation[];
+  /** Previous deterministic service violations for lifecycle comparison */
+  baselineServiceViolations?: string[];
+  /** Previous deterministic module violations for lifecycle comparison */
+  baselineModuleViolations?: string[];
 }
 
 export async function generateViolations(
@@ -133,8 +152,8 @@ export async function generateViolations(
     architecture: input.architecture,
     services: serviceDtos,
     dependencies: depDtos,
-    violations: input.violations,
     llmRules: archRules,
+    violations: input.serviceViolations,
   };
 
   const hasDBs = input.databases && input.databases.length > 0;
@@ -142,10 +161,12 @@ export async function generateViolations(
     ? { databases: input.databases!, llmRules: dbRules }
     : undefined;
 
+  const serviceNameToIdMap = new Map(serviceDtos.map((s) => [s.name, s.id]));
+
   const hasModules = input.modules && input.modules.length > 0;
   const moduleContext: ModuleViolationContext | undefined = hasModules
     ? {
-        modules: input.modules!,
+        modules: input.modules!.map((m) => ({ ...m, serviceId: serviceNameToIdMap.get(m.serviceName) })),
         methods: input.methods || [],
         moduleDependencies: input.moduleDependencies || [],
         methodDependencies: input.methodDependencies || [],
@@ -206,6 +227,77 @@ export async function generateViolations(
   }
 
   return { violations: allViolations, serviceDescriptions };
+}
+
+/**
+ * Generate violations with lifecycle tracking — returns new violations + resolved IDs
+ * instead of a flat violations array.
+ */
+export async function generateViolationsWithLifecycle(
+  input: ViolationGenerationInput,
+  onProgress?: (step: string) => void,
+): Promise<AllViolationsLifecycleResult> {
+  const provider = createLLMProvider();
+
+  const archRules = (input.llmRules || []).filter((r) => r.category === 'service');
+  const dbRules = (input.llmRules || []).filter((r) => r.category === 'database');
+  const moduleRules = (input.llmRules || []).filter((r) => r.category === 'module');
+
+  const serviceDtos = input.services.map((s) => ({
+    id: s.id,
+    name: s.name,
+    type: s.type,
+    framework: s.framework,
+    fileCount: s.fileCount,
+    layers: extractLayerNames(s.layerSummary),
+  }));
+
+  const depDtos = input.dependencies.map((d) => ({
+    source: d.sourceServiceName,
+    target: d.targetServiceName,
+    count: d.dependencyCount || 0,
+    type: d.dependencyType || undefined,
+  }));
+
+  const serviceContext: ServiceViolationContext = {
+    architecture: input.architecture,
+    services: serviceDtos,
+    dependencies: depDtos,
+    llmRules: archRules,
+    violations: input.serviceViolations,
+    existingViolations: input.existingServiceViolations,
+    baselineViolations: input.baselineServiceViolations,
+  };
+
+  const hasDBs = input.databases && input.databases.length > 0;
+  const dbContext: DatabaseViolationContext | undefined = hasDBs
+    ? { databases: input.databases!, llmRules: dbRules, existingViolations: input.existingDatabaseViolations }
+    : undefined;
+
+  const serviceNameToIdMap = new Map(serviceDtos.map((s) => [s.name, s.id]));
+
+  const hasModules = input.modules && input.modules.length > 0;
+  const moduleContext: ModuleViolationContext | undefined = hasModules
+    ? {
+        modules: input.modules!.map((m) => ({ ...m, serviceId: serviceNameToIdMap.get(m.serviceName) })),
+        methods: input.methods || [],
+        moduleDependencies: input.moduleDependencies || [],
+        methodDependencies: input.methodDependencies || [],
+        llmRules: moduleRules,
+        violations: input.moduleViolations,
+        existingViolations: input.existingModuleViolations,
+        baselineViolations: input.baselineModuleViolations,
+      }
+    : undefined;
+
+  const result = await provider.generateAllViolationsWithLifecycle({
+    service: serviceContext,
+    database: dbContext,
+    module: moduleContext,
+  });
+
+  onProgress?.('All checks done');
+  return result;
 }
 
 function extractLayerNames(layerSummary: unknown): string[] {
