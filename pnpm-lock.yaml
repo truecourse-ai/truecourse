@@ -294,6 +294,10 @@ importers:
       socket.io-client:
         specifier: ^4.7.0
         version: 4.8.3
+    optionalDependencies:
+      node-windows:
+        specifier: ^1.0.0-beta.8
+        version: 1.0.0-beta.8
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -3526,6 +3530,9 @@ packages:
   node-releases@2.0.36:
     resolution: {integrity: sha512-TdC8FSgHz8Mwtw9g5L4gR/Sh9XhSP/0DEkQxfEFXOpiul5IiHgHan2VhYYb6agDSfp4KuvltmGApc8HMgUrIkA==}
 
+  node-windows@1.0.0-beta.8:
+    resolution: {integrity: sha512-uLekXnSeem3nW5escID224Fd0U/1VtvE796JpSpOY+c73Cslz/Qn2WUHRJyPQJEMrNGAy/FMRFjjhh4z1alZTA==}
+
   npm-run-path@4.0.1:
     resolution: {integrity: sha512-S48WzZW777zhNIrn7gxOlISNAqi9ZC/uQFnRdbeIHhZhCA6UqpkOT8T1G7BvfdgP4Er8gF4sUbaS0i7QvIfCWw==}
     engines: {node: '>=8'}
@@ -4426,6 +4433,9 @@ packages:
   wsl-utils@0.3.1:
     resolution: {integrity: sha512-g/eziiSUNBSsdDJtCLB8bdYEUMj4jR7AGeUo96p/3dTafgjHhpF4RiCFPiRILwjQoDXx5MqkBr4fwWtR3Ky4Wg==}
     engines: {node: '>=20'}
+
+  xml@1.0.1:
+    resolution: {integrity: sha512-huCv9IH9Tcf95zuYCsQraZtWnJvBtLVE0QHMOs8bWyZAFZNDcYjsPq1nEx8jKA9y+Beo9v+7OBPRisQTjinQMw==}
 
   xmlhttprequest-ssl@2.1.2:
     resolution: {integrity: sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==}
@@ -7587,6 +7597,12 @@ snapshots:
 
   node-releases@2.0.36: {}
 
+  node-windows@1.0.0-beta.8:
+    dependencies:
+      xml: 1.0.1
+      yargs: 17.7.2
+    optional: true
+
   npm-run-path@4.0.1:
     dependencies:
       path-key: 3.1.1
@@ -8582,6 +8598,9 @@ snapshots:
     dependencies:
       is-wsl: 3.1.1
       powershell-utils: 0.1.0
+
+  xml@1.0.1:
+    optional: true
 
   xmlhttprequest-ssl@2.1.2: {}
 
