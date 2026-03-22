@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { getServerUrl } from "./helpers.js";
+import { getServerUrl, openInBrowser } from "./helpers.js";
 import { cpSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,8 @@ export async function runAdd(): Promise<void> {
     });
 
     if (p.isCancel(installSkills)) {
-      p.outro(`Open ${repoUrl}`);
+      openInBrowser(repoUrl);
+      p.outro("Opened in browser");
       return;
     }
 
@@ -65,7 +66,8 @@ export async function runAdd(): Promise<void> {
       }
     }
 
-    p.outro(`Open ${repoUrl}`);
+    openInBrowser(repoUrl);
+    p.outro("Opened in browser");
   } catch (err) {
     const message =
       err instanceof Error ? err.message : String(err);

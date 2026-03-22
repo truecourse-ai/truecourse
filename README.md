@@ -79,17 +79,13 @@ Track violation trends over time with charts showing how your codebase health ev
 ## Quick Start
 
 ```bash
-# 1. Start TrueCourse (first run walks you through setup)
-npx truecourse
-
-# 2. In another terminal, cd into your repo and analyze
 cd /path/to/your/repo
 npx truecourse analyze
 ```
 
-On first run, the setup wizard configures your LLM provider. An embedded PostgreSQL database is created automatically, no Docker or external database required.
+On first run, the server starts automatically and the setup wizard configures your LLM provider. An embedded PostgreSQL database is created automatically, no Docker or external database required.
 
-Violations print directly in your terminal. The web UI at **http://localhost:3001** shows an interactive dependency graph with violations highlighted.
+Violations print in your terminal and the web UI opens automatically with an interactive dependency graph and violations highlighted.
 
 ## CLI Commands
 

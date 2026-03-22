@@ -7,6 +7,7 @@ import {
   connectSocket,
   renderViolationsSummary,
   renderDiffResultsSummary,
+  openInBrowser,
 } from "./helpers.js";
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
@@ -14,7 +15,7 @@ const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 export async function runAnalyze(): Promise<void> {
   p.intro("Analyzing repository");
 
-  await ensureServer();
+  const firstRun = await ensureServer();
   const repo = await ensureRepo();
   p.log.step(`Repository: ${repo.name}`);
 
@@ -93,9 +94,11 @@ export async function runAnalyze(): Promise<void> {
     const violations = (await res.json()) as Violation[];
     renderViolationsSummary(violations);
 
-    const repoUrl = `${serverUrl}/repos/${repo.id}`;
-    const link = `\x1b[4m\x1b[38;5;75m${repoUrl}\x1b[0m`;
-    p.outro(`Open ${link} to see violations and architecture diagrams in the UI`);
+    if (firstRun) {
+      const repoUrl = `${serverUrl}/repos/${repo.id}`;
+      openInBrowser(repoUrl);
+    }
+    p.outro("Analysis complete");
   } catch (err) {
     spinner.stop("Analysis failed");
     const message = err instanceof Error ? err.message : String(err);

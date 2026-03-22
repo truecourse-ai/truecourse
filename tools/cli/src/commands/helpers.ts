@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import { io, type Socket } from "socket.io-client";
+import { exec } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -41,19 +42,27 @@ export function getServerUrl(): string {
   return `http://localhost:${port}`;
 }
 
-export async function ensureServer(): Promise<void> {
+/** Returns true if the server was just started (first run). */
+export async function ensureServer(): Promise<boolean> {
   const url = getServerUrl();
   try {
     const res = await fetch(`${url}/api/health`);
-    if (!res.ok) {
-      throw new Error(`Server returned ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    return false;
   } catch {
-    p.log.error(
-      "Could not connect to TrueCourse server. Is it running?\n" +
-        "  Start it with: npx truecourse start"
-    );
-    process.exit(1);
+    // Server not running — auto-start it
+    const { runStart } = await import("./start.js");
+    await runStart({ openBrowser: false });
+
+    // Verify it's up
+    try {
+      const res = await fetch(`${url}/api/health`);
+      if (!res.ok) throw new Error();
+    } catch {
+      p.log.error("Server failed to start. Check logs with: truecourse service logs");
+      process.exit(1);
+    }
+    return true;
   }
 }
 
@@ -333,4 +342,13 @@ export function renderDiffResultsSummary(result: DiffResult): void {
   console.log(`  Summary: ${result.summary.newCount} new issues, ${result.summary.resolvedCount} resolved`);
   console.log("");
   p.log.info("Run `truecourse list --diff` to see full details.");
+}
+
+export function openInBrowser(url: string): void {
+  const cmd = process.platform === "darwin"
+    ? "open"
+    : process.platform === "win32"
+      ? "start"
+      : "xdg-open";
+  exec(`${cmd} ${url}`);
 }

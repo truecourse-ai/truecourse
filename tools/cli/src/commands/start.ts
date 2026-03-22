@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readConfig, getServerUrl } from "./helpers.js";
+import { readConfig, getServerUrl, openInBrowser } from "./helpers.js";
 import { getPlatform } from "./service/platform.js";
 import { rotateLogs, rotateErrorLogs, getLogDir, getLogPath } from "./service/logs.js";
 
@@ -26,7 +26,7 @@ async function healthcheck(): Promise<boolean> {
   return false;
 }
 
-async function startServiceMode(): Promise<void> {
+async function startServiceMode(openBrowser: boolean): Promise<void> {
   const platform = getPlatform();
   const serverPath = getServerPath();
   const logDir = getLogDir();
@@ -59,6 +59,7 @@ async function startServiceMode(): Promise<void> {
   const healthy = await healthcheck();
   if (healthy) {
     p.log.success(`TrueCourse is running at ${url}`);
+    if (openBrowser) openInBrowser(url);
   } else {
     p.log.warn("Service started but server hasn't responded yet.");
     p.log.info("Check logs with: truecourse service logs");
@@ -98,14 +99,14 @@ function startConsoleMode(): void {
   process.on("SIGTERM", cleanup);
 }
 
-export async function runStart(): Promise<void> {
+export async function runStart({ openBrowser = true } = {}): Promise<void> {
   p.intro("Starting TrueCourse");
 
   const config = readConfig();
 
   if (config.runMode === "service") {
     try {
-      await startServiceMode();
+      await startServiceMode(openBrowser);
     } catch (error: any) {
       p.log.error(`Service mode failed: ${error.message}`);
       p.log.info("Falling back to console mode. Reconfigure with: truecourse setup");

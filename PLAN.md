@@ -1307,3 +1307,31 @@ Allow users to dismiss violations they've reviewed and consider acceptable. Dism
 2. Connect a GitHub repo → webhook triggers analysis on push
 3. Graph renders in cloud-hosted UI
 4. Team members can view the same repo analysis
+
+---
+
+## Optional: Claude Code / Codex Integration `STATUS: BACKLOG`
+
+Add an alternative execution mode where TrueCourse shells out to Claude Code (or Codex) CLI instead of calling the LLM API directly. This enables users with a Claude Code subscription to run analyses without a separate API key.
+
+### Approach
+- Spawn `claude --print - --output-format stream-json --verbose` as a child process
+- Feed prompts via stdin, parse structured JSON output from stdout
+- Track session IDs for conversation continuity across analysis steps
+- Strip Claude Code nesting guard env vars so it works when TrueCourse itself runs inside Claude Code
+
+### Scope
+- **Analysis pipeline:** Likely not suitable — requires 5-8 parallel structured output calls with Zod schemas. CLI subprocess model is slower, no structured output guarantees, no Langfuse tracing
+- **Chat feature:** Good fit — single conversational session, no structured output needed, benefits from Claude Code's file access tools
+- **Fix application:** Good fit — Claude Code can directly edit files with its built-in tools, better than generating fix prompts
+- **Codex:** Same subprocess pattern, different binary (`codex` CLI)
+
+### Configuration
+- Setup wizard asks: "Use API key or Claude Code subscription?"
+- Per-agent adapter config: `command`, `model`, `maxTurnsPerRun`, `timeoutSec`, `dangerouslySkipPermissions`
+- Fallback: if Claude Code session fails, offer to retry with API key
+
+### Why optional
+- Cloud version requires API (no CLI available server-side)
+- API gives better control: structured output, parallel calls, token tracking, Langfuse tracing
+- CLI approach only benefits local users with existing subscriptions
