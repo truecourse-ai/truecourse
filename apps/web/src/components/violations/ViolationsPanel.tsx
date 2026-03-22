@@ -1,12 +1,12 @@
 
 import { useCallback, useRef, useState, useMemo } from 'react';
-import { AlertTriangle, AlertCircle, Loader2, X, Shield, Network, Database, Box, FileCode, Braces } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Loader2, X, Shield, Network, Database, Box, FileCode, Braces, Search } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
+import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
 type CategoryFilter = 'all' | 'service' | 'module' | 'function' | 'database' | 'code';
-
 type ViolationsPanelProps = {
   violations: ViolationResponse[];
   isLoading: boolean;
@@ -33,6 +33,18 @@ const categories: { value: CategoryFilter; label: string; icon: React.ReactNode 
   { value: 'code', label: 'Code', icon: <FileCode className="h-3.5 w-3.5" /> },
 ];
 
+function matchesSearch(violation: ViolationResponse, search: string): boolean {
+  const q = search.toLowerCase();
+  return (
+    violation.title.toLowerCase().includes(q) ||
+    violation.content?.toLowerCase().includes(q) ||
+    violation.targetServiceName?.toLowerCase().includes(q) ||
+    violation.targetModuleName?.toLowerCase().includes(q) ||
+    violation.targetMethodName?.toLowerCase().includes(q) ||
+    false
+  );
+}
+
 export function ViolationsPanel({
   violations,
   isLoading,
@@ -50,6 +62,8 @@ export function ViolationsPanel({
   onOpenDatabaseInTab,
 }: ViolationsPanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
+  const [search, setSearch] = useState('');
 
   // Resizable ER panel
   const [erHeight, setErHeight] = useState(264);
@@ -161,46 +175,103 @@ export function ViolationsPanel({
     });
   }, [violations, selectedPath, nodeFilePathMap]);
 
-  // Apply category filter
-  const categoryFilteredViolations = useMemo(() => {
-    if (categoryFilter === 'all') return pathFilteredViolations;
-    return pathFilteredViolations.filter((v) => v.type === categoryFilter);
-  }, [pathFilteredViolations, categoryFilter]);
+  // Pre-category filtered: applies search + severity but not category
+  const preCategoryFiltered = useMemo(() => {
+    let result = pathFilteredViolations;
+    if (severityFilter !== 'all') result = result.filter((v) => v.severity === severityFilter);
+    if (search) result = result.filter((v) => matchesSearch(v, search));
+    return result;
+  }, [pathFilteredViolations, severityFilter, search]);
 
-  // Count violations per category for badge numbers (normal mode)
+  // Apply category filter on top
+  const fullyFilteredViolations = useMemo(() => {
+    if (categoryFilter === 'all') return preCategoryFiltered;
+    return preCategoryFiltered.filter((v) => v.type === categoryFilter);
+  }, [preCategoryFiltered, categoryFilter]);
+
+  // Category counts reflect search + severity filters
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const v of pathFilteredViolations) {
+    for (const v of preCategoryFiltered) {
       counts[v.type] = (counts[v.type] || 0) + 1;
     }
     return counts;
-  }, [pathFilteredViolations]);
+  }, [preCategoryFiltered]);
 
-  // Filter and count for diff mode
-  const filteredDiffCards = useMemo(() => {
+  // Severity counts reflect search + path filters (not severity filter itself)
+  const severityCounts = useMemo(() => {
+    let result = pathFilteredViolations;
+    if (search) result = result.filter((v) => matchesSearch(v, search));
+    const counts: Record<string, number> = {};
+    for (const v of result) {
+      counts[v.severity] = (counts[v.severity] || 0) + 1;
+    }
+    return counts;
+  }, [pathFilteredViolations, search]);
+
+  // Diff mode: pre-category filtered
+  const preCategoryDiffCards = useMemo(() => {
     if (!diffViolationCards) return null;
-    if (categoryFilter === 'all') return diffViolationCards;
-    return diffViolationCards.filter((c) => c.violation.type === categoryFilter);
-  }, [diffViolationCards, categoryFilter]);
+    let result = diffViolationCards;
+    if (severityFilter !== 'all') result = result.filter((c) => c.violation.severity === severityFilter);
+    if (search) result = result.filter((c) => matchesSearch(c.violation, search));
+    return result;
+  }, [diffViolationCards, severityFilter, search]);
+
+  const filteredDiffCards = useMemo(() => {
+    if (!preCategoryDiffCards) return null;
+    if (categoryFilter === 'all') return preCategoryDiffCards;
+    return preCategoryDiffCards.filter((c) => c.violation.type === categoryFilter);
+  }, [preCategoryDiffCards, categoryFilter]);
 
   const diffCategoryCounts = useMemo(() => {
-    if (!diffViolationCards) return {};
+    if (!preCategoryDiffCards) return {};
     const counts: Record<string, number> = {};
-    for (const c of diffViolationCards) {
+    for (const c of preCategoryDiffCards) {
       counts[c.violation.type] = (counts[c.violation.type] || 0) + 1;
     }
     return counts;
-  }, [diffViolationCards]);
+  }, [preCategoryDiffCards]);
+
+  const diffSeverityCounts = useMemo(() => {
+    if (!diffViolationCards) return {};
+    let result = diffViolationCards;
+    if (search) result = result.filter((c) => matchesSearch(c.violation, search));
+    const counts: Record<string, number> = {};
+    for (const c of result) {
+      counts[c.violation.severity] = (counts[c.violation.severity] || 0) + 1;
+    }
+    return counts;
+  }, [diffViolationCards, search]);
+
+  const activeSeverityCounts = isDiffMode ? diffSeverityCounts : severityCounts;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
-        {/* Sticky filters */}
+        {/* Search + severity filter */}
+        <div className="shrink-0 border-b border-border px-3 py-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search violations..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full rounded-md border border-border bg-background py-1.5 pl-7 pr-2 text-xs outline-none focus:border-primary/50"
+              />
+            </div>
+            <SeverityDropdown value={severityFilter} onChange={setSeverityFilter} counts={activeSeverityCounts} />
+          </div>
+        </div>
+
+        {/* Category tabs */}
         <div className="shrink-0 border-b border-border px-3 py-2">
           <div className="flex gap-1 overflow-x-auto scrollbar-thin">
             {categories.map((cat) => {
               const counts = isDiffMode ? diffCategoryCounts : categoryCounts;
-              const total = isDiffMode ? (diffViolationCards?.length || 0) : pathFilteredViolations.length;
+              const total = isDiffMode ? (preCategoryDiffCards?.length || 0) : preCategoryFiltered.length;
               const count = cat.value === 'all' ? total : counts[cat.value] || 0;
               return (
                 <button
@@ -282,22 +353,24 @@ export function ViolationsPanel({
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-              ) : categoryFilteredViolations.length === 0 ? (
+              ) : fullyFilteredViolations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
-                    {selectedPath
-                      ? 'No violations in this path'
-                      : selectedService
-                        ? 'No violations for this service'
-                        : categoryFilter !== 'all'
-                          ? `No ${categoryFilter} violations found`
-                          : 'No violations yet. Run an analysis to detect violations.'}
+                    {search
+                      ? 'No violations match your search'
+                      : selectedPath
+                        ? 'No violations in this path'
+                        : selectedService
+                          ? 'No violations for this service'
+                          : categoryFilter !== 'all' || severityFilter !== 'all'
+                            ? 'No violations match the selected filters'
+                            : 'No violations yet. Run an analysis to detect violations.'}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {categoryFilteredViolations.map((violation) => (
+                  {fullyFilteredViolations.map((violation) => (
                     <ViolationCard
                       key={violation.id}
                       violation={violation}

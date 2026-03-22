@@ -1,16 +1,16 @@
 
-import { useEffect, useState } from 'react';
-import { Shield, Network, Database, Box, FileCode, Loader2 } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Shield, Network, Database, Box, FileCode, Loader2, Search } from 'lucide-react';
 import { getRules, type RuleResponse } from '@/lib/api';
+import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 
-type CategoryFilter = 'all' | 'service' | 'database' | 'module' | 'code';
-
+type CategoryFilter = 'all' | 'service' | 'module' | 'database' | 'code';
 const severityColors: Record<string, string> = {
-  critical: 'bg-red-500/20 text-red-400 border-red-500/30',
-  high: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  low: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  info: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  critical: 'bg-red-600/20 text-red-400 border-red-600/30',
+  high: 'bg-red-500/20 text-red-400 border-red-500/30',
+  medium: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  low: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  info: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
 };
 
 const typeColors: Record<string, string> = {
@@ -36,6 +36,8 @@ export function RulesPanel() {
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<CategoryFilter>('all');
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     getRules()
@@ -47,16 +49,53 @@ export function RulesPanel() {
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
   const categoryOrder: Record<string, number> = { service: 0, module: 1, database: 2, code: 3 };
   const typeOrder: Record<string, number> = { deterministic: 0, llm: 1 };
-  const filtered = (filter === 'all' ? rules : rules.filter((r) => r.category === filter))
-    .slice()
-    .sort((a, b) =>
+
+  // Pre-category: search + severity filtered
+  const preCategoryFiltered = useMemo(() => {
+    let result = rules;
+    if (severityFilter !== 'all') result = result.filter((r) => r.severity === severityFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter((r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.description?.toLowerCase().includes(q) ||
+        r.key.toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [rules, severityFilter, search]);
+
+  const filtered = useMemo(() => {
+    const result = filter === 'all' ? preCategoryFiltered : preCategoryFiltered.filter((r) => r.category === filter);
+    return result.slice().sort((a, b) =>
       (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)
       || (categoryOrder[a.category] ?? 9) - (categoryOrder[b.category] ?? 9)
       || (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9)
     );
+  }, [preCategoryFiltered, filter]);
 
-  const categoryCounts: Record<string, number> = {};
-  for (const r of rules) categoryCounts[r.category] = (categoryCounts[r.category] || 0) + 1;
+  // Category counts reflect search + severity
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of preCategoryFiltered) counts[r.category] = (counts[r.category] || 0) + 1;
+    return counts;
+  }, [preCategoryFiltered]);
+
+  // Severity counts reflect search (not severity filter itself)
+  const severityCounts = useMemo(() => {
+    let result = rules;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter((r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.description?.toLowerCase().includes(q) ||
+        r.key.toLowerCase().includes(q)
+      );
+    }
+    const counts: Record<string, number> = {};
+    for (const r of result) counts[r.severity] = (counts[r.severity] || 0) + 1;
+    return counts;
+  }, [rules, search]);
 
   const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
     { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
@@ -76,11 +115,28 @@ export function RulesPanel() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Sticky filters */}
+      {/* Search + severity filter */}
+      <div className="shrink-0 border-b border-border px-3 py-2">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search rules..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full rounded-md border border-border bg-background py-1.5 pl-7 pr-2 text-xs outline-none focus:border-primary/50"
+            />
+          </div>
+          <SeverityDropdown value={severityFilter} onChange={setSeverityFilter} counts={severityCounts} />
+        </div>
+      </div>
+
+      {/* Category tabs */}
       <div className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-thin">
           {categories.map((cat) => {
-            const count = cat.value === 'all' ? rules.length : categoryCounts[cat.value] || 0;
+            const count = cat.value === 'all' ? preCategoryFiltered.length : categoryCounts[cat.value] || 0;
             return (
               <button
                 key={cat.value}
@@ -106,7 +162,9 @@ export function RulesPanel() {
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <Shield className="mb-3 h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No rules found</p>
+          <p className="text-sm text-muted-foreground">
+            {search ? 'No rules match your search' : 'No rules found'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">

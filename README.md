@@ -15,7 +15,7 @@
   <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
 </p>
 
-TrueCourse analyzes your codebase to detect architectural violations, code quality issues, and semantic bugs that traditional linters miss. It combines [tree-sitter](https://tree-sitter.github.io/tree-sitter/) static analysis with LLM-powered code review to surface actionable findings with fix suggestions.
+TrueCourse analyzes your codebase architecture and code to detect violations that traditional linters miss — circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, and more. It combines static analysis with AI review to surface findings with fix suggestions.
 
 Everything runs locally on your machine with your own API keys. Your code never leaves your environment.
 
@@ -27,7 +27,7 @@ Everything runs locally on your machine with your own API keys. Your code never 
 
 TrueCourse is designed with two interfaces:
 
-- **Web UI** — Interactive dependency graph, inline code viewer with violation markers, rules panel, and diff mode. Built for developers who want to explore and understand their codebase visually.
+- **Web UI** — Interactive dependency graph, inline code viewer with violation markers, cross-service flow tracing, database ER diagrams, analytics dashboard, and diff mode. Built for developers who want to explore and understand their codebase visually.
 - **CLI** — Analyze repos, list violations, and run diff checks from the terminal. Built for AI coding agents, CI pipelines, and automation workflows that need structured output.
 
 Both interfaces share the same analysis engine and database — run `analyze` from an agent, review results in the UI.
@@ -59,11 +59,22 @@ TrueCourse goes beyond architecture — it reviews your actual source code for s
 
 Code violations appear inline in the code viewer with severity markers, highlighted ranges, and fix suggestions. Deterministic rules (empty catch, console.log, hardcoded secrets, magic numbers, explicit `any`, SQL injection) run via AST visitors; semantic rules run via LLM.
 
+### Cross-Service Flow Tracing
+
+TrueCourse automatically detects request flows across service boundaries — HTTP calls, route handlers, and internal method chains — and visualizes them as end-to-end traces. Each flow shows the chain of services, modules, and methods involved, with severity indicators when violations exist along the path.
+
+### Database Analysis
+
+Databases are detected automatically from ORM usage (Prisma, TypeORM, Drizzle, Knex, etc.) and displayed as nodes in the dependency graph. Click a database node to see a full ER diagram with tables, columns, types, and relationships. LLM rules check for missing foreign keys, missing indexes, naming inconsistencies, and schema issues.
+
+### Analytics Dashboard
+
+Track violation trends over time with charts showing how your codebase health evolves across analyses. Breakdowns by severity, category, and rule help identify recurring patterns. Code hotspots highlight files with the most violations.
+
 ### Git Diff Mode
 
 - **New vs resolved** — See which violations your uncommitted changes introduce or fix
 - **Affected nodes** — Graph dims unaffected nodes, highlights touched services/modules/methods
-- **URL persistence** — Diff mode state preserved in URL for sharing and refreshing
 
 ## Quick Start
 
@@ -96,11 +107,11 @@ npx truecourse start          # Start the server
 Once the server is running, `cd` into any repo and:
 
 ```bash
+npx truecourse add            # Register repo without analyzing
 npx truecourse analyze        # Analyze current repo, show violations
 npx truecourse analyze --diff # Show new/resolved violations from uncommitted changes
 npx truecourse list           # Show violations from latest analysis
 npx truecourse list --diff    # Show saved diff check results
-npx truecourse add            # Register repo without analyzing
 ```
 
 ## Prerequisites
@@ -129,7 +140,7 @@ pnpm dev
 
 TrueCourse includes [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) that let you run analysis conversationally from within Claude Code.
 
-To install them, run `npx truecourse add` in your project and accept the prompt to install skills. This copies the skill files to `.claude/skills/truecourse/` in your project.
+When you register a repo with `npx truecourse add`, you'll be prompted to install Claude Code skills. Accepting copies the skill files to `.claude/skills/truecourse/` in your project.
 
 ### Available skills
 

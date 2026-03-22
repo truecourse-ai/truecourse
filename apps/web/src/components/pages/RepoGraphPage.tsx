@@ -847,8 +847,11 @@ export default function RepoGraphPage() {
           await api.deleteAnalysis(repoId, analysisId);
           setSelectedAnalysisId(null);
           refetchAnalyses();
-          if (isDiffMode) loadDiffCheck();
+          refetchViolations();
           refetchGraph();
+          refetchCodeViolationSummary();
+          refetchFlows();
+          if (isDiffMode) loadDiffCheck();
         }}
       />
 
