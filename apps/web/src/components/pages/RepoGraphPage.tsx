@@ -15,6 +15,7 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
+import { AnalyticsDashboard } from '@/components/analytics/AnalyticsDashboard';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
@@ -78,7 +79,19 @@ export default function RepoGraphPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [leftTab, setLeftTab] = useState<LeftTab | null>(searchParams?.get('flow') ? 'flows' : searchParams?.get('file') ? 'files' : 'violations');
+  const [leftTab, setLeftTabState] = useState<LeftTab | null>(
+    searchParams?.get('tab') === 'analytics' ? 'analytics' : searchParams?.get('flow') ? 'flows' : searchParams?.get('file') ? 'files' : 'violations'
+  );
+  const setLeftTab = useCallback((tab: LeftTab | null) => {
+    setLeftTabState(tab);
+    const url = new URL(window.location.href);
+    if (tab === 'analytics') {
+      url.searchParams.set('tab', 'analytics');
+    } else {
+      url.searchParams.delete('tab');
+    }
+    window.history.replaceState({}, '', url.toString());
+  }, []);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
   const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -1093,6 +1106,18 @@ export default function RepoGraphPage() {
               databaseId={activeDbId}
               violations={violations}
               isTab
+            />
+          ) : leftTab === 'analytics' ? (
+            <AnalyticsDashboard
+              repoId={repoId}
+              branch={currentBranch}
+              onNavigateToNode={(nodeId, kind) => {
+                setLeftTab('violations');
+                handleLocateNode(nodeId, kind === 'module' ? 'modules' : 'services');
+              }}
+              onOpenFile={(filePath) => {
+                handleOpenFile(filePath, true);
+              }}
             />
           ) : (
           <>

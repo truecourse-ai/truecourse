@@ -1006,7 +1006,7 @@ When `runMode` is `service`, `truecourse start` installs and starts the service 
 
 ---
 
-## Phase 10: Violation Lifecycle & Analytics Dashboard `STATUS: IN PROGRESS`
+## Phase 10: Violation Lifecycle & Analytics Dashboard `STATUS: DONE`
 
 Persistent violation tracking across analyses and an analytics dashboard showing violation trends over time.
 
@@ -1068,7 +1068,7 @@ This gives us:
 - `GET /api/repos/:id/violations/history` — returns violation counts per analysis over time (for trending)
 - Remove diff-check-specific violation endpoints — diff results are now queried the same way as full analysis results
 
-### 10.2 Analytics Dashboard `STATUS: BACKLOG`
+### 10.2 Analytics Dashboard `STATUS: DONE`
 
 A new "Analytics" tab in the frontend showing violation trends and breakdowns across analyses.
 
@@ -1111,7 +1111,7 @@ A new "Analytics" tab in the frontend showing violation trends and breakdowns ac
 - `GET /api/repos/:id/analytics/top-offenders` — services/modules ranked by violation count
 - `GET /api/repos/:id/analytics/resolution` — resolution velocity metrics
 
-### Test Plan (Phase 10) `STATUS: BACKLOG`
+### Test Plan (Phase 10) `STATUS: DONE`
 - Unified lifecycle: both full and diff analysis store violations as real rows with status field
 - Unified lifecycle: LLM receives previous active violations in prompt and returns new/unchanged/resolved classifications
 - Unified lifecycle: re-analyzing unchanged code → all violations have status `unchanged`, `previousViolationId` links to prior rows

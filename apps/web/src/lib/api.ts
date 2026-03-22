@@ -500,6 +500,76 @@ export function getConversationHistory(repoId: string, conversationId: string): 
   return fetchApi<ConversationHistory>(`/api/repos/${repoId}/chat/${conversationId}`);
 }
 
+// Analytics
+export type TrendDataPoint = {
+  analysisId: string;
+  date: string;
+  branch: string | null;
+  total: number;
+  new: number;
+  unchanged: number;
+  resolved: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+};
+
+export type TrendResponse = { points: TrendDataPoint[] };
+
+export type BreakdownResponse = {
+  byType: Record<string, number>;
+  bySeverity: Record<string, number>;
+  total: number;
+};
+
+export type TopOffender = {
+  id: string;
+  name: string;
+  kind: 'service' | 'module';
+  violationCount: number;
+  criticalCount: number;
+  highCount: number;
+};
+
+export type TopOffendersResponse = {
+  offenders: TopOffender[];
+  analysisId: string;
+};
+
+export type ResolutionResponse = {
+  avgTimeToResolveMs: number | null;
+  totalResolved: number;
+  totalActive: number;
+  resolutionRate: number;
+  staleCount: number;
+  staleDays: number;
+};
+
+export function getAnalyticsTrend(repoId: string, branch?: string, limit?: number): Promise<TrendResponse> {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (limit) params.set('limit', String(limit));
+  const qs = params.toString();
+  return fetchApi<TrendResponse>(`/api/repos/${repoId}/analytics/trend${qs ? `?${qs}` : ''}`);
+}
+
+export function getAnalyticsBreakdown(repoId: string, branch?: string): Promise<BreakdownResponse> {
+  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+  return fetchApi<BreakdownResponse>(`/api/repos/${repoId}/analytics/breakdown${params}`);
+}
+
+export function getAnalyticsTopOffenders(repoId: string, branch?: string): Promise<TopOffendersResponse> {
+  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+  return fetchApi<TopOffendersResponse>(`/api/repos/${repoId}/analytics/top-offenders${params}`);
+}
+
+export function getAnalyticsResolution(repoId: string, branch?: string): Promise<ResolutionResponse> {
+  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+  return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${params}`);
+}
+
 // Chat (SSE streaming)
 export function streamChat(
   repoId: string,

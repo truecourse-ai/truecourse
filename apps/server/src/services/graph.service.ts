@@ -688,6 +688,7 @@ function addDatabaseNodes(
         label: db.name,
         serviceType: db.type,
         fileCount: 0,
+        tableCount: Array.isArray(db.tables) ? db.tables.length : 0,
         layers: [],
         rootPath: '',
         dbType: db.type,
