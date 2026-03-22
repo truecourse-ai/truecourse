@@ -94,11 +94,13 @@ export async function runAnalyze(): Promise<void> {
     const violations = (await res.json()) as Violation[];
     renderViolationsSummary(violations);
 
+    const repoUrl = `${serverUrl}/repos/${repo.id}`;
     if (firstRun) {
-      const repoUrl = `${serverUrl}/repos/${repo.id}`;
       openInBrowser(repoUrl);
+      p.outro("Analysis complete — opened in browser");
+    } else {
+      p.outro(`Analysis complete — open ${repoUrl}`);
     }
-    p.outro("Analysis complete");
   } catch (err) {
     spinner.stop("Analysis failed");
     const message = err instanceof Error ? err.message : String(err);

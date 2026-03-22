@@ -1310,28 +1310,144 @@ Allow users to dismiss violations they've reviewed and consider acceptable. Dism
 
 ---
 
-## Optional: Claude Code / Codex Integration `STATUS: BACKLOG`
+## Phase 16: Claude Code CLI Provider `STATUS: IN PROGRESS`
 
-Add an alternative execution mode where TrueCourse shells out to Claude Code (or Codex) CLI instead of calling the LLM API directly. This enables users with a Claude Code subscription to run analyses without a separate API key.
+Alternative LLM provider that spawns `claude --print` as a subprocess instead of making API calls. Users with a Claude Code subscription can run TrueCourse without a separate API key. Architecture supports adding Codex later.
 
-### Approach
-- Spawn `claude --print - --output-format stream-json --verbose` as a child process
-- Feed prompts via stdin, parse structured JSON output from stdout
-- Track session IDs for conversation continuity across analysis steps
-- Strip Claude Code nesting guard env vars so it works when TrueCourse itself runs inside Claude Code
+**Key insight**: only the LLM transport changes. The entire pipeline — deterministic analysis, graph persistence, prompt compilation, variable binding, violation persistence — stays identical. The `LLMProvider` interface is the clean boundary.
 
-### Scope
-- **Analysis pipeline:** Likely not suitable — requires 5-8 parallel structured output calls with Zod schemas. CLI subprocess model is slower, no structured output guarantees, no Langfuse tracing
-- **Chat feature:** Good fit — single conversational session, no structured output needed, benefits from Claude Code's file access tools
-- **Fix application:** Good fit — Claude Code can directly edit files with its built-in tools, better than generating fix prompts
-- **Codex:** Same subprocess pattern, different binary (`codex` CLI)
+### Differences Between API and CLI Modes
+
+| Aspect | API Mode | CLI Mode |
+|---|---|---|
+| LLM transport | Vercel AI SDK `generateText()` | `claude --print` subprocess via stdin |
+| Structured output | `Output.object({ schema })` | `--json-schema` flag (native in Claude CLI) |
+| API key | Required | Not needed (uses Claude Code subscription) |
+| Langfuse tracing | Yes | No |
+| Code violations | File content injected | File paths — Claude reads via Read tool |
+| Non-code violations | Metadata injected | Same |
+| Parallel calls | Parallel API requests | Parallel subprocesses |
+| Permissions | N/A | `--dangerously-skip-permissions` + `--allowedTools` |
+
+### Architecture
+
+- `BaseCLIProvider` abstract class — shared subprocess logic (spawn, parse, validate, retry, env cleanup)
+- `ClaudeCodeProvider extends BaseCLIProvider` — Claude-specific binary name + CLI flags
+- Future: `CodexProvider extends BaseCLIProvider` — Codex-specific binary + flags
+- Zod schemas extracted to `schemas.ts` — shared between `AISDKProvider` and CLI providers
+- `zod-to-json-schema` converts Zod → JSON Schema for `--json-schema` CLI flag
+- `buildCodeTemplateVars` accepts `useFilePaths` option for CLI mode
+
+### CLI Flags
+
+```
+claude --print --output-format json --dangerously-skip-permissions --no-session-persistence --json-schema <schema>
+```
+
+- Non-code calls: add `--bare --tools ""` (no tools needed, faster)
+- Code violations: add `--allowedTools "Read"` (Claude reads files itself)
+- Chat: use `--output-format stream-json` + `--system-prompt`
 
 ### Configuration
-- Setup wizard asks: "Use API key or Claude Code subscription?"
-- Per-agent adapter config: `command`, `model`, `maxTurnsPerRun`, `timeoutSec`, `dangerouslySkipPermissions`
-- Fallback: if Claude Code session fails, offer to retry with API key
 
-### Why optional
-- Cloud version requires API (no CLI available server-side)
-- API gives better control: structured output, parallel calls, token tracking, Langfuse tracing
-- CLI approach only benefits local users with existing subscriptions
+`truecourse setup` offers:
+```
+? Which LLM provider would you like to use?
+  ○ Anthropic (Claude API)
+  ○ OpenAI (GPT API)
+  ○ Claude Code CLI (no API key needed)
+  ○ Skip for now
+```
+
+Env vars: `LLM_PROVIDER=claude-code`, `CLAUDE_CODE_MODEL`, `CLAUDE_CODE_TIMEOUT_MS`, `CLAUDE_CODE_MAX_RETRIES`
+
+### Nesting Guard
+
+`BaseCLIProvider.getCleanEnv()` strips `CLAUDE_CODE_*` and `CLAUDE_INTERNAL_*` env vars from child process to prevent nesting protection when TrueCourse runs inside Claude Code.
+
+### Files
+
+| File | Action |
+|---|---|
+| `apps/server/src/services/llm/schemas.ts` | NEW — extracted Zod output schemas |
+| `apps/server/src/services/llm/cli-provider.ts` | NEW — BaseCLIProvider + ClaudeCodeProvider |
+| `apps/server/src/services/llm/provider.ts` | MODIFY — import schemas, update factory |
+| `apps/server/src/services/llm/prompts.ts` | MODIFY — `buildCodeTemplateVars` useFilePaths option |
+| `apps/server/src/config/index.ts` | MODIFY — claude-code config vars |
+| `tools/cli/src/commands/setup.ts` | MODIFY — claude-code provider option |
+| `apps/server/package.json` | MODIFY — zod-to-json-schema dep |
+| `tests/server/cli-provider.test.ts` | NEW — tests |
+
+### Test Plan (Phase 16) `STATUS: IN PROGRESS`
+
+- `parseAndValidate`: valid JSON, invalid JSON, Zod validation failure
+- `getCleanEnv`: nesting guard vars stripped
+- Schema conversion: all Zod schemas convert to valid JSON Schema
+- Factory: `LLM_PROVIDER=claude-code` returns `ClaudeCodeProvider`
+- Provider implements full `LLMProvider` interface
+
+### Verification (Phase 16)
+1. `pnpm build` — no type errors
+2. `pnpm test` — all tests pass
+3. `npx truecourse setup` → select "Claude Code CLI" → env file correct
+4. Set `LLM_PROVIDER=claude-code`, analyze → violations appear
+5. Diff mode → lifecycle tracking works
+6. Chat → streaming works
+7. `claude` not on PATH → clear error
+8. Run from inside Claude Code → nesting guard works
+
+### Future: Codex Support
+
+Adding Codex requires only:
+1. `CodexProvider extends BaseCLIProvider` — different binary + flags
+2. Add `'codex'` to setup.ts and factory function
+3. Handle Codex-specific output format (JSONL vs JSON)
+
+---
+
+## Phase 17: LLM Usage Tracking `STATUS: BACKLOG`
+
+Track token usage and cost per analysis, independent of Langfuse. Works for both API and Claude Code CLI modes.
+
+### Data Sources
+
+- **API mode**: `generateText()` returns `result.usage` with `promptTokens`, `completionTokens`, `totalTokens` — already available, just not stored
+- **CLI mode**: JSON response includes `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens` and `total_cost_usd`
+
+### Schema
+
+New `analysis_usage` table:
+- `id`, `analysis_id` (FK), `provider` (anthropic/openai/claude-code)
+- `call_type` (service/database/module/code/enrichment/flow/chat)
+- `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `total_tokens`
+- `cost_usd` (nullable — available from CLI, can be estimated for API)
+- `duration_ms`, `created_at`
+
+### Provider Changes
+
+- Add `UsageData` type to `LLMProvider` interface or return usage alongside results
+- `AISDKProvider`: capture `result.usage` from each `generateText()` call
+- `ClaudeCodeProvider`: extract `usage` + `total_cost_usd` + `duration_ms` from JSON response
+- Store via a `recordUsage()` service after each LLM call
+
+### Frontend
+
+- New **"Analyses" tab** in the sidebar (alongside violations, rules, etc.)
+- Shows a list of all analyses for the current repo, each row with:
+  - Date/time, branch, type (normal/diff), provider (anthropic/openai/claude-code)
+  - Service count, duration
+  - Violations by severity (e.g., 2 critical · 3 high · 5 medium · 7 low)
+  - Code violations by severity (same breakdown)
+  - **Usage** button — opens a detail panel/modal showing token breakdown by call type, total cost, duration
+  - **Delete** button — deletes the analysis and all its violations (move existing delete from wherever it is to this tab)
+- Per-analysis usage detail: tokens by call type (service/database/module/code/enrichment), total cost, duration
+- Trend over time: cost/tokens per analysis across history
+- Provider comparison if user switches between modes
+
+### Test Plan (Phase 17) `STATUS: BACKLOG`
+
+- API mode: verify usage data captured from `generateText()` results
+- CLI mode: verify usage data extracted from JSON response
+- DB: usage rows created per LLM call, linked to correct analysis
+- Frontend: usage tab renders with correct totals
+- `pnpm build` and `pnpm test` pass

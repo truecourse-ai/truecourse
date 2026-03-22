@@ -11,19 +11,17 @@ type RepoSelectorProps = {
 export function RepoSelector({ onAdd }: RepoSelectorProps) {
   const [path, setPath] = useState('');
   const [isAdding, setIsAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!path.trim()) return;
 
     setIsAdding(true);
-    setError(null);
     try {
       await onAdd(path.trim());
       setPath('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add repository');
+    } catch {
+      // Error is handled by the parent via useRepo hook state
     } finally {
       setIsAdding(false);
     }
@@ -54,9 +52,6 @@ export function RepoSelector({ onAdd }: RepoSelectorProps) {
           Add Repository
         </Button>
       </div>
-      {error && (
-        <p className="mt-2 text-sm text-destructive">{error}</p>
-      )}
     </form>
   );
 }

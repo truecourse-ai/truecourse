@@ -66,8 +66,9 @@ async function startServiceMode(openBrowser: boolean): Promise<void> {
   }
 }
 
-function startConsoleMode(): void {
+function startConsoleMode(openBrowser: boolean): void {
   const serverPath = getServerPath();
+  const url = getServerUrl();
 
   p.log.step("Starting server (embedded PostgreSQL starts automatically)...");
 
@@ -97,6 +98,12 @@ function startConsoleMode(): void {
 
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
+
+  if (openBrowser) {
+    healthcheck().then((healthy) => {
+      if (healthy) openInBrowser(url);
+    });
+  }
 }
 
 export async function runStart({ openBrowser = true } = {}): Promise<void> {
@@ -110,9 +117,9 @@ export async function runStart({ openBrowser = true } = {}): Promise<void> {
     } catch (error: any) {
       p.log.error(`Service mode failed: ${error.message}`);
       p.log.info("Falling back to console mode. Reconfigure with: truecourse setup");
-      startConsoleMode();
+      startConsoleMode(openBrowser);
     }
   } else {
-    startConsoleMode();
+    startConsoleMode(openBrowser);
   }
 }

@@ -545,22 +545,34 @@ function formatExistingViolations(
 // ---------------------------------------------------------------------------
 
 /** Build template vars for violations-code prompt. */
-export function buildCodeTemplateVars(context: CodeViolationContext): TemplateVarsResult {
+export function buildCodeTemplateVars(
+  context: CodeViolationContext,
+  options?: { useFilePaths?: boolean },
+): TemplateVarsResult {
   const idMap: PromptIdMap = new Map();
 
   const llmRules = context.llmRules
     .map((r) => `- [${r.severity.toUpperCase()}] [key: ${r.key}] ${r.name}: ${r.prompt}`)
     .join('\n');
 
-  const fileList = context.files
-    .map((f) => {
-      const numbered = f.content
-        .split('\n')
-        .map((line, i) => `${i + 1}: ${line}`)
-        .join('\n');
-      return `=== ${f.path} ===\n${numbered}`;
-    })
-    .join('\n\n');
+  let fileList: string;
+  if (options?.useFilePaths) {
+    // CLI mode: pass file paths only — Claude reads them via Read tool
+    fileList = context.files
+      .map((f) => `=== ${f.path} ===\nRead this file using the Read tool before analyzing.`)
+      .join('\n\n');
+  } else {
+    // API mode: inline file content with line numbers
+    fileList = context.files
+      .map((f) => {
+        const numbered = f.content
+          .split('\n')
+          .map((line, i) => `${i + 1}: ${line}`)
+          .join('\n');
+        return `=== ${f.path} ===\n${numbered}`;
+      })
+      .join('\n\n');
+  }
 
   const existingViolations = context.existingViolations?.length
     ? context.existingViolations.map(

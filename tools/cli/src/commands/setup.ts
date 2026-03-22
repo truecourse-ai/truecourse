@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -56,8 +57,9 @@ export async function runSetup(): Promise<void> {
   const provider = await p.select({
     message: "Which LLM provider would you like to use?",
     options: [
-      { value: "anthropic", label: "Anthropic (Claude)" },
-      { value: "openai", label: "OpenAI (GPT)" },
+      { value: "claude-code", label: "Claude Code CLI — no API key needed (Recommended)" },
+      { value: "anthropic", label: "Anthropic (Claude API)" },
+      { value: "openai", label: "OpenAI (GPT API)" },
       { value: "skip", label: "Skip for now" },
     ],
   });
@@ -77,8 +79,19 @@ export async function runSetup(): Promise<void> {
   } = {};
 
   // Set LLM provider
-  if (provider === "anthropic" || provider === "openai") {
+  if (provider === "anthropic" || provider === "openai" || provider === "claude-code") {
     config.provider = provider;
+  }
+
+  // Claude Code CLI — validate binary exists, no API key needed
+  if (provider === "claude-code") {
+    try {
+      execSync("which claude", { stdio: "ignore" });
+    } catch {
+      p.log.error("Claude Code CLI not found on PATH. Install it first: https://docs.anthropic.com/en/docs/claude-code");
+      process.exit(1);
+    }
+    p.log.success("Claude Code CLI detected.");
   }
 
   // Collect API keys based on provider selection
@@ -120,7 +133,7 @@ export async function runSetup(): Promise<void> {
     config.openaiKey = openaiKey;
   }
 
-  // Select LLM model
+  // Select LLM model (not needed for claude-code — uses its own model selection)
   if (provider === "anthropic" || provider === "openai") {
     const defaultModel = DEFAULT_MODELS[provider];
     const model = await p.text({
@@ -136,8 +149,8 @@ export async function runSetup(): Promise<void> {
     config.model = model?.trim() || defaultModel;
   }
 
-  // Langfuse tracing
-  const useLangfuse = await p.confirm({
+  // Langfuse tracing (not applicable for claude-code)
+  const useLangfuse = provider !== "claude-code" && await p.confirm({
     message: "Would you like to enable Langfuse tracing?",
     initialValue: false,
   });

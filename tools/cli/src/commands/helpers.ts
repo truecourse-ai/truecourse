@@ -345,6 +345,7 @@ export function renderDiffResultsSummary(result: DiffResult): void {
 }
 
 export function openInBrowser(url: string): void {
+  console.log(`   Opening ${url}`);
   const cmd = process.platform === "darwin"
     ? "open"
     : process.platform === "win32"

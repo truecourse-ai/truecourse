@@ -51,6 +51,10 @@ async function main() {
   // 3b. Seed default rules (upserts — safe to run every startup)
   await seedRules();
   console.log('[Database] Rules seeded');
+  const llmModel = config.llmProvider === 'claude-code'
+    ? (config.claudeCodeModel || 'default')
+    : (config.llmModel || (config.llmProvider === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-5-mini'));
+  console.log(`[LLM] Provider: ${config.llmProvider}, model: ${llmModel}`);
 
   // 4. Setup Express app
   const app: express.Express = express();
@@ -115,11 +119,6 @@ async function main() {
       console.log('   ~~~~~~~~~~~~~~');
       console.log('');
       console.log(`   Charting your course...`);
-      console.log(`   Open \x1b[4m\x1b[38;5;75mhttp://localhost:${config.port}\x1b[0m to sail`);
-      console.log('');
-      console.log('   or analyze a repo from your terminal:');
-      console.log('     cd /path/to/your/repo');
-      console.log('     npx truecourse analyze');
       console.log('');
       resolve();
     });

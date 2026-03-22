@@ -26,8 +26,14 @@ async function fetchApi<T>(
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => 'Unknown error');
-    throw new ApiError(res.status, body);
+    let message = 'Unknown error';
+    try {
+      const body = await res.json();
+      message = body.error || JSON.stringify(body);
+    } catch {
+      message = await res.text().catch(() => 'Unknown error');
+    }
+    throw new ApiError(res.status, message);
   }
 
   if (res.status === 204) return undefined as T;
