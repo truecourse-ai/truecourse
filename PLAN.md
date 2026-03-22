@@ -1405,7 +1405,7 @@ Adding Codex requires only:
 
 ---
 
-## Phase 17: LLM Usage Tracking `STATUS: BACKLOG`
+## Phase 17: LLM Usage Tracking `STATUS: DONE`
 
 Track token usage and cost per analysis, independent of Langfuse. Works for both API and Claude Code CLI modes.
 
@@ -1444,7 +1444,7 @@ New `analysis_usage` table:
 - Trend over time: cost/tokens per analysis across history
 - Provider comparison if user switches between modes
 
-### Test Plan (Phase 17) `STATUS: BACKLOG`
+### Test Plan (Phase 17) `STATUS: DONE`
 
 - API mode: verify usage data captured from `generateText()` results
 - CLI mode: verify usage data extracted from JSON response

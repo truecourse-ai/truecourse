@@ -43,7 +43,8 @@ router.get(
       const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
       if (!repo) throw createAppError('Repo not found', 404);
 
-      const result = await getBreakdown(id, branch);
+      const analysisId = req.query.analysisId as string | undefined;
+      const result = await getBreakdown(id, branch, analysisId);
       res.json(result);
     } catch (err) {
       next(err);
@@ -62,7 +63,8 @@ router.get(
       const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
       if (!repo) throw createAppError('Repo not found', 404);
 
-      const result = await getTopOffenders(id, branch);
+      const analysisId = req.query.analysisId as string | undefined;
+      const result = await getTopOffenders(id, branch, analysisId);
       res.json(result);
     } catch (err) {
       next(err);

@@ -133,8 +133,9 @@ export async function getTrend(
 export async function getBreakdown(
   repoId: string,
   branch?: string,
+  specificAnalysisId?: string,
 ): Promise<BreakdownResponse> {
-  const analysisId = await findLatestAnalysisId(repoId, branch);
+  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(repoId, branch);
   if (!analysisId) return { byType: {}, bySeverity: {}, total: 0 };
 
   // Architecture violations: group by type and severity (only active)
@@ -217,8 +218,9 @@ export async function getBreakdown(
 export async function getTopOffenders(
   repoId: string,
   branch?: string,
+  specificAnalysisId?: string,
 ): Promise<TopOffendersResponse> {
-  const analysisId = await findLatestAnalysisId(repoId, branch);
+  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(repoId, branch);
   if (!analysisId) return { offenders: [], analysisId: '' };
 
   // Services with most violations

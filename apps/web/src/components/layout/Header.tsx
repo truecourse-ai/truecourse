@@ -1,5 +1,5 @@
 
-import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info, ChevronDown, Trash2 } from 'lucide-react';
+import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info, ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -20,7 +20,6 @@ type HeaderProps = {
   analyses?: AnalysisSummary[];
   selectedAnalysisId?: string | null;
   onSelectAnalysis?: (analysisId: string | null) => void;
-  onDeleteAnalysis?: (analysisId: string) => void;
   currentAnalysisId?: string | null;
 };
 
@@ -39,7 +38,6 @@ export function Header({
   analyses,
   selectedAnalysisId,
   onSelectAnalysis,
-  onDeleteAnalysis,
   currentAnalysisId,
 }: HeaderProps) {
   const [isDark, setIsDark] = useState(false);
@@ -118,32 +116,17 @@ export function Header({
                     const label = `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                     const isLatest = i === 0;
                     return (
-                      <div key={a.id} className="flex items-center group/item">
-                        <button
-                          className={`flex-1 whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
-                            (isLatest ? !selectedAnalysisId : selectedAnalysisId === a.id) ? 'bg-accent/50 font-medium text-foreground' : 'text-muted-foreground'
-                          }`}
-                          onClick={() => { onSelectAnalysis(isLatest ? null : a.id); setHistoryOpen(false); }}
-                        >
-                          <span>{label}</span>
-                          {a.branch && <span className="ml-1.5 font-mono opacity-60">{a.branch}</span>}
-                          {i === 0 && <span className="ml-1.5 text-primary/70">(latest)</span>}
-                        </button>
-                        {onDeleteAnalysis && (
-                          <button
-                            className="px-2 py-1.5 opacity-0 group-hover/item:opacity-100 text-muted-foreground hover:text-destructive transition-all"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm('Delete this analysis? This cannot be undone.')) {
-                                onDeleteAnalysis(a.id);
-                              }
-                            }}
-                            title="Delete analysis"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        key={a.id}
+                        className={`w-full whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-accent transition-colors ${
+                          (isLatest ? !selectedAnalysisId : selectedAnalysisId === a.id) ? 'bg-accent/50 font-medium text-foreground' : 'text-muted-foreground'
+                        }`}
+                        onClick={() => { onSelectAnalysis(isLatest ? null : a.id); setHistoryOpen(false); }}
+                      >
+                        <span>{label}</span>
+                        {a.branch && <span className="ml-1.5 font-mono opacity-60">{a.branch}</span>}
+                        {i === 0 && <span className="ml-1.5 text-primary/70">(latest)</span>}
+                      </button>
                     );
                   })}
                 </div>
@@ -193,22 +176,6 @@ export function Header({
           >
             {isAnalyzing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             {isAnalyzing ? 'Analyzing...' : 'Analyze'}
-          </Button>
-        )}
-        {onDeleteAnalysis && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled={!currentAnalysisId}
-            className={currentAnalysisId ? '' : 'invisible'}
-            onClick={() => {
-              if (currentAnalysisId && window.confirm('Delete this analysis? This cannot be undone.')) {
-                onDeleteAnalysis(currentAnalysisId);
-              }
-            }}
-            title="Delete current analysis"
-          >
-            <Trash2 className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
           </Button>
         )}
       </div>

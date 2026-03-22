@@ -17,7 +17,7 @@
 
 TrueCourse analyzes your codebase architecture and code to detect violations that traditional linters miss — circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, and more. It combines static analysis with AI review to surface findings with fix suggestions.
 
-Everything runs locally on your machine with your own API keys. Your code never leaves your environment.
+Everything runs locally on your machine. Works with Claude Code (no API key needed) or your own API keys. Your code never leaves your environment.
 
 <p align="center">
   <img src="assets/screenshot.png" alt="TrueCourse Screenshot" width="100%" />
@@ -83,7 +83,13 @@ cd /path/to/your/repo
 npx truecourse analyze
 ```
 
-On first run, the server starts automatically and the setup wizard configures your LLM provider. An embedded PostgreSQL database is created automatically, no Docker or external database required.
+On first run, the server starts automatically and the setup wizard configures your LLM provider:
+
+- **Claude Code CLI** (Recommended) — uses your Claude Code subscription, no API key needed
+- **Anthropic API** — requires an Anthropic API key
+- **OpenAI API** — requires an OpenAI API key
+
+An embedded PostgreSQL database is created automatically, no Docker or external database required.
 
 Violations print in your terminal and the web UI opens automatically with an interactive dependency graph and violations highlighted.
 
@@ -96,7 +102,7 @@ npx truecourse                # Runs setup + starts the server
 or you can run them one by one:
 
 ```bash
-npx truecourse setup          # Configure LLM keys
+npx truecourse setup          # Configure LLM provider
 npx truecourse start          # Start the server
 ```
 
@@ -113,7 +119,9 @@ npx truecourse list --diff    # Show saved diff check results
 ## Prerequisites
 
 - Node.js >= 20
-- An OpenAI or Anthropic API key
+- One of:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed (recommended, no API key needed)
+  - An Anthropic or OpenAI API key
 
 No database setup, no Docker. Everything runs locally out of the box.
 

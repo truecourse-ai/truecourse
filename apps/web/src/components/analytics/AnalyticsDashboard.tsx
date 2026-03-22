@@ -11,16 +11,18 @@ import type { TopOffender } from '@/lib/api';
 export function AnalyticsDashboard({
   repoId,
   branch,
+  analysisId,
   onNavigateToNode,
   onOpenFile,
 }: {
   repoId: string;
   branch?: string;
+  analysisId?: string;
   onNavigateToNode?: (nodeId: string, kind: 'service' | 'module') => void;
   onOpenFile?: (filePath: string) => void;
 }) {
   const { trend, breakdown, topOffenders, resolution, codeHotspots, isLoading, error, refetch } =
-    useAnalytics(repoId, branch);
+    useAnalytics(repoId, branch, analysisId);
 
   const handleNavigate = (offender: TopOffender) => {
     onNavigateToNode?.(offender.id, offender.kind);

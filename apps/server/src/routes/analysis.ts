@@ -16,6 +16,7 @@ import {
   moduleDeps,
   methodDeps,
   codeViolations,
+  analysisUsage,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
@@ -36,6 +37,7 @@ import {
   loadActiveCodeViolations,
 } from '../services/violation-lifecycle.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
+import { createLLMProvider } from '../services/llm/provider.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -275,6 +277,8 @@ router.post(
           .where(eq(repos.id, id));
 
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
+        const provider = createLLMProvider();
+        provider.setAnalysisId(newAnalysisId);
         try {
           await runViolationPipeline({
             repoId: id,
@@ -289,6 +293,7 @@ router.post(
             previousActiveCodeViolations,
             previousDeterministicViolations,
             onProgress: (progress) => emitAnalysisProgress(id, progress),
+            provider,
           });
 
           emitViolationsReady(id, analysis.id);
@@ -297,6 +302,13 @@ router.post(
             `[Violations] Failed for repo ${id}:`,
             violationError instanceof Error ? violationError.message : String(violationError)
           );
+        }
+
+        // Flush LLM usage records
+        try {
+          await provider.flushUsage();
+        } catch (usageError) {
+          console.error('[Usage] Failed to record usage:', usageError instanceof Error ? usageError.message : String(usageError));
         }
 
         emitAnalysisComplete(id, analysis.id);
@@ -317,7 +329,7 @@ router.post(
   }
 );
 
-// GET /api/repos/:id/analyses - List past analyses
+// GET /api/repos/:id/analyses - List past analyses (enhanced with counts)
 router.get(
   '/:id/analyses',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -346,7 +358,71 @@ router.get(
         .orderBy(desc(analyses.createdAt))
         .limit(20);
 
-      res.json(analysisList);
+      // Enrich with counts per analysis
+      const enriched = await Promise.all(
+        analysisList.map(async (a) => {
+          const [serviceCount, violationCounts, codeViolationCounts, usageSummary] = await Promise.all([
+            db.select({ count: sql<number>`count(*)::int` }).from(services).where(eq(services.analysisId, a.id)).then(([r]) => r.count),
+            db.select({
+              severity: violations.severity,
+              count: sql<number>`count(*)::int`,
+            }).from(violations).where(eq(violations.analysisId, a.id)).groupBy(violations.severity),
+            db.select({
+              severity: codeViolations.severity,
+              count: sql<number>`count(*)::int`,
+            }).from(codeViolations).where(eq(codeViolations.analysisId, a.id)).groupBy(codeViolations.severity),
+            db.select({
+              totalDurationMs: sql<number>`coalesce(sum(${analysisUsage.durationMs}), 0)::int`,
+              totalTokens: sql<number>`coalesce(sum(${analysisUsage.totalTokens}), 0)::int`,
+              totalCost: sql<string | null>`case when sum(case when ${analysisUsage.costUsd} is not null then 1 else 0 end) > 0 then sum(${analysisUsage.costUsd}::numeric)::text else null end`,
+              provider: sql<string | null>`max(${analysisUsage.provider})`,
+              callCount: sql<number>`count(*)::int`,
+            }).from(analysisUsage).where(eq(analysisUsage.analysisId, a.id)).then(([r]) => r),
+          ]);
+
+          const violationsBySeverity: Record<string, number> = {};
+          for (const { severity, count } of violationCounts) {
+            violationsBySeverity[severity] = count;
+          }
+
+          const codeViolationsBySeverity: Record<string, number> = {};
+          for (const { severity, count } of codeViolationCounts) {
+            codeViolationsBySeverity[severity] = count;
+          }
+
+          return {
+            ...a,
+            serviceCount,
+            violationsBySeverity,
+            codeViolationsBySeverity,
+            durationMs: usageSummary.totalDurationMs,
+            totalTokens: usageSummary.totalTokens,
+            totalCost: usageSummary.totalCost,
+            provider: usageSummary.provider,
+          };
+        }),
+      );
+
+      res.json(enriched);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// GET /api/repos/:id/analyses/:analysisId/usage - Usage breakdown for an analysis
+router.get(
+  '/:id/analyses/:analysisId/usage',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const analysisId = req.params.analysisId as string;
+
+      const rows = await db
+        .select()
+        .from(analysisUsage)
+        .where(eq(analysisUsage.analysisId, analysisId));
+
+      res.json(rows);
     } catch (error) {
       next(error);
     }
@@ -894,6 +970,8 @@ router.post(
       const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
 
       // Run violation pipeline
+      const diffProvider = createLLMProvider();
+      diffProvider.setAnalysisId(diffAnalysisId);
       const pipelineResult = await runViolationPipeline({
         repoId: id,
         repoPath: repo.path,
@@ -908,7 +986,9 @@ router.post(
         previousDeterministicViolations: prevDetViolations,
         changedFileSet,
         onProgress: (progress) => emitAnalysisProgress(id, progress),
+        provider: diffProvider,
       });
+      try { await diffProvider.flushUsage(); } catch { /* best-effort */ }
       // Compute affected node IDs from changed files + new violations
       const affectedServices = new Set<string>();
       for (const svc of result.services) {

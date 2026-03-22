@@ -8,7 +8,7 @@ import type {
   CodeViolationSummary,
 } from '@/lib/api';
 
-export function useAnalytics(repoId: string, branch?: string) {
+export function useAnalytics(repoId: string, branch?: string, analysisId?: string) {
   const [trend, setTrend] = useState<TrendResponse | null>(null);
   const [breakdown, setBreakdown] = useState<BreakdownResponse | null>(null);
   const [topOffenders, setTopOffenders] = useState<TopOffendersResponse | null>(null);
@@ -24,10 +24,10 @@ export function useAnalytics(repoId: string, branch?: string) {
     try {
       const [trendData, breakdownData, offendersData, resolutionData, hotspotsData] = await Promise.all([
         api.getAnalyticsTrend(repoId, branch),
-        api.getAnalyticsBreakdown(repoId, branch),
-        api.getAnalyticsTopOffenders(repoId, branch),
+        api.getAnalyticsBreakdown(repoId, branch, analysisId),
+        api.getAnalyticsTopOffenders(repoId, branch, analysisId),
         api.getAnalyticsResolution(repoId, branch),
-        api.getCodeViolationSummary(repoId),
+        api.getCodeViolationSummary(repoId, analysisId),
       ]);
       setTrend(trendData);
       setBreakdown(breakdownData);
@@ -39,7 +39,7 @@ export function useAnalytics(repoId: string, branch?: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, branch]);
+  }, [repoId, branch, analysisId]);
 
   useEffect(() => {
     fetchAnalytics();

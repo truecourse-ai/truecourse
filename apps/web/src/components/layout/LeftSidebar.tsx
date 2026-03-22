@@ -1,8 +1,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Shield, FolderTree, Workflow, Database, BarChart3 } from 'lucide-react';
+import { AlertTriangle, Shield, FolderTree, Workflow, Database, BarChart3, ClipboardList } from 'lucide-react';
 
-export type LeftTab = 'violations' | 'rules' | 'files' | 'flows' | 'databases' | 'analytics';
+export type LeftTab = 'violations' | 'rules' | 'files' | 'flows' | 'databases' | 'analytics' | 'analyses';
 
 type LeftSidebarProps = {
   activeTab: LeftTab | null;
@@ -20,6 +20,7 @@ const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
   { id: 'flows', icon: Workflow, label: 'Flows' },
   { id: 'databases', icon: Database, label: 'Databases' },
   { id: 'analytics', icon: BarChart3, label: 'Analytics' },
+  { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
 ];
 
 export function LeftSidebar({
@@ -67,7 +68,7 @@ export function LeftSidebar({
     [width, minWidth, maxWidth],
   );
 
-  const isOpen = activeTab !== null && activeTab !== 'analytics';
+  const isOpen = activeTab !== null && activeTab !== 'analytics' && activeTab !== 'analyses';
 
   return (
     <div className="flex flex-shrink-0 h-full">

@@ -17,6 +17,7 @@ import {
 } from './schemas.js';
 import type { Violation } from '@truecourse/shared';
 import { config } from '../../config/index.js';
+import { recordUsageBatch, type UsageData } from '../usage.service.js';
 import {
   getPrompt,
   buildServiceTemplateVars,
@@ -264,6 +265,18 @@ export interface FlowEnrichmentResult {
   stepDescriptions: { stepOrder: number; dataDescription: string }[];
 }
 
+export interface UsageRecord {
+  provider: string;
+  callType: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens: number;
+  costUsd?: string;
+  durationMs: number;
+}
+
 export interface LLMProvider {
   generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult>;
   generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult>;
@@ -275,6 +288,8 @@ export interface LLMProvider {
   enrichDeterministicViolations(detections: DeterministicDetectionForEnrichment[], architectureContext: string): Promise<EnrichmentResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
+  setAnalysisId(id: string): void;
+  flushUsage(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +330,39 @@ function getModel(): LanguageModel {
 // ---------------------------------------------------------------------------
 
 class AISDKProvider implements LLMProvider {
+  private _analysisId: string | null = null;
+  private _usageRecords: UsageRecord[] = [];
+
+  setAnalysisId(id: string): void {
+    this._analysisId = id;
+    this._usageRecords = [];
+  }
+
+  async flushUsage(): Promise<void> {
+    if (!this._analysisId || this._usageRecords.length === 0) return;
+    const records: UsageData[] = this._usageRecords.map((r) => ({
+      ...r,
+      analysisId: this._analysisId!,
+    }));
+    await recordUsageBatch(records);
+    this._usageRecords = [];
+  }
+
+  private collectUsage(
+    callType: string,
+    usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number },
+    durationMs: number,
+  ): void {
+    this._usageRecords.push({
+      provider: config.llmProvider,
+      callType,
+      inputTokens: usage.promptTokens ?? 0,
+      outputTokens: usage.completionTokens ?? 0,
+      totalTokens: usage.totalTokens ?? 0,
+      durationMs,
+    });
+  }
+
   async generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult> {
     const { vars, idMap } = buildServiceTemplateVars(context);
     const { text: prompt, langfusePrompt } = await getPrompt('violations-service', vars);
@@ -322,13 +370,15 @@ class AISDKProvider implements LLMProvider {
 
     console.log('[LLM] Service violations call starting...');
     const t0 = Date.now();
-    const { output: object } = await generateText({
+    const { output: object, usage } = await generateText({
       model,
       output: Output.object({ schema: ServiceViolationOutputSchema }),
       prompt,
       experimental_telemetry: telemetry('violations-service', langfusePrompt),
     });
-    console.log(`[LLM] Service violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    const dur = Date.now() - t0;
+    console.log(`[LLM] Service violations call done in ${dur}ms — ${object.violations.length} violations`);
+    this.collectUsage('service', usage, dur);
 
     return {
       violations: object.violations.map((v) => ({
@@ -356,13 +406,15 @@ class AISDKProvider implements LLMProvider {
 
     console.log('[LLM] Database violations call starting...');
     const t0 = Date.now();
-    const { output: object } = await generateText({
+    const { output: object, usage } = await generateText({
       model,
       output: Output.object({ schema: DatabaseViolationOutputSchema }),
       prompt,
       experimental_telemetry: telemetry('violations-database', langfusePrompt),
     });
-    console.log(`[LLM] Database violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    const dur = Date.now() - t0;
+    console.log(`[LLM] Database violations call done in ${dur}ms — ${object.violations.length} violations`);
+    this.collectUsage('database', usage, dur);
 
     return {
       violations: object.violations.map((v) => ({
@@ -392,13 +444,15 @@ class AISDKProvider implements LLMProvider {
 
     console.log('[LLM] Module violations call starting...');
     const t0 = Date.now();
-    const { output: object } = await generateText({
+    const { output: object, usage } = await generateText({
       model,
       output: Output.object({ schema: ModuleViolationOutputSchema }),
       prompt,
       experimental_telemetry: telemetry('violations-module', langfusePrompt),
     });
-    console.log(`[LLM] Module violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    const dur = Date.now() - t0;
+    console.log(`[LLM] Module violations call done in ${dur}ms — ${object.violations.length} violations`);
+    this.collectUsage('module', usage, dur);
 
     return {
       violations: object.violations.map((v) => {
@@ -486,13 +540,15 @@ class AISDKProvider implements LLMProvider {
             const { text: prompt, langfusePrompt } = await getPrompt('violations-service-lifecycle', vars);
             console.log('[LLM] Lifecycle service call starting...');
             const t0 = Date.now();
-            const { output: object } = await generateText({
+            const { output: object, usage } = await generateText({
               model,
               output: Output.object({ schema: LifecycleServiceOutputSchema }),
               prompt,
               experimental_telemetry: telemetry('violations-service-lifecycle', langfusePrompt),
             });
-            console.log(`[LLM] Lifecycle service call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            const dur = Date.now() - t0;
+            console.log(`[LLM] Lifecycle service call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            this.collectUsage('service', usage, dur);
             return object;
           })()]);
         } else {
@@ -510,13 +566,15 @@ class AISDKProvider implements LLMProvider {
             const { text: prompt, langfusePrompt } = await getPrompt('violations-database-lifecycle', vars);
             console.log('[LLM] Lifecycle database call starting...');
             const t0 = Date.now();
-            const { output: object } = await generateText({
+            const { output: object, usage } = await generateText({
               model,
               output: Output.object({ schema: DiffViolationOutputSchema }),
               prompt,
               experimental_telemetry: telemetry('violations-database-lifecycle', langfusePrompt),
             });
-            console.log(`[LLM] Lifecycle database call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            const dur = Date.now() - t0;
+            console.log(`[LLM] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            this.collectUsage('database', usage, dur);
             return object;
           })()]);
         } else {
@@ -537,13 +595,15 @@ class AISDKProvider implements LLMProvider {
             const { text: prompt, langfusePrompt } = await getPrompt('violations-module-lifecycle', vars);
             console.log('[LLM] Lifecycle module call starting...');
             const t0 = Date.now();
-            const { output: object } = await generateText({
+            const { output: object, usage } = await generateText({
               model,
               output: Output.object({ schema: DiffViolationOutputSchema }),
               prompt,
               experimental_telemetry: telemetry('violations-module-lifecycle', langfusePrompt),
             });
-            console.log(`[LLM] Lifecycle module call done in ${Date.now() - t0}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            const dur = Date.now() - t0;
+            console.log(`[LLM] Lifecycle module call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+            this.collectUsage('module', usage, dur);
             return {
               resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
               newViolations: object.newViolations.map((i) => {
@@ -673,13 +733,15 @@ class AISDKProvider implements LLMProvider {
     const t0 = Date.now();
 
     if (hasExisting) {
-      const { output: object } = await generateText({
+      const { output: object, usage } = await generateText({
         model,
         output: Output.object({ schema: CodeViolationLifecycleOutputSchema }),
         prompt,
         experimental_telemetry: telemetry('violations-code-lifecycle', langfusePrompt),
       });
-      console.log(`[LLM] Code violations call done in ${Date.now() - t0}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
+      const dur = Date.now() - t0;
+      console.log(`[LLM] Code violations call done in ${dur}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
+      this.collectUsage('code', usage, dur);
 
       return {
         violations: object.newViolations.map((v) => ({
@@ -697,13 +759,15 @@ class AISDKProvider implements LLMProvider {
       };
     }
 
-    const { output: object } = await generateText({
+    const { output: object, usage } = await generateText({
       model,
       output: Output.object({ schema: CodeViolationOutputSchema }),
       prompt,
       experimental_telemetry: telemetry('violations-code', langfusePrompt),
     });
-    console.log(`[LLM] Code violations call done in ${Date.now() - t0}ms — ${object.violations.length} violations`);
+    const dur = Date.now() - t0;
+    console.log(`[LLM] Code violations call done in ${dur}ms — ${object.violations.length} violations`);
+    this.collectUsage('code', usage, dur);
 
     return {
       violations: object.violations.map((v) => ({
@@ -765,13 +829,15 @@ class AISDKProvider implements LLMProvider {
 
     console.log(`[LLM] Enrichment call starting for ${detections.length} detections...`);
     const t0 = Date.now();
-    const { output: object } = await generateText({
+    const { output: object, usage } = await generateText({
       model,
       output: Output.object({ schema: EnrichmentOutputSchema }),
       prompt,
       experimental_telemetry: telemetry('violations-enrich-deterministic', langfusePrompt),
     });
-    console.log(`[LLM] Enrichment call done in ${Date.now() - t0}ms — ${object.enrichedViolations.length} enriched`);
+    const dur = Date.now() - t0;
+    console.log(`[LLM] Enrichment call done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
+    this.collectUsage('enrichment', usage, dur);
 
     return {
       enrichedViolations: object.enrichedViolations.map((e) => ({
@@ -787,13 +853,15 @@ class AISDKProvider implements LLMProvider {
 
     console.log(`[LLM] Flow enrichment call starting for ${context.flowName}...`);
     const t0 = Date.now();
-    const { output: object } = await generateText({
+    const { output: object, usage } = await generateText({
       model,
       output: Output.object({ schema: FlowEnrichmentOutputSchema }),
       prompt,
       experimental_telemetry: telemetry('flow-enrichment', langfusePrompt),
     });
-    console.log(`[LLM] Flow enrichment done in ${Date.now() - t0}ms`);
+    const dur = Date.now() - t0;
+    console.log(`[LLM] Flow enrichment done in ${dur}ms`);
+    this.collectUsage('flow', usage, dur);
 
     return {
       name: object.name,

@@ -1,5 +1,6 @@
 import {
   createLLMProvider,
+  type LLMProvider,
   type ServiceViolationContext,
   type DatabaseViolationContext,
   type ModuleViolationContext,
@@ -91,8 +92,9 @@ export interface ViolationGenerationInput {
 export async function generateViolations(
   input: ViolationGenerationInput,
   onProgress?: (step: string) => void,
+  externalProvider?: LLMProvider,
 ): Promise<ViolationsResult> {
-  const provider = createLLMProvider();
+  const provider = externalProvider ?? createLLMProvider();
 
   // Partition rules by category
   const archRules = (input.llmRules || []).filter((r) => r.category === 'service');
@@ -207,8 +209,9 @@ export async function generateViolations(
 export async function generateViolationsWithLifecycle(
   input: ViolationGenerationInput,
   onProgress?: (step: string) => void,
+  externalProvider?: LLMProvider,
 ): Promise<AllViolationsLifecycleResult> {
-  const provider = createLLMProvider();
+  const provider = externalProvider ?? createLLMProvider();
 
   const archRules = (input.llmRules || []).filter((r) => r.category === 'service');
   const dbRules = (input.llmRules || []).filter((r) => r.category === 'database');

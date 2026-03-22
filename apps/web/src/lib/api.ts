@@ -175,10 +175,36 @@ export type AnalysisSummary = {
   branch: string | null;
   architecture: string;
   createdAt: string;
+  serviceCount?: number;
+  violationsBySeverity?: Record<string, number>;
+  codeViolationsBySeverity?: Record<string, number>;
+  durationMs?: number;
+  totalTokens?: number;
+  totalCost?: string | null;
+  provider?: string | null;
+};
+
+export type AnalysisUsageRow = {
+  id: string;
+  analysisId: string;
+  provider: string;
+  callType: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: string | null;
+  durationMs: number;
+  createdAt: string;
 };
 
 export function getAnalyses(repoId: string): Promise<AnalysisSummary[]> {
   return fetchApi<AnalysisSummary[]>(`/api/repos/${repoId}/analyses`);
+}
+
+export function getAnalysisUsage(repoId: string, analysisId: string): Promise<AnalysisUsageRow[]> {
+  return fetchApi<AnalysisUsageRow[]>(`/api/repos/${repoId}/analyses/${analysisId}/usage`);
 }
 
 export function deleteAnalysis(repoId: string, analysisId: string): Promise<{ ok: boolean }> {
@@ -565,14 +591,20 @@ export function getAnalyticsTrend(repoId: string, branch?: string, limit?: numbe
   return fetchApi<TrendResponse>(`/api/repos/${repoId}/analytics/trend${qs ? `?${qs}` : ''}`);
 }
 
-export function getAnalyticsBreakdown(repoId: string, branch?: string): Promise<BreakdownResponse> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<BreakdownResponse>(`/api/repos/${repoId}/analytics/breakdown${params}`);
+export function getAnalyticsBreakdown(repoId: string, branch?: string, analysisId?: string): Promise<BreakdownResponse> {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<BreakdownResponse>(`/api/repos/${repoId}/analytics/breakdown${qs ? `?${qs}` : ''}`);
 }
 
-export function getAnalyticsTopOffenders(repoId: string, branch?: string): Promise<TopOffendersResponse> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<TopOffendersResponse>(`/api/repos/${repoId}/analytics/top-offenders${params}`);
+export function getAnalyticsTopOffenders(repoId: string, branch?: string, analysisId?: string): Promise<TopOffendersResponse> {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<TopOffendersResponse>(`/api/repos/${repoId}/analytics/top-offenders${qs ? `?${qs}` : ''}`);
 }
 
 export function getAnalyticsResolution(repoId: string, branch?: string): Promise<ResolutionResponse> {

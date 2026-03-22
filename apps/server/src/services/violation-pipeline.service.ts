@@ -14,7 +14,7 @@ import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
 import { getEnabledRules } from './rules.service.js';
-import { createLLMProvider, type CodeViolationContext, type CodeViolationsResult, type DiffViolationItem } from './llm/provider.js';
+import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type DiffViolationItem } from './llm/provider.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
   persistViolationsWithLifecycle,
@@ -88,6 +88,8 @@ export interface ViolationPipelineInput {
   changedFileSet?: Set<string>;
   /** Progress callback */
   onProgress?: (progress: { step: string; percent: number; detail?: string }) => void;
+  /** Optional pre-created provider (for usage tracking) */
+  provider?: LLMProvider;
 }
 
 export interface ViolationPipelineResult {
@@ -165,6 +167,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     serviceIdMap, moduleIdMap, methodIdMap, dbIdMap,
     previousActiveViolations, previousActiveCodeViolations, previousDeterministicViolations,
     changedFileSet, onProgress,
+    provider: externalProvider,
   } = input;
 
   // 1. Load rules
@@ -387,7 +390,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // Architecture context for enrichment
   const architectureContext = `Architecture: ${result.architecture}\nServices: ${result.services.map((s) => `${s.name} (${s.type})`).join(', ')}`;
 
-  const provider = createLLMProvider();
+  const provider = externalProvider ?? createLLMProvider();
   const now = new Date();
   const allNewViolations: DiffViolationItem[] = [];
   const allResolvedViolationIds: string[] = [];
@@ -663,7 +666,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
         llmStepCount++;
         emitProgress(87 + llmStepCount * 2, step);
-      });
+      }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
       allResolvedViolationIds.push(...archResult.resolvedViolationIds);
       allNewViolations.push(...archResult.newViolations);
@@ -692,7 +695,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const archResult = await generateViolations(violationInput, (step) => {
         llmStepCount++;
         emitProgress(87 + llmStepCount * 2, step);
-      });
+      }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
 
       // LLM first-run violations

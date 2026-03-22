@@ -59,6 +59,7 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   methods: many(methods),
   moduleDeps: many(moduleDeps),
   flows: many(flows),
+  usageRecords: many(analysisUsage),
 }));
 
 // ---------------------------------------------------------------------------
@@ -628,5 +629,33 @@ export const flowStepsRelations = relations(flowSteps, ({ one }) => ({
   flow: one(flows, {
     fields: [flowSteps.flowId],
     references: [flows.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// analysis_usage (LLM token usage per call per analysis)
+// ---------------------------------------------------------------------------
+
+export const analysisUsage = pgTable('analysis_usage', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  analysisId: uuid('analysis_id')
+    .notNull()
+    .references(() => analyses.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(), // 'anthropic' | 'openai' | 'claude-code'
+  callType: text('call_type').notNull(), // 'service' | 'database' | 'module' | 'code' | 'enrichment' | 'flow'
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+  totalTokens: integer('total_tokens').notNull().default(0),
+  costUsd: text('cost_usd'), // nullable — stored as string for precision
+  durationMs: integer('duration_ms').notNull().default(0),
+  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
+});
+
+export const analysisUsageRelations = relations(analysisUsage, ({ one }) => ({
+  analysis: one(analyses, {
+    fields: [analysisUsage.analysisId],
+    references: [analyses.id],
   }),
 }));

@@ -64,9 +64,9 @@ describe('ClaudeCodeProvider', () => {
       });
       const result = (provider as any).parseAndValidate(raw, ServiceViolationOutputSchema);
 
-      expect(result.violations).toHaveLength(1);
-      expect(result.violations[0].title).toBe('Test violation');
-      expect(result.violations[0].severity).toBe('medium');
+      expect(result.data.violations).toHaveLength(1);
+      expect(result.data.violations[0].title).toBe('Test violation');
+      expect(result.data.violations[0].severity).toBe('medium');
     });
 
     it('falls back to result field as JSON', async () => {
@@ -86,7 +86,7 @@ describe('ClaudeCodeProvider', () => {
       });
       const result = (provider as any).parseAndValidate(raw, ServiceViolationOutputSchema);
 
-      expect(result.violations).toHaveLength(0);
+      expect(result.data.violations).toHaveLength(0);
     });
 
     it('throws on is_error response', async () => {

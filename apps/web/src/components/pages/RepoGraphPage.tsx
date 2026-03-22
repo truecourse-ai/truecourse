@@ -16,6 +16,7 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalyticsDashboard } from '@/components/analytics/AnalyticsDashboard';
+import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
@@ -79,14 +80,20 @@ export default function RepoGraphPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [leftTab, setLeftTabState] = useState<LeftTab | null>(
-    searchParams?.get('tab') === 'analytics' ? 'analytics' : searchParams?.get('flow') ? 'flows' : searchParams?.get('file') ? 'files' : 'violations'
-  );
+  const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
+    const tabParam = searchParams?.get('tab');
+    if (tabParam && ['violations', 'rules', 'files', 'flows', 'databases', 'analytics', 'analyses'].includes(tabParam)) {
+      return tabParam as LeftTab;
+    }
+    if (searchParams?.get('flow')) return 'flows';
+    if (searchParams?.get('file')) return 'files';
+    return 'violations';
+  });
   const setLeftTab = useCallback((tab: LeftTab | null) => {
     setLeftTabState(tab);
     const url = new URL(window.location.href);
-    if (tab === 'analytics') {
-      url.searchParams.set('tab', 'analytics');
+    if (tab && tab !== 'violations') {
+      url.searchParams.set('tab', tab);
     } else {
       url.searchParams.delete('tab');
     }
@@ -843,16 +850,6 @@ export default function RepoGraphPage() {
         selectedAnalysisId={selectedAnalysisId}
         onSelectAnalysis={setSelectedAnalysisId}
         currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
-        onDeleteAnalysis={async (analysisId) => {
-          await api.deleteAnalysis(repoId, analysisId);
-          setSelectedAnalysisId(null);
-          refetchAnalyses();
-          refetchViolations();
-          refetchGraph();
-          refetchCodeViolationSummary();
-          refetchFlows();
-          if (isDiffMode) loadDiffCheck();
-        }}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -863,6 +860,7 @@ export default function RepoGraphPage() {
             : allViolations.length,
           flows: flowList.length,
           databases: nodes.filter((n) => n.type === 'database').length,
+          analyses: analyses.length,
         }}>
           {leftTab === 'violations' && (
             <ViolationsPanel
@@ -1129,6 +1127,7 @@ export default function RepoGraphPage() {
             <AnalyticsDashboard
               repoId={repoId}
               branch={currentBranch}
+              analysisId={graphAnalysisId}
               onNavigateToNode={(nodeId, kind) => {
                 setLeftTab('violations');
                 handleLocateNode(nodeId, kind === 'module' ? 'modules' : 'services');
@@ -1136,6 +1135,25 @@ export default function RepoGraphPage() {
               onOpenFile={(filePath) => {
                 handleOpenFile(filePath, true);
               }}
+            />
+          ) : leftTab === 'analyses' ? (
+            <AnalysesPanel
+              analyses={analyses}
+              isLoading={false}
+              currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
+              selectedAnalysisId={selectedAnalysisId}
+              onSelectAnalysis={setSelectedAnalysisId}
+              onDeleteAnalysis={async (analysisId) => {
+                await api.deleteAnalysis(repoId, analysisId);
+                setSelectedAnalysisId(null);
+                refetchAnalyses();
+                refetchViolations();
+                refetchGraph();
+                refetchCodeViolationSummary();
+                refetchFlows();
+                if (isDiffMode) loadDiffCheck();
+              }}
+              repoId={repoId}
             />
           ) : (
           <>

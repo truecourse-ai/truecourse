@@ -64,6 +64,13 @@
       "when": 1774121664073,
       "tag": "0008_medical_la_nuit",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1774208404071,
+      "tag": "0009_sticky_blizzard",
+      "breakpoints": true
     }
   ]
 }
