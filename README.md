@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml"><img src="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml/badge.svg" alt="Tests" /></a>
   <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/dm/truecourse" alt="npm downloads" /></a>
 </p>
 
 TrueCourse analyzes your codebase architecture and code to detect violations that traditional linters miss — circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, and more. It combines static analysis with AI review to surface findings with fix suggestions.
