@@ -6,8 +6,8 @@
 import type { FileAnalysis, Entity, EntityField, EntityRelationship } from '@truecourse/shared'
 import { dataLayerPatterns } from '../patterns/layer-patterns.js'
 import { matchesPattern } from '../patterns/index.js'
-import Parser from 'tree-sitter'
-import TypeScript from 'tree-sitter-typescript'
+import type Parser from 'tree-sitter'
+import { getParser } from '../parser.js'
 
 /**
  * Check if a file likely contains entities based on ORM import patterns
@@ -92,12 +92,8 @@ function mapToSimpleType(type: string): string {
 }
 
 class TypeScriptEntityDetector {
-  private parser: Parser
+  private parser = getParser('typescript')
 
-  constructor() {
-    this.parser = new Parser()
-    this.parser.setLanguage(TypeScript.typescript)
-  }
 
   shouldScanFile(filePath: string): boolean {
     if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {

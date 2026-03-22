@@ -241,8 +241,13 @@ export default function RepoGraphPage() {
 
   const currentBranch = repo?.defaultBranch;
   const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
-  const { violations, allViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
+  const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
+
+  // In diff mode with no diff result yet, show no violations
+  const emptyViolations = isDiffMode && !diffResult;
+  const violations = emptyViolations ? [] : rawViolations;
+  const allViolations = emptyViolations ? [] : rawAllViolations;
   const { analyses, refetch: refetchAnalyses } = useAnalysisList(repoId);
   const graphAnalysisId = isDiffMode && diffResult?.diffAnalysisId
     ? diffResult.diffAnalysisId
@@ -250,8 +255,10 @@ export default function RepoGraphPage() {
   const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
     useGraph(repoId, currentBranch, depthLevel, graphAnalysisId);
 
-  const { summary: codeViolationSummary, refetch: refetchCodeViolationSummary } = useCodeViolationSummary(repoId, graphAnalysisId);
-  const { flows: flowList, severities: flowSeverities, isLoading: flowsLoading, refetch: refetchFlows } = useFlows(repoId);
+  const { summary: rawCodeViolationSummary, refetch: refetchCodeViolationSummary } = useCodeViolationSummary(repoId, graphAnalysisId);
+  const codeViolationSummary = emptyViolations ? undefined : rawCodeViolationSummary;
+  const { flows: flowList, severities: rawFlowSeverities, isLoading: flowsLoading, refetch: refetchFlows } = useFlows(repoId);
+  const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -835,6 +842,14 @@ export default function RepoGraphPage() {
         analyses={analyses}
         selectedAnalysisId={selectedAnalysisId}
         onSelectAnalysis={setSelectedAnalysisId}
+        currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
+        onDeleteAnalysis={async (analysisId) => {
+          await api.deleteAnalysis(repoId, analysisId);
+          setSelectedAnalysisId(null);
+          refetchAnalyses();
+          if (isDiffMode) loadDiffCheck();
+          refetchGraph();
+        }}
       />
 
       <div className="flex flex-1 overflow-hidden">

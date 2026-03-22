@@ -175,6 +175,10 @@ export function getAnalyses(repoId: string): Promise<AnalysisSummary[]> {
   return fetchApi<AnalysisSummary[]>(`/api/repos/${repoId}/analyses`);
 }
 
+export function deleteAnalysis(repoId: string, analysisId: string): Promise<{ ok: boolean }> {
+  return fetchApi(`/api/repos/${repoId}/analyses/${analysisId}`, { method: 'DELETE' });
+}
+
 // Graph
 export function getGraph(
   repoId: string,

@@ -569,6 +569,26 @@ router.delete(
   }
 );
 
+// DELETE /api/repos/:id/analyses/:analysisId - Delete a specific analysis
+router.delete(
+  '/:id/analyses/:analysisId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const analysisId = req.params.analysisId as string;
+
+      const existing = await db.select({ id: analyses.id }).from(analyses).where(eq(analyses.id, analysisId));
+      if (existing.length === 0) {
+        throw createAppError('Analysis not found', 404);
+      }
+
+      await db.delete(analyses).where(eq(analyses.id, analysisId));
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // PUT /api/repos/:id/graph/collapsed - Save collapsed node IDs for a mode
 router.put(
   '/:id/graph/collapsed',
