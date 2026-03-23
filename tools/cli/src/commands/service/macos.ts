@@ -63,6 +63,11 @@ export class MacOSService implements ServicePlatform {
     const envFile = path.join(os.homedir(), ".truecourse", ".env");
     const envVars = parseEnvFile(envFile);
 
+    // Include PATH so the service can find binaries like `claude`
+    if (process.env.PATH && !envVars.PATH) {
+      envVars.PATH = process.env.PATH;
+    }
+
     fs.mkdirSync(PLIST_DIR, { recursive: true });
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
 

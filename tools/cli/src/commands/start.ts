@@ -14,7 +14,7 @@ function getServerPath(): string {
 
 async function healthcheck(): Promise<boolean> {
   const url = getServerUrl();
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 120; i++) {
     try {
       const res = await fetch(`${url}/api/health`);
       if (res.ok) return true;
