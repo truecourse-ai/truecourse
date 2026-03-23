@@ -1,8 +1,11 @@
 import * as p from "@clack/prompts";
 import { io, type Socket } from "socket.io-client";
 import { exec } from "node:child_process";
+import { cpSync, existsSync } from "node:fs";
 import fs from "node:fs";
 import path from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 
 const DEFAULT_PORT = 3001;
@@ -50,19 +53,37 @@ export async function ensureServer(): Promise<boolean> {
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     return false;
   } catch {
+    // Run setup if not configured yet
+    const envPath = path.join(os.homedir(), ".truecourse", ".env");
+    if (!fs.existsSync(envPath)) {
+      const { runSetup } = await import("./setup.js");
+      await runSetup();
+    }
+
     // Server not running — auto-start it
-    const { runStart } = await import("./start.js");
+    const { runStart, getServerProcess } = await import("./start.js");
     await runStart({ openBrowser: false });
 
-    // Verify it's up
-    try {
-      const res = await fetch(`${url}/api/health`);
-      if (!res.ok) throw new Error();
-    } catch {
-      p.log.error("Server failed to start. Check logs with: truecourse service logs");
-      process.exit(1);
+    // Kill server subprocess when this process exits (console mode only)
+    const killServer = () => {
+      const proc = getServerProcess();
+      if (proc && !proc.killed) proc.kill("SIGTERM");
+    };
+    process.on("exit", killServer);
+
+    // Wait for server to be ready (may take time on first run for Postgres download)
+    for (let i = 0; i < 120; i++) {
+      try {
+        const res = await fetch(`${url}/api/health`);
+        if (res.ok) return true;
+      } catch {
+        // Not ready yet
+      }
+      await new Promise((r) => setTimeout(r, 500));
     }
-    return true;
+
+    p.log.error("Server failed to start. Check logs with: truecourse service logs");
+    process.exit(1);
   }
 }
 
@@ -89,7 +110,14 @@ export async function ensureRepo(): Promise<{ id: string; name: string }> {
     process.exit(1);
   }
 
-  return (await res.json()) as { id: string; name: string };
+  const repo = (await res.json()) as { id: string; name: string };
+
+  // First time adding this repo — ask about Claude Code skills
+  if (res.status === 201) {
+    await promptInstallSkills(process.cwd());
+  }
+
+  return repo;
 }
 
 export function connectSocket(repoId: string): Socket {
@@ -352,4 +380,33 @@ export function openInBrowser(url: string): void {
       ? "start"
       : "xdg-open";
   exec(`${cmd} ${url}`);
+}
+
+/** Prompt to install Claude Code skills into a repo directory. */
+export async function promptInstallSkills(repoPath: string): Promise<void> {
+  const installSkills = await p.confirm({
+    message: "Would you like to install Claude Code skills?",
+  });
+
+  if (p.isCancel(installSkills) || !installSkills) return;
+
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  // In source: src/commands/ → ../../skills/truecourse
+  // In dist:   dist/ → ./skills/truecourse
+  const srcPath = resolve(__dirname, "..", "..", "skills", "truecourse");
+  const distPath = resolve(__dirname, "skills", "truecourse");
+  const skillsSrc = existsSync(srcPath) ? srcPath : distPath;
+
+  if (!existsSync(skillsSrc)) {
+    p.log.warn("Skills directory not found in package — skipping.");
+    return;
+  }
+
+  const skillsDest = resolve(repoPath, ".claude", "skills");
+  cpSync(skillsSrc, skillsDest, { recursive: true });
+
+  p.log.success("Installed Claude Code skills:");
+  p.log.message("  - truecourse-analyze  (run analysis)");
+  p.log.message("  - truecourse-list     (list violations)");
+  p.log.message("  - truecourse-fix      (apply fixes)");
 }

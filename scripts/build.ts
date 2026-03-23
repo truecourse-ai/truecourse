@@ -102,6 +102,12 @@ run(
 // Ensure CLI is executable
 fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
 
+// 6b. Copy Claude Code skills
+console.log('Copying skills...');
+const skillsSrc = path.join(ROOT, 'tools/cli/skills');
+const skillsDest = path.join(DIST, 'skills');
+copyDir(skillsSrc, skillsDest);
+
 // 7. Generate package.json for npm publish
 console.log('\nGenerating package.json...');
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));

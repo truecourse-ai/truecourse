@@ -72,3 +72,9 @@ export function emitViolationsReady(
   const io = getIO();
   io.to(`repo:${repoId}`).emit('violations:ready', { repoId, analysisId });
 }
+
+export function emitAnalysisCanceled(repoId: string): void {
+  activeAnalyses.delete(repoId);
+  const io = getIO();
+  io.to(`repo:${repoId}`).emit('analysis:canceled', { repoId });
+}

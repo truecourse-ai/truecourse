@@ -1,8 +1,5 @@
 import * as p from "@clack/prompts";
-import { getServerUrl } from "./helpers.js";
-import { cpSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { getServerUrl, promptInstallSkills } from "./helpers.js";
 
 export async function runAdd(): Promise<void> {
   const repoPath = process.cwd();
@@ -36,34 +33,7 @@ export async function runAdd(): Promise<void> {
 
     p.log.success(`Repository "${repo.name}" added`);
 
-    // Prompt to install Claude Code skills
-    const installSkills = await p.confirm({
-      message: "Would you like to install Claude Code skills?",
-    });
-
-    if (p.isCancel(installSkills)) {
-      p.outro(`Open ${repoUrl}`);
-      return;
-    }
-
-    if (installSkills) {
-      const cliDir = dirname(fileURLToPath(import.meta.url));
-      // In dist: dist/commands/add.js → skills/truecourse/
-      // In src:  src/commands/add.ts → ../../skills/truecourse/
-      const skillsSrc = resolve(cliDir, "..", "..", "skills", "truecourse");
-
-      if (!existsSync(skillsSrc)) {
-        p.log.warn("Skills directory not found in package — skipping.");
-      } else {
-        const skillsDest = resolve(repoPath, ".claude", "skills", "truecourse");
-        cpSync(skillsSrc, skillsDest, { recursive: true });
-
-        p.log.success("Installed Claude Code skills:");
-        p.log.message("  - truecourse-analyze  (run analysis)");
-        p.log.message("  - truecourse-list     (list violations)");
-        p.log.message("  - truecourse-fix      (apply fixes)");
-      }
-    }
+    await promptInstallSkills(repoPath);
 
     p.outro(`Open ${repoUrl}`);
   } catch (err) {

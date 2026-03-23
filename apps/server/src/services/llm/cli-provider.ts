@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { v4 as uuidv4 } from 'uuid';
+import { registerChildProcess, unregisterChildProcess } from '../analysis-registry.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodType } from 'zod';
 import type { Violation } from '@truecourse/shared';
@@ -93,11 +94,22 @@ export abstract class BaseCLIProvider implements LLMProvider {
   private debugDir: string | null = null;
   private callCounter = 0;
   private _analysisId: string | null = null;
+  private _repoId: string | null = null;
+  private _abortSignal: AbortSignal | null = null;
   private _usageRecords: UsageRecord[] = [];
 
   setAnalysisId(id: string): void {
     this._analysisId = id;
     this._usageRecords = [];
+  }
+
+  setAbortSignal(signal: AbortSignal): void {
+    this._abortSignal = signal;
+  }
+
+  /** Set repoId for child process tracking in the analysis registry. */
+  setRepoId(repoId: string): void {
+    this._repoId = repoId;
   }
 
   async flushUsage(): Promise<void> {
@@ -162,6 +174,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   /** Spawn CLI subprocess, pipe prompt via stdin, collect stdout. */
   protected spawnCLI(prompt: string, jsonSchemaStr: string, opts?: SpawnOptions & { label?: string }): Promise<string> {
+    // Check if already aborted before spawning
+    if (this._abortSignal?.aborted) {
+      return Promise.reject(new DOMException('Analysis cancelled', 'AbortError'));
+    }
+
     const timeout = opts?.timeoutMs ?? config.claudeCodeTimeoutMs ?? 120_000;
     const label = opts?.label ?? 'call';
     const args = [
@@ -177,20 +194,41 @@ export abstract class BaseCLIProvider implements LLMProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
+      // Register child process for cancellation tracking
+      if (this._repoId) {
+        registerChildProcess(this._repoId, child);
+      }
+
       let stdout = '';
       let stderr = '';
       let timedOut = false;
+      let aborted = false;
 
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill('SIGTERM');
       }, timeout);
 
+      // Listen for abort signal to kill the subprocess
+      const onAbort = () => {
+        aborted = true;
+        clearTimeout(timer);
+        if (!child.killed) child.kill('SIGTERM');
+      };
+      this._abortSignal?.addEventListener('abort', onAbort, { once: true });
+
       child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
       child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
 
       child.on('close', (code) => {
         clearTimeout(timer);
+        this._abortSignal?.removeEventListener('abort', onAbort);
+        if (this._repoId) unregisterChildProcess(this._repoId, child);
+
+        if (aborted) {
+          reject(new DOMException('Analysis cancelled', 'AbortError'));
+          return;
+        }
         if (timedOut) {
           reject(new Error(`[CLI] ${label} timed out after ${timeout}ms`));
           return;
@@ -205,6 +243,8 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
       child.on('error', (err) => {
         clearTimeout(timer);
+        this._abortSignal?.removeEventListener('abort', onAbort);
+        if (this._repoId) unregisterChildProcess(this._repoId, child);
         reject(new Error(`[CLI] Failed to spawn ${this.binaryName}: ${err.message}`));
       });
 

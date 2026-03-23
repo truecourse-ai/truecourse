@@ -12,10 +12,22 @@ import {
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-export async function runAnalyze(): Promise<void> {
+export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
 
-  const firstRun = await ensureServer();
+  if (noAutostart) {
+    // Check if server is running without auto-starting
+    const url = getServerUrl();
+    try {
+      const res = await fetch(`${url}/api/health`);
+      if (!res.ok) throw new Error();
+    } catch {
+      p.log.error("TrueCourse server is not running. Start it with: npx truecourse start");
+      process.exit(1);
+    }
+  }
+
+  const firstRun = noAutostart ? false : await ensureServer();
   const repo = await ensureRepo();
   p.log.step(`Repository: ${repo.name}`);
 
@@ -24,6 +36,21 @@ export async function runAnalyze(): Promise<void> {
 
   const spinner = p.spinner();
   spinner.start("Starting analysis...");
+
+  // Handle Ctrl+C — cancel the analysis on the server
+  let canceled = false;
+  const onSigint = () => {
+    if (canceled) return; // second Ctrl+C — let it force exit
+    canceled = true;
+    spinner.stop("Cancelling analysis...");
+    fetch(`${serverUrl}/api/repos/${repo.id}/analyze/cancel`, { method: "POST" })
+      .catch(() => {}) // ignore errors
+      .finally(() => {
+        socket.disconnect();
+        process.exit(130);
+      });
+  };
+  process.on("SIGINT", onSigint);
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -55,6 +82,11 @@ export async function runAnalyze(): Promise<void> {
       socket.on("violations:ready", () => {
         violationsReady = true;
         checkDone();
+      });
+
+      socket.on("analysis:canceled", () => {
+        clearTimeout(timeout);
+        reject(new Error("CANCELED"));
       });
 
       // Trigger analysis
@@ -102,19 +134,36 @@ export async function runAnalyze(): Promise<void> {
       p.outro(`Analysis complete — open ${repoUrl}`);
     }
   } catch (err) {
-    spinner.stop("Analysis failed");
     const message = err instanceof Error ? err.message : String(err);
-    p.log.error(message);
-    process.exit(1);
+    if (message === "CANCELED") {
+      spinner.stop("Analysis cancelled");
+      p.outro("Analysis cancelled");
+    } else {
+      spinner.stop("Analysis failed");
+      p.log.error(message);
+      process.exit(1);
+    }
   } finally {
+    process.removeListener("SIGINT", onSigint);
     socket.disconnect();
   }
 }
 
-export async function runAnalyzeDiff(): Promise<void> {
+export async function runAnalyzeDiff({ noAutostart = false } = {}): Promise<void> {
   p.intro("Running diff check");
 
-  await ensureServer();
+  if (noAutostart) {
+    const url = getServerUrl();
+    try {
+      const res = await fetch(`${url}/api/health`);
+      if (!res.ok) throw new Error();
+    } catch {
+      p.log.error("TrueCourse server is not running. Start it with: npx truecourse start");
+      process.exit(1);
+    }
+  } else {
+    await ensureServer();
+  }
   const repo = await ensureRepo();
   p.log.step(`Repository: ${repo.name}`);
 

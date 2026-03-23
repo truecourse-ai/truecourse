@@ -206,8 +206,8 @@ export async function runSetup(): Promise<void> {
   const runMode = await p.select({
     message: "How would you like to run TrueCourse?",
     options: [
+      { value: "service" as const, label: "Background service (Recommended)" },
       { value: "console" as const, label: "Console (keep terminal open)" },
-      { value: "service" as const, label: "Background service (runs automatically, no terminal needed)" },
     ],
   });
 

@@ -30,7 +30,13 @@ import {
   emitAnalysisProgress,
   emitAnalysisComplete,
   emitViolationsReady,
+  emitAnalysisCanceled,
 } from '../socket/handlers.js';
+import {
+  registerAnalysis,
+  unregisterAnalysis,
+  cancelAnalysis,
+} from '../services/analysis-registry.js';
 import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
 import {
   loadActiveViolations,
@@ -72,6 +78,9 @@ router.post(
 
       // Respond immediately, run analysis asynchronously
       res.status(202).json({ message: 'Analysis started', repoId: id, branch });
+
+      // Register analysis for cancellation support
+      const abortController = registerAnalysis(id, 'pending');
 
       // Run analysis in the background
       try {
@@ -279,6 +288,8 @@ router.post(
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
         const provider = createLLMProvider();
         provider.setAnalysisId(newAnalysisId);
+        provider.setRepoId(id);
+        provider.setAbortSignal(abortController.signal);
         try {
           await runViolationPipeline({
             repoId: id,
@@ -294,14 +305,20 @@ router.post(
             previousDeterministicViolations,
             onProgress: (progress) => emitAnalysisProgress(id, progress),
             provider,
+            signal: abortController.signal,
           });
 
           emitViolationsReady(id, analysis.id);
         } catch (violationError) {
-          console.error(
-            `[Violations] Failed for repo ${id}:`,
-            violationError instanceof Error ? violationError.message : String(violationError)
-          );
+          // Don't log AbortError as a failure — it's expected on cancel
+          if (violationError instanceof DOMException && violationError.name === 'AbortError') {
+            console.log(`[Violations] Cancelled for repo ${id}`);
+          } else {
+            console.error(
+              `[Violations] Failed for repo ${id}:`,
+              violationError instanceof Error ? violationError.message : String(violationError)
+            );
+          }
           // Still emit violations:ready so clients don't hang waiting
           emitViolationsReady(id, analysis.id);
         }
@@ -315,15 +332,40 @@ router.post(
 
         emitAnalysisComplete(id, analysis.id);
       } catch (error) {
-        console.error(
-          `[Analysis] Failed for repo ${id}:`,
-          error instanceof Error ? error.message : String(error)
-        );
-        emitAnalysisProgress(id, {
-          step: 'error',
-          percent: -1,
-          detail: error instanceof Error ? error.message : 'Analysis failed',
-        });
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          console.log(`[Analysis] Cancelled for repo ${id}`);
+        } else {
+          console.error(
+            `[Analysis] Failed for repo ${id}:`,
+            error instanceof Error ? error.message : String(error)
+          );
+          emitAnalysisProgress(id, {
+            step: 'error',
+            percent: -1,
+            detail: error instanceof Error ? error.message : 'Analysis failed',
+          });
+        }
+      } finally {
+        unregisterAnalysis(id);
+      }
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+// POST /api/repos/:id/analyze/cancel - Cancel in-progress analysis
+router.post(
+  '/:id/analyze/cancel',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = req.params.id as string;
+      const canceled = cancelAnalysis(id);
+      if (canceled) {
+        emitAnalysisCanceled(id);
+        res.json({ message: 'Analysis cancelled' });
+      } else {
+        throw createAppError('No active analysis for this repo', 404);
       }
     } catch (error) {
       next(error);

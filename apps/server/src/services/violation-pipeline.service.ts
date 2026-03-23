@@ -26,6 +26,11 @@ function log(msg: string) {
   process.stderr.write(`${msg}\n`);
 }
 
+/** Throw if the abort signal has been triggered. */
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -95,6 +100,8 @@ export interface ViolationPipelineInput {
   onProgress?: (progress: { step: string; percent: number; detail?: string }) => void;
   /** Optional pre-created provider (for usage tracking) */
   provider?: LLMProvider;
+  /** Abort signal for cancellation */
+  signal?: AbortSignal;
 }
 
 export interface ViolationPipelineResult {
@@ -173,11 +180,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     previousActiveViolations, previousActiveCodeViolations, previousDeterministicViolations,
     changedFileSet, onProgress,
     provider: externalProvider,
+    signal,
   } = input;
 
   // 1. Load rules
   const allRules = await getEnabledRules();
 
+  throwIfAborted(signal);
   onProgress?.({ step: 'analyzing', percent: 80, detail: 'Running deterministic checks...' });
 
   // 2. Run all deterministic checks (service, module, method)
@@ -257,6 +266,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  throwIfAborted(signal);
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 
   // 5. Build LLM code violation batches
@@ -335,6 +345,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     onProgress?.({ step: 'analyzing', percent: emitted, detail });
   };
 
+  throwIfAborted(signal);
   emitProgress(85, 'Enriching & analyzing violations...');
 
   // Build flat list of all current deterministic violations with resolved target IDs
@@ -766,6 +777,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
   llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
 
+  throwIfAborted(signal);
   emitProgress(95, 'Analysis complete');
 
   // 8. Save service descriptions

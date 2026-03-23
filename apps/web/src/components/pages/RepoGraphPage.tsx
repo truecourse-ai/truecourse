@@ -1092,6 +1092,13 @@ export default function RepoGraphPage() {
                     </ProgressLabel>
                   </div>
                 </Progress>
+                <button
+                  onClick={() => repoId && api.cancelAnalysis(repoId).catch(() => {})}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title="Cancel analysis"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
               {analysisProgress.detail && (
                 <p className="mt-1.5 pl-6 text-[10px] text-muted-foreground">

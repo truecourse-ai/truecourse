@@ -289,6 +289,8 @@ export interface LLMProvider {
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
   setAnalysisId(id: string): void;
+  setRepoId(repoId: string): void;
+  setAbortSignal(signal: AbortSignal): void;
   flushUsage(): Promise<void>;
 }
 
@@ -332,10 +334,19 @@ function getModel(): LanguageModel {
 class AISDKProvider implements LLMProvider {
   private _analysisId: string | null = null;
   private _usageRecords: UsageRecord[] = [];
+  private _abortSignal: AbortSignal | null = null;
 
   setAnalysisId(id: string): void {
     this._analysisId = id;
     this._usageRecords = [];
+  }
+
+  setRepoId(_repoId: string): void {
+    // No-op for API provider — child process tracking is CLI-only
+  }
+
+  setAbortSignal(signal: AbortSignal): void {
+    this._abortSignal = signal;
   }
 
   async flushUsage(): Promise<void> {
@@ -374,6 +385,7 @@ class AISDKProvider implements LLMProvider {
       model,
       output: Output.object({ schema: ServiceViolationOutputSchema }),
       prompt,
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('violations-service', langfusePrompt),
     });
     const dur = Date.now() - t0;
@@ -410,6 +422,7 @@ class AISDKProvider implements LLMProvider {
       model,
       output: Output.object({ schema: DatabaseViolationOutputSchema }),
       prompt,
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('violations-database', langfusePrompt),
     });
     const dur = Date.now() - t0;
@@ -448,6 +461,7 @@ class AISDKProvider implements LLMProvider {
       model,
       output: Output.object({ schema: ModuleViolationOutputSchema }),
       prompt,
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('violations-module', langfusePrompt),
     });
     const dur = Date.now() - t0;
@@ -544,7 +558,8 @@ class AISDKProvider implements LLMProvider {
               model,
               output: Output.object({ schema: LifecycleServiceOutputSchema }),
               prompt,
-              experimental_telemetry: telemetry('violations-service-lifecycle', langfusePrompt),
+              abortSignal: this._abortSignal ?? undefined,
+      experimental_telemetry: telemetry('violations-service-lifecycle', langfusePrompt),
             });
             const dur = Date.now() - t0;
             console.log(`[LLM] Lifecycle service call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
@@ -570,7 +585,8 @@ class AISDKProvider implements LLMProvider {
               model,
               output: Output.object({ schema: DiffViolationOutputSchema }),
               prompt,
-              experimental_telemetry: telemetry('violations-database-lifecycle', langfusePrompt),
+              abortSignal: this._abortSignal ?? undefined,
+      experimental_telemetry: telemetry('violations-database-lifecycle', langfusePrompt),
             });
             const dur = Date.now() - t0;
             console.log(`[LLM] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
@@ -599,7 +615,8 @@ class AISDKProvider implements LLMProvider {
               model,
               output: Output.object({ schema: DiffViolationOutputSchema }),
               prompt,
-              experimental_telemetry: telemetry('violations-module-lifecycle', langfusePrompt),
+              abortSignal: this._abortSignal ?? undefined,
+      experimental_telemetry: telemetry('violations-module-lifecycle', langfusePrompt),
             });
             const dur = Date.now() - t0;
             console.log(`[LLM] Lifecycle module call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
@@ -737,7 +754,8 @@ class AISDKProvider implements LLMProvider {
         model,
         output: Output.object({ schema: CodeViolationLifecycleOutputSchema }),
         prompt,
-        experimental_telemetry: telemetry('violations-code-lifecycle', langfusePrompt),
+        abortSignal: this._abortSignal ?? undefined,
+      experimental_telemetry: telemetry('violations-code-lifecycle', langfusePrompt),
       });
       const dur = Date.now() - t0;
       console.log(`[LLM] Code violations call done in ${dur}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
@@ -763,6 +781,7 @@ class AISDKProvider implements LLMProvider {
       model,
       output: Output.object({ schema: CodeViolationOutputSchema }),
       prompt,
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('violations-code', langfusePrompt),
     });
     const dur = Date.now() - t0;
@@ -833,6 +852,7 @@ class AISDKProvider implements LLMProvider {
       model,
       output: Output.object({ schema: EnrichmentOutputSchema }),
       prompt,
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('violations-enrich-deterministic', langfusePrompt),
     });
     const dur = Date.now() - t0;
@@ -857,6 +877,7 @@ class AISDKProvider implements LLMProvider {
       model,
       output: Output.object({ schema: FlowEnrichmentOutputSchema }),
       prompt,
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('flow-enrichment', langfusePrompt),
     });
     const dur = Date.now() - t0;
@@ -883,6 +904,7 @@ class AISDKProvider implements LLMProvider {
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content,
       })),
+      abortSignal: this._abortSignal ?? undefined,
       experimental_telemetry: telemetry('chat'),
     });
 

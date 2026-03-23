@@ -211,6 +211,10 @@ export function deleteAnalysis(repoId: string, analysisId: string): Promise<{ ok
   return fetchApi(`/api/repos/${repoId}/analyses/${analysisId}`, { method: 'DELETE' });
 }
 
+export function cancelAnalysis(repoId: string): Promise<{ message: string }> {
+  return fetchApi(`/api/repos/${repoId}/analyze/cancel`, { method: 'POST' });
+}
+
 // Graph
 export function getGraph(
   repoId: string,

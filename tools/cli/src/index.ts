@@ -46,11 +46,12 @@ program
   .command("analyze")
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
+  .option("--no-autostart", "Don't auto-start the server (for use from Claude Code skills)")
   .action(async (options) => {
     if (options.diff) {
-      await runAnalyzeDiff();
+      await runAnalyzeDiff({ noAutostart: !options.autostart });
     } else {
-      await runAnalyze();
+      await runAnalyze({ noAutostart: !options.autostart });
     }
   });
 

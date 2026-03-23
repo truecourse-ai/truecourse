@@ -66,13 +66,20 @@ async function startServiceMode(openBrowser: boolean): Promise<void> {
   }
 }
 
+let _serverProcess: ReturnType<typeof spawn> | null = null;
+
+/** Get the server child process (for cleanup when started by ensureServer). */
+export function getServerProcess() {
+  return _serverProcess;
+}
+
 function startConsoleMode(openBrowser: boolean): void {
   const serverPath = getServerPath();
   const url = getServerUrl();
 
   p.log.step("Starting server (embedded PostgreSQL starts automatically)...");
 
-  const serverProcess = spawn(
+  const serverProcess = _serverProcess = spawn(
     process.execPath,
     [serverPath],
     {
