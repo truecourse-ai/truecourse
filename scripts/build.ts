@@ -105,6 +105,9 @@ fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
 // 7. Generate package.json for npm publish
 console.log('\nGenerating package.json...');
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
+const analyzerPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/analyzer/package.json'), 'utf-8'));
+const serverPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/server/package.json'), 'utf-8'));
+const cliPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'));
 const publishPkg = {
   name: 'truecourse',
   version: rootPkg.version || '0.1.0',
@@ -117,16 +120,16 @@ const publishPkg = {
     node: '>=20',
   },
   dependencies: {
-    // Native modules that can't be bundled
-    'tree-sitter': '^0.21.1',
-    'tree-sitter-typescript': '^0.21.2',
-    'tree-sitter-javascript': '^0.21.4',
-    'embedded-postgres': '18.3.0-beta.16',
-    // Runtime deps used by the server
-    'dotenv': '^16.4.0',
-    'postgres': '^3.4.0',
-    'commander': '^12.1.0',
-    '@clack/prompts': '^0.9.0',
+    // Native modules — versions from packages/analyzer/package.json
+    'tree-sitter': analyzerPkg.dependencies['tree-sitter'],
+    'tree-sitter-typescript': analyzerPkg.dependencies['tree-sitter-typescript'],
+    'tree-sitter-javascript': analyzerPkg.dependencies['tree-sitter-javascript'],
+    // Runtime deps — versions from source package.json files
+    'embedded-postgres': serverPkg.dependencies['embedded-postgres'],
+    'dotenv': serverPkg.dependencies['dotenv'],
+    'postgres': serverPkg.dependencies['postgres'],
+    'commander': cliPkg.dependencies['commander'],
+    '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
   },
   optionalDependencies: {
     'node-windows': '^1.0.0-beta.8',
@@ -145,7 +148,7 @@ fs.writeFileSync(
 
 // 8. Install production dependencies
 console.log('\n=== Installing dependencies ===');
-run('npm install --production', DIST);
+run('npm install --omit=dev --legacy-peer-deps', DIST);
 
 console.log('\n=== Build complete ===');
 console.log(`Output: ${DIST}`);

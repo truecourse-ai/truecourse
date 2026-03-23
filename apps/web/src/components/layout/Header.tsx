@@ -40,7 +40,7 @@ export function Header({
   onSelectAnalysis,
   currentAnalysisId,
 }: HeaderProps) {
-  const [isDark, setIsDark] = useState(false);
+  const [isDark, setIsDark] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
 

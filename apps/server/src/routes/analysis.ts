@@ -302,6 +302,8 @@ router.post(
             `[Violations] Failed for repo ${id}:`,
             violationError instanceof Error ? violationError.message : String(violationError)
           );
+          // Still emit violations:ready so clients don't hang waiting
+          emitViolationsReady(id, analysis.id);
         }
 
         // Flush LLM usage records

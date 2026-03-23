@@ -6,12 +6,12 @@ const activeAnalyses = new Map<string, { step: string; percent: number; detail?:
 
 export function setupHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
-    console.log(`[Socket] Client connected: ${socket.id}`);
+    console.error(`[Socket] Client connected: ${socket.id}`);
 
     socket.on('joinRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.join(room);
-      console.log(`[Socket] ${socket.id} joined room ${room}`);
+      console.error(`[Socket] ${socket.id} joined room ${room}`);
 
       // If analysis is already running for this repo, send current progress
       const progress = activeAnalyses.get(repoId);
@@ -23,11 +23,11 @@ export function setupHandlers(io: SocketServer): void {
     socket.on('leaveRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.leave(room);
-      console.log(`[Socket] ${socket.id} left room ${room}`);
+      console.error(`[Socket] ${socket.id} left room ${room}`);
     });
 
     socket.on('disconnect', () => {
-      console.log(`[Socket] Client disconnected: ${socket.id}`);
+      console.error(`[Socket] Client disconnected: ${socket.id}`);
     });
   });
 }

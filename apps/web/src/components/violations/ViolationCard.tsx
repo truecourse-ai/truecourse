@@ -114,7 +114,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
 
         {/* Code violation: show file path + line */}
         {isCodeViolation && violation.filePath && (
-          <p className="mt-2 text-[10px] text-muted-foreground">
+          <p className="mt-2 truncate text-[10px] text-muted-foreground" title={`${violation.filePath}${violation.lineStart ? `:${violation.lineStart}` : ''}`}>
             File:{' '}
             <span className="font-medium text-foreground">
               {violation.filePath}

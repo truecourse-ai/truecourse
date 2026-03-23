@@ -57,6 +57,15 @@ import type {
 } from './provider.js';
 
 // ---------------------------------------------------------------------------
+// Logging helper — clears the current terminal line before printing so
+// log messages don't collide with the clack spinner's \r overwrites.
+// ---------------------------------------------------------------------------
+
+function log(msg: string) {
+  process.stderr.write(`${msg}\n`);
+}
+
+// ---------------------------------------------------------------------------
 // Base class for CLI-based LLM providers (Claude Code, future Codex)
 // ---------------------------------------------------------------------------
 
@@ -120,7 +129,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     if (process.env.TRUECOURSE_CLI_DEBUG) {
       this.debugDir = join(tmpdir(), 'truecourse-cli-debug');
       mkdirSync(this.debugDir, { recursive: true });
-      console.log(`[CLI] Debug output: ${this.debugDir}`);
+      log(`[CLI] Debug output: ${this.debugDir}`);
     }
   }
 
@@ -152,8 +161,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
   }
 
   /** Spawn CLI subprocess, pipe prompt via stdin, collect stdout. */
-  protected spawnCLI(prompt: string, jsonSchemaStr: string, opts?: SpawnOptions): Promise<string> {
+  protected spawnCLI(prompt: string, jsonSchemaStr: string, opts?: SpawnOptions & { label?: string }): Promise<string> {
     const timeout = opts?.timeoutMs ?? config.claudeCodeTimeoutMs ?? 120_000;
+    const label = opts?.label ?? 'call';
     const args = [
       ...this.baseArgs,
       ...this.modelFlag,
@@ -182,7 +192,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       child.on('close', (code) => {
         clearTimeout(timer);
         if (timedOut) {
-          reject(new Error(`[CLI] ${this.binaryName} timed out after ${timeout}ms`));
+          reject(new Error(`[CLI] ${label} timed out after ${timeout}ms`));
           return;
         }
         if (code !== 0) {
@@ -266,7 +276,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       } catch (err) {
         lastError = err as Error;
         if (attempt < this.maxRetries) {
-          console.warn(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
+          log(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
         }
       }
     }
@@ -282,13 +292,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const { vars, idMap } = buildServiceTemplateVars(context);
     const { text: prompt } = await getPrompt('violations-service', vars);
 
-    console.log('[CLI] Service violations call starting...');
+    log('[CLI] Service violations call starting...');
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, ServiceViolationOutputSchema, {
       extraArgs: ['--tools', ''], label: 'service',
     });
     const dur = Date.now() - t0;
-    console.log(`[CLI] Service violations call done in ${dur}ms — ${object.violations.length} violations`);
+    log(`[CLI] Service violations call done in ${dur}ms — ${object.violations.length} violations`);
     this.collectUsage('service', cliUsage, dur);
 
     return {
@@ -314,13 +324,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const { vars, idMap } = buildDatabaseTemplateVars(context);
     const { text: prompt } = await getPrompt('violations-database', vars);
 
-    console.log('[CLI] Database violations call starting...');
+    log('[CLI] Database violations call starting...');
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DatabaseViolationOutputSchema, {
       extraArgs: ['--tools', ''], label: 'database',
     });
     const dur = Date.now() - t0;
-    console.log(`[CLI] Database violations call done in ${dur}ms — ${object.violations.length} violations`);
+    log(`[CLI] Database violations call done in ${dur}ms — ${object.violations.length} violations`);
     this.collectUsage('database', cliUsage, dur);
 
     return {
@@ -347,13 +357,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
       context.modules.filter((m) => m.serviceId).map((m) => [m.id, m.serviceId!]),
     );
 
-    console.log('[CLI] Module violations call starting...');
+    log('[CLI] Module violations call starting...');
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, ModuleViolationOutputSchema, {
       extraArgs: ['--tools', ''], label: 'module',
     });
     const dur = Date.now() - t0;
-    console.log(`[CLI] Module violations call done in ${dur}ms — ${object.violations.length} violations`);
+    log(`[CLI] Module violations call done in ${dur}ms — ${object.violations.length} violations`);
     this.collectUsage('module', cliUsage, dur);
 
     return {
@@ -408,7 +418,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       if (outcome.status === 'fulfilled') {
         (result as Record<string, unknown>)[key] = outcome.value;
       } else {
-        console.error(`[CLI Violations] ${key} call failed:`, outcome.reason);
+        log(`[CLI Violations] ${key} call failed: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`);
       }
     }
 
@@ -434,13 +444,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
           const { vars, idMap } = buildServiceTemplateVars(ctx);
           idMaps.service = idMap;
           const { text: prompt } = await getPrompt('violations-service-lifecycle', vars);
-          console.log('[CLI] Lifecycle service call starting...');
+          log('[CLI] Lifecycle service call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, LifecycleServiceOutputSchema, {
             extraArgs: ['--tools', ''], label: 'service-lifecycle',
           });
           const dur = Date.now() - t0;
-          console.log(`[CLI] Lifecycle service call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+          log(`[CLI] Lifecycle service call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
           this.collectUsage('service', cliUsage, dur);
           return object;
         })()]);
@@ -457,13 +467,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
           const { vars, idMap } = buildDatabaseTemplateVars(ctx);
           idMaps.database = idMap;
           const { text: prompt } = await getPrompt('violations-database-lifecycle', vars);
-          console.log('[CLI] Lifecycle database call starting...');
+          log('[CLI] Lifecycle database call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
             extraArgs: ['--tools', ''], label: 'database-lifecycle',
           });
           const dur = Date.now() - t0;
-          console.log(`[CLI] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+          log(`[CLI] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
           this.collectUsage('database', cliUsage, dur);
           return object;
         })()]);
@@ -483,13 +493,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
           const { vars, idMap } = buildModuleTemplateVars(ctx);
           idMaps.module = idMap;
           const { text: prompt } = await getPrompt('violations-module-lifecycle', vars);
-          console.log('[CLI] Lifecycle module call starting...');
+          log('[CLI] Lifecycle module call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
             extraArgs: ['--tools', ''], label: 'module-lifecycle',
           });
           const dur = Date.now() - t0;
-          console.log(`[CLI] Lifecycle module call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+          log(`[CLI] Lifecycle module call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
           this.collectUsage('module', cliUsage, dur);
           return {
             resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
@@ -528,7 +538,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       const [key] = promises[i];
       const outcome = settled[i];
       if (outcome.status !== 'fulfilled') {
-        console.error(`[CLI ViolationsLifecycle] ${key} call failed:`, outcome.reason);
+        log(`[CLI ViolationsLifecycle] ${key} call failed: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`);
         continue;
       }
 
@@ -611,18 +621,19 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: true });
     const { text: prompt } = await getPrompt(promptName, vars);
 
-    console.log(`[CLI] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
+    log(`[CLI] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
     const t0 = Date.now();
 
-    // Code violations use Read tool access (no --bare, --allowedTools "Read")
+    // Code violations use Read tool access — longer timeout since Claude reads files via tools
     const codeExtraArgs = ['--allowedTools', 'Read'];
+    const codeTimeoutMs = 300_000; // 5 minutes — code review uses Read tool, takes many turns
 
     if (hasExisting) {
       const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, CodeViolationLifecycleOutputSchema, {
-        extraArgs: codeExtraArgs, label: 'code-lifecycle',
+        extraArgs: codeExtraArgs, label: 'code-lifecycle', timeoutMs: codeTimeoutMs,
       });
       const dur = Date.now() - t0;
-      console.log(`[CLI] Code violations call done in ${dur}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
+      log(`[CLI] Code violations call done in ${dur}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
       this.collectUsage('code', cliUsage, dur);
 
       return {
@@ -642,10 +653,10 @@ export abstract class BaseCLIProvider implements LLMProvider {
     }
 
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, CodeViolationOutputSchema, {
-      extraArgs: codeExtraArgs, label: 'code',
+      extraArgs: codeExtraArgs, label: 'code', timeoutMs: codeTimeoutMs,
     });
     const dur = Date.now() - t0;
-    console.log(`[CLI] Code violations call done in ${dur}ms — ${object.violations.length} violations`);
+    log(`[CLI] Code violations call done in ${dur}ms — ${object.violations.length} violations`);
     this.collectUsage('code', cliUsage, dur);
 
     return {
@@ -665,7 +676,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   async generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult> {
     if (batches.length === 0) return { violations: [] };
 
-    console.log(`[CLI] Code violations: ${batches.length} batch(es) starting...`);
+    log(`[CLI] Code violations: ${batches.length} batch(es) starting...`);
     const t0 = Date.now();
 
     const results = await Promise.allSettled(
@@ -681,11 +692,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
         if (result.value.resolvedViolationIds) allResolved.push(...result.value.resolvedViolationIds);
         if (result.value.unchangedViolationIds) allUnchanged.push(...result.value.unchangedViolationIds);
       } else {
-        console.error('[CLI CodeViolations] Batch call failed:', result.reason);
+        log(`[CLI CodeViolations] Batch call failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
       }
     }
 
-    console.log(`[CLI] Code violations total: ${Date.now() - t0}ms — new: ${allViolations.length}, resolved: ${allResolved.length}, unchanged: ${allUnchanged.length}`);
+    log(`[CLI] Code violations total: ${Date.now() - t0}ms — new: ${allViolations.length}, resolved: ${allResolved.length}, unchanged: ${allUnchanged.length}`);
     return {
       violations: allViolations,
       resolvedViolationIds: allResolved.length > 0 ? allResolved : undefined,
@@ -702,13 +713,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const { vars, idMap } = buildEnrichmentTemplateVars(detections, architectureContext);
     const { text: prompt } = await getPrompt('violations-enrich-deterministic', vars);
 
-    console.log(`[CLI] Enrichment call starting for ${detections.length} detections...`);
+    log(`[CLI] Enrichment call starting for ${detections.length} detections...`);
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, EnrichmentOutputSchema, {
       extraArgs: ['--tools', ''], label: 'enrichment',
     });
     const dur = Date.now() - t0;
-    console.log(`[CLI] Enrichment call done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
+    log(`[CLI] Enrichment call done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
     this.collectUsage('enrichment', cliUsage, dur);
 
     return {
@@ -722,13 +733,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {
     const { text: prompt } = await getPrompt('flow-enrichment', buildFlowTemplateVars(context));
 
-    console.log(`[CLI] Flow enrichment call starting for ${context.flowName}...`);
+    log(`[CLI] Flow enrichment call starting for ${context.flowName}...`);
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, FlowEnrichmentOutputSchema, {
       extraArgs: ['--tools', ''], label: 'flow',
     });
     const dur = Date.now() - t0;
-    console.log(`[CLI] Flow enrichment done in ${dur}ms`);
+    log(`[CLI] Flow enrichment done in ${dur}ms`);
     this.collectUsage('flow', cliUsage, dur);
 
     return {

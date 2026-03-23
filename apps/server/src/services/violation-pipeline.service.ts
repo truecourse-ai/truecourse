@@ -14,12 +14,17 @@ import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
 import { getEnabledRules } from './rules.service.js';
-import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type DiffViolationItem } from './llm/provider.js';
+import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
   persistViolationsWithLifecycle,
   persistCodeViolationsWithLifecycle,
 } from './violation-lifecycle.service.js';
+
+// Clear spinner line before logging so messages don't collide with clack spinner
+function log(msg: string) {
+  process.stderr.write(`${msg}\n`);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -744,8 +749,19 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     return r;
   });
 
-  const [,, codeResult] = await Promise.all([deterministicPromise, llmRulePromise, codePromise]);
+  const [detResult, llmResult, codeSettled] = await Promise.allSettled([deterministicPromise, llmRulePromise, codePromise]);
 
+  if (detResult.status === 'rejected') {
+    log(`[Violations] Deterministic enrichment failed: ${detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason)}`);
+  }
+  if (llmResult.status === 'rejected') {
+    log(`[Violations] LLM rule analysis failed: ${llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason)}`);
+  }
+  if (codeSettled.status === 'rejected') {
+    log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
+  }
+
+  const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
   processLlmCodeViolations(codeResult, validFilePaths, fileContents, allCodeViolations);
   llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
   llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];

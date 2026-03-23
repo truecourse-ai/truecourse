@@ -138,7 +138,7 @@ export async function detectAndPersistFlows(
     }
   }
 
-  console.log(`[Flows] Detected and persisted ${traced.length} flows for analysis ${analysisId}`);
+  console.error(`[Flows] Detected and persisted ${traced.length} flows for analysis ${analysisId}`);
   return { flowCount: traced.length };
 }
 
