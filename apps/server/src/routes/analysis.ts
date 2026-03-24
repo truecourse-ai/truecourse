@@ -31,6 +31,9 @@ import {
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
+  emitCodeReviewProgress,
+  emitCodeReviewReady,
+  StepTracker,
 } from '../socket/handlers.js';
 import {
   registerAnalysis,
@@ -72,9 +75,10 @@ router.post(
         throw createAppError('Repo not found', 404);
       }
 
-      // Detect current branch (never checkout — analyze what's on disk)
+      // Detect current branch and commit hash (never checkout — analyze what's on disk)
       const git = simpleGit(repo.path);
       const branch = (await git.branch()).current || null;
+      const commitHash = (await git.revparse(['HEAD'])).trim();
 
       // Respond immediately, run analysis asynchronously
       res.status(202).json({ message: 'Analysis started', repoId: id, branch });
@@ -84,14 +88,20 @@ router.post(
 
       // Run analysis in the background
       try {
-        emitAnalysisProgress(id, {
-          step: 'starting',
-          percent: 0,
-          detail: 'Starting analysis...',
-        });
+        const tracker = new StepTracker(id, [
+          { key: 'parse', label: 'Parsing repository' },
+          { key: 'detect', label: 'Deterministic checks' },
+          { key: 'enrich', label: 'Enriching detections' },
+          { key: 'architecture', label: 'Architecture analysis' },
+          { key: 'persist', label: 'Saving results' },
+          { key: 'code-review', label: 'Code review' },
+        ]);
+
+        tracker.start('parse', 'Starting analysis...');
 
         const result = await runAnalysis(repo.path, branch ?? undefined, (progress) => {
-          emitAnalysisProgress(id, progress);
+          // Forward analyzer progress as detail on the 'parse' step
+          tracker.detail('parse', progress.detail ?? 'Analyzing...');
         });
 
         // Get previous analysis positions (mapped by service name)
@@ -136,7 +146,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash });
 
         const analysis = { id: newAnalysisId };
 
@@ -285,13 +295,38 @@ router.post(
           .set({ lastAnalyzedAt: new Date(), updatedAt: new Date() })
           .where(eq(repos.id, id));
 
+        // Incremental file detection: only review changed files if previous commit hash exists
+        let changedFileSet: Set<string> | undefined;
+        if (previousAnalysisId) {
+          const [prevAnalysisRow] = await db
+            .select({ commitHash: analyses.commitHash })
+            .from(analyses)
+            .where(eq(analyses.id, previousAnalysisId))
+            .limit(1);
+          if (prevAnalysisRow?.commitHash) {
+            try {
+              const diffOutput = await git.diff([prevAnalysisRow.commitHash, 'HEAD', '--name-only']);
+              const changedFiles = diffOutput.trim().split('\n').filter(Boolean);
+              if (changedFiles.length > 0) {
+                changedFileSet = new Set(changedFiles);
+                console.log(`[Analysis] Incremental: ${changedFiles.length} changed files since ${prevAnalysisRow.commitHash.slice(0, 8)}`);
+              }
+            } catch (diffError) {
+              console.log(`[Analysis] Could not compute diff, reviewing all files: ${diffError instanceof Error ? diffError.message : String(diffError)}`);
+            }
+          }
+        }
+
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
+        tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
+
         const provider = createLLMProvider();
         provider.setAnalysisId(newAnalysisId);
         provider.setRepoId(id);
         provider.setAbortSignal(abortController.signal);
+        let codeReviewPromise: Promise<void> | null = null;
         try {
-          await runViolationPipeline({
+          const pipelineResult = await runViolationPipeline({
             repoId: id,
             repoPath: repo.path,
             analysisId: newAnalysisId,
@@ -303,12 +338,14 @@ router.post(
             previousActiveViolations,
             previousActiveCodeViolations,
             previousDeterministicViolations,
-            onProgress: (progress) => emitAnalysisProgress(id, progress),
+            changedFileSet,
+            tracker,
             provider,
             signal: abortController.signal,
           });
 
           emitViolationsReady(id, analysis.id);
+          codeReviewPromise = pipelineResult.codeReviewPromise;
         } catch (violationError) {
           // Don't log AbortError as a failure — it's expected on cancel
           if (violationError instanceof DOMException && violationError.name === 'AbortError') {
@@ -323,14 +360,45 @@ router.post(
           emitViolationsReady(id, analysis.id);
         }
 
-        // Flush LLM usage records
+        // Flush LLM usage records for flows 1+2
         try {
           await provider.flushUsage();
         } catch (usageError) {
           console.error('[Usage] Failed to record usage:', usageError instanceof Error ? usageError.message : String(usageError));
         }
 
+        // Mark code review as triggered before completing so it appears in the final checklist state
+        if (codeReviewPromise) {
+          tracker.start('code-review', 'Running in background...');
+        } else {
+          tracker.done('code-review', 'Skipped');
+        }
+
         emitAnalysisComplete(id, analysis.id);
+
+        // Fire-and-forget: background code review with deferred cleanup
+        if (codeReviewPromise) {
+          console.log(`[CodeReview] Started background code review for repo ${id}`);
+          emitCodeReviewProgress(id, analysis.id);
+          codeReviewPromise
+            .then(() => provider.flushUsage())
+            .then(() => {
+              console.log(`[CodeReview] Completed for repo ${id}`);
+              emitCodeReviewReady(id, analysis.id);
+            })
+            .catch((err) => {
+              if (err instanceof DOMException && err.name === 'AbortError') {
+                console.log(`[CodeReview] Cancelled for repo ${id}`);
+              } else {
+                console.error(`[CodeReview] Failed for repo ${id}:`, err instanceof Error ? err.message : String(err));
+              }
+              // Always emit so UI doesn't hang
+              emitCodeReviewReady(id, analysis.id);
+            })
+            .finally(() => unregisterAnalysis(id));
+        } else {
+          unregisterAnalysis(id);
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           console.log(`[Analysis] Cancelled for repo ${id}`);
@@ -345,7 +413,6 @@ router.post(
             detail: error instanceof Error ? error.message : 'Analysis failed',
           });
         }
-      } finally {
         unregisterAnalysis(id);
       }
     } catch (error) {

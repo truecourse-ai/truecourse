@@ -1,8 +1,26 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { getIO } from './index.js';
 
+// Step status for checklist UI
+export type StepStatus = 'pending' | 'active' | 'done' | 'error';
+export interface AnalysisStep {
+  key: string;
+  label: string;
+  status: StepStatus;
+  detail?: string;
+}
+
+export interface AnalysisProgressPayload {
+  step: string;
+  percent: number;
+  detail?: string;
+  steps?: AnalysisStep[];
+}
+
 // Track in-progress analyses so we can inform clients that join mid-analysis
-const activeAnalyses = new Map<string, { step: string; percent: number; detail?: string }>();
+const activeAnalyses = new Map<string, AnalysisProgressPayload>();
+// Track in-progress code reviews (background LLM code analysis)
+const activeCodeReviews = new Map<string, { analysisId: string }>();
 
 export function setupHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
@@ -18,6 +36,12 @@ export function setupHandlers(io: SocketServer): void {
       if (progress) {
         socket.emit('analysis:progress', { repoId, ...progress });
       }
+
+      // If code review is running in background, inform late joiner
+      const codeReview = activeCodeReviews.get(repoId);
+      if (codeReview) {
+        socket.emit('code-review:progress', { repoId, analysisId: codeReview.analysisId });
+      }
     });
 
     socket.on('leaveRepo', async (repoId: string) => {
@@ -32,9 +56,75 @@ export function setupHandlers(io: SocketServer): void {
   });
 }
 
+// ---------------------------------------------------------------------------
+// StepTracker — manages a checklist of analysis phases and emits progress
+// ---------------------------------------------------------------------------
+
+export class StepTracker {
+  private steps: AnalysisStep[];
+  private repoId: string;
+
+  constructor(repoId: string, stepDefs: { key: string; label: string }[]) {
+    this.repoId = repoId;
+    this.steps = stepDefs.map((s) => ({ ...s, status: 'pending' as StepStatus }));
+  }
+
+  /** Mark a step as active (in progress) with optional detail. */
+  start(key: string, detail?: string): void {
+    this.setStatus(key, 'active', detail);
+  }
+
+  /** Mark a step as done with optional detail. */
+  done(key: string, detail?: string): void {
+    this.setStatus(key, 'done', detail);
+  }
+
+  /** Mark a step as errored with optional detail. */
+  error(key: string, detail?: string): void {
+    this.setStatus(key, 'error', detail);
+  }
+
+  /** Update detail text on a step without changing status. */
+  detail(key: string, detail: string): void {
+    const step = this.steps.find((s) => s.key === key);
+    if (step) {
+      step.detail = detail;
+      this.emit();
+    }
+  }
+
+  private setStatus(key: string, status: StepStatus, detail?: string): void {
+    const step = this.steps.find((s) => s.key === key);
+    if (step) {
+      step.status = status;
+      if (detail !== undefined) step.detail = detail;
+      this.emit();
+    }
+  }
+
+  private emit(): void {
+    // Compute percent from step completion
+    const total = this.steps.length;
+    const doneCount = this.steps.filter((s) => s.status === 'done' || s.status === 'error').length;
+    const activeCount = this.steps.filter((s) => s.status === 'active').length;
+    const percent = Math.round(((doneCount + activeCount * 0.5) / total) * 100);
+
+    // Current step label for the `step` field (backward compat)
+    const activeStep = this.steps.find((s) => s.status === 'active');
+    const stepLabel = activeStep?.label ?? 'Analyzing';
+
+    emitAnalysisProgress(this.repoId, {
+      step: stepLabel,
+      percent,
+      detail: activeStep?.detail,
+      steps: [...this.steps],
+    });
+  }
+}
+
 export function emitAnalysisProgress(
   repoId: string,
-  progress: { step: string; percent: number; detail?: string }
+  progress: AnalysisProgressPayload,
 ): void {
   // Track progress so we can resend to clients that connect later
   if (progress.step === 'error') {
@@ -75,6 +165,19 @@ export function emitViolationsReady(
 
 export function emitAnalysisCanceled(repoId: string): void {
   activeAnalyses.delete(repoId);
+  activeCodeReviews.delete(repoId);
   const io = getIO();
   io.to(`repo:${repoId}`).emit('analysis:canceled', { repoId });
+}
+
+export function emitCodeReviewProgress(repoId: string, analysisId: string): void {
+  activeCodeReviews.set(repoId, { analysisId });
+  const io = getIO();
+  io.to(`repo:${repoId}`).emit('code-review:progress', { repoId, analysisId });
+}
+
+export function emitCodeReviewReady(repoId: string, analysisId: string): void {
+  activeCodeReviews.delete(repoId);
+  const io = getIO();
+  io.to(`repo:${repoId}`).emit('code-review:ready', { repoId, analysisId });
 }

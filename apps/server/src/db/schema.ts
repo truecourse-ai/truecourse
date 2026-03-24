@@ -41,6 +41,7 @@ export const analyses = pgTable('analyses', {
   architecture: text('architecture').notNull(), // 'monolith' | 'microservices'
   metadata: jsonb('metadata'),
   nodePositions: jsonb('node_positions'), // { [serviceId]: { x, y } }
+  commitHash: text('commit_hash'),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 

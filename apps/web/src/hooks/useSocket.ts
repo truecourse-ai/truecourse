@@ -2,10 +2,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { connectSocket, disconnectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 
+export type StepStatus = 'pending' | 'active' | 'done' | 'error';
+
+export interface AnalysisStep {
+  key: string;
+  label: string;
+  status: StepStatus;
+  detail?: string;
+}
+
 export type AnalysisProgress = {
   step: string;
   percent: number;
   detail?: string;
+  steps?: AnalysisStep[];
 };
 
 type EventHandler = (data: unknown) => void;
@@ -56,6 +66,12 @@ export function useSocket(repoId?: string) {
     socket.on('analysis:canceled', (data: unknown) => {
       setAnalysisProgress(null);
       handlersRef.current.get('analysis:canceled')?.forEach((h) => h(data));
+    });
+    socket.on('code-review:progress', (data: unknown) => {
+      handlersRef.current.get('code-review:progress')?.forEach((h) => h(data));
+    });
+    socket.on('code-review:ready', (data: unknown) => {
+      handlersRef.current.get('code-review:ready')?.forEach((h) => h(data));
     });
 
     if (socket.connected && repoId) {

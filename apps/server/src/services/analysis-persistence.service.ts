@@ -21,6 +21,7 @@ export interface PersistAnalysisParams {
   branch: string | null;
   result: AnalysisResult;
   metadata?: Record<string, unknown>;
+  commitHash?: string;
 }
 
 export interface PersistAnalysisOutput {
@@ -32,7 +33,7 @@ export interface PersistAnalysisOutput {
 }
 
 export async function persistAnalysisResult(params: PersistAnalysisParams): Promise<PersistAnalysisOutput> {
-  const { repoId, branch, result, metadata } = params;
+  const { repoId, branch, result, metadata, commitHash } = params;
 
   // Create analysis row
   const [analysis] = await db
@@ -42,6 +43,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       branch: branch || null,
       architecture: result.architecture,
       metadata: metadata ?? result.metadata,
+      commitHash: commitHash || null,
     })
     .returning();
 

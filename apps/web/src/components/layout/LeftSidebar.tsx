@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Shield, FolderTree, Workflow, Database, BarChart3, ClipboardList } from 'lucide-react';
+import { AlertTriangle, Shield, FolderTree, Workflow, Database, BarChart3, ClipboardList, Loader2 } from 'lucide-react';
 
 export type LeftTab = 'violations' | 'rules' | 'files' | 'flows' | 'databases' | 'analytics' | 'analyses';
 
@@ -11,6 +11,7 @@ type LeftSidebarProps = {
   defaultWidth?: number;
   minWidth?: number;
   badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
+  isCodeReviewing?: boolean;
 };
 
 const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
@@ -30,6 +31,7 @@ export function LeftSidebar({
   defaultWidth = 350,
   minWidth = 260,
   badgeCounts,
+  isCodeReviewing,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
@@ -95,6 +97,9 @@ export function LeftSidebar({
               <span className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md border border-border opacity-0 group-hover:opacity-100 transition-opacity z-50">
                 {tab.label}
               </span>
+              {tab.id === 'files' && isCodeReviewing && (
+                <Loader2 className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-spin text-primary" />
+              )}
               {(() => {
                 const badge = badgeCounts?.[tab.id];
                 if (badge == null) return null;

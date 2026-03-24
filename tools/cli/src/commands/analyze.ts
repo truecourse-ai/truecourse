@@ -126,6 +126,8 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
     const violations = (await res.json()) as Violation[];
     renderViolationsSummary(violations);
 
+    p.log.info("Code review running in background — results will appear in the dashboard");
+
     const repoUrl = `${serverUrl}/repos/${repo.id}`;
     if (firstRun) {
       openInBrowser(repoUrl);

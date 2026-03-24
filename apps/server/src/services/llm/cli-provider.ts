@@ -397,10 +397,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
       context.modules.filter((m) => m.serviceId).map((m) => [m.id, m.serviceId!]),
     );
 
-    log('[CLI] Module violations call starting...');
+    log(`[CLI] Module violations call starting (${context.modules.length} modules)...`);
     const t0 = Date.now();
+    // Module context is a connected graph — use a longer timeout instead of batching
+    // to avoid losing cross-module dependency edges
+    const moduleTimeoutMs = 300_000; // 5 minutes
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, ModuleViolationOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'module',
+      extraArgs: ['--tools', ''], label: 'module', timeoutMs: moduleTimeoutMs,
     });
     const dur = Date.now() - t0;
     log(`[CLI] Module violations call done in ${dur}ms — ${object.violations.length} violations`);
@@ -744,22 +747,24 @@ export abstract class BaseCLIProvider implements LLMProvider {
     };
   }
 
-  async enrichDeterministicViolations(
+  private async enrichDeterministicViolationsBatch(
     detections: DeterministicDetectionForEnrichment[],
     architectureContext: string,
+    batchIndex: number,
+    totalBatches: number,
   ): Promise<EnrichmentResult> {
-    if (detections.length === 0) return { enrichedViolations: [] };
-
     const { vars, idMap } = buildEnrichmentTemplateVars(detections, architectureContext);
     const { text: prompt } = await getPrompt('violations-enrich-deterministic', vars);
 
-    log(`[CLI] Enrichment call starting for ${detections.length} detections...`);
+    const label = totalBatches > 1 ? `enrichment-${batchIndex + 1}/${totalBatches}` : 'enrichment';
+    log(`[CLI] Enrichment ${label} starting for ${detections.length} detections...`);
     const t0 = Date.now();
+    const enrichmentTimeoutMs = 300_000; // 5 minutes — enrichment processes many detections
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, EnrichmentOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'enrichment',
+      extraArgs: ['--tools', ''], label, timeoutMs: enrichmentTimeoutMs,
     });
     const dur = Date.now() - t0;
-    log(`[CLI] Enrichment call done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
+    log(`[CLI] Enrichment ${label} done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
     this.collectUsage('enrichment', cliUsage, dur);
 
     return {
@@ -768,6 +773,44 @@ export abstract class BaseCLIProvider implements LLMProvider {
         id: resolveId(e.id, idMap) || e.id,
       })),
     };
+  }
+
+  async enrichDeterministicViolations(
+    detections: DeterministicDetectionForEnrichment[],
+    architectureContext: string,
+  ): Promise<EnrichmentResult> {
+    if (detections.length === 0) return { enrichedViolations: [] };
+
+    const ENRICHMENT_BATCH_SIZE = 150;
+
+    if (detections.length <= ENRICHMENT_BATCH_SIZE) {
+      return this.enrichDeterministicViolationsBatch(detections, architectureContext, 0, 1);
+    }
+
+    // Split into batches
+    const batches: DeterministicDetectionForEnrichment[][] = [];
+    for (let i = 0; i < detections.length; i += ENRICHMENT_BATCH_SIZE) {
+      batches.push(detections.slice(i, i + ENRICHMENT_BATCH_SIZE));
+    }
+
+    log(`[CLI] Enrichment: splitting ${detections.length} detections into ${batches.length} batches`);
+    const t0 = Date.now();
+
+    const results = await Promise.allSettled(
+      batches.map((batch, i) => this.enrichDeterministicViolationsBatch(batch, architectureContext, i, batches.length))
+    );
+
+    const allEnriched: EnrichmentResult['enrichedViolations'] = [];
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        allEnriched.push(...result.value.enrichedViolations);
+      } else {
+        log(`[CLI Enrichment] Batch failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+      }
+    }
+
+    log(`[CLI] Enrichment total: ${Date.now() - t0}ms — ${allEnriched.length} enriched from ${detections.length} detections`);
+    return { enrichedViolations: allEnriched };
   }
 
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {

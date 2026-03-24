@@ -89,11 +89,21 @@ export class MacOSService implements ServicePlatform {
   }
 
   async start(): Promise<void> {
-    execSync(`launchctl start ${SERVICE_LABEL}`, { stdio: "pipe" });
+    if (!fs.existsSync(PLIST_PATH)) {
+      throw new Error("Service is not installed. Run 'truecourse service install' first.");
+    }
+    execSync(`launchctl load -w "${PLIST_PATH}"`, { stdio: "pipe" });
   }
 
   async stop(): Promise<void> {
-    execSync(`launchctl stop ${SERVICE_LABEL}`, { stdio: "pipe" });
+    // Use unload instead of stop — KeepAlive causes launchd to restart
+    // the process immediately after `launchctl stop`. Unload removes it
+    // from supervision but keeps the plist so `start` can reload it.
+    try {
+      execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: "pipe" });
+    } catch {
+      // May already be unloaded
+    }
   }
 
   async status(): Promise<{ running: boolean; pid?: number }> {

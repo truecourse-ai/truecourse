@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
@@ -78,6 +78,7 @@ export default function RepoGraphPage() {
   const [filteredNodes, setFilteredNodes] = useState<Node[]>([]);
   const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isCodeReviewing, setIsCodeReviewing] = useState(false);
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
@@ -299,6 +300,7 @@ export default function RepoGraphPage() {
   useEffect(() => {
     const unsub = onEvent('analysis:complete', () => {
       setIsAnalyzing(false);
+      setIsCodeReviewing(true);
       refetchGraph();
       refetchAnalyses();
       refetchCodeViolationSummary();
@@ -315,6 +317,19 @@ export default function RepoGraphPage() {
       refetchCodeViolationSummary();
     });
     return unsub;
+  }, [onEvent, refetchViolations, refetchCodeViolationSummary]);
+
+  // Listen for background code review completion
+  useEffect(() => {
+    const unsub1 = onEvent('code-review:progress', () => {
+      setIsCodeReviewing(true);
+    });
+    const unsub2 = onEvent('code-review:ready', () => {
+      setIsCodeReviewing(false);
+      refetchViolations();
+      refetchCodeViolationSummary();
+    });
+    return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchViolations, refetchCodeViolationSummary]);
 
   const handleAnalyze = async () => {
@@ -854,7 +869,7 @@ export default function RepoGraphPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} badgeCounts={{
+        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} isCodeReviewing={isCodeReviewing} badgeCounts={{
           violations: isDiffMode && diffResult
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
@@ -1080,18 +1095,11 @@ export default function RepoGraphPage() {
           )}
 
           <div className="relative flex-1 overflow-hidden">
-          {/* Analysis progress — always visible */}
+          {/* Analysis progress — step checklist */}
           {analysisProgress && (
             <div className="absolute bottom-4 left-1/2 z-20 w-72 -translate-x-1/2 rounded-lg border border-border bg-card p-3 shadow-lg">
-              <div className="flex items-center gap-2.5">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-                <Progress value={analysisProgress.percent} className="flex-1 gap-1">
-                  <div className="flex w-full items-center justify-between">
-                    <ProgressLabel className="text-[11px] font-medium capitalize">
-                      {analysisProgress.step}
-                    </ProgressLabel>
-                  </div>
-                </Progress>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-medium text-foreground">Analyzing...</span>
                 <button
                   onClick={() => repoId && api.cancelAnalysis(repoId).catch(() => {})}
                   className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -1100,10 +1108,37 @@ export default function RepoGraphPage() {
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-              {analysisProgress.detail && (
-                <p className="mt-1.5 pl-6 text-[10px] text-muted-foreground">
-                  {analysisProgress.detail}
-                </p>
+              {analysisProgress.steps && analysisProgress.steps.length > 0 ? (
+                <div className="space-y-1">
+                  {analysisProgress.steps.map((s) => (
+                    <div key={s.key} className="flex items-center gap-2">
+                      <div className="flex h-[16px] w-3 shrink-0 items-center justify-center">
+                        {s.status === 'done' && <Check className="h-3 w-3 text-emerald-500" />}
+                        {s.status === 'active' && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                        {s.status === 'error' && <CircleX className="h-3 w-3 text-destructive" />}
+                        {s.status === 'pending' && <div className="h-2 w-2 rounded-full border border-muted-foreground/30" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className={`text-[11px] leading-[16px] ${
+                          s.status === 'active' ? 'font-medium text-foreground' :
+                          s.status === 'done' ? 'text-muted-foreground' :
+                          s.status === 'error' ? 'text-destructive' :
+                          'text-muted-foreground/60'
+                        }`}>
+                          {s.label}
+                          {s.detail && s.status !== 'pending' && (
+                            <span className="ml-1.5 font-normal text-[10px] text-muted-foreground/70">{s.detail}</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                  <span className="text-[11px] text-muted-foreground">{analysisProgress.detail || analysisProgress.step}</span>
+                </div>
               )}
             </div>
           )}

@@ -874,7 +874,7 @@ Add a source code viewer panel to the frontend using a library like Monaco Edito
 
 ---
 
-## Phase 8: Claude Code Skills `STATUS: TESTING`
+## Phase 8: Claude Code Skills `STATUS: DONE`
 
 Add Claude Code skills that let users invoke TrueCourse commands conversationally from within Claude Code. Skills are bundled with the npm package and installed into the user's project via `truecourse add`.
 
@@ -888,15 +888,16 @@ Three skills in `tools/cli/skills/truecourse/`:
 | `truecourse-list` | "show violations", "list issues", "what violations were found", "show diff results" | Runs `npx truecourse list` or `list --diff` |
 | `truecourse-fix` | "fix violations", "apply fixes", "fix my code" | Fetches violations with `fixPrompt`, lets user pick which to fix, applies changes to codebase |
 
-### 8.2 Skill Installation via `truecourse add` `STATUS: DONE`
+### 8.2 Skill Installation via `truecourse add` or `truecourse analyze` `STATUS: DONE`
 
-After adding a repo, `truecourse add` prompts:
+After adding a repo (via `add` or first-time `analyze`), prompts:
 > "Would you like to install Claude Code skills? (y/n)"
 
-If yes: copies bundled `skills/truecourse/` to `<project>/.claude/skills/truecourse/` using recursive copy. Lists installed skills on success.
+If yes: copies bundled `skills/truecourse/` contents to `<project>/.claude/skills/` (3 skill subdirectories). Lists installed skills on success.
 
-- `tools/cli/src/commands/add.ts` — clack confirm prompt + `cpSync` logic
-- `tools/cli/package.json` — `"files"` field includes `skills/` so it ships with npm
+- `tools/cli/src/commands/helpers.ts` — shared `promptInstallSkills()` function used by both `add` and `ensureRepo`
+- `tools/cli/skills/` — bundled with npm package, copied to dist during `build:dist`
+- Skills use `--no-autostart` flag to avoid auto-starting the server from within Claude Code
 
 ### Verification (Phase 8)
 1. Start the TrueCourse server (`pnpm dev`)
@@ -913,7 +914,7 @@ If yes: copies bundled `skills/truecourse/` to `<project>/.claude/skills/truecou
 
 ---
 
-## Phase 9: Background Service Mode `STATUS: TESTING`
+## Phase 9: Background Service Mode `STATUS: DONE`
 
 Run TrueCourse as a background service (daemon) instead of keeping a terminal open. Uses native OS service managers — no third-party process managers (pm2 is AGPL, incompatible with MIT + commercial cloud).
 
@@ -923,8 +924,8 @@ During `truecourse setup`, add a new prompt step after LLM configuration:
 
 ```
 ? How would you like to run TrueCourse?
-  ○ Console (keep terminal open) — default
-  ○ Background service (runs automatically, no terminal needed)
+  ○ Background service (Recommended)
+  ○ Console (keep terminal open)
 ```
 
 Selection is saved to `~/.truecourse/config.json` (`"runMode": "console" | "service"`). Can be changed later via `truecourse setup` or `truecourse service install/uninstall`.
@@ -1286,31 +1287,396 @@ Allow users to dismiss violations they've reviewed and consider acceptable. Dism
 
 ---
 
-## Phase 15: Cloud Version (Future) `STATUS: BACKLOG`
+## Phase 15: Cloud Version `STATUS: BACKLOG`
 
-- Auth (NextAuth.js), GitHub integration
-- GitHub webhooks replacing file watcher
-- Landing page, dashboard, team features
-- Managed Postgres deployment
+Cloud-hosted version of TrueCourse with team workspaces, GitHub App integration, and automated PR analysis. Local instances can connect to cloud for shared state and LLM offloading.
 
-### Test Plan (Phase 15) `STATUS: BACKLOG`
-- Auth flow: NextAuth.js sign-in/sign-out, session persistence, token refresh
-- GitHub OAuth: mock OAuth flow, verify user creation and repo access scoping
-- Webhook handler: GitHub push event triggers analysis for correct repo and branch
-- Webhook signature verification: rejects requests with invalid signatures
-- Multi-tenant isolation: user A cannot access user B's repos or analyses
-- Team access: shared repo analyses are visible to all team members
-- Cloud DB: migrations run cleanly on managed Postgres (connection pooling, SSL)
+### Key Decisions
 
-### Verification (Phase 15)
-1. Sign up / sign in via OAuth
-2. Connect a GitHub repo → webhook triggers analysis on push
-3. Graph renders in cloud-hosted UI
-4. Team members can view the same repo analysis
+| Decision | Choice |
+|----------|--------|
+| Auth | Logto (MPL 2.0, self-host or cloud) |
+| GitHub integration | GitHub App (not OAuth App) |
+| User matching | GitHub user ID from OAuth profile; email is invite transport only |
+| Workspace model | Owner / Admin / User roles; users can belong to multiple workspaces; repos 1:1 with workspace |
+| PR analysis | Auto diff analysis only for workspace members |
+| Repo connect | Triggers full baseline analysis automatically |
+| Cloud UI analysis | No Normal/Diff toggle — system decides. "Re-run baseline" button only |
+| Local mode | Unchanged — keeps full manual control (Analyze button + Normal/Diff) |
+| PR results | GitHub Check Run (pass/fail) + PR comment (details) + link to TrueCourse UI |
+| Job processing | Separate worker + job queue (BullMQ + Redis) |
+| Hosting | Railway (web service + worker + managed Postgres + Redis) |
+
+### Local Connection Mode
+
+Local TrueCourse can operate in two modes:
+
+```
+truecourse setup
+
+? How would you like to use TrueCourse?
+  ○ Standalone (local only, bring your own API key)
+  ○ Connected to cloud (uses your team's cloud workspace)
+```
+
+**Connected mode flow:**
+1. User generates a personal connection key in cloud UI (Workspace Settings → Connection Keys, like GitHub SSH keys — one per user)
+2. Locally runs `truecourse setup` → selects "Connected to cloud" → pastes key
+3. Key stored as `TRUECOURSE_CLOUD_KEY=tc_conn_xxxxx` in local `.env`
+4. Local instance behavior changes:
+   - Tree-sitter analysis still runs locally (fast, code is on disk)
+   - LLM calls routed through cloud API (no local API key needed)
+   - Results stored in cloud DB (shared with team)
+   - No local DB needed — embedded Postgres doesn't start
+   - Local UI shows same violations as cloud (shared state)
+
+| Aspect | Standalone | Connected |
+|--------|-----------|-----------|
+| LLM calls | Local (own API key) | Via cloud API |
+| Database | Embedded Postgres | Cloud DB (via API) |
+| Violations | Local only | Shared with team |
+| Analysis trigger | Manual | Manual locally, auto on PRs in cloud |
+| Auth | None | Connection key identifies user + workspace |
+
+**Workflow complement:** developers run local diff analysis before opening a PR to catch issues early; cloud acts as the automated safety net on the PR itself.
 
 ---
 
-## Phase 16: Claude Code CLI Provider `STATUS: IN PROGRESS`
+### Phase 15a: Auth + Workspaces `STATUS: BACKLOG`
+
+Logto authentication, workspace CRUD, user invitations, role management.
+
+#### Database Schema
+
+```
+users
+  id, logto_user_id (unique), github_user_id (unique), github_username,
+  github_avatar_url, email, name, created_at, updated_at
+
+workspaces
+  id, name, slug (unique), created_at, updated_at
+
+workspace_members
+  id, workspace_id (FK), user_id (FK), role (owner/admin/user),
+  invited_by (FK → users), invited_at, joined_at
+  UNIQUE(workspace_id, user_id)
+
+connection_keys
+  id, user_id (FK), workspace_id (FK), key_hash (unique),
+  key_prefix (for display, e.g. "tc_conn_a3f..."),
+  name (user label), last_used_at, created_at, revoked_at
+```
+
+#### Features
+
+- Sign up / sign in via Logto (GitHub social connector)
+- On first login, capture `github_user_id` from OAuth profile
+- Create workspace → creator becomes owner
+- Invite users by email → invitee signs up → matched by email → joins workspace
+- Workspace member list with role management (owner can promote/demote)
+- Generate / revoke connection keys (per user per workspace)
+
+#### API Endpoints
+
+- `POST /api/auth/callback` — Logto OAuth callback
+- `GET /api/auth/me` — current user + workspaces
+- `POST /api/workspaces` — create workspace
+- `GET /api/workspaces/:id` — workspace details + members
+- `POST /api/workspaces/:id/invite` — invite by email
+- `PATCH /api/workspaces/:id/members/:userId` — change role
+- `DELETE /api/workspaces/:id/members/:userId` — remove member
+- `POST /api/workspaces/:id/connection-keys` — generate key
+- `DELETE /api/workspaces/:id/connection-keys/:keyId` — revoke key
+
+#### Test Plan (Phase 15a) `STATUS: BACKLOG`
+- Logto OAuth flow: sign-in, sign-out, session persistence, token refresh
+- GitHub user ID captured from OAuth profile on first login
+- Create workspace → creator is owner
+- Invite user by email → accept → joins as user role
+- Role management: owner promotes user to admin, demotes admin to user
+- Multi-workspace: user belongs to two workspaces, sees both
+- Connection key: generate, use to authenticate API call, revoke → rejected
+- Isolation: user A cannot access workspace B's data
+- `pnpm build` and `pnpm test` pass
+
+#### Verification (Phase 15a)
+1. Sign up via Logto with GitHub → user created with github_user_id
+2. Create workspace → invite another user by email → they join
+3. Role changes reflected in UI
+4. Generate connection key → use it in local setup → authenticated
+
+---
+
+### Phase 15b: GitHub App + PR Analysis `STATUS: BACKLOG`
+
+GitHub App installation, webhook handling, automated PR diff analysis with results posted back to GitHub.
+
+#### Database Schema
+
+```
+github_installations
+  id, workspace_id (FK), github_installation_id (unique),
+  github_account_login, github_account_type (org/user),
+  installed_by (FK → users), created_at, removed_at
+
+workspace_repos
+  id, workspace_id (FK), github_installation_id (FK → github_installations),
+  github_repo_id (unique), github_repo_full_name,
+  default_branch, baseline_analysis_id (FK → analyses, nullable),
+  created_at, removed_at
+
+analysis_jobs
+  id, workspace_id (FK), repo_id (FK → workspace_repos),
+  triggered_by (FK → users, nullable — null for webhook triggers),
+  trigger_type (repo_connect/pr_webhook/manual_baseline),
+  pr_number (nullable), pr_head_sha (nullable),
+  status (queued/running/completed/failed),
+  error (nullable), created_at, started_at, completed_at
+```
+
+Existing `analyses` table gains: `workspace_id (FK)`, `author_id (FK → users)`, `job_id (FK → analysis_jobs)`.
+
+#### GitHub App Setup
+
+- Permissions: `contents: read`, `pull_requests: write`, `checks: write`
+- Webhook events: `pull_request` (opened, synchronize), `installation`
+- App authenticates via JWT → installation access tokens for repo operations
+
+#### Webhook → Analysis Flow
+
+```
+POST /api/webhooks/github
+  → Verify webhook signature (HMAC-SHA256)
+  → pull_request event (opened/synchronize):
+    → Look up installation → workspace → repo
+    → Get PR author's github_user_id
+    → Match against workspace members
+      → Not a member? Skip analysis, no action
+      → Is a member? Enqueue analysis job
+  → installation event (created/deleted):
+    → Create/deactivate github_installations record
+```
+
+#### Job Queue (BullMQ + Redis)
+
+```
+analysis-worker:
+  → Dequeue job
+  → Clone repo (shallow, specific SHA) into temp dir
+  → Run tree-sitter analysis
+  → Run LLM diff analysis (same engine as local)
+  → Store violations in cloud DB, linked to author
+  → Post results back to GitHub:
+    1. Create Check Run (pass if no critical/high violations, fail otherwise)
+    2. Post PR comment with violation summary + link to TrueCourse UI
+  → Clean up temp dir
+```
+
+#### PR Results on GitHub
+
+**Check Run:**
+- Name: "TrueCourse Analysis"
+- Conclusion: `success` (no critical/high) or `failure` (critical/high found)
+- Summary: "Found 2 critical, 3 high, 5 medium violations"
+
+**PR Comment:**
+```markdown
+## TrueCourse Analysis
+
+| Severity | Count |
+|----------|-------|
+| Critical | 2 |
+| High | 3 |
+| Medium | 5 |
+| Low | 7 |
+
+🔗 [View full analysis →](https://app.truecourse.dev/w/acme/repo/api/analysis/123)
+```
+
+#### API Endpoints
+
+- `POST /api/webhooks/github` — GitHub webhook receiver
+- `POST /api/workspaces/:id/repos` — connect a repo (triggers baseline)
+- `DELETE /api/workspaces/:id/repos/:repoId` — disconnect repo
+- `GET /api/workspaces/:id/repos` — list connected repos
+- `POST /api/workspaces/:id/repos/:repoId/reanalyze` — re-run baseline
+- `GET /api/workspaces/:id/jobs` — list analysis jobs + status
+
+#### Test Plan (Phase 15b) `STATUS: BACKLOG`
+- Webhook signature verification: valid signature accepted, invalid rejected
+- PR webhook for workspace member → analysis job enqueued
+- PR webhook for non-member → no job created, no action
+- Installation webhook: created → record stored, deleted → record deactivated
+- Job worker: processes job, creates violations linked to author
+- GitHub Check Run created with correct pass/fail conclusion
+- GitHub PR comment posted with violation summary and link
+- Repo connect → full baseline analysis triggered automatically
+- Re-run baseline → new full analysis, old baseline replaced
+- Shallow clone + cleanup: temp dir removed after analysis
+- `pnpm build` and `pnpm test` pass
+
+#### Verification (Phase 15b)
+1. Install GitHub App on a repo → `github_installations` record created
+2. Connect repo in UI → full baseline analysis runs
+3. Open PR by a workspace member → diff analysis runs automatically
+4. PR shows Check Run (pass/fail) + comment with violations + link
+5. Open PR by non-member → no analysis triggered
+6. Click link in PR comment → TrueCourse UI shows violations
+
+---
+
+### Phase 15c: Connected Local Mode `STATUS: BACKLOG`
+
+Local TrueCourse instances connect to cloud for shared state and LLM offloading.
+
+#### Architecture
+
+```
+Local UI → Local Express server → Cloud API (api.truecourse.dev)
+                                    ↓
+                              Cloud DB (shared)
+                              LLM Provider (cloud-managed)
+```
+
+Local server in connected mode:
+- Runs tree-sitter analysis locally (fast, code on disk)
+- Sends analysis results to cloud API for LLM review
+- Reads/writes violations via cloud API
+- No local DB — embedded Postgres doesn't start
+- Connection key sent as `Authorization: Bearer tc_conn_xxxxx`
+
+#### Cloud API for Local Clients
+
+- `POST /api/connected/analyze` — submit tree-sitter results for LLM review
+- `GET /api/connected/violations` — fetch violations for repo
+- `GET /api/connected/analyses` — fetch analysis history
+- `POST /api/connected/chat` — streaming chat (proxied to LLM)
+- `GET /api/connected/repos` — list repos in workspace (for local repo matching)
+
+#### Setup Flow
+
+```
+truecourse setup
+  → "Connected to cloud" selected
+  → Paste connection key
+  → Key validated against cloud API
+  → Stored in .env: TRUECOURSE_CLOUD_KEY, TRUECOURSE_CLOUD_URL
+  → Local server starts in connected mode (no DB, no LLM config needed)
+```
+
+#### Local Server Changes
+
+- `ServerMode` config: `standalone` | `connected`
+- In connected mode, analysis service delegates LLM calls to cloud API
+- In connected mode, DB service replaced with cloud API client
+- Socket.io still used locally for UI ↔ local server communication
+- Cloud API handles the socket.io bridge for real-time updates
+
+#### Test Plan (Phase 15c) `STATUS: BACKLOG`
+- Setup flow: "Connected to cloud" → key validated → env written
+- Connected mode: local tree-sitter runs, LLM calls go to cloud API
+- Connected mode: violations fetched from cloud DB, not local
+- Connected mode: embedded Postgres does not start
+- Invalid/revoked key: clear error, falls back to setup prompt
+- Standalone mode: unchanged behavior (local DB, local LLM)
+- `pnpm build` and `pnpm test` pass
+
+#### Verification (Phase 15c)
+1. `truecourse setup` → select connected → paste key → validated
+2. Run local analysis → tree-sitter runs locally, LLM calls hit cloud
+3. Violations appear in local UI, same as cloud UI
+4. Teammate runs analysis → violations visible in your local UI too
+5. Revoke key in cloud → local gets auth error, prompts re-setup
+
+---
+
+### Phase 15d: User-Level Analytics `STATUS: BACKLOG`
+
+Per-user violation tracking on charts. Reward good contributors, surface improvement trends.
+
+#### Data Model
+
+Existing `violations` table gains: `author_id (FK → users)` — set from PR author on diff analyses.
+
+#### Metrics Per User
+
+- **Violations introduced**: new violations in their PRs
+- **Violations resolved**: violations that disappeared in their PRs
+- **Net delta**: resolved − introduced (positive = improving the codebase)
+- **Trend over time**: net delta per week/month
+
+#### Frontend
+
+- User filter/selector on existing charts (violations by severity, by category, over time)
+- New **"Team" tab** or section:
+  - Leaderboard: top improvers (best net-negative violation delta)
+  - Per-user violation trend over time
+  - Breakdown by user: violations introduced vs resolved
+- User avatars (from GitHub) on violation cards and analysis history
+
+#### Test Plan (Phase 15d) `STATUS: BACKLOG`
+- Violations from PR analysis linked to correct author
+- User filter on charts: selecting user filters violations correctly
+- Leaderboard: users ranked by net violation delta
+- User with no PRs: shows in member list but no chart data
+- `pnpm build` and `pnpm test` pass
+
+#### Verification (Phase 15d)
+1. Two users open PRs → violations attributed correctly to each
+2. Charts filter by user → show only that user's violations
+3. Leaderboard shows user with most resolved violations at top
+4. User avatars visible on violation cards
+
+---
+
+### Phase 15e: Railway Deployment `STATUS: BACKLOG`
+
+Deploy cloud version to Railway.
+
+#### Railway Services
+
+| Service | Type | Notes |
+|---------|------|-------|
+| Web | Railway service | Express server + static frontend build |
+| Worker | Railway service | BullMQ worker for analysis jobs |
+| Postgres | Railway managed | Replaces embedded Postgres |
+| Redis | Railway managed | Job queue backend for BullMQ |
+
+#### Configuration
+
+- Environment variables managed in Railway dashboard
+- `DATABASE_URL` — Railway Postgres connection string (with SSL)
+- `REDIS_URL` — Railway Redis connection string
+- Logto config: `LOGTO_ENDPOINT`, `LOGTO_APP_ID`, `LOGTO_APP_SECRET`
+- GitHub App config: `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`
+- LLM keys: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+- `TRUECOURSE_BASE_URL` — public URL for links in PR comments
+
+#### Build & Deploy
+
+- Monorepo build: `pnpm build` produces `dist/` with bundled server + static frontend
+- Worker shares server code, different entry point (`worker.ts`)
+- Migrations run on web service startup (same as local)
+- Railway auto-deploys on push to `main` (or configured branch)
+
+#### Test Plan (Phase 15e) `STATUS: BACKLOG`
+- Build succeeds on Railway (monorepo + pnpm)
+- Migrations run on Railway Postgres with SSL + connection pooling
+- Web service serves frontend + API
+- Worker processes jobs from Redis queue
+- GitHub webhooks reach Railway endpoint
+- `TRUECOURSE_BASE_URL` used correctly in PR comment links
+- Health check endpoint responds
+
+#### Verification (Phase 15e)
+1. Push to main → Railway auto-deploys
+2. Visit cloud URL → frontend loads, login works
+3. Connect repo → baseline analysis runs via worker
+4. Open PR → webhook received → analysis runs → results on PR
+
+---
+
+## Phase 16: Claude Code CLI Provider `STATUS: DONE`
 
 Alternative LLM provider that spawns `claude --print` as a subprocess instead of making API calls. Users with a Claude Code subscription can run TrueCourse without a separate API key. Architecture supports adding Codex later.
 
@@ -1378,7 +1744,7 @@ Env vars: `LLM_PROVIDER=claude-code`, `CLAUDE_CODE_MODEL`, `CLAUDE_CODE_TIMEOUT_
 | `apps/server/package.json` | MODIFY — zod-to-json-schema dep |
 | `tests/server/cli-provider.test.ts` | NEW — tests |
 
-### Test Plan (Phase 16) `STATUS: IN PROGRESS`
+### Test Plan (Phase 16) `STATUS: DONE`
 
 - `parseAndValidate`: valid JSON, invalid JSON, Zod validation failure
 - `getCleanEnv`: nesting guard vars stripped

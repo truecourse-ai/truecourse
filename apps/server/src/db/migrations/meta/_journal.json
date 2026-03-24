@@ -71,6 +71,13 @@
       "when": 1774208404071,
       "tag": "0009_sticky_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1774324889620,
+      "tag": "0010_sticky_stark_industries",
+      "breakpoints": true
     }
   ]
 }

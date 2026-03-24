@@ -96,8 +96,10 @@ export interface ViolationPipelineInput {
   }[];
   /** If set, only run code rules on these files (for diff mode performance) */
   changedFileSet?: Set<string>;
-  /** Progress callback */
+  /** Progress callback (legacy — prefer tracker) */
   onProgress?: (progress: { step: string; percent: number; detail?: string }) => void;
+  /** Step tracker for checklist UI */
+  tracker?: import('../socket/handlers.js').StepTracker;
   /** Optional pre-created provider (for usage tracking) */
   provider?: LLMProvider;
   /** Abort signal for cancellation */
@@ -114,6 +116,8 @@ export interface ViolationPipelineResult {
   codeViolations: CodeViolation[];
   /** Number of resolved code violations (for badge counts) */
   codeResolvedCount: number;
+  /** Background LLM code review promise (null if no LLM code batches) */
+  codeReviewPromise: Promise<void> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +182,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     repoId, repoPath, analysisId, result,
     serviceIdMap, moduleIdMap, methodIdMap, dbIdMap,
     previousActiveViolations, previousActiveCodeViolations, previousDeterministicViolations,
-    changedFileSet, onProgress,
+    changedFileSet, onProgress, tracker,
     provider: externalProvider,
     signal,
   } = input;
@@ -187,6 +191,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allRules = await getEnabledRules();
 
   throwIfAborted(signal);
+  tracker?.start('detect', 'Running deterministic checks...');
   onProgress?.({ step: 'analyzing', percent: 80, detail: 'Running deterministic checks...' });
 
   // 2. Run all deterministic checks (service, module, method)
@@ -242,6 +247,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     : (result.fileAnalyses || []).map((fa) => ({ filePath: fa.filePath, resolve: !path.isAbsolute(fa.filePath) }));
 
   if ((enabledCodeRules.length > 0 || enabledLlmCodeRules.length > 0) && filesToScan.length > 0) {
+    tracker?.detail('detect', 'Running code checks...');
     onProgress?.({ step: 'analyzing', percent: 82, detail: 'Running code checks...' });
 
     for (const { filePath, resolve } of filesToScan) {
@@ -267,6 +273,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   throwIfAborted(signal);
+  const totalDetections = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
+  tracker?.done('detect', `${totalDetections} detections found`);
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 
   // 5. Build LLM code violation batches
@@ -411,6 +419,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allNewViolations: DiffViolationItem[] = [];
   const allResolvedViolationIds: string[] = [];
 
+  tracker?.start('enrich', `Enriching ${allDetEntries.length} detections...`);
+  tracker?.start('architecture');
+
   // Deterministic enrichment promise
   const deterministicPromise = (async () => {
     let detectionsToEnrich: DetEntry[];
@@ -539,7 +550,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
           ruleKey: det.ruleKey,
         });
       }
+      tracker?.done('enrich', `${enrichmentResult.enrichedViolations.length} violations enriched`);
       emitProgress(88, 'Deterministic violations enriched');
+    } else {
+      tracker?.done('enrich', 'No detections to enrich');
     }
   })();
 
@@ -681,6 +695,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     if (hasLlmOnlyExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
         llmStepCount++;
+        tracker?.detail('architecture', step);
         emitProgress(87 + llmStepCount * 2, step);
       }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
@@ -710,6 +725,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     } else {
       const archResult = await generateViolations(violationInput, (step) => {
         llmStepCount++;
+        tracker?.detail('architecture', step);
         emitProgress(87 + llmStepCount * 2, step);
       }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
@@ -754,30 +770,28 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   })();
 
-  // Run deterministic enrichment, LLM rules, and code violations in parallel
-  const codePromise = llmCodePromise.then((r) => {
-    emitProgress(94, 'Code analysis done');
-    return r;
-  });
+  // codePromise runs in background — no progress emit here to avoid
+  // re-triggering the progress bar after analysis:complete clears it
+  const codePromise = llmCodePromise;
 
-  const [detResult, llmResult, codeSettled] = await Promise.allSettled([deterministicPromise, llmRulePromise, codePromise]);
+  const [detResult, llmResult] = await Promise.allSettled([deterministicPromise, llmRulePromise]);
 
   if (detResult.status === 'rejected') {
-    log(`[Violations] Deterministic enrichment failed: ${detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason)}`);
+    const msg = detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason);
+    log(`[Violations] Deterministic enrichment failed: ${msg}`);
+    tracker?.error('enrich', `Failed: ${msg.slice(0, 80)}`);
   }
   if (llmResult.status === 'rejected') {
-    log(`[Violations] LLM rule analysis failed: ${llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason)}`);
+    const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
+    log(`[Violations] LLM rule analysis failed: ${msg}`);
+    tracker?.error('architecture', `Failed: ${msg.slice(0, 80)}`);
   }
-  if (codeSettled.status === 'rejected') {
-    log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
+  if (llmResult.status === 'fulfilled') {
+    tracker?.done('architecture');
   }
-
-  const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
-  processLlmCodeViolations(codeResult, validFilePaths, fileContents, allCodeViolations);
-  llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
-  llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
 
   throwIfAborted(signal);
+  tracker?.start('persist', 'Saving results...');
   emitProgress(95, 'Analysis complete');
 
   // 8. Save service descriptions
@@ -793,67 +807,16 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   emitProgress(97, 'Persisting violations...');
 
   // 9. Persist code violations with lifecycle tracking
-  // Three groups:
-  // a) LLM code violations with lifecycle decisions → use LLM's unchanged/resolved
-  // b) Deterministic code violations in changed files → use deterministic matching
-  // c) Previous violations for unchanged files → auto carry forward
+  // Deterministic code violations are persisted now (groups b + c).
+  // LLM code violations (group a) are deferred to codeReviewPromise.
 
   const scannedFilePaths = new Set(fileContents.keys());
-  const llmLifecycleIds = new Set([...llmCodeUnchangedIds, ...llmCodeResolvedIds]);
   let codeResolvedCount = 0;
 
-  // a) LLM lifecycle: carry forward unchanged, mark resolved
-  for (const prevId of llmCodeUnchangedIds) {
-    const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
-    if (!prev) continue;
-    await db.insert(codeViolations).values({
-      analysisId,
-      filePath: prev.filePath,
-      lineStart: prev.lineStart,
-      lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart,
-      columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey,
-      severity: prev.severity,
-      status: 'unchanged',
-      title: prev.title,
-      content: prev.content,
-      snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt,
-      firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt,
-      previousCodeViolationId: prev.id,
-    });
-  }
-
-  for (const prevId of llmCodeResolvedIds) {
-    const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
-    if (!prev) continue;
-    await db.insert(codeViolations).values({
-      analysisId,
-      filePath: prev.filePath,
-      lineStart: prev.lineStart,
-      lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart,
-      columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey,
-      severity: prev.severity,
-      status: 'resolved',
-      title: prev.title,
-      content: prev.content,
-      snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt,
-      firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt,
-      previousCodeViolationId: prev.id,
-      resolvedAt: now,
-    });
-    codeResolvedCount++;
-  }
-
-  // b) Deterministic matching for code violations NOT handled by LLM lifecycle
+  // b) Deterministic matching for code violations in scanned files
+  // (No LLM lifecycle IDs yet — those will be handled in the background)
   const prevForDeterministicMatching = previousActiveCodeViolations.filter(
-    (v) => !llmLifecycleIds.has(v.id) && scannedFilePaths.has(v.filePath),
+    (v) => scannedFilePaths.has(v.filePath) && !v.ruleKey.startsWith('llm/'),
   );
 
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
@@ -872,9 +835,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  // c) Auto carry forward violations for unchanged files
+  // c) Auto carry forward violations for unchanged files (non-LLM only now)
   const prevInUnchangedFiles = previousActiveCodeViolations.filter(
-    (v) => !llmLifecycleIds.has(v.id) && !scannedFilePaths.has(v.filePath),
+    (v) => !scannedFilePaths.has(v.filePath) && !v.ruleKey.startsWith('llm/'),
   );
 
   for (const prev of prevInUnchangedFiles) {
@@ -898,12 +861,126 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     });
   }
 
+  // Build the background code review promise for LLM code violations (group a)
+  const hasLlmCodeWork = llmCodeBatches.length > 0;
+  const codeReviewPromise: Promise<void> | null = hasLlmCodeWork
+    ? (async () => {
+        const codeSettled = await codePromise.then(
+          (r) => ({ status: 'fulfilled' as const, value: r }),
+          (err) => ({ status: 'rejected' as const, reason: err }),
+        );
+
+        if (codeSettled.status === 'rejected') {
+          log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
+        }
+
+        throwIfAborted(signal);
+
+        const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
+        const llmCodeViolations: CodeViolation[] = [];
+        processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
+        llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
+        llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
+
+        // a) LLM lifecycle: carry forward unchanged, mark resolved
+        for (const prevId of llmCodeUnchangedIds) {
+          const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
+          if (!prev) continue;
+          await db.insert(codeViolations).values({
+            analysisId,
+            filePath: prev.filePath,
+            lineStart: prev.lineStart,
+            lineEnd: prev.lineEnd,
+            columnStart: prev.columnStart,
+            columnEnd: prev.columnEnd,
+            ruleKey: prev.ruleKey,
+            severity: prev.severity,
+            status: 'unchanged',
+            title: prev.title,
+            content: prev.content,
+            snippet: prev.snippet,
+            fixPrompt: prev.fixPrompt,
+            firstSeenAnalysisId: prev.firstSeenAnalysisId,
+            firstSeenAt: prev.firstSeenAt,
+            previousCodeViolationId: prev.id,
+          });
+        }
+
+        for (const prevId of llmCodeResolvedIds) {
+          const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
+          if (!prev) continue;
+          await db.insert(codeViolations).values({
+            analysisId,
+            filePath: prev.filePath,
+            lineStart: prev.lineStart,
+            lineEnd: prev.lineEnd,
+            columnStart: prev.columnStart,
+            columnEnd: prev.columnEnd,
+            ruleKey: prev.ruleKey,
+            severity: prev.severity,
+            status: 'resolved',
+            title: prev.title,
+            content: prev.content,
+            snippet: prev.snippet,
+            fixPrompt: prev.fixPrompt,
+            firstSeenAnalysisId: prev.firstSeenAnalysisId,
+            firstSeenAt: prev.firstSeenAt,
+            previousCodeViolationId: prev.id,
+            resolvedAt: now,
+          });
+        }
+
+        // Persist new LLM code violations via deterministic matching
+        const llmPrevForMatching = previousActiveCodeViolations.filter(
+          (v) => v.ruleKey.startsWith('llm/') && scannedFilePaths.has(v.filePath)
+            && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
+        );
+
+        if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
+          await persistCodeViolationsWithLifecycle({
+            analysisId,
+            currentCodeViolations: llmCodeViolations,
+            previousActiveCodeViolations: llmPrevForMatching,
+          });
+        }
+
+        // Carry forward LLM violations for unchanged files
+        const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
+          (v) => v.ruleKey.startsWith('llm/') && !scannedFilePaths.has(v.filePath),
+        );
+
+        for (const prev of llmPrevUnchangedFiles) {
+          await db.insert(codeViolations).values({
+            analysisId,
+            filePath: prev.filePath,
+            lineStart: prev.lineStart,
+            lineEnd: prev.lineEnd,
+            columnStart: prev.columnStart,
+            columnEnd: prev.columnEnd,
+            ruleKey: prev.ruleKey,
+            severity: prev.severity,
+            status: 'unchanged',
+            title: prev.title,
+            content: prev.content,
+            snippet: prev.snippet,
+            fixPrompt: prev.fixPrompt,
+            firstSeenAnalysisId: prev.firstSeenAnalysisId,
+            firstSeenAt: prev.firstSeenAt,
+            previousCodeViolationId: prev.id,
+          });
+        }
+      })()
+    : null;
+
+  tracker?.done('persist', 'Done');
+
   return {
     serviceDescriptions,
     newViolations: allNewViolations,
     resolvedViolationIds: allResolvedViolationIds,
     codeViolations: allCodeViolations,
     codeResolvedCount,
+    codeReviewPromise,
   };
 }
 
