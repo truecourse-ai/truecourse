@@ -1097,7 +1097,7 @@ export default function RepoGraphPage() {
           <div className="relative flex-1 overflow-hidden">
           {/* Analysis progress — step checklist */}
           {analysisProgress && (
-            <div className="absolute bottom-4 left-1/2 z-20 w-72 -translate-x-1/2 rounded-lg border border-border bg-card p-3 shadow-lg">
+            <div className="absolute bottom-4 left-1/2 z-20 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-3 shadow-lg">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-medium text-foreground">Analyzing...</span>
                 <button
@@ -1112,14 +1112,14 @@ export default function RepoGraphPage() {
                 <div className="space-y-1">
                   {analysisProgress.steps.map((s) => (
                     <div key={s.key} className="flex items-center gap-2">
-                      <div className="flex h-[16px] w-3 shrink-0 items-center justify-center">
-                        {s.status === 'done' && <Check className="h-3 w-3 text-emerald-500" />}
-                        {s.status === 'active' && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
-                        {s.status === 'error' && <CircleX className="h-3 w-3 text-destructive" />}
-                        {s.status === 'pending' && <div className="h-2 w-2 rounded-full border border-muted-foreground/30" />}
+                      <div className="shrink-0 translate-y-px">
+                        {s.status === 'done' && <Check className="h-3.5 w-3.5 text-emerald-500" />}
+                        {s.status === 'active' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                        {s.status === 'error' && <CircleX className="h-3.5 w-3.5 text-destructive" />}
+                        {s.status === 'pending' && <div className="h-2.5 w-2.5 rounded-full border border-muted-foreground/30" />}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <span className={`text-[11px] leading-[16px] ${
+                        <span className={`text-[11px] leading-[18px] ${
                           s.status === 'active' ? 'font-medium text-foreground' :
                           s.status === 'done' ? 'text-muted-foreground' :
                           s.status === 'error' ? 'text-destructive' :

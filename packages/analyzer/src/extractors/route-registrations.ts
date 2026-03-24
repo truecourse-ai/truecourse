@@ -19,7 +19,7 @@ export function extractRouteRegistrations(
   const routes: RouteRegistration[] = []
   const mounts: RouterMount[] = []
 
-  if (language !== 'typescript' && language !== 'javascript') {
+  if (language !== 'typescript' && language !== 'tsx' && language !== 'javascript') {
     return { routes, mounts }
   }
 

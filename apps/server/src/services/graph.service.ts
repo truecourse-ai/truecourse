@@ -1,5 +1,4 @@
 import dagre from 'dagre';
-import { isFrameworkEntryFile } from '@truecourse/analyzer';
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -826,9 +825,15 @@ function markDeadModules(
       connectedIds.add(mod.id);
     }
   }
-  // Framework entry files are alive
+  // Entry point files are alive — files that import others but are never imported themselves
+  // (framework entry files like page.tsx, layout.tsx, scripts, CLI entry points, etc.)
+  const importedFiles = new Set<string>();
+  for (const dep of moduleDeps) {
+    const targetMod = modules.find((m) => m.id === dep.targetModuleId);
+    if (targetMod) importedFiles.add(targetMod.filePath);
+  }
   for (const mod of modules) {
-    if (isFrameworkEntryFile(mod.filePath)) connectedIds.add(mod.id);
+    if (!importedFiles.has(mod.filePath)) connectedIds.add(mod.id);
   }
 
   for (const node of nodes) {

@@ -58,8 +58,8 @@ describe('detectLanguage', () => {
     expect(detectLanguage('app.ts')).toBe('typescript');
   });
 
-  it("returns 'typescript' for .tsx files", () => {
-    expect(detectLanguage('component.tsx')).toBe('typescript');
+  it("returns 'tsx' for .tsx files", () => {
+    expect(detectLanguage('component.tsx')).toBe('tsx');
   });
 
   it("returns 'javascript' for .js files", () => {

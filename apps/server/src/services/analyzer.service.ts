@@ -11,7 +11,7 @@ import type {
   ModuleLevelDependency,
   MethodLevelDependency,
 } from '@truecourse/shared';
-import { checkModuleRules, checkMethodRules, checkServiceRules, type ModuleViolation, type ServiceViolation } from '@truecourse/analyzer';
+import { checkModuleRules, checkMethodRules, checkServiceRules, findEntryPoints, buildScopedCompilerOptions, analyzeSemantics, type ModuleViolation, type ServiceViolation } from '@truecourse/analyzer';
 import type { AnalysisRule } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
@@ -30,6 +30,8 @@ export interface AnalysisResult {
   methodLevelDependencies: MethodLevelDependency[];
   fileAnalyses: FileAnalysis[];
   moduleDependencies: ModuleDependency[];
+  /** Files that are not imported by anyone — framework entry points, scripts, etc. */
+  entryPointFiles: Set<string>;
   metadata: Record<string, unknown>;
 }
 
@@ -78,6 +80,7 @@ export function runDeterministicModuleChecks(
     dbConnectedModuleKeys,
     result.fileAnalyses,
     libraryServiceNames,
+    result.entryPointFiles,
   );
 }
 
@@ -93,6 +96,7 @@ export function runDeterministicMethodChecks(
     result.methods,
     enabledDeterministic,
     result.methodLevelDependencies || [],
+    result.entryPointFiles,
   );
 }
 
@@ -182,6 +186,31 @@ export async function runAnalysis(
       percent: 65,
       detail: 'Building dependency graph...',
     });
+
+    // Use TS compiler for accurate export detection — corrects isExported flags
+    // set by tree-sitter which can't handle grouped exports, re-exports, or barrels
+    const scopedOptions = buildScopedCompilerOptions(repoPath);
+    if (scopedOptions.length > 0) {
+      const filePaths = fileAnalyses.map((fa) => fa.filePath);
+      const { exportMap } = analyzeSemantics(filePaths, scopedOptions);
+
+      // Correct isExported flags on functions using the compiler's definitive export list.
+      // The compiler reports default exports as 'default', so we also check if the function
+      // is the default export by matching against the file's export statements.
+      for (const fa of fileAnalyses) {
+        const fileExports = exportMap.get(fa.filePath);
+        if (!fileExports) continue;
+
+        // Find the default-exported function name (if any) from the file's export list
+        const defaultExportedFn = fa.exports.find((e) => e.isDefault)?.name;
+
+        for (const fn of fa.functions) {
+          fn.isExported = fileExports.has(fn.name)
+            || (fileExports.has('default') && fn.name === defaultExportedFn);
+        }
+      }
+    }
+
     const moduleDependencies = analyzer.buildDependencyGraph(fileAnalyses, repoPath);
 
     onProgress({
@@ -213,6 +242,7 @@ export async function runAnalysis(
       methodLevelDependencies: splitResult.methodLevelDependencies,
       fileAnalyses,
       moduleDependencies,
+      entryPointFiles: new Set(findEntryPoints(fileAnalyses, moduleDependencies)),
       metadata: {
         totalFiles: files.length,
         analyzedFiles: fileAnalyses.length,

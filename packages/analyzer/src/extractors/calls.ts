@@ -1,5 +1,6 @@
 import type { Tree, SyntaxNode } from 'tree-sitter'
 import type { CallExpression, SupportedLanguage, SourceLocation } from '@truecourse/shared'
+import { extractJsxReferences } from '../ts-compiler.js'
 
 /**
  * Extract all function/method calls from an AST
@@ -22,13 +23,32 @@ export function extractCalls(
       }
     }
 
-    // Recursively traverse children
     for (const child of node.children) {
       traverse(child)
     }
   }
 
   traverse(tree.rootNode)
+
+  // Extract JSX references using the TypeScript compiler AST.
+  // This replaces tree-sitter heuristic matching on jsx_attribute /
+  // jsx_self_closing_element node types with the compiler's native JSX understanding.
+  const jsxRefs = extractJsxReferences(sourceCode, filePath)
+  for (const ref of jsxRefs) {
+    const callerName = functionContext.get(ref.line) || undefined
+    calls.push({
+      callee: ref.callee,
+      location: {
+        filePath,
+        startLine: ref.line + 1,
+        endLine: ref.line + 1,
+        startColumn: ref.column,
+        endColumn: ref.column,
+      },
+      callerFunction: callerName,
+    })
+  }
+
   return calls
 }
 
@@ -104,8 +124,11 @@ export function buildFunctionContext(
 ): Map<number, string> {
   const context = new Map<number, string>()
 
-  // Add standalone functions
+  // Add standalone functions — skip anonymous functions so they don't overwrite
+  // the enclosing named function's context. This ensures calls inside useEffect
+  // callbacks, inline handlers, etc. are attributed to the parent component/function.
   for (const func of functions) {
+    if (func.name === 'anonymous') continue
     for (let line = func.location.startLine; line <= func.location.endLine; line++) {
       context.set(line - 1, func.name) // Tree-sitter uses 0-indexed lines
     }
@@ -114,6 +137,7 @@ export function buildFunctionContext(
   // Add class methods
   for (const cls of classes) {
     for (const method of cls.methods) {
+      if (method.name === 'anonymous') continue
       for (let line = method.location.startLine; line <= method.location.endLine; line++) {
         context.set(line - 1, `${cls.name}.${method.name}`)
       }

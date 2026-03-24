@@ -27,6 +27,7 @@ export function checkModuleRules(
   dbConnectedModuleKeys?: Set<string>,
   fileAnalyses?: FileAnalysis[],
   libraryServiceNames?: Set<string>,
+  entryPointFiles?: Set<string>,
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -48,7 +49,8 @@ export function checkModuleRules(
     }
   }
 
-  // Unused export
+  // Unused export — skip framework entry files (Next.js pages, layouts, route handlers, etc.)
+  // and framework convention export names (GET, POST, generateMetadata, etc.)
   if (ruleKeys.has('arch/unused-export')) {
     const importedTargets = new Set<string>()
     for (const dep of fileDependencies) {
@@ -59,6 +61,9 @@ export function checkModuleRules(
 
     for (const method of methods) {
       if (method.isExported && !importedTargets.has(method.name)) {
+        // Skip exports from entry point files — they're consumed by the framework/runtime
+        if (entryPointFiles?.has(method.filePath)) continue
+
         violations.push({
           ruleKey: 'arch/unused-export',
           title: `Unused export: ${method.name}`,
@@ -74,6 +79,8 @@ export function checkModuleRules(
 
     for (const mod of modules) {
       if (mod.kind === 'class' && mod.exportCount > 0 && !importedTargets.has(mod.name)) {
+        if (entryPointFiles?.has(mod.filePath)) continue
+
         violations.push({
           ruleKey: 'arch/unused-export',
           title: `Unused export: ${mod.name}`,
@@ -87,7 +94,7 @@ export function checkModuleRules(
     }
   }
 
-  // Dead module
+  // Dead module — skip framework entry files (loaded by the framework, not via imports)
   if (ruleKeys.has('arch/dead-module') && moduleLevelDeps) {
     const connectedModules = new Set<string>()
     for (const dep of moduleLevelDeps) {
@@ -98,6 +105,8 @@ export function checkModuleRules(
     for (const mod of modules) {
       const key = `${mod.serviceName}::${mod.name}`
       if (!connectedModules.has(key) && !dbConnectedModuleKeys?.has(key)) {
+        if (entryPointFiles?.has(mod.filePath)) continue
+
         violations.push({
           ruleKey: 'arch/dead-module',
           title: `Dead module: ${mod.name}`,
@@ -111,9 +120,11 @@ export function checkModuleRules(
     }
   }
 
-  // Orphan file
+  // Orphan file — skip framework entry files (Next.js pages, layouts, route handlers, etc.)
+  // and common non-importable files (tests, configs, migrations, scripts)
   if (ruleKeys.has('arch/orphan-file') && fileAnalyses) {
-    const ENTRY_POINT_PATTERN = /(?:^|\/)(?:index|main|app|server)\.[^/]+$|(?:^|\/)route[^/]*\.[^/]+$|\.config\.[^/]+$|\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|(?:^|\/)migrations\/|(?:^|\/)seeds\/|(?:^|\/)bin\/|(?:^|\/)scripts\//
+    // Test/config files that are never imported but shouldn't be flagged as orphans
+    const TEST_CONFIG_PATTERN = /\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|\.config\.[^/]+$|(?:^|\/)migrations\/|(?:^|\/)seeds\/|(?:^|\/)bin\/|(?:^|\/)scripts\//
 
     const importedFiles = new Set<string>()
     for (const dep of fileDependencies) {
@@ -122,7 +133,8 @@ export function checkModuleRules(
 
     for (const fa of fileAnalyses) {
       if (importedFiles.has(fa.filePath)) continue
-      if (ENTRY_POINT_PATTERN.test(fa.filePath)) continue
+      if (TEST_CONFIG_PATTERN.test(fa.filePath)) continue
+      if (entryPointFiles?.has(fa.filePath)) continue
 
       const matchingModule = modules.find((m) => m.filePath === fa.filePath)
       const serviceName = matchingModule?.serviceName || 'unknown'
@@ -211,6 +223,7 @@ export function checkMethodRules(
   methods: MethodInfo[],
   enabledRules: AnalysisRule[],
   methodLevelDeps?: MethodLevelDependency[],
+  entryPointFiles?: Set<string>,
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -269,7 +282,8 @@ export function checkMethodRules(
     }
   }
 
-  // Dead method
+  // Dead method — skip methods in framework entry files (React components, route handlers, etc.)
+  // These are either consumed by the framework router or are internal functions called from JSX.
   if (ruleKeys.has('arch/dead-method') && methodLevelDeps) {
     const connectedMethods = new Set<string>()
     for (const dep of methodLevelDeps) {
@@ -280,6 +294,10 @@ export function checkMethodRules(
     for (const method of methods) {
       const key = `${method.serviceName}::${method.moduleName}::${method.name}`
       if (!connectedMethods.has(key)) {
+        // Skip methods in framework entry files — they're invoked by the framework
+        // or called from JSX which isn't tracked in method-level dependencies
+        if (entryPointFiles?.has(method.filePath)) continue
+
         violations.push({
           ruleKey: 'arch/dead-method',
           title: `Dead method: ${method.moduleName}.${method.name}`,

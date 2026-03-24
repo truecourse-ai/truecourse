@@ -1,147 +1,53 @@
-import { resolve, dirname, join } from 'path'
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
-import type { FileAnalysis, ModuleDependency, SupportedLanguage } from '@truecourse/shared'
-import { getLanguageConfig } from './language-config.js'
-import { monorepoPatterns } from './patterns/service-patterns.js'
+import { resolve, dirname } from 'path'
+import { realpathSync } from 'fs'
+import type { FileAnalysis, ModuleDependency } from '@truecourse/shared'
+import { buildScopedCompilerOptions, resolveModule, type ScopedCompilerOptions } from './ts-compiler.js'
+
+// Common TS/JS extensions for fallback resolution (when no tsconfig exists)
+const FALLBACK_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']
+const FALLBACK_INDEX_FILES = ['index.ts', 'index.tsx', 'index.js', 'index.jsx']
 
 /**
- * Parse tsconfig.json compilerOptions.paths into a map of prefix → directory
- * e.g. { "@/*": ["src/*"] } → Map { "@/" → "/abs/path/src/" }
+ * Fallback resolution for relative imports when no tsconfig is available.
+ * Tries extension probing and index file resolution against analyzed files.
  */
-function buildPathAliasMap(rootPath: string): Map<string, string> {
-  const aliasMap = new Map<string, string>()
-
-  // Search for tsconfig.json in rootPath and immediate subdirs (monorepo packages)
-  const tsconfigCandidates = [join(rootPath, 'tsconfig.json')]
-
-  for (const pattern of monorepoPatterns) {
-    const dirPath = join(rootPath, pattern)
-    if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) continue
-    try {
-      for (const entry of readdirSync(dirPath)) {
-        tsconfigCandidates.push(join(dirPath, entry, 'tsconfig.json'))
-      }
-    } catch { /* skip */ }
-  }
-
-  for (const tsconfigPath of tsconfigCandidates) {
-    if (!existsSync(tsconfigPath)) continue
-    try {
-      // Strip comments (// and /* */) for JSON parsing
-      const raw = readFileSync(tsconfigPath, 'utf-8')
-        .replace(/\/\/.*$/gm, '')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-      const tsconfig = JSON.parse(raw)
-      const paths = tsconfig?.compilerOptions?.paths
-      const baseUrl = tsconfig?.compilerOptions?.baseUrl || '.'
-      if (!paths) continue
-
-      const baseDir = resolve(dirname(tsconfigPath), baseUrl)
-
-      for (const [alias, targets] of Object.entries(paths)) {
-        if (!Array.isArray(targets) || targets.length === 0) continue
-        // "@/*" → prefix "@/", target "src/*" → dir "src/"
-        const prefix = alias.replace(/\*$/, '')
-        const targetDir = resolve(baseDir, (targets[0] as string).replace(/\*$/, ''))
-        aliasMap.set(prefix, targetDir)
-      }
-    } catch { /* skip invalid tsconfig */ }
-  }
-
-  return aliasMap
-}
-
-/**
- * Build a map of workspace package names to their root directories
- * by scanning monorepo pattern directories for package.json files
- */
-function buildWorkspacePackageMap(rootPath: string): Map<string, string> {
-  const packageMap = new Map<string, string>()
-
-  for (const pattern of monorepoPatterns) {
-    const dirPath = join(rootPath, pattern)
-    if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) continue
-
-    try {
-      const entries = readdirSync(dirPath)
-      for (const entry of entries) {
-        const pkgDir = join(dirPath, entry)
-        const pkgJsonPath = join(pkgDir, 'package.json')
-
-        if (!existsSync(pkgJsonPath)) continue
-
-        try {
-          const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
-          if (pkg.name) {
-            packageMap.set(pkg.name, pkgDir)
-          }
-        } catch {
-          // skip invalid package.json
-        }
-      }
-    } catch {
-      // skip unreadable directories
-    }
-  }
-
-  return packageMap
-}
-
-/**
- * Resolve a workspace package import to an entry point file
- */
-function resolveWorkspaceImport(
+function resolveRelativeFallback(
   importSource: string,
-  workspacePackages: Map<string, string>,
-  existingFiles: Set<string>,
-  language: SupportedLanguage,
+  containingFile: string,
+  analyzedFiles: Set<string>,
 ): string | null {
-  // Check exact package name match
-  const pkgDir = workspacePackages.get(importSource)
-  if (!pkgDir) return null
+  const fromDir = dirname(containingFile)
+  const basePath = resolve(fromDir, importSource)
 
-  const config = getLanguageConfig(language)
-  const { extensions, indexFiles } = config.moduleResolution
+  // Try as-is
+  if (analyzedFiles.has(basePath)) return basePath
 
-  // Try to resolve via package.json "main" field
-  const pkgJsonPath = join(pkgDir, 'package.json')
-  if (existsSync(pkgJsonPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
-      const mainField = pkg.main || pkg.module
-      if (mainField) {
-        const mainPath = resolve(pkgDir, mainField)
-        if (existingFiles.has(mainPath)) return mainPath
-
-        // Try with extensions
-        for (const ext of extensions) {
-          const candidate = mainPath.endsWith(ext) ? mainPath : mainPath + ext
-          if (existingFiles.has(candidate)) return candidate
-        }
-      }
-    } catch {
-      // skip
-    }
+  // Try with extensions
+  for (const ext of FALLBACK_EXTENSIONS) {
+    const candidate = basePath + ext
+    if (analyzedFiles.has(candidate)) return candidate
+    // Also try stripping existing extension first
+    const stripped = basePath.replace(/\.[^.]+$/, '') + ext
+    if (stripped !== candidate && analyzedFiles.has(stripped)) return stripped
   }
 
-  // Fall back to src/index.* or index.*
-  const srcDir = join(pkgDir, 'src')
-  for (const indexFile of indexFiles) {
-    const candidates = [
-      join(srcDir, indexFile),
-      join(pkgDir, indexFile),
-    ]
-    for (const candidate of candidates) {
-      if (existingFiles.has(candidate)) return candidate
-    }
+  // Try index files
+  for (const indexFile of FALLBACK_INDEX_FILES) {
+    const candidate = resolve(basePath, indexFile)
+    if (analyzedFiles.has(candidate)) return candidate
   }
 
   return null
 }
 
 /**
- * Build module dependency graph from file analyses
- * Resolves relative import paths and workspace package imports to absolute file paths
+ * Build module dependency graph from file analyses.
+ * Uses the TypeScript Compiler API for module resolution — handles path aliases,
+ * workspace packages, re-exports, extension probing, and all moduleResolution
+ * strategies natively via ts.resolveModuleName.
+ *
+ * Falls back to basic relative resolution when no tsconfig is available
+ * (e.g., in test fixtures or JS-only projects).
  */
 export function buildDependencyGraph(
   files: FileAnalysis[],
@@ -149,21 +55,16 @@ export function buildDependencyGraph(
 ): ModuleDependency[] {
   const dependencies: ModuleDependency[] = []
 
-  // Create a map of file paths for quick lookup
-  const filePaths = new Set(files.map(f => f.filePath))
+  // Build scoped compiler options from tsconfig.json files
+  const scoped: ScopedCompilerOptions[] = rootPath
+    ? buildScopedCompilerOptions(rootPath)
+    : []
 
-  // Build workspace package map if rootPath is provided
-  const workspacePackages = rootPath
-    ? buildWorkspacePackageMap(rootPath)
-    : new Map<string, string>()
-
-  // Build path alias map from tsconfig.json
-  const pathAliases = rootPath
-    ? buildPathAliasMap(rootPath)
-    : new Map<string, string>()
+  // Set of analyzed file paths for filtering resolved targets
+  const analyzedFiles = new Set(files.map((f) => f.filePath))
 
   for (const file of files) {
-    // Collect both imports and re-exports (export { x } from './y') as dependency sources
+    // Collect import sources: both imports and re-exports (export { x } from './y')
     const depSources: { source: string; names: string[] }[] = []
 
     for (const importStmt of file.imports) {
@@ -173,7 +74,6 @@ export function buildDependencyGraph(
       })
     }
 
-    // Re-exports are exports with a source field — they create real dependencies
     for (const exportStmt of file.exports) {
       if (exportStmt.source) {
         depSources.push({
@@ -183,49 +83,53 @@ export function buildDependencyGraph(
       }
     }
 
+    // Resolve each import/re-export to an absolute file path
     for (const dep of depSources) {
-      const importSource = dep.source
+      // Try TS compiler resolution first
+      let resolved = resolveModule(dep.source, file.filePath, scoped)
 
-      if (importSource.startsWith('.')) {
-        // Resolve relative import
-        const fileDir = dirname(file.filePath)
-        const resolvedPath = resolveImportPath(fileDir, importSource, file.language, filePaths)
+      // TS compiler may resolve to a symlink path (e.g., node_modules/@pkg → packages/pkg).
+      // Resolve to real path so it matches the analyzed file set.
+      if (resolved && !analyzedFiles.has(resolved)) {
+        try { resolved = realpathSync(resolved) } catch { /* keep as-is */ }
+      }
 
-        if (resolvedPath) {
-          dependencies.push({
-            source: file.filePath,
-            target: resolvedPath,
-            importedNames: dep.names,
-          })
-        }
-      } else {
-        let resolved: string | null = null
+      // Fallback for relative imports when TS compiler can't resolve
+      // (no tsconfig, or files don't exist on disk like in tests)
+      if (!resolved && dep.source.startsWith('.')) {
+        resolved = resolveRelativeFallback(dep.source, file.filePath, analyzedFiles)
+      }
 
-        // Try path alias resolution (e.g. @/utils/validators → src/utils/validators)
-        for (const [prefix, targetDir] of pathAliases) {
-          if (importSource.startsWith(prefix)) {
-            const rest = importSource.slice(prefix.length)
-            resolved = resolveImportPath(targetDir, './' + rest, file.language, filePaths)
-            if (resolved) break
+      if (resolved && analyzedFiles.has(resolved)) {
+        dependencies.push({
+          source: file.filePath,
+          target: resolved,
+          importedNames: dep.names,
+        })
+      }
+    }
+
+    // Also resolve dynamic imports: import('...') calls
+    if (file.calls) {
+      for (const call of file.calls) {
+        if (call.callee === 'import' && call.arguments?.length === 1) {
+          const specifier = call.arguments[0].replace(/^['"]|['"]$/g, '')
+          if (specifier) {
+            let resolved = resolveModule(specifier, file.filePath, scoped)
+            if (resolved && !analyzedFiles.has(resolved)) {
+              try { resolved = realpathSync(resolved) } catch { /* keep as-is */ }
+            }
+            if (!resolved && specifier.startsWith('.')) {
+              resolved = resolveRelativeFallback(specifier, file.filePath, analyzedFiles)
+            }
+            if (resolved && analyzedFiles.has(resolved)) {
+              dependencies.push({
+                source: file.filePath,
+                target: resolved,
+                importedNames: [],
+              })
+            }
           }
-        }
-
-        // Try workspace package resolution
-        if (!resolved && workspacePackages.size > 0) {
-          resolved = resolveWorkspaceImport(
-            importSource,
-            workspacePackages,
-            filePaths,
-            file.language,
-          )
-        }
-
-        if (resolved) {
-          dependencies.push({
-            source: file.filePath,
-            target: resolved,
-            importedNames: dep.names,
-          })
         }
       }
     }
@@ -235,61 +139,15 @@ export function buildDependencyGraph(
 }
 
 /**
- * Resolve a relative import path to an absolute file path
- * Uses language-specific module resolution configuration
- */
-function resolveImportPath(
-  fromDir: string,
-  importPath: string,
-  language: SupportedLanguage,
-  existingFiles: Set<string>
-): string | null {
-  const config = getLanguageConfig(language)
-  const { extensions, indexFiles } = config.moduleResolution
-
-  // Remove any extension that matches the language's extensions
-  let cleanPath = importPath
-  for (const ext of extensions) {
-    if (cleanPath.endsWith(ext)) {
-      cleanPath = cleanPath.slice(0, -ext.length)
-      break
-    }
-  }
-
-  // Try different extensions
-  for (const ext of extensions) {
-    const candidatePath = resolve(fromDir, cleanPath + ext)
-    if (existingFiles.has(candidatePath)) {
-      return candidatePath
-    }
-  }
-
-  // Try as-is (might already have extension)
-  const asIsPath = resolve(fromDir, importPath)
-  if (existingFiles.has(asIsPath)) {
-    return asIsPath
-  }
-
-  // Try index files for directory imports
-  for (const indexFile of indexFiles) {
-    const indexPath = resolve(fromDir, cleanPath, indexFile)
-    if (existingFiles.has(indexPath)) {
-      return indexPath
-    }
-  }
-
-  // If we can't resolve it, return null (might be a package or missing file)
-  return null
-}
-
-/**
- * Find entry points (files that are not imported by anyone)
+ * Find entry points — files that are not imported by anyone.
+ * These are structural entry points: framework-routed files (page.tsx, layout.tsx),
+ * scripts, CLI entry points, etc. Used by deterministic rules to avoid flagging
+ * framework entry files as dead/unused.
  */
 export function findEntryPoints(
   files: FileAnalysis[],
-  dependencies: ModuleDependency[]
+  dependencies: ModuleDependency[],
 ): string[] {
-  // Build set of all imported file paths (targets)
   const importedFiles = new Set<string>()
   for (const dep of dependencies) {
     importedFiles.add(dep.target)

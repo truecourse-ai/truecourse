@@ -22,9 +22,6 @@ export interface LanguageConfig {
   exportNodeTypes: string[]
   callNodeTypes: string[]
 
-  // Framework entry file patterns (files invoked by the framework, not by user code)
-  frameworkEntryPatterns: RegExp[]
-
   // URL interpolation patterns — how this language embeds variables in URL strings.
   // Used to normalize raw URLs from source code into language-agnostic route patterns.
   // See ADDING_A_LANGUAGE.md for details.
@@ -49,7 +46,7 @@ export interface LanguageConfig {
  */
 export const TYPESCRIPT_CONFIG: LanguageConfig = {
   name: 'typescript',
-  fileExtensions: ['.ts', '.tsx'],
+  fileExtensions: ['.ts'],
 
   moduleResolution: {
     extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx'],
@@ -74,18 +71,6 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
   exportNodeTypes: ['export_statement'],
 
   callNodeTypes: ['call_expression'],
-
-  frameworkEntryPatterns: [
-    /\bpage\.tsx?$/,
-    /\blayout\.tsx?$/,
-    /\bloading\.tsx?$/,
-    /\berror\.tsx?$/,
-    /\bnot-found\.tsx?$/,
-    /\broute\.tsx?$/,
-    /\bmiddleware\.tsx?$/,
-    /\bworker\.tsx?$/,
-    /\binstrument\.tsx?$/,
-  ],
 
   urlInterpolation: {
     baseUrlVar: /\$\{[^}]*URL[^}]*\}/gi,
@@ -116,6 +101,16 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
 
 /**
  * JavaScript language configuration
+ * TSX — TypeScript with JSX. Extends TypeScript config, only differs in file extension
+ * and uses the TSX tree-sitter grammar which recognizes JSX syntax nodes.
+ */
+export const TSX_CONFIG: LanguageConfig = {
+  ...TYPESCRIPT_CONFIG,
+  name: 'tsx',
+  fileExtensions: ['.tsx'],
+}
+
+/**
  * Reuses TypeScript queries (they work for JS too)
  */
 export const JAVASCRIPT_CONFIG: LanguageConfig = {
@@ -157,7 +152,7 @@ export const JAVASCRIPT_CONFIG: LanguageConfig = {
 /**
  * Registry of all language configurations. Add new languages here.
  */
-const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, JAVASCRIPT_CONFIG]
+const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG]
 
 /**
  * Get language configuration by language name
@@ -166,16 +161,6 @@ export function getLanguageConfig(language: SupportedLanguage): LanguageConfig {
   const config = LANGUAGE_CONFIGS.find((c) => c.name === language)
   if (!config) throw new Error(`Unsupported language: ${language}`)
   return config
-}
-
-/**
- * Check if a file is a framework entry file (invoked by the framework, not by user code).
- * Checks against all registered language configs.
- */
-export function isFrameworkEntryFile(filePath: string): boolean {
-  return LANGUAGE_CONFIGS.some((config) =>
-    config.frameworkEntryPatterns.some((pattern) => pattern.test(filePath)),
-  )
 }
 
 /**

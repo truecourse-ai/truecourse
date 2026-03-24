@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { FileAnalysis } from '../../packages/shared/src/types/analysis';
 import { buildDependencyGraph, findEntryPoints } from '../../packages/analyzer/src/dependency-graph';
+import { extractJsxReferences } from '../../packages/analyzer/src/ts-compiler';
 import { analyzeFile } from '../../packages/analyzer/src/file-analyzer';
 import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 
@@ -187,5 +188,94 @@ describe('dependency graph with fixture project', () => {
         d.target.includes('shared/utils')
     );
     expect(crossPkgDep).toBeDefined();
+  });
+});
+
+describe('findEntryPoints — structural detection', () => {
+  it('detects framework entry files as entry points', () => {
+    // page.tsx and layout.tsx are never imported — they should be entry points
+    const files: FileAnalysis[] = [
+      makeFileAnalysis('/project/app/page.tsx', [{ source: '../components/Header' }]),
+      makeFileAnalysis('/project/app/layout.tsx', [{ source: '../components/Shell' }]),
+      makeFileAnalysis('/project/components/Header.tsx', []),
+      makeFileAnalysis('/project/components/Shell.tsx', [{ source: './Header' }]),
+    ];
+
+    const deps = buildDependencyGraph(files);
+    const entryPoints = findEntryPoints(files, deps);
+
+    expect(entryPoints).toContain('/project/app/page.tsx');
+    expect(entryPoints).toContain('/project/app/layout.tsx');
+    expect(entryPoints).not.toContain('/project/components/Header.tsx');
+    expect(entryPoints).not.toContain('/project/components/Shell.tsx');
+  });
+
+  it('detects script files as entry points', () => {
+    const files: FileAnalysis[] = [
+      makeFileAnalysis('/project/scripts/migrate.ts', [{ source: '../lib/db' }]),
+      makeFileAnalysis('/project/lib/db.ts', []),
+    ];
+
+    const deps = buildDependencyGraph(files);
+    const entryPoints = findEntryPoints(files, deps);
+
+    expect(entryPoints).toContain('/project/scripts/migrate.ts');
+    expect(entryPoints).not.toContain('/project/lib/db.ts');
+  });
+});
+
+describe('extractJsxReferences', () => {
+  it('extracts JSX attribute identifier references', () => {
+    const code = `
+function App() {
+  const handleClick = () => {};
+  return <button onClick={handleClick}>Click</button>;
+}`;
+    const refs = extractJsxReferences(code, 'app.tsx');
+    expect(refs.some((r) => r.callee === 'handleClick')).toBe(true);
+  });
+
+  it('extracts JSX component tags', () => {
+    const code = `
+import { Header } from './Header';
+function App() {
+  return <Header />;
+}`;
+    const refs = extractJsxReferences(code, 'app.tsx');
+    expect(refs.some((r) => r.callee === 'Header')).toBe(true);
+  });
+
+  it('extracts nested component references', () => {
+    const code = `
+function App() {
+  return <Parent.Child />;
+}`;
+    const refs = extractJsxReferences(code, 'app.tsx');
+    expect(refs.some((r) => r.callee === 'Parent.Child')).toBe(true);
+  });
+
+  it('ignores lowercase HTML elements', () => {
+    const code = `
+function App() {
+  return <div className="test"><span>text</span></div>;
+}`;
+    const refs = extractJsxReferences(code, 'app.tsx');
+    expect(refs).toHaveLength(0);
+  });
+
+  it('returns empty for non-TSX files', () => {
+    const code = `
+function foo() { return 1; }`;
+    const refs = extractJsxReferences(code, 'foo.ts');
+    expect(refs).toHaveLength(0);
+  });
+
+  it('extracts member expression in JSX attribute', () => {
+    const code = `
+function App() {
+  return <div onClick={handlers.click}>test</div>;
+}`;
+    const refs = extractJsxReferences(code, 'app.tsx');
+    expect(refs.some((r) => r.callee === 'handlers.click')).toBe(true);
   });
 });

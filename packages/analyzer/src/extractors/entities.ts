@@ -44,7 +44,7 @@ export function shouldExtractEntities(analysis: FileAnalysis): boolean {
 export function extractEntities(
   sourceCode: string,
   filePath: string,
-  language: 'typescript' | 'javascript',
+  language: 'typescript' | 'tsx' | 'javascript',
   serviceName: string = 'default'
 ): Entity[] {
   // Both JS and TS use the TypeScript entity detector

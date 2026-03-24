@@ -15,6 +15,8 @@ function getTreeSitterLanguage(language: SupportedLanguage): any {
   switch (language) {
     case 'typescript':
       return TypeScriptParser.typescript
+    case 'tsx':
+      return TypeScriptParser.tsx
     case 'javascript':
       return JavaScriptParser
     default:

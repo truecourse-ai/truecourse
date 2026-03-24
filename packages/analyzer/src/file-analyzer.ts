@@ -40,10 +40,11 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
 
     switch (language) {
       case 'typescript':
-        functions = extractTypeScriptFunctions(tree, filePath)
-        classes = extractTypeScriptClasses(tree, filePath)
-        imports = extractTypeScriptImports(tree, filePath)
-        exports = extractTypeScriptExports(tree, filePath)
+      case 'tsx':
+        functions = extractTypeScriptFunctions(tree, filePath, language)
+        classes = extractTypeScriptClasses(tree, filePath, language)
+        imports = extractTypeScriptImports(tree, filePath, language)
+        exports = extractTypeScriptExports(tree, filePath, language)
         break
       case 'javascript':
         functions = extractJavaScriptFunctions(tree, filePath)
@@ -98,10 +99,11 @@ export function analyzeFileContent(
 
   switch (language) {
     case 'typescript':
-      functions = extractTypeScriptFunctions(tree, filePath)
-      classes = extractTypeScriptClasses(tree, filePath)
-      imports = extractTypeScriptImports(tree, filePath)
-      exports = extractTypeScriptExports(tree, filePath)
+    case 'tsx':
+      functions = extractTypeScriptFunctions(tree, filePath, language)
+      classes = extractTypeScriptClasses(tree, filePath, language)
+      imports = extractTypeScriptImports(tree, filePath, language)
+      exports = extractTypeScriptExports(tree, filePath, language)
       break
     case 'javascript':
       functions = extractJavaScriptFunctions(tree, filePath)

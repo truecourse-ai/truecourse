@@ -8,9 +8,13 @@ import type {
   Parameter,
   ClassProperty,
   ImportSpecifier,
+  SupportedLanguage,
 } from '@truecourse/shared'
 import { getLanguageConfig } from '../../language-config.js'
 import { getParser } from '../../parser.js'
+
+/** TypeScript-family languages (typescript and tsx share extractors) */
+type TSLanguage = 'typescript' | 'tsx'
 import { createSourceLocation, extractDocComment, computeFunctionMetrics } from './common.js'
 
 /**
@@ -83,19 +87,14 @@ function extractReturnType(node: SyntaxNode): string | undefined {
 }
 
 /**
- * Check if function is exported
+ * Check if function is exported.
+ * Simple check — just looks for an export_statement as a direct parent.
+ * For TS/TSX projects, the compiler's export map (analyzeSemantics) overwrites
+ * this with the definitive answer. This is only used as a basic fallback
+ * for JS-only projects without a tsconfig.
  */
 function isExported(node: SyntaxNode): boolean {
-  let current: SyntaxNode | null = node.parent
-
-  while (current) {
-    if (current.type === 'export_statement') {
-      return true
-    }
-    current = current.parent
-  }
-
-  return false
+  return node.parent?.type === 'export_statement'
 }
 
 /**
@@ -450,9 +449,10 @@ function extractDecorators(node: SyntaxNode): string[] {
  */
 export function extractTypeScriptFunctions(
   tree: Tree,
-  filePath: string
+  filePath: string,
+  language: TSLanguage = 'typescript',
 ): FunctionDefinition[] {
-  const config = getLanguageConfig('typescript')
+  const config = getLanguageConfig(language)
   const functions: FunctionDefinition[] = []
   const seenLocations = new Set<string>()
 
@@ -460,7 +460,7 @@ export function extractTypeScriptFunctions(
     config.functionQuery ||
     config.functionNodeTypes.map((type) => `(${type}) @function`).join('\n')
 
-  const parser = getParser('typescript')
+  const parser = getParser(language)
   const tsLanguage = parser.getLanguage()
   const query = new Parser.Query(tsLanguage, queryString)
 
@@ -508,16 +508,17 @@ export function extractTypeScriptFunctions(
  */
 export function extractTypeScriptClasses(
   tree: Tree,
-  filePath: string
+  filePath: string,
+  language: TSLanguage = 'typescript',
 ): ClassDefinition[] {
-  const config = getLanguageConfig('typescript')
+  const config = getLanguageConfig(language)
   const classes: ClassDefinition[] = []
 
   const queryString =
     config.classQuery ||
     config.classNodeTypes.map((type) => `(${type}) @class`).join('\n')
 
-  const parser = getParser('typescript')
+  const parser = getParser(language)
   const tsLanguage = parser.getLanguage()
   const query = new Parser.Query(tsLanguage, queryString)
 
@@ -570,16 +571,17 @@ export function extractTypeScriptClasses(
  */
 export function extractTypeScriptImports(
   tree: Tree,
-  filePath: string
+  filePath: string,
+  language: TSLanguage = 'typescript',
 ): ImportStatement[] {
-  const config = getLanguageConfig('typescript')
+  const config = getLanguageConfig(language)
   const imports: ImportStatement[] = []
 
   const queryString =
     config.importQuery ||
     config.importNodeTypes.map((type) => `(${type}) @import`).join('\n')
 
-  const parser = getParser('typescript')
+  const parser = getParser(language)
   const tsLanguage = parser.getLanguage()
   const query = new Parser.Query(tsLanguage, queryString)
 
@@ -613,16 +615,17 @@ export function extractTypeScriptImports(
  */
 export function extractTypeScriptExports(
   tree: Tree,
-  _filePath: string
+  _filePath: string,
+  language: TSLanguage = 'typescript',
 ): ExportStatement[] {
-  const config = getLanguageConfig('typescript')
+  const config = getLanguageConfig(language)
   const exports: ExportStatement[] = []
 
   const queryString =
     config.exportQuery ||
     config.exportNodeTypes.map((type) => `(${type}) @export`).join('\n')
 
-  const parser = getParser('typescript')
+  const parser = getParser(language)
   const tsLanguage = parser.getLanguage()
   const query = new Parser.Query(tsLanguage, queryString)
 

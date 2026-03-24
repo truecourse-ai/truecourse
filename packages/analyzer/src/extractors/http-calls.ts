@@ -13,7 +13,7 @@ export function extractHttpCalls(
 ): HttpCall[] {
   const httpCalls: HttpCall[] = []
 
-  if (language !== 'typescript' && language !== 'javascript') {
+  if (language !== 'typescript' && language !== 'tsx' && language !== 'javascript') {
     return httpCalls
   }
 

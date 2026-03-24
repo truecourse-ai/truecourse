@@ -461,18 +461,35 @@ function buildMethodDependencies(
       }
     }
 
-    for (const call of analysis.calls) {
-      if (!call.callerFunction) continue
+    // Find the first method in this file to use as a synthetic caller when
+    // the real caller can't be resolved (e.g., React.forwardRef callbacks)
+    let fallbackCaller: MethodInfo | undefined
+    for (const mod of modsInFile) {
+      const methods = methodsByModuleKey.get(`${serviceName}::${mod.name}`)
+      if (methods?.length) { fallbackCaller = methods[0]; break }
+    }
 
+    for (const call of analysis.calls) {
       // Resolve caller to a method in this file
       // callerFunction is like "ClassName.methodName" or just "functionName"
-      const callerParts = call.callerFunction.split('.')
       let callerMethod: MethodInfo | undefined
 
-      for (const mod of modsInFile) {
-        const methodName = callerParts.length > 1 ? callerParts[callerParts.length - 1] : callerParts[0]
-        callerMethod = methodLookup.get(`${serviceName}::${mod.name}::${methodName}`)
-        if (callerMethod) break
+      if (call.callerFunction) {
+        const callerParts = call.callerFunction.split('.')
+        for (const mod of modsInFile) {
+          const methodName = callerParts.length > 1 ? callerParts[callerParts.length - 1] : callerParts[0]
+          callerMethod = methodLookup.get(`${serviceName}::${mod.name}::${methodName}`)
+          if (callerMethod) break
+        }
+      }
+
+      // If caller can't be resolved (e.g., inside React.forwardRef/memo callbacks
+      // or top-level script code), use the first method in the file as a synthetic caller.
+      // The call still proves the callee is used within this file.
+      let usedFallbackCaller = false
+      if (!callerMethod) {
+        callerMethod = fallbackCaller
+        usedFallbackCaller = true
       }
       if (!callerMethod) continue
 
@@ -564,9 +581,48 @@ function buildMethodDependencies(
         }
       }
 
+      // Strategy 4: Same-module call — a function calling another function defined
+      // in the same file/module (e.g., a React component calling handleClick defined
+      // in the same component). These don't appear in imports.
+      if (!targetMethod && calleeParts.length === 1 && callerMethod) {
+        for (const mod of modsInFile) {
+          const candidate = methodLookup.get(`${serviceName}::${mod.name}::${calleeMethodName}`)
+          if (candidate) {
+            targetMethod = candidate
+            break
+          }
+        }
+      }
+
+      // Strategy 5: Polymorphic call — receiver doesn't match any known module name
+      // (e.g., `channel.send()` where `channel` is a variable holding an interface reference).
+      // Look for a class method with this name in same-service classes first, then cross-service.
+      if (!targetMethod && calleeParts.length >= 2) {
+        for (const mod of allModules) {
+          if (mod.kind !== 'class' || mod.serviceName !== serviceName) continue
+          const candidate = methodLookup.get(`${mod.serviceName}::${mod.name}::${calleeMethodName}`)
+          if (candidate) {
+            targetMethod = candidate
+            break
+          }
+        }
+        if (!targetMethod) {
+          for (const mod of allModules) {
+            if (mod.kind !== 'class' || mod.serviceName === serviceName) continue
+            const candidate = methodLookup.get(`${mod.serviceName}::${mod.name}::${calleeMethodName}`)
+            if (candidate) {
+              targetMethod = candidate
+              break
+            }
+          }
+        }
+      }
+
       if (!targetMethod) continue
-      // Skip self-calls within the same method
-      if (targetMethod.moduleName === callerMethod.moduleName
+      // Skip self-calls within the same method — but not when using a fallback caller,
+      // since the fallback may equal the target (e.g., script's main() calling itself at top level)
+      if (!usedFallbackCaller
+        && targetMethod.moduleName === callerMethod.moduleName
         && targetMethod.name === callerMethod.name
         && targetMethod.serviceName === callerMethod.serviceName
         && targetMethod.filePath === callerMethod.filePath) continue

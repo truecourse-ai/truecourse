@@ -4,13 +4,26 @@ This guide covers every file that needs to change when adding support for a new 
 
 ## Architecture Overview
 
-The analyzer pipeline is:
+The analyzer uses a **hybrid approach**: tree-sitter for fast AST extraction and metrics, and the **TypeScript Compiler API** for semantic analysis (module resolution, export detection, JSX references, polymorphic dispatch). For non-JS languages, the equivalent compiler/analyzer should be used (e.g., Python's `ast` module, Go's `go/packages`).
 
 ```
-File Discovery → Parse (tree-sitter) → Extract (per-language) → FileAnalysis → downstream (language-agnostic)
+File Discovery → Parse (tree-sitter) → Extract (per-language) → FileAnalysis
+                                                                      ↓
+                                              TS Compiler API → Module Resolution
+                                                              → Export Detection
+                                                              → JSX References
+                                                              → Interface Implementations
+                                                                      ↓
+                                              Downstream (language-agnostic): dependency graph,
+                                              module extraction, service detection, violation rules
 ```
 
-Once files are extracted into `FileAnalysis` objects, everything downstream (dependency graph, module extraction, layer detection, service detection) is **language-agnostic**. The language-specific work is isolated to parsing and extraction.
+### Key design decisions
+
+- **Structural entry point detection**: Files that import other files but are never imported themselves are detected as entry points (framework routes, scripts, CLI tools). No hardcoded framework patterns — works for any framework automatically.
+- **Tree-sitter for metrics**: Statement count, nesting depth, line count, parameter count — fast bulk computation.
+- **Language compiler for semantics**: Module resolution, export lists, type information — correct by construction.
+- **Symlink resolution**: Workspace package imports resolve through `node_modules` symlinks. The dependency graph resolves symlinks to real paths to match analyzed files.
 
 ---
 
@@ -21,10 +34,12 @@ Once files are extracted into `FileAnalysis` objects, everything downstream (dep
 **File:** `packages/shared/src/types/analysis.ts`
 
 ```typescript
-export const SupportedLanguageSchema = z.enum(['typescript', 'javascript', 'python'])
+export const SupportedLanguageSchema = z.enum(['typescript', 'tsx', 'javascript', 'python'])
 ```
 
 TypeScript will then flag every switch/case that needs updating.
+
+Note: `tsx` is a separate language variant from `typescript` — it uses a different tree-sitter grammar that recognizes JSX syntax nodes. If your language has a similar variant (e.g., JSX for JavaScript), consider adding it as a separate entry.
 
 ### 2. Create the language config
 
@@ -45,11 +60,10 @@ export const PYTHON_CONFIG: LanguageConfig = {
   importNodeTypes: ['import_statement', 'import_from_statement'],
   exportNodeTypes: [],  // Python doesn't have explicit exports
   callNodeTypes: ['call'],
-  frameworkEntryPatterns: [
-    /\bmanage\.py$/,
-    /\bwsgi\.py$/,
-    /\basgi\.py$/,
-  ],
+  urlInterpolation: {
+    baseUrlVar: /\{[^}]*[Uu]rl[^}]*\}/gi,
+    paramVar: /\{[^}]+\}/g,
+  },
   functionQuery: `(function_definition) @function`,
   classQuery: `(class_definition) @class`,
   importQuery: `
@@ -58,7 +72,7 @@ export const PYTHON_CONFIG: LanguageConfig = {
   `,
 }
 
-const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG]
+const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG]
 ```
 
 **What each field does:**
@@ -67,33 +81,35 @@ const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, JAVASCRIPT_CONFIG
 |-------|---------|
 | `name` | Must match the `SupportedLanguage` enum value |
 | `fileExtensions` | Used by `detectLanguage()` to match files during discovery |
-| `moduleResolution.extensions` | Extensions to try when resolving import paths |
-| `moduleResolution.indexFiles` | Files to try for directory imports (e.g., `__init__.py`) |
+| `moduleResolution.extensions` | Extensions to try when resolving imports (fallback only — used when no language compiler is available) |
+| `moduleResolution.indexFiles` | Files to try for directory imports (fallback only) |
 | `functionNodeTypes` | Tree-sitter AST node types that represent function declarations |
 | `classNodeTypes` | Tree-sitter AST node types that represent class declarations |
 | `importNodeTypes` | Tree-sitter AST node types for import statements |
 | `exportNodeTypes` | Tree-sitter AST node types for export statements |
 | `callNodeTypes` | Tree-sitter AST node types for function calls |
-| `frameworkEntryPatterns` | RegExp patterns for framework entry files (invoked by framework, not user code) |
+| `urlInterpolation` | Regex patterns for normalizing URL strings (see below) |
 | `functionQuery` | Tree-sitter query string for capturing functions |
 | `classQuery` | Tree-sitter query string for capturing classes |
 | `importQuery` | Tree-sitter query string for capturing imports |
 | `exportQuery` | Tree-sitter query string for capturing exports |
 
-**Framework entry patterns** deserve special attention. These are file naming conventions where the framework invokes the file directly (not user code). For example, Next.js automatically routes requests to `page.tsx`, `route.ts`, `layout.tsx`, etc. These files won't be imported by any other file in the codebase, so without this list they'd be flagged as "dead modules" by the analysis.
-
-The `isFrameworkEntryFile()` function (exported from the analyzer) checks a file path against all registered language configs' `frameworkEntryPatterns`. It's used in `graph.service.ts` to exclude framework entry files from dead module detection.
-
-Examples by framework:
-
-| Framework | Entry file patterns |
-|-----------|-------------------|
-| Next.js | `page.tsx`, `route.ts`, `layout.tsx`, `loading.tsx`, `error.tsx`, `middleware.ts` |
-| Django | `views.py`, `urls.py`, `admin.py`, `models.py`, `apps.py` |
-| Flask | `app.py`, `wsgi.py` |
-| Go (net/http) | `main.go` |
-
 **How to find node types:** Use the [tree-sitter playground](https://tree-sitter.github.io/tree-sitter/playground) or inspect the grammar's `node-types.json` in the tree-sitter language package.
+
+#### URL interpolation config
+
+The `urlInterpolation` field tells the URL normalizer how this language embeds variables in URL strings. The flow-tracer is **language-agnostic** — it only sees normalized URLs like `/users/:param`. All language-specific interpolation syntax is stripped upstream using these patterns.
+
+| Field | Purpose | Example (TypeScript) | Example (C#) |
+|-------|---------|---------------------|---------------|
+| `baseUrlVar` | Regex matching base-URL variables (removed entirely) | `/\$\{[^}]*URL[^}]*\}/gi` | `/\{[^}]*[Uu]rl[^}]*\}/gi` |
+| `paramVar` | Regex matching interpolated path parameters (replaced with `:param`) | `/\$\{[^}]+\}/g` | `/\{[^}]+\}/g` |
+| `stripChars` | Characters to strip from raw URL strings (optional) | `` /`/g `` (backticks) | not needed |
+
+**How it works**: When building cross-service calls in `flow.service.ts`, raw URLs from source code are normalized via `normalizeUrl(url, language)`. This function applies the language's `urlInterpolation` config to produce clean route patterns.
+
+- TypeScript `${BASE_URL}/users/${id}` → `/users/:param`
+- C# `$"{baseUrl}/users/{id}"` → `/users/:param`
 
 ### 3. Add the tree-sitter parser
 
@@ -105,6 +121,7 @@ import PythonParser from 'tree-sitter-python'
 function getTreeSitterLanguage(language: SupportedLanguage): any {
   switch (language) {
     case 'typescript': return TypeScriptParser.typescript
+    case 'tsx':        return TypeScriptParser.tsx
     case 'javascript': return JavaScriptParser
     case 'python':     return PythonParser
     // ...
@@ -153,6 +170,7 @@ export function extractPythonExports(tree: Tree, filePath: string): ExportStatem
 - **Function names:** Only extract functions with real names. Nested lambdas/closures inside other functions should return `'anonymous'` — they get filtered out downstream.
 - **Deduplication:** Use a `Set<string>` keyed on `startLine:startColumn` to skip duplicate AST captures.
 - **Exports:** For languages without explicit export syntax (e.g., Python), infer from conventions (e.g., no leading underscore = public).
+- **isExported:** For TS/JS, this is a basic heuristic (checks direct parent for `export_statement`). The TS compiler's export map overwrites it with the correct answer during analysis. For non-JS languages, provide the best heuristic you can — it may be the only source of export info.
 
 ### 5. Wire up the file analyzer
 
@@ -182,7 +200,27 @@ export {
 } from './extractors/languages/python.js'
 ```
 
-### 7. Add framework and library detection patterns
+### 7. Add semantic analysis support (compiler integration)
+
+**File:** `packages/analyzer/src/ts-compiler.ts` (for TS/JS) or new file for other languages
+
+For TS/JS/TSX, the TypeScript Compiler API handles:
+
+- **Module resolution** — `ts.resolveModuleName()` resolves path aliases, workspace packages, re-exports, extension probing. Used in `dependency-graph.ts`.
+- **Export detection** — `checker.getExportsOfModule()` gives the definitive list of exports per file, including grouped exports (`export { a, b }`), re-exports, and barrel files. Used in `analyzer.service.ts` to overwrite tree-sitter's basic `isExported` heuristic.
+- **JSX reference extraction** — `extractJsxReferences()` uses `ts.createSourceFile()` to parse JSX and extract attribute references (`onClick={handler}`) and component tags (`<Child />`). Used in `extractors/calls.ts`.
+- **Interface implementation detection** — `analyzeSemantics()` finds which classes implement interfaces, enabling polymorphic method call resolution.
+
+For a new language, you'd need equivalent functionality:
+
+| Capability | TS/JS implementation | What to build for new language |
+|-----------|---------------------|-------------------------------|
+| Module resolution | `ts.resolveModuleName()` | Language's module resolver (e.g., Python's import system, Go's module resolution) |
+| Export detection | `checker.getExportsOfModule()` | Language's equivalent (e.g., Python AST for `__all__`, Go exported identifiers start with uppercase) |
+| Template references | `extractJsxReferences()` | Language's template system (e.g., Jinja `{% include %}`, Go `template.Execute()`) |
+| Interface implementations | `analyzeSemantics()` | Language's type system (e.g., Python ABC, Go interface satisfaction) |
+
+### 8. Add framework and library detection patterns
 
 The pattern files in `packages/analyzer/src/patterns/` drive service type detection (frontend vs API vs worker vs library), layer detection (data vs API vs external vs service), and database detection. They currently only contain **JS/TS ecosystem package names**. A new language needs its own equivalents.
 
@@ -239,7 +277,7 @@ Detects which databases are used and parses schema files.
 | ORM schema files | `prisma/schema.prisma`, `drizzle/*.ts` | `models.py`, `alembic/` | `ent/schema/` |
 | Database drivers | `pg`, `mysql2`, `ioredis` | `psycopg2`, `pymysql`, `redis` | `lib/pq`, `go-redis` |
 
-### 8. Add ORM/database detection
+### 9. Add ORM/database detection
 
 The analyzer has a database detection pipeline that identifies which databases and ORMs a project uses, then parses schema files to extract tables and relations. This is heavily language-specific.
 
@@ -292,13 +330,37 @@ For a new language, you'd need to:
 - Add schema file patterns to `SCHEMA_FILE_PATTERNS`
 - Optionally create a schema parser for the language's popular ORMs
 
-### 9. Optional: HTTP call detection
+### 10. Optional: HTTP call detection
 
 **File:** `packages/analyzer/src/extractors/http-calls.ts`
 
 Add the language to the guard at the top of `extractHttpCalls()`. The current implementation looks for common HTTP libraries (fetch, axios) via call expressions — this may work as-is if the language uses `call_expression` nodes. Otherwise, implement language-specific detection.
 
-### 9. Optional: Entity extraction
+Each language has different HTTP client patterns:
+
+| Language | Patterns |
+|----------|----------|
+| TypeScript/JavaScript | `fetch()`, `axios.get()`, `http.get()` |
+| C# | `HttpClient.GetAsync()`, `HttpClient.PostAsync()` |
+| Python | `requests.get()`, `httpx.get()`, `aiohttp` |
+
+### 11. Optional: Route registration detection
+
+**File:** `packages/analyzer/src/extractors/route-registrations.ts`
+
+Add language-specific route registration detection. Each framework has different patterns:
+
+| Language/Framework | Route Pattern | Mount Pattern |
+|-------------------|---------------|---------------|
+| TypeScript (Express) | `router.get('/path', handler)` | `app.use('/prefix', router)` |
+| C# (ASP.NET) | `[HttpGet("/path")]` attribute on methods | `app.MapGet("/path", handler)` |
+| C# (Minimal APIs) | `app.MapGet("/path", handler)` | `app.MapGroup("/prefix")` |
+| Python (FastAPI) | `@app.get("/path")` decorator | `app.include_router(router, prefix="/prefix")` |
+| Python (Flask) | `@app.route("/path")` decorator | `app.register_blueprint(bp, url_prefix="/prefix")` |
+
+Either extend the existing extractor with language branches, or create per-language extractor files following the pattern in `extractors/languages/`.
+
+### 12. Optional: Entity extraction
 
 **File:** `packages/analyzer/src/extractors/entities.ts`
 
@@ -311,12 +373,41 @@ If the language has its own ORM patterns (e.g., SQLAlchemy for Python, GORM for 
 These are language-agnostic and work on `FileAnalysis` objects:
 
 - `module-extractor.ts` — module/method extraction from analyzed files
-- `dependency-graph.ts` — import resolution (uses language config automatically)
+- `dependency-graph.ts` — uses TS compiler for JS/TS resolution; falls back to basic relative resolution for other languages
 - `split-analyzer.ts` — service grouping and architecture detection
-- `rules/` — analysis rules (operate on extracted data, not source code)
+- `rules/module-rules-checker.ts` — deterministic rules use structural entry point detection (`findEntryPoints`), not hardcoded patterns. New frameworks are supported automatically.
 - All frontend code
 - All server code
 - Database schema
+
+### How entry point detection works
+
+Instead of hardcoded framework patterns, entry points are detected **structurally**: after building the dependency graph, any file that imports other files but is never imported itself is an entry point. This automatically covers:
+
+- Framework-routed files (`page.tsx`, `layout.tsx`, `manage.py`, `main.go`)
+- CLI scripts and entry points
+- Test files (excluded separately via test/config pattern)
+- Worker entry points
+
+No configuration needed per framework — it just works.
+
+### How export detection works (TS/JS)
+
+For TypeScript/JavaScript/TSX projects, the TS compiler's `checker.getExportsOfModule()` provides the definitive export list per file. This is computed during analysis in `analyzer.service.ts` and overwrites the tree-sitter `isExported` heuristic. It correctly handles:
+
+- `export function foo()` — named export
+- `export default function foo()` — default export (reported as `'default'`, matched to function name via `ExportStatement.isDefault`)
+- `export { a, b, c }` — grouped exports
+- `export { foo } from './bar'` — re-exports
+- Barrel files (`index.ts` re-exporting from sub-modules)
+
+For non-JS languages, the tree-sitter `isExported` heuristic is the only source — make it as accurate as possible.
+
+### Gotchas
+
+- **Workspace symlinks**: In monorepos, workspace package imports resolve through `node_modules` symlinks. The dependency graph uses `realpathSync` to resolve symlinks to actual file paths. If adding a language with its own workspace/package mechanism, ensure resolved paths match the analyzed file set.
+- **JSX/template references are invisible to tree-sitter**: Static import analysis only tracks `import` statements. Component references in JSX (`<Foo />`), template syntax (`{% include %}`), or dependency injection are not captured as method-level calls by tree-sitter. For TS/JS, the TS compiler extracts JSX references via `extractJsxReferences()`. For other languages, you may need equivalent template reference extraction.
+- **Default exports**: The TS compiler reports default exports with the name `'default'`, not the function name. The export map correction in `analyzer.service.ts` handles this by matching against the file's `ExportStatement.isDefault` flag.
 
 ---
 
@@ -327,22 +418,25 @@ Add tests in `tests/analyzer/`:
 1. **Parser test** — verify the tree-sitter parser loads and parses sample code
 2. **Extractor tests** — test each of the 4 extract functions with representative code snippets
 3. **Integration test** — analyze a sample file end-to-end via `analyzeFileContent()`
-4. **Test fixtures** — create a sample project in the new language under `tests/fixtures/`
+4. **Test fixtures** — create a sample project in the new language under `tests/fixtures/`, include a tsconfig.json (or equivalent) for module resolution
+5. **Dependency graph tests** — verify imports resolve correctly for the language's module system
+6. **Entry point tests** — verify framework entry files are detected structurally
 
 ---
 
 ## Reference: Existing Language Extractors
 
-| Feature | TypeScript | JavaScript |
-|---------|-----------|------------|
-| Return type annotations | Yes | No (always `undefined`) |
-| Decorators | Yes | No |
-| Interfaces / `implements` | Yes | No |
-| Abstract classes | Yes | No |
-| Type-only imports | Yes | No |
-| Generator functions | No | Yes |
-| Arrow functions | Yes | Yes |
-| Async functions | Yes | Yes |
-| Class properties | Yes | Yes |
+| Feature | TypeScript | TSX | JavaScript |
+|---------|-----------|-----|------------|
+| Return type annotations | Yes | Yes | No (always `undefined`) |
+| Decorators | Yes | Yes | No |
+| Interfaces / `implements` | Yes | Yes | No |
+| Abstract classes | Yes | Yes | No |
+| Type-only imports | Yes | Yes | No |
+| Generator functions | No | No | Yes |
+| Arrow functions | Yes | Yes | Yes |
+| Async functions | Yes | Yes | Yes |
+| Class properties | Yes | Yes | Yes |
+| JSX references | No | Yes (via TS compiler) | No |
 
-Use the TypeScript extractor as the most complete reference, and the JavaScript extractor to see how to omit features.
+Use the TypeScript extractor as the most complete reference, and the JavaScript extractor to see how to omit features. TSX extends TypeScript with JSX support via a separate tree-sitter grammar.

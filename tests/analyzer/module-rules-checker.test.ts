@@ -186,7 +186,10 @@ describe('checkModuleRules', () => {
       makeFileAnalysis('/repo/svc/src/__tests__/helper.ts'),
     ];
 
-    const violations = checkModuleRules([], [], [], enabledRules, undefined, undefined, fileAnalyses);
+    // These are structural entry points (never imported by other files)
+    const entryPointFiles = new Set(fileAnalyses.map((fa) => fa.filePath));
+
+    const violations = checkModuleRules([], [], [], enabledRules, undefined, undefined, fileAnalyses, undefined, entryPointFiles);
 
     const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
     expect(orphanViolations).toHaveLength(0);
