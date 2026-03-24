@@ -1,7 +1,8 @@
-import { resolve, dirname } from 'path'
-import { realpathSync } from 'fs'
+import { resolve, dirname, join } from 'path'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs'
 import type { FileAnalysis, ModuleDependency } from '@truecourse/shared'
 import { buildScopedCompilerOptions, resolveModule, type ScopedCompilerOptions } from './ts-compiler.js'
+import { monorepoPatterns } from './patterns/service-patterns.js'
 
 // Common TS/JS extensions for fallback resolution (when no tsconfig exists)
 const FALLBACK_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']
@@ -41,6 +42,88 @@ function resolveRelativeFallback(
 }
 
 /**
+ * Build a map of workspace package names to their root directories.
+ * Fallback for when the TS compiler can't resolve workspace imports
+ * (e.g., projects without tsconfig.json).
+ */
+function buildWorkspacePackageMap(rootPath: string): Map<string, string> {
+  const packageMap = new Map<string, string>()
+  for (const pattern of monorepoPatterns) {
+    const dirPath = join(rootPath, pattern)
+    if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) continue
+    try {
+      for (const entry of readdirSync(dirPath)) {
+        const pkgDir = join(dirPath, entry)
+        const pkgJsonPath = join(pkgDir, 'package.json')
+        if (!existsSync(pkgJsonPath)) continue
+        try {
+          const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
+          if (pkg.name) packageMap.set(pkg.name, pkgDir)
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  }
+  return packageMap
+}
+
+/**
+ * Resolve a workspace package import to a file path.
+ * Handles both exact matches (@sample/shared-utils) and deep imports (@sample/shared-utils/foo).
+ */
+function resolveWorkspaceFallback(
+  importSource: string,
+  workspacePackages: Map<string, string>,
+  analyzedFiles: Set<string>,
+): string | null {
+  // Try exact match first
+  let pkgDir = workspacePackages.get(importSource)
+  let subPath: string | null = null
+
+  // Try deep import: @org/pkg/sub/path
+  if (!pkgDir) {
+    for (const [pkgName, dir] of workspacePackages) {
+      if (importSource.startsWith(pkgName + '/')) {
+        pkgDir = dir
+        subPath = importSource.slice(pkgName.length + 1)
+        break
+      }
+    }
+  }
+  if (!pkgDir) return null
+
+  // Deep import — resolve as relative path within package
+  if (subPath) {
+    return resolveRelativeFallback('./' + subPath, join(pkgDir, 'dummy.ts'), analyzedFiles)
+  }
+
+  // Try package.json main field
+  const pkgJsonPath = join(pkgDir, 'package.json')
+  if (existsSync(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
+      const mainField = pkg.main || pkg.module
+      if (mainField) {
+        const mainPath = resolve(pkgDir, mainField)
+        if (analyzedFiles.has(mainPath)) return mainPath
+        for (const ext of FALLBACK_EXTENSIONS) {
+          const candidate = mainPath.endsWith(ext) ? mainPath : mainPath + ext
+          if (analyzedFiles.has(candidate)) return candidate
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  // Try src/index.* and index.*
+  for (const indexFile of FALLBACK_INDEX_FILES) {
+    for (const candidate of [join(pkgDir, 'src', indexFile), join(pkgDir, indexFile)]) {
+      if (analyzedFiles.has(candidate)) return candidate
+    }
+  }
+
+  return null
+}
+
+/**
  * Build module dependency graph from file analyses.
  * Uses the TypeScript Compiler API for module resolution — handles path aliases,
  * workspace packages, re-exports, extension probing, and all moduleResolution
@@ -59,6 +142,11 @@ export function buildDependencyGraph(
   const scoped: ScopedCompilerOptions[] = rootPath
     ? buildScopedCompilerOptions(rootPath)
     : []
+
+  // Workspace package map — fallback for non-relative imports without tsconfig
+  const workspacePackages = rootPath
+    ? buildWorkspacePackageMap(rootPath)
+    : new Map<string, string>()
 
   // Set of analyzed file paths for filtering resolved targets
   const analyzedFiles = new Set(files.map((f) => f.filePath))
@@ -95,9 +183,13 @@ export function buildDependencyGraph(
       }
 
       // Fallback for relative imports when TS compiler can't resolve
-      // (no tsconfig, or files don't exist on disk like in tests)
       if (!resolved && dep.source.startsWith('.')) {
         resolved = resolveRelativeFallback(dep.source, file.filePath, analyzedFiles)
+      }
+
+      // Fallback for workspace package imports (e.g., @sample/shared-utils)
+      if (!resolved && !dep.source.startsWith('.') && workspacePackages.size > 0) {
+        resolved = resolveWorkspaceFallback(dep.source, workspacePackages, analyzedFiles)
       }
 
       if (resolved && analyzedFiles.has(resolved)) {
@@ -121,6 +213,9 @@ export function buildDependencyGraph(
             }
             if (!resolved && specifier.startsWith('.')) {
               resolved = resolveRelativeFallback(specifier, file.filePath, analyzedFiles)
+            }
+            if (!resolved && !specifier.startsWith('.') && workspacePackages.size > 0) {
+              resolved = resolveWorkspaceFallback(specifier, workspacePackages, analyzedFiles)
             }
             if (resolved && analyzedFiles.has(resolved)) {
               dependencies.push({

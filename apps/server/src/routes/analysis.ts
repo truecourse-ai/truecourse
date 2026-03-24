@@ -1120,11 +1120,20 @@ router.post(
       const branch = (await git.branch()).current || undefined;
 
       // Phase 1: Run analysis on dirty tree + get changed files
+      const diffTracker = new StepTracker(id, [
+        { key: 'parse', label: 'Parsing working tree' },
+        { key: 'detect', label: 'Deterministic checks' },
+        { key: 'enrich', label: 'Enriching detections' },
+        { key: 'architecture', label: 'Architecture analysis' },
+        { key: 'persist', label: 'Saving results' },
+      ]);
+
+      diffTracker.start('parse');
       const diffAnalysis = await runDiffAnalysis({
         repoPath: repo.path,
         branch,
         onProgress: (progress) => {
-          emitAnalysisProgress(id, progress);
+          diffTracker.detail('parse', progress.detail ?? 'Analyzing...');
         },
       });
 
@@ -1171,6 +1180,7 @@ router.post(
       const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
 
       // Run violation pipeline
+      diffTracker.done('parse', `${result.services.length} services, ${changedFiles.length} changed files`);
       const diffProvider = createLLMProvider();
       diffProvider.setAnalysisId(diffAnalysisId);
       const pipelineResult = await runViolationPipeline({
@@ -1186,7 +1196,7 @@ router.post(
         previousActiveCodeViolations,
         previousDeterministicViolations: prevDetViolations,
         changedFileSet,
-        onProgress: (progress) => emitAnalysisProgress(id, progress),
+        tracker: diffTracker,
         provider: diffProvider,
       });
       try { await diffProvider.flushUsage(); } catch { /* best-effort */ }
@@ -1316,6 +1326,10 @@ router.post(
       // Clear progress bar
       emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
 
+      // Check if code review was run on this diff analysis
+      const diffMeta = await db.select({ metadata: analyses.metadata }).from(analyses).where(eq(analyses.id, diffAnalysisId)).limit(1);
+      const diffCodeReview = (diffMeta[0]?.metadata as Record<string, unknown> | null)?.codeReview === true;
+
       res.json({
         changedFiles,
         resolvedViolations: allResolvedViolations,
@@ -1324,6 +1338,7 @@ router.post(
         summary,
         isStale: false,
         diffAnalysisId,
+        codeReview: diffCodeReview,
       });
     } catch (error) {
       const repoId = req.params.id as string;
@@ -1499,6 +1514,7 @@ router.get(
         changedFiles: metadata?.changedFiles || [],
         isStale,
         diffAnalysisId: diffAnalysis.id,
+        codeReview: metadata?.codeReview === true,
       });
     } catch (error) {
       next(error);

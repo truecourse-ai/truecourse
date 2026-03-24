@@ -381,6 +381,7 @@ export type DiffViolationItem = {
 
 export type DiffCheckResponse = {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
+  codeReview: boolean;
   resolvedViolations: ViolationResponse[];
   newViolations: DiffViolationItem[];
   summary: {

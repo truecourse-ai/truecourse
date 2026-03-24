@@ -6,8 +6,8 @@ import {
   connectSocket,
 } from "./helpers.js";
 
-export async function runCodeReviewCmd({ noAutostart = false } = {}): Promise<void> {
-  p.intro("Running code review");
+export async function runCodeReviewCmd({ noAutostart = false, diff = false } = {}): Promise<void> {
+  p.intro(diff ? "Running code review (diff mode)" : "Running code review");
 
   if (noAutostart) {
     const url = getServerUrl();
@@ -23,20 +23,38 @@ export async function runCodeReviewCmd({ noAutostart = false } = {}): Promise<vo
   const serverUrl = getServerUrl();
   const repo = await ensureRepo();
 
-  // Get latest analysis
-  const analysesRes = await fetch(`${serverUrl}/api/repos/${repo.id}/analyses`);
-  if (!analysesRes.ok) {
-    p.log.error("Failed to fetch analyses");
-    process.exit(1);
-  }
-  const analyses = await analysesRes.json() as { id: string; branch: string | null; createdAt: string }[];
-  if (analyses.length === 0) {
-    p.log.error("No analysis found. Run 'truecourse analyze' first.");
-    process.exit(1);
-  }
+  // Get analysis to run code review on
+  let analysisId: string;
 
-  const latestAnalysis = analyses[0];
-  p.log.info(`Running code review on latest analysis (${latestAnalysis.id.slice(0, 8)})`);
+  if (diff) {
+    // Get latest diff analysis
+    const diffRes = await fetch(`${serverUrl}/api/repos/${repo.id}/diff-check`);
+    if (!diffRes.ok) {
+      p.log.error("Failed to fetch diff check");
+      process.exit(1);
+    }
+    const diffResult = await diffRes.json() as { diffAnalysisId: string } | null;
+    if (!diffResult?.diffAnalysisId) {
+      p.log.error("No diff analysis found. Run 'truecourse analyze --diff' first.");
+      process.exit(1);
+    }
+    analysisId = diffResult.diffAnalysisId;
+    p.log.info(`Running code review on diff analysis (${analysisId.slice(0, 8)})`);
+  } else {
+    // Get latest normal analysis
+    const analysesRes = await fetch(`${serverUrl}/api/repos/${repo.id}/analyses`);
+    if (!analysesRes.ok) {
+      p.log.error("Failed to fetch analyses");
+      process.exit(1);
+    }
+    const analyses = await analysesRes.json() as { id: string }[];
+    if (analyses.length === 0) {
+      p.log.error("No analysis found. Run 'truecourse analyze' first.");
+      process.exit(1);
+    }
+    analysisId = analyses[0].id;
+    p.log.info(`Running code review on latest analysis (${analysisId.slice(0, 8)})`);
+  }
 
   const spinner = p.spinner();
   spinner.start("Running code review...");
@@ -68,7 +86,7 @@ export async function runCodeReviewCmd({ noAutostart = false } = {}): Promise<vo
     socket.on("code-review:ready", () => clearTimeout(timeout));
 
     // Trigger code review
-    fetch(`${serverUrl}/api/repos/${repo.id}/analyses/${latestAnalysis.id}/code-review`, {
+    fetch(`${serverUrl}/api/repos/${repo.id}/analyses/${analysisId}/code-review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     }).then((res) => {
