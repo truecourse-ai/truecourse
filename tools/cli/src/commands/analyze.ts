@@ -12,7 +12,7 @@ import {
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
+export async function runAnalyze({ noAutostart = false, codeReview = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
 
   if (noAutostart) {
@@ -93,7 +93,7 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
       fetch(`${serverUrl}/api/repos/${repo.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ codeReview }),
       }).then((res) => {
         if (!res.ok) {
           clearTimeout(timeout);

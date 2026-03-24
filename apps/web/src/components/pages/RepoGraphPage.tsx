@@ -300,7 +300,7 @@ export default function RepoGraphPage() {
   useEffect(() => {
     const unsub = onEvent('analysis:complete', () => {
       setIsAnalyzing(false);
-      setIsCodeReviewing(true);
+      // Don't set isCodeReviewing here — the code-review:progress event handles that
       refetchGraph();
       refetchAnalyses();
       refetchCodeViolationSummary();
@@ -328,17 +328,18 @@ export default function RepoGraphPage() {
       setIsCodeReviewing(false);
       refetchViolations();
       refetchCodeViolationSummary();
+      refetchAnalyses();
     });
     return () => { unsub1(); unsub2(); };
-  }, [onEvent, refetchViolations, refetchCodeViolationSummary]);
+  }, [onEvent, refetchViolations, refetchCodeViolationSummary, refetchAnalyses]);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = async (options?: { codeReview?: boolean }) => {
     if (isDiffMode) {
       runDiffCheckAnalysis();
     } else {
       try {
         setIsAnalyzing(true);
-        await api.analyzeRepo(repoId);
+        await api.analyzeRepo(repoId, { codeReview: options?.codeReview });
       } catch {
         setIsAnalyzing(false);
       }
@@ -853,7 +854,21 @@ export default function RepoGraphPage() {
         repoName={repo?.name}
         currentBranch={currentBranch}
         onAnalyze={isViewingHistory ? undefined : handleAnalyze}
+        onCodeReview={(() => {
+          if (isViewingHistory || !analyses?.length) return undefined;
+          const currentAnalysis = analyses[0];
+          if (currentAnalysis.codeReview) return undefined; // already run
+          return async () => {
+            try {
+              setIsCodeReviewing(true);
+              await api.runCodeReview(repoId, currentAnalysis.id);
+            } catch {
+              setIsCodeReviewing(false);
+            }
+          };
+        })()}
         isAnalyzing={isAnalyzing || isDiffChecking}
+        isCodeReviewing={isCodeReviewing}
         showBack
         backHref="/"
         isChatOpen={isChatOpen}
@@ -1249,7 +1264,7 @@ export default function RepoGraphPage() {
                   </AlertDescription>
                 </Alert>
                 <Button
-                  onClick={handleAnalyze}
+                  onClick={() => handleAnalyze()}
                   disabled={isAnalyzing}
                   className="mt-2"
                 >

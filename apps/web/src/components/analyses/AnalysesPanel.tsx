@@ -202,6 +202,9 @@ export function AnalysesPanel({
                     ) : (
                       <span className="text-xs text-muted-foreground">-</span>
                     )}
+                    {a.commitHash && (
+                      <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{a.commitHash.slice(0, 7)}</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     {a.provider ? (

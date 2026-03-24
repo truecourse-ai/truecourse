@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, notInArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { rules } from '../db/schema.js';
 import { getAllDefaultRules } from '@truecourse/analyzer';
@@ -8,6 +8,7 @@ import type { AnalysisRule } from '@truecourse/shared';
  * Seed default rules into the database.
  * Uses upsert — new rules are inserted, existing rules get their
  * name/description/prompt/severity updated (preserving user's `enabled` toggle).
+ * Removes rules that are no longer in the defaults.
  */
 export async function seedRules(): Promise<void> {
   const defaults = getAllDefaultRules();
@@ -39,6 +40,13 @@ export async function seedRules(): Promise<void> {
           updatedAt: new Date(),
         },
       });
+  }
+
+  // Remove rules that are no longer in the defaults
+  const defaultKeys = defaults.map((r) => r.key);
+  const deleted = await db.delete(rules).where(notInArray(rules.key, defaultKeys)).returning({ key: rules.key });
+  if (deleted.length > 0) {
+    console.log(`[Rules] Removed ${deleted.length} obsolete rule(s): ${deleted.map((r) => r.key).join(', ')}`);
   }
 }
 

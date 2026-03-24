@@ -45,7 +45,7 @@ import {
   loadActiveViolations,
   loadActiveCodeViolations,
 } from '../services/violation-lifecycle.service.js';
-import { runViolationPipeline } from '../services/violation-pipeline.service.js';
+import { runViolationPipeline, runCodeReview } from '../services/violation-pipeline.service.js';
 import { createLLMProvider } from '../services/llm/provider.js';
 
 /** SQL filter to exclude diff analyses */
@@ -64,6 +64,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
+      const { codeReview: includeCodeReview } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -88,14 +89,15 @@ router.post(
 
       // Run analysis in the background
       try {
-        const tracker = new StepTracker(id, [
+        const trackerSteps = [
           { key: 'parse', label: 'Parsing repository' },
           { key: 'detect', label: 'Deterministic checks' },
           { key: 'enrich', label: 'Enriching detections' },
           { key: 'architecture', label: 'Architecture analysis' },
           { key: 'persist', label: 'Saving results' },
-          { key: 'code-review', label: 'Code review' },
-        ]);
+          ...(includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
+        ];
+        const tracker = new StepTracker(id, trackerSteps);
 
         tracker.start('parse', 'Starting analysis...');
 
@@ -146,7 +148,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview } });
 
         const analysis = { id: newAnalysisId };
 
@@ -340,6 +342,7 @@ router.post(
             previousDeterministicViolations,
             changedFileSet,
             tracker,
+            includeCodeReview,
             provider,
             signal: abortController.signal,
           });
@@ -370,7 +373,7 @@ router.post(
         // Mark code review as triggered before completing so it appears in the final checklist state
         if (codeReviewPromise) {
           tracker.start('code-review', 'Running in background...');
-        } else {
+        } else if (includeCodeReview) {
           tracker.done('code-review', 'Skipped');
         }
 
@@ -440,6 +443,88 @@ router.post(
   }
 );
 
+// POST /api/repos/:id/analyses/:analysisId/code-review - Run code review on existing analysis
+router.post(
+  '/:id/analyses/:analysisId/code-review',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repoId = req.params.id as string;
+      const analysisId = req.params.analysisId as string;
+
+      const [repo] = await db.select().from(repos).where(eq(repos.id, repoId)).limit(1);
+      if (!repo) throw createAppError('Repo not found', 404);
+
+      const [analysis] = await db.select().from(analyses).where(eq(analyses.id, analysisId)).limit(1);
+      if (!analysis) throw createAppError('Analysis not found', 404);
+
+      // Get file paths from the analysis modules
+      const analysisModules = await db.select({ filePath: modules.filePath }).from(modules).where(eq(modules.analysisId, analysisId));
+      const filePaths = [...new Set(analysisModules.map((m) => m.filePath))];
+
+      if (filePaths.length === 0) throw createAppError('No files found in analysis', 400);
+
+      // Load previous active LLM code violations for lifecycle tracking
+      const prevCodeViolationRows = await db
+        .select()
+        .from(codeViolations)
+        .where(eq(codeViolations.analysisId, analysisId));
+
+      const previousCodeViolations = prevCodeViolationRows
+        .filter((v) => (v.status === 'new' || v.status === 'unchanged') && v.ruleKey.startsWith('llm/'))
+        .map((r) => ({
+          id: r.id,
+          filePath: r.filePath,
+          lineStart: r.lineStart,
+          lineEnd: r.lineEnd,
+          columnStart: r.columnStart,
+          columnEnd: r.columnEnd,
+          ruleKey: r.ruleKey,
+          severity: r.severity,
+          title: r.title,
+          content: r.content,
+          snippet: r.snippet,
+          fixPrompt: r.fixPrompt,
+          firstSeenAnalysisId: r.firstSeenAnalysisId,
+          firstSeenAt: r.firstSeenAt,
+        }));
+
+      // Mark analysis as having code review
+      await db.update(analyses).set({
+        metadata: sql`coalesce(${analyses.metadata}, '{}'::jsonb) || '{"codeReview": true}'::jsonb`,
+      }).where(eq(analyses.id, analysisId));
+
+      res.status(202).json({ message: 'Code review started', analysisId });
+
+      // Run in background
+      const provider = createLLMProvider();
+      provider.setAnalysisId(analysisId);
+      provider.setRepoId(repoId);
+
+      emitCodeReviewProgress(repoId, analysisId);
+
+      runCodeReview({
+        repoId,
+        repoPath: repo.path,
+        analysisId,
+        filePaths,
+        previousCodeViolations,
+        provider,
+      })
+        .then(() => provider.flushUsage())
+        .then(() => {
+          console.log(`[CodeReview] Completed for repo ${repoId}`);
+          emitCodeReviewReady(repoId, analysisId);
+        })
+        .catch((err) => {
+          console.error(`[CodeReview] Failed for repo ${repoId}:`, err instanceof Error ? err.message : String(err));
+          emitCodeReviewReady(repoId, analysisId);
+        });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 // GET /api/repos/:id/analyses - List past analyses (enhanced with counts)
 router.get(
   '/:id/analyses',
@@ -461,7 +546,9 @@ router.get(
         .select({
           id: analyses.id,
           branch: analyses.branch,
+          commitHash: analyses.commitHash,
           architecture: analyses.architecture,
+          metadata: analyses.metadata,
           createdAt: analyses.createdAt,
         })
         .from(analyses)
@@ -501,8 +588,11 @@ router.get(
             codeViolationsBySeverity[severity] = count;
           }
 
+          const meta = a.metadata as Record<string, unknown> | null;
           return {
             ...a,
+            metadata: undefined, // don't send raw metadata to client
+            codeReview: meta?.codeReview === true,
             serviceCount,
             violationsBySeverity,
             codeViolationsBySeverity,

@@ -127,31 +127,6 @@ describe('code/todo-fixme', () => {
   });
 });
 
-describe('code/magic-number', () => {
-  it('detects magic numbers in expressions', () => {
-    const violations = check(`let timeout = 3000;`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/magic-number');
-    expect(matches).toHaveLength(1);
-    expect(matches[0].title).toContain('3000');
-  });
-
-  it('does not flag 0, 1, -1, 2', () => {
-    const violations = check(`
-      let a = 0;
-      let b = 1;
-      let c = 2;
-    `);
-    const matches = violations.filter((v) => v.ruleKey === 'code/magic-number');
-    expect(matches).toHaveLength(0);
-  });
-
-  it('does not flag numbers in const declarations', () => {
-    const violations = check(`const MAX_RETRIES = 5;`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/magic-number');
-    expect(matches).toHaveLength(0);
-  });
-});
-
 describe('code/no-explicit-any', () => {
   it('detects explicit any type annotations', () => {
     const violations = check(`function foo(x: any): void {}`);
@@ -222,14 +197,12 @@ describe('checkCodeRules integration', () => {
 
   it('detects multiple violations in problematic code', () => {
     const violations = check(`
-      let timeout = 5000;
       // TODO: clean this up
       try { riskyOp(); } catch (e) {}
       console.log("debugging");
       const apiKey = "sk_live_abc123defghijk";
     `);
     const ruleKeys = new Set(violations.map((v) => v.ruleKey));
-    expect(ruleKeys.has('code/magic-number')).toBe(true);
     expect(ruleKeys.has('code/todo-fixme')).toBe(true);
     expect(ruleKeys.has('code/empty-catch')).toBe(true);
     expect(ruleKeys.has('code/console-log')).toBe(true);

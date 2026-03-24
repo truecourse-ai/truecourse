@@ -68,6 +68,17 @@ export const LLM_CODE_RULES: AnalysisRule[] = [
     type: 'llm',
   },
   {
+    key: 'llm/code-magic-number',
+    category: 'code',
+    name: 'Magic number',
+    description: 'Numeric literals whose meaning is unclear without context — excludes HTTP status codes, common time constants, object property values, array lengths, and numbers in const declarations.',
+    prompt:
+      'Find numeric literals whose meaning is genuinely unclear without a named constant. IGNORE these common patterns that are NOT magic numbers: HTTP status codes (200, 400, 401, 404, 500, etc.), time constants (60, 1000, 24, 7, 30, 365), numbers in object properties where the key provides context ({ status: 401, attempts: 3, timeout: 5000 }), numbers in const declarations, array lengths, small integers for UI layout (columns, grid sizes), decimal values for opacity/ratios (0.5, 0.8), and enum-like values. Only flag numbers that genuinely hurt readability — numbers whose purpose cannot be understood from the surrounding code.',
+    enabled: true,
+    severity: 'low',
+    type: 'llm',
+  },
+  {
     key: 'llm/code-inconsistent-return',
     category: 'code',
     name: 'Inconsistent return types',

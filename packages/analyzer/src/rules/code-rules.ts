@@ -38,15 +38,6 @@ export const CODE_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'code/magic-number',
-    category: 'code',
-    name: 'Magic number',
-    description: 'Numeric literals outside const declarations (excluding 0, 1, -1, 2).',
-    enabled: true,
-    severity: 'low',
-    type: 'deterministic',
-  },
-  {
     key: 'code/no-explicit-any',
     category: 'code',
     name: 'Explicit any type',

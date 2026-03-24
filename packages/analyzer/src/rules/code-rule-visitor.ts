@@ -163,54 +163,6 @@ export const todoFixmeVisitor: CodeRuleVisitor = {
   },
 }
 
-const ALLOWED_NUMBERS = new Set([0, 1, -1, 2])
-
-export const magicNumberVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/magic-number',
-  nodeTypes: ['number'],
-  visit(node, filePath, sourceCode) {
-    const value = Number(node.text)
-    if (isNaN(value) || ALLOWED_NUMBERS.has(value)) return null
-
-    // Check if inside a const declaration
-    let current = node.parent
-    while (current) {
-      if (current.type === 'lexical_declaration') {
-        // Check if it's const
-        const kindNode = current.children[0]
-        if (kindNode && kindNode.text === 'const') return null
-        break
-      }
-      if (current.type === 'variable_declaration') break
-      // Allow in enum members
-      if (current.type === 'enum_declaration' || current.type === 'enum_body') return null
-      // Allow in array indices and common patterns
-      if (current.type === 'subscript_expression') return null
-      // Allow in type annotations
-      if (current.type === 'type_annotation') return null
-      current = current.parent
-    }
-
-    // Skip if inside default parameter values
-    current = node.parent
-    while (current) {
-      if (current.type === 'required_parameter' || current.type === 'optional_parameter') {
-        if (node.parent?.type === 'assignment_pattern') return null
-      }
-      if (current.type === 'function_declaration' || current.type === 'arrow_function' || current.type === 'method_definition') break
-      current = current.parent
-    }
-
-    return makeViolation(
-      this.ruleKey, node, filePath, 'low',
-      `Magic number: ${node.text}`,
-      `Numeric literal ${node.text} should be extracted to a named constant for clarity.`,
-      sourceCode,
-      `Extract ${node.text} into a named constant.`,
-    )
-  },
-}
-
 export const noExplicitAnyVisitor: CodeRuleVisitor = {
   ruleKey: 'code/no-explicit-any',
   nodeTypes: ['type_annotation'],
@@ -297,7 +249,6 @@ export const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   hardcodedSecretVisitor,
   todoFixmeVisitor,
-  magicNumberVisitor,
   noExplicitAnyVisitor,
   sqlInjectionVisitor,
 ]

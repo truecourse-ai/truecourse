@@ -46,13 +46,23 @@ program
   .command("analyze")
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
+  .option("--code-review", "Include LLM code review (off by default)")
   .option("--no-autostart", "Don't auto-start the server (for use from Claude Code skills)")
   .action(async (options) => {
     if (options.diff) {
       await runAnalyzeDiff({ noAutostart: !options.autostart });
     } else {
-      await runAnalyze({ noAutostart: !options.autostart });
+      await runAnalyze({ noAutostart: !options.autostart, codeReview: options.codeReview ?? false });
     }
+  });
+
+program
+  .command("code-review")
+  .description("Run LLM code review on the latest analysis")
+  .option("--no-autostart", "Don't auto-start the server")
+  .action(async (options) => {
+    const { runCodeReviewCmd } = await import("./commands/code-review.js");
+    await runCodeReviewCmd({ noAutostart: !options.autostart });
   });
 
 program

@@ -109,11 +109,12 @@ npx truecourse start          # Start the server
 Once the server is running, `cd` into any repo and:
 
 ```bash
-npx truecourse add            # Register repo without analyzing
-npx truecourse analyze        # Analyze current repo, show violations
-npx truecourse analyze --diff # Show new/resolved violations from uncommitted changes
-npx truecourse list           # Show violations from latest analysis
-npx truecourse list --diff    # Show saved diff check results
+npx truecourse add                    # Register repo without analyzing
+npx truecourse analyze                # Analyze current repo, show violations
+npx truecourse analyze --code-review  # Analyze with LLM code review (off by default)
+npx truecourse analyze --diff         # Show new/resolved violations from uncommitted changes
+npx truecourse list                   # Show violations from latest analysis
+npx truecourse list --diff            # Show saved diff check results
 ```
 
 ## Prerequisites
@@ -158,9 +159,9 @@ When you register a repo with `npx truecourse add`, you'll be prompted to instal
 
 TrueCourse ships with three types of rules:
 
-- **Deterministic rules** — Checked programmatically via AST visitors (layer violations, circular deps, dead modules, empty catch, magic numbers, etc.)
+- **Deterministic rules** — Checked programmatically via AST visitors (layer violations, circular deps, dead modules, empty catch, etc.)
 - **LLM architecture rules** — Passed to the LLM for deeper architectural, database, and module inspection with fix suggestions
-- **LLM code rules** — Source files sent to the LLM in batches for semantic code review (error handling, race conditions, security, etc.)
+- **LLM code rules** — Source files sent to the LLM in batches for semantic code review (error handling, race conditions, magic numbers, security, etc.). Runs when code review is enabled (`--code-review` flag or "Analyze with code review" in the UI)
 
 All rules are visible in the **Rules** tab in the web UI. Custom rule generation is an upcoming feature.
 

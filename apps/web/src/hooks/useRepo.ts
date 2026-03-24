@@ -48,9 +48,9 @@ export function useRepo() {
     }
   }, []);
 
-  const analyzeRepo = useCallback(async (id: string, branch?: string) => {
+  const analyzeRepo = useCallback(async (id: string, options?: { branch?: string; codeReview?: boolean }) => {
     try {
-      return await api.analyzeRepo(id, branch);
+      return await api.analyzeRepo(id, options);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start analysis';
       setError(message);
