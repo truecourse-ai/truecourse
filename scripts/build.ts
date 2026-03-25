@@ -108,7 +108,12 @@ const skillsSrc = path.join(ROOT, 'tools/cli/skills');
 const skillsDest = path.join(DIST, 'skills');
 copyDir(skillsSrc, skillsDest);
 
-// 7. Generate package.json for npm publish
+// 7. Copy README and README assets used by npm package page rendering
+console.log('Copying README and assets...');
+fs.copyFileSync(path.join(ROOT, 'README.md'), path.join(DIST, 'README.md'));
+copyDir(path.join(ROOT, 'assets'), path.join(DIST, 'assets'));
+
+// 8. Generate package.json for npm publish
 console.log('\nGenerating package.json...');
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
 const analyzerPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/analyzer/package.json'), 'utf-8'));
@@ -152,7 +157,7 @@ fs.writeFileSync(
   JSON.stringify(publishPkg, null, 2) + '\n',
 );
 
-// 8. Install production dependencies
+// 9. Install production dependencies
 console.log('\n=== Installing dependencies ===');
 run('npm install --omit=dev --legacy-peer-deps', DIST);
 

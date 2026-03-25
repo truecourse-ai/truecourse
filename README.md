@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml"><img src="https://github.com/truecourse-ai/truecourse/actions/workflows/test.yml/badge.svg" alt="Tests" /></a>
   <a href="https://www.npmjs.com/package/truecourse"><img src="https://img.shields.io/npm/v/truecourse" alt="npm version" /></a>
+  <a href="https://github.com/truecourse-ai/truecourse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/truecourse-ai/truecourse" alt="License" /></a>
 </p>
 
 TrueCourse analyzes your codebase architecture and code to detect violations that traditional linters miss — circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, and more. It combines static analysis with AI review to surface findings with fix suggestions.
@@ -20,7 +21,7 @@ TrueCourse analyzes your codebase architecture and code to detect violations tha
 Everything runs locally on your machine. Works with Claude Code (no API key needed) or your own API keys. Your code never leaves your environment.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="TrueCourse Screenshot" width="100%" />
+  <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
 </p>
 
 ## Built for Humans and AI Agents
