@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "vite --port 3000",
+    "dev": "vite --port 3000 --open",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist"
