@@ -20,7 +20,7 @@ TrueCourse analyzes your codebase architecture and code to detect violations tha
 Everything runs locally on your machine. Works with Claude Code (no API key needed) or your own API keys. Your code never leaves your environment.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="TrueCourse Screenshot" width="100%" />
+  <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
 </p>
 
 ## Built for Humans and AI Agents
