@@ -1003,7 +1003,7 @@ export default function RepoGraphPage() {
           {/* Tab bar when files or flows are open */}
           {(openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
-              {/* Graph tab */}
+              {/* Home tab */}
               <button
                 onClick={() => { handleSelectTab(null); setActiveFlowId(null); setActiveDbId(null); }}
                 className={`shrink-0 px-3 py-1.5 border-r border-border transition-colors ${
@@ -1012,7 +1012,7 @@ export default function RepoGraphPage() {
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                Graph
+                Home
               </button>
               {/* File tabs */}
               {openFiles.map((file) => {
