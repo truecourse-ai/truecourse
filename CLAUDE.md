@@ -10,7 +10,7 @@
 - `apps/web/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
 - `apps/server/` — Express + Socket.io backend (Drizzle ORM, LLM providers)
 - `packages/shared/` — Shared Zod schemas and TypeScript types
-- `packages/analyzer/` — Tree-sitter analysis engine (adapted from SpecMind, TS/JS only)
+- `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS only)
 - `tools/cli/` — CLI commands (setup, start, analyze, list, add)
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
 - `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
@@ -47,4 +47,3 @@ Auth: Basic auth with `LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY` from `.env`.
 - Detection patterns are TypeScript constants in `packages/analyzer/src/patterns/`, not JSON files
 - LLM providers implement the `LLMProvider` interface — add new providers there
 - Types shared between frontend and backend go in `packages/shared`
-- The analysis engine is adapted from SpecMind (`github.com/specmind/specmind`) — refer to that codebase for understanding the original implementation
