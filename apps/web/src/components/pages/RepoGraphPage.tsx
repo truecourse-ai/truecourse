@@ -51,6 +51,23 @@ type OpenDatabase = {
   pinned: boolean;
 };
 
+const VALID_LEFT_TABS = new Set<LeftTab>([
+  'violations',
+  'rules',
+  'files',
+  'flows',
+  'databases',
+  'analytics',
+  'analyses',
+]);
+
+const MAIN_CONTENT_TABS = new Set<LeftTab>([
+  'violations',
+  'rules',
+  'analytics',
+  'analyses',
+]);
+
 export default function RepoGraphPage() {
   const { repoId = '' } = useParams();
   const [searchParams] = useSearchParams();
@@ -83,7 +100,7 @@ export default function RepoGraphPage() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
     const tabParam = searchParams?.get('tab');
-    if (tabParam && ['violations', 'rules', 'files', 'flows', 'databases', 'analytics', 'analyses'].includes(tabParam)) {
+    if (tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)) {
       return tabParam as LeftTab;
     }
     if (searchParams?.get('flow')) return 'flows';
@@ -157,11 +174,6 @@ export default function RepoGraphPage() {
     }
   }, [openFiles, activeFilePath, setActiveFilePath]);
 
-  const handleSelectTab = useCallback((path: string | null) => {
-    setActiveFilePath(path);
-    if (path) { setActiveFlowIdState(null); setActiveDbIdState(null); }
-  }, []);
-
   // Multi-tab flow viewer state — restore from URL
   const flowFromUrl = searchParams?.get('flow') || null;
   const [openFlows, setOpenFlows] = useState<OpenFlow[]>(() =>
@@ -181,6 +193,58 @@ export default function RepoGraphPage() {
     navigate(url.pathname + url.search, { replace: true });
   }, [navigate]);
 
+  const handleCloseFlow = useCallback((flowId: string) => {
+    setOpenFlows((prev) => prev.filter((f) => f.id !== flowId));
+    if (activeFlowId === flowId) {
+      const remaining = openFlows.filter((f) => f.id !== flowId);
+      setActiveFlowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+    }
+  }, [openFlows, activeFlowId, setActiveFlowId]);
+
+  // Multi-tab database viewer state
+  const [openDatabases, setOpenDatabases] = useState<OpenDatabase[]>([]);
+  const [activeDbId, setActiveDbIdState] = useState<string | null>(null);
+
+  const setActiveDbId = useCallback((id: string | null) => {
+    setActiveDbIdState(id);
+  }, []);
+
+  const clearActiveDetailView = useCallback(() => {
+    setActiveFilePath(null);
+    setActiveFlowId(null);
+    setActiveDbId(null);
+  }, [setActiveFilePath, setActiveFlowId, setActiveDbId]);
+
+  const showFileView = useCallback((path: string | null) => {
+    setActiveFilePath(path);
+    setActiveFlowId(null);
+    setActiveDbId(null);
+  }, [setActiveFilePath, setActiveFlowId, setActiveDbId]);
+
+  const handleSelectTab = useCallback((path: string | null) => {
+    showFileView(path);
+  }, [showFileView]);
+
+  const showFlowView = useCallback((flowId: string | null) => {
+    setActiveFlowId(flowId);
+    setActiveFilePath(null);
+    setActiveDbId(null);
+  }, [setActiveFlowId, setActiveFilePath, setActiveDbId]);
+
+  const showDatabaseView = useCallback((dbId: string | null) => {
+    setActiveDbId(dbId);
+    setActiveFilePath(null);
+    setActiveFlowId(null);
+  }, [setActiveDbId, setActiveFilePath, setActiveFlowId]);
+
+  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
+    setLeftTab(tab);
+
+    if (tab && MAIN_CONTENT_TABS.has(tab)) {
+      clearActiveDetailView();
+    }
+  }, [setLeftTab, clearActiveDetailView]);
+
   const handleOpenFlow = useCallback((flowId: string, pinned: boolean) => {
     setOpenFlows((prev) => {
       const existing = prev.find((f) => f.id === flowId);
@@ -196,30 +260,8 @@ export default function RepoGraphPage() {
       }
       return [...prev, { id: flowId, name: 'Flow', pinned: false }];
     });
-    setActiveFlowId(flowId);
-    setActiveFilePathState(null);
-    setActiveDbIdState(null);
-  }, [setActiveFlowId]);
-
-  const handleCloseFlow = useCallback((flowId: string) => {
-    setOpenFlows((prev) => prev.filter((f) => f.id !== flowId));
-    if (activeFlowId === flowId) {
-      const remaining = openFlows.filter((f) => f.id !== flowId);
-      setActiveFlowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-    }
-  }, [openFlows, activeFlowId, setActiveFlowId]);
-
-  // Multi-tab database viewer state
-  const [openDatabases, setOpenDatabases] = useState<OpenDatabase[]>([]);
-  const [activeDbId, setActiveDbIdState] = useState<string | null>(null);
-
-  const setActiveDbId = useCallback((id: string | null) => {
-    setActiveDbIdState(id);
-    if (id) {
-      setActiveFilePathState(null);
-      setActiveFlowIdState(null);
-    }
-  }, []);
+    showFlowView(flowId);
+  }, [showFlowView]);
 
   const handleOpenDatabase = useCallback((dbId: string, dbName: string, pinned: boolean) => {
     setOpenDatabases((prev) => {
@@ -236,8 +278,8 @@ export default function RepoGraphPage() {
       }
       return [...prev, { id: dbId, name: dbName, pinned: false }];
     });
-    setActiveDbId(dbId);
-  }, [setActiveDbId]);
+    showDatabaseView(dbId);
+  }, [showDatabaseView]);
 
   const handleCloseDatabase = useCallback((dbId: string) => {
     setOpenDatabases((prev) => prev.filter((d) => d.id !== dbId));
@@ -897,7 +939,7 @@ export default function RepoGraphPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} isCodeReviewing={isCodeReviewing} badgeCounts={{
+        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} isCodeReviewing={isCodeReviewing} badgeCounts={{
           violations: isDiffMode && diffResult
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
@@ -991,16 +1033,16 @@ export default function RepoGraphPage() {
           {/* Tab bar when files or flows are open */}
           {(openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
-              {/* Graph tab */}
+              {/* Home tab */}
               <button
-                onClick={() => { handleSelectTab(null); setActiveFlowId(null); setActiveDbId(null); }}
+                onClick={clearActiveDetailView}
                 className={`shrink-0 px-3 py-1.5 border-r border-border transition-colors ${
                   !showingCodeViewer && !showingFlow && !showingDatabase
                     ? 'bg-background text-foreground'
                     : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 }`}
               >
-                Graph
+                Home
               </button>
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1009,7 +1051,7 @@ export default function RepoGraphPage() {
                 return (
                   <div
                     key={file.path}
-                    onClick={() => { handleSelectTab(file.path); setActiveFlowIdState(null); }}
+                    onClick={() => handleSelectTab(file.path)}
                     className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-background text-foreground'
@@ -1038,7 +1080,7 @@ export default function RepoGraphPage() {
                 return (
                   <div
                     key={flow.id}
-                    onClick={() => { setActiveFlowId(flow.id); setActiveFilePathState(null); setActiveDbIdState(null); }}
+                    onClick={() => showFlowView(flow.id)}
                     className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-background text-foreground'
@@ -1068,7 +1110,7 @@ export default function RepoGraphPage() {
                 return (
                   <div
                     key={db.id}
-                    onClick={() => { setActiveDbId(db.id); setActiveFilePathState(null); setActiveFlowIdState(null); }}
+                    onClick={() => showDatabaseView(db.id)}
                     className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-background text-foreground'
