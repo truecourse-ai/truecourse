@@ -4,6 +4,18 @@ import { AlertTriangle, Shield, FolderTree, Workflow, Database, BarChart3, Clipb
 
 export type LeftTab = 'violations' | 'rules' | 'files' | 'flows' | 'databases' | 'analytics' | 'analyses';
 
+const TAB_LABELS: Record<LeftTab, string> = {
+  violations: 'Violations',
+  rules: 'Rules',
+  files: 'Files',
+  flows: 'Flows',
+  databases: 'Databases',
+  analytics: 'Analytics',
+  analyses: 'Analyses',
+};
+
+const TABS_WITHOUT_PANEL = new Set<LeftTab>(['analytics', 'analyses']);
+
 type LeftSidebarProps = {
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab | null) => void;
@@ -70,7 +82,7 @@ export function LeftSidebar({
     [width, minWidth, maxWidth],
   );
 
-  const isOpen = activeTab !== null && activeTab !== 'analytics' && activeTab !== 'analyses';
+  const isOpen = activeTab !== null && !TABS_WITHOUT_PANEL.has(activeTab);
 
   return (
     <div className="flex flex-shrink-0 h-full">
@@ -136,7 +148,7 @@ export function LeftSidebar({
           {/* Panel header */}
           <div className="flex h-10 items-center gap-2 border-b border-border px-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeTab === 'violations' ? 'Violations' : activeTab === 'rules' ? 'Rules' : activeTab === 'flows' ? 'Flows' : activeTab === 'databases' ? 'Databases' : activeTab === 'analytics' ? 'Analytics' : 'Files'}
+              {activeTab ? TAB_LABELS[activeTab] : ''}
             </span>
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
