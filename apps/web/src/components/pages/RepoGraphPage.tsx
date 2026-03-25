@@ -221,6 +221,18 @@ export default function RepoGraphPage() {
     }
   }, []);
 
+  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
+    setLeftTab(tab);
+
+    // Overview tabs should return to the graph/dashboard area instead of leaving
+    // an old file, flow, or database detail tab active over the main content.
+    if (tab === 'violations' || tab === 'rules' || tab === 'analytics' || tab === 'analyses') {
+      setActiveFilePath(null);
+      setActiveFlowId(null);
+      setActiveDbId(null);
+    }
+  }, [setLeftTab, setActiveFilePath, setActiveFlowId, setActiveDbId]);
+
   const handleOpenDatabase = useCallback((dbId: string, dbName: string, pinned: boolean) => {
     setOpenDatabases((prev) => {
       const existing = prev.find((d) => d.id === dbId);
@@ -897,7 +909,7 @@ export default function RepoGraphPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={setLeftTab} isCodeReviewing={isCodeReviewing} badgeCounts={{
+        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} isCodeReviewing={isCodeReviewing} badgeCounts={{
           violations: isDiffMode && diffResult
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
