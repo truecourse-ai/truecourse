@@ -8,7 +8,6 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 - Node.js 20+
 - pnpm 9+
-- Git
 
 ### Getting Started
 
@@ -19,7 +18,7 @@ pnpm install
 pnpm dev          # Start all services (Vite frontend + Express backend + embedded Postgres)
 ```
 
-The dev server starts at `http://localhost:5173` (frontend) and `http://localhost:3000` (API). Embedded Postgres starts automatically — no Docker needed. Database migrations run on boot.
+The dev server starts at `http://localhost:3000`. Embedded Postgres starts automatically — no Docker needed. Database migrations run on boot.
 
 ### Project Structure
 
@@ -90,7 +89,6 @@ See [packages/analyzer/ADDING_A_LANGUAGE.md](packages/analyzer/ADDING_A_LANGUAGE
 
 - **New language support** — Python and Go are the next targets
 - **New deterministic rules** — see `packages/analyzer/src/rules/` for examples
-- **UI improvements** — the graph visualization, violation panels, and analytics dashboard
 - **Documentation** — improving docs, adding examples, writing tutorials
 - **Testing** — expanding test coverage, especially for edge cases in dependency resolution
 
