@@ -855,9 +855,22 @@ export default function RepoGraphPage() {
         currentBranch={currentBranch}
         onAnalyze={isViewingHistory ? undefined : handleAnalyze}
         onCodeReview={(() => {
-          if (isViewingHistory || !analyses?.length) return undefined;
+          if (isViewingHistory) return undefined;
+          if (isDiffMode) {
+            const diffId = diffResult?.diffAnalysisId;
+            if (!diffId || diffResult.codeReview) return undefined;
+            return async () => {
+              try {
+                setIsCodeReviewing(true);
+                await api.runCodeReview(repoId, diffId);
+              } catch {
+                setIsCodeReviewing(false);
+              }
+            };
+          }
+          if (!analyses?.length) return undefined;
           const currentAnalysis = analyses[0];
-          if (currentAnalysis.codeReview) return undefined; // already run
+          if (currentAnalysis.codeReview) return undefined;
           return async () => {
             try {
               setIsCodeReviewing(true);

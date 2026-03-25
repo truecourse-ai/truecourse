@@ -8,3 +8,8 @@ dist/
 coverage/
 out/
 tsconfig.tsbuildinfo
+
+# Pitch deck (keep images, ignore generated files)
+assets/generate-deck.js
+assets/*.pptx
+assets/*.pdf

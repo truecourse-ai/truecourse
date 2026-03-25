@@ -59,10 +59,11 @@ program
 program
   .command("code-review")
   .description("Run LLM code review on the latest analysis")
+  .option("--diff", "Run on the latest diff analysis instead")
   .option("--no-autostart", "Don't auto-start the server")
   .action(async (options) => {
     const { runCodeReviewCmd } = await import("./commands/code-review.js");
-    await runCodeReviewCmd({ noAutostart: !options.autostart });
+    await runCodeReviewCmd({ noAutostart: !options.autostart, diff: options.diff ?? false });
   });
 
 program
