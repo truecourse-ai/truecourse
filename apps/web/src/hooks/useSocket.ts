@@ -40,6 +40,10 @@ export function useSocket(repoId?: string) {
     }
 
     function onAnalysisProgress(data: AnalysisProgress) {
+      if (data.step === 'error') {
+        setAnalysisProgress({ ...data, step: 'error' });
+        return;
+      }
       if (data.percent >= 100) {
         setAnalysisProgress(null);
       } else {
@@ -104,5 +108,7 @@ export function useSocket(repoId?: string) {
     };
   }, []);
 
-  return { isConnected, analysisProgress, onEvent };
+  const clearProgress = useCallback(() => setAnalysisProgress(null), []);
+
+  return { isConnected, analysisProgress, clearProgress, onEvent };
 }

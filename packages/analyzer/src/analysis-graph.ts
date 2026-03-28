@@ -238,58 +238,57 @@ export class AnalysisGraph {
 
   /** Resolve which handler in the target service receives an HTTP call */
   resolveHandler(call: CrossServiceCall): { method: MethodInfo; module: ModuleInfo } | null {
-    // Route handlers lookup
-    if (this.routeHandlers.size > 0) {
-      const normalizedPath = call.url
-      const exactKey = `${call.targetService}::${call.httpMethod}::${normalizedPath}`
-      const handler = this.routeHandlers.get(exactKey)
-      if (handler) {
-        const m = this.methodByKey.get(`${call.targetService}::${handler.moduleName}::${handler.handlerName}`)
-        const mod = this.moduleByKey.get(`${call.targetService}::${handler.moduleName}`)
-        if (m && mod) return { method: m, module: mod }
-      }
+    if (this.routeHandlers.size === 0) return null
 
-      // Try pattern matching
-      for (const [key, rh] of this.routeHandlers) {
-        if (!key.startsWith(`${call.targetService}::${call.httpMethod}::`)) continue
-        const routePath = key.slice(`${call.targetService}::${call.httpMethod}::`.length)
-        if (matchRoutePattern(normalizedPath, routePath)) {
-          const m = this.methodByKey.get(`${call.targetService}::${rh.moduleName}::${rh.handlerName}`)
-          const mod = this.moduleByKey.get(`${call.targetService}::${rh.moduleName}`)
-          if (m && mod) return { method: m, module: mod }
-        }
-      }
+    const normalizedPath = call.url
+
+    // Collect matching handlers: exact match first, then pattern match
+    const matched = this.findMatchingRouteHandler(call.targetService, call.httpMethod, normalizedPath)
+    if (!matched) return null
+
+    return this.lookupHandlerMethod(call.targetService, matched)
+  }
+
+  private findMatchingRouteHandler(
+    targetService: string,
+    httpMethod: string,
+    normalizedPath: string,
+  ): RouteHandler | null {
+    // Exact match
+    const exactKey = `${targetService}::${httpMethod}::${normalizedPath}`
+    const exact = this.routeHandlers.get(exactKey)
+    if (exact) return exact
+
+    // Pattern match (handles :param, <param>, {param}, [param])
+    for (const [key, rh] of this.routeHandlers) {
+      if (!key.startsWith(`${targetService}::${httpMethod}::`)) continue
+      const routePath = key.slice(`${targetService}::${httpMethod}::`.length)
+      if (matchRoutePattern(normalizedPath, routePath)) return rh
     }
 
-    // Heuristic fallback
-    const candidates = this.apiMethodsByService.get(call.targetService)
-    if (!candidates || candidates.length === 0) return null
+    return null
+  }
 
-    const resource = extractResource(call.url)
-    const HTTP_PREFIXES: Record<string, string[]> = {
-      GET: ['get', 'find', 'fetch', 'list', 'load', 'read', 'search', 'query'],
-      POST: ['create', 'add', 'insert', 'save', 'register', 'post'],
-      PUT: ['update', 'put', 'replace', 'set', 'modify'],
-      PATCH: ['update', 'patch', 'modify'],
-      DELETE: ['delete', 'remove', 'destroy', 'drop'],
-    }
-    const prefixes = HTTP_PREFIXES[call.httpMethod] || []
+  private lookupHandlerMethod(
+    targetService: string,
+    handler: RouteHandler,
+  ): { method: MethodInfo; module: ModuleInfo } | null {
+    // Direct lookup: service::module::method
+    const m = this.methodByKey.get(`${targetService}::${handler.moduleName}::${handler.handlerName}`)
+    const mod = this.moduleByKey.get(`${targetService}::${handler.moduleName}`)
+    if (m && mod) return { method: m, module: mod }
 
-    let best: { method: MethodInfo; module: ModuleInfo } | null = null
-    let bestScore = 0
-    for (const c of candidates) {
-      let score = 0
-      const mLower = c.method.name.toLowerCase()
-      const modLower = c.module.name.toLowerCase()
-      if (resource && modLower.includes(resource)) score += 10
-      if (prefixes.some((p) => mLower.startsWith(p))) score += 5
-      if (resource && mLower.includes(resource)) score += 3
-      const urlHasParam = /:[a-z]/i.test(call.url)
-      if (urlHasParam && /byid|one|single/i.test(mLower)) score += 4
-      else if (!urlHasParam && /all|list|many/i.test(mLower)) score += 4
-      if (score > bestScore) { bestScore = score; best = c }
+    // The handler's module name may not match the module registry (e.g., thin router
+    // files that don't produce modules). Search all modules in the target service
+    // for a method with the handler's name.
+    for (const [key, method] of this.methodByKey) {
+      if (!key.startsWith(`${targetService}::`) || !key.endsWith(`::${handler.handlerName}`)) continue
+      const moduleName = key.split('::')[1]
+      const module = this.moduleByKey.get(`${targetService}::${moduleName}`)
+      if (module) return { method, module }
     }
-    return bestScore >= 10 ? best : null
+
+    return null
   }
 }
 
@@ -306,8 +305,16 @@ function matchRoutePattern(urlPattern: string, routePattern: string): boolean {
   for (let i = 0; i < urlParts.length; i++) {
     const u = urlParts[i]
     const r = routeParts[i]
-    if (u.startsWith(':') || r.startsWith(':')) continue
+    // Treat :param, <param>, {param}, [param] all as route parameter wildcards
+    if (isRouteParam(u) || isRouteParam(r)) continue
     if (u !== r) return false
   }
   return true
+}
+
+function isRouteParam(segment: string): boolean {
+  return segment.startsWith(':')       // Express: :id
+    || segment.startsWith('<')         // Flask: <id>
+    || segment.startsWith('{')         // FastAPI/C#: {id}
+    || segment.startsWith('[')         // Next.js: [id]
 }

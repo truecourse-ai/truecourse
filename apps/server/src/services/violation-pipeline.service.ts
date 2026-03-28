@@ -268,7 +268,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         if (enabledCodeRules.length > 0) {
           const scanPath = changedFileSet ? filePath : filePath;
           const tree = parseFile(scanPath, content, lang);
-          const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, content, enabledCodeRules);
+          const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, content, enabledCodeRules, lang);
           allCodeViolations.push(...codeRuleViolations);
         }
       } catch {

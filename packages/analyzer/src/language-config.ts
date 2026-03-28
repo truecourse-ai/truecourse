@@ -34,6 +34,21 @@ export interface LanguageConfig {
     stripChars?: RegExp
   }
 
+  // Package/project indicator files
+  packageIndicatorFiles: string[]
+
+  // Ignore patterns for file discovery
+  ignorePatterns: string[]
+
+  // Test file patterns (excluded from analysis)
+  testPatterns: string[]
+
+  // Bootstrap entry point patterns
+  bootstrap: {
+    filePattern: RegExp
+    functionNames: string[]
+  }
+
   // Optional: Custom tree-sitter query strings
   functionQuery?: string
   classQuery?: string
@@ -94,6 +109,14 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
     (import_statement) @import
   `,
 
+  packageIndicatorFiles: ['package.json'],
+  ignorePatterns: [],
+  testPatterns: ['**/*.test.*', '**/*.spec.*', '**/__tests__/', '**/__mocks__/'],
+  bootstrap: {
+    filePattern: /(?:^|[/\\])(?:app|main|index|server)\.\w+$/,
+    functionNames: ['start', 'main', 'bootstrap'],
+  },
+
   exportQuery: `
     (export_statement) @export
   `,
@@ -150,9 +173,88 @@ export const JAVASCRIPT_CONFIG: LanguageConfig = {
 }
 
 /**
+ * Python language configuration
+ */
+export const PYTHON_CONFIG: LanguageConfig = {
+  name: 'python',
+  fileExtensions: ['.py'],
+
+  moduleResolution: {
+    extensions: ['.py'],
+    indexFiles: ['__init__.py'],
+  },
+
+  functionNodeTypes: ['function_definition'],
+  classNodeTypes: ['class_definition'],
+  importNodeTypes: ['import_statement', 'import_from_statement'],
+  exportNodeTypes: [], // Python has no explicit export syntax
+  callNodeTypes: ['call'],
+
+  urlInterpolation: {
+    // Python f-strings: f"{BASE_URL}/users/{id}"
+    baseUrlVar: /\{[^}]*[Uu]rl[^}]*\}/gi,
+    paramVar: /\{[^}]+\}/g,
+  },
+
+  functionQuery: `(function_definition) @function`,
+
+  classQuery: `(class_definition) @class`,
+
+  packageIndicatorFiles: ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', '__init__.py'],
+  ignorePatterns: ['**/__pycache__/', '**/.venv/', '**/venv/', '**/.pytest_cache/', '**/*.egg-info/'],
+  testPatterns: ['**/test_*.py', '**/*_test.py', '**/conftest.py'],
+  bootstrap: {
+    filePattern: /(?:^|[/\\])(?:app|main|wsgi|asgi)\.\w+$/,
+    functionNames: ['start', 'main', '__main__', 'bootstrap'],
+  },
+
+  importQuery: `
+    (import_statement) @import
+    (import_from_statement) @import
+  `,
+}
+
+/**
  * Registry of all language configurations. Add new languages here.
  */
-const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG]
+const LANGUAGE_CONFIGS: LanguageConfig[] = [TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG]
+
+// ---------------------------------------------------------------------------
+// Helpers — aggregate across all languages
+// ---------------------------------------------------------------------------
+
+export function getAllFileExtensions(): string[] {
+  return LANGUAGE_CONFIGS.flatMap((c) => c.fileExtensions)
+}
+
+export function getAllIgnorePatterns(): string[] {
+  return LANGUAGE_CONFIGS.flatMap((c) => c.ignorePatterns)
+}
+
+export function getAllTestPatterns(): string[] {
+  return LANGUAGE_CONFIGS.flatMap((c) => c.testPatterns)
+}
+
+export function getAllPackageIndicatorFiles(): string[] {
+  return [...new Set(LANGUAGE_CONFIGS.flatMap((c) => c.packageIndicatorFiles))]
+}
+
+export function getAllIndexBaseNames(): Set<string> {
+  const names = new Set<string>()
+  for (const config of LANGUAGE_CONFIGS) {
+    for (const indexFile of config.moduleResolution.indexFiles) {
+      const dot = indexFile.lastIndexOf('.')
+      names.add(dot >= 0 ? indexFile.slice(0, dot) : indexFile)
+    }
+  }
+  return names
+}
+
+export function isBootstrapEntry(functionName: string, filePath: string): boolean {
+  return LANGUAGE_CONFIGS.some(
+    (c) => c.bootstrap.functionNames.includes(functionName) && c.bootstrap.filePattern.test(filePath)
+  )
+}
 
 /**
  * Get language configuration by language name

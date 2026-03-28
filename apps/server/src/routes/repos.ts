@@ -4,7 +4,7 @@ import { db } from '../config/database.js';
 import { repos, analyses, services, serviceDependencies, violations, conversations, messages } from '../db/schema.js';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
-import { simpleGit } from 'simple-git';
+import { getGit } from '../lib/git.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -116,7 +116,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     }
 
     // Get git branch info
-    const git = simpleGit(repo.path);
+    const git = await getGit(repo.path);
     const branchSummary = await git.branch();
     const branches = branchSummary.all;
     const defaultBranch = branchSummary.current;
@@ -147,7 +147,7 @@ router.get('/:id/branches', async (req: Request, res: Response, next: NextFuncti
       throw createAppError('Repo not found', 404);
     }
 
-    const git = simpleGit(repo.path);
+    const git = await getGit(repo.path);
     const branchSummary = await git.branch();
 
     res.json({

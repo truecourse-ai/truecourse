@@ -190,12 +190,12 @@ describe('traceFlows', () => {
       makeModule({ name: 'B', layerName: 'service', serviceName: 'svc' }),
     ]
     const methods = [
-      makeMethod({ name: 'start', moduleName: 'Ctrl', serviceName: 'svc', isExported: true }),
+      makeMethod({ name: 'process', moduleName: 'Ctrl', serviceName: 'svc', isExported: true }),
       makeMethod({ name: 'doA', moduleName: 'A', serviceName: 'svc' }),
       makeMethod({ name: 'doB', moduleName: 'B', serviceName: 'svc' }),
     ]
     const deps = [
-      makeDep({ callerMethod: 'start', callerModule: 'Ctrl', callerService: 'svc', calleeMethod: 'doA', calleeModule: 'A', calleeService: 'svc' }),
+      makeDep({ callerMethod: 'process', callerModule: 'Ctrl', callerService: 'svc', calleeMethod: 'doA', calleeModule: 'A', calleeService: 'svc' }),
       makeDep({ callerMethod: 'doA', callerModule: 'A', callerService: 'svc', calleeMethod: 'doB', calleeModule: 'B', calleeService: 'svc' }),
       makeDep({ callerMethod: 'doB', callerModule: 'B', callerService: 'svc', calleeMethod: 'doA', calleeModule: 'A', calleeService: 'svc' }),
     ]
@@ -351,6 +351,9 @@ describe('traceFlows', () => {
           targetService: 'user-service',
         },
       ],
+      routeHandlers: new Map([
+        ['user-service::GET::/users/:id', { handlerName: 'getUserById', moduleName: 'UserHandler' }],
+      ]),
     })
     const flows = traceFlows(graph)
 
@@ -474,6 +477,10 @@ describe('traceFlows', () => {
           targetService: 'user-service',
         },
       ],
+      routeHandlers: new Map([
+        ['user-service::GET::/users/:id', { handlerName: 'getUserById', moduleName: 'UserHandler' }],
+        ['user-service::GET::/users', { handlerName: 'getUsers', moduleName: 'UserHandler' }],
+      ]),
     })
     const flows = traceFlows(graph)
 

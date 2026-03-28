@@ -1817,3 +1817,157 @@ New `analysis_usage` table:
 - DB: usage rows created per LLM call, linked to correct analysis
 - Frontend: usage tab renders with correct totals
 - `pnpm build` and `pnpm test` pass
+
+---
+
+## Phase 18: Business Logic Requirements Tracking `STATUS: BACKLOG`
+
+Track business logic requirements alongside code, verify which are implemented (correctly or incorrectly), and detect when code changes break existing requirements. Bridges the gap between product specs and actual code.
+
+### Requirements Definition
+
+- New `requirements` DB table: `id`, `repo_id`, `key` (unique slug, e.g. `AUTH-001`), `title`, `description` (natural language), `severity` (critical/high/medium/low), `status` (verified/violated/unverified/stale), `created_at`, `updated_at`
+- New `requirement_mappings` table: `id`, `requirement_id`, `file_path`, `entity` (service/module/method name), `confidence` (0-1), `source` (manual/auto), `verified_at`
+- Users can define requirements in the UI or via a `.truecourse/requirements.yaml` file in the repo
+- YAML file format:
+  ```yaml
+  requirements:
+    - key: AUTH-001
+      title: JWT tokens must expire within 24 hours
+      description: All JWT token generation must set expiration to 24h or less. No infinite tokens.
+      severity: critical
+    - key: PAY-001
+      title: Payment amounts must be validated server-side
+      description: All payment endpoints must validate amounts are positive and within limits before processing.
+      severity: critical
+  ```
+- CLI command: `npx truecourse requirements sync` — syncs YAML definitions to DB
+
+### Auto-Mapping (LLM-Powered)
+
+- After analysis, LLM examines each requirement and the analyzed code to suggest which files/services/methods implement it
+- Produces a confidence score (0-1) for each mapping
+- Users can confirm, reject, or manually add mappings in the UI
+- Mappings update automatically when code is re-analyzed (stale mappings flagged if mapped code changed significantly)
+
+### Verification
+
+- LLM evaluates whether mapped code actually satisfies the requirement
+- Three verification outcomes:
+  - **Verified** — code correctly implements the requirement (with evidence)
+  - **Violated** — code exists but doesn't satisfy the requirement (with explanation of what's wrong)
+  - **Unverified** — no mapped code found, or confidence too low to determine
+- Verification runs as part of normal analysis, results stored per requirement
+- Each verification includes LLM reasoning (shown in UI) so users can judge accuracy
+
+### Regression Detection
+
+- During diff analysis (Phase 5 flow), check if changed files overlap with any requirement mappings
+- If overlap found, re-verify affected requirements against the new code
+- New `requirement_violations` table: `id`, `requirement_id`, `analysis_id`, `previous_status`, `new_status`, `diff_summary`, `created_at`
+- Surface requirement regressions prominently in the diff analysis results
+- Separate from architectural violations — these are business logic regressions
+
+### Frontend
+
+- New **"Requirements"** tab in the sidebar
+- Requirements list view: key, title, severity, status badge (verified/violated/unverified/stale), mapped entity count
+- Requirement detail panel:
+  - Description, severity, status
+  - Mapped code locations (clickable, opens code viewer from Phase 7)
+  - Verification result with LLM reasoning
+  - History of status changes across analyses
+- Requirement creation/edit form in the UI
+- Filter by status, severity
+- In diff analysis view: highlight any requirement regressions alongside architectural violations
+- Dashboard widget: requirements coverage summary (X verified, Y violated, Z unverified)
+
+### Scope
+
+- Requirements are per-repo (each repo has its own set)
+- Auto-mapping and verification use the same LLM provider as the rest of the analysis
+- YAML file is optional — UI-only workflow is fully supported
+- No CI integration in this phase (future: GitHub Action that fails PR if requirements regress)
+
+### Test Plan (Phase 18) `STATUS: BACKLOG`
+
+- YAML parsing: valid file loads requirements correctly; invalid file produces clear errors
+- DB: requirements and mappings CRUD operations work correctly
+- Auto-mapping: given a requirement and analyzed code, LLM suggests reasonable mappings with confidence scores
+- Verification: LLM correctly identifies verified vs violated requirements on known test cases
+- Regression detection: changing code mapped to a requirement triggers re-verification and flags status change
+- Stale detection: refactoring mapped code marks mappings as stale
+- Frontend: requirements tab renders, CRUD works, status badges update after analysis
+- `pnpm build` and `pnpm test` pass
+
+### Verification (Phase 18)
+
+1. Add requirements via YAML file → `npx truecourse requirements sync` → appear in UI
+2. Add requirements via UI → persisted in DB, shown in list
+3. Run analysis → auto-mapping suggests code locations for each requirement
+4. Verify mappings → LLM provides verified/violated status with reasoning
+5. Modify code that implements a requirement → diff analysis flags the regression
+6. Requirements dashboard shows accurate coverage summary
+
+---
+
+## Phase 19: ADR (Architectural Decision Records) `STATUS: BACKLOG`
+
+Surface and generate Architectural Decision Records, linking them to the code structures they shaped. Bridges the gap between "what the code looks like" and "why it was built that way."
+
+### Layer 1: Bring Your Own ADRs
+
+- Detect ADR files in common locations (`docs/adr/`, `docs/decisions/`, `adr/`, or configured path)
+- Parse standard formats (MADR, Nygard) — extract title, status, date, context, decision, consequences
+- Auto-link ADRs to graph nodes by matching file paths, module names, and service names mentioned in ADR text against the analyzed code graph
+- Show linked ADRs as contextual annotations when clicking on a node (sidebar panel or popover)
+- ADR list view in the UI with status, date, and linked entities
+
+### Layer 2: ADR Generation (LLM-Powered)
+
+- After analysis, LLM examines the code graph to identify implicit architectural decisions that are undocumented
+- Examples: service boundaries, shared database patterns, circular dependencies, facade modules, chosen communication patterns (REST vs events)
+- Generate draft ADRs in MADR format with pre-filled context, decision, and consequences sections
+- User reviews, edits, and approves drafts before they become official ADRs
+- Option to export approved ADRs as markdown files back into the repo
+
+### Staleness Detection
+
+- When code changes invalidate an ADR (e.g., referenced modules removed, dependency reversed), flag the ADR as potentially stale
+- Surface stale ADRs in the UI and during diff analysis
+- Suggest ADR updates when significant architectural changes are detected
+
+### Frontend
+
+- New **"Decisions"** tab in the sidebar
+- ADR list view: title, status (accepted/deprecated/superseded/stale), date, linked node count
+- ADR detail panel: full content, linked graph nodes (clickable), staleness warnings
+- ADR draft review flow: generated drafts shown in a review queue, user can edit/approve/discard
+- Graph nodes show a badge/indicator when they have linked ADRs
+- Filter by status, date range, linked service
+
+### Scope
+
+- ADRs are per-repo
+- Auto-linking uses fuzzy matching on entity names + LLM for ambiguous cases
+- Generation uses the same LLM provider as the rest of the analysis
+- No CI integration in this phase (future: generate ADR drafts on PR)
+
+### Test Plan (Phase 19) `STATUS: BACKLOG`
+
+- Detection: ADR files found in standard locations and custom configured paths
+- Parsing: MADR and Nygard formats parsed correctly; malformed files produce clear errors
+- Auto-linking: ADR mentioning a known service/module links to the correct graph node
+- Generation: LLM produces valid MADR-format drafts with reasonable content for known architectural patterns
+- Staleness: removing a module referenced by an ADR flags it as stale
+- Frontend: Decisions tab renders, list/detail views work, draft review flow works
+- `pnpm build` and `pnpm test` pass
+
+### Verification (Phase 19)
+
+1. Place ADR files in `docs/adr/` → detected and parsed → appear in Decisions tab
+2. ADR mentioning "payments-service" auto-links to the payments service node on the graph
+3. Click a graph node → see linked ADRs in the detail panel
+4. Run analysis → LLM identifies undocumented architectural decisions → drafts appear in review queue
+5. Approve a draft → becomes an official ADR, optionally exported to repo
+6. Delete a service referenced by an ADR → ADR flagged as stale in the UI

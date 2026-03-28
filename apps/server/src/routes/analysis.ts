@@ -20,7 +20,7 @@ import {
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
-import { simpleGit } from 'simple-git';
+import { getGit } from '../lib/git.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runAnalysis, runDiffAnalysis } from '../services/analyzer.service.js';
@@ -77,7 +77,7 @@ router.post(
       }
 
       // Detect current branch and commit hash (never checkout — analyze what's on disk)
-      const git = simpleGit(repo.path);
+      const git = await getGit(repo.path);
       const branch = (await git.branch()).current || null;
       const commitHash = (await git.revparse(['HEAD'])).trim();
 
@@ -930,7 +930,7 @@ router.get(
         throw createAppError('Repo not found', 404);
       }
 
-      const git = simpleGit(repo.path);
+      const git = await getGit(repo.path);
       // Use git ls-files to get tracked files (respects .gitignore)
       const result = await git.raw(['ls-files']);
       const files = result.split('\n').filter((f) => f.length > 0);
@@ -970,7 +970,7 @@ router.get(
         throw createAppError('Repo not found', 404);
       }
 
-      const git = simpleGit(repo.path);
+      const git = await getGit(repo.path);
       const statusResult = await git.status();
 
       const changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }> = [];
@@ -1116,7 +1116,7 @@ router.post(
           firstSeenAt: r.firstSeenAt,
         }));
 
-      const git = simpleGit(repo.path);
+      const git = await getGit(repo.path);
       const branch = (await git.branch()).current || undefined;
 
       // Phase 1: Run analysis on dirty tree + get changed files
@@ -1565,7 +1565,7 @@ router.get(
         content = fs.readFileSync(resolved, 'utf-8');
       } else {
         // Default: read committed content from HEAD
-        const git = simpleGit(repo.path);
+        const git = await getGit(repo.path);
         try {
           content = await git.show([`HEAD:${filePath}`]);
         } catch {

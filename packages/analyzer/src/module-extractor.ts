@@ -1,4 +1,5 @@
 import path from 'path'
+import { getAllFileExtensions, getAllIndexBaseNames } from './language-config.js'
 import type {
   FileAnalysis,
   ModuleDependency,
@@ -218,7 +219,8 @@ function deriveModuleName(analysis: FileAnalysis): string {
 
   // For index files, use parent directory name (they're barrels/entry points)
   const baseName = fileBaseName(analysis.filePath)
-  if (path.basename(analysis.filePath).replace(/\.(ts|tsx|js|jsx)$/, '') === 'index') {
+  const strippedName = stripExtension(path.basename(analysis.filePath))
+  if (INDEX_NAMES.has(strippedName)) {
     return baseName
   }
 
@@ -272,11 +274,19 @@ function deriveNextjsRouteName(filePath: string): string | null {
 
 const GENERIC_DIR_NAMES = new Set(['src', 'lib', 'dist', 'build', 'app', 'root'])
 
+const ALL_EXTENSIONS = getAllFileExtensions()
+const INDEX_NAMES = getAllIndexBaseNames()
+
+function stripExtension(filename: string): string {
+  for (const ext of ALL_EXTENSIONS) {
+    if (filename.endsWith(ext)) return filename.slice(0, -ext.length)
+  }
+  return filename
+}
+
 function fileBaseName(filePath: string): string {
-  const base = path.basename(filePath)
-  const name = base.replace(/\.(ts|tsx|js|jsx)$/, '')
-  // For index files, use the parent directory name instead
-  if (name === 'index') {
+  const name = stripExtension(path.basename(filePath))
+  if (INDEX_NAMES.has(name)) {
     return path.basename(path.dirname(filePath))
   }
   return name

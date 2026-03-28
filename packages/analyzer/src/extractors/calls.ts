@@ -1,6 +1,7 @@
 import type { Tree, SyntaxNode } from 'tree-sitter'
 import type { CallExpression, SupportedLanguage, SourceLocation } from '@truecourse/shared'
 import { extractJsxReferences } from '../ts-compiler.js'
+import { getLanguageConfig } from '../language-config.js'
 
 /**
  * Extract all function/method calls from an AST
@@ -13,10 +14,11 @@ export function extractCalls(
 ): CallExpression[] {
   const sourceCode = tree.rootNode.text
   const calls: CallExpression[] = []
+  const callNodeTypes = new Set(getLanguageConfig(_language).callNodeTypes)
 
   // Traverse the tree to find call expressions
   function traverse(node: SyntaxNode) {
-    if (node.type === 'call_expression') {
+    if (callNodeTypes.has(node.type)) {
       const call = extractCallExpression(node, filePath, sourceCode, functionContext)
       if (call) {
         calls.push(call)
@@ -31,8 +33,7 @@ export function extractCalls(
   traverse(tree.rootNode)
 
   // Extract JSX references using the TypeScript compiler AST.
-  // This replaces tree-sitter heuristic matching on jsx_attribute /
-  // jsx_self_closing_element node types with the compiler's native JSX understanding.
+  // extractJsxReferences returns empty for non-TSX/JSX files.
   const jsxRefs = extractJsxReferences(sourceCode, filePath)
   for (const ref of jsxRefs) {
     const callerName = functionContext.get(ref.line) || undefined
@@ -74,10 +75,11 @@ function extractCallExpression(
   let calleeName = ''
 
   // Check if it's a method call (obj.method()) or function call (func())
-  if (functionNode.type === 'member_expression') {
+  const MEMBER_ACCESS_TYPES = new Set(['member_expression', 'attribute'])
+  if (MEMBER_ACCESS_TYPES.has(functionNode.type)) {
     // Method call: obj.method()
     const objectNode = functionNode.childForFieldName('object')
-    const propertyNode = functionNode.childForFieldName('property')
+    const propertyNode = functionNode.childForFieldName('property') || functionNode.childForFieldName('attribute')
 
     if (objectNode && propertyNode) {
       const receiver = sourceCode.slice(objectNode.startIndex, objectNode.endIndex)

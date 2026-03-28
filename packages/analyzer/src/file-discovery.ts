@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join, relative, resolve } from 'path'
 import ignore from 'ignore'
-import { detectLanguage } from './language-config.js'
+import { detectLanguage, getAllIgnorePatterns, getAllTestPatterns } from './language-config.js'
 
 /**
  * Find all .gitignore files from startDir up to root
@@ -55,11 +55,9 @@ function loadIgnorePatterns(baseDir: string): { ig: ReturnType<typeof ignore>; r
   // Always ignore .git directory (never analyze git internals)
   ig.add('.git')
 
-  // Ignore test files — they're not application architecture
-  ig.add('**/*.test.*')
-  ig.add('**/*.spec.*')
-  ig.add('**/__tests__/')
-  ig.add('**/__mocks__/')
+  // Ignore test files and language-specific directories (from language configs)
+  for (const pattern of getAllTestPatterns()) ig.add(pattern)
+  for (const pattern of getAllIgnorePatterns()) ig.add(pattern)
 
   return { ig, rootDir }
 }

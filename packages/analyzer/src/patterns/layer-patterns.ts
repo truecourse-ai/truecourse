@@ -26,14 +26,21 @@ export const dataLayerPatterns = {
     'kysely',
     'bookshelf',
     'waterline',
+    // Python
+    'sqlalchemy',
+    'django.db',
+    'tortoise',
+    'peewee',
+    'mongoengine',
+    'sqlmodel',
   ],
 
   drivers: {
-    postgresql: ['pg', 'pg-promise', 'postgres'],
-    mysql: ['mysql', 'mysql2'],
+    postgresql: ['pg', 'pg-promise', 'postgres', 'psycopg2', 'asyncpg', 'psycopg'],
+    mysql: ['mysql', 'mysql2', 'pymysql'],
     sqlite: ['better-sqlite3', 'sqlite', 'sqlite3'],
-    redis: ['redis', 'ioredis', '@redis/client'],
-    mongodb: ['mongodb'],
+    redis: ['redis', 'ioredis', '@redis/client', 'aioredis'],
+    mongodb: ['mongodb', 'pymongo', 'motor'],
     cassandra: ['cassandra-driver'],
     elasticsearch: ['@elastic/elasticsearch'],
     neo4j: ['neo4j-driver'],
@@ -88,6 +95,15 @@ export const apiLayerPatterns = {
     '@trpc/server',
     'elysia',
     'hono',
+    // Python
+    'flask',
+    'fastapi',
+    'django.http',
+    'django.urls',
+    'starlette',
+    'sanic',
+    'falcon',
+    'pyramid',
   ],
 
   graphql: [
@@ -170,12 +186,17 @@ export const externalLayerPatterns = {
     'bent',
     'ky',
     'wretch',
+    // Python
+    'requests',
+    'httpx',
+    'aiohttp',
+    'urllib3',
   ],
 
   cloudServices: {
-    aws: ['@aws-sdk/*', 'aws-sdk'],
-    gcp: ['@google-cloud/*'],
-    azure: ['@azure/*'],
+    aws: ['@aws-sdk/*', 'aws-sdk', 'boto3', 'botocore'],
+    gcp: ['@google-cloud/*', 'google-cloud-*'],
+    azure: ['@azure/*', 'azure-*'],
   } as Record<string, string[]>,
 
   paymentServices: {

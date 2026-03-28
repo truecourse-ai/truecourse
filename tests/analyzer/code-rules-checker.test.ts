@@ -5,9 +5,10 @@ import { parseCode } from '../../packages/analyzer/src/parser';
 
 const enabledRules = CODE_RULES.filter((r) => r.enabled);
 
-function check(code: string, language: 'typescript' | 'javascript' = 'typescript') {
+function check(code: string, language: 'typescript' | 'javascript' | 'python' = 'typescript') {
+  const ext = language === 'python' ? '.py' : '.ts';
   const tree = parseCode(code, language);
-  return checkCodeRules(tree, '/test/file.ts', code, enabledRules);
+  return checkCodeRules(tree, `/test/file${ext}`, code, enabledRules, language);
 }
 
 describe('code/empty-catch', () => {
@@ -214,8 +215,193 @@ describe('checkCodeRules integration', () => {
       r.key === 'code/console-log' ? { ...r, enabled: false } : r,
     );
     const tree = parseCode(`console.log("test");`, 'typescript');
-    const violations = checkCodeRules(tree, '/test.ts', `console.log("test");`, rulesWithDisabled);
+    const violations = checkCodeRules(tree, '/test.ts', `console.log("test");`, rulesWithDisabled, 'typescript');
     const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python code rules
+// ---------------------------------------------------------------------------
+
+describe('Python: code/empty-catch', () => {
+  it('detects except with only pass', () => {
+    const violations = check(`
+try:
+    do_something()
+except Exception:
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag except with handler', () => {
+    const violations = check(`
+try:
+    do_something()
+except Exception as e:
+    logger.error(e)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code/console-log (print)', () => {
+  it('detects print() calls', () => {
+    const violations = check(`print("hello world")`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toBe('print() call');
+  });
+
+  it('does not flag non-print calls', () => {
+    const violations = check(`logger.info("hello")`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code/todo-fixme', () => {
+  it('detects TODO comments', () => {
+    const violations = check(`# TODO: fix this later\nx = 1`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/todo-fixme');
+    expect(matches).toHaveLength(1);
+  });
+});
+
+describe('Python: code/bare-except', () => {
+  it('detects bare except clause', () => {
+    const violations = check(`
+try:
+    do_something()
+except:
+    handle_error()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag except Exception', () => {
+    const violations = check(`
+try:
+    do_something()
+except Exception:
+    handle_error()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('flags except BaseException', () => {
+    const violations = check(`
+try:
+    do_something()
+except BaseException:
+    handle_error()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    expect(matches).toHaveLength(1);
+  });
+});
+
+describe('Python: code/mutable-default-arg', () => {
+  it('detects list default', () => {
+    const violations = check(`def foo(items=[]):\n    pass`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects dict default', () => {
+    const violations = check(`def foo(data={}):\n    pass`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag None default', () => {
+    const violations = check(`def foo(items=None):\n    pass`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag immutable defaults', () => {
+    const violations = check(`def foo(x=5, name="default", flag=True):\n    pass`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code/star-import', () => {
+  it('detects from module import *', () => {
+    const violations = check(`from os import *`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/star-import');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag named imports', () => {
+    const violations = check(`from os import path, getcwd`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/star-import');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code/global-statement', () => {
+  it('detects global inside function', () => {
+    const violations = check(`
+x = 0
+def increment():
+    global x
+    x += 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag global at module level', () => {
+    const violations = check(`global x\nx = 1`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('JS: code/global-statement (var)', () => {
+  it('detects var inside function', () => {
+    const violations = check(`function foo() { var x = 1; }`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag let/const inside function', () => {
+    const violations = check(`function foo() { let x = 1; const y = 2; }`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: language isolation', () => {
+  it('does not fire JS console.log visitor on Python code', () => {
+    const violations = check(`console.log("test")`, 'python');
+    const matches = violations.filter((v) => v.title === 'console.log call');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not fire Python print visitor on JS code', () => {
+    const violations = check(`print("test")`, 'typescript');
+    const matches = violations.filter((v) => v.title === 'print() call');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not fire bare-except on JS code', () => {
+    const violations = check(`try { x() } catch(e) {}`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not fire mutable-default-arg on JS code', () => {
+    const violations = check(`function foo(x = []) {}`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
     expect(matches).toHaveLength(0);
   });
 });

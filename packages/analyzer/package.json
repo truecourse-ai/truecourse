@@ -20,8 +20,10 @@
     "@truecourse/shared": "workspace:*",
     "ignore": "^7.0.5",
     "minimatch": "^10.0.3",
+    "pyright": "^1.1.408",
     "tree-sitter": "^0.25.0",
     "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
     "tree-sitter-typescript": "^0.23.2",
     "typescript": "^5.7.0"
   },

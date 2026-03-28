@@ -3,7 +3,7 @@ import { join, resolve } from 'path'
 import type { FileAnalysis, DatabaseType, DatabaseInfo, DatabaseConnectionInfo, DatabaseDetectionResult, TableInfo, RelationInfo } from '@truecourse/shared'
 import { DATABASE_IMPORT_MAP, DOCKER_IMAGE_MAP } from './patterns/database-patterns.js'
 import { parsePrismaSchema } from './schema-parsers/prisma.js'
-import { parseDrizzleSchema } from './schema-parsers/drizzle.js'
+import { SCHEMA_PARSERS } from './schema-parsers/registry.js'
 import type { Service } from './service-detector.js'
 
 interface DetectedDatabase {
@@ -105,31 +105,28 @@ export function detectDatabases(
     schemaResults.set(dbType, existing)
   }
 
-  // Drizzle schemas — look for files importing from drizzle-orm that contain pgTable/mysqlTable/sqliteTable
+  // Import-based schema parsers (Drizzle, SQLAlchemy, etc.)
   for (const analysis of analyses) {
-    const hasDrizzleImport = analysis.imports.some(
-      (imp) => imp.source.startsWith('drizzle-orm')
-    )
-    if (!hasDrizzleImport) continue
+    for (const parser of SCHEMA_PARSERS) {
+      if (!parser.matchesImport(analysis)) continue
 
-    try {
-      const content = readFileSync(resolve(analysis.filePath), 'utf-8')
-      if (!/(?:pgTable|mysqlTable|sqliteTable)\s*\(/.test(content)) continue
+      try {
+        const content = readFileSync(resolve(analysis.filePath), 'utf-8')
+        if (parser.validateContent && !parser.validateContent(content)) continue
 
-      const result = parseDrizzleSchema(content)
-      if (result.tables.length === 0) continue
+        const result = parser.parse(content)
+        if (result.tables.length === 0) continue
 
-      // Determine DB type from the function used
-      let dbType: DatabaseType = 'postgres'
-      if (content.includes('mysqlTable')) dbType = 'mysql'
-      else if (content.includes('sqliteTable')) dbType = 'sqlite'
+        const dbType = parser.detectDbType(content)
+        const existing = schemaResults.get(dbType) || { tables: [], relations: [] }
+        existing.tables.push(...result.tables)
+        existing.relations.push(...result.relations)
+        schemaResults.set(dbType, existing)
+      } catch {
+        // Skip files that can't be read
+      }
 
-      const existing = schemaResults.get(dbType) || { tables: [], relations: [] }
-      existing.tables.push(...result.tables)
-      existing.relations.push(...result.relations)
-      schemaResults.set(dbType, existing)
-    } catch {
-      // Skip files that can't be read
+      break // One parser match per file is enough
     }
   }
 

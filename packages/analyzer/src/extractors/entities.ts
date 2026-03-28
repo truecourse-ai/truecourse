@@ -3,7 +3,7 @@
  * Detects ORM entities/models and extracts schema information
  */
 
-import type { FileAnalysis, Entity, EntityField, EntityRelationship } from '@truecourse/shared'
+import type { FileAnalysis, Entity, EntityField, EntityRelationship, SupportedLanguage } from '@truecourse/shared'
 import { dataLayerPatterns } from '../patterns/layer-patterns.js'
 import { matchesPattern } from '../patterns/index.js'
 import type Parser from 'tree-sitter'
@@ -44,10 +44,19 @@ export function shouldExtractEntities(analysis: FileAnalysis): boolean {
 export function extractEntities(
   sourceCode: string,
   filePath: string,
-  language: 'typescript' | 'tsx' | 'javascript',
+  language: SupportedLanguage,
   serviceName: string = 'default'
 ): Entity[] {
-  // Both JS and TS use the TypeScript entity detector
+  switch (language) {
+    case 'typescript':
+    case 'tsx':
+    case 'javascript':
+      break // handled below
+    default:
+      // Other languages: entity detection via class extraction in the extractor
+      return []
+  }
+
   const detector = new TypeScriptEntityDetector()
 
   if (!detector.shouldScanFile(filePath)) {

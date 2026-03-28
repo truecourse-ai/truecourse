@@ -39,6 +39,23 @@ export const DATABASE_IMPORT_MAP: Record<string, { type: DatabaseType; driver: s
   'redis': { type: 'redis', driver: 'redis' },
   'ioredis': { type: 'redis', driver: 'ioredis' },
   '@redis/client': { type: 'redis', driver: 'redis' },
+
+  // Python PostgreSQL
+  'sqlalchemy': { type: 'postgres', driver: 'sqlalchemy' },
+  'psycopg2': { type: 'postgres', driver: 'psycopg2' },
+  'asyncpg': { type: 'postgres', driver: 'asyncpg' },
+  'psycopg': { type: 'postgres', driver: 'psycopg' },
+
+  // Python MySQL
+  'pymysql': { type: 'mysql', driver: 'pymysql' },
+
+  // Python MongoDB
+  'pymongo': { type: 'mongodb', driver: 'pymongo' },
+  'motor': { type: 'mongodb', driver: 'motor' },
+  'mongoengine': { type: 'mongodb', driver: 'mongoengine' },
+
+  // Python Redis
+  'aioredis': { type: 'redis', driver: 'aioredis' },
 }
 
 /**
@@ -78,4 +95,7 @@ export const SCHEMA_FILE_PATTERNS = {
   prisma: ['**/prisma/schema.prisma', '**/schema.prisma'],
   drizzle: ['**/drizzle/**/*.ts', '**/db/schema*.ts', '**/schema/*.ts'],
   mongoose: ['**/models/**/*.ts', '**/models/**/*.js'],
+  // Python ORMs
+  sqlalchemy: ['**/models/**/*.py', '**/models.py'],
+  django: ['**/models.py'],
 }

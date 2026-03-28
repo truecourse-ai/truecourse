@@ -66,7 +66,7 @@ TrueCourse automatically detects request flows across service boundaries — HTT
 
 ### Database Analysis
 
-Databases are detected automatically from ORM usage (Prisma, TypeORM, Drizzle, Knex, etc.) and displayed as nodes in the dependency graph. Click a database node to see a full ER diagram with tables, columns, types, and relationships. LLM rules check for missing foreign keys, missing indexes, naming inconsistencies, and schema issues.
+Databases are detected automatically from ORM usage (Prisma, Drizzle, SQLAlchemy, TypeORM, Knex, etc.) and displayed as nodes in the dependency graph. Click a database node to see a full ER diagram with tables, columns, types, and relationships. LLM rules check for missing foreign keys, missing indexes, naming inconsistencies, and schema issues.
 
 ### Analytics Dashboard
 
@@ -171,7 +171,11 @@ All rules are visible in the **Rules** tab in the web UI. Custom rule generation
 | Language | Status |
 |---|---|
 | JavaScript / TypeScript | Supported |
-| Python | Upcoming |
+| Python | Supported |
+| C# | Planned |
+| Go | Planned |
+| Rust | Planned |
+| PHP | Planned |
 
 ## License
 
