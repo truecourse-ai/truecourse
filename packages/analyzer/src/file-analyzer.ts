@@ -17,6 +17,12 @@ import {
   extractJavaScriptImports,
   extractJavaScriptExports,
 } from './extractors/languages/javascript.js'
+import {
+  extractPythonFunctions,
+  extractPythonClasses,
+  extractPythonImports,
+  extractPythonExports,
+} from './extractors/languages/python.js'
 
 /**
  * Analyze a single file and extract all code elements
@@ -51,6 +57,12 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
         classes = extractJavaScriptClasses(tree, filePath)
         imports = extractJavaScriptImports(tree, filePath)
         exports = extractJavaScriptExports(tree, filePath)
+        break
+      case 'python':
+        functions = extractPythonFunctions(tree, filePath)
+        classes = extractPythonClasses(tree, filePath)
+        imports = extractPythonImports(tree, filePath)
+        exports = extractPythonExports(tree, filePath)
         break
       default:
         throw new Error(`Unsupported language: ${language}`)

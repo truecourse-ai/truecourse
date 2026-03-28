@@ -3,19 +3,20 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'f
 import type { FileAnalysis, ModuleDependency } from '@truecourse/shared'
 import { buildScopedCompilerOptions, resolveModule, type ScopedCompilerOptions } from './ts-compiler.js'
 import { monorepoPatterns } from './patterns/service-patterns.js'
-
-// Common TS/JS extensions for fallback resolution (when no tsconfig exists)
-const FALLBACK_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts']
-const FALLBACK_INDEX_FILES = ['index.ts', 'index.tsx', 'index.js', 'index.jsx']
+import { getImportResolver } from './resolvers/registry.js'
+import { getLanguageConfig } from './language-config.js'
 
 /**
- * Fallback resolution for relative imports when no tsconfig is available.
- * Tries extension probing and index file resolution against analyzed files.
+ * Fallback resolution for relative imports when the language compiler can't resolve.
+ * Tries extension probing and index file resolution against analyzed files,
+ * using the language's configured extensions and index files.
  */
 function resolveRelativeFallback(
   importSource: string,
   containingFile: string,
   analyzedFiles: Set<string>,
+  extensions: string[],
+  indexFiles: string[],
 ): string | null {
   const fromDir = dirname(containingFile)
   const basePath = resolve(fromDir, importSource)
@@ -24,16 +25,15 @@ function resolveRelativeFallback(
   if (analyzedFiles.has(basePath)) return basePath
 
   // Try with extensions
-  for (const ext of FALLBACK_EXTENSIONS) {
+  for (const ext of extensions) {
     const candidate = basePath + ext
     if (analyzedFiles.has(candidate)) return candidate
-    // Also try stripping existing extension first
     const stripped = basePath.replace(/\.[^.]+$/, '') + ext
     if (stripped !== candidate && analyzedFiles.has(stripped)) return stripped
   }
 
   // Try index files
-  for (const indexFile of FALLBACK_INDEX_FILES) {
+  for (const indexFile of indexFiles) {
     const candidate = resolve(basePath, indexFile)
     if (analyzedFiles.has(candidate)) return candidate
   }
@@ -74,12 +74,12 @@ function resolveWorkspaceFallback(
   importSource: string,
   workspacePackages: Map<string, string>,
   analyzedFiles: Set<string>,
+  extensions: string[],
+  indexFiles: string[],
 ): string | null {
-  // Try exact match first
   let pkgDir = workspacePackages.get(importSource)
   let subPath: string | null = null
 
-  // Try deep import: @org/pkg/sub/path
   if (!pkgDir) {
     for (const [pkgName, dir] of workspacePackages) {
       if (importSource.startsWith(pkgName + '/')) {
@@ -91,12 +91,10 @@ function resolveWorkspaceFallback(
   }
   if (!pkgDir) return null
 
-  // Deep import — resolve as relative path within package
   if (subPath) {
-    return resolveRelativeFallback('./' + subPath, join(pkgDir, 'dummy.ts'), analyzedFiles)
+    return resolveRelativeFallback('./' + subPath, join(pkgDir, 'dummy.ts'), analyzedFiles, extensions, indexFiles)
   }
 
-  // Try package.json main field
   const pkgJsonPath = join(pkgDir, 'package.json')
   if (existsSync(pkgJsonPath)) {
     try {
@@ -105,7 +103,7 @@ function resolveWorkspaceFallback(
       if (mainField) {
         const mainPath = resolve(pkgDir, mainField)
         if (analyzedFiles.has(mainPath)) return mainPath
-        for (const ext of FALLBACK_EXTENSIONS) {
+        for (const ext of extensions) {
           const candidate = mainPath.endsWith(ext) ? mainPath : mainPath + ext
           if (analyzedFiles.has(candidate)) return candidate
         }
@@ -113,8 +111,7 @@ function resolveWorkspaceFallback(
     } catch { /* skip */ }
   }
 
-  // Try src/index.* and index.*
-  for (const indexFile of FALLBACK_INDEX_FILES) {
+  for (const indexFile of indexFiles) {
     for (const candidate of [join(pkgDir, 'src', indexFile), join(pkgDir, indexFile)]) {
       if (analyzedFiles.has(candidate)) return candidate
     }
@@ -122,6 +119,7 @@ function resolveWorkspaceFallback(
 
   return null
 }
+
 
 /**
  * Build module dependency graph from file analyses.
@@ -173,23 +171,32 @@ export function buildDependencyGraph(
 
     // Resolve each import/re-export to an absolute file path
     for (const dep of depSources) {
-      // Try TS compiler resolution first
-      let resolved = resolveModule(dep.source, file.filePath, scoped)
+      let resolved: string | null = null
 
-      // TS compiler may resolve to a symlink path (e.g., node_modules/@pkg → packages/pkg).
-      // Resolve to real path so it matches the analyzed file set.
-      if (resolved && !analyzedFiles.has(resolved)) {
-        try { resolved = realpathSync(resolved) } catch { /* keep as-is */ }
-      }
+      const customResolver = getImportResolver(file.language)
+      if (customResolver && rootPath) {
+        resolved = customResolver(dep.source, file.filePath, rootPath, analyzedFiles)
+      } else {
+        // TS/JS: Try TS compiler resolution first
+        resolved = resolveModule(dep.source, file.filePath, scoped)
 
-      // Fallback for relative imports when TS compiler can't resolve
-      if (!resolved && dep.source.startsWith('.')) {
-        resolved = resolveRelativeFallback(dep.source, file.filePath, analyzedFiles)
-      }
+        // TS compiler may resolve to a symlink path (e.g., node_modules/@pkg → packages/pkg).
+        // Resolve to real path so it matches the analyzed file set.
+        if (resolved && !analyzedFiles.has(resolved)) {
+          try { resolved = realpathSync(resolved) } catch { /* keep as-is */ }
+        }
 
-      // Fallback for workspace package imports (e.g., @sample/shared-utils)
-      if (!resolved && !dep.source.startsWith('.') && workspacePackages.size > 0) {
-        resolved = resolveWorkspaceFallback(dep.source, workspacePackages, analyzedFiles)
+        // Fallback for relative imports when compiler can't resolve
+        if (!resolved && dep.source.startsWith('.')) {
+          const config = getLanguageConfig(file.language)
+          resolved = resolveRelativeFallback(dep.source, file.filePath, analyzedFiles, config.moduleResolution.extensions, config.moduleResolution.indexFiles)
+        }
+
+        // Fallback for workspace package imports (e.g., @sample/shared-utils)
+        if (!resolved && !dep.source.startsWith('.') && workspacePackages.size > 0) {
+          const config = getLanguageConfig(file.language)
+          resolved = resolveWorkspaceFallback(dep.source, workspacePackages, analyzedFiles, config.moduleResolution.extensions, config.moduleResolution.indexFiles)
+        }
       }
 
       if (resolved && analyzedFiles.has(resolved)) {
@@ -212,10 +219,12 @@ export function buildDependencyGraph(
               try { resolved = realpathSync(resolved) } catch { /* keep as-is */ }
             }
             if (!resolved && specifier.startsWith('.')) {
-              resolved = resolveRelativeFallback(specifier, file.filePath, analyzedFiles)
+              const config = getLanguageConfig(file.language)
+              resolved = resolveRelativeFallback(specifier, file.filePath, analyzedFiles, config.moduleResolution.extensions, config.moduleResolution.indexFiles)
             }
             if (!resolved && !specifier.startsWith('.') && workspacePackages.size > 0) {
-              resolved = resolveWorkspaceFallback(specifier, workspacePackages, analyzedFiles)
+              const config = getLanguageConfig(file.language)
+              resolved = resolveWorkspaceFallback(specifier, workspacePackages, analyzedFiles, config.moduleResolution.extensions, config.moduleResolution.indexFiles)
             }
             if (resolved && analyzedFiles.has(resolved)) {
               dependencies.push({

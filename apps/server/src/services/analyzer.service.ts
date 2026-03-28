@@ -1,4 +1,4 @@
-import { simpleGit } from 'simple-git';
+import { getGit } from '../lib/git.js';
 import type {
   FileAnalysis,
   ModuleDependency,
@@ -11,7 +11,7 @@ import type {
   ModuleLevelDependency,
   MethodLevelDependency,
 } from '@truecourse/shared';
-import { checkModuleRules, checkMethodRules, checkServiceRules, findEntryPoints, buildScopedCompilerOptions, analyzeSemantics, type ModuleViolation, type ServiceViolation } from '@truecourse/analyzer';
+import { checkModuleRules, checkMethodRules, checkServiceRules, findEntryPoints, buildScopedCompilerOptions, analyzeSemantics, LspClient, getLspServerConfig, type ModuleViolation, type ServiceViolation } from '@truecourse/analyzer';
 import type { AnalysisRule } from '@truecourse/shared';
 
 export interface AnalysisProgressCallback {
@@ -120,7 +120,7 @@ export async function runAnalysis(
   onProgress: AnalysisProgressCallback,
   options?: { skipStash?: boolean },
 ): Promise<AnalysisResult> {
-  const git = simpleGit(repoPath);
+  const git = await getGit(repoPath);
 
   // Detect current branch (we never checkout — analyze whatever is checked out)
   const currentBranch = (await git.branch()).current;
@@ -211,6 +211,47 @@ export async function runAnalysis(
       }
     }
 
+    // Use LSP servers for accurate export detection on non-JS/TS languages.
+    // Each language with a registered LSP server gets the same treatment as
+    // the TS compiler above — correct isExported flags from the server's
+    // definitive export list.
+    const filesByLanguage = new Map<string, FileAnalysis[]>();
+    for (const fa of fileAnalyses) {
+      const list = filesByLanguage.get(fa.language) || [];
+      list.push(fa);
+      filesByLanguage.set(fa.language, list);
+    }
+
+    for (const [language, files] of filesByLanguage) {
+      const serverConfig = getLspServerConfig(language as any);
+      if (!serverConfig) continue; // JS/TS uses TS compiler, not LSP
+
+      try {
+        const lspClient = new LspClient(serverConfig);
+        await lspClient.start(repoPath);
+
+        const filePaths = files.map((fa) => fa.filePath);
+        const { exportMap } = await lspClient.analyzeSemantics(
+          filePaths.map((fp) => fp.startsWith(repoPath) ? fp.slice(repoPath.length + 1) : fp)
+        );
+
+        for (const fa of files) {
+          const fileExports = exportMap.get(fa.filePath);
+          if (!fileExports) continue;
+          for (const fn of fa.functions) {
+            fn.isExported = fileExports.has(fn.name);
+          }
+        }
+
+        await lspClient.stop();
+      } catch (error) {
+        console.warn(
+          `[Analyzer] ${serverConfig.name} LSP analysis failed, using tree-sitter heuristics:`,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+
     const moduleDependencies = analyzer.buildDependencyGraph(fileAnalyses, repoPath);
 
     onProgress({
@@ -284,7 +325,7 @@ export async function runDiffAnalysis(input: DiffAnalysisInput): Promise<DiffAna
   onProgress({ step: 'analyzing', percent: 10, detail: 'Analyzing dirty working tree...' });
   const result = await runAnalysis(repoPath, branch, onProgress, { skipStash: true });
 
-  const git = simpleGit(repoPath);
+  const git = await getGit(repoPath);
   const statusResult = await git.status();
 
   const changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }> = [];

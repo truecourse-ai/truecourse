@@ -255,9 +255,10 @@ function matchUrlToService(
     }
   }
 
-  // 2. Check for service name references in template string variable names
-  //    e.g., `${USER_SERVICE_URL}/users` → matches "user-service"
-  const templateVarPattern = /\$\{([^}]+)\}/g
+  // 2. Check for service name references in interpolated variable names
+  //    JS:     `${USER_SERVICE_URL}/users` → matches "user-service"
+  //    Python: f"{USER_SERVICE_URL}/users" → matches "user_service"
+  const templateVarPattern = /\$?\{([^}]+)\}/g
   let match
   while ((match = templateVarPattern.exec(urlLower)) !== null) {
     const varName = match[1]!.toLowerCase()

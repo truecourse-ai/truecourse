@@ -16,8 +16,8 @@ export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer
 export { parseCode, parseFile, getParser } from './parser.js'
 
 // Language configuration
-export { detectLanguage, getLanguageConfig, normalizeUrl, type LanguageConfig } from './language-config.js'
-export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG } from './language-config.js'
+export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, getAllIgnorePatterns, getAllTestPatterns, getAllPackageIndicatorFiles, getAllIndexBaseNames, isBootstrapEntry, type LanguageConfig } from './language-config.js'
+export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG } from './language-config.js'
 
 // TypeScript Compiler API utilities
 export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsxReferences, type ScopedCompilerOptions, type SemanticAnalysisResult, type JsxReference } from './ts-compiler.js'
@@ -39,12 +39,24 @@ export {
   extractJavaScriptImports,
   extractJavaScriptExports,
 } from './extractors/languages/javascript.js'
+export {
+  extractPythonFunctions,
+  extractPythonClasses,
+  extractPythonImports,
+  extractPythonExports,
+} from './extractors/languages/python.js'
 export { createSourceLocation, extractDocComment } from './extractors/languages/common.js'
+
+// LSP client
+export { LspClient, type LspServerConfig, type LspAnalysisResult } from './lsp-client.js'
+export { createPyrightConfig } from './lsp-servers/pyright.js'
+export { getLspServerConfig, hasLspServer } from './lsp-servers/registry.js'
 
 // Database detection
 export { detectDatabases, parseDockerCompose } from './database-detector.js'
 export { parsePrismaSchema } from './schema-parsers/prisma.js'
 export { parseDrizzleSchema } from './schema-parsers/drizzle.js'
+export { parseSqlAlchemySchema } from './schema-parsers/sqlalchemy.js'
 
 // Patterns
 export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPatterns, externalLayerPatterns, DATABASE_IMPORT_MAP, CONNECTION_ENV_VARS, DOCKER_IMAGE_MAP } from './patterns/index.js'

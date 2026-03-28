@@ -40,15 +40,15 @@ describe('getParser', () => {
   });
 
   it('throws for unsupported language', () => {
-    expect(() => getParser('python' as any)).toThrow('Unsupported language');
+    expect(() => getParser('rust' as any)).toThrow('Unsupported language');
   });
 });
 
 describe('parseFile', () => {
   it('wraps errors with file path', () => {
     // Passing an unsupported language through parseFile should include the file path in the error
-    expect(() => parseFile('/some/file.py', 'x = 1', 'python' as any)).toThrow(
-      '/some/file.py'
+    expect(() => parseFile('/some/file.rs', 'fn main() {}', 'rust' as any)).toThrow(
+      '/some/file.rs'
     );
   });
 });
@@ -70,8 +70,11 @@ describe('detectLanguage', () => {
     expect(detectLanguage('component.jsx')).toBe('javascript');
   });
 
+  it("returns 'python' for .py files", () => {
+    expect(detectLanguage('app.py')).toBe('python');
+  });
+
   it('returns null for unsupported extensions', () => {
-    expect(detectLanguage('script.py')).toBeNull();
     expect(detectLanguage('Program.cs')).toBeNull();
     expect(detectLanguage('main.go')).toBeNull();
     expect(detectLanguage('README.md')).toBeNull();

@@ -1,5 +1,7 @@
 import type Parser from 'tree-sitter'
 import type { HttpCall, SupportedLanguage, FunctionDefinition, ClassDefinition } from '@truecourse/shared'
+import { getLanguageConfig } from '../language-config.js'
+import { getHttpMatcher } from './http/matchers.js'
 
 /**
  * Extract HTTP calls from a parsed syntax tree
@@ -13,9 +15,11 @@ export function extractHttpCalls(
 ): HttpCall[] {
   const httpCalls: HttpCall[] = []
 
-  if (language !== 'typescript' && language !== 'tsx' && language !== 'javascript') {
-    return httpCalls
-  }
+  const matcher = getHttpMatcher(language)
+  if (!matcher) return httpCalls
+
+  const config = getLanguageConfig(language)
+  const callNodeTypes = new Set(config.callNodeTypes)
 
   // Build a map of line numbers to qualified names
   const lineToQualifiedName = new Map<number, string>()
@@ -32,8 +36,7 @@ export function extractHttpCalls(
   const cursor = tree.walk()
 
   function traverse(): void {
-    // Look for call expressions
-    if (cursor.nodeType === 'call_expression') {
+    if (callNodeTypes.has(cursor.nodeType)) {
       const node = cursor.currentNode
       const calleeNode = node.childForFieldName('function')
 
@@ -41,8 +44,8 @@ export function extractHttpCalls(
         const calleeName = calleeNode.text
 
         // Check if this is an HTTP call (fetch, axios, etc.)
-        if (isHttpCall(calleeName)) {
-          const httpCall = extractHttpCallDetails(node, filePath)
+        if (matcher!.isHttpCall(calleeName)) {
+          const httpCall = extractHttpCallDetails(node, filePath, matcher!)
           if (httpCall) {
             httpCalls.push(httpCall)
           }
@@ -64,27 +67,12 @@ export function extractHttpCalls(
 }
 
 /**
- * Check if a function name is an HTTP client call
- */
-function isHttpCall(calleeName: string): boolean {
-  const httpMethods = ['.get', '.post', '.put', '.delete', '.patch', '.request']
-
-  return (
-    calleeName === 'fetch' ||
-    calleeName.includes('axios') ||
-    calleeName.includes('http.request') ||
-    calleeName.includes('https.request') ||
-    // Check for HTTP method calls (this.http.get, client.post, etc.)
-    httpMethods.some(method => calleeName.endsWith(method) || calleeName.includes(method + '('))
-  )
-}
-
-/**
  * Extract details from an HTTP call expression
  */
 function extractHttpCallDetails(
   node: Parser.SyntaxNode,
   filePath: string,
+  matcher: { getClientType(calleeName: string): string },
 ): HttpCall | null {
   const calleeNode = node.childForFieldName('function')
   const argsNode = node.childForFieldName('arguments')
@@ -98,14 +86,8 @@ function extractHttpCallDetails(
   // Extract HTTP method and URL from arguments
   let method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' = 'GET'
   let url = ''
-  let clientType: 'fetch' | 'axios' | 'http' | 'unknown' = 'unknown'
-
-  // Determine client type
-  if (calleeName === 'fetch') {
-    clientType = 'fetch'
-  } else if (calleeName.includes('axios')) {
-    clientType = 'axios'
-  } else if (calleeName.includes('http')) {
+  let clientType = matcher.getClientType(calleeName) as 'fetch' | 'axios' | 'http' | 'unknown'
+  if (clientType === 'unknown' && calleeName.includes('http')) {
     clientType = 'http'
   }
 
@@ -170,7 +152,17 @@ function extractHttpCallDetails(
  */
 function extractStringValue(node: Parser.SyntaxNode): string {
   if (node.type === 'string' || node.type === 'string_fragment') {
-    return node.text.replace(/^["'`]|["'`]$/g, '')
+    let text = node.text
+    // Strip Python f-string prefix
+    text = text.replace(/^[fFbBrRuU]+/, '')
+    // Strip quotes
+    text = text.replace(/^["'`]{1,3}|["'`]{1,3}$/g, '')
+    return text
+  }
+
+  // Python: concatenated_string (implicit string concat)
+  if (node.type === 'concatenated_string') {
+    return node.namedChildren.map((c) => extractStringValue(c)).join('')
   }
 
   if (node.type === 'template_string') {
@@ -179,7 +171,7 @@ function extractStringValue(node: Parser.SyntaxNode): string {
     return node.text
   }
 
-  if (node.type === 'binary_expression') {
+  if (node.type === 'binary_expression' || node.type === 'binary_operator') {
     // Handle string concatenation
     const left = node.childForFieldName('left')
     const right = node.childForFieldName('right')

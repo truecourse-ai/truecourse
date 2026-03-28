@@ -150,7 +150,7 @@ function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandl
   const handlers = new Map<string, RouteHandler>();
   if (!result.fileAnalyses) return handlers;
 
-  // Map filePath → serviceName
+  // Map filePath → serviceName (from modules + layer details for full coverage)
   const fileToService = new Map<string, string>();
   // Map filePath → moduleName
   const fileToModuleName = new Map<string, string>();
@@ -158,21 +158,42 @@ function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandl
     fileToService.set(mod.filePath, mod.serviceName);
     fileToModuleName.set(mod.filePath, mod.name);
   }
+  // Some files (thin routers, barrels) don't have modules — use layerDetails for service mapping
+  for (const ld of result.layerDetails) {
+    for (const fp of ld.filePaths) {
+      if (!fileToService.has(fp)) fileToService.set(fp, ld.serviceName);
+    }
+  }
 
-  // Collect mounts: routerName → mountPath (per service)
-  // Also track which file each router variable was imported from
-  const mountsByService = new Map<string, Map<string, string>>();
+  // Build mount prefix lookup: filePath → mountPath
+  // Traces from the mount file (e.g., index.ts has app.use('/users', userRoutes))
+  // through imports to find which file defines the mounted router, then maps
+  // that file's path to the mount prefix.
+  const fileMountPrefix = new Map<string, string>();
 
   for (const fa of result.fileAnalyses) {
     if (!fa.routerMounts || fa.routerMounts.length === 0) continue;
-    const serviceName = fileToService.get(fa.filePath);
-    if (!serviceName) continue;
-
-    if (!mountsByService.has(serviceName)) mountsByService.set(serviceName, new Map());
-    const mounts = mountsByService.get(serviceName)!;
 
     for (const mount of fa.routerMounts) {
-      mounts.set(mount.routerName, mount.path);
+      // Find which file the router variable was imported from
+      for (const imp of fa.imports) {
+        const spec = imp.specifiers.find((s) => s.name === mount.routerName || s.alias === mount.routerName);
+        if (spec) {
+          // Find the resolved target file for this import
+          for (const dep of result.moduleDependencies) {
+            if (dep.source === fa.filePath && dep.importedNames.includes(spec.name)) {
+              fileMountPrefix.set(dep.target, mount.path);
+            }
+          }
+        }
+      }
+
+      // Also check if the router is defined in the same file
+      const hasLocal = fa.functions.some((f) => f.name === mount.routerName)
+        || fa.exports.some((e) => e.name === mount.routerName);
+      if (hasLocal) {
+        fileMountPrefix.set(fa.filePath, mount.path);
+      }
     }
   }
 
@@ -182,8 +203,7 @@ function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandl
     const serviceName = fileToService.get(fa.filePath);
     if (!serviceName) continue;
 
-    // Find the router variable name in this file to look up its mount prefix
-    const mountPrefix = findMountPrefix(fa, serviceName, mountsByService);
+    const mountPrefix = fileMountPrefix.get(fa.filePath) || '';
 
     for (const route of fa.routeRegistrations) {
       const fullPath = composePath(mountPrefix, route.path);
@@ -199,22 +219,6 @@ function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandl
   return handlers;
 }
 
-function findMountPrefix(
-  fa: FileAnalysis,
-  serviceName: string,
-  mountsByService: Map<string, Map<string, string>>,
-): string {
-  const mounts = mountsByService.get(serviceName);
-  if (!mounts) return '';
-
-  // Check if any exported variable from this file matches a mounted router name
-  for (const exp of fa.exports) {
-    const prefix = mounts.get(exp.name);
-    if (prefix) return prefix;
-  }
-
-  return '';
-}
 
 function resolveHandlerModule(
   handlerName: string,
@@ -234,15 +238,27 @@ function resolveHandlerModule(
 
   // Look up imports to trace to defining file
   for (const imp of routeFile.imports) {
+    // Direct import match: handler name matches an imported specifier
     const spec = imp.specifiers.find((s) => s.name === handlerName || s.alias === handlerName);
     if (spec) {
-      // Find the file that defines this import
       for (const targetFile of allFiles) {
         const hasExport = targetFile.exports.some((e) => e.name === (spec.alias || spec.name) || e.name === spec.name);
         const hasFunction = targetFile.functions.some((f) => f.name === spec.name);
         const hasClassMethod = targetFile.classes.some((c) => c.methods.some((m) => m.name === spec.name));
         if (hasExport || hasFunction || hasClassMethod) {
           return fileToModuleName.get(targetFile.filePath) || handlerName;
+        }
+      }
+    }
+
+    // Class method match: handler is a method on an imported class (e.g., controller.getAll)
+    // Check if any imported class in any file has this handler as a method
+    for (const s of imp.specifiers) {
+      for (const targetFile of allFiles) {
+        for (const cls of targetFile.classes) {
+          if (cls.name === s.name && cls.methods.some((m) => m.name === handlerName)) {
+            return fileToModuleName.get(targetFile.filePath) || cls.name;
+          }
         }
       }
     }
@@ -255,7 +271,9 @@ function resolveHandlerModule(
 function composePath(prefix: string, routePath: string): string {
   const p = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
   const r = routePath.startsWith('/') ? routePath : `/${routePath}`;
-  return `${p}${r}` || '/';
+  const full = `${p}${r}`;
+  // Remove trailing slash (except root /) for consistent matching
+  return full.length > 1 && full.endsWith('/') ? full.slice(0, -1) : full || '/';
 }
 
 export async function getFlowsForAnalysis(analysisId: string) {

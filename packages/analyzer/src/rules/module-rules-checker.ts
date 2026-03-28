@@ -59,10 +59,35 @@ export function checkModuleRules(
       }
     }
 
+    // Build set of class module names — methods inside classes are accessed
+    // through the class instance, not individually imported
+    const classModuleNames = new Set(
+      modules.filter((m) => m.kind === 'class').map((m) => m.name)
+    )
+
+    // Build set of route handler names — functions consumed by the framework
+    // via decorators (@app.route, @router.get) or router bindings (router.get('/', handler))
+    const routeHandlerNames = new Set<string>()
+    if (fileAnalyses) {
+      for (const fa of fileAnalyses) {
+        if (fa.routeRegistrations) {
+          for (const route of fa.routeRegistrations) {
+            if (route.handlerName) routeHandlerNames.add(route.handlerName)
+          }
+        }
+      }
+    }
+
     for (const method of methods) {
       if (method.isExported && !importedTargets.has(method.name)) {
         // Skip exports from entry point files — they're consumed by the framework/runtime
         if (entryPointFiles?.has(method.filePath)) continue
+
+        // Skip class methods — they're accessed via the class, not individually imported
+        if (classModuleNames.has(method.moduleName)) continue
+
+        // Skip route handler functions — consumed by framework via decorators/bindings
+        if (routeHandlerNames.has(method.name)) continue
 
         violations.push({
           ruleKey: 'arch/unused-export',

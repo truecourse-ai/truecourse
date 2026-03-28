@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join, basename, dirname } from 'path'
 import type { ServiceType } from '@truecourse/shared'
 import { serviceDetectionPatterns } from './patterns/service-patterns.js'
+import { getAllPackageIndicatorFiles } from './language-config.js'
+import { readAllDependencies, isLanguageLibrary } from './service-detectors/registry.js'
 
 /**
  * Service detection result
@@ -91,8 +93,10 @@ function detectMonorepoServices(rootPath: string, allFiles: string[]): Service[]
 
         if (!stats.isDirectory()) continue
 
-        // Check if this directory has a package.json
-        const hasPackageFile = existsSync(join(servicePath, 'package.json'))
+        // Check if this directory has any known package indicator file
+        const hasPackageFile = getAllPackageIndicatorFiles().some(
+          (f) => existsSync(join(servicePath, f))
+        )
 
         if (hasPackageFile) {
           const serviceFiles = allFiles.filter(f => f.startsWith(servicePath))
@@ -266,19 +270,10 @@ function detectServiceType(
     return 'worker'
   }
 
-  // Check if it's a library (has package.json with "main" or "exports")
-  if (hasPackageJson) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(servicePath, 'package.json'), 'utf-8'))
-      const hasLibraryIndicators = patterns.library.packageJsonIndicators.some(
-        indicator => pkg[indicator]
-      )
-
-      if (hasLibraryIndicators) {
-        return 'library'
-      }
-    } catch (error) {
-      // Ignore parse errors
+  // Check if it's a library (language-agnostic — each language detector has its own heuristic)
+  if (isLanguageLibrary(servicePath, files, hasApiIndicators, hasWorkerIndicators)) {
+    if (!detectFramework(servicePath)) {
+      return 'library'
     }
   }
 
@@ -318,6 +313,21 @@ function detectFramework(servicePath: string): string | undefined {
       }
     } catch (error) {
       // Ignore parse errors
+    }
+  }
+
+  // Check all language-specific dependency files for framework detection
+  const deps = readAllDependencies(servicePath)
+  if (deps.length > 0) {
+    const allFrameworks = [
+      ...patterns.apiServer.frameworks,
+      ...patterns.worker.frameworks,
+    ]
+
+    for (const fw of allFrameworks) {
+      if (deps.some((d) => d === fw || d.startsWith(fw + '['))) {
+        return fw
+      }
     }
   }
 

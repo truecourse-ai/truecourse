@@ -3,6 +3,7 @@ import type {
   FlowTrigger,
 } from '@truecourse/shared'
 import { AnalysisGraph } from './analysis-graph.js'
+import { isBootstrapEntry } from './language-config.js'
 
 // Re-export types from analysis-graph for backward compatibility
 export type { CrossServiceCall, RouteHandler, AnalysisGraphInput } from './analysis-graph.js'
@@ -116,6 +117,12 @@ export function traceFlows(graph: AnalysisGraph): TracedFlow[] {
       ['api', 'controller', 'route'].includes(layer) ? 'http' :
       ['event', 'listener', 'subscriber'].includes(layer) ? 'event' : 'startup'
 
+    // Skip app bootstrap entry points — functions like start(), main() that
+    // just wire up the app (connect DB, register routes, call listen).
+    // Only skip if BOTH the function name is a common bootstrap name AND
+    // the file is a known app entry point file (app.py, main.py, index.ts, etc.)
+    if (isBootstrapEntry(entryMethod.name, entryMethod.filePath)) continue
+
     // Prepend trigger step
     for (const s of steps) s.stepOrder++
     if (trigger === 'http') {
@@ -154,7 +161,7 @@ export function traceFlows(graph: AnalysisGraph): TracedFlow[] {
     })
   }
 
-  // Dedup: remove flows whose entry is reached as cross-service step in another flow
+  // Dedup 1: remove flows whose entry is reached as cross-service step in another flow
   if (graph.crossServiceCallsByMethod.size > 0 || graph.crossServiceCallsByModule.size > 0) {
     const reachedViaHttp = new Set<string>()
     for (const flow of flows) {
@@ -164,7 +171,92 @@ export function traceFlows(graph: AnalysisGraph): TracedFlow[] {
         }
       }
     }
-    return flows.filter((f) => !reachedViaHttp.has(`${f.entryService}::${f.entryModule}::${f.entryMethod}`))
+    const filtered = flows.filter((f) => !reachedViaHttp.has(`${f.entryService}::${f.entryModule}::${f.entryMethod}`))
+    return mergeDelegationFlows(filtered)
   }
-  return flows
+  return mergeDelegationFlows(flows)
+}
+
+/**
+ * Merge thin delegation flows into the flows they delegate to.
+ *
+ * A delegation flow is one where the entry method's only real action is calling
+ * another method that is itself a flow entry point in the same service.
+ * Example: Flask route handler `users.get_all` just calls `controller.get_all()`.
+ *
+ * The wrapper flow is removed and its entry becomes the first step of the target flow.
+ */
+function mergeDelegationFlows(flows: TracedFlow[]): TracedFlow[] {
+  // Build lookup: entry key → flow
+  const flowByEntry = new Map<string, TracedFlow>()
+  for (const flow of flows) {
+    flowByEntry.set(`${flow.entryService}::${flow.entryModule}::${flow.entryMethod}`, flow)
+  }
+
+  // Find delegation flows: flows where the first non-trigger step targets
+  // another flow's entry point in the same service
+  const delegationMap = new Map<TracedFlow, TracedFlow>() // wrapper → target
+
+  for (const flow of flows) {
+    // A delegation flow has a trigger step + one call step that leads to another flow
+    // The call steps (excluding trigger at index 0) should have the first real call
+    // pointing to another flow entry
+    const realSteps = flow.steps.filter((s) => s.stepOrder > 1)
+    if (realSteps.length === 0) continue
+
+    const firstCall = realSteps[0]
+    if (firstCall.sourceService !== firstCall.targetService) continue // same service only
+
+    const targetKey = `${firstCall.targetService}::${firstCall.targetModule}::${firstCall.targetMethod}`
+    const targetFlow = flowByEntry.get(targetKey)
+    if (!targetFlow) continue
+    if (targetFlow === flow) continue
+
+    // Check that this flow's unique contribution is just the delegation —
+    // all remaining steps should be a subset of the target flow's steps
+    delegationMap.set(flow, targetFlow)
+  }
+
+  if (delegationMap.size === 0) return flows
+
+  // Merge: prepend the wrapper's route step into the target flow
+  const removedFlows = new Set<TracedFlow>()
+  for (const [wrapper, target] of delegationMap) {
+    // Don't merge if the target is itself being removed (chain delegation)
+    if (removedFlows.has(target)) continue
+
+    // Insert the delegation as the second step (after trigger, before existing steps)
+    // The trigger step (index 0) of the target flow stays, but update its target
+    // to point to the wrapper's entry (the actual route handler)
+    const triggerStep = target.steps[0]
+    if (triggerStep) {
+      // Shift all existing steps forward
+      for (const s of target.steps) s.stepOrder++
+
+      // Insert delegation step: route handler → controller/service
+      target.steps.splice(1, 0, {
+        stepOrder: 2,
+        sourceService: wrapper.entryService,
+        sourceModule: wrapper.entryModule,
+        sourceMethod: wrapper.entryMethod,
+        targetService: target.entryService,
+        targetModule: target.entryModule,
+        targetMethod: target.entryMethod,
+        stepType: 'call',
+        isAsync: false,
+        isConditional: false,
+      })
+
+      // Update trigger to point to the wrapper (route handler) instead
+      triggerStep.targetService = wrapper.entryService
+      triggerStep.targetModule = wrapper.entryModule
+      triggerStep.targetMethod = wrapper.entryMethod
+
+      // Keep the target flow's original name — the wrapper is an implementation detail
+    }
+
+    removedFlows.add(wrapper)
+  }
+
+  return flows.filter((f) => !removedFlows.has(f))
 }

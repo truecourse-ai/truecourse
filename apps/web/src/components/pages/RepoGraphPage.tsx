@@ -290,7 +290,7 @@ export default function RepoGraphPage() {
   }, [openDatabases, activeDbId, setActiveDbId]);
 
   const currentBranch = repo?.defaultBranch;
-  const { isConnected, analysisProgress, onEvent } = useSocket(repoId);
+  const { isConnected, analysisProgress, clearProgress, onEvent } = useSocket(repoId);
   const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
 
@@ -314,9 +314,12 @@ export default function RepoGraphPage() {
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
 
   // Fetch repo details
+  const [repoError, setRepoError] = useState<string | null>(null);
   useEffect(() => {
     if (!repoId) return;
-    api.getRepo(repoId).then(setRepo).catch(() => {});
+    api.getRepo(repoId).then(setRepo).catch((err) => {
+      setRepoError(err instanceof Error ? err.message : 'Failed to load repository');
+    });
   }, [repoId]);
 
   // Load saved diff check on mount when URL has view=diff
@@ -375,15 +378,19 @@ export default function RepoGraphPage() {
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchViolations, refetchCodeViolationSummary, refetchAnalyses]);
 
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
   const handleAnalyze = async (options?: { codeReview?: boolean }) => {
     if (isDiffMode) {
       runDiffCheckAnalysis();
     } else {
       try {
         setIsAnalyzing(true);
+        setAnalysisError(null);
         await api.analyzeRepo(repoId, { codeReview: options?.codeReview });
-      } catch {
+      } catch (error) {
         setIsAnalyzing(false);
+        setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');
       }
     }
   };
@@ -895,7 +902,7 @@ export default function RepoGraphPage() {
       <Header
         repoName={repo?.name}
         currentBranch={currentBranch}
-        onAnalyze={isViewingHistory ? undefined : handleAnalyze}
+        onAnalyze={isViewingHistory || repoError ? undefined : handleAnalyze}
         onCodeReview={(() => {
           if (isViewingHistory) return undefined;
           if (isDiffMode) {
@@ -1165,20 +1172,55 @@ export default function RepoGraphPage() {
           )}
 
           <div className="relative flex-1 overflow-hidden">
-          {/* Analysis progress — step checklist */}
-          {analysisProgress && (
-            <div className="absolute bottom-4 left-1/2 z-20 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-3 shadow-lg">
+          {/* Analysis error banner */}
+          {analysisError && (
+            <div className="absolute bottom-4 left-1/2 z-20 w-96 -translate-x-1/2 rounded-lg border border-destructive/50 bg-card p-3 shadow-lg">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-medium text-foreground">Analyzing...</span>
+                <span className="text-[11px] font-medium text-destructive">Analysis failed</span>
                 <button
-                  onClick={() => repoId && api.cancelAnalysis(repoId).catch(() => {})}
+                  onClick={() => setAnalysisError(null)}
                   className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Cancel analysis"
+                  title="Dismiss"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-              {analysisProgress.steps && analysisProgress.steps.length > 0 ? (
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
+                <span className="text-[11px] text-muted-foreground">{analysisError}</span>
+              </div>
+            </div>
+          )}
+          {/* Analysis progress — step checklist */}
+          {analysisProgress && (
+            <div className={`absolute bottom-4 left-1/2 z-20 w-80 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${
+              analysisProgress.step === 'error' ? 'border-destructive/50' : 'border-border'
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className={`text-[11px] font-medium ${
+                  analysisProgress.step === 'error' ? 'text-destructive' : 'text-foreground'
+                }`}>{analysisProgress.step === 'error' ? 'Analysis failed' : 'Analyzing...'}</span>
+                <button
+                  onClick={() => {
+                    if (analysisProgress.step === 'error') {
+                      clearProgress();
+                      setIsAnalyzing(false);
+                    } else {
+                      repoId && api.cancelAnalysis(repoId).catch(() => {});
+                    }
+                  }}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title={analysisProgress.step === 'error' ? 'Dismiss' : 'Cancel analysis'}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {analysisProgress.step === 'error' ? (
+                <div className="flex items-start gap-2">
+                  <CircleX className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
+                  <span className="text-[11px] text-muted-foreground">{analysisProgress.detail || 'An error occurred'}</span>
+                </div>
+              ) : analysisProgress.steps && analysisProgress.steps.length > 0 ? (
                 <div className="space-y-1">
                   {analysisProgress.steps.map((s) => (
                     <div key={s.key} className="flex items-center gap-2">
@@ -1306,6 +1348,16 @@ export default function RepoGraphPage() {
                 >
                   Retry
                 </Button>
+              </div>
+            </div>
+          ) : repoError ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="flex flex-col items-center gap-3 text-center">
+                <AlertCircle className="h-10 w-10 text-amber-500" />
+                <Alert className="max-w-sm border-amber-500/30">
+                  <AlertTitle className="text-amber-500">Repository warning</AlertTitle>
+                  <AlertDescription className="text-amber-500/90">{repoError}</AlertDescription>
+                </Alert>
               </div>
             </div>
           ) : filteredNodes.length === 0 && nodes.length === 0 ? (

@@ -1,27 +1,36 @@
 import type Parser from 'tree-sitter'
 import type { RouteRegistration, RouterMount, SupportedLanguage } from '@truecourse/shared'
+import { extractPythonRoutes } from './routes/python.js'
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
 
 /**
- * Extract route registrations and router mounts from an Express-style file.
- *
- * Detects patterns like:
- *   router.get('/users', handler)
- *   router.get('/users', mw1, mw2, handler)
- *   app.use('/prefix', routerRef)
+ * Extract route registrations and router mounts from source files.
+ * Dispatches to language-specific extractors.
  */
 export function extractRouteRegistrations(
   tree: Parser.Tree,
   filePath: string,
   language: SupportedLanguage,
 ): { routes: RouteRegistration[]; mounts: RouterMount[] } {
+  switch (language) {
+    case 'python':
+      return extractPythonRoutes(tree, filePath)
+    case 'typescript':
+    case 'tsx':
+    case 'javascript':
+      return extractJsRoutes(tree, filePath)
+    default:
+      return { routes: [], mounts: [] }
+  }
+}
+
+function extractJsRoutes(
+  tree: Parser.Tree,
+  filePath: string,
+): { routes: RouteRegistration[]; mounts: RouterMount[] } {
   const routes: RouteRegistration[] = []
   const mounts: RouterMount[] = []
-
-  if (language !== 'typescript' && language !== 'tsx' && language !== 'javascript') {
-    return { routes, mounts }
-  }
 
   const cursor = tree.walk()
 
@@ -166,3 +175,4 @@ function extractStringLiteral(node: Parser.SyntaxNode): string | null {
   }
   return null
 }
+

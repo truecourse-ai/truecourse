@@ -30,6 +30,12 @@ export const entryPointPatterns = [
   'server.js',
   'main.ts',
   'main.tsx',
+  // Python
+  'main.py',
+  'app.py',
+  'manage.py',
+  'wsgi.py',
+  'asgi.py',
 ]
 
 export const commonSourceDirectories = [
@@ -93,6 +99,16 @@ export const apiFrameworks = [
   '@trpc/server',
   'elysia',
   'hono',
+  // Python
+  'flask',
+  'fastapi',
+  'django',
+  'django-rest-framework',
+  'djangorestframework',
+  'starlette',
+  'sanic',
+  'falcon',
+  'pyramid',
 ]
 
 export const apiServerFileIndicators = [
@@ -112,6 +128,11 @@ export const workerFrameworks = [
   'kue',
   'agenda',
   'bree',
+  // Python
+  'celery',
+  'dramatiq',
+  'rq',
+  'huey',
 ]
 
 export const workerFileIndicators = [

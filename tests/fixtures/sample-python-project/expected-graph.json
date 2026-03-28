@@ -1,0 +1,365 @@
+{
+  "services": [
+    {
+      "name": "api_gateway",
+      "type": "api-server"
+    },
+    {
+      "name": "user_service",
+      "type": "api-server"
+    },
+    {
+      "name": "utils",
+      "type": "library"
+    }
+  ],
+  "serviceDependencies": [
+    {
+      "source": "api_gateway",
+      "target": "user_service"
+    },
+    {
+      "source": "api_gateway",
+      "target": "utils"
+    },
+    {
+      "source": "user_service",
+      "target": "utils"
+    }
+  ],
+  "modules": [
+    {
+      "name": "auth_middleware",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "health_check",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "HealthService",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "redis_client",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "UserController",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "users",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "UserService",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "Base",
+      "service": "user_service",
+      "kind": "interface",
+      "layer": "data"
+    },
+    {
+      "name": "Comment",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "connection",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Post",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "PostTag",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "start",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "User",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "user_handler",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "UserRepository",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "UserService",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "formatters",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Logger",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "validators",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    }
+  ],
+  "moduleDependencies": [
+    {
+      "source": "health_check",
+      "sourceService": "api_gateway",
+      "target": "HealthService",
+      "targetService": "api_gateway",
+      "importedNames": [
+        "HealthService"
+      ]
+    },
+    {
+      "source": "UserController",
+      "sourceService": "api_gateway",
+      "target": "UserService",
+      "targetService": "api_gateway",
+      "importedNames": [
+        "UserService"
+      ]
+    },
+    {
+      "source": "users",
+      "sourceService": "api_gateway",
+      "target": "UserController",
+      "targetService": "api_gateway",
+      "importedNames": [
+        "UserController"
+      ]
+    },
+    {
+      "source": "UserService",
+      "sourceService": "api_gateway",
+      "target": "formatters",
+      "targetService": "utils",
+      "importedNames": [
+        "format_user"
+      ]
+    },
+    {
+      "source": "start",
+      "sourceService": "user_service",
+      "target": "connection",
+      "targetService": "user_service",
+      "importedNames": [
+        "connect_database"
+      ]
+    },
+    {
+      "source": "start",
+      "sourceService": "user_service",
+      "target": "user_handler",
+      "targetService": "user_service",
+      "importedNames": [
+        "users_bp"
+      ]
+    },
+    {
+      "source": "user_handler",
+      "sourceService": "user_service",
+      "target": "UserService",
+      "targetService": "user_service",
+      "importedNames": [
+        "UserService"
+      ]
+    },
+    {
+      "source": "user_handler",
+      "sourceService": "user_service",
+      "target": "validators",
+      "targetService": "utils",
+      "importedNames": [
+        "validate_email"
+      ]
+    },
+    {
+      "source": "UserRepository",
+      "sourceService": "user_service",
+      "target": "User",
+      "targetService": "user_service",
+      "importedNames": [
+        "User"
+      ]
+    },
+    {
+      "source": "UserRepository",
+      "sourceService": "user_service",
+      "target": "user_handler",
+      "targetService": "user_service",
+      "importedNames": [
+        "get_users"
+      ]
+    },
+    {
+      "source": "UserService",
+      "sourceService": "user_service",
+      "target": "UserRepository",
+      "targetService": "user_service",
+      "importedNames": [
+        "UserRepository"
+      ]
+    }
+  ],
+  "deterministicViolations": [
+    {
+      "ruleKey": "arch/cross-service-internal-import",
+      "title": "Cross-service internal import: user_handler → validators",
+      "severity": "high"
+    },
+    {
+      "ruleKey": "arch/cross-service-internal-import",
+      "title": "Cross-service internal import: UserService → formatters",
+      "severity": "high"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: connection.disconnect_database",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: formatters.format_date",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: Logger.error",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: Logger.info",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: Logger.warn",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: UserController.__init__",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-method",
+      "title": "Dead method: validators.validate_name",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-module",
+      "title": "Dead module: Base",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-module",
+      "title": "Dead module: Comment",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-module",
+      "title": "Dead module: Logger",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-module",
+      "title": "Dead module: Post",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/dead-module",
+      "title": "Dead module: PostTag",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/god-service",
+      "title": "God service: api_gateway",
+      "severity": "medium"
+    },
+    {
+      "ruleKey": "arch/module-layer-data-api",
+      "title": "Layer violation: UserRepository → user_handler",
+      "severity": "high"
+    },
+    {
+      "ruleKey": "arch/unused-export",
+      "title": "Unused export: Comment",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/unused-export",
+      "title": "Unused export: disconnect_database",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/unused-export",
+      "title": "Unused export: format_date",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/unused-export",
+      "title": "Unused export: Logger",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/unused-export",
+      "title": "Unused export: Post",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "arch/unused-export",
+      "title": "Unused export: PostTag",
+      "severity": "low"
+    }
+  ]
+}
