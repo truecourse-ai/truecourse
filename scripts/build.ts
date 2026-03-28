@@ -64,6 +64,8 @@ run(
     '--external:tree-sitter',
     '--external:tree-sitter-typescript',
     '--external:tree-sitter-javascript',
+    '--external:tree-sitter-python',
+    '--external:pyright',
     '--external:embedded-postgres',
     '--external:postgres',
     // drizzle-kit is dev only
