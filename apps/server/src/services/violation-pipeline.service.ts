@@ -773,6 +773,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         });
       }
     }
+
+    tracker?.done('architecture');
   })();
 
   // codePromise runs in background — no progress emit here to avoid
@@ -791,9 +793,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     log(`[Violations] LLM rule analysis failed: ${msg}`);
     tracker?.error('architecture', `Failed: ${msg.slice(0, 80)}`);
   }
-  if (llmResult.status === 'fulfilled') {
-    tracker?.done('architecture');
-  }
+  // Architecture step is marked done inside the llmRulePromise itself
 
   throwIfAborted(signal);
   tracker?.start('persist', 'Saving results...');

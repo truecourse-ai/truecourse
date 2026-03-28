@@ -1200,20 +1200,22 @@ export default function RepoGraphPage() {
                 <span className={`text-[11px] font-medium ${
                   analysisProgress.step === 'error' ? 'text-destructive' : 'text-foreground'
                 }`}>{analysisProgress.step === 'error' ? 'Analysis failed' : 'Analyzing...'}</span>
-                <button
-                  onClick={() => {
-                    if (analysisProgress.step === 'error') {
-                      clearProgress();
-                      setIsAnalyzing(false);
-                    } else {
-                      repoId && api.cancelAnalysis(repoId).catch(() => {});
-                    }
-                  }}
-                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title={analysisProgress.step === 'error' ? 'Dismiss' : 'Cancel analysis'}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+                {analysisProgress.step === 'error' ? (
+                  <button
+                    onClick={() => { clearProgress(); setIsAnalyzing(false); }}
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => repoId && api.cancelAnalysis(repoId).catch(() => {})}
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    Cancel
+                  </button>
+                )}
               </div>
               {analysisProgress.step === 'error' ? (
                 <div className="flex items-start gap-2">
