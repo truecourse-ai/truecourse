@@ -30,123 +30,171 @@
   "modules": [
     {
       "name": "auth_middleware",
-      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "api"
+      "layer": "api",
+      "service": "api_gateway"
     },
     {
       "name": "health_check",
-      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "api"
+      "layer": "api",
+      "service": "api_gateway"
     },
     {
       "name": "HealthService",
-      "service": "api_gateway",
       "kind": "class",
-      "layer": "service"
+      "layer": "service",
+      "service": "api_gateway"
+    },
+    {
+      "name": "helpers",
+      "kind": "standalone",
+      "layer": "service",
+      "service": "api_gateway"
     },
     {
       "name": "redis_client",
-      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "data"
+      "layer": "data",
+      "service": "api_gateway"
     },
     {
       "name": "UserController",
-      "service": "api_gateway",
       "kind": "class",
-      "layer": "api"
+      "layer": "api",
+      "service": "api_gateway"
     },
     {
       "name": "users",
-      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "api"
+      "layer": "api",
+      "service": "api_gateway"
     },
     {
       "name": "UserService",
-      "service": "api_gateway",
       "kind": "class",
-      "layer": "external"
+      "layer": "external",
+      "service": "api_gateway"
     },
     {
       "name": "Base",
-      "service": "user_service",
       "kind": "interface",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
+    },
+    {
+      "name": "BaseNotification",
+      "kind": "class",
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "Comment",
-      "service": "user_service",
       "kind": "class",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "connection",
-      "service": "user_service",
       "kind": "standalone",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
+    },
+    {
+      "name": "Notification",
+      "kind": "class",
+      "layer": "data",
+      "service": "user_service"
+    },
+    {
+      "name": "NotificationChannel",
+      "kind": "class",
+      "layer": "data",
+      "service": "user_service"
+    },
+    {
+      "name": "NotificationPriority",
+      "kind": "class",
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "Post",
-      "service": "user_service",
       "kind": "class",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "PostTag",
-      "service": "user_service",
       "kind": "class",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "start",
-      "service": "user_service",
       "kind": "standalone",
-      "layer": "api"
+      "layer": "api",
+      "service": "user_service"
+    },
+    {
+      "name": "Token",
+      "kind": "class",
+      "layer": "data",
+      "service": "user_service"
+    },
+    {
+      "name": "token_service",
+      "kind": "standalone",
+      "layer": "service",
+      "service": "user_service"
+    },
+    {
+      "name": "TokenService",
+      "kind": "class",
+      "layer": "service",
+      "service": "user_service"
     },
     {
       "name": "User",
-      "service": "user_service",
       "kind": "class",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "user_handler",
-      "service": "user_service",
       "kind": "standalone",
-      "layer": "api"
+      "layer": "api",
+      "service": "user_service"
     },
     {
       "name": "UserRepository",
-      "service": "user_service",
       "kind": "class",
-      "layer": "data"
+      "layer": "data",
+      "service": "user_service"
     },
     {
       "name": "UserService",
-      "service": "user_service",
       "kind": "class",
-      "layer": "service"
+      "layer": "service",
+      "service": "user_service"
     },
     {
       "name": "formatters",
-      "service": "utils",
       "kind": "standalone",
-      "layer": "service"
+      "layer": "service",
+      "service": "utils"
     },
     {
       "name": "Logger",
-      "service": "utils",
       "kind": "class",
-      "layer": "service"
+      "layer": "service",
+      "service": "utils"
     },
     {
       "name": "validators",
-      "service": "utils",
       "kind": "standalone",
-      "layer": "service"
+      "layer": "service",
+      "service": "utils"
     }
   ],
   "moduleDependencies": [
@@ -202,6 +250,15 @@
       "targetService": "user_service",
       "importedNames": [
         "users_bp"
+      ]
+    },
+    {
+      "source": "Token",
+      "sourceService": "user_service",
+      "target": "Base",
+      "targetService": "user_service",
+      "importedNames": [
+        "Base"
       ]
     },
     {
