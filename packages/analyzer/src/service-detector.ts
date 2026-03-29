@@ -134,25 +134,47 @@ function detectByEntryPoints(_rootPath: string, allFiles: string[]): Service[] {
     return []
   }
 
-  // Group files by entry point directory
-  const serviceMap = new Map<string, string[]>()
+  // Group files by entry point directory, then merge nested services into parents.
+  // If one entry point's directory is inside another's, the nested one is a submodule,
+  // not a separate service. e.g., core/serverless/sync_loads/main.py is inside core/main.py.
+  const entryDirs = entryPoints.map((e) => dirname(e)).sort((a, b) => a.length - b.length)
 
-  for (const entry of entryPoints) {
-    const dir = dirname(entry)
-    serviceMap.set(dir, allFiles.filter(f => f.startsWith(dir)))
+  // Remove nested directories — if dir A is a prefix of dir B, B is inside A
+  const topLevelDirs: string[] = []
+  for (const dir of entryDirs) {
+    const isNested = topLevelDirs.some((parent) => dir.startsWith(parent + '/'))
+    if (!isNested) {
+      topLevelDirs.push(dir)
+    }
+  }
+
+  // Detect duplicate names and disambiguate with parent directory
+  const nameCount = new Map<string, number>()
+  for (const dir of topLevelDirs) {
+    const dirName = basename(dir)
+    nameCount.set(dirName, (nameCount.get(dirName) || 0) + 1)
   }
 
   const services: Service[] = []
-  for (const [dir, files] of serviceMap.entries()) {
+  for (const dir of topLevelDirs) {
+    const files = allFiles.filter((f) => f.startsWith(dir))
+    if (files.length === 0) continue
+
     const dirName = basename(dir)
     const isSrcDir = patterns.commonSourceDirectories.includes(dirName)
     const serviceRoot = isSrcDir ? dirname(dir) : dir
-    const name = isSrcDir ? basename(dirname(dir)) : dirName
+    let name = isSrcDir ? basename(dirname(dir)) : dirName
+
+    // Disambiguate duplicate names with parent directory (e.g., tms-gateway, eld-gateway)
+    if ((nameCount.get(dirName) || 0) > 1) {
+      const parentName = basename(dirname(dir))
+      name = `${parentName}-${dirName}`
+    }
 
     services.push({
       name,
       rootPath: dir,
-      entryPoint: entryPoints.find(e => dirname(e) === dir),
+      entryPoint: entryPoints.find((e) => dirname(e) === dir),
       type: detectServiceType(serviceRoot, files),
       files,
     })

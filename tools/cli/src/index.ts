@@ -18,7 +18,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.1.0")
+  .version("0.2.1")
   .description("TrueCourse CLI - Setup and manage your TrueCourse instance");
 
 program
@@ -47,12 +47,13 @@ program
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
   .option("--code-review", "Include LLM code review (off by default)")
+  .option("--no-llm", "Skip all LLM calls, run only deterministic checks")
   .option("--no-autostart", "Don't auto-start the server (for use from Claude Code skills)")
   .action(async (options) => {
     if (options.diff) {
       await runAnalyzeDiff({ noAutostart: !options.autostart });
     } else {
-      await runAnalyze({ noAutostart: !options.autostart, codeReview: options.codeReview ?? false });
+      await runAnalyze({ noAutostart: !options.autostart, codeReview: options.codeReview ?? false, deterministicOnly: !options.llm });
     }
   });
 

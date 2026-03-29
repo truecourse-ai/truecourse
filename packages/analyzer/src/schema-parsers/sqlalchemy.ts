@@ -13,7 +13,40 @@ export function parseSqlAlchemySchema(content: string): {
   const tables: TableInfo[] = []
   const relations: RelationInfo[] = []
 
-  const lines = content.split('\n')
+  // Pre-process: join multi-line statements (mapped_column(...), Column(...), relationship(...))
+  // so each statement is on a single line for regex matching.
+  const rawLines = content.split('\n')
+  const lines: string[] = []
+  let pending = ''
+  let parenDepth = 0
+  for (const raw of rawLines) {
+    if (parenDepth > 0) {
+      pending += ' ' + raw.trim()
+      for (const ch of raw) {
+        if (ch === '(') parenDepth++
+        else if (ch === ')') parenDepth--
+      }
+      if (parenDepth <= 0) {
+        lines.push(pending)
+        pending = ''
+        parenDepth = 0
+      }
+    } else {
+      // Count parens to detect multi-line statements
+      let depth = 0
+      for (const ch of raw) {
+        if (ch === '(') depth++
+        else if (ch === ')') depth--
+      }
+      if (depth > 0) {
+        pending = raw
+        parenDepth = depth
+      } else {
+        lines.push(raw)
+      }
+    }
+  }
+  if (pending) lines.push(pending)
 
   // First pass: build class name → __tablename__ map
   const classToTable = new Map<string, string>()
@@ -101,16 +134,48 @@ export function parseSqlAlchemySchema(content: string): {
 
     // Detect Column() definition: name = Column(Type, ...)
     const columnMatch = trimmed.match(/^(\w+)\s*=\s*Column\((.+)\)/)
-    if (columnMatch) {
-      const colName = columnMatch[1]
-      const colArgs = columnMatch[2]
+    // Detect mapped_column() definition (SQLAlchemy 2.0):
+    //   name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    //   name: Mapped[str] = mapped_column(String(255))
+    // Uses balanced bracket extraction since Mapped types can be nested (e.g., Mapped[Optional[List[str]]])
+    let mappedColMatch: RegExpMatchArray | null = null
+    if (!columnMatch) {
+      const mcPrefix = trimmed.match(/^(\w+)\s*:\s*Mapped\[/)
+      if (mcPrefix) {
+        const afterMapped = trimmed.slice(mcPrefix[0].length)
+        let depth = 1, idx = 0
+        while (idx < afterMapped.length && depth > 0) {
+          if (afterMapped[idx] === '[') depth++
+          else if (afterMapped[idx] === ']') depth--
+          idx++
+        }
+        if (depth === 0) {
+          const mappedTypeStr = afterMapped.slice(0, idx - 1)
+          const rest = afterMapped.slice(idx)
+          const argsMatch = rest.match(/^\s*=\s*mapped_column\((.+)\)/)
+          if (argsMatch) {
+            mappedColMatch = [trimmed, mcPrefix[1], mappedTypeStr, argsMatch[1]] as unknown as RegExpMatchArray
+          }
+        }
+      }
+    }
 
-      const colType = mapSqlAlchemyType(colArgs)
+    const colMatch = columnMatch || mappedColMatch
+    if (colMatch) {
+      const colName = colMatch[1]
+      const colArgs = columnMatch ? colMatch[2] : colMatch[3]
+      const mappedType = mappedColMatch ? colMatch[2] : null
+
+      const colType = mappedType
+        ? mapMappedType(mappedType, colArgs)
+        : mapSqlAlchemyType(colArgs)
       const isPrimaryKey = colArgs.includes('primary_key=True')
-      const isNullable = colArgs.includes('nullable=True') || (!colArgs.includes('nullable=False') && !isPrimaryKey)
+      const isNullable = mappedType
+        ? /Optional|None/.test(mappedType)
+        : (colArgs.includes('nullable=True') || (!colArgs.includes('nullable=False') && !isPrimaryKey))
 
       // Detect ForeignKey
-      const fkMatch = colArgs.match(/ForeignKey\(["'](\w+)\.(\w+)["']\)/)
+      const fkMatch = colArgs.match(/ForeignKey\(["'](\w+)\.(\w+)["'][^)]*\)/)
       const isForeignKey = !!fkMatch
       const referencesTable = fkMatch?.[1]
       const referencesColumn = fkMatch?.[2]
@@ -152,7 +217,8 @@ export function parseSqlAlchemySchema(content: string): {
     }
 
     // Detect relationship() — for relation mapping (not a column)
-    const relMatch = trimmed.match(/^(\w+)\s*=\s*relationship\(["'](\w+)["']/)
+    // Supports both: name = relationship("Model", ...) and name: Mapped["Model"] = relationship(...)
+    const relMatch = trimmed.match(/^(\w+)\s*(?::\s*Mapped\[[^\]]+\]\s*)?=\s*relationship\(["'](\w+)["']/)
     if (relMatch && currentTableName) {
       const targetModel = relMatch[2]
       const targetTable = classToTable.get(targetModel)
@@ -205,4 +271,38 @@ function mapSqlAlchemyType(colArgs: string): string {
   }
 
   return typeMap[firstArg] || firstArg
+}
+
+/**
+ * Map SQLAlchemy 2.0 Mapped[type] annotation + mapped_column args to a type string.
+ * Uses the mapped_column args first (e.g., BigInteger, String(255)), falls back to Mapped type.
+ */
+function mapMappedType(mappedType: string, colArgs: string): string {
+  // Try to get type from mapped_column args first (more specific)
+  const argType = mapSqlAlchemyType(colArgs)
+  if (argType && argType !== colArgs.split(',')[0].trim()) {
+    return argType
+  }
+
+  // Fall back to Mapped type annotation
+  // Strip Optional[], List[], etc.
+  const inner = mappedType
+    .replace(/Optional\[([^\]]+)\]/, '$1')
+    .replace(/List\[([^\]]+)\]/, '$1[]')
+    .replace(/Dict\[([^\]]+)\]/, 'Json')
+    .replace(/list\[([^\]]+)\]/, '$1[]')
+    .replace(/dict\[([^\]]+)\]/, 'Json')
+    .trim()
+
+  const pyTypeMap: Record<string, string> = {
+    'str': 'String',
+    'int': 'Int',
+    'float': 'Float',
+    'bool': 'Boolean',
+    'datetime': 'DateTime',
+    'date': 'Date',
+    'bytes': 'Bytes',
+  }
+
+  return pyTypeMap[inner] || argType || inner
 }

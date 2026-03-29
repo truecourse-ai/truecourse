@@ -47,6 +47,11 @@ export type RepoResponse = {
   lastAnalyzed?: string;
   branches?: string[];
   defaultBranch?: string;
+  latestAnalysis?: {
+    id: string;
+    status: string;
+    [key: string]: unknown;
+  };
 };
 
 export type GraphResponse = {
@@ -162,16 +167,17 @@ export function deleteRepo(id: string): Promise<void> {
   return fetchApi<void>(`/api/repos/${id}`, { method: 'DELETE' });
 }
 
-export function analyzeRepo(id: string, options?: { branch?: string; codeReview?: boolean }): Promise<{ jobId: string }> {
+export function analyzeRepo(id: string, options?: { branch?: string; codeReview?: boolean; deterministicOnly?: boolean }): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>(`/api/repos/${id}/analyze`, {
     method: 'POST',
-    body: JSON.stringify({ branch: options?.branch, codeReview: options?.codeReview ?? false }),
+    body: JSON.stringify({ branch: options?.branch, codeReview: options?.codeReview ?? false, deterministicOnly: options?.deterministicOnly ?? false }),
   });
 }
 
 // Analyses
 export type AnalysisSummary = {
   id: string;
+  status: string;
   branch: string | null;
   commitHash: string | null;
   codeReview: boolean;

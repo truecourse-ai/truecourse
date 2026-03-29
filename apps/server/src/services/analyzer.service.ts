@@ -81,6 +81,7 @@ export function runDeterministicModuleChecks(
     result.fileAnalyses,
     libraryServiceNames,
     result.entryPointFiles,
+    result.methodLevelDependencies || [],
   );
 }
 
@@ -118,7 +119,7 @@ export async function runAnalysis(
   repoPath: string,
   _branch: string | undefined,
   onProgress: AnalysisProgressCallback,
-  options?: { skipStash?: boolean },
+  options?: { skipStash?: boolean; signal?: AbortSignal },
 ): Promise<AnalysisResult> {
   const git = await getGit(repoPath);
 
@@ -158,6 +159,8 @@ export async function runAnalysis(
     const totalFiles = files.length;
 
     for (let i = 0; i < totalFiles; i++) {
+      if (options?.signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+
       const file = files[i];
       try {
         const analysis = await analyzer.analyzeFile(file);

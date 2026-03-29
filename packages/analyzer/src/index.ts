@@ -16,7 +16,7 @@ export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer
 export { parseCode, parseFile, getParser } from './parser.js'
 
 // Language configuration
-export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, getAllIgnorePatterns, getAllTestPatterns, getAllPackageIndicatorFiles, getAllIndexBaseNames, isBootstrapEntry, type LanguageConfig } from './language-config.js'
+export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, getAllIgnorePatterns, getAllTestPatterns, getAllPackageIndicatorFiles, getAllIndexBaseNames, isBootstrapEntry, getMaxParameters, type LanguageConfig } from './language-config.js'
 export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG } from './language-config.js'
 
 // TypeScript Compiler API utilities

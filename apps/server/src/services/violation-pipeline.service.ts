@@ -102,6 +102,8 @@ export interface ViolationPipelineInput {
   tracker?: import('../socket/handlers.js').StepTracker;
   /** Include LLM code review (default false) */
   includeCodeReview?: boolean;
+  /** Skip all LLM calls — only run deterministic checks (default false) */
+  deterministicOnly?: boolean;
   /** Optional pre-created provider (for usage tracking) */
   provider?: LLMProvider;
   /** Abort signal for cancellation */
@@ -187,6 +189,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     changedFileSet, onProgress, tracker,
     provider: externalProvider,
     includeCodeReview,
+    deterministicOnly,
     signal,
   } = input;
 
@@ -240,7 +243,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // 4. Run code-level rules and collect file contents for LLM code rules
   const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
-  const enabledLlmCodeRules = includeCodeReview
+  const enabledLlmCodeRules = (includeCodeReview && !deterministicOnly)
     ? allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt)
     : [];
   const allCodeViolations: CodeViolation[] = [];
@@ -419,13 +422,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // Architecture context for enrichment
   const architectureContext = `Architecture: ${result.architecture}\nServices: ${result.services.map((s) => `${s.name} (${s.type})`).join(', ')}`;
 
-  const provider = externalProvider ?? createLLMProvider();
+  const provider = deterministicOnly ? undefined : (externalProvider ?? createLLMProvider());
   const now = new Date();
   const allNewViolations: DiffViolationItem[] = [];
   const allResolvedViolationIds: string[] = [];
 
-  tracker?.start('enrich', `Enriching ${allDetEntries.length} detections...`);
-  tracker?.start('architecture');
+  if (!deterministicOnly) {
+    tracker?.start('enrich', `Enriching ${allDetEntries.length} detections...`);
+    tracker?.start('architecture');
+  }
 
   // Deterministic enrichment promise
   const deterministicPromise = (async () => {
@@ -501,64 +506,105 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       detectionsToEnrich = allDetEntries;
     }
 
-    // Enrich new/all detections via LLM
+    // Enrich new/all detections via LLM (or persist raw when deterministicOnly)
     if (detectionsToEnrich.length > 0) {
-      // Build lookup by detViolationId for matching enrichment results
-      const detByViolationId = new Map(detectionsToEnrich.map((d) => [d.detViolationId, d]));
+      if (deterministicOnly) {
+        // Persist violations directly using raw detection data — no LLM enrichment
+        for (const det of detectionsToEnrich) {
+          const violationId = uuidv4();
+          await db.insert(violations).values({
+            id: violationId,
+            repoId,
+            analysisId,
+            type: det.violationType,
+            title: det.title,
+            content: det.description,
+            severity: det.severity,
+            status: 'new',
+            targetServiceId: det.targetServiceId,
+            targetModuleId: det.targetModuleId,
+            targetMethodId: det.targetMethodId,
+            fixPrompt: null,
+            ruleKey: det.ruleKey,
+            deterministicViolationId: det.detViolationId,
+            firstSeenAnalysisId: analysisId,
+            firstSeenAt: now,
+          });
 
-      const enrichmentResult = await provider.enrichDeterministicViolations(
-        detectionsToEnrich.map((d) => ({
-          id: d.detViolationId, ruleKey: d.ruleKey, title: d.title, description: d.description,
-          severity: d.severity, category: d.category,
-          serviceName: d.serviceName, moduleName: d.moduleName, methodName: d.methodName,
-        })),
-        architectureContext,
-      );
+          allNewViolations.push({
+            type: det.violationType,
+            title: det.title,
+            content: det.description,
+            severity: det.severity,
+            targetServiceId: det.targetServiceId,
+            targetModuleId: det.targetModuleId,
+            targetMethodId: det.targetMethodId,
+            targetServiceName: det.serviceName || null,
+            targetModuleName: det.moduleName || null,
+            targetMethodName: det.methodName || null,
+            fixPrompt: null,
+            ruleKey: det.ruleKey,
+          });
+        }
+        emitProgress(88, 'Deterministic violations persisted');
+      } else {
+        // Build lookup by detViolationId for matching enrichment results
+        const detByViolationId = new Map(detectionsToEnrich.map((d) => [d.detViolationId, d]));
 
-      // Persist enriched violations — match by ID echoed back from LLM
-      for (const enriched of enrichmentResult.enrichedViolations) {
-        const det = detByViolationId.get(enriched.id);
-        if (!det) continue;
+        const enrichmentResult = await provider!.enrichDeterministicViolations(
+          detectionsToEnrich.map((d) => ({
+            id: d.detViolationId, ruleKey: d.ruleKey, title: d.title, description: d.description,
+            severity: d.severity, category: d.category,
+            serviceName: d.serviceName, moduleName: d.moduleName, methodName: d.methodName,
+          })),
+          architectureContext,
+        );
 
-        const violationId = uuidv4();
-        await db.insert(violations).values({
-          id: violationId,
-          repoId,
-          analysisId,
-          type: det.violationType,
-          title: enriched.title,
-          content: enriched.content,
-          severity: det.severity,
-          status: 'new',
-          targetServiceId: det.targetServiceId,
-          targetModuleId: det.targetModuleId,
-          targetMethodId: det.targetMethodId,
-          fixPrompt: enriched.fixPrompt,
-          ruleKey: det.ruleKey,
-          deterministicViolationId: det.detViolationId,
-          firstSeenAnalysisId: analysisId,
-          firstSeenAt: now,
-        });
+        // Persist enriched violations — match by ID echoed back from LLM
+        for (const enriched of enrichmentResult.enrichedViolations) {
+          const det = detByViolationId.get(enriched.id);
+          if (!det) continue;
 
-        allNewViolations.push({
-          type: det.violationType,
-          title: enriched.title,
-          content: enriched.content,
-          severity: det.severity,
-          targetServiceId: det.targetServiceId,
-          targetModuleId: det.targetModuleId,
-          targetMethodId: det.targetMethodId,
-          targetServiceName: det.serviceName || null,
-          targetModuleName: det.moduleName || null,
-          targetMethodName: det.methodName || null,
-          fixPrompt: enriched.fixPrompt,
-          ruleKey: det.ruleKey,
-        });
+          const violationId = uuidv4();
+          await db.insert(violations).values({
+            id: violationId,
+            repoId,
+            analysisId,
+            type: det.violationType,
+            title: enriched.title,
+            content: enriched.content,
+            severity: det.severity,
+            status: 'new',
+            targetServiceId: det.targetServiceId,
+            targetModuleId: det.targetModuleId,
+            targetMethodId: det.targetMethodId,
+            fixPrompt: enriched.fixPrompt,
+            ruleKey: det.ruleKey,
+            deterministicViolationId: det.detViolationId,
+            firstSeenAnalysisId: analysisId,
+            firstSeenAt: now,
+          });
+
+          allNewViolations.push({
+            type: det.violationType,
+            title: enriched.title,
+            content: enriched.content,
+            severity: det.severity,
+            targetServiceId: det.targetServiceId,
+            targetModuleId: det.targetModuleId,
+            targetMethodId: det.targetMethodId,
+            targetServiceName: det.serviceName || null,
+            targetModuleName: det.moduleName || null,
+            targetMethodName: det.methodName || null,
+            fixPrompt: enriched.fixPrompt,
+            ruleKey: det.ruleKey,
+          });
+        }
+        tracker?.done('enrich', `${enrichmentResult.enrichedViolations.length} violations enriched`);
+        emitProgress(88, 'Deterministic violations enriched');
       }
-      tracker?.done('enrich', `${enrichmentResult.enrichedViolations.length} violations enriched`);
-      emitProgress(88, 'Deterministic violations enriched');
     } else {
-      tracker?.done('enrich', 'No detections to enrich');
+      if (!deterministicOnly) tracker?.done('enrich', 'No detections to enrich');
     }
   })();
 
@@ -684,19 +730,19 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   };
 
   // LLM code violations promise
-  const llmCodePromise = llmCodeBatches.length > 0
-    ? provider.generateAllCodeViolations(llmCodeBatches)
+  const llmCodePromise = (llmCodeBatches.length > 0 && !deterministicOnly)
+    ? provider!.generateAllCodeViolations(llmCodeBatches)
     : Promise.resolve({ violations: [] } as CodeViolationsResult);
 
   let serviceDescriptions: { id: string; description: string }[] = [];
   let llmCodeResolvedIds: string[] = [];
   let llmCodeUnchangedIds: string[] = [];
 
-  emitProgress(86, 'Analyzing architecture & modules...');
+  if (!deterministicOnly) emitProgress(86, 'Analyzing architecture & modules...');
 
   // LLM rule analysis promise (runs in parallel with deterministic enrichment)
   let llmStepCount = 0;
-  const llmRulePromise = (async () => {
+  const llmRulePromise = deterministicOnly ? Promise.resolve() : (async () => {
     if (hasLlmOnlyExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
         llmStepCount++;
@@ -773,6 +819,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         });
       }
     }
+
+    tracker?.done('architecture');
   })();
 
   // codePromise runs in background — no progress emit here to avoid
@@ -791,9 +839,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     log(`[Violations] LLM rule analysis failed: ${msg}`);
     tracker?.error('architecture', `Failed: ${msg.slice(0, 80)}`);
   }
-  if (llmResult.status === 'fulfilled') {
-    tracker?.done('architecture');
-  }
+  // Architecture step is marked done inside the llmRulePromise itself
 
   throwIfAborted(signal);
   tracker?.start('persist', 'Saving results...');

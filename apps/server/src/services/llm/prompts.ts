@@ -628,11 +628,33 @@ export function buildFlowTemplateVars(context: FlowEnrichmentContext): Record<st
 // ---------------------------------------------------------------------------
 
 let langfuseInstance: Langfuse | null = null;
+let langfuseChecked = false;
+let langfuseAvailable = false;
 
-function getLangfuse(): Langfuse | null {
+async function getLangfuse(): Promise<Langfuse | null> {
   if (!(config.langfuse.publicKey && config.langfuse.secretKey)) {
     return null;
   }
+
+  // Check connectivity once per session to avoid noisy SDK error logs
+  if (!langfuseChecked) {
+    langfuseChecked = true;
+    try {
+      const res = await fetch(`${config.langfuse.baseUrl || 'http://localhost:3001'}/api/public/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      langfuseAvailable = res.ok;
+    } catch {
+      langfuseAvailable = false;
+    }
+    if (!langfuseAvailable) {
+      console.log('[Langfuse] Unavailable — using local prompts for this session.');
+      return null;
+    }
+  }
+
+  if (!langfuseAvailable) return null;
+
   if (!langfuseInstance) {
     langfuseInstance = new Langfuse({
       publicKey: config.langfuse.publicKey,
@@ -657,7 +679,7 @@ export async function getPrompt(
   name: PromptName,
   variables?: Record<string, string>
 ): Promise<PromptResult> {
-  const langfuse = getLangfuse();
+  const langfuse = await getLangfuse();
   const localDef = PROMPT_DEFINITIONS[name];
 
   if (langfuse) {
@@ -668,7 +690,7 @@ export async function getPrompt(
       const compiled = prompt.compile(variables || {});
       return { text: compiled, langfusePrompt: prompt.toJSON() };
     } catch {
-      // Fallback to local definition
+      // Prompt fetch failed — fall through to local definition
     }
   }
 

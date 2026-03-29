@@ -97,6 +97,30 @@ describe('code/hardcoded-secret', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not flag dict keys with secret-like names (Python)', () => {
+    const violations = check(`
+config = {
+    "token_uri": token_uri,
+    "client_secret": client_secret,
+    "access_token": creds.token,
+}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag variable names containing uri/url/endpoint', () => {
+    const violations = check(`token_uri = "https://oauth2.googleapis.com/token"`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag Bearer as a secret value', () => {
+    const violations = check(`token_type = "Bearer"`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 describe('code/todo-fixme', () => {
@@ -304,6 +328,29 @@ except BaseException:
 `, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag except with tuple of types', () => {
+    const violations = check(`
+try:
+    do_something()
+except (ValueError, TypeError):
+    handle_error()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag except with dotted attribute type', () => {
+    const violations = check(`
+import json
+try:
+    data = json.loads(text)
+except json.JSONDecodeError:
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    expect(matches).toHaveLength(0);
   });
 });
 

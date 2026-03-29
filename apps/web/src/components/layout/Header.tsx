@@ -8,7 +8,7 @@ import type { AnalysisSummary } from '@/lib/api';
 type HeaderProps = {
   repoName?: string;
   currentBranch?: string;
-  onAnalyze?: (options?: { codeReview?: boolean }) => void;
+  onAnalyze?: (options?: { codeReview?: boolean; deterministicOnly?: boolean }) => void;
   onCodeReview?: () => void;
   isAnalyzing?: boolean;
   isCodeReviewing?: boolean;
@@ -224,7 +224,7 @@ export function Header({
   );
 }
 
-function AnalyzeDropdown({ onSelect, disabled }: { onSelect: (opts: { codeReview?: boolean }) => void; disabled?: boolean }) {
+function AnalyzeDropdown({ onSelect, disabled }: { onSelect: (opts: { codeReview?: boolean; deterministicOnly?: boolean }) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -254,6 +254,12 @@ function AnalyzeDropdown({ onSelect, disabled }: { onSelect: (opts: { codeReview
             onClick={() => { onSelect({ codeReview: true }); setOpen(false); }}
           >
             Analyze with code review
+          </button>
+          <button
+            className="flex w-full items-center rounded px-2 py-1.5 text-xs text-popover-foreground hover:bg-accent"
+            onClick={() => { onSelect({ deterministicOnly: true }); setOpen(false); }}
+          >
+            Deterministic only (no LLM)
           </button>
         </div>
       )}

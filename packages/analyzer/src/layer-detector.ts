@@ -3,6 +3,14 @@ import { dataLayerPatterns, apiLayerPatterns, externalLayerPatterns } from './pa
 import { matchesPattern } from './patterns/index.js'
 import { minimatch } from 'minimatch'
 
+/** Framework imports that are utilities, not route-defining symbols.
+ *  Files importing only these from a framework (e.g., fastapi) are not API layer. */
+const FRAMEWORK_UTILITY_IMPORTS = new Set([
+  'HTTPException', 'Depends', 'Header', 'Body', 'Query', 'Path', 'Form', 'File',
+  'UploadFile', 'status', 'Response', 'JSONResponse', 'BackgroundTasks', 'Security',
+  'Cookie', 'Request', 'WebSocket',
+])
+
 /**
  * Internal layer detection result with multiple layers
  * (The shared type LayerDetectionResult is per-layer; this is for internal use)
@@ -124,9 +132,16 @@ function hasAPILayerPatterns(
 ): { match: boolean; reasons: string[] } {
   const reasons: string[] = []
 
-  // Check framework imports
+  // Check framework imports — for Python frameworks (fastapi, flask, django),
+  // only count as API layer if the import includes route-defining symbols
+  // (FastAPI, APIRouter, Blueprint, etc.), not just utilities (HTTPException, Depends).
   for (const imp of analysis.imports) {
     if (apiLayerPatterns.frameworks.some(fw => matchesPattern(imp.source, fw))) {
+      // If all imported names are utility-only, don't classify as API layer
+      const importedNames = imp.specifiers.map(s => s.name)
+      if (importedNames.length > 0 && importedNames.every(n => FRAMEWORK_UTILITY_IMPORTS.has(n))) {
+        continue
+      }
       reasons.push(`Imports API framework: ${imp.source}`)
       return { match: true, reasons }
     }
@@ -148,9 +163,16 @@ function hasAPILayerPatterns(
     }
   }
 
-  // Check file patterns
+  // Check file patterns — but for broad directory patterns like **/api/**,
+  // only match if the file also has route registrations, to avoid classifying
+  // utility/model files in api/ directories as API layer.
+  const broadDirPatterns = new Set(['**/api/**', '**/views/**'])
+  const hasRoutes = (analysis.routeRegistrations?.length ?? 0) > 0
+
   for (const pattern of apiLayerPatterns.filePatterns) {
     if (minimatch(analysis.filePath, pattern)) {
+      // Broad patterns require evidence of actual route handling
+      if (broadDirPatterns.has(pattern) && !hasRoutes) continue
       reasons.push(`File path matches API layer pattern: ${pattern}`)
       return { match: true, reasons }
     }

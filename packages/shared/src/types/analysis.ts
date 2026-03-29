@@ -225,6 +225,8 @@ export const MethodInfoSchema = z.object({
   lineCount: z.number().optional(),
   statementCount: z.number().optional(),
   maxNestingDepth: z.number().optional(),
+  /** Method is called implicitly by the runtime (e.g., Python __init__, __str__, JS constructor) */
+  isImplicitCall: z.boolean().optional(),
 })
 
 export type MethodInfo = z.infer<typeof MethodInfoSchema>

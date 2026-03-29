@@ -22,6 +22,8 @@ export interface PersistAnalysisParams {
   result: AnalysisResult;
   metadata?: Record<string, unknown>;
   commitHash?: string;
+  /** If provided, update this existing analysis row instead of creating a new one */
+  existingAnalysisId?: string;
 }
 
 export interface PersistAnalysisOutput {
@@ -33,19 +35,37 @@ export interface PersistAnalysisOutput {
 }
 
 export async function persistAnalysisResult(params: PersistAnalysisParams): Promise<PersistAnalysisOutput> {
-  const { repoId, branch, result, metadata, commitHash } = params;
+  const { repoId, branch, result, metadata, commitHash, existingAnalysisId } = params;
 
-  // Create analysis row
-  const [analysis] = await db
-    .insert(analyses)
-    .values({
-      repoId,
-      branch: branch || null,
-      architecture: result.architecture,
-      metadata: metadata ?? result.metadata,
-      commitHash: commitHash || null,
-    })
-    .returning();
+  let analysis: typeof analyses.$inferSelect;
+
+  if (existingAnalysisId) {
+    // Update existing 'running' analysis row to 'completed'
+    const [updated] = await db
+      .update(analyses)
+      .set({
+        status: 'completed',
+        architecture: result.architecture,
+        metadata: metadata ?? result.metadata,
+      })
+      .where(eq(analyses.id, existingAnalysisId))
+      .returning();
+    analysis = updated;
+  } else {
+    // Create new analysis row (for diff analysis and other flows)
+    const [created] = await db
+      .insert(analyses)
+      .values({
+        repoId,
+        branch: branch || null,
+        status: 'completed',
+        architecture: result.architecture,
+        metadata: metadata ?? result.metadata,
+        commitHash: commitHash || null,
+      })
+      .returning();
+    analysis = created;
+  }
 
   // Save services
   const serviceIdMap = new Map<string, string>();

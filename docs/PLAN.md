@@ -1971,3 +1971,46 @@ Surface and generate Architectural Decision Records, linking them to the code st
 4. Run analysis → LLM identifies undocumented architectural decisions → drafts appear in review queue
 5. Approve a draft → becomes an official ADR, optionally exported to repo
 6. Delete a service referenced by an ADR → ADR flagged as stale in the UI
+
+---
+
+## Phase 20: Anonymous Usage Telemetry `STATUS: BACKLOG`
+
+Collect anonymous, privacy-safe usage metrics to understand real adoption — how many analyses run, which languages are used, and rough project sizes. No code, file paths, repo names, or violation details are ever sent.
+
+### Design
+
+- On first run, show a one-time notice: "TrueCourse collects anonymous usage data to improve the product. Run `npx truecourse telemetry disable` to opt out."
+- Store opt-in/out preference in `~/.truecourse/telemetry.json`
+- Send a lightweight ping on each `analyze` or `diff-check` command
+
+### Data collected (per event)
+
+- Event type: `analyze`, `diff-check`
+- Tool version
+- Languages detected (e.g., `['typescript', 'python']`)
+- File count range (1-50, 50-200, 200-500, 500+)
+- Service count
+- Analysis duration range (seconds, bucketed)
+- OS and architecture (`darwin-arm64`, `linux-x64`, etc.)
+- Random anonymous session ID (UUID, not tied to user identity)
+
+### What is NOT collected
+
+- Source code, file paths, repo names, git URLs
+- Violation details, rule results, LLM outputs
+- IP addresses (use a privacy-respecting backend or Plausible-style analytics)
+- User identity, machine hostname, environment variables
+
+### Implementation
+
+- CLI: `truecourse telemetry enable|disable|status`
+- Telemetry module in `tools/cli/src/telemetry.ts`
+- Backend: lightweight endpoint or third-party service (PostHog, Plausible, or custom)
+- Fire-and-forget: never block the CLI on telemetry — async with timeout, failures are silent
+
+### Scope
+
+- CLI only (not the web UI — web UI is local)
+- Opt-out, not opt-in (industry standard for dev tools)
+- No telemetry in test/CI environments (`CI=true` env var disables automatically)
