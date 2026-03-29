@@ -18,7 +18,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.3.0")
+  .version("0.2.1")
   .description("TrueCourse CLI - Setup and manage your TrueCourse instance");
 
 program
