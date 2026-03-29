@@ -41,6 +41,12 @@
       "layer": "service"
     },
     {
+      "name": "helpers",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "redis",
       "service": "api-gateway",
       "kind": "standalone",
@@ -65,10 +71,22 @@
       "layer": "data"
     },
     {
+      "name": "getTokenService",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "src",
       "service": "user-service",
       "kind": "standalone",
       "layer": "api"
+    },
+    {
+      "name": "TokenService",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "user.handler",
