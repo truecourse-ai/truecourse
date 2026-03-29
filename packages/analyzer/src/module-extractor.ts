@@ -628,6 +628,29 @@ function buildMethodDependencies(
         }
       }
 
+      // Strategy 6: Constructor call — `ClassName()` in Python resolves to `ClassName.__init__`.
+      // The call extractor sees this as a bare function call with callee matching a class name.
+      if (!targetMethod && calleeParts.length === 1) {
+        // Same-service first
+        for (const mod of allModules) {
+          if (mod.kind !== 'class' || mod.serviceName !== serviceName) continue
+          if (mod.name === calleeMethodName) {
+            targetMethod = methodLookup.get(`${mod.serviceName}::${mod.name}::__init__`)
+            if (targetMethod) break
+          }
+        }
+        // Cross-service
+        if (!targetMethod) {
+          for (const mod of allModules) {
+            if (mod.kind !== 'class' || mod.serviceName === serviceName) continue
+            if (mod.name === calleeMethodName) {
+              targetMethod = methodLookup.get(`${mod.serviceName}::${mod.name}::__init__`)
+              if (targetMethod) break
+            }
+          }
+        }
+      }
+
       if (!targetMethod) continue
       // Skip self-calls within the same method — but not when using a fallback caller,
       // since the fallback may equal the target (e.g., script's main() calling itself at top level)

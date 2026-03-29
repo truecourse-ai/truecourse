@@ -158,10 +158,14 @@ export class AnalysisGraph {
       }
     }
 
-    // Entry points
+    // Entry points — skip constructors, private methods, and dunder methods
+    const isEntryCandidate = (name: string) =>
+      !name.startsWith('_') && name !== 'constructor'
+
     this.entryPoints = []
     const servicesWithEntryPoints = new Set<string>()
     for (const method of input.methods) {
+      if (!isEntryCandidate(method.name)) continue
       const mod = this.moduleByKey.get(`${method.serviceName}::${method.moduleName}`)
       if (!mod) continue
       const layer = mod.layerName.toLowerCase()
@@ -173,6 +177,7 @@ export class AnalysisGraph {
     const fallbackLayers = new Set(['service', 'worker', 'job', 'event', 'handler'])
     for (const method of input.methods) {
       if (servicesWithEntryPoints.has(method.serviceName)) continue
+      if (!isEntryCandidate(method.name)) continue
       if (!method.isExported) continue
       const mod = this.moduleByKey.get(`${method.serviceName}::${method.moduleName}`)
       if (!mod) continue

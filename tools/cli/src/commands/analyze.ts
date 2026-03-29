@@ -12,7 +12,7 @@ import {
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-export async function runAnalyze({ noAutostart = false, codeReview = false } = {}): Promise<void> {
+export async function runAnalyze({ noAutostart = false, codeReview = false, deterministicOnly = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
 
   if (noAutostart) {
@@ -93,7 +93,7 @@ export async function runAnalyze({ noAutostart = false, codeReview = false } = {
       fetch(`${serverUrl}/api/repos/${repo.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codeReview }),
+        body: JSON.stringify({ codeReview, deterministicOnly }),
       }).then((res) => {
         if (!res.ok) {
           clearTimeout(timeout);
@@ -126,7 +126,9 @@ export async function runAnalyze({ noAutostart = false, codeReview = false } = {
     const violations = (await res.json()) as Violation[];
     renderViolationsSummary(violations);
 
-    p.log.info("Code review running in background — results will appear in the dashboard");
+    if (!deterministicOnly) {
+      p.log.info("Code review running in background — results will appear in the dashboard");
+    }
 
     const repoUrl = `${serverUrl}/repos/${repo.id}`;
     if (firstRun) {

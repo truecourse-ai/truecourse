@@ -292,23 +292,10 @@ function extractPythonParameters(paramsNode: SyntaxNode | null): Parameter[] {
         break
       }
 
-      case 'list_splat_pattern': {
-        // *args
-        const name = child.namedChildren[0]?.text
-        if (name) {
-          parameters.push({ name: `*${name}` })
-        }
+      case 'list_splat_pattern':
+      case 'dictionary_splat_pattern':
+        // *args and **kwargs are variadic — don't count as fixed parameters
         break
-      }
-
-      case 'dictionary_splat_pattern': {
-        // **kwargs
-        const name = child.namedChildren[0]?.text
-        if (name) {
-          parameters.push({ name: `**${name}` })
-        }
-        break
-      }
     }
   }
 
@@ -328,6 +315,9 @@ export function extractPythonClasses(tree: Tree, filePath: string): ClassDefinit
       const key = `${node.startPosition.row}:${node.startPosition.column}`
       if (seen.has(key)) return
       seen.add(key)
+
+      // Skip nested classes (e.g., Pydantic's inner class Config)
+      if (isInsideClass(node)) return
 
       const name = node.childForFieldName('name')?.text
       if (!name) return
@@ -448,13 +438,14 @@ function extractClassProperties(body: SyntaxNode | null): ClassProperty[] {
       if (!expr) continue
 
       if (expr.type === 'assignment') {
-        // x = Column(String) or x: str = "value"
+        // x = Column(String) or x: str = "value" or x: str
         const left = expr.childForFieldName('left')
+        const typeNode = expr.childForFieldName('type')
         const right = expr.childForFieldName('right')
         if (left && left.type === 'identifier') {
           properties.push({
             name: left.text,
-            type: right?.text,
+            type: typeNode?.text || right?.text,
           })
         }
       } else if (expr.type === 'type_alias_statement' || expr.type === 'annotated_assignment') {
@@ -670,6 +661,24 @@ export function extractPythonExports(tree: Tree, filePath: string): ExportStatem
     return exports
   }
 
+  // Collect classes that have instance assignments at module level
+  // e.g., controller = AgentController() — the class is consumed locally, the instance is the export
+  const classesWithInstances = new Set<string>()
+  for (const child of root.namedChildren) {
+    if (child.type === 'expression_statement') {
+      const expr = child.namedChildren[0]
+      if (expr?.type === 'assignment') {
+        const right = expr.childForFieldName('right')
+        if (right?.type === 'call') {
+          const fn = right.childForFieldName('function')
+          if (fn?.type === 'identifier') {
+            classesWithInstances.add(fn.text)
+          }
+        }
+      }
+    }
+  }
+
   // Fallback: all public top-level names
   for (const child of root.namedChildren) {
     if (child.type === 'function_definition') {
@@ -689,7 +698,9 @@ export function extractPythonExports(tree: Tree, filePath: string): ExportStatem
       }
     } else if (child.type === 'class_definition') {
       const name = child.childForFieldName('name')?.text
-      if (name && !name.startsWith('_')) {
+      // Skip classes that have a module-level instance (e.g., controller = Controller())
+      // The instance variable is the real export, not the class
+      if (name && !name.startsWith('_') && !classesWithInstances.has(name)) {
         exports.push({ name, isDefault: false })
       }
     } else if (child.type === 'expression_statement') {

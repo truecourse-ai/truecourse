@@ -49,6 +49,11 @@ export interface LanguageConfig {
     functionNames: string[]
   }
 
+  // Rule thresholds — language-specific overrides
+  thresholds: {
+    maxParameters: number
+  }
+
   // Optional: Custom tree-sitter query strings
   functionQuery?: string
   classQuery?: string
@@ -115,6 +120,9 @@ export const TYPESCRIPT_CONFIG: LanguageConfig = {
   bootstrap: {
     filePattern: /(?:^|[/\\])(?:app|main|index|server)\.\w+$/,
     functionNames: ['start', 'main', 'bootstrap'],
+  },
+  thresholds: {
+    maxParameters: 5,
   },
 
   exportQuery: `
@@ -207,6 +215,9 @@ export const PYTHON_CONFIG: LanguageConfig = {
     filePattern: /(?:^|[/\\])(?:app|main|wsgi|asgi)\.\w+$/,
     functionNames: ['start', 'main', '__main__', 'bootstrap'],
   },
+  thresholds: {
+    maxParameters: 7, // Python uses keyword args extensively
+  },
 
   importQuery: `
     (import_statement) @import
@@ -248,6 +259,15 @@ export function getAllIndexBaseNames(): Set<string> {
     }
   }
   return names
+}
+
+export function getMaxParameters(filePath: string): number {
+  const lang = detectLanguage(filePath)
+  if (lang) {
+    const config = LANGUAGE_CONFIGS.find((c) => c.name === lang)
+    if (config) return config.thresholds.maxParameters
+  }
+  return 5 // default
 }
 
 export function isBootstrapEntry(functionName: string, filePath: string): boolean {

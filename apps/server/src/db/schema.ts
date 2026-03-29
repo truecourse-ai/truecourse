@@ -38,6 +38,7 @@ export const analyses = pgTable('analyses', {
     .notNull()
     .references(() => repos.id, { onDelete: 'cascade' }),
   branch: text('branch'),
+  status: text('status').notNull().default('completed'), // 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed'
   architecture: text('architecture').notNull(), // 'monolith' | 'microservices'
   metadata: jsonb('metadata'),
   nodePositions: jsonb('node_positions'), // { [serviceId]: { x, y } }

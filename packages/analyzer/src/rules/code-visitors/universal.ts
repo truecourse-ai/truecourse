@@ -19,8 +19,10 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
   nodeTypes: ['string', 'template_string'],
   visit(node, filePath, sourceCode) {
     const text = node.text
-    const value = text.slice(1, -1)
-    if (value.length < 8) return null
+    // Strip string prefix (f, b, r, u for Python) and quotes
+    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    if (stripped.length < 8) return null
+    const value = stripped
 
     for (const pattern of SECRET_PATTERNS) {
       if (pattern.test(value)) {
@@ -36,6 +38,11 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
 
     const parent = node.parent
     if (parent) {
+      // Skip if this string node is the key of a dict/object pair — only check values
+      if (parent.type === 'pair' && parent.childForFieldName('key') === node) {
+        return null
+      }
+
       const varDeclarator = parent.type === 'variable_declarator' ? parent : null
       const assignment = parent.type === 'assignment_expression' || parent.type === 'assignment' ? parent : null
       const propAssignment = parent.type === 'pair' ? parent : null
@@ -47,7 +54,13 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
       if (nameNode) {
         const name = nameNode.text.toLowerCase()
         const secretNames = ['password', 'passwd', 'secret', 'apikey', 'api_key', 'token', 'auth_token', 'access_token', 'private_key']
-        if (secretNames.some((s) => name.includes(s)) && value.length >= 8 && !/^(true|false|null|undefined|localhost|https?:\/\/)/.test(value)) {
+        // Exclude variable names that are clearly not secrets (URIs, URLs, endpoints, types)
+        const isNonSecretName = /(?:uri|url|endpoint|type|scope|name|header|grant|method)/.test(name)
+        const isNonSecretValue =
+          /https?:\/\//.test(value)                          // URLs
+          || /^(true|false|null|undefined|localhost|None|True|False|Bearer)$/i.test(value) // literals & common tokens
+          || /[[\]<>{}()#.=\s]/.test(value)                  // selectors, HTML, format strings, paths
+        if (secretNames.some((s) => name.includes(s)) && value.length >= 8 && !isNonSecretName && !isNonSecretValue) {
           return makeViolation(
             this.ruleKey, node, filePath, 'critical',
             'Hardcoded secret detected',

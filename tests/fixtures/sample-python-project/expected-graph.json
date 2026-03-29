@@ -288,27 +288,12 @@
     },
     {
       "ruleKey": "arch/dead-method",
-      "title": "Dead method: UserController.__init__",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
       "title": "Dead method: validators.validate_name",
       "severity": "low"
     },
     {
       "ruleKey": "arch/dead-module",
-      "title": "Dead module: Base",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
       "title": "Dead module: Comment",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
-      "title": "Dead module: Logger",
       "severity": "low"
     },
     {

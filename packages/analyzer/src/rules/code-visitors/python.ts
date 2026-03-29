@@ -177,6 +177,7 @@ export const pythonBareExceptVisitor: CodeRuleVisitor = {
 
     const hasCatchType = children.slice(exceptIdx + 1, colonIdx).some(
       (c) => c.type === 'identifier' || c.type === 'as_pattern' || c.type === 'dotted_name'
+        || c.type === 'attribute' || c.type === 'tuple'
     )
 
     if (!hasCatchType) {

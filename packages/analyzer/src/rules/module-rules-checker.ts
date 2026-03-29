@@ -1,4 +1,35 @@
 import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
+import { getMaxParameters } from '../language-config.js'
+
+/** Build a map of direct function calls and references per file (no member access like obj.method). */
+function buildSameFileCalls(fileAnalyses?: FileAnalysis[]): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>()
+  if (!fileAnalyses) return result
+  for (const fa of fileAnalyses) {
+    const callees = new Set<string>()
+    for (const call of fa.calls) {
+      if (!call.callee.includes('.')) {
+        callees.add(call.callee)
+      }
+      // Also capture function names passed as arguments (e.g., retry=should_retry_request)
+      if (call.arguments) {
+        for (const arg of call.arguments) {
+          // Simple identifier arguments (no dots, no quotes, no operators)
+          if (/^[A-Za-z_]\w*$/.test(arg)) {
+            callees.add(arg)
+          }
+          // Keyword arguments: extract value side (e.g., "retry=should_retry" → "should_retry")
+          const kwMatch = arg.match(/^[A-Za-z_]\w*=([A-Za-z_]\w*)$/)
+          if (kwMatch) {
+            callees.add(kwMatch[1])
+          }
+        }
+      }
+    }
+    if (callees.size > 0) result.set(fa.filePath, callees)
+  }
+  return result
+}
 
 export interface ModuleViolation {
   ruleKey: string
@@ -28,6 +59,7 @@ export function checkModuleRules(
   fileAnalyses?: FileAnalysis[],
   libraryServiceNames?: Set<string>,
   entryPointFiles?: Set<string>,
+  methodLevelDeps?: MethodLevelDependency[],
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -49,6 +81,39 @@ export function checkModuleRules(
     }
   }
 
+  const calledInOwnFile = buildSameFileCalls(fileAnalyses)
+
+  // Build set of class names used as type annotations anywhere in the codebase.
+  // Handles compound types: "X | Y", "Optional[X]", "list[X]", "Dict[str, X]", etc.
+  const usedAsType = new Set<string>()
+  function addType(typeStr: string | undefined) {
+    if (!typeStr) return
+    // Split union types (X | Y, Union[X, Y]) and extract identifiers from generics
+    const parts = typeStr.split(/[|,\[\]()]+/).map((s) => s.trim()).filter(Boolean)
+    for (const part of parts) {
+      // Skip builtins and common type keywords
+      if (/^(str|int|float|bool|None|Any|string|number|void|undefined|null|Optional|Union|List|Dict|Set|Tuple|list|dict|set|tuple|type)$/i.test(part)) continue
+      usedAsType.add(part)
+    }
+  }
+  if (fileAnalyses) {
+    for (const fa of fileAnalyses) {
+      for (const fn of fa.functions) {
+        for (const p of fn.params) addType(p.type)
+        addType(fn.returnType)
+      }
+      for (const cls of fa.classes) {
+        if (cls.superClass) usedAsType.add(cls.superClass)
+        for (const iface of cls.interfaces || []) usedAsType.add(iface)
+        for (const m of cls.methods) {
+          for (const p of m.params) addType(p.type)
+          addType(m.returnType)
+        }
+        for (const prop of cls.properties) addType(prop.type)
+      }
+    }
+  }
+
   // Unused export — skip framework entry files (Next.js pages, layouts, route handlers, etc.)
   // and framework convention export names (GET, POST, generateMetadata, etc.)
   if (ruleKeys.has('arch/unused-export')) {
@@ -56,6 +121,13 @@ export function checkModuleRules(
     for (const dep of fileDependencies) {
       for (const name of dep.importedNames) {
         importedTargets.add(name)
+      }
+    }
+    // Also consider targets reached via method-level dependencies (constructor calls, etc.)
+    if (methodLevelDeps) {
+      for (const dep of methodLevelDeps) {
+        importedTargets.add(dep.calleeModule)
+        importedTargets.add(dep.calleeMethod)
       }
     }
 
@@ -89,6 +161,9 @@ export function checkModuleRules(
         // Skip route handler functions — consumed by framework via decorators/bindings
         if (routeHandlerNames.has(method.name)) continue
 
+        // Skip functions called directly within their own file
+        if (calledInOwnFile.get(method.filePath)?.has(method.name)) continue
+
         violations.push({
           ruleKey: 'arch/unused-export',
           title: `Unused export: ${method.name}`,
@@ -105,6 +180,9 @@ export function checkModuleRules(
     for (const mod of modules) {
       if (mod.kind === 'class' && mod.exportCount > 0 && !importedTargets.has(mod.name)) {
         if (entryPointFiles?.has(mod.filePath)) continue
+
+        // Skip classes used as type annotations (params, return types, superclasses)
+        if (usedAsType.has(mod.name)) continue
 
         violations.push({
           ruleKey: 'arch/unused-export',
@@ -126,11 +204,39 @@ export function checkModuleRules(
       connectedModules.add(`${dep.sourceService}::${dep.sourceModule}`)
       connectedModules.add(`${dep.targetService}::${dep.targetModule}`)
     }
+    // Also consider modules connected via method-level dependencies
+    // (catches same-file class usage, constructor calls, etc.)
+    if (methodLevelDeps) {
+      for (const dep of methodLevelDeps) {
+        connectedModules.add(`${dep.callerService}::${dep.callerModule}`)
+        connectedModules.add(`${dep.calleeService}::${dep.calleeModule}`)
+      }
+    }
+
+    // Build module → method names lookup for same-file reference checks
+    const moduleMethodNames = new Map<string, string[]>()
+    for (const m of methods) {
+      const mKey = `${m.serviceName}::${m.moduleName}`
+      const arr = moduleMethodNames.get(mKey) || []
+      arr.push(m.name)
+      moduleMethodNames.set(mKey, arr)
+    }
 
     for (const mod of modules) {
       const key = `${mod.serviceName}::${mod.name}`
       if (!connectedModules.has(key) && !dbConnectedModuleKeys?.has(key)) {
         if (entryPointFiles?.has(mod.filePath)) continue
+
+        // Skip classes used as type annotations (params, return types, superclasses)
+        if (usedAsType.has(mod.name)) continue
+
+        // Skip modules whose methods or name are referenced in the same file
+        // (catches function references passed as arguments, e.g., retry=should_retry)
+        const sameFileRefs = calledInOwnFile.get(mod.filePath)
+        if (sameFileRefs) {
+          const modMethods = moduleMethodNames.get(key) || []
+          if (sameFileRefs.has(mod.name) || modMethods.some((m) => sameFileRefs.has(m))) continue
+        }
 
         violations.push({
           ruleKey: 'arch/dead-module',
@@ -249,9 +355,11 @@ export function checkMethodRules(
   enabledRules: AnalysisRule[],
   methodLevelDeps?: MethodLevelDependency[],
   entryPointFiles?: Set<string>,
+  fileAnalyses?: FileAnalysis[],
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
+  const calledInOwnFile = buildSameFileCalls(fileAnalyses)
 
   // Long method
   if (ruleKeys.has('arch/long-method')) {
@@ -274,11 +382,12 @@ export function checkMethodRules(
   // Too many parameters
   if (ruleKeys.has('arch/too-many-parameters')) {
     for (const method of methods) {
-      if (method.paramCount >= TOO_MANY_PARAMS) {
+      const paramThreshold = getMaxParameters(method.filePath)
+      if (method.paramCount >= paramThreshold) {
         violations.push({
           ruleKey: 'arch/too-many-parameters',
           title: `Too many parameters: ${method.moduleName}.${method.name}`,
-          description: `${method.name} has ${method.paramCount} parameters (threshold: ${TOO_MANY_PARAMS}). Consider using an options object or splitting the function.`,
+          description: `${method.name} has ${method.paramCount} parameters (threshold: ${paramThreshold}). Consider using an options object or splitting the function.`,
           severity: 'low',
           serviceName: method.serviceName,
           moduleName: method.moduleName,
@@ -322,6 +431,13 @@ export function checkMethodRules(
         // Skip methods in framework entry files — they're invoked by the framework
         // or called from JSX which isn't tracked in method-level dependencies
         if (entryPointFiles?.has(method.filePath)) continue
+
+        // Skip functions called directly within their own file
+        if (calledInOwnFile.get(method.filePath)?.has(method.name)) continue
+
+        // Skip Python dunder methods called implicitly by the runtime
+        // (NOT __init__ — it should be tracked via constructor calls)
+        if (method.name.startsWith('__') && method.name.endsWith('__') && method.name !== '__init__') continue
 
         violations.push({
           ruleKey: 'arch/dead-method',

@@ -189,9 +189,29 @@ export function AnalysesPanel({
                         <span className="text-xs font-medium">{date}</span>
                         <span className="text-[11px] text-muted-foreground">{time}</span>
                       </div>
-                      {i === 0 && (
+                      {i === 0 && a.status === 'completed' && (
                         <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                           latest
+                        </span>
+                      )}
+                      {a.status === 'running' && (
+                        <span className="rounded bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-500">
+                          running
+                        </span>
+                      )}
+                      {a.status === 'cancelling' && (
+                        <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">
+                          cancelling
+                        </span>
+                      )}
+                      {a.status === 'cancelled' && (
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          cancelled
+                        </span>
+                      )}
+                      {a.status === 'failed' && (
+                        <span className="rounded bg-destructive/20 px-1.5 py-0.5 text-[10px] font-medium text-destructive">
+                          failed
                         </span>
                       )}
                     </div>

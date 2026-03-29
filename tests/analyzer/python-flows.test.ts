@@ -163,7 +163,7 @@ async function buildFlows() {
 }
 
 describe('Python fixture flow tracing', () => {
-  it('produces 5 flows', async () => {
+  it('produces 6 flows', async () => {
     const { flows, crossServiceCalls, routeHandlers } = await buildFlows();
 
     console.log('\nCross-service calls:', crossServiceCalls.length);
@@ -175,6 +175,6 @@ describe('Python fixture flow tracing', () => {
     console.log('\nFlows:', flows.length);
     for (const f of flows) console.log(`  ${f.name} (${f.trigger}, ${f.steps.length} steps)`);
 
-    expect(flows.length).toBe(5);
+    expect(flows.length).toBe(6);
   });
 });

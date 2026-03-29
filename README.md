@@ -113,6 +113,7 @@ Once the server is running, `cd` into any repo and:
 npx truecourse add                    # Register repo without analyzing
 npx truecourse analyze                # Analyze current repo, show violations
 npx truecourse analyze --code-review  # Analyze with LLM code review (off by default)
+npx truecourse analyze --no-llm       # Deterministic checks only, skip all LLM calls
 npx truecourse analyze --diff         # Show new/resolved violations from uncommitted changes
 npx truecourse list                   # Show violations from latest analysis
 npx truecourse list --diff            # Show saved diff check results

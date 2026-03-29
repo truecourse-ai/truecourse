@@ -317,7 +317,17 @@ export default function RepoGraphPage() {
   const [repoError, setRepoError] = useState<string | null>(null);
   useEffect(() => {
     if (!repoId) return;
-    api.getRepo(repoId).then(setRepo).catch((err) => {
+    api.getRepo(repoId).then((data) => {
+      setRepo(data);
+      // Restore analysis state from DB on page load
+      const status = data.latestAnalysis?.status;
+      if (status === 'running') {
+        setIsAnalyzing(true);
+      } else if (status === 'cancelling') {
+        setIsAnalyzing(true);
+        setIsCancelling(true);
+      }
+    }).catch((err) => {
       setRepoError(err instanceof Error ? err.message : 'Failed to load repository');
     });
   }, [repoId]);
@@ -341,17 +351,21 @@ export default function RepoGraphPage() {
     }
   }, [analysisProgress, isAnalyzing, isDiffMode]);
 
-  // Listen for analysis complete to refetch
+  // Listen for analysis complete/canceled to update state
   useEffect(() => {
-    const unsub = onEvent('analysis:complete', () => {
+    const unsub1 = onEvent('analysis:complete', () => {
       setIsAnalyzing(false);
-      // Don't set isCodeReviewing here — the code-review:progress event handles that
+      setIsCancelling(false);
       refetchGraph();
       refetchAnalyses();
       refetchCodeViolationSummary();
       refetchFlows();
     });
-    return unsub;
+    const unsub2 = onEvent('analysis:canceled', () => {
+      setIsAnalyzing(false);
+      setIsCancelling(false);
+    });
+    return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows]);
 
   // Listen for violations ready
@@ -379,15 +393,16 @@ export default function RepoGraphPage() {
   }, [onEvent, refetchViolations, refetchCodeViolationSummary, refetchAnalyses]);
 
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  const handleAnalyze = async (options?: { codeReview?: boolean }) => {
+  const handleAnalyze = async (options?: { codeReview?: boolean; deterministicOnly?: boolean }) => {
     if (isDiffMode) {
       runDiffCheckAnalysis();
     } else {
       try {
         setIsAnalyzing(true);
         setAnalysisError(null);
-        await api.analyzeRepo(repoId, { codeReview: options?.codeReview });
+        await api.analyzeRepo(repoId, { codeReview: options?.codeReview, deterministicOnly: options?.deterministicOnly });
       } catch (error) {
         setIsAnalyzing(false);
         setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');
@@ -1199,7 +1214,7 @@ export default function RepoGraphPage() {
               <div className="flex items-center justify-between mb-2">
                 <span className={`text-[11px] font-medium ${
                   analysisProgress.step === 'error' ? 'text-destructive' : 'text-foreground'
-                }`}>{analysisProgress.step === 'error' ? 'Analysis failed' : 'Analyzing...'}</span>
+                }`}>{analysisProgress.step === 'error' ? 'Analysis failed' : isCancelling ? 'Cancelling...' : 'Analyzing...'}</span>
                 {analysisProgress.step === 'error' ? (
                   <button
                     onClick={() => { clearProgress(); setIsAnalyzing(false); }}
@@ -1208,9 +1223,18 @@ export default function RepoGraphPage() {
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
+                ) : isCancelling ? (
+                  <span className="shrink-0 px-1.5 py-0.5 text-[10px] text-amber-500">
+                    Cancelling...
+                  </span>
                 ) : (
                   <button
-                    onClick={() => repoId && api.cancelAnalysis(repoId).catch(() => {})}
+                    onClick={() => {
+                      if (repoId) {
+                        api.cancelAnalysis(repoId).catch(() => {});
+                        setIsCancelling(true);
+                      }
+                    }}
                     className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     Cancel

@@ -64,7 +64,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
-      const { codeReview: includeCodeReview } = parsed.data;
+      const { codeReview: includeCodeReview, deterministicOnly } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -81,21 +81,35 @@ router.post(
       const branch = (await git.branch()).current || null;
       const commitHash = (await git.revparse(['HEAD'])).trim();
 
+      // Create analysis row with 'running' status
+      const [runningAnalysis] = await db
+        .insert(analyses)
+        .values({
+          repoId: id,
+          branch,
+          status: 'running',
+          architecture: 'unknown',
+          commitHash,
+        })
+        .returning();
+
       // Respond immediately, run analysis asynchronously
-      res.status(202).json({ message: 'Analysis started', repoId: id, branch });
+      res.status(202).json({ message: 'Analysis started', repoId: id, branch, analysisId: runningAnalysis.id });
 
       // Register analysis for cancellation support
-      const abortController = registerAnalysis(id, 'pending');
+      const abortController = registerAnalysis(id, runningAnalysis.id);
 
       // Run analysis in the background
       try {
         const trackerSteps = [
           { key: 'parse', label: 'Parsing repository' },
           { key: 'detect', label: 'Deterministic checks' },
-          { key: 'enrich', label: 'Enriching detections' },
-          { key: 'architecture', label: 'Architecture analysis' },
+          ...(!deterministicOnly ? [
+            { key: 'enrich', label: 'Enriching detections' },
+            { key: 'architecture', label: 'Architecture analysis' },
+          ] : []),
           { key: 'persist', label: 'Saving results' },
-          ...(includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
+          ...(!deterministicOnly && includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
         ];
         const tracker = new StepTracker(id, trackerSteps);
 
@@ -104,7 +118,7 @@ router.post(
         const result = await runAnalysis(repo.path, branch ?? undefined, (progress) => {
           // Forward analyzer progress as detail on the 'parse' step
           tracker.detail('parse', progress.detail ?? 'Analyzing...');
-        });
+        }, { signal: abortController.signal });
 
         // Get previous analysis positions (mapped by service name)
         const prevConditions = [eq(analyses.repoId, id), notDiffAnalysis];
@@ -146,9 +160,17 @@ router.post(
           await db.delete(analyses).where(eq(analyses.id, da.id));
         }
 
+        // Check if cancelled before persisting
+        if (abortController.signal.aborted) {
+          await db.update(analyses).set({ status: 'cancelled' }).where(eq(analyses.id, runningAnalysis.id));
+          emitAnalysisCanceled(id);
+          unregisterAnalysis(id);
+          return;
+        }
+
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview } });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview, deterministicOnly }, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
@@ -322,10 +344,12 @@ router.post(
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
         tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
 
-        const provider = createLLMProvider();
-        provider.setAnalysisId(newAnalysisId);
-        provider.setRepoId(id);
-        provider.setAbortSignal(abortController.signal);
+        const provider = deterministicOnly ? undefined : createLLMProvider();
+        if (provider) {
+          provider.setAnalysisId(newAnalysisId);
+          provider.setRepoId(id);
+          provider.setAbortSignal(abortController.signal);
+        }
         let codeReviewPromise: Promise<void> | null = null;
         try {
           const pipelineResult = await runViolationPipeline({
@@ -342,7 +366,8 @@ router.post(
             previousDeterministicViolations,
             changedFileSet,
             tracker,
-            includeCodeReview,
+            includeCodeReview: deterministicOnly ? false : includeCodeReview,
+            deterministicOnly,
             provider,
             signal: abortController.signal,
           });
@@ -365,7 +390,7 @@ router.post(
 
         // Flush LLM usage records for flows 1+2
         try {
-          await provider.flushUsage();
+          await provider?.flushUsage();
         } catch (usageError) {
           console.error('[Usage] Failed to record usage:', usageError instanceof Error ? usageError.message : String(usageError));
         }
@@ -384,7 +409,7 @@ router.post(
           console.log(`[CodeReview] Started background code review for repo ${id}`);
           emitCodeReviewProgress(id, analysis.id);
           codeReviewPromise
-            .then(() => provider.flushUsage())
+            .then(() => provider?.flushUsage())
             .then(() => {
               console.log(`[CodeReview] Completed for repo ${id}`);
               emitCodeReviewReady(id, analysis.id);
@@ -405,11 +430,14 @@ router.post(
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           console.log(`[Analysis] Cancelled for repo ${id}`);
+          await db.update(analyses).set({ status: 'cancelled' }).where(eq(analyses.id, runningAnalysis.id));
+          emitAnalysisCanceled(id);
         } else {
           console.error(
             `[Analysis] Failed for repo ${id}:`,
             error instanceof Error ? error.message : String(error)
           );
+          await db.update(analyses).set({ status: 'failed' }).where(eq(analyses.id, runningAnalysis.id));
           emitAnalysisProgress(id, {
             step: 'error',
             percent: -1,
@@ -432,11 +460,12 @@ router.post(
       const id = req.params.id as string;
       const canceled = cancelAnalysis(id);
       if (canceled) {
-        emitAnalysisCanceled(id);
-        res.json({ message: 'Analysis cancelled' });
-      } else {
-        throw createAppError('No active analysis for this repo', 404);
+        // Set status to 'cancelling' — analysis:canceled event fires when it actually stops
+        await db.update(analyses)
+          .set({ status: 'cancelling' })
+          .where(and(eq(analyses.repoId, id), eq(analyses.status, 'running')));
       }
+      res.json({ message: canceled ? 'Analysis cancelling' : 'No active analysis' });
     } catch (error) {
       next(error);
     }
@@ -545,6 +574,7 @@ router.get(
       const analysisList = await db
         .select({
           id: analyses.id,
+          status: analyses.status,
           branch: analyses.branch,
           commitHash: analyses.commitHash,
           architecture: analyses.architecture,

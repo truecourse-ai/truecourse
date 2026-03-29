@@ -83,9 +83,10 @@ function buildActualViolations(
   const moduleV = checkModuleRules(
     split.modules, split.methods, deps, enabledDet,
     split.moduleLevelDependencies, undefined, analyses, undefined, entryPoints,
+    split.methodLevelDependencies,
   );
   const methodV = checkMethodRules(
-    split.methods, enabledDet, split.methodLevelDependencies, entryPoints,
+    split.methods, enabledDet, split.methodLevelDependencies, entryPoints, analyses,
   );
 
   return [...serviceV, ...moduleV, ...methodV]
