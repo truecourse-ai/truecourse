@@ -435,9 +435,8 @@ export function checkMethodRules(
         // Skip functions called directly within their own file
         if (calledInOwnFile.get(method.filePath)?.has(method.name)) continue
 
-        // Skip Python dunder methods called implicitly by the runtime
-        // (NOT __init__ — it should be tracked via constructor calls)
-        if (method.name.startsWith('__') && method.name.endsWith('__') && method.name !== '__init__') continue
+        // Skip methods called implicitly by the runtime (e.g., Python dunders, JS constructors)
+        if (method.isImplicitCall) continue
 
         violations.push({
           ruleKey: 'arch/dead-method',

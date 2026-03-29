@@ -71,7 +71,7 @@ export function extractModulesAndMethods(
 
       // Extract methods from class
       for (const method of namedMethods) {
-        methods.push(toMethodInfo(method, modName, serviceName, analysis.filePath))
+        methods.push(toMethodInfo(method, modName, serviceName, analysis.filePath, analysis.language))
       }
 
       addToFileModules(fileToModules, analysis.filePath, modName)
@@ -106,7 +106,7 @@ export function extractModulesAndMethods(
         })
 
         for (const fn of extraFunctions) {
-          methods.push(toMethodInfo(fn, modName, serviceName, analysis.filePath))
+          methods.push(toMethodInfo(fn, modName, serviceName, analysis.filePath, analysis.language))
         }
 
         addToFileModules(fileToModules, analysis.filePath, modName)
@@ -134,7 +134,7 @@ export function extractModulesAndMethods(
       })
 
       for (const fn of namedFunctions) {
-        methods.push(toMethodInfo(fn, modName, serviceName, analysis.filePath))
+        methods.push(toMethodInfo(fn, modName, serviceName, analysis.filePath, analysis.language))
       }
 
       addToFileModules(fileToModules, analysis.filePath, modName)
@@ -163,10 +163,17 @@ function toMethodInfo(
   moduleName: string,
   serviceName: string,
   filePath: string,
+  language: string,
 ): MethodInfo {
   const params = fn.params.map(p => p.type ? `${p.name}: ${p.type}` : p.name).join(', ')
   const ret = fn.returnType ? `: ${fn.returnType}` : ''
   const signature = `${fn.name}(${params})${ret}`
+
+  // Dunder methods in Python (except __init__) and JS/TS constructors are called implicitly
+  const isImplicitCall =
+    (language === 'python' && fn.name.startsWith('__') && fn.name.endsWith('__') && fn.name !== '__init__')
+    || (language !== 'python' && fn.name === 'constructor')
+    || undefined
 
   return {
     name: fn.name,
@@ -181,6 +188,7 @@ function toMethodInfo(
     lineCount: fn.lineCount,
     statementCount: fn.statementCount,
     maxNestingDepth: fn.maxNestingDepth,
+    isImplicitCall,
   }
 }
 
