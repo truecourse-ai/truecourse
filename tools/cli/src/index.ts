@@ -13,12 +13,13 @@ import { runList, runListDiff } from "./commands/list.js";
 import { registerServiceCommand } from "./commands/service/index.js";
 import { readConfig } from "./commands/helpers.js";
 import { getPlatform } from "./commands/service/platform.js";
+import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 
 const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.2.1")
+  .version("0.2.2")
   .description("TrueCourse CLI - Setup and manage your TrueCourse instance");
 
 program
@@ -102,6 +103,41 @@ program
     } else {
       p.log.info("TrueCourse is running in console mode.");
       p.log.info("Press Ctrl+C in the terminal where TrueCourse is running.");
+    }
+  });
+
+// Telemetry management
+const telemetryCmd = program
+  .command("telemetry")
+  .description("Manage anonymous usage telemetry");
+
+telemetryCmd
+  .command("enable")
+  .description("Enable anonymous usage telemetry")
+  .action(() => {
+    writeTelemetryConfig({ enabled: true });
+    p.log.success("Telemetry enabled. Thank you for helping improve TrueCourse!");
+  });
+
+telemetryCmd
+  .command("disable")
+  .description("Disable anonymous usage telemetry")
+  .action(() => {
+    writeTelemetryConfig({ enabled: false });
+    p.log.success("Telemetry disabled. No data will be collected.");
+  });
+
+telemetryCmd
+  .command("status")
+  .description("Show current telemetry status")
+  .action(() => {
+    const config = readTelemetryConfig();
+    if (process.env.CI === "true") {
+      p.log.info("Telemetry is automatically disabled in CI environments.");
+    } else if (config.enabled) {
+      p.log.info("Telemetry is enabled.");
+    } else {
+      p.log.info("Telemetry is disabled.");
     }
   });
 

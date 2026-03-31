@@ -9,11 +9,13 @@ import {
   renderDiffResultsSummary,
   openInBrowser,
 } from "./helpers.js";
+import { showFirstRunNotice } from "../telemetry.js";
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 export async function runAnalyze({ noAutostart = false, codeReview = false, deterministicOnly = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
+  showFirstRunNotice();
 
   if (noAutostart) {
     // Check if server is running without auto-starting
@@ -155,6 +157,7 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
 
 export async function runAnalyzeDiff({ noAutostart = false } = {}): Promise<void> {
   p.intro("Running diff check");
+  showFirstRunNotice();
 
   if (noAutostart) {
     const url = getServerUrl();
