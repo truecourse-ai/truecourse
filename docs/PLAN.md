@@ -1974,7 +1974,7 @@ Surface and generate Architectural Decision Records, linking them to the code st
 
 ---
 
-## Phase 20: Anonymous Usage Telemetry `STATUS: BACKLOG`
+## Phase 20: Anonymous Usage Telemetry `STATUS: DONE`
 
 Collect anonymous, privacy-safe usage metrics to understand real adoption — how many analyses run, which languages are used, and rough project sizes. No code, file paths, repo names, or violation details are ever sent.
 

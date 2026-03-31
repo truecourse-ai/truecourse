@@ -70,7 +70,7 @@ run(
     '--external:postgres',
     // drizzle-kit is dev only
     '--external:drizzle-kit',
-    '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
+    '--banner:js="import { createRequire } from \'node:module\'; import { fileURLToPath as __esm_fileURLToPath } from \'node:url\'; import { dirname as __esm_dirname } from \'node:path\'; const require = createRequire(import.meta.url); const __filename = __esm_fileURLToPath(import.meta.url); const __dirname = __esm_dirname(__filename);"',
   ].join(' '),
 );
 
@@ -137,6 +137,8 @@ const publishPkg = {
     'tree-sitter': analyzerPkg.dependencies['tree-sitter'],
     'tree-sitter-typescript': analyzerPkg.dependencies['tree-sitter-typescript'],
     'tree-sitter-javascript': analyzerPkg.dependencies['tree-sitter-javascript'],
+    'tree-sitter-python': analyzerPkg.dependencies['tree-sitter-python'],
+    'pyright': analyzerPkg.dependencies['pyright'],
     // Runtime deps — versions from source package.json files
     'embedded-postgres': serverPkg.dependencies['embedded-postgres'],
     'dotenv': serverPkg.dependencies['dotenv'],

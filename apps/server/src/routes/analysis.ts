@@ -47,6 +47,7 @@ import {
 } from '../services/violation-lifecycle.service.js';
 import { runViolationPipeline, runCodeReview } from '../services/violation-pipeline.service.js';
 import { createLLMProvider } from '../services/llm/provider.js';
+import { trackEvent, detectLanguages, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -113,6 +114,7 @@ router.post(
         ];
         const tracker = new StepTracker(id, trackerSteps);
 
+        const analysisStartTime = Date.now();
         tracker.start('parse', 'Starting analysis...');
 
         const result = await runAnalysis(repo.path, branch ?? undefined, (progress) => {
@@ -403,6 +405,15 @@ router.post(
         }
 
         emitAnalysisComplete(id, analysis.id);
+
+        // Anonymous usage telemetry
+        trackEvent('analyze', {
+          serviceCount: result.services.length,
+          fileCountRange: bucketFileCount(result.fileAnalyses?.length ?? 0),
+          languages: detectLanguages(result),
+          architecture: result.architecture,
+          durationRange: bucketDuration(Date.now() - analysisStartTime),
+        });
 
         // Fire-and-forget: background code review with deferred cleanup
         if (codeReviewPromise) {
@@ -1150,6 +1161,7 @@ router.post(
       const branch = (await git.branch()).current || undefined;
 
       // Phase 1: Run analysis on dirty tree + get changed files
+      const diffStartTime = Date.now();
       const diffTracker = new StepTracker(id, [
         { key: 'parse', label: 'Parsing working tree' },
         { key: 'detect', label: 'Deterministic checks' },
@@ -1359,6 +1371,14 @@ router.post(
       // Check if code review was run on this diff analysis
       const diffMeta = await db.select({ metadata: analyses.metadata }).from(analyses).where(eq(analyses.id, diffAnalysisId)).limit(1);
       const diffCodeReview = (diffMeta[0]?.metadata as Record<string, unknown> | null)?.codeReview === true;
+
+      // Anonymous usage telemetry
+      trackEvent('diff-check', {
+        changedFileCount: changedFiles.length,
+        newViolationCount: summary.newCount,
+        resolvedViolationCount: summary.resolvedCount,
+        durationRange: bucketDuration(Date.now() - diffStartTime),
+      });
 
       res.json({
         changedFiles,

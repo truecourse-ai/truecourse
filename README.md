@@ -178,6 +178,39 @@ All rules are visible in the **Rules** tab in the web UI. Custom rule generation
 | Rust | Planned |
 | PHP | Planned |
 
+## Telemetry
+
+TrueCourse collects anonymous usage data to help us understand adoption and improve the product. Telemetry is **enabled by default** and can be disabled at any time.
+
+### What is collected
+
+- Event type (`analyze` or `diff-check`)
+- Tool version
+- Languages detected (e.g., TypeScript, Python)
+- File count range (bucketed: 1-50, 50-200, etc.)
+- Service count
+- Analysis duration range (bucketed)
+- OS and architecture (e.g., `darwin-arm64`)
+- Random anonymous session ID (not tied to user identity)
+
+### What is NOT collected
+
+- Source code, file paths, repo names, or git URLs
+- Violation details, rule results, or LLM outputs
+- IP addresses, user identity, or machine hostname
+
+### Opt out
+
+```bash
+npx truecourse telemetry disable   # Disable telemetry
+npx truecourse telemetry enable    # Re-enable telemetry
+npx truecourse telemetry status    # Check current status
+```
+
+Telemetry is automatically disabled in CI environments (`CI=true`) and can also be disabled by setting `TRUECOURSE_TELEMETRY=0`.
+
+Data is sent to [PostHog](https://posthog.com) for aggregation.
+
 ## License
 
 MIT

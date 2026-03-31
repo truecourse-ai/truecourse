@@ -29,6 +29,7 @@
     "embedded-postgres": "18.3.0-beta.16",
     "express": "^4.21.0",
     "langfuse": "^3.32.0",
+    "posthog-node": "^4.0.0",
     "postgres": "^3.4.0",
     "simple-git": "^3.27.0",
     "socket.io": "^4.8.0",

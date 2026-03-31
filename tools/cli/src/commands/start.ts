@@ -83,10 +83,21 @@ function startConsoleMode(openBrowser: boolean): void {
     process.execPath,
     [serverPath],
     {
-      stdio: "inherit",
+      stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     }
   );
+
+  // Server output is piped so we can coordinate with the CLI spinner.
+  // Before printing each log line, clear the spinner's current line with
+  // ANSI escapes (\r = start of line, \x1b[K = clear to end of line).
+  // The spinner redraws itself on its next animation tick (~80ms).
+  const forwardOutput = (data: Buffer) => {
+    process.stdout.write("\r\x1b[K");  // clear spinner line
+    process.stderr.write(data);         // print server log
+  };
+  serverProcess.stdout?.on("data", forwardOutput);
+  serverProcess.stderr?.on("data", forwardOutput);
 
   serverProcess.on("error", (error) => {
     p.log.error(`Failed to start server: ${error.message}`);
