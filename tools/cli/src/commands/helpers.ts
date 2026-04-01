@@ -240,16 +240,29 @@ export function renderViolations(violations: Violation[]): void {
   console.log("");
 }
 
-export function renderViolationsSummary(violations: Violation[]): void {
-  if (violations.length === 0) {
+export function renderViolationsSummary(
+  violations: Violation[],
+  codeSummary?: { total: number; bySeverity: Record<string, number> },
+): void {
+  const codeTotal = codeSummary?.total ?? 0;
+  const totalCount = violations.length + codeTotal;
+
+  if (totalCount === 0) {
     p.log.info("No violations found.");
     return;
   }
 
+  // Merge severity counts from both architecture and code violations
   const counts: Record<string, number> = {};
   for (const v of violations) {
     const sev = v.severity.toLowerCase();
     counts[sev] = (counts[sev] || 0) + 1;
+  }
+  if (codeSummary) {
+    for (const [sev, c] of Object.entries(codeSummary.bySeverity)) {
+      const key = sev.toLowerCase();
+      counts[key] = (counts[key] || 0) + c;
+    }
   }
 
   const parts: string[] = [];
@@ -261,7 +274,10 @@ export function renderViolationsSummary(violations: Violation[]): void {
   }
 
   console.log("");
-  console.log(`  ${violations.length} violations (${parts.join(", ")})`);
+  console.log(`  ${totalCount} violations (${parts.join(", ")})`);
+  if (codeTotal > 0) {
+    console.log(`  ├ ${violations.length} architecture · ${codeTotal} code`);
+  }
   console.log("");
   p.log.info("Run `truecourse list` to see full details.");
 }

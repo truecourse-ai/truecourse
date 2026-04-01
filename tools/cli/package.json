@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "bin": {
     "truecourse": "./dist/index.js"
@@ -15,8 +15,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@clack/prompts": "^1.2.0",
     "commander": "^12.1.0",
-    "@clack/prompts": "^0.9.0",
     "dotenv": "^16.4.0",
     "socket.io-client": "^4.7.0"
   },
@@ -24,8 +24,8 @@
     "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
   }
 }
