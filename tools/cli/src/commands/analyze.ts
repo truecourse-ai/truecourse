@@ -118,15 +118,22 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
 
     spinner.stop("Analysis complete");
 
-    // Fetch violations
-    const res = await fetch(`${serverUrl}/api/repos/${repo.id}/violations`);
-    if (!res.ok) {
-      p.log.error(`Failed to fetch violations: ${res.status}`);
+    // Fetch architecture violations and code-level violations in parallel
+    const [archRes, codeRes] = await Promise.all([
+      fetch(`${serverUrl}/api/repos/${repo.id}/violations`),
+      fetch(`${serverUrl}/api/repos/${repo.id}/code-violations/summary`),
+    ]);
+
+    if (!archRes.ok) {
+      p.log.error(`Failed to fetch violations: ${archRes.status}`);
       process.exit(1);
     }
 
-    const violations = (await res.json()) as Violation[];
-    renderViolationsSummary(violations);
+    const violations = (await archRes.json()) as Violation[];
+    const codeSummary = codeRes.ok
+      ? (await codeRes.json()) as { total: number; bySeverity: Record<string, number> }
+      : undefined;
+    renderViolationsSummary(violations, codeSummary);
 
     if (!deterministicOnly) {
       p.log.info("Code review running in background — results will appear in the dashboard");
