@@ -15,6 +15,15 @@ const MIGRATIONS_DIR = path.join(
 
 let pg: EmbeddedPostgres | null = null;
 
+// Capture listeners before embedded-postgres registers its AsyncExitHook.
+// These hooks prevent vitest from exiting cleanly and cause it to always
+// exit 0 regardless of test results.
+const HOOK_EVENTS = ['exit', 'beforeExit', 'SIGINT', 'SIGTERM', 'SIGHUP'];
+const listenersBefore = new Map<string, Function[]>();
+for (const event of HOOK_EVENTS) {
+  listenersBefore.set(event, [...(process as NodeJS.EventEmitter).listeners(event)]);
+}
+
 /**
  * Vitest global setup — starts embedded PostgreSQL and runs migrations.
  * Runs once before all test files.
@@ -65,6 +74,18 @@ export async function teardown() {
       await pg.stop();
     } catch {
       // Ignore stop errors
+    }
+    pg = null;
+  }
+
+  // Remove AsyncExitHook listeners that embedded-postgres registered at
+  // import time so vitest can exit with the correct code.
+  const emitter = process as NodeJS.EventEmitter;
+  for (const [event, before] of listenersBefore) {
+    for (const listener of emitter.listeners(event)) {
+      if (!before.includes(listener)) {
+        emitter.removeListener(event, listener as (...args: unknown[]) => void);
+      }
     }
   }
 }

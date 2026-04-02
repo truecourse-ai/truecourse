@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "bin": {
     "truecourse": "./dist/index.js"
@@ -24,7 +24,7 @@
     "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.15",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
