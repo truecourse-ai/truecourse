@@ -14,6 +14,9 @@ importers:
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
       '@types/supertest':
         specifier: ^7.2.0
         version: 7.2.0
@@ -315,7 +318,7 @@ importers:
         version: 1.0.0-beta.8
     devDependencies:
       '@types/node':
-        specifier: ^22.0.0
+        specifier: ^22.19.15
         version: 22.19.15
       tsx:
         specifier: ^4.19.0

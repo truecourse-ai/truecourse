@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "private": true,
   "scripts": {
     "dev": "turbo dev",
@@ -19,15 +19,16 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
     "@types/supertest": "^7.2.0",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.38.0",
     "embedded-postgres": "18.3.0-beta.16",
+    "esbuild": "^0.24.0",
     "express": "^4.22.1",
     "postgres": "^3.4.0",
     "simple-git": "^3.27.0",
     "supertest": "^7.2.2",
-    "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0",

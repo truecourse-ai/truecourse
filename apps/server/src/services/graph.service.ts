@@ -464,7 +464,7 @@ function computeLayerContentSize(
   }
 
   // Method level: modules sized by their method count
-  let maxModWidth = 0;
+  const moduleWidths: number[] = [];
   const moduleHeights: number[] = [];
 
   for (const mod of layerModules) {
@@ -479,12 +479,22 @@ function computeLayerContentSize(
     );
     const modHeight = MODULE_NODE_HEIGHT + mthRows * METHOD_NODE_HEIGHT + (mthRows - 1) * METHOD_GAP + 8;
 
-    if (modWidth > maxModWidth) maxModWidth = modWidth;
+    moduleWidths.push(modWidth);
     moduleHeights.push(modHeight);
   }
 
   const cols = Math.max(Math.ceil(layerModules.length / MAX_PER_COL), 1);
-  const width = cols * maxModWidth + (cols - 1) * MOD_COL_GAP;
+
+  // Per-column max width for accurate layer sizing
+  const colMaxWidths: number[] = new Array(cols).fill(MIN_MODULE_WIDTH);
+  for (let i = 0; i < moduleWidths.length; i++) {
+    const c = Math.floor(i / MAX_PER_COL);
+    if (moduleWidths[i] > colMaxWidths[c]) colMaxWidths[c] = moduleWidths[i];
+  }
+  let width = 0;
+  for (let c = 0; c < cols; c++) {
+    width += colMaxWidths[c] + (c > 0 ? MOD_COL_GAP : 0);
+  }
 
   // Height = max column height
   let maxColHeight = 0;
@@ -512,6 +522,27 @@ function placeModulesInGrid(
   layerWidth: number,
 ) {
   const cols = Math.max(Math.ceil(layerModules.length / MAX_PER_COL), 1);
+
+  // Pre-compute per-column max width and cumulative X offsets (method level)
+  const colMaxWidths: number[] = new Array(cols).fill(MIN_MODULE_WIDTH);
+  if (level === 'method') {
+    for (let i = 0; i < layerModules.length; i++) {
+      const c = Math.floor(i / MAX_PER_COL);
+      const mths = methodsByModule.get(layerModules[i].id) || [];
+      const mthCount = mths.length || 1;
+      const mthCols = Math.max(Math.ceil(mthCount / MAX_PER_COL), 1);
+      const w = Math.max(
+        MOD_PAD_X * 2 + mthCols * METHOD_NODE_WIDTH + (mthCols - 1) * METHOD_COL_GAP,
+        MIN_MODULE_WIDTH,
+      );
+      if (w > colMaxWidths[c]) colMaxWidths[c] = w;
+    }
+  }
+  // Cumulative X offset for each column
+  const colX: number[] = [LAYER_PAD_X];
+  for (let c = 1; c < cols; c++) {
+    colX[c] = colX[c - 1] + colMaxWidths[c - 1] + MOD_COL_GAP;
+  }
 
   for (let i = 0; i < layerModules.length; i++) {
     const mod = layerModules[i];
@@ -567,7 +598,7 @@ function placeModulesInGrid(
         yOffset += MODULE_NODE_HEIGHT + prevRows * METHOD_NODE_HEIGHT + (prevRows - 1) * METHOD_GAP + 8 + MODULE_GAP;
       }
 
-      const x = LAYER_PAD_X + col * (modWidth + MOD_COL_GAP);
+      const x = colX[col];
 
       nodes.push({
         id: mod.id,

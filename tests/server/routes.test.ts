@@ -19,6 +19,16 @@ vi.mock('../../apps/server/src/socket/handlers', () => ({
   emitAnalysisComplete: vi.fn(),
   emitViolationsReady: vi.fn(),
   emitFilesChanged: vi.fn(),
+  emitAnalysisCanceled: vi.fn(),
+  emitCodeReviewProgress: vi.fn(),
+  emitCodeReviewReady: vi.fn(),
+  StepTracker: class StepTracker {
+    constructor() {}
+    start() {}
+    done() {}
+    error() {}
+    detail() {}
+  },
 }));
 
 // Import routes AFTER mocks are set up
@@ -267,21 +277,19 @@ describe('API routes (integration)', () => {
     expect(res.body.message).toBe('Analysis started');
     expect(res.body.repoId).toBe(createdRepoId);
 
-    // Wait for background analysis to complete by polling the database
+    // Wait for background analysis to fully complete.
+    // Poll until emitAnalysisComplete has been called (mocked).
+    const { emitAnalysisComplete } = await import('../../apps/server/src/socket/handlers');
     const maxWait = 60_000;
-    const pollInterval = 1_000;
+    const pollInterval = 500;
     const start = Date.now();
 
     while (Date.now() - start < maxWait) {
-      const analysisRows = await db
-        .select()
-        .from(schema.analyses)
-        .where(eq(schema.analyses.repoId, createdRepoId));
-
-      if (analysisRows.length > 0) {
+      if ((emitAnalysisComplete as any).mock.calls.length > 0) {
+        // Allow DB writes to flush before subsequent tests read
+        await new Promise((r) => setTimeout(r, 200));
         break;
       }
-
       await new Promise((r) => setTimeout(r, pollInterval));
     }
 

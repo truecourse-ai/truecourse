@@ -123,8 +123,12 @@ describe('SupportedLanguageSchema', () => {
     expect(SupportedLanguageSchema.safeParse('javascript').success).toBe(true);
   });
 
-  it('rejects "python"', () => {
-    expect(SupportedLanguageSchema.safeParse('python').success).toBe(false);
+  it('accepts "python"', () => {
+    expect(SupportedLanguageSchema.safeParse('python').success).toBe(true);
+  });
+
+  it('rejects "ruby"', () => {
+    expect(SupportedLanguageSchema.safeParse('ruby').success).toBe(false);
   });
 });
 
