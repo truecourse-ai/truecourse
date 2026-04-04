@@ -1,6 +1,49 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { getIO } from './index.js';
 
+// Domain priority order
+export const DOMAIN_ORDER = ['security', 'bugs', 'architecture', 'performance', 'reliability', 'code-quality', 'database', 'style'] as const;
+
+// Domains that have LLM rules
+export const LLM_DOMAINS = ['security', 'bugs', 'architecture', 'code-quality', 'database'] as const;
+
+// Human-readable domain labels
+export const DOMAIN_LABELS: Record<string, string> = {
+  'security': 'Security',
+  'bugs': 'Bugs',
+  'architecture': 'Architecture',
+  'performance': 'Performance',
+  'reliability': 'Reliability',
+  'code-quality': 'Code quality',
+  'database': 'Database',
+  'style': 'Style',
+};
+
+export function buildAnalysisSteps(
+  enabledCategories?: string[],
+  enableLlmRules?: boolean,
+): { key: string; label: string }[] {
+  const steps: { key: string; label: string }[] = [
+    { key: 'parse', label: 'Parsing repository' },
+  ];
+
+  const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories?.length || enabledCategories.includes(d));
+
+  for (const domain of activeDomains) {
+    steps.push({ key: `det-${domain}`, label: `${DOMAIN_LABELS[domain]} checks` });
+  }
+
+  if (enableLlmRules !== false) {
+    const llmDomains = LLM_DOMAINS.filter(d => activeDomains.includes(d));
+    for (const domain of llmDomains) {
+      steps.push({ key: `llm-${domain}`, label: `${DOMAIN_LABELS[domain]} analysis (LLM)` });
+    }
+  }
+
+  steps.push({ key: 'persist', label: 'Saving results' });
+  return steps;
+}
+
 // Step status for checklist UI
 export type StepStatus = 'pending' | 'active' | 'done' | 'error';
 export interface AnalysisStep {

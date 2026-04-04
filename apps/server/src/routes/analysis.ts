@@ -32,6 +32,7 @@ import {
   emitViolationsReady,
   emitAnalysisCanceled,
   StepTracker,
+  buildAnalysisSteps,
 } from '../socket/handlers.js';
 import {
   registerAnalysis,
@@ -100,12 +101,12 @@ router.post(
 
       // Run analysis in the background
       try {
-        const trackerSteps = [
-          { key: 'parse', label: 'Parsing repository' },
-          { key: 'detect', label: 'Deterministic checks' },
-          { key: 'architecture', label: 'Architecture analysis' },
-          { key: 'persist', label: 'Saving results' },
-        ];
+        // Resolve effective enabled categories
+        const effectiveCategories = globalEnabledCategories?.length
+          ? globalEnabledCategories
+          : (repo.enabledCategories ?? undefined);
+
+        const trackerSteps = buildAnalysisSteps(effectiveCategories, enableLlmRules);
         const tracker = new StepTracker(id, trackerSteps);
 
         const analysisStartTime = Date.now();
@@ -361,6 +362,7 @@ router.post(
             previousDeterministicViolations,
             changedFileSet,
             tracker,
+            enabledCategories: effectiveCategories,
             enableLlmRules,
             provider,
             signal: abortController.signal,

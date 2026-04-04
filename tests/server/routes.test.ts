@@ -14,22 +14,26 @@ import * as schema from '../../apps/server/src/db/schema';
 // Mock the socket handlers so analysis doesn't crash on getIO()
 // ---------------------------------------------------------------------------
 
-vi.mock('../../apps/server/src/socket/handlers', () => ({
-  emitAnalysisProgress: vi.fn(),
-  emitAnalysisComplete: vi.fn(),
-  emitViolationsReady: vi.fn(),
-  emitFilesChanged: vi.fn(),
-  emitAnalysisCanceled: vi.fn(),
-  emitCodeReviewProgress: vi.fn(),
-  emitCodeReviewReady: vi.fn(),
-  StepTracker: class StepTracker {
-    constructor() {}
-    start() {}
-    done() {}
-    error() {}
-    detail() {}
-  },
-}));
+vi.mock('../../apps/server/src/socket/handlers', async () => {
+  const actual = await vi.importActual('../../apps/server/src/socket/handlers');
+  return {
+    ...actual,
+    emitAnalysisProgress: vi.fn(),
+    emitAnalysisComplete: vi.fn(),
+    emitViolationsReady: vi.fn(),
+    emitFilesChanged: vi.fn(),
+    emitAnalysisCanceled: vi.fn(),
+    emitCodeReviewProgress: vi.fn(),
+    emitCodeReviewReady: vi.fn(),
+    StepTracker: class StepTracker {
+      constructor() {}
+      start() {}
+      done() {}
+      error() {}
+      detail() {}
+    },
+  };
+});
 
 // Import routes AFTER mocks are set up
 import { errorHandler } from '../../apps/server/src/middleware/error';

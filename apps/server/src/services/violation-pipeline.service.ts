@@ -13,6 +13,7 @@ import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer'
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
+import { DOMAIN_ORDER, DOMAIN_LABELS, LLM_DOMAINS } from '../socket/handlers.js';
 import { getEnabledRules } from './rules.service.js';
 import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
@@ -197,14 +198,35 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     .filter((r) => enableLlmRules !== false || r.type !== 'llm');
 
   throwIfAborted(signal);
-  tracker?.start('detect', 'Running deterministic checks...');
   onProgress?.({ step: 'analyzing', percent: 80, detail: 'Running deterministic checks...' });
 
-  // 2. Run all deterministic checks (service, module, method)
+  // 2. Run deterministic checks per domain with individual tracker steps
   const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
-  const serviceViolationResults: ServiceViolation[] = runDeterministicServiceChecks(result, enabledDeterministic);
-  const moduleViolationResults: ModuleViolation[] = runDeterministicModuleChecks(result, enabledDeterministic);
-  const methodViolationResults: ModuleViolation[] = runDeterministicMethodChecks(result, enabledDeterministic);
+  const serviceViolationResults: ServiceViolation[] = [];
+  const moduleViolationResults: ModuleViolation[] = [];
+  const methodViolationResults: ModuleViolation[] = [];
+
+  for (const domain of DOMAIN_ORDER) {
+    const stepKey = `det-${domain}`;
+    const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
+    if (domainRules.length === 0) {
+      tracker?.done(stepKey); // skip silently
+      continue;
+    }
+
+    tracker?.start(stepKey);
+
+    if (domain === 'architecture') {
+      serviceViolationResults.push(...runDeterministicServiceChecks(result, domainRules));
+      moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
+      methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
+      const archCount = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
+      tracker?.done(stepKey, archCount > 0 ? `${archCount} violations` : 'Clean');
+    } else {
+      // Non-architecture domains: their code-level checks run in the file scanning loop below.
+      // We'll mark them done after the scan completes.
+    }
+  }
 
   // 3. Persist deterministic violations to deterministic_violations table
   const detViolationIdMap = new Map<string, string>();
@@ -256,7 +278,14 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     : (result.fileAnalyses || []).map((fa) => ({ filePath: fa.filePath, resolve: !path.isAbsolute(fa.filePath) }));
 
   if ((enabledCodeRules.length > 0 || enabledLlmCodeRules.length > 0) && filesToScan.length > 0) {
-    tracker?.detail('detect', 'Running code checks...');
+    // Start code-level domain steps (they'll be completed after the scan loop)
+    for (const domain of DOMAIN_ORDER) {
+      if (domain === 'architecture') continue;
+      const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
+      if (domainRules.length > 0) {
+        tracker?.start(`det-${domain}`);
+      }
+    }
     onProgress?.({ step: 'analyzing', percent: 82, detail: 'Running code checks...' });
 
     for (const { filePath, resolve } of filesToScan) {
@@ -282,8 +311,22 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   throwIfAborted(signal);
+
+  // Mark non-architecture domain steps done with per-domain violation counts
+  const codeViolationsByDomain = new Map<string, number>();
+  for (const v of allCodeViolations) {
+    const domain = v.ruleKey.split('/')[0];
+    codeViolationsByDomain.set(domain, (codeViolationsByDomain.get(domain) ?? 0) + 1);
+  }
+
+  for (const domain of DOMAIN_ORDER) {
+    if (domain === 'architecture') continue; // already done above
+    const stepKey = `det-${domain}`;
+    const count = codeViolationsByDomain.get(domain) ?? 0;
+    tracker?.done(stepKey, count > 0 ? `${count} violations` : 'Clean');
+  }
+
   const totalDetections = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
-  tracker?.done('detect', `${totalDetections} detections found`);
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 
   // 5. Build LLM code violation batches
@@ -425,7 +468,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allNewViolations: DiffViolationItem[] = [];
   const allResolvedViolationIds: string[] = [];
 
-  tracker?.start('architecture');
+  // Start LLM domain steps
+  if (enableLlmRules !== false) {
+    for (const domain of LLM_DOMAINS) {
+      const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories || enabledCategories.includes(d));
+      if (activeDomains.includes(domain)) {
+        tracker?.start(`llm-${domain}`);
+      }
+    }
+  }
 
   // Deterministic enrichment promise
   const deterministicPromise = (async () => {
@@ -683,7 +734,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     if (hasLlmOnlyExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
         llmStepCount++;
-        tracker?.detail('architecture', step);
+        tracker?.detail('llm-architecture', step);
         emitProgress(87 + llmStepCount * 2, step);
       }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
@@ -713,7 +764,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     } else {
       const archResult = await generateViolations(violationInput, (step) => {
         llmStepCount++;
-        tracker?.detail('architecture', step);
+        tracker?.detail('llm-architecture', step);
         emitProgress(87 + llmStepCount * 2, step);
       }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
@@ -757,7 +808,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       }
     }
 
-    tracker?.done('architecture');
+    // Mark all LLM domain steps done
+    for (const domain of LLM_DOMAINS) {
+      tracker?.done(`llm-${domain}`);
+    }
   })();
 
   // codePromise runs in background — no progress emit here to avoid
@@ -774,9 +828,12 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (llmResult.status === 'rejected') {
     const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
     log(`[Violations] LLM rule analysis failed: ${msg}`);
-    tracker?.error('architecture', `Failed: ${msg.slice(0, 80)}`);
+    // Mark all LLM steps as errored
+    for (const domain of LLM_DOMAINS) {
+      tracker?.error(`llm-${domain}`, `Failed: ${msg.slice(0, 80)}`);
+    }
   }
-  // Architecture step is marked done inside the llmRulePromise itself
+  // LLM steps are marked done inside the llmRulePromise itself
 
   throwIfAborted(signal);
   tracker?.start('persist', 'Saving results...');
