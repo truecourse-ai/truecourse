@@ -220,11 +220,15 @@ export async function runSetup(): Promise<void> {
   const categories = await p.multiselect({
     message: "Which rule categories would you like to enable?",
     options: [
-      { value: "architecture" as const, label: "Architecture rules (circular deps, god services, layer violations)", hint: "recommended" },
-      { value: "code" as const, label: "Code rules (code quality & security)", hint: "recommended" },
-      { value: "database" as const, label: "Database rules (schema analysis)", hint: "recommended" },
+      { value: "architecture" as const, label: "Architecture (service boundaries, layers, coupling)", hint: "recommended" },
+      { value: "security" as const, label: "Security (secrets, injection, crypto, auth)", hint: "recommended" },
+      { value: "bugs" as const, label: "Bugs (runtime errors, null derefs, type issues)", hint: "recommended" },
+      { value: "code-quality" as const, label: "Code Quality (complexity, dead code, smells)", hint: "recommended" },
+      { value: "performance" as const, label: "Performance (N+1 queries, memory leaks, inefficient patterns)", hint: "recommended" },
+      { value: "reliability" as const, label: "Reliability (error handling, timeouts, retries)", hint: "recommended" },
+      { value: "database" as const, label: "Database (schema, indexes, constraints)", hint: "recommended" },
     ],
-    initialValues: ["architecture", "code", "database"],
+    initialValues: ["architecture", "security", "bugs", "code-quality", "performance", "reliability", "database"],
     required: true,
   });
 
@@ -233,8 +237,19 @@ export async function runSetup(): Promise<void> {
     process.exit(0);
   }
 
+  // LLM rules toggle
+  const enableLlm = await p.confirm({
+    message: "Enable LLM-powered rules? (costs tokens, slower but deeper analysis)",
+    initialValue: true,
+  });
+
+  if (p.isCancel(enableLlm)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
   const { writeConfig } = await import("./helpers.js");
-  writeConfig({ runMode, enabledCategories: categories as string[] });
+  writeConfig({ runMode, enabledCategories: categories as string[], enableLlmRules: enableLlm });
 
   if (runMode === "service") {
     p.log.info("Background service selected. Run `truecourse start` to install and start the service.");

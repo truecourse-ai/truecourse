@@ -2787,7 +2787,7 @@ Merged into **Phase 30.7: Linter Config Import**. Linter migration is the onboar
 
 ---
 
-## Phase 28: Git Hooks `STATUS: TODO`
+## Phase 28: Git Hooks `STATUS: DONE`
 
 Pre-commit analysis to prevent bad code from being committed. Focus on high-accuracy, fast checks — only block on things that are reliably wrong (secrets, critical violations).
 

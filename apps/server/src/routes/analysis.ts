@@ -40,7 +40,7 @@ import {
   unregisterAnalysis,
   cancelAnalysis,
 } from '../services/analysis-registry.js';
-import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
+import { buildUnifiedGraph, buildAllLevelGraph, type GraphLevel } from '../services/graph.service.js';
 import {
   loadActiveViolations,
   loadActiveCodeViolations,
@@ -65,7 +65,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
-      const { codeReview: includeCodeReview, enabledCategories: globalEnabledCategories } = parsed.data;
+      const { codeReview: includeCodeReview, deterministicOnly } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -76,18 +76,6 @@ router.post(
       if (!repo) {
         throw createAppError('Repo not found', 404);
       }
-
-      // Resolve enabled categories: per-repo override > global default from CLI
-      // User-facing names → internal rule categories
-      const categoryMapping: Record<string, string[]> = {
-        architecture: ['service', 'module', 'method'],
-        code: ['code'],
-        database: ['database'],
-      };
-      const resolvedUserCategories = repo.enabledCategories ?? (globalEnabledCategories.length > 0 ? globalEnabledCategories : undefined);
-      const enabledCategories: string[] | undefined = resolvedUserCategories
-        ? resolvedUserCategories.flatMap((c: string) => categoryMapping[c] ?? [c])
-        : undefined;
 
       // Detect current branch and commit hash (never checkout — analyze what's on disk)
       const git = await getGit(repo.path);
@@ -117,9 +105,12 @@ router.post(
         const trackerSteps = [
           { key: 'parse', label: 'Parsing repository' },
           { key: 'detect', label: 'Deterministic checks' },
-          { key: 'architecture', label: 'Architecture analysis' },
+          ...(!deterministicOnly ? [
+            { key: 'enrich', label: 'Enriching detections' },
+            { key: 'architecture', label: 'Architecture analysis' },
+          ] : []),
           { key: 'persist', label: 'Saving results' },
-          ...(includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
+          ...(!deterministicOnly && includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
         ];
         const tracker = new StepTracker(id, trackerSteps);
 
@@ -181,7 +172,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview }, existingAnalysisId: runningAnalysis.id });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview, deterministicOnly }, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
@@ -355,10 +346,12 @@ router.post(
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
         tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
 
-        const provider = createLLMProvider();
-        provider.setAnalysisId(newAnalysisId);
-        provider.setRepoId(id);
-        provider.setAbortSignal(abortController.signal);
+        const provider = deterministicOnly ? undefined : createLLMProvider();
+        if (provider) {
+          provider.setAnalysisId(newAnalysisId);
+          provider.setRepoId(id);
+          provider.setAbortSignal(abortController.signal);
+        }
         let codeReviewPromise: Promise<void> | null = null;
         try {
           const pipelineResult = await runViolationPipeline({
@@ -375,8 +368,8 @@ router.post(
             previousDeterministicViolations,
             changedFileSet,
             tracker,
-            includeCodeReview,
-            enabledCategories,
+            includeCodeReview: deterministicOnly ? false : includeCodeReview,
+            deterministicOnly,
             provider,
             signal: abortController.signal,
           });
@@ -733,7 +726,6 @@ router.get(
       }
 
       const level = (req.query.level as string) || 'services';
-      const graphLevel = level.replace(/s$/, '') as GraphLevel;
 
       // Fetch all data in parallel
       const [
@@ -771,7 +763,7 @@ router.get(
         evidence: l.evidence as string[],
       }));
 
-      const graphData = buildUnifiedGraph(graphLevel, {
+      const unifiedInput = {
         services: analysisServices,
         serviceDeps: analysisDeps,
         layers: layerData,
@@ -782,7 +774,18 @@ router.get(
         databases: analysisDatabases,
         dbConnections: analysisDbConnections,
         deterministicViolations: analysisDetViolations,
-      });
+      };
+
+      // level=all returns the full hierarchy for semantic zoom
+      if (level === 'all') {
+        const allData = buildAllLevelGraph(unifiedInput);
+        res.set('Cache-Control', 'no-store');
+        res.json(allData);
+        return;
+      }
+
+      const graphLevel = level.replace(/s$/, '') as GraphLevel;
+      const graphData = buildUnifiedGraph(graphLevel, unifiedInput);
 
       // Include saved node positions if any (namespaced by level)
       const allPositions = analysis.nodePositions as Record<string, unknown> | null;

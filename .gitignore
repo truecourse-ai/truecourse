@@ -13,3 +13,4 @@ tsconfig.tsbuildinfo
 assets/generate-deck.js
 assets/*.pptx
 assets/*.pdf
+.claude/worktrees/

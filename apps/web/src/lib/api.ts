@@ -167,10 +167,10 @@ export function deleteRepo(id: string): Promise<void> {
   return fetchApi<void>(`/api/repos/${id}`, { method: 'DELETE' });
 }
 
-export function analyzeRepo(id: string, options?: { branch?: string; codeReview?: boolean }): Promise<{ jobId: string }> {
+export function analyzeRepo(id: string, options?: { branch?: string; codeReview?: boolean; deterministicOnly?: boolean }): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>(`/api/repos/${id}/analyze`, {
     method: 'POST',
-    body: JSON.stringify({ branch: options?.branch, codeReview: options?.codeReview ?? false }),
+    body: JSON.stringify({ branch: options?.branch, codeReview: options?.codeReview ?? false, deterministicOnly: options?.deterministicOnly ?? false }),
   });
 }
 
@@ -238,6 +238,93 @@ export function getGraph(
   if (options?.analysisId) params.set('analysisId', options.analysisId);
   const qs = params.toString();
   return fetchApi<GraphResponse>(`/api/repos/${repoId}/graph${qs ? `?${qs}` : ''}`);
+}
+
+// All-level response for semantic zoom
+export type AllLevelGraphResponse = {
+  services: Array<{
+    id: string;
+    name: string;
+    type: string;
+    framework: string | null;
+    fileCount: number;
+    description: string | null;
+    rootPath: string;
+    layers: string[];
+  }>;
+  layers: Array<{
+    id: string;
+    serviceId: string;
+    layer: string;
+    fileCount: number;
+    filePaths: string[];
+    layerColor: string;
+  }>;
+  directories: Array<{
+    id: string;
+    serviceId: string;
+    layerId: string;
+    dirPath: string;
+    moduleCount: number;
+    violationCount: number;
+  }>;
+  modules: Array<{
+    id: string;
+    serviceId: string;
+    layerId: string;
+    directoryId: string;
+    name: string;
+    kind: string;
+    filePath: string;
+    methodCount: number;
+    layerColor: string;
+  }>;
+  methods: Array<{
+    id: string;
+    moduleId: string;
+    name: string;
+    signature: string;
+    isAsync: boolean;
+    isExported: boolean;
+    lineCount: number | null;
+  }>;
+  edges: {
+    service: Array<{ id: string; source: string; target: string; count: number; type: string | null }>;
+    module: Array<{ id: string; source: string; target: string; count: number }>;
+    method: Array<{ id: string; source: string; target: string; count: number }>;
+  };
+  databases: Array<{
+    id: string;
+    name: string;
+    type: string;
+    driver: string;
+    tableCount: number;
+  }>;
+  dbConnections: Array<{
+    serviceId: string;
+    databaseId: string;
+    driver: string;
+  }>;
+  violations: Array<{
+    id: string;
+    ruleKey: string;
+    category: string;
+    title: string;
+    severity: string;
+    serviceName: string;
+    moduleName: string | null;
+  }>;
+};
+
+export function getGraphAll(
+  repoId: string,
+  options?: { branch?: string; analysisId?: string },
+): Promise<AllLevelGraphResponse> {
+  const params = new URLSearchParams();
+  params.set('level', 'all');
+  if (options?.branch) params.set('branch', options.branch);
+  if (options?.analysisId) params.set('analysisId', options.analysisId);
+  return fetchApi<AllLevelGraphResponse>(`/api/repos/${repoId}/graph?${params.toString()}`);
 }
 
 export function saveGraphPositions(

@@ -303,12 +303,18 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
+      '@truecourse/analyzer':
+        specifier: workspace:*
+        version: link:../../packages/analyzer
       commander:
         specifier: ^12.1.0
         version: 12.1.0
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
       socket.io-client:
         specifier: ^4.7.0
         version: 4.8.3
@@ -317,6 +323,9 @@ importers:
         specifier: ^1.0.0-beta.8
         version: 1.0.0-beta.8
     devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       '@types/node':
         specifier: ^22.19.15
         version: 22.19.15
@@ -2059,6 +2068,9 @@ packages:
 
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
+
+  '@types/js-yaml@4.0.9':
+    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
 
   '@types/mdast@4.0.4':
     resolution: {integrity: sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA==}
@@ -6135,6 +6147,8 @@ snapshots:
       '@types/unist': 3.0.3
 
   '@types/http-errors@2.0.5': {}
+
+  '@types/js-yaml@4.0.9': {}
 
   '@types/mdast@4.0.4':
     dependencies:

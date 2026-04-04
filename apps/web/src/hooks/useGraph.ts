@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
+import type { AllLevelGraphResponse } from '@/lib/api';
 import type { ServiceNodeData, DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
 
@@ -8,6 +9,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [savedCollapsedIds, setSavedCollapsedIds] = useState<string[] | undefined>(undefined);
+  const [allLevelData, setAllLevelData] = useState<AllLevelGraphResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -203,9 +205,23 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
     }
   }, [repoId, branch, level, analysisId]);
 
+  const fetchAllLevels = useCallback(async () => {
+    if (!repoId) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await api.getGraphAll(repoId, { branch, analysisId });
+      setAllLevelData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch graph');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [repoId, branch, analysisId]);
+
   useEffect(() => {
     fetchGraph();
   }, [fetchGraph]);
 
-  return { nodes, edges, savedCollapsedIds, isLoading, error, refetch: fetchGraph, setNodes, setEdges };
+  return { nodes, edges, savedCollapsedIds, allLevelData, isLoading, error, refetch: fetchGraph, refetchAll: fetchAllLevels, setNodes, setEdges };
 }

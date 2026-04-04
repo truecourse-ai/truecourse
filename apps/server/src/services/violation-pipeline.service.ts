@@ -104,6 +104,8 @@ export interface ViolationPipelineInput {
   includeCodeReview?: boolean;
   /** Rule categories to include (undefined = all) */
   enabledCategories?: string[];
+  /** Enable LLM-powered rules (default true) */
+  enableLlmRules?: boolean;
   /** Optional pre-created provider (for usage tracking) */
   provider?: LLMProvider;
   /** Abort signal for cancellation */
@@ -190,12 +192,14 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     provider: externalProvider,
     includeCodeReview,
     enabledCategories,
+    enableLlmRules,
     signal,
   } = input;
 
-  // 1. Load rules (filter to enabled categories if specified)
+  // 1. Load rules (filter to enabled categories, and filter out LLM rules if disabled)
   const allRules = (await getEnabledRules())
-    .filter((r) => !enabledCategories || enabledCategories.includes(r.category));
+    .filter((r) => !enabledCategories || enabledCategories.includes(r.category))
+    .filter((r) => enableLlmRules !== false || r.type !== 'llm');
 
   throwIfAborted(signal);
   tracker?.start('detect', 'Running deterministic checks...');

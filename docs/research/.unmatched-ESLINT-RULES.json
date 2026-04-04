@@ -1,0 +1,494 @@
+[
+  {
+    "id": "no-undef",
+    "name": "no-undef",
+    "description": "Disallow the use of undeclared variables unless mentioned in `/*global */` comments",
+    "section": "Possible Problems"
+  },
+  {
+    "id": "arrow-body-style",
+    "name": "arrow-body-style",
+    "description": "Require braces around arrow function bodies",
+    "section": "Suggestions"
+  },
+  {
+    "id": "camelcase",
+    "name": "camelcase",
+    "description": "Enforce camelcase naming convention",
+    "section": "Suggestions"
+  },
+  {
+    "id": "capitalized-comments",
+    "name": "capitalized-comments",
+    "description": "Enforce or disallow capitalization of the first letter of a comment",
+    "section": "Suggestions"
+  },
+  {
+    "id": "consistent-this",
+    "name": "consistent-this",
+    "description": "Enforce consistent naming when capturing the current execution context",
+    "section": "Suggestions"
+  },
+  {
+    "id": "curly",
+    "name": "curly",
+    "description": "Enforce consistent brace style for all control statements",
+    "section": "Suggestions"
+  },
+  {
+    "id": "default-case",
+    "name": "default-case",
+    "description": "Require `default` cases in `switch` statements",
+    "section": "Suggestions"
+  },
+  {
+    "id": "dot-notation",
+    "name": "dot-notation",
+    "description": "Enforce dot notation whenever possible",
+    "section": "Suggestions"
+  },
+  {
+    "id": "func-name-matching",
+    "name": "func-name-matching",
+    "description": "Require function names to match the name of the variable or property to which they are assigned",
+    "section": "Suggestions"
+  },
+  {
+    "id": "func-names",
+    "name": "func-names",
+    "description": "Require or disallow named `function` expressions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "func-style",
+    "name": "func-style",
+    "description": "Enforce the consistent use of either `function` declarations or expressions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "id-denylist",
+    "name": "id-denylist",
+    "description": "Disallow specified identifiers",
+    "section": "Suggestions"
+  },
+  {
+    "id": "id-length",
+    "name": "id-length",
+    "description": "Enforce minimum and maximum identifier lengths",
+    "section": "Suggestions"
+  },
+  {
+    "id": "id-match",
+    "name": "id-match",
+    "description": "Require identifiers to match a specified regular expression",
+    "section": "Suggestions"
+  },
+  {
+    "id": "init-declarations",
+    "name": "init-declarations",
+    "description": "Require or disallow initialization in variable declarations",
+    "section": "Suggestions"
+  },
+  {
+    "id": "logical-assignment-operators",
+    "name": "logical-assignment-operators",
+    "description": "Require or disallow logical assignment operator shorthand",
+    "section": "Suggestions"
+  },
+  {
+    "id": "max-depth",
+    "name": "max-depth",
+    "description": "Enforce a maximum depth that blocks can be nested",
+    "section": "Suggestions"
+  },
+  {
+    "id": "max-statements",
+    "name": "max-statements",
+    "description": "Enforce a maximum number of statements allowed in function blocks",
+    "section": "Suggestions"
+  },
+  {
+    "id": "new-cap",
+    "name": "new-cap",
+    "description": "Require constructor names to begin with a capital letter",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-bitwise",
+    "name": "no-bitwise",
+    "description": "Disallow bitwise operators",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-continue",
+    "name": "no-continue",
+    "description": "Disallow `continue` statements",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-div-regex",
+    "name": "no-div-regex",
+    "description": "Disallow equal signs explicitly at the beginning of regular expressions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-eq-null",
+    "name": "no-eq-null",
+    "description": "Disallow `null` comparisons without type-checking operators",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-extra-label",
+    "name": "no-extra-label",
+    "description": "Disallow unnecessary labels",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-implicit-globals",
+    "name": "no-implicit-globals",
+    "description": "Disallow declarations in the global scope",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-inline-comments",
+    "name": "no-inline-comments",
+    "description": "Disallow inline comments after code",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-invalid-this",
+    "name": "no-invalid-this",
+    "description": "Disallow use of `this` in contexts where the value of `this` is `undefined`",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-multi-str",
+    "name": "no-multi-str",
+    "description": "Disallow multiline strings",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-plusplus",
+    "name": "no-plusplus",
+    "description": "Disallow the unary operators `++` and `--`",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-regex-spaces",
+    "name": "no-regex-spaces",
+    "description": "Disallow multiple spaces in regular expressions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-restricted-exports",
+    "name": "no-restricted-exports",
+    "description": "Disallow specified names in exports",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-restricted-globals",
+    "name": "no-restricted-globals",
+    "description": "Disallow specified global variables",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-restricted-imports",
+    "name": "no-restricted-imports",
+    "description": "Disallow specified modules when loaded by `import`",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-restricted-properties",
+    "name": "no-restricted-properties",
+    "description": "Disallow certain properties on certain objects",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-restricted-syntax",
+    "name": "no-restricted-syntax",
+    "description": "Disallow specified syntax",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-ternary",
+    "name": "no-ternary",
+    "description": "Disallow ternary operators",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-undef-init",
+    "name": "no-undef-init",
+    "description": "Disallow initializing variables to `undefined`",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-undefined",
+    "name": "no-undefined",
+    "description": "Disallow the use of `undefined` as an identifier",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-underscore-dangle",
+    "name": "no-underscore-dangle",
+    "description": "Disallow dangling underscores in identifiers",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-unused-labels",
+    "name": "no-unused-labels",
+    "description": "Disallow unused labels",
+    "section": "Suggestions"
+  },
+  {
+    "id": "no-warning-comments",
+    "name": "no-warning-comments",
+    "description": "Disallow specified warning terms in comments",
+    "section": "Suggestions"
+  },
+  {
+    "id": "object-shorthand",
+    "name": "object-shorthand",
+    "description": "Require or disallow method and property shorthand syntax for object literals",
+    "section": "Suggestions"
+  },
+  {
+    "id": "one-var",
+    "name": "one-var",
+    "description": "Enforce variables to be declared either together or separately in functions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "operator-assignment",
+    "name": "operator-assignment",
+    "description": "Require or disallow assignment operator shorthand where possible",
+    "section": "Suggestions"
+  },
+  {
+    "id": "prefer-arrow-callback",
+    "name": "prefer-arrow-callback",
+    "description": "Require using arrow functions for callbacks",
+    "section": "Suggestions"
+  },
+  {
+    "id": "prefer-exponentiation-operator",
+    "name": "prefer-exponentiation-operator",
+    "description": "Disallow the use of `Math.pow` in favor of the `**` operator",
+    "section": "Suggestions"
+  },
+  {
+    "id": "prefer-numeric-literals",
+    "name": "prefer-numeric-literals",
+    "description": "Disallow `parseInt()` and `Number.parseInt()` in favor of binary, octal, and hexadecimal literals",
+    "section": "Suggestions"
+  },
+  {
+    "id": "require-unicode-regexp",
+    "name": "require-unicode-regexp",
+    "description": "Enforce the use of `u` or `v` flag on RegExp",
+    "section": "Suggestions"
+  },
+  {
+    "id": "sort-imports",
+    "name": "sort-imports",
+    "description": "Enforce sorted import declarations within modules",
+    "section": "Suggestions"
+  },
+  {
+    "id": "sort-keys",
+    "name": "sort-keys",
+    "description": "Require object keys to be sorted",
+    "section": "Suggestions"
+  },
+  {
+    "id": "sort-vars",
+    "name": "sort-vars",
+    "description": "Require variables within the same declaration block to be sorted",
+    "section": "Suggestions"
+  },
+  {
+    "id": "strict",
+    "name": "strict",
+    "description": "Require or disallow strict mode directives",
+    "section": "Suggestions"
+  },
+  {
+    "id": "symbol-description",
+    "name": "symbol-description",
+    "description": "Require symbol descriptions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "vars-on-top",
+    "name": "vars-on-top",
+    "description": "Require `var` declarations be placed at the top of their containing scope",
+    "section": "Suggestions"
+  },
+  {
+    "id": "yoda",
+    "name": "yoda",
+    "description": "Require or disallow \"Yoda\" conditions",
+    "section": "Suggestions"
+  },
+  {
+    "id": "adjacent-overload-signatures",
+    "name": "adjacent-overload-signatures",
+    "description": "Require that function overload signatures be consecutive",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "array-type",
+    "name": "array-type",
+    "description": "Require consistently using either `T[]` or `Array<T>` for arrays",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "ban-tslint-comment",
+    "name": "ban-tslint-comment",
+    "description": "Disallow `// tslint:<rule-flag>` comments",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "class-literal-property-style",
+    "name": "class-literal-property-style",
+    "description": "Enforce that literals on classes are exposed in a consistent style",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "consistent-generic-constructors",
+    "name": "consistent-generic-constructors",
+    "description": "Enforce specifying generic type arguments on type annotation or constructor name of a constructor call",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "consistent-indexed-object-style",
+    "name": "consistent-indexed-object-style",
+    "description": "Require or disallow the `Record` type",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "consistent-type-assertions",
+    "name": "consistent-type-assertions",
+    "description": "Enforce consistent usage of type assertions",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "consistent-type-definitions",
+    "name": "consistent-type-definitions",
+    "description": "Enforce type definitions to consistently use either `interface` or `type`",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "explicit-member-accessibility",
+    "name": "explicit-member-accessibility",
+    "description": "Require explicit accessibility modifiers on class properties and methods",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "init-declarations",
+    "name": "init-declarations",
+    "description": "Require or disallow initialization in variable declarations",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "member-ordering",
+    "name": "member-ordering",
+    "description": "Require a consistent member declaration order",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "method-signature-style",
+    "name": "method-signature-style",
+    "description": "Enforce using a particular method signature syntax",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "no-extra-non-null-assertion",
+    "name": "no-extra-non-null-assertion",
+    "description": "Disallow extra non-null assertions",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "no-inferrable-types",
+    "name": "no-inferrable-types",
+    "description": "Disallow explicit type declarations for variables or parameters initialized to a number, string, or boolean",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "no-invalid-this",
+    "name": "no-invalid-this",
+    "description": "Disallow `this` keywords outside of classes or class-like objects",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "no-restricted-imports",
+    "name": "no-restricted-imports",
+    "description": "Disallow specified modules when loaded by `import`",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "no-restricted-types",
+    "name": "no-restricted-types",
+    "description": "Disallow certain types",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "parameter-properties",
+    "name": "parameter-properties",
+    "description": "Require or disallow parameter properties in class constructors",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "prefer-namespace-keyword",
+    "name": "prefer-namespace-keyword",
+    "description": "Require using `namespace` keyword over `module` keyword to declare custom TypeScript modules",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "typedef",
+    "name": "typedef",
+    "description": "Require type annotations in certain places",
+    "section": "@typescript-eslint Rules"
+  },
+  {
+    "id": "Category",
+    "name": "Category",
+    "description": "Total Rules",
+    "section": "Summary"
+  },
+  {
+    "id": "ESLint Core - Possible Problems",
+    "name": "ESLint Core - Possible Problems",
+    "description": "59",
+    "section": "Summary"
+  },
+  {
+    "id": "ESLint Core - Suggestions",
+    "name": "ESLint Core - Suggestions",
+    "description": "131",
+    "section": "Summary"
+  },
+  {
+    "id": "ESLint Core - Layout & Formatting",
+    "name": "ESLint Core - Layout & Formatting",
+    "description": "1",
+    "section": "Summary"
+  },
+  {
+    "id": "ESLint Core - Deprecated",
+    "name": "ESLint Core - Deprecated",
+    "description": "88",
+    "section": "Summary"
+  },
+  {
+    "id": "@typescript-eslint - Active",
+    "name": "@typescript-eslint - Active",
+    "description": "125",
+    "section": "Summary"
+  },
+  {
+    "id": "@typescript-eslint - Deprecated",
+    "name": "@typescript-eslint - Deprecated",
+    "description": "7",
+    "section": "Summary"
+  }
+]

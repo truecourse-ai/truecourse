@@ -15,6 +15,7 @@ const DEFAULT_PORT = 3001;
 export type TrueCourseConfig = {
   runMode: "console" | "service";
   enabledCategories?: string[];
+  enableLlmRules?: boolean;
 };
 
 const DEFAULT_CONFIG: TrueCourseConfig = { runMode: "console" };

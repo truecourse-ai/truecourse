@@ -59,6 +59,18 @@ export type GraphData = {
 
 export type DepthLevel = 'services' | 'modules' | 'methods';
 
+// Semantic zoom levels (fine-grained, driven by zoom scale)
+export type SemanticZoomLevel = 'services' | 'layers' | 'directories' | 'modules' | 'methods';
+
+// Directory node data (groups modules by filesystem path)
+export type DirectoryNodeData = {
+  label: string;
+  dirPath: string;
+  moduleCount: number;
+  violationCount: number;
+  layerColor: string;
+};
+
 export type LayerColor = {
   layer: Layer;
   color: string;

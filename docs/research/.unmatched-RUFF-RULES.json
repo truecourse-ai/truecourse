@@ -1,0 +1,2156 @@
+[
+  {
+    "id": "E401",
+    "name": "MultipleImportsOnOneLine",
+    "description": "MultipleImportsOnOneLine (Pycodestyle)",
+    "section": "Pycodestyle Errors (E)"
+  },
+  {
+    "id": "E402",
+    "name": "ModuleImportNotAtTopOfFile",
+    "description": "ModuleImportNotAtTopOfFile (Pycodestyle)",
+    "section": "Pycodestyle Errors (E)"
+  },
+  {
+    "id": "E902",
+    "name": "IOError",
+    "description": "IOError (Pycodestyle)",
+    "section": "Pycodestyle Errors (E)"
+  },
+  {
+    "id": "F402",
+    "name": "ImportShadowedByLoopVar",
+    "description": "ImportShadowedByLoopVar (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F403",
+    "name": "UndefinedLocalWithImportStar",
+    "description": "UndefinedLocalWithImportStar (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F404",
+    "name": "LateFutureImport",
+    "description": "LateFutureImport (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F405",
+    "name": "UndefinedLocalWithImportStarUsage",
+    "description": "UndefinedLocalWithImportStarUsage (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F406",
+    "name": "UndefinedLocalWithNestedImportStarUsage",
+    "description": "UndefinedLocalWithNestedImportStarUsage (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F407",
+    "name": "FutureFeatureNotDefined",
+    "description": "FutureFeatureNotDefined (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F621",
+    "name": "ExpressionsInStarAssignment",
+    "description": "ExpressionsInStarAssignment (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F622",
+    "name": "MultipleStarredExpressions",
+    "description": "MultipleStarredExpressions (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F633",
+    "name": "InvalidPrintSyntax",
+    "description": "InvalidPrintSyntax (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F634",
+    "name": "IfTuple",
+    "description": "IfTuple (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F707",
+    "name": "DefaultExceptNotLast",
+    "description": "DefaultExceptNotLast (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F722",
+    "name": "ForwardAnnotationSyntaxError",
+    "description": "ForwardAnnotationSyntaxError (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F823",
+    "name": "UndefinedLocal",
+    "description": "UndefinedLocal (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "F842",
+    "name": "UnusedAnnotation",
+    "description": "UnusedAnnotation (Pyflakes)",
+    "section": "Pyflakes (F)"
+  },
+  {
+    "id": "PLC0105",
+    "name": "TypeNameIncorrectVariance",
+    "description": "TypeNameIncorrectVariance (Pylint)",
+    "section": "Pylint Convention (PLC)"
+  },
+  {
+    "id": "PLC0131",
+    "name": "TypeBivariance",
+    "description": "TypeBivariance (Pylint)",
+    "section": "Pylint Convention (PLC)"
+  },
+  {
+    "id": "PLC0132",
+    "name": "TypeParamNameMismatch",
+    "description": "TypeParamNameMismatch (Pylint)",
+    "section": "Pylint Convention (PLC)"
+  },
+  {
+    "id": "PLC0415",
+    "name": "ImportOutsideTopLevel",
+    "description": "ImportOutsideTopLevel (Pylint)",
+    "section": "Pylint Convention (PLC)"
+  },
+  {
+    "id": "PLC2401",
+    "name": "NonAsciiName",
+    "description": "NonAsciiName (Pylint)",
+    "section": "Pylint Convention (PLC)"
+  },
+  {
+    "id": "PLC2403",
+    "name": "NonAsciiImportName",
+    "description": "NonAsciiImportName (Pylint)",
+    "section": "Pylint Convention (PLC)"
+  },
+  {
+    "id": "PLE0116",
+    "name": "ContinueInFinally",
+    "description": "ContinueInFinally (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLE0303",
+    "name": "InvalidLengthReturnType",
+    "description": "InvalidLengthReturnType (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLE0304",
+    "name": "InvalidBoolReturnType",
+    "description": "InvalidBoolReturnType (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLE0305",
+    "name": "InvalidIndexReturnType",
+    "description": "InvalidIndexReturnType (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLE0307",
+    "name": "InvalidStrReturnType",
+    "description": "InvalidStrReturnType (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLE0308",
+    "name": "InvalidBytesReturnType",
+    "description": "InvalidBytesReturnType (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLE0309",
+    "name": "InvalidHashReturnType",
+    "description": "InvalidHashReturnType (Pylint)",
+    "section": "Pylint Error (PLE)"
+  },
+  {
+    "id": "PLR0202",
+    "name": "NoClassmethodDecorator",
+    "description": "NoClassmethodDecorator (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR0203",
+    "name": "NoStaticmethodDecorator",
+    "description": "NoStaticmethodDecorator (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR0402",
+    "name": "ManualFromImport",
+    "description": "ManualFromImport (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR0913",
+    "name": "TooManyArguments",
+    "description": "TooManyArguments (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR0917",
+    "name": "TooManyPositionalArguments",
+    "description": "TooManyPositionalArguments (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR1712",
+    "name": "SwapWithTemporaryVariable",
+    "description": "SwapWithTemporaryVariable (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR2044",
+    "name": "EmptyComment",
+    "description": "EmptyComment (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLR5501",
+    "name": "CollapsibleElseIf",
+    "description": "CollapsibleElseIf (Pylint)",
+    "section": "Pylint Refactor (PLR)"
+  },
+  {
+    "id": "PLW0603",
+    "name": "GlobalStatement",
+    "description": "GlobalStatement (Pylint)",
+    "section": "Pylint Warning (PLW)"
+  },
+  {
+    "id": "ASYNC105",
+    "name": "TrioSyncCall",
+    "description": "TrioSyncCall (flake8-async)",
+    "section": "flake8-async (ASYNC)"
+  },
+  {
+    "id": "ASYNC212",
+    "name": "BlockingHttpCallHttpxInAsyncFunction",
+    "description": "BlockingHttpCallHttpxInAsyncFunction (flake8-async)",
+    "section": "flake8-async (ASYNC)"
+  },
+  {
+    "id": "ASYNC221",
+    "name": "RunProcessInAsyncFunction",
+    "description": "RunProcessInAsyncFunction (flake8-async)",
+    "section": "flake8-async (ASYNC)"
+  },
+  {
+    "id": "ASYNC222",
+    "name": "WaitForProcessInAsyncFunction",
+    "description": "WaitForProcessInAsyncFunction (flake8-async)",
+    "section": "flake8-async (ASYNC)"
+  },
+  {
+    "id": "A003",
+    "name": "BuiltinAttributeShadowing",
+    "description": "BuiltinAttributeShadowing (flake8-builtins)",
+    "section": "flake8-builtins (A)"
+  },
+  {
+    "id": "A004",
+    "name": "BuiltinImportShadowing",
+    "description": "BuiltinImportShadowing (flake8-builtins)",
+    "section": "flake8-builtins (A)"
+  },
+  {
+    "id": "A006",
+    "name": "BuiltinLambdaArgumentShadowing",
+    "description": "BuiltinLambdaArgumentShadowing (flake8-builtins)",
+    "section": "flake8-builtins (A)"
+  },
+  {
+    "id": "TID251",
+    "name": "BannedApi",
+    "description": "BannedApi (flake8-tidy-imports)",
+    "section": "flake8-tidy-imports (TID)"
+  },
+  {
+    "id": "TID252",
+    "name": "RelativeImports",
+    "description": "RelativeImports (flake8-tidy-imports)",
+    "section": "flake8-tidy-imports (TID)"
+  },
+  {
+    "id": "TID253",
+    "name": "BannedModuleLevelImports",
+    "description": "BannedModuleLevelImports (flake8-tidy-imports)",
+    "section": "flake8-tidy-imports (TID)"
+  },
+  {
+    "id": "TID254",
+    "name": "LazyImportMismatch",
+    "description": "LazyImportMismatch (flake8-tidy-imports)",
+    "section": "flake8-tidy-imports (TID)"
+  },
+  {
+    "id": "RET504",
+    "name": "UnnecessaryAssign",
+    "description": "UnnecessaryAssign (flake8-return)",
+    "section": "flake8-return (RET)"
+  },
+  {
+    "id": "INT001",
+    "name": "FStringInGetTextFuncCall",
+    "description": "FStringInGetTextFuncCall (flake8-gettext)",
+    "section": "flake8-gettext (INT)"
+  },
+  {
+    "id": "INT002",
+    "name": "FormatInGetTextFuncCall",
+    "description": "FormatInGetTextFuncCall (flake8-gettext)",
+    "section": "flake8-gettext (INT)"
+  },
+  {
+    "id": "INT003",
+    "name": "PrintfInGetTextFuncCall",
+    "description": "PrintfInGetTextFuncCall (flake8-gettext)",
+    "section": "flake8-gettext (INT)"
+  },
+  {
+    "id": "ISC001",
+    "name": "SingleLineImplicitStringConcatenation",
+    "description": "SingleLineImplicitStringConcatenation (flake8-implicit-str-concat)",
+    "section": "flake8-implicit-str-concat (ISC)"
+  },
+  {
+    "id": "ISC002",
+    "name": "MultiLineImplicitStringConcatenation",
+    "description": "MultiLineImplicitStringConcatenation (flake8-implicit-str-concat)",
+    "section": "flake8-implicit-str-concat (ISC)"
+  },
+  {
+    "id": "ISC003",
+    "name": "ExplicitStringConcatenation",
+    "description": "ExplicitStringConcatenation (flake8-implicit-str-concat)",
+    "section": "flake8-implicit-str-concat (ISC)"
+  },
+  {
+    "id": "T203",
+    "name": "PPrint",
+    "description": "PPrint (flake8-print)",
+    "section": "flake8-print (T20)"
+  },
+  {
+    "id": "FA100",
+    "name": "FutureRewritableTypeAnnotation",
+    "description": "FutureRewritableTypeAnnotation (flake8-future-annotations)",
+    "section": "flake8-future-annotations (FA)"
+  },
+  {
+    "id": "FA102",
+    "name": "FutureRequiredTypeAnnotation",
+    "description": "FutureRequiredTypeAnnotation (flake8-future-annotations)",
+    "section": "flake8-future-annotations (FA)"
+  },
+  {
+    "id": "YTT101",
+    "name": "SysVersionSlice3",
+    "description": "SysVersionSlice3 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT102",
+    "name": "SysVersion2",
+    "description": "SysVersion2 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT103",
+    "name": "SysVersionCmpStr3",
+    "description": "SysVersionCmpStr3 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT201",
+    "name": "SysVersionInfo0Eq3",
+    "description": "SysVersionInfo0Eq3 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT202",
+    "name": "SixPY3",
+    "description": "SixPY3 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT203",
+    "name": "SysVersionInfo1CmpInt",
+    "description": "SysVersionInfo1CmpInt (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT204",
+    "name": "SysVersionInfoMinorCmpInt",
+    "description": "SysVersionInfoMinorCmpInt (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT301",
+    "name": "SysVersion0",
+    "description": "SysVersion0 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT302",
+    "name": "SysVersionCmpStr10",
+    "description": "SysVersionCmpStr10 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "YTT303",
+    "name": "SysVersionSlice1",
+    "description": "SysVersionSlice1 (flake8-2020)",
+    "section": "flake8-2020 (YTT)"
+  },
+  {
+    "id": "SIM107",
+    "name": "ReturnInTryExceptFinally",
+    "description": "ReturnInTryExceptFinally (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM112",
+    "name": "UncapitalizedEnvironmentVariables",
+    "description": "UncapitalizedEnvironmentVariables (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM201",
+    "name": "NegateEqualOp",
+    "description": "NegateEqualOp (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM202",
+    "name": "NegateNotEqualOp",
+    "description": "NegateNotEqualOp (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM210",
+    "name": "IfExprWithTrueFalse",
+    "description": "IfExprWithTrueFalse (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM211",
+    "name": "IfExprWithFalseTrue",
+    "description": "IfExprWithFalseTrue (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM212",
+    "name": "IfExprWithTwistedArms",
+    "description": "IfExprWithTwistedArms (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM905",
+    "name": "SplitStaticString",
+    "description": "SplitStaticString (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "SIM911",
+    "name": "ZipDictKeysAndValues",
+    "description": "ZipDictKeysAndValues (flake8-simplify)",
+    "section": "flake8-simplify (SIM)"
+  },
+  {
+    "id": "CPY001",
+    "name": "MissingCopyrightNotice",
+    "description": "MissingCopyrightNotice (flake8-copyright)",
+    "section": "flake8-copyright (CPY)"
+  },
+  {
+    "id": "UP001",
+    "name": "UselessMetaclassType",
+    "description": "UselessMetaclassType (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP003",
+    "name": "TypeOfPrimitive",
+    "description": "TypeOfPrimitive (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP004",
+    "name": "UselessObjectInheritance",
+    "description": "UselessObjectInheritance (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP005",
+    "name": "DeprecatedUnittestAlias",
+    "description": "DeprecatedUnittestAlias (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP006",
+    "name": "NonPEP585Annotation",
+    "description": "NonPEP585Annotation (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP007",
+    "name": "NonPEP604AnnotationUnion",
+    "description": "NonPEP604AnnotationUnion (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP008",
+    "name": "SuperCallWithParameters",
+    "description": "SuperCallWithParameters (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP009",
+    "name": "UTF8EncodingDeclaration",
+    "description": "UTF8EncodingDeclaration (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP010",
+    "name": "UnnecessaryFutureImport",
+    "description": "UnnecessaryFutureImport (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP011",
+    "name": "LRUCacheWithoutParameters",
+    "description": "LRUCacheWithoutParameters (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP012",
+    "name": "UnnecessaryEncodeUTF8",
+    "description": "UnnecessaryEncodeUTF8 (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP013",
+    "name": "ConvertTypedDictFunctionalToClass",
+    "description": "ConvertTypedDictFunctionalToClass (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP014",
+    "name": "ConvertNamedTupleFunctionalToClass",
+    "description": "ConvertNamedTupleFunctionalToClass (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP015",
+    "name": "RedundantOpenModes",
+    "description": "RedundantOpenModes (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP017",
+    "name": "DatetimeTimezoneUTC",
+    "description": "DatetimeTimezoneUTC (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP018",
+    "name": "NativeLiterals",
+    "description": "NativeLiterals (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP019",
+    "name": "TypingTextStrAlias",
+    "description": "TypingTextStrAlias (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP020",
+    "name": "OpenAlias",
+    "description": "OpenAlias (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP021",
+    "name": "ReplaceUniversalNewlines",
+    "description": "ReplaceUniversalNewlines (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP022",
+    "name": "ReplaceStdoutStderr",
+    "description": "ReplaceStdoutStderr (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP023",
+    "name": "DeprecatedCElementTree",
+    "description": "DeprecatedCElementTree (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP024",
+    "name": "OSErrorAlias",
+    "description": "OSErrorAlias (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP025",
+    "name": "UnicodeKindPrefix",
+    "description": "UnicodeKindPrefix (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP026",
+    "name": "DeprecatedMockImport",
+    "description": "DeprecatedMockImport (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP027",
+    "name": "UnpackedListComprehension",
+    "description": "UnpackedListComprehension (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP028",
+    "name": "YieldInForLoop",
+    "description": "YieldInForLoop (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP029",
+    "name": "UnnecessaryBuiltinImport",
+    "description": "UnnecessaryBuiltinImport (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP030",
+    "name": "FormatLiterals",
+    "description": "FormatLiterals (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP031",
+    "name": "PrintfStringFormatting",
+    "description": "PrintfStringFormatting (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP033",
+    "name": "LRUCacheWithMaxsizeNone",
+    "description": "LRUCacheWithMaxsizeNone (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP034",
+    "name": "ExtraneousParentheses",
+    "description": "ExtraneousParentheses (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP035",
+    "name": "DeprecatedImport",
+    "description": "DeprecatedImport (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP036",
+    "name": "OutdatedVersionBlock",
+    "description": "OutdatedVersionBlock (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP037",
+    "name": "QuotedAnnotation",
+    "description": "QuotedAnnotation (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP038",
+    "name": "NonPEP604Isinstance",
+    "description": "NonPEP604Isinstance (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP039",
+    "name": "UnnecessaryClassParentheses",
+    "description": "UnnecessaryClassParentheses (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP041",
+    "name": "TimeoutErrorAlias",
+    "description": "TimeoutErrorAlias (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP042",
+    "name": "ReplaceStrEnum",
+    "description": "ReplaceStrEnum (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP043",
+    "name": "UnnecessaryDefaultTypeArgs",
+    "description": "UnnecessaryDefaultTypeArgs (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP044",
+    "name": "NonPEP646Unpack",
+    "description": "NonPEP646Unpack (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP045",
+    "name": "NonPEP604AnnotationOptional",
+    "description": "NonPEP604AnnotationOptional (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP046",
+    "name": "NonPEP695GenericClass",
+    "description": "NonPEP695GenericClass (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP047",
+    "name": "NonPEP695GenericFunction",
+    "description": "NonPEP695GenericFunction (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP049",
+    "name": "PrivateTypeParameter",
+    "description": "PrivateTypeParameter (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "UP050",
+    "name": "UselessClassMetaclassType",
+    "description": "UselessClassMetaclassType (pyupgrade)",
+    "section": "pyupgrade (UP)"
+  },
+  {
+    "id": "S401",
+    "name": "SuspiciousTelnetlibImport",
+    "description": "SuspiciousTelnetlibImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S402",
+    "name": "SuspiciousFtplibImport",
+    "description": "SuspiciousFtplibImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S403",
+    "name": "SuspiciousPickleImport",
+    "description": "SuspiciousPickleImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S404",
+    "name": "SuspiciousSubprocessImport",
+    "description": "SuspiciousSubprocessImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S405",
+    "name": "SuspiciousXmlEtreeImport",
+    "description": "SuspiciousXmlEtreeImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S406",
+    "name": "SuspiciousXmlSaxImport",
+    "description": "SuspiciousXmlSaxImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S407",
+    "name": "SuspiciousXmlExpatImport",
+    "description": "SuspiciousXmlExpatImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S408",
+    "name": "SuspiciousXmlMinidomImport",
+    "description": "SuspiciousXmlMinidomImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S409",
+    "name": "SuspiciousXmlPulldomImport",
+    "description": "SuspiciousXmlPulldomImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S410",
+    "name": "SuspiciousLxmlImport",
+    "description": "SuspiciousLxmlImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S411",
+    "name": "SuspiciousXmlrpcImport",
+    "description": "SuspiciousXmlrpcImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S413",
+    "name": "SuspiciousPycryptoImport",
+    "description": "SuspiciousPycryptoImport (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "S606",
+    "name": "StartProcessWithNoShell",
+    "description": "StartProcessWithNoShell (flake8-bandit)",
+    "section": "flake8-bandit (S)"
+  },
+  {
+    "id": "ARG003",
+    "name": "UnusedClassMethodArgument",
+    "description": "UnusedClassMethodArgument (flake8-unused-arguments)",
+    "section": "flake8-unused-arguments (ARG)"
+  },
+  {
+    "id": "ARG004",
+    "name": "UnusedStaticMethodArgument",
+    "description": "UnusedStaticMethodArgument (flake8-unused-arguments)",
+    "section": "flake8-unused-arguments (ARG)"
+  },
+  {
+    "id": "ARG005",
+    "name": "UnusedLambdaArgument",
+    "description": "UnusedLambdaArgument (flake8-unused-arguments)",
+    "section": "flake8-unused-arguments (ARG)"
+  },
+  {
+    "id": "ICN001",
+    "name": "UnconventionalImportAlias",
+    "description": "UnconventionalImportAlias (flake8-import-conventions)",
+    "section": "flake8-import-conventions (ICN)"
+  },
+  {
+    "id": "ICN002",
+    "name": "BannedImportAlias",
+    "description": "BannedImportAlias (flake8-import-conventions)",
+    "section": "flake8-import-conventions (ICN)"
+  },
+  {
+    "id": "ICN003",
+    "name": "BannedImportFrom",
+    "description": "BannedImportFrom (flake8-import-conventions)",
+    "section": "flake8-import-conventions (ICN)"
+  },
+  {
+    "id": "PGH001",
+    "name": "Eval",
+    "description": "Eval (pygrep-hooks)",
+    "section": "pygrep-hooks (PGH)"
+  },
+  {
+    "id": "PGH004",
+    "name": "BlanketNOQA",
+    "description": "BlanketNOQA (pygrep-hooks)",
+    "section": "pygrep-hooks (PGH)"
+  },
+  {
+    "id": "PD003",
+    "name": "PandasUseOfDotIsNull",
+    "description": "PandasUseOfDotIsNull (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD004",
+    "name": "PandasUseOfDotNotNull",
+    "description": "PandasUseOfDotNotNull (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD007",
+    "name": "PandasUseOfDotIx",
+    "description": "PandasUseOfDotIx (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD008",
+    "name": "PandasUseOfDotAt",
+    "description": "PandasUseOfDotAt (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD009",
+    "name": "PandasUseOfDotIat",
+    "description": "PandasUseOfDotIat (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD010",
+    "name": "PandasUseOfDotPivotOrUnstack",
+    "description": "PandasUseOfDotPivotOrUnstack (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD012",
+    "name": "PandasUseOfDotReadTable",
+    "description": "PandasUseOfDotReadTable (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD013",
+    "name": "PandasUseOfDotStack",
+    "description": "PandasUseOfDotStack (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PD901",
+    "name": "PandasDfVariableName",
+    "description": "PandasDfVariableName (pandas-vet)",
+    "section": "pandas-vet (PD)"
+  },
+  {
+    "id": "PYI001",
+    "name": "UnprefixedTypeParam",
+    "description": "UnprefixedTypeParam (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI002",
+    "name": "ComplexIfStatementInStub",
+    "description": "ComplexIfStatementInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI003",
+    "name": "UnrecognizedVersionInfoCheck",
+    "description": "UnrecognizedVersionInfoCheck (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI004",
+    "name": "PatchVersionComparison",
+    "description": "PatchVersionComparison (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI005",
+    "name": "WrongTupleLengthVersionComparison",
+    "description": "WrongTupleLengthVersionComparison (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI006",
+    "name": "BadVersionInfoComparison",
+    "description": "BadVersionInfoComparison (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI007",
+    "name": "UnrecognizedPlatformCheck",
+    "description": "UnrecognizedPlatformCheck (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI008",
+    "name": "UnrecognizedPlatformName",
+    "description": "UnrecognizedPlatformName (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI009",
+    "name": "PassStatementStubBody",
+    "description": "PassStatementStubBody (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI010",
+    "name": "NonEmptyStubBody",
+    "description": "NonEmptyStubBody (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI011",
+    "name": "TypedArgumentDefaultInStub",
+    "description": "TypedArgumentDefaultInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI012",
+    "name": "PassInClassBody",
+    "description": "PassInClassBody (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI013",
+    "name": "EllipsisInNonEmptyClassBody",
+    "description": "EllipsisInNonEmptyClassBody (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI014",
+    "name": "ArgumentDefaultInStub",
+    "description": "ArgumentDefaultInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI015",
+    "name": "AssignmentDefaultInStub",
+    "description": "AssignmentDefaultInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI016",
+    "name": "DuplicateUnionMember",
+    "description": "DuplicateUnionMember (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI017",
+    "name": "ComplexAssignmentInStub",
+    "description": "ComplexAssignmentInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI018",
+    "name": "UnusedPrivateTypeVar",
+    "description": "UnusedPrivateTypeVar (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI019",
+    "name": "CustomTypeVarForSelf",
+    "description": "CustomTypeVarForSelf (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI020",
+    "name": "QuotedAnnotationInStub",
+    "description": "QuotedAnnotationInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI021",
+    "name": "DocstringInStub",
+    "description": "DocstringInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI024",
+    "name": "CollectionsNamedTuple",
+    "description": "CollectionsNamedTuple (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI025",
+    "name": "UnaliasedCollectionsAbcSetImport",
+    "description": "UnaliasedCollectionsAbcSetImport (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI026",
+    "name": "TypeAliasWithoutAnnotation",
+    "description": "TypeAliasWithoutAnnotation (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI029",
+    "name": "StrOrReprDefinedInStub",
+    "description": "StrOrReprDefinedInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI032",
+    "name": "AnyEqNeAnnotation",
+    "description": "AnyEqNeAnnotation (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI033",
+    "name": "TypeCommentInStub",
+    "description": "TypeCommentInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI034",
+    "name": "NonSelfReturnType",
+    "description": "NonSelfReturnType (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI035",
+    "name": "UnassignedSpecialVariableInStub",
+    "description": "UnassignedSpecialVariableInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI036",
+    "name": "BadExitAnnotation",
+    "description": "BadExitAnnotation (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI041",
+    "name": "RedundantNumericUnion",
+    "description": "RedundantNumericUnion (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI042",
+    "name": "SnakeCaseTypeAlias",
+    "description": "SnakeCaseTypeAlias (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI043",
+    "name": "TSuffixedTypeAlias",
+    "description": "TSuffixedTypeAlias (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI044",
+    "name": "FutureAnnotationsInStub",
+    "description": "FutureAnnotationsInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI045",
+    "name": "IterMethodReturnIterable",
+    "description": "IterMethodReturnIterable (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI046",
+    "name": "UnusedPrivateProtocol",
+    "description": "UnusedPrivateProtocol (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI047",
+    "name": "UnusedPrivateTypeAlias",
+    "description": "UnusedPrivateTypeAlias (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI048",
+    "name": "StubBodyMultipleStatements",
+    "description": "StubBodyMultipleStatements (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI049",
+    "name": "UnusedPrivateTypedDict",
+    "description": "UnusedPrivateTypedDict (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI050",
+    "name": "NoReturnArgumentAnnotationInStub",
+    "description": "NoReturnArgumentAnnotationInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI051",
+    "name": "RedundantLiteralUnion",
+    "description": "RedundantLiteralUnion (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI052",
+    "name": "UnannotatedAssignmentInStub",
+    "description": "UnannotatedAssignmentInStub (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI053",
+    "name": "StringOrBytesTooLong",
+    "description": "StringOrBytesTooLong (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI054",
+    "name": "NumericLiteralTooLong",
+    "description": "NumericLiteralTooLong (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI055",
+    "name": "UnnecessaryTypeUnion",
+    "description": "UnnecessaryTypeUnion (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI057",
+    "name": "ByteStringUsage",
+    "description": "ByteStringUsage (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI058",
+    "name": "GeneratorReturnFromIterMethod",
+    "description": "GeneratorReturnFromIterMethod (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI059",
+    "name": "GenericNotLastBaseClass",
+    "description": "GenericNotLastBaseClass (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI061",
+    "name": "RedundantNoneLiteral",
+    "description": "RedundantNoneLiteral (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI062",
+    "name": "DuplicateLiteralMember",
+    "description": "DuplicateLiteralMember (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI063",
+    "name": "Pep484StylePositionalOnlyParameter",
+    "description": "Pep484StylePositionalOnlyParameter (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI064",
+    "name": "RedundantFinalLiteral",
+    "description": "RedundantFinalLiteral (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PYI066",
+    "name": "BadVersionInfoOrder",
+    "description": "BadVersionInfoOrder (flake8-pyi)",
+    "section": "flake8-pyi (PYI)"
+  },
+  {
+    "id": "PT001",
+    "name": "PytestFixtureIncorrectParenthesesStyle",
+    "description": "PytestFixtureIncorrectParenthesesStyle (flake8-pytest-style)",
+    "section": "flake8-pytest-style (PT)"
+  },
+  {
+    "id": "PT002",
+    "name": "PytestFixturePositionalArgs",
+    "description": "PytestFixturePositionalArgs (flake8-pytest-style)",
+    "section": "flake8-pytest-style (PT)"
+  },
+  {
+    "id": "PT003",
+    "name": "PytestExtraneousScopeFunction",
+    "description": "PytestExtraneousScopeFunction (flake8-pytest-style)",
+    "section": "flake8-pytest-style (PT)"
+  },
+  {
+    "id": "PT006",
+    "name": "PytestParametrizeNamesWrongType",
+    "description": "PytestParametrizeNamesWrongType (flake8-pytest-style)",
+    "section": "flake8-pytest-style (PT)"
+  },
+  {
+    "id": "PT023",
+    "name": "PytestIncorrectMarkParenthesesStyle",
+    "description": "PytestIncorrectMarkParenthesesStyle (flake8-pytest-style)",
+    "section": "flake8-pytest-style (PT)"
+  },
+  {
+    "id": "PIE790",
+    "name": "UnnecessaryPlaceholder",
+    "description": "UnnecessaryPlaceholder (flake8-pie)",
+    "section": "flake8-pie (PIE)"
+  },
+  {
+    "id": "PIE800",
+    "name": "UnnecessarySpread",
+    "description": "UnnecessarySpread (flake8-pie)",
+    "section": "flake8-pie (PIE)"
+  },
+  {
+    "id": "PIE807",
+    "name": "ReimplementedContainerBuiltin",
+    "description": "ReimplementedContainerBuiltin (flake8-pie)",
+    "section": "flake8-pie (PIE)"
+  },
+  {
+    "id": "PIE808",
+    "name": "UnnecessaryRangeStart",
+    "description": "UnnecessaryRangeStart (flake8-pie)",
+    "section": "flake8-pie (PIE)"
+  },
+  {
+    "id": "EXE001",
+    "name": "ShebangNotExecutable",
+    "description": "ShebangNotExecutable (flake8-executable)",
+    "section": "flake8-executable (EXE)"
+  },
+  {
+    "id": "EXE002",
+    "name": "ShebangMissingExecutableFile",
+    "description": "ShebangMissingExecutableFile (flake8-executable)",
+    "section": "flake8-executable (EXE)"
+  },
+  {
+    "id": "EXE003",
+    "name": "ShebangMissingPython",
+    "description": "ShebangMissingPython (flake8-executable)",
+    "section": "flake8-executable (EXE)"
+  },
+  {
+    "id": "EXE004",
+    "name": "ShebangLeadingWhitespace",
+    "description": "ShebangLeadingWhitespace (flake8-executable)",
+    "section": "flake8-executable (EXE)"
+  },
+  {
+    "id": "EXE005",
+    "name": "ShebangNotFirstLine",
+    "description": "ShebangNotFirstLine (flake8-executable)",
+    "section": "flake8-executable (EXE)"
+  },
+  {
+    "id": "TC006",
+    "name": "RuntimeCastValue",
+    "description": "RuntimeCastValue (flake8-type-checking)",
+    "section": "flake8-type-checking (TC)"
+  },
+  {
+    "id": "TC007",
+    "name": "UnquotedTypeAlias",
+    "description": "UnquotedTypeAlias (flake8-type-checking)",
+    "section": "flake8-type-checking (TC)"
+  },
+  {
+    "id": "TC008",
+    "name": "QuotedTypeAlias",
+    "description": "QuotedTypeAlias (flake8-type-checking)",
+    "section": "flake8-type-checking (TC)"
+  },
+  {
+    "id": "TC010",
+    "name": "RuntimeStringUnion",
+    "description": "RuntimeStringUnion (flake8-type-checking)",
+    "section": "flake8-type-checking (TC)"
+  },
+  {
+    "id": "TRY003",
+    "name": "RaiseVanillaArgs",
+    "description": "RaiseVanillaArgs (tryceratops)",
+    "section": "tryceratops (TRY)"
+  },
+  {
+    "id": "G201",
+    "name": "LoggingExcInfo",
+    "description": "LoggingExcInfo (flake8-logging-format)",
+    "section": "flake8-logging-format (G)"
+  },
+  {
+    "id": "RSE102",
+    "name": "UnnecessaryParenOnRaiseException",
+    "description": "UnnecessaryParenOnRaiseException (flake8-raise)",
+    "section": "flake8-raise (RSE)"
+  },
+  {
+    "id": "DOC102",
+    "name": "DocstringExtraneousParameter",
+    "description": "DocstringExtraneousParameter (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "DOC201",
+    "name": "DocstringMissingReturns",
+    "description": "DocstringMissingReturns (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "DOC202",
+    "name": "DocstringExtraneousReturns",
+    "description": "DocstringExtraneousReturns (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "DOC402",
+    "name": "DocstringMissingYields",
+    "description": "DocstringMissingYields (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "DOC403",
+    "name": "DocstringExtraneousYields",
+    "description": "DocstringExtraneousYields (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "DOC501",
+    "name": "DocstringMissingException",
+    "description": "DocstringMissingException (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "DOC502",
+    "name": "DocstringExtraneousException",
+    "description": "DocstringExtraneousException (pydoclint)",
+    "section": "pydoclint (DOC)"
+  },
+  {
+    "id": "RUF002",
+    "name": "AmbiguousUnicodeCharacterDocstring",
+    "description": "AmbiguousUnicodeCharacterDocstring (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF003",
+    "name": "AmbiguousUnicodeCharacterComment",
+    "description": "AmbiguousUnicodeCharacterComment (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF010",
+    "name": "ExplicitFStringTypeConversion",
+    "description": "ExplicitFStringTypeConversion (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF011",
+    "name": "RuffStaticKeyDictComprehension",
+    "description": "RuffStaticKeyDictComprehension (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF021",
+    "name": "ParenthesizeChainedOperators",
+    "description": "ParenthesizeChainedOperators (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF022",
+    "name": "UnsortedDunderAll",
+    "description": "UnsortedDunderAll (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF023",
+    "name": "UnsortedDunderSlots",
+    "description": "UnsortedDunderSlots (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF028",
+    "name": "InvalidFormatterSuppressionComment",
+    "description": "InvalidFormatterSuppressionComment (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF031",
+    "name": "IncorrectlyParenthesizedTupleInSubscript",
+    "description": "IncorrectlyParenthesizedTupleInSubscript (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF035",
+    "name": "RuffUnsafeMarkupUse",
+    "description": "RuffUnsafeMarkupUse (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF036",
+    "name": "NoneNotAtEndOfUnion",
+    "description": "NoneNotAtEndOfUnion (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF038",
+    "name": "RedundantBoolLiteral",
+    "description": "RedundantBoolLiteral (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF041",
+    "name": "UnnecessaryNestedLiteral",
+    "description": "UnnecessaryNestedLiteral (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF043",
+    "name": "PytestRaisesAmbiguousPattern",
+    "description": "PytestRaisesAmbiguousPattern (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF046",
+    "name": "UnnecessaryCastToInt",
+    "description": "UnnecessaryCastToInt (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF047",
+    "name": "NeedlessElse",
+    "description": "NeedlessElse (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF048",
+    "name": "MapIntVersionParsing",
+    "description": "MapIntVersionParsing (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF052",
+    "name": "UsedDummyVariable",
+    "description": "UsedDummyVariable (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF054",
+    "name": "IndentedFormFeed",
+    "description": "IndentedFormFeed (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF057",
+    "name": "UnnecessaryRound",
+    "description": "UnnecessaryRound (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF058",
+    "name": "StarmapZip",
+    "description": "StarmapZip (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF059",
+    "name": "UnusedUnpackedVariable",
+    "description": "UnusedUnpackedVariable (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF061",
+    "name": "LegacyFormPytestRaises",
+    "description": "LegacyFormPytestRaises (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF064",
+    "name": "NonOctalPermissions",
+    "description": "NonOctalPermissions (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF067",
+    "name": "NonEmptyInitModule",
+    "description": "NonEmptyInitModule (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF070",
+    "name": "UnnecessaryAssignBeforeYield",
+    "description": "UnnecessaryAssignBeforeYield (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF071",
+    "name": "OsPathCommonprefix",
+    "description": "OsPathCommonprefix (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF073",
+    "name": "FStringPercentFormat",
+    "description": "FStringPercentFormat (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF100",
+    "name": "UnusedNOQA",
+    "description": "UnusedNOQA (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF101",
+    "name": "RedirectedNOQA",
+    "description": "RedirectedNOQA (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF102",
+    "name": "InvalidRuleCode",
+    "description": "InvalidRuleCode (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF103",
+    "name": "InvalidSuppressionComment",
+    "description": "InvalidSuppressionComment (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF104",
+    "name": "UnmatchedSuppressionComment",
+    "description": "UnmatchedSuppressionComment (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "RUF200",
+    "name": "InvalidPyprojectToml",
+    "description": "InvalidPyprojectToml (ruff)",
+    "section": "Ruff-specific (RUF)"
+  },
+  {
+    "id": "DJ013",
+    "name": "DjangoNonLeadingReceiverDecorator",
+    "description": "DjangoNonLeadingReceiverDecorator (flake8-django)",
+    "section": "flake8-django (DJ)"
+  },
+  {
+    "id": "FLY002",
+    "name": "StaticJoinToFString",
+    "description": "StaticJoinToFString (flynt)",
+    "section": "flynt (FLY)"
+  },
+  {
+    "id": "TD001",
+    "name": "InvalidTodoTag",
+    "description": "InvalidTodoTag (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "TD002",
+    "name": "MissingTodoAuthor",
+    "description": "MissingTodoAuthor (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "TD003",
+    "name": "MissingTodoLink",
+    "description": "MissingTodoLink (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "TD004",
+    "name": "MissingTodoColon",
+    "description": "MissingTodoColon (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "TD005",
+    "name": "MissingTodoDescription",
+    "description": "MissingTodoDescription (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "TD006",
+    "name": "InvalidTodoCapitalization",
+    "description": "InvalidTodoCapitalization (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "TD007",
+    "name": "MissingSpaceAfterTodoColon",
+    "description": "MissingSpaceAfterTodoColon (flake8-todos)",
+    "section": "flake8-todos (TD)"
+  },
+  {
+    "id": "FIX001",
+    "name": "LineContainsFixme",
+    "description": "LineContainsFixme (flake8-fixme)",
+    "section": "flake8-fixme (FIX)"
+  },
+  {
+    "id": "FIX002",
+    "name": "LineContainsTodo",
+    "description": "LineContainsTodo (flake8-fixme)",
+    "section": "flake8-fixme (FIX)"
+  },
+  {
+    "id": "FIX003",
+    "name": "LineContainsXxx",
+    "description": "LineContainsXxx (flake8-fixme)",
+    "section": "flake8-fixme (FIX)"
+  },
+  {
+    "id": "FIX004",
+    "name": "LineContainsHack",
+    "description": "LineContainsHack (flake8-fixme)",
+    "section": "flake8-fixme (FIX)"
+  },
+  {
+    "id": "FURB105",
+    "name": "PrintEmptyString",
+    "description": "PrintEmptyString (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB116",
+    "name": "FStringNumberFormat",
+    "description": "FStringNumberFormat (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB152",
+    "name": "MathConstant",
+    "description": "MathConstant (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB154",
+    "name": "RepeatedGlobal",
+    "description": "RepeatedGlobal (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB156",
+    "name": "HardcodedStringCharset",
+    "description": "HardcodedStringCharset (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB157",
+    "name": "VerboseDecimalConstructor",
+    "description": "VerboseDecimalConstructor (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB162",
+    "name": "FromisoformatReplaceZ",
+    "description": "FromisoformatReplaceZ (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB163",
+    "name": "RedundantLogBase",
+    "description": "RedundantLogBase (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB164",
+    "name": "UnnecessaryFromFloat",
+    "description": "UnnecessaryFromFloat (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB166",
+    "name": "IntOnSlicedStr",
+    "description": "IntOnSlicedStr (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB167",
+    "name": "RegexFlagAlias",
+    "description": "RegexFlagAlias (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB168",
+    "name": "IsinstanceTypeNone",
+    "description": "IsinstanceTypeNone (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB169",
+    "name": "TypeNoneComparison",
+    "description": "TypeNoneComparison (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB180",
+    "name": "MetaClassABCMeta",
+    "description": "MetaClassABCMeta (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "FURB181",
+    "name": "HashlibDigestHex",
+    "description": "HashlibDigestHex (refurb)",
+    "section": "Refurb (FURB)"
+  },
+  {
+    "id": "LOG007",
+    "name": "ExceptionWithoutExcInfo",
+    "description": "ExceptionWithoutExcInfo (flake8-logging)",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Category",
+    "name": "Rule Count",
+    "description": "Rule Count ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Pycodestyle (E/W)",
+    "name": "68",
+    "description": "68 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Pyflakes (F)",
+    "name": "40",
+    "description": "40 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Pylint (PLC/PLE/PLR/PLW)",
+    "name": "98",
+    "description": "98 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-async (ASYNC)",
+    "name": "15",
+    "description": "15 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-builtins (A)",
+    "name": "6",
+    "description": "6 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-bugbear (B)",
+    "name": "42",
+    "description": "42 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-blind-except (BLE)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-comprehensions (C4)",
+    "name": "20",
+    "description": "20 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-debugger (T10)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "mccabe (C90)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-tidy-imports (TID)",
+    "name": "4",
+    "description": "4 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-return (RET)",
+    "name": "8",
+    "description": "8 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-gettext (INT)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-implicit-str-concat (ISC)",
+    "name": "4",
+    "description": "4 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-print (T20)",
+    "name": "2",
+    "description": "2 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-quotes (Q)",
+    "name": "5",
+    "description": "5 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-annotations (ANN)",
+    "name": "11",
+    "description": "11 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-future-annotations (FA)",
+    "name": "2",
+    "description": "2 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-2020 (YTT)",
+    "name": "10",
+    "description": "10 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-simplify (SIM)",
+    "name": "30",
+    "description": "30 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-copyright (CPY)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "pyupgrade (UP)",
+    "name": "48",
+    "description": "48 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "pydocstyle (D)",
+    "name": "43",
+    "description": "43 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "pep8-naming (N)",
+    "name": "16",
+    "description": "16 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "isort (I)",
+    "name": "2",
+    "description": "2 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "eradicate (ERA)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-bandit (S)",
+    "name": "67",
+    "description": "67 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-boolean-trap (FBT)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-unused-arguments (ARG)",
+    "name": "5",
+    "description": "5 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-import-conventions (ICN)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-datetimez (DTZ)",
+    "name": "10",
+    "description": "10 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "pygrep-hooks (PGH)",
+    "name": "5",
+    "description": "5 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "pandas-vet (PD)",
+    "name": "13",
+    "description": "13 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-errmsg (EM)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-pyi (PYI)",
+    "name": "52",
+    "description": "52 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-pytest-style (PT)",
+    "name": "31",
+    "description": "31 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-pie (PIE)",
+    "name": "8",
+    "description": "8 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-commas (COM)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-no-pep420 (INP)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-executable (EXE)",
+    "name": "5",
+    "description": "5 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-type-checking (TC)",
+    "name": "9",
+    "description": "9 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "tryceratops (TRY)",
+    "name": "10",
+    "description": "10 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-use-pathlib (PTH)",
+    "name": "32",
+    "description": "32 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-logging-format (G)",
+    "name": "8",
+    "description": "8 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-raise (RSE)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-self (SLF)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "NumPy (NPY)",
+    "name": "4",
+    "description": "4 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "FastAPI (FAST)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "pydoclint (DOC)",
+    "name": "7",
+    "description": "7 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Ruff (RUF)",
+    "name": "72",
+    "description": "72 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-django (DJ)",
+    "name": "7",
+    "description": "7 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flynt (FLY)",
+    "name": "1",
+    "description": "1 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-todos (TD)",
+    "name": "7",
+    "description": "7 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Airflow (AIR)",
+    "name": "10",
+    "description": "10 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Perflint (PERF)",
+    "name": "6",
+    "description": "6 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-fixme (FIX)",
+    "name": "4",
+    "description": "4 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-slots (SLOT)",
+    "name": "3",
+    "description": "3 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "Refurb (FURB)",
+    "name": "36",
+    "description": "36 ()",
+    "section": "flake8-logging (LOG)"
+  },
+  {
+    "id": "flake8-logging (LOG)",
+    "name": "7",
+    "description": "7 ()",
+    "section": "flake8-logging (LOG)"
+  }
+]

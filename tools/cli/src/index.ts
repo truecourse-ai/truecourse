@@ -14,6 +14,7 @@ import { registerServiceCommand } from "./commands/service/index.js";
 import { readConfig } from "./commands/helpers.js";
 import { getPlatform } from "./commands/service/platform.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
+import { runHooksInstall, runHooksUninstall, runHooksStatus, runHooksRun } from "./commands/hooks.js";
 
 const program = new Command();
 
@@ -65,24 +66,13 @@ program
   .command("analyze")
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
-  .option("--code-review", "Include LLM code review (off by default)")
   .option("--no-autostart", "Don't auto-start the server (for use from Claude Code skills)")
   .action(async (options) => {
     if (options.diff) {
       await runAnalyzeDiff({ noAutostart: !options.autostart });
     } else {
-      await runAnalyze({ noAutostart: !options.autostart, codeReview: options.codeReview ?? false });
+      await runAnalyze({ noAutostart: !options.autostart });
     }
-  });
-
-program
-  .command("code-review")
-  .description("Run LLM code review on the latest analysis")
-  .option("--diff", "Run on the latest diff analysis instead")
-  .option("--no-autostart", "Don't auto-start the server")
-  .action(async (options) => {
-    const { runCodeReviewCmd } = await import("./commands/code-review.js");
-    await runCodeReviewCmd({ noAutostart: !options.autostart, diff: options.diff ?? false });
   });
 
 program
@@ -108,8 +98,8 @@ const rulesCmd = program
 rulesCmd
   .command("categories")
   .description("View or override rule categories for this repository")
-  .option("--enable <category>", "Enable a category (architecture, code, database)")
-  .option("--disable <category>", "Disable a category (architecture, code, database)")
+  .option("--enable <category>", "Enable a category (architecture, security, bugs, code-quality, performance, reliability, database)")
+  .option("--disable <category>", "Disable a category (architecture, security, bugs, code-quality, performance, reliability, database)")
   .option("--reset", "Reset to global default")
   .action(async (options) => {
     const { getServerUrl, ensureServer, ensureRepo } = await import("./commands/helpers.js");
@@ -117,7 +107,7 @@ rulesCmd
     const repo = await ensureRepo();
     const serverUrl = getServerUrl();
 
-    const allCategories = ["architecture", "code", "database"];
+    const allCategories = ["architecture", "security", "bugs", "code-quality", "performance", "reliability", "database"];
 
     if (options.reset) {
       await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
@@ -170,9 +160,13 @@ rulesCmd
     const status = (cat: string) => enabled.has(cat) ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
 
     p.log.info(`Rule categories for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}:`);
-    console.log(`  Architecture: ${status("architecture")}`);
-    console.log(`  Code:         ${status("code")}`);
-    console.log(`  Database:     ${status("database")}`);
+    console.log(`  Architecture:  ${status("architecture")}`);
+    console.log(`  Security:      ${status("security")}`);
+    console.log(`  Bugs:          ${status("bugs")}`);
+    console.log(`  Code Quality:  ${status("code-quality")}`);
+    console.log(`  Performance:   ${status("performance")}`);
+    console.log(`  Reliability:   ${status("reliability")}`);
+    console.log(`  Database:      ${status("database")}`);
     console.log("");
     if (!isOverride) {
       p.log.info("Override with: truecourse rules categories --enable/--disable <category>");
@@ -238,6 +232,39 @@ telemetryCmd
     } else {
       p.log.info("Telemetry is disabled.");
     }
+  });
+
+// Git hooks management
+const hooksCmd = program
+  .command("hooks")
+  .description("Manage git hooks");
+
+hooksCmd
+  .command("install")
+  .description("Install pre-commit hook")
+  .action(() => {
+    runHooksInstall();
+  });
+
+hooksCmd
+  .command("uninstall")
+  .description("Remove pre-commit hook")
+  .action(() => {
+    runHooksUninstall();
+  });
+
+hooksCmd
+  .command("status")
+  .description("Show hook installation status")
+  .action(() => {
+    runHooksStatus();
+  });
+
+hooksCmd
+  .command("run")
+  .description("Run pre-commit checks (called by the hook)")
+  .action(async () => {
+    await runHooksRun();
   });
 
 program
