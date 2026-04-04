@@ -98,8 +98,8 @@ const rulesCmd = program
 rulesCmd
   .command("categories")
   .description("View or override rule categories for this repository")
-  .option("--enable <category>", "Enable a category (architecture, security, bugs, code-quality, performance, reliability, database)")
-  .option("--disable <category>", "Disable a category (architecture, security, bugs, code-quality, performance, reliability, database)")
+  .option("--enable <category>", "Enable a category (architecture, security, bugs, code-quality, style, performance, reliability, database)")
+  .option("--disable <category>", "Disable a category (architecture, security, bugs, code-quality, style, performance, reliability, database)")
   .option("--reset", "Reset to global default")
   .action(async (options) => {
     const { getServerUrl, ensureServer, ensureRepo } = await import("./commands/helpers.js");
@@ -107,7 +107,7 @@ rulesCmd
     const repo = await ensureRepo();
     const serverUrl = getServerUrl();
 
-    const allCategories = ["architecture", "security", "bugs", "code-quality", "performance", "reliability", "database"];
+    const allCategories = ["architecture", "security", "bugs", "code-quality", "style", "performance", "reliability", "database"];
 
     if (options.reset) {
       await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
@@ -164,6 +164,7 @@ rulesCmd
     console.log(`  Security:      ${status("security")}`);
     console.log(`  Bugs:          ${status("bugs")}`);
     console.log(`  Code Quality:  ${status("code-quality")}`);
+    console.log(`  Style:         ${status("style")}`);
     console.log(`  Performance:   ${status("performance")}`);
     console.log(`  Reliability:   ${status("reliability")}`);
     console.log(`  Database:      ${status("database")}`);

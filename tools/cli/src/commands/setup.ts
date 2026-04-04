@@ -224,11 +224,12 @@ export async function runSetup(): Promise<void> {
       { value: "security" as const, label: "Security (secrets, injection, crypto, auth)", hint: "recommended" },
       { value: "bugs" as const, label: "Bugs (runtime errors, null derefs, type issues)", hint: "recommended" },
       { value: "code-quality" as const, label: "Code Quality (complexity, dead code, smells)", hint: "recommended" },
+      { value: "style" as const, label: "Style (formatting, naming conventions, docstrings)" },
       { value: "performance" as const, label: "Performance (N+1 queries, memory leaks, inefficient patterns)", hint: "recommended" },
       { value: "reliability" as const, label: "Reliability (error handling, timeouts, retries)", hint: "recommended" },
       { value: "database" as const, label: "Database (schema, indexes, constraints)", hint: "recommended" },
     ],
-    initialValues: ["architecture", "security", "bugs", "code-quality", "performance", "reliability", "database"],
+    initialValues: ["architecture", "security", "bugs", "code-quality", "performance", "reliability", "database"] as string[],
     required: true,
   });
 

@@ -55,7 +55,7 @@ function deriveDomain(key: string): AnalysisRule['domain'] {
   const firstSlash = key.indexOf('/');
   if (firstSlash === -1) return undefined;
   const prefix = key.slice(0, firstSlash);
-  const validDomains = new Set(['architecture', 'security', 'bugs', 'code-quality', 'database', 'performance', 'reliability']);
+  const validDomains = new Set(['architecture', 'security', 'bugs', 'code-quality', 'style', 'database', 'performance', 'reliability']);
   return validDomains.has(prefix) ? (prefix as AnalysisRule['domain']) : undefined;
 }
 
