@@ -261,6 +261,30 @@ function parseTableRows(content: string): { cells: string[]; section: string }[]
   return rows;
 }
 
+/** Check if a string looks like a valid Ruff rule ID (e.g., E101, PLR0913, ASYNC210) */
+function isRuffId(s: string): boolean {
+  return /^[A-Z]{1,5}\d{3,4}$/.test(s);
+}
+
+/** Check if a string looks like a valid ESLint rule ID (kebab-case) */
+function isEslintId(s: string): boolean {
+  return /^[a-z][\w-]+$/.test(s) && !s.includes(" ");
+}
+
+/** Check if a string looks like a valid SonarPython rule ID (PascalCase name or S-number) */
+function isSonarPythonId(s: string): boolean {
+  // Must be PascalCase (uppercase start, has lowercase) or S-number
+  // Excludes all-caps like "BUG", "VULNERABILITY", "CODE_SMELL"
+  if (/^S\d{3,5}$/.test(s)) return true;
+  if (/^[A-Z][a-zA-Z]+$/.test(s) && /[a-z]/.test(s)) return true;
+  return false;
+}
+
+/** Check if a string looks like a valid SonarJS rule name (kebab-case) */
+function isSonarJsId(s: string): boolean {
+  return /^[a-z][\w-]+$/.test(s) && !s.includes(" ");
+}
+
 function parseRuff(filePath: string): SourceRule[] {
   const content = readFileSync(filePath, "utf-8");
   const rows = parseTableRows(content);
@@ -273,6 +297,8 @@ function parseRuff(filePath: string): SourceRule[] {
     const name = cells[2];
     const deprecated = (cells[4] || "").toLowerCase().includes("yes");
     if (!id || !name) continue;
+    // Skip summary/count rows that aren't real rule IDs
+    if (!isRuffId(id)) continue;
 
     rules.push({
       id,
@@ -300,6 +326,8 @@ function parseSonarPython(filePath: string): SourceRule[] {
     const tags = cells[6] || "";
     const deprecated = status.toLowerCase().includes("deprecated");
     if (!id || !title) continue;
+    // Skip summary rows (e.g., "BUG | 104", "Type | Count")
+    if (!isSonarPythonId(id)) continue;
 
     rules.push({
       id,
@@ -310,7 +338,13 @@ function parseSonarPython(filePath: string): SourceRule[] {
     });
   }
 
-  return rules;
+  // Deduplicate — SonarPython lists some rules in multiple sections
+  const seen = new Set<string>();
+  return rules.filter((r) => {
+    if (seen.has(r.id)) return false;
+    seen.add(r.id);
+    return true;
+  });
 }
 
 function parseEslint(filePath: string): SourceRule[] {
@@ -324,9 +358,10 @@ function parseEslint(filePath: string): SourceRule[] {
     const id = cells[1];
     const description = cells[2];
     if (!id || !description) continue;
+    // Skip summary rows (e.g., "ESLint Core - Possible Problems | 59")
+    if (!isEslintId(id)) continue;
 
     // Check if it's in the deprecated column
-    const lastNonEmpty = cells.filter((c) => c).pop();
     const deprecated =
       section.includes("Deprecated") ||
       (cells.length >= 6 && cells[5]?.toLowerCase() === "yes") ||
@@ -341,7 +376,13 @@ function parseEslint(filePath: string): SourceRule[] {
     });
   }
 
-  return rules;
+  // Deduplicate — some ESLint rules appear in both core and @typescript-eslint
+  const seen = new Set<string>();
+  return rules.filter((r) => {
+    if (seen.has(r.id)) return false;
+    seen.add(r.id);
+    return true;
+  });
 }
 
 function parseSonarjs(filePath: string): SourceRule[] {
@@ -357,6 +398,8 @@ function parseSonarjs(filePath: string): SourceRule[] {
     const deprecated = (cells[4] || "").toLowerCase().includes("yes") ||
                        (cells[4] || "").trim() === "Yes";
     if (!name || !sNumber) continue;
+    // Skip summary rows — SonarJS rule names are kebab-case, S-numbers are S+digits
+    if (!isSonarJsId(name) || !/^S\d+$/.test(sNumber)) continue;
 
     rules.push({
       id: name,

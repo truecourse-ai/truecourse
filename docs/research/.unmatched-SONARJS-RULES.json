@@ -1,19 +1,5 @@
 [
   {
-    "id": "arrow-function-convention",
-    "secondaryId": "S3524",
-    "name": "arrow-function-convention",
-    "description": "Braces and parentheses should be used consistently with arrow functions",
-    "section": "Native SonarJS Rules (278 rules)"
-  },
-  {
-    "id": "call-argument-line",
-    "secondaryId": "S1472",
-    "name": "call-argument-line",
-    "description": "Function call arguments should not start on new lines",
-    "section": "Native SonarJS Rules (278 rules)"
-  },
-  {
     "id": "file-header",
     "secondaryId": "S1451",
     "name": "file-header",
@@ -21,24 +7,10 @@
     "section": "Native SonarJS Rules (278 rules)"
   },
   {
-    "id": "function-name",
-    "secondaryId": "S100",
-    "name": "function-name",
-    "description": "Function and method names should comply with a naming convention",
-    "section": "Native SonarJS Rules (278 rules)"
-  },
-  {
     "id": "no-sonar-comments",
     "secondaryId": "S1291",
     "name": "no-sonar-comments",
     "description": "Track uses of \"NOSONAR\" comments",
-    "section": "Native SonarJS Rules (278 rules)"
-  },
-  {
-    "id": "variable-name",
-    "secondaryId": "S117",
-    "name": "variable-name",
-    "description": "Variable, property and parameter names should comply with a naming convention",
     "section": "Native SonarJS Rules (278 rules)"
   }
 ]

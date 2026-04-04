@@ -3,9 +3,12 @@
  *
  * Listens to viewport changes, debounces zoom level transitions, and
  * returns the correct set of nodes/edges/zoomLevel for the current zoom.
+ *
+ * Dagre runs per zoom level with correct container sizes, so parent nodes
+ * grow/shrink to fit their children without overlapping.
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Node, Edge, Viewport } from '@xyflow/react';
 import type { SemanticZoomLevel } from '@/types/graph';
 import type { AllLevelGraphResponse } from '@/lib/api';
@@ -13,7 +16,8 @@ import {
   getZoomLevel,
   getVisibleNodes,
   aggregateEdges,
-  computeLayoutForLevel,
+  computeLayoutForZoom,
+  type ZoomLayout,
 } from '@/lib/semantic-zoom';
 
 interface UseSemanticZoomOptions {
@@ -33,40 +37,42 @@ export function useSemanticZoom({ data, enabled }: UseSemanticZoomOptions): UseS
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
 
-  // Cache layout results per zoom level
-  const layoutCache = useRef<Map<SemanticZoomLevel, { nodes: Node[]; edges: Edge[] }>>(new Map());
-
   // Debounce timer ref
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track current zoom to debounce transitions
   const currentZoomRef = useRef(0.5);
 
-  const computeForLevel = useCallback(
-    (level: SemanticZoomLevel) => {
-      if (!data) return { nodes: [], edges: [] };
-
-      const cached = layoutCache.current.get(level);
-      if (cached) return cached;
-
-      const visibleNodes = getVisibleNodes(data, level);
-      const visibleIds = new Set(visibleNodes.map((n) => n.id));
-      const visibleEdges = aggregateEdges(data, level, visibleIds);
-      const layoutNodes = computeLayoutForLevel(visibleNodes, visibleEdges);
-
-      const result = { nodes: layoutNodes, edges: visibleEdges };
-      layoutCache.current.set(level, result);
-      return result;
-    },
-    [data],
-  );
+  // Cache layouts per zoom level (invalidated when data changes)
+  const layoutCache = useRef<Map<SemanticZoomLevel, ZoomLayout>>(new Map());
 
   // Invalidate cache when data changes
   useEffect(() => {
     layoutCache.current.clear();
   }, [data]);
 
-  // Compute initial level
+  // Compute nodes/edges for a given level
+  const computeForLevel = useCallback(
+    (level: SemanticZoomLevel) => {
+      if (!data) return { nodes: [], edges: [] };
+
+      // Get or compute layout for this zoom level
+      let layout = layoutCache.current.get(level);
+      if (!layout) {
+        layout = computeLayoutForZoom(data, level);
+        layoutCache.current.set(level, layout);
+      }
+
+      const visibleNodes = getVisibleNodes(data, level, layout);
+      const visibleIds = new Set(visibleNodes.map((n) => n.id));
+      const visibleEdges = aggregateEdges(data, level, visibleIds);
+
+      return { nodes: visibleNodes, edges: visibleEdges };
+    },
+    [data],
+  );
+
+  // Recompute when level or data changes
   useEffect(() => {
     if (!enabled || !data) return;
     const result = computeForLevel(zoomLevel);

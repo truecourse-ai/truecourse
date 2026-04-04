@@ -7,6 +7,10 @@
  *   zoom <= 0.7   → directories
  *   zoom <= 1.2   → modules
  *   zoom >  1.2   → methods    (most zoomed in)
+ *
+ * IMPORTANT: The base layout (service/database positions) is computed ONCE from
+ * the full data and reused at every zoom level. Only the visible children change.
+ * This prevents nodes from jumping when crossing zoom thresholds.
  */
 
 import dagre from 'dagre';
@@ -47,24 +51,147 @@ export function isLevelAtLeast(level: SemanticZoomLevel, target: SemanticZoomLev
 }
 
 // ---------------------------------------------------------------------------
-// Build visible nodes for a given zoom level
+// Stable base layout — computed once, reused at every zoom level
+// ---------------------------------------------------------------------------
+
+export interface ZoomLayout {
+  /** Positions for top-level nodes (services + databases) at this zoom level */
+  positions: Map<string, { x: number; y: number; w: number; h: number }>;
+  /** Computed layer sizes for this zoom level */
+  layerSizes: Map<string, { w: number; h: number }>;
+  /** Computed module sizes for this zoom level (only at methods level) */
+  moduleSizes: Map<string, { w: number; h: number }>;
+}
+
+/**
+ * Compute layout for a specific zoom level. Container sizes are computed
+ * bottom-up (methods → modules → layers → services), then Dagre positions
+ * the top-level nodes to avoid overlaps.
+ *
+ * Different zoom levels produce different service sizes (layers-only is compact,
+ * methods-expanded is large), so Dagre runs per level. The relative ordering
+ * stays consistent because the same edges/ranking are used.
+ */
+export function computeLayoutForZoom(
+  data: AllLevelGraphResponse,
+  zoomLevel: SemanticZoomLevel,
+): ZoomLayout {
+  const positions = new Map<string, { x: number; y: number; w: number; h: number }>();
+
+  // --- Bottom-up: compute module sizes (methods level) ---
+  const moduleSizesMap = new Map<string, { w: number; h: number }>();
+  if (zoomLevel === 'methods') {
+    for (const mod of data.modules) {
+      const methodCount = data.methods.filter((m) => m.moduleId === mod.id).length;
+      const mMaxPerCol = 5;
+      const mCols = Math.max(Math.ceil(methodCount / mMaxPerCol), 1);
+      const mRows = Math.min(methodCount, mMaxPerCol);
+      const w = Math.max(264, 16 * 2 + mCols * (204 + 8));
+      const h = Math.max(60, 40 + mRows * (32 + 8) + 16);
+      moduleSizesMap.set(mod.id, { w, h });
+    }
+  }
+
+  // --- Bottom-up: compute layer sizes ---
+  const layerSizesMap = new Map<string, { w: number; h: number }>();
+  if (isLevelAtLeast(zoomLevel, 'layers')) {
+    for (const layer of data.layers) {
+      const size = computeLayerSizeDynamic(data, layer, zoomLevel, moduleSizesMap);
+      layerSizesMap.set(layer.id, size);
+    }
+  }
+
+  // --- Bottom-up: compute service sizes ---
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: 'TB', nodesep: 150, ranksep: 200, marginx: 60, marginy: 60 });
+  g.setDefaultEdgeLabel(() => ({}));
+
+  for (const svc of data.services) {
+    if (zoomLevel === 'services') {
+      // Flat service card
+      g.setNode(svc.id, { width: 280, height: 120 });
+    } else {
+      // Container — size from layers
+      const svcLayers = data.layers.filter((l) => l.serviceId === svc.id);
+      const svcPadX = 20;
+      const svcPadTop = 50;
+      const svcPadBottom = 20;
+      const layerGap = 12;
+
+      let totalH = svcPadTop;
+      let maxW = 350;
+      for (const layer of svcLayers) {
+        const ls = layerSizesMap.get(layer.id) || { w: 350, h: 60 };
+        maxW = Math.max(maxW, ls.w);
+        totalH += ls.h + layerGap;
+      }
+      totalH += svcPadBottom;
+      const svcW = maxW + svcPadX * 2;
+      const svcH = Math.max(200, totalH);
+
+      g.setNode(svc.id, { width: svcW, height: svcH });
+    }
+  }
+
+  // Database nodes
+  for (const db of data.databases) {
+    g.setNode(db.id, { width: 200, height: 80 });
+  }
+
+  // Edges for ranking
+  for (const e of data.edges.service) {
+    if (g.hasNode(e.source) && g.hasNode(e.target)) {
+      g.setEdge(e.source, e.target);
+    }
+  }
+  for (const conn of data.dbConnections) {
+    if (g.hasNode(conn.serviceId) && g.hasNode(conn.databaseId)) {
+      g.setEdge(conn.serviceId, conn.databaseId);
+    }
+  }
+
+  dagre.layout(g);
+
+  for (const svc of data.services) {
+    const n = g.node(svc.id);
+    if (n) {
+      positions.set(svc.id, { x: n.x - n.width / 2, y: n.y - n.height / 2, w: n.width, h: n.height });
+    }
+  }
+  for (const db of data.databases) {
+    const n = g.node(db.id);
+    if (n) {
+      positions.set(db.id, { x: n.x - n.width / 2, y: n.y - n.height / 2, w: n.width, h: n.height });
+    }
+  }
+
+  return { positions, layerSizes: layerSizesMap, moduleSizes: moduleSizesMap };
+}
+
+// ---------------------------------------------------------------------------
+// Build visible nodes for a given zoom level using stable base positions
 // ---------------------------------------------------------------------------
 
 export function getVisibleNodes(
   data: AllLevelGraphResponse,
   zoomLevel: SemanticZoomLevel,
+  layout: ZoomLayout,
 ): Node[] {
   const nodes: Node[] = [];
-
-  // Services are always visible (as either flat nodes or group containers)
   const isFlat = zoomLevel === 'services';
 
+  // Use pre-computed sizes from the layout
+  const { layerSizes, moduleSizes } = layout;
+
+  // --- Services: position and size from layout (Dagre-computed for this level) ---
   for (const svc of data.services) {
+    const pos = layout.positions.get(svc.id) || { x: 0, y: 0, w: 400, h: 300 };
+
     if (isFlat) {
       nodes.push({
         id: svc.id,
         type: 'service',
-        position: { x: 0, y: 0 },
+        position: { x: pos.x, y: pos.y },
         data: {
           label: svc.name,
           description: svc.description || undefined,
@@ -83,7 +210,7 @@ export function getVisibleNodes(
       nodes.push({
         id: svc.id,
         type: 'serviceGroup',
-        position: { x: 0, y: 0 },
+        position: { x: pos.x, y: pos.y },
         data: {
           label: svc.name,
           serviceType: svc.type,
@@ -92,119 +219,208 @@ export function getVisibleNodes(
           layers: svc.layers,
           rootPath: svc.rootPath,
         },
-        style: { width: 400, height: 300 }, // will be resized by layout
+        style: { width: pos.w, height: pos.h },
       });
     }
   }
 
-  // Layers visible from 'layers' level and deeper
+  // --- Layers: positioned within their service group ---
   if (isLevelAtLeast(zoomLevel, 'layers')) {
+    const layersByService = new Map<string, typeof data.layers>();
     for (const layer of data.layers) {
-      nodes.push({
-        id: layer.id,
-        type: 'layer',
-        position: { x: 0, y: 0 },
-        parentId: layer.serviceId,
-        extent: 'parent' as const,
-        data: {
-          label: layer.layer,
-          layer: layer.layer,
-          fileCount: layer.fileCount,
-          layerColor: layer.layerColor,
-          fileNames: [],
-          filePaths: layer.filePaths,
-          isContainer: true,
-        },
-        style: { width: 350, height: 200 },
-      });
+      if (!layersByService.has(layer.serviceId)) layersByService.set(layer.serviceId, []);
+      layersByService.get(layer.serviceId)!.push(layer);
+    }
+
+    for (const [_serviceId, svcLayers] of layersByService) {
+      let yOffset = 50; // top padding inside service group
+      for (const layer of svcLayers) {
+        const ls = layerSizes.get(layer.id) || { w: 350, h: 60 };
+
+        nodes.push({
+          id: layer.id,
+          type: 'layer',
+          position: { x: 16, y: yOffset },
+          parentId: layer.serviceId,
+          extent: 'parent' as const,
+          data: {
+            label: layer.layer,
+            layer: layer.layer,
+            fileCount: layer.fileCount,
+            layerColor: layer.layerColor,
+            fileNames: [],
+            filePaths: layer.filePaths,
+            isContainer: true,
+          },
+          style: { width: ls.w, height: ls.h },
+        });
+
+        yOffset += ls.h + 12;
+      }
     }
   }
 
-  // Directories visible at 'directories' level
+  // --- Directories: positioned within their layer ---
   if (zoomLevel === 'directories') {
+    const dirsByLayer = new Map<string, typeof data.directories>();
     for (const dir of data.directories) {
-      // Get display name (last segment of path)
-      const parts = dir.dirPath.split('/');
-      const displayName = parts[parts.length - 1] || dir.dirPath;
-      nodes.push({
-        id: dir.id,
-        type: 'directory',
-        position: { x: 0, y: 0 },
-        parentId: dir.layerId,
-        extent: 'parent' as const,
-        data: {
-          label: displayName,
-          dirPath: dir.dirPath,
-          moduleCount: dir.moduleCount,
-          violationCount: dir.violationCount,
-          layerColor: '', // will be filled from layer
-        },
-      });
+      if (!dirsByLayer.has(dir.layerId)) dirsByLayer.set(dir.layerId, []);
+      dirsByLayer.get(dir.layerId)!.push(dir);
     }
-    // Fill layerColor from layer data
+
     const layerColorMap = new Map(data.layers.map((l) => [l.id, l.layerColor]));
-    for (const node of nodes) {
-      if (node.type === 'directory') {
-        const dir = data.directories.find((d) => d.id === node.id);
-        if (dir) {
-          (node.data as Record<string, unknown>).layerColor = layerColorMap.get(dir.layerId) || '#6b7280';
+
+    for (const [_layerId, layerDirs] of dirsByLayer) {
+      const maxPerCol = 5;
+      const dirW = 264;
+      const dirH = 50;
+      const gap = 12;
+      const padX = 16;
+      const padTop = 36;
+
+      for (let i = 0; i < layerDirs.length; i++) {
+        const dir = layerDirs[i];
+        const col = Math.floor(i / maxPerCol);
+        const row = i % maxPerCol;
+        const parts = dir.dirPath.split('/');
+        const displayName = parts[parts.length - 1] || dir.dirPath;
+
+        nodes.push({
+          id: dir.id,
+          type: 'directory',
+          position: { x: padX + col * (dirW + gap), y: padTop + row * (dirH + gap) },
+          parentId: dir.layerId,
+          extent: 'parent' as const,
+          data: {
+            label: displayName,
+            dirPath: dir.dirPath,
+            moduleCount: dir.moduleCount,
+            violationCount: dir.violationCount,
+            layerColor: layerColorMap.get(dir.layerId) || '#6b7280',
+          },
+        });
+      }
+    }
+  }
+
+  // --- Modules: positioned within their layer ---
+  if (isLevelAtLeast(zoomLevel, 'modules')) {
+    const modulesByLayer = new Map<string, typeof data.modules>();
+    for (const mod of data.modules) {
+      if (!modulesByLayer.has(mod.layerId)) modulesByLayer.set(mod.layerId, []);
+      modulesByLayer.get(mod.layerId)!.push(mod);
+    }
+
+    const isContainer = zoomLevel === 'methods';
+
+    for (const [_layerId, layerModules] of modulesByLayer) {
+      const maxPerCol = 5;
+      const modW = 264;
+      const modH = isContainer ? 100 : 50;
+      const gap = 12;
+      const padX = 16;
+      const padTop = 36;
+
+      // At methods level, use actual module sizes for positioning (variable height)
+      if (isContainer) {
+        let yOffset = padTop;
+        for (const mod of layerModules) {
+          const ms = moduleSizes.get(mod.id) || { w: modW, h: 100 };
+          nodes.push({
+            id: mod.id,
+            type: 'module',
+            position: { x: padX, y: yOffset },
+            parentId: mod.layerId,
+            extent: 'parent' as const,
+            data: {
+              label: mod.name,
+              moduleKind: mod.kind,
+              methodCount: mod.methodCount,
+              layerColor: mod.layerColor,
+              isDead: false,
+              isContainer: true,
+              filePath: mod.filePath,
+              rootPath: mod.filePath,
+            },
+            style: { width: ms.w, height: ms.h },
+          });
+          yOffset += ms.h + gap;
+        }
+      } else {
+        for (let i = 0; i < layerModules.length; i++) {
+          const mod = layerModules[i];
+          const col = Math.floor(i / maxPerCol);
+          const row = i % maxPerCol;
+          nodes.push({
+            id: mod.id,
+            type: 'module',
+            position: { x: padX + col * (modW + gap), y: padTop + row * (modH + gap) },
+            parentId: mod.layerId,
+            extent: 'parent' as const,
+            data: {
+              label: mod.name,
+              moduleKind: mod.kind,
+              methodCount: mod.methodCount,
+              layerColor: mod.layerColor,
+              isDead: false,
+              isContainer: false,
+              filePath: mod.filePath,
+              rootPath: mod.filePath,
+            },
+          });
         }
       }
     }
   }
 
-  // Modules visible at 'modules' and 'methods' levels
-  if (isLevelAtLeast(zoomLevel, 'modules')) {
-    for (const mod of data.modules) {
-      const isContainer = zoomLevel === 'methods';
-      nodes.push({
-        id: mod.id,
-        type: 'module',
-        position: { x: 0, y: 0 },
-        parentId: mod.layerId,
-        extent: 'parent' as const,
-        data: {
-          label: mod.name,
-          moduleKind: mod.kind,
-          methodCount: mod.methodCount,
-          layerColor: mod.layerColor,
-          isDead: false,
-          isContainer,
-          filePath: mod.filePath,
-          rootPath: mod.filePath,
-        },
-      });
-    }
-  }
-
-  // Methods visible at 'methods' level
+  // --- Methods: positioned within their module ---
   if (zoomLevel === 'methods') {
+    const methodsByModule = new Map<string, typeof data.methods>();
     for (const method of data.methods) {
-      nodes.push({
-        id: method.id,
-        type: 'method',
-        position: { x: 0, y: 0 },
-        parentId: method.moduleId,
-        extent: 'parent' as const,
-        data: {
-          label: method.name,
-          signature: method.signature,
-          isAsync: method.isAsync,
-          isExported: method.isExported,
-          lineCount: method.lineCount,
-          filePath: '',
-          rootPath: '',
-        },
-      });
+      if (!methodsByModule.has(method.moduleId)) methodsByModule.set(method.moduleId, []);
+      methodsByModule.get(method.moduleId)!.push(method);
+    }
+
+    for (const [_moduleId, moduleMethods] of methodsByModule) {
+      const maxPerCol = 5;
+      const methW = 204;
+      const methH = 32;
+      const gap = 8;
+      const padX = 8;
+      const padTop = 36;
+
+      for (let i = 0; i < moduleMethods.length; i++) {
+        const method = moduleMethods[i];
+        const col = Math.floor(i / maxPerCol);
+        const row = i % maxPerCol;
+
+        nodes.push({
+          id: method.id,
+          type: 'method',
+          position: { x: padX + col * (methW + gap), y: padTop + row * (methH + gap) },
+          parentId: method.moduleId,
+          extent: 'parent' as const,
+          data: {
+            label: method.name,
+            signature: method.signature,
+            isAsync: method.isAsync,
+            isExported: method.isExported,
+            lineCount: method.lineCount,
+            filePath: '',
+            rootPath: '',
+          },
+        });
+      }
     }
   }
 
-  // Database nodes (always visible)
+  // --- Database nodes: always visible, stable positions ---
   for (const db of data.databases) {
+    const pos = baseLayout.positions.get(db.id) || { x: 0, y: 0 };
     nodes.push({
       id: db.id,
       type: 'database',
-      position: { x: 0, y: 0 },
+      position: { x: pos.x, y: pos.y },
       data: {
         label: db.name,
         databaseType: db.type,
@@ -216,6 +432,67 @@ export function getVisibleNodes(
   }
 
   return nodes;
+}
+
+// ---------------------------------------------------------------------------
+// Compute layer size based on content at the current zoom level
+// ---------------------------------------------------------------------------
+
+function computeLayerSizeDynamic(
+  data: AllLevelGraphResponse,
+  layer: AllLevelGraphResponse['layers'][0],
+  zoomLevel: SemanticZoomLevel,
+  moduleSizes: Map<string, { w: number; h: number }>,
+): { w: number; h: number } {
+  const padX = 16;
+  const padTop = 36;
+  const padBottom = 16;
+  const gap = 12;
+
+  if (zoomLevel === 'layers') {
+    return { w: 350, h: 60 };
+  }
+
+  if (zoomLevel === 'directories') {
+    const dirs = data.directories.filter((d) => d.layerId === layer.id);
+    const count = dirs.length;
+    if (count === 0) return { w: 350, h: 60 };
+    const maxPerCol = 5;
+    const cols = Math.max(Math.ceil(count / maxPerCol), 1);
+    const rows = Math.min(count, maxPerCol);
+    return {
+      w: padX * 2 + cols * (264 + gap),
+      h: padTop + rows * (50 + gap) + padBottom,
+    };
+  }
+
+  // modules level — grid layout
+  if (zoomLevel === 'modules') {
+    const mods = data.modules.filter((m) => m.layerId === layer.id);
+    const count = mods.length;
+    if (count === 0) return { w: 350, h: 60 };
+    const maxPerCol = 5;
+    const cols = Math.max(Math.ceil(count / maxPerCol), 1);
+    const rows = Math.min(count, maxPerCol);
+    return {
+      w: padX * 2 + cols * (264 + gap),
+      h: padTop + rows * (50 + gap) + padBottom,
+    };
+  }
+
+  // methods level — modules are stacked vertically with variable heights
+  const mods = data.modules.filter((m) => m.layerId === layer.id);
+  if (mods.length === 0) return { w: 350, h: 60 };
+
+  let totalH = padTop;
+  let maxW = 264;
+  for (const mod of mods) {
+    const ms = moduleSizes.get(mod.id) || { w: 264, h: 100 };
+    maxW = Math.max(maxW, ms.w);
+    totalH += ms.h + gap;
+  }
+  totalH += padBottom;
+  return { w: padX * 2 + maxW, h: totalH };
 }
 
 // ---------------------------------------------------------------------------
@@ -303,187 +580,4 @@ export function aggregateEdges(
   }
 
   return edges;
-}
-
-// ---------------------------------------------------------------------------
-// Layout: run dagre on visible top-level nodes, position children relative
-// ---------------------------------------------------------------------------
-
-const NODE_WIDTHS: Record<string, number> = {
-  service: 280,
-  serviceGroup: 400,
-  layer: 350,
-  directory: 264,
-  module: 264,
-  method: 204,
-  database: 200,
-};
-
-const NODE_HEIGHTS: Record<string, number> = {
-  service: 120,
-  serviceGroup: 300,
-  layer: 200,
-  directory: 50,
-  module: 50,
-  method: 32,
-  database: 80,
-};
-
-export function computeLayoutForLevel(nodes: Node[], edges: Edge[]): Node[] {
-  if (nodes.length === 0) return nodes;
-
-  // Separate top-level nodes (no parentId) from children
-  const topLevel = nodes.filter((n) => !(n as Record<string, unknown>).parentId);
-  const children = nodes.filter((n) => (n as Record<string, unknown>).parentId);
-
-  if (topLevel.length === 0) return nodes;
-
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: 'TB', nodesep: 150, ranksep: 200, marginx: 60, marginy: 60 });
-  g.setDefaultEdgeLabel(() => ({}));
-
-  // Count children per parent to estimate container sizes
-  const childCountByParent = new Map<string, number>();
-  for (const child of children) {
-    const pid = (child as Record<string, unknown>).parentId as string;
-    childCountByParent.set(pid, (childCountByParent.get(pid) || 0) + 1);
-  }
-
-  for (const node of topLevel) {
-    const type = node.type || 'service';
-    const baseW = NODE_WIDTHS[type] || 280;
-    const baseH = NODE_HEIGHTS[type] || 120;
-    const childCount = childCountByParent.get(node.id) || 0;
-
-    // Scale container size based on child count
-    const w = childCount > 0 ? Math.max(baseW, 200 + childCount * 40) : baseW;
-    const h = childCount > 0 ? Math.max(baseH, 150 + childCount * 30) : baseH;
-
-    g.setNode(node.id, { width: w, height: h });
-  }
-
-  // Only add edges between top-level nodes
-  const topLevelIds = new Set(topLevel.map((n) => n.id));
-  for (const edge of edges) {
-    if (topLevelIds.has(edge.source) && topLevelIds.has(edge.target)) {
-      g.setEdge(edge.source, edge.target);
-    }
-  }
-
-  dagre.layout(g);
-
-  const positionMap = new Map<string, { x: number; y: number; w: number; h: number }>();
-  for (const node of topLevel) {
-    const dagreNode = g.node(node.id);
-    if (dagreNode) {
-      positionMap.set(node.id, {
-        x: dagreNode.x - dagreNode.width / 2,
-        y: dagreNode.y - dagreNode.height / 2,
-        w: dagreNode.width,
-        h: dagreNode.height,
-      });
-    }
-  }
-
-  // Position children in a grid within their parent
-  const childrenByParent = new Map<string, Node[]>();
-  for (const child of children) {
-    const pid = (child as Record<string, unknown>).parentId as string;
-    if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
-    childrenByParent.get(pid)!.push(child);
-  }
-
-  const childPositionMap = new Map<string, { x: number; y: number }>();
-  for (const [parentId, parentChildren] of childrenByParent) {
-    const parentLayout = positionMap.get(parentId);
-    const padTop = 50;
-    const padX = 16;
-    const gap = 12;
-
-    // Check if children themselves have children (containers)
-    const hasGrandchildren = parentChildren.some((c) => childrenByParent.has(c.id));
-
-    if (hasGrandchildren) {
-      // Vertical stack for containers
-      let y = padTop;
-      for (const child of parentChildren) {
-        const type = child.type || 'module';
-        const w = NODE_WIDTHS[type] || 264;
-        const grandchildCount = childCountByParent.get(child.id) || 0;
-        const h = grandchildCount > 0 ? Math.max(NODE_HEIGHTS[type] || 50, 50 + grandchildCount * 30) : NODE_HEIGHTS[type] || 50;
-        childPositionMap.set(child.id, { x: padX, y });
-        y += h + gap;
-      }
-
-      // Update parent size
-      if (parentLayout) {
-        const totalH = parentChildren.reduce((sum, c) => {
-          const type = c.type || 'module';
-          const gc = childCountByParent.get(c.id) || 0;
-          return sum + (gc > 0 ? Math.max(NODE_HEIGHTS[type] || 50, 50 + gc * 30) : NODE_HEIGHTS[type] || 50) + gap;
-        }, padTop + 16);
-        parentLayout.h = Math.max(parentLayout.h, totalH);
-        const maxChildW = parentChildren.reduce((max, c) => {
-          const type = c.type || 'module';
-          const gc = childCountByParent.get(c.id) || 0;
-          return Math.max(max, gc > 0 ? Math.max(NODE_WIDTHS[type] || 264, 200 + gc * 40) : NODE_WIDTHS[type] || 264);
-        }, 0);
-        parentLayout.w = Math.max(parentLayout.w, maxChildW + padX * 2);
-      }
-    } else {
-      // Grid layout for leaf children
-      const maxPerCol = 5;
-      const childW = NODE_WIDTHS[parentChildren[0]?.type || 'module'] || 264;
-      const childH = NODE_HEIGHTS[parentChildren[0]?.type || 'module'] || 50;
-      const cols = Math.max(Math.ceil(parentChildren.length / maxPerCol), 1);
-
-      for (let i = 0; i < parentChildren.length; i++) {
-        const col = Math.floor(i / maxPerCol);
-        const row = i % maxPerCol;
-        childPositionMap.set(parentChildren[i].id, {
-          x: padX + col * (childW + gap),
-          y: padTop + row * (childH + gap),
-        });
-      }
-
-      // Update parent size
-      if (parentLayout) {
-        const rows = Math.min(parentChildren.length, maxPerCol);
-        parentLayout.w = Math.max(parentLayout.w, padX * 2 + cols * (childW + gap));
-        parentLayout.h = Math.max(parentLayout.h, padTop + rows * (childH + gap) + 16);
-      }
-    }
-  }
-
-  // Build final positioned nodes
-  return nodes.map((node) => {
-    const pid = (node as Record<string, unknown>).parentId as string | undefined;
-    if (!pid) {
-      const pos = positionMap.get(node.id);
-      if (!pos) return node;
-      const type = node.type || 'service';
-      const isContainer = type === 'serviceGroup' || childCountByParent.has(node.id);
-      return {
-        ...node,
-        position: { x: pos.x, y: pos.y },
-        ...(isContainer ? { style: { ...node.style, width: pos.w, height: pos.h } } : {}),
-      };
-    }
-    const pos = childPositionMap.get(node.id);
-    if (!pos) return node;
-
-    // Size containers that have children
-    const grandchildCount = childCountByParent.get(node.id) || 0;
-    if (grandchildCount > 0) {
-      const type = node.type || 'module';
-      const w = Math.max(NODE_WIDTHS[type] || 264, 200 + grandchildCount * 40);
-      const h = Math.max(NODE_HEIGHTS[type] || 50, 50 + grandchildCount * 30);
-      return {
-        ...node,
-        position: pos,
-        style: { ...node.style, width: w, height: h },
-      };
-    }
-    return { ...node, position: pos };
-  });
 }

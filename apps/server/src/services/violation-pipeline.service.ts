@@ -100,8 +100,6 @@ export interface ViolationPipelineInput {
   onProgress?: (progress: { step: string; percent: number; detail?: string }) => void;
   /** Step tracker for checklist UI */
   tracker?: import('../socket/handlers.js').StepTracker;
-  /** Include LLM code review (default false) */
-  includeCodeReview?: boolean;
   /** Rule categories to include (undefined = all) */
   enabledCategories?: string[];
   /** Enable LLM-powered rules (default true) */
@@ -122,8 +120,6 @@ export interface ViolationPipelineResult {
   codeViolations: CodeViolation[];
   /** Number of resolved code violations (for badge counts) */
   codeResolvedCount: number;
-  /** Background LLM code review promise (null if no LLM code batches) */
-  codeReviewPromise: Promise<void> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +186,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     previousActiveViolations, previousActiveCodeViolations, previousDeterministicViolations,
     changedFileSet, onProgress, tracker,
     provider: externalProvider,
-    includeCodeReview,
     enabledCategories,
     enableLlmRules,
     signal,
@@ -248,7 +243,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // 4. Run code-level rules and collect file contents for LLM code rules
   const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
-  const enabledLlmCodeRules = includeCodeReview
+  const enabledLlmCodeRules = enableLlmRules !== false
     ? allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt)
     : [];
   const allCodeViolations: CodeViolation[] = [];
@@ -799,7 +794,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // 9. Persist code violations with lifecycle tracking
   // Deterministic code violations are persisted now (groups b + c).
-  // LLM code violations (group a) are deferred to codeReviewPromise.
+  // LLM code violations (group a) are processed after deterministic ones.
 
   const scannedFilePaths = new Set(fileContents.keys());
   let codeResolvedCount = 0;
@@ -852,116 +847,113 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     });
   }
 
-  // Build the background code review promise for LLM code violations (group a)
-  const hasLlmCodeWork = llmCodeBatches.length > 0;
-  const codeReviewPromise: Promise<void> | null = hasLlmCodeWork
-    ? (async () => {
-        const codeSettled = await codePromise.then(
-          (r) => ({ status: 'fulfilled' as const, value: r }),
-          (err) => ({ status: 'rejected' as const, reason: err }),
-        );
+  // Process LLM code violations inline (group a)
+  if (llmCodeBatches.length > 0) {
+    const codeSettled = await codePromise.then(
+      (r) => ({ status: 'fulfilled' as const, value: r }),
+      (err) => ({ status: 'rejected' as const, reason: err }),
+    );
 
-        if (codeSettled.status === 'rejected') {
-          log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
-        }
+    if (codeSettled.status === 'rejected') {
+      log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
+    }
 
-        throwIfAborted(signal);
+    throwIfAborted(signal);
 
-        const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
-        const llmCodeViolations: CodeViolation[] = [];
-        processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
-        llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
-        llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
+    const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
+    const llmCodeViolations: CodeViolation[] = [];
+    processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
+    llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
+    llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
 
-        // a) LLM lifecycle: carry forward unchanged, mark resolved
-        for (const prevId of llmCodeUnchangedIds) {
-          const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
-          if (!prev) continue;
-          await db.insert(codeViolations).values({
-            analysisId,
-            filePath: prev.filePath,
-            lineStart: prev.lineStart,
-            lineEnd: prev.lineEnd,
-            columnStart: prev.columnStart,
-            columnEnd: prev.columnEnd,
-            ruleKey: prev.ruleKey,
-            severity: prev.severity,
-            status: 'unchanged',
-            title: prev.title,
-            content: prev.content,
-            snippet: prev.snippet,
-            fixPrompt: prev.fixPrompt,
-            firstSeenAnalysisId: prev.firstSeenAnalysisId,
-            firstSeenAt: prev.firstSeenAt,
-            previousCodeViolationId: prev.id,
-          });
-        }
+    // a) LLM lifecycle: carry forward unchanged, mark resolved
+    for (const prevId of llmCodeUnchangedIds) {
+      const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
+      if (!prev) continue;
+      await db.insert(codeViolations).values({
+        analysisId,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        ruleKey: prev.ruleKey,
+        severity: prev.severity,
+        status: 'unchanged',
+        title: prev.title,
+        content: prev.content,
+        snippet: prev.snippet,
+        fixPrompt: prev.fixPrompt,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousCodeViolationId: prev.id,
+      });
+    }
 
-        for (const prevId of llmCodeResolvedIds) {
-          const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
-          if (!prev) continue;
-          await db.insert(codeViolations).values({
-            analysisId,
-            filePath: prev.filePath,
-            lineStart: prev.lineStart,
-            lineEnd: prev.lineEnd,
-            columnStart: prev.columnStart,
-            columnEnd: prev.columnEnd,
-            ruleKey: prev.ruleKey,
-            severity: prev.severity,
-            status: 'resolved',
-            title: prev.title,
-            content: prev.content,
-            snippet: prev.snippet,
-            fixPrompt: prev.fixPrompt,
-            firstSeenAnalysisId: prev.firstSeenAnalysisId,
-            firstSeenAt: prev.firstSeenAt,
-            previousCodeViolationId: prev.id,
-            resolvedAt: now,
-          });
-        }
+    for (const prevId of llmCodeResolvedIds) {
+      const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
+      if (!prev) continue;
+      await db.insert(codeViolations).values({
+        analysisId,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        ruleKey: prev.ruleKey,
+        severity: prev.severity,
+        status: 'resolved',
+        title: prev.title,
+        content: prev.content,
+        snippet: prev.snippet,
+        fixPrompt: prev.fixPrompt,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousCodeViolationId: prev.id,
+        resolvedAt: now,
+      });
+    }
 
-        // Persist new LLM code violations via deterministic matching
-        const llmPrevForMatching = previousActiveCodeViolations.filter(
-          (v) => v.ruleKey.startsWith('llm/') && scannedFilePaths.has(v.filePath)
-            && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
-        );
+    // Persist new LLM code violations via deterministic matching
+    const llmPrevForMatching = previousActiveCodeViolations.filter(
+      (v) => v.ruleKey.startsWith('llm/') && scannedFilePaths.has(v.filePath)
+        && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
+    );
 
-        if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-          await persistCodeViolationsWithLifecycle({
-            analysisId,
-            currentCodeViolations: llmCodeViolations,
-            previousActiveCodeViolations: llmPrevForMatching,
-          });
-        }
+    if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
+      await persistCodeViolationsWithLifecycle({
+        analysisId,
+        currentCodeViolations: llmCodeViolations,
+        previousActiveCodeViolations: llmPrevForMatching,
+      });
+    }
 
-        // Carry forward LLM violations for unchanged files
-        const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
-          (v) => v.ruleKey.startsWith('llm/') && !scannedFilePaths.has(v.filePath),
-        );
+    // Carry forward LLM violations for unchanged files
+    const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
+      (v) => v.ruleKey.startsWith('llm/') && !scannedFilePaths.has(v.filePath),
+    );
 
-        for (const prev of llmPrevUnchangedFiles) {
-          await db.insert(codeViolations).values({
-            analysisId,
-            filePath: prev.filePath,
-            lineStart: prev.lineStart,
-            lineEnd: prev.lineEnd,
-            columnStart: prev.columnStart,
-            columnEnd: prev.columnEnd,
-            ruleKey: prev.ruleKey,
-            severity: prev.severity,
-            status: 'unchanged',
-            title: prev.title,
-            content: prev.content,
-            snippet: prev.snippet,
-            fixPrompt: prev.fixPrompt,
-            firstSeenAnalysisId: prev.firstSeenAnalysisId,
-            firstSeenAt: prev.firstSeenAt,
-            previousCodeViolationId: prev.id,
-          });
-        }
-      })()
-    : null;
+    for (const prev of llmPrevUnchangedFiles) {
+      await db.insert(codeViolations).values({
+        analysisId,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        ruleKey: prev.ruleKey,
+        severity: prev.severity,
+        status: 'unchanged',
+        title: prev.title,
+        content: prev.content,
+        snippet: prev.snippet,
+        fixPrompt: prev.fixPrompt,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousCodeViolationId: prev.id,
+      });
+    }
+  }
 
   tracker?.done('persist', 'Done');
 
@@ -971,7 +963,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     resolvedViolationIds: allResolvedViolationIds,
     codeViolations: allCodeViolations,
     codeResolvedCount,
-    codeReviewPromise,
   };
 }
 
@@ -1012,181 +1003,4 @@ function processLlmCodeViolations(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Standalone code review — runs LLM code review on an existing analysis
-// ---------------------------------------------------------------------------
 
-export interface RunCodeReviewInput {
-  repoId: string;
-  repoPath: string;
-  analysisId: string;
-  /** File paths from the analysis to review */
-  filePaths: string[];
-  /** Previous active LLM code violations for lifecycle tracking */
-  previousCodeViolations: {
-    id: string;
-    filePath: string;
-    lineStart: number;
-    lineEnd: number;
-    columnStart: number;
-    columnEnd: number;
-    ruleKey: string;
-    severity: string;
-    title: string;
-    content: string;
-    snippet: string;
-    fixPrompt: string | null;
-    firstSeenAnalysisId: string | null;
-    firstSeenAt: Date | null;
-  }[];
-  provider?: LLMProvider;
-  signal?: AbortSignal;
-}
-
-/**
- * Run LLM code review on an existing analysis.
- * Reads file contents from disk, builds LLM batches, runs review, and persists results.
- */
-export async function runCodeReview(input: RunCodeReviewInput): Promise<void> {
-  const { repoId, repoPath, analysisId, filePaths, previousCodeViolations, signal } = input;
-
-  const provider = input.provider ?? createLLMProvider();
-  const allRules = await getEnabledRules();
-  const enabledLlmCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt);
-
-  if (enabledLlmCodeRules.length === 0) {
-    log('[CodeReview] No LLM code rules enabled — skipping');
-    return;
-  }
-
-  // Read file contents from disk
-  const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
-  for (const filePath of filePaths) {
-    try {
-      const lang = detectLanguage(filePath);
-      if (!lang) continue;
-      const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(repoPath, filePath);
-      if (!fs.existsSync(absPath)) continue;
-      const content = fs.readFileSync(absPath, 'utf-8');
-      fileContents.set(filePath, { content, lineCount: content.split('\n').length });
-    } catch {
-      // Skip files that can't be read
-    }
-  }
-
-  if (fileContents.size === 0) {
-    log('[CodeReview] No files to review');
-    return;
-  }
-
-  // Build LLM code batches
-  const MAX_CHARS_PER_BATCH = 100_000;
-  const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
-  const llmCodeBatches: CodeViolationContext[] = [];
-  const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
-    key: r.key, name: r.name, severity: r.severity, prompt: r.prompt!,
-  }));
-
-  const prevLlmCodeByFile = new Map<string, typeof previousCodeViolations>();
-  for (const cv of previousCodeViolations) {
-    if (!cv.ruleKey.startsWith('llm/')) continue;
-    if (!prevLlmCodeByFile.has(cv.filePath)) prevLlmCodeByFile.set(cv.filePath, []);
-    prevLlmCodeByFile.get(cv.filePath)!.push(cv);
-  }
-
-  let currentBatch: { path: string; content: string }[] = [];
-  let currentChars = 0;
-
-  const addBatch = (files: { path: string; content: string }[]) => {
-    const batchFilePaths = new Set(files.map((f) => f.path));
-    const existing = [...prevLlmCodeByFile.entries()]
-      .filter(([fp]) => batchFilePaths.has(fp))
-      .flatMap(([, violations]) => violations);
-    llmCodeBatches.push({
-      files,
-      llmRules: llmCodeRulesDtos,
-      existingViolations: existing.length > 0 ? existing : undefined,
-    });
-  };
-
-  for (const [filePath, { content }] of fileContents) {
-    const fileChars = content.length;
-    if (fileChars > HALF_BATCH) {
-      if (currentBatch.length > 0) { addBatch(currentBatch); currentBatch = []; currentChars = 0; }
-      addBatch([{ path: filePath, content }]);
-      continue;
-    }
-    if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
-      addBatch(currentBatch); currentBatch = []; currentChars = 0;
-    }
-    currentBatch.push({ path: filePath, content });
-    currentChars += fileChars;
-  }
-  if (currentBatch.length > 0) addBatch(currentBatch);
-
-  if (llmCodeBatches.length === 0) return;
-
-  log(`[CodeReview] Starting: ${llmCodeBatches.length} batch(es), ${fileContents.size} files`);
-
-  // Run LLM code review
-  throwIfAborted(signal);
-  const codeResult = await provider.generateAllCodeViolations(llmCodeBatches);
-
-  throwIfAborted(signal);
-
-  // Process results
-  const validFilePaths = new Set(fileContents.keys());
-  const llmCodeViolations: CodeViolation[] = [];
-  processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
-
-  const llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
-  const llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
-  const now = new Date();
-
-  // Persist unchanged
-  for (const prevId of llmCodeUnchangedIds) {
-    const prev = previousCodeViolations.find((v) => v.id === prevId);
-    if (!prev) continue;
-    await db.insert(codeViolations).values({
-      analysisId, filePath: prev.filePath,
-      lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey, severity: prev.severity, status: 'unchanged',
-      title: prev.title, content: prev.content, snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt, previousCodeViolationId: prev.id,
-    });
-  }
-
-  // Persist resolved
-  for (const prevId of llmCodeResolvedIds) {
-    const prev = previousCodeViolations.find((v) => v.id === prevId);
-    if (!prev) continue;
-    await db.insert(codeViolations).values({
-      analysisId, filePath: prev.filePath,
-      lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey, severity: prev.severity, status: 'resolved',
-      title: prev.title, content: prev.content, snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt, previousCodeViolationId: prev.id,
-      resolvedAt: now,
-    });
-  }
-
-  // Persist new via lifecycle matching
-  const llmPrevForMatching = previousCodeViolations.filter(
-    (v) => v.ruleKey.startsWith('llm/') && validFilePaths.has(v.filePath)
-      && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
-  );
-
-  if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-    await persistCodeViolationsWithLifecycle({
-      analysisId,
-      currentCodeViolations: llmCodeViolations,
-      previousActiveCodeViolations: llmPrevForMatching,
-    });
-  }
-
-  log(`[CodeReview] Done: ${llmCodeViolations.length} new, ${llmCodeUnchangedIds.length} unchanged, ${llmCodeResolvedIds.length} resolved`);
-}

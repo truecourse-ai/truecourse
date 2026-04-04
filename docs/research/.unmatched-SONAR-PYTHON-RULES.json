@@ -1,44 +1,8 @@
 [
   {
-    "id": "Type",
-    "name": "Count",
-    "description": "Count [] tags: ",
-    "section": "Summary by Type"
-  },
-  {
-    "id": "BUG",
-    "name": "104",
-    "description": "104 [] tags: ",
-    "section": "Summary by Type"
-  },
-  {
-    "id": "VULNERABILITY",
-    "name": "30",
-    "description": "30 [] tags: ",
-    "section": "Summary by Type"
-  },
-  {
-    "id": "CODE_SMELL",
-    "name": "210",
-    "description": "210 [] tags: ",
-    "section": "Summary by Type"
-  },
-  {
-    "id": "SECURITY_HOTSPOT",
-    "name": "44",
-    "description": "44 [] tags: ",
-    "section": "Summary by Type"
-  },
-  {
     "id": "NoSonar",
     "name": "Track uses of \"NOSONAR\" comments",
     "description": "Track uses of \"NOSONAR\" comments [CODE_SMELL] tags: bad-practice",
-    "section": "All Rules"
-  },
-  {
-    "id": "OneStatementPerLine",
-    "name": "Statements should be on separate lines",
-    "description": "Statements should be on separate lines [CODE_SMELL] tags: convention",
     "section": "All Rules"
   },
   {
@@ -48,45 +12,9 @@
     "section": "All Rules"
   },
   {
-    "id": "S100",
-    "name": "Method names should comply with a naming convention",
-    "description": "Method names should comply with a naming convention [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
-    "id": "S1110",
-    "name": "Redundant pairs of parentheses should be removed",
-    "description": "Redundant pairs of parentheses should be removed [CODE_SMELL] tags: confusing",
-    "section": "All Rules"
-  },
-  {
-    "id": "S1131",
-    "name": "Lines should not end with trailing whitespaces",
-    "description": "Lines should not end with trailing whitespaces [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
-    "id": "S116",
-    "name": "Field names should comply with a naming convention",
-    "description": "Field names should comply with a naming convention [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
-    "id": "S117",
-    "name": "Local variable and function parameter names should comply with a naming convention",
-    "description": "Local variable and function parameter names should comply with a naming convention [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
     "id": "S1309",
     "name": "Track uses of noqa comments",
     "description": "Track uses of noqa comments [CODE_SMELL] tags: ",
-    "section": "All Rules"
-  },
-  {
-    "id": "S139",
-    "name": "Comments should not be located at the end of lines of code",
-    "description": "Comments should not be located at the end of lines of code [CODE_SMELL] tags: convention",
     "section": "All Rules"
   },
   {
@@ -96,51 +24,9 @@
     "section": "All Rules"
   },
   {
-    "id": "S1542",
-    "name": "Function names should comply with a naming convention",
-    "description": "Function names should comply with a naming convention [CODE_SMELL] tags: convention,pep",
-    "section": "All Rules"
-  },
-  {
-    "id": "S1578",
-    "name": "Module names should comply with a naming convention",
-    "description": "Module names should comply with a naming convention [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
-    "id": "S1707",
-    "name": "Track \"TODO\" and \"FIXME\" comments that do not contain a reference to a person",
-    "description": "Track \"TODO\" and \"FIXME\" comments that do not contain a reference to a person [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
-    "id": "S1720",
-    "name": "Docstrings should be defined",
-    "description": "Docstrings should be defined [CODE_SMELL] tags: convention",
-    "section": "All Rules"
-  },
-  {
     "id": "S1722",
     "name": "New-style classes should be used",
     "description": "New-style classes should be used [CODE_SMELL] tags: python3",
-    "section": "All Rules"
-  },
-  {
-    "id": "S1845",
-    "name": "Methods and field names should not differ only by capitalization",
-    "description": "Methods and field names should not differ only by capitalization [CODE_SMELL] tags: confusing,convention",
-    "section": "All Rules"
-  },
-  {
-    "id": "S2710",
-    "name": "The first argument to class methods should follow the naming convention",
-    "description": "The first argument to class methods should follow the naming convention [CODE_SMELL] tags: convention,confusing,pitfall",
-    "section": "All Rules"
-  },
-  {
-    "id": "S5704",
-    "name": "Bare \"raise\" statements should not be used in \"finally\" blocks",
-    "description": "Bare \"raise\" statements should not be used in \"finally\" blocks [CODE_SMELL] tags: error-handling,unpredictable,confusing",
     "section": "All Rules"
   },
   {
@@ -202,203 +88,5 @@
     "name": "Mutable default values should not be used with \"dict.fromkeys()\" or \"ContextVar()\"",
     "description": "Mutable default values should not be used with \"dict.fromkeys()\" or \"ContextVar()\" [BUG] tags: ",
     "section": "All Rules"
-  },
-  {
-    "id": "S2733",
-    "name": "\"__exit__\" should accept type, value, and traceback arguments",
-    "description": "\"__exit__\" should accept type, value, and traceback arguments [Blocker] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7487",
-    "name": "Async functions should not contain synchronous subprocess calls",
-    "description": "Async functions should not contain synchronous subprocess calls [Major] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7488",
-    "name": "Use non-blocking sleep functions in asynchronous code",
-    "description": "Use non-blocking sleep functions in asynchronous code [Major] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7489",
-    "name": "Async functions should not contain synchronous OS calls",
-    "description": "Async functions should not contain synchronous OS calls [Major] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7493",
-    "name": "Async functions should not contain synchronous file operations",
-    "description": "Async functions should not contain synchronous file operations [Major] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7499",
-    "name": "Async functions should not contain synchronous HTTP client calls",
-    "description": "Async functions should not contain synchronous HTTP client calls [Major] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7501",
-    "name": "Async functions should not contain input() calls",
-    "description": "Async functions should not contain input() calls [Major] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S7932",
-    "name": "Return, break, or continue statements should not exit finally blocks",
-    "description": "Return, break, or continue statements should not exit finally blocks [Critical] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "S8508",
-    "name": "Mutable default values should not be used with \"dict.fromkeys()\" or \"ContextVar()\"",
-    "description": "Mutable default values should not be used with \"dict.fromkeys()\" or \"ContextVar()\" [Blocker] tags: ",
-    "section": "Bug Detection Rules (104)"
-  },
-  {
-    "id": "ClassComplexity",
-    "name": "Cyclomatic Complexity of classes should not be too high",
-    "description": "Cyclomatic Complexity of classes should not be too high [Critical] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "FileComplexity",
-    "name": "Files should not be too complex",
-    "description": "Files should not be too complex [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "NoSonar",
-    "name": "Track uses of \"NOSONAR\" comments",
-    "description": "Track uses of \"NOSONAR\" comments [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "OneStatementPerLine",
-    "name": "Statements should be on separate lines",
-    "description": "Statements should be on separate lines [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "ParsingError",
-    "name": "Python parser failure",
-    "description": "Python parser failure [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S100",
-    "name": "Method names should comply with a naming convention",
-    "description": "Method names should comply with a naming convention [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1110",
-    "name": "Redundant pairs of parentheses should be removed",
-    "description": "Redundant pairs of parentheses should be removed [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1131",
-    "name": "Lines should not end with trailing whitespaces",
-    "description": "Lines should not end with trailing whitespaces [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S116",
-    "name": "Field names should comply with a naming convention",
-    "description": "Field names should comply with a naming convention [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S117",
-    "name": "Local variable and function parameter names should comply with a naming convention",
-    "description": "Local variable and function parameter names should comply with a naming convention [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1309",
-    "name": "Track uses of noqa comments",
-    "description": "Track uses of noqa comments [Info] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S139",
-    "name": "Comments should not be located at the end of lines of code",
-    "description": "Comments should not be located at the end of lines of code [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1451",
-    "name": "Track lack of copyright and license headers",
-    "description": "Track lack of copyright and license headers [Blocker] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1542",
-    "name": "Function names should comply with a naming convention",
-    "description": "Function names should comply with a naming convention [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1578",
-    "name": "Module names should comply with a naming convention",
-    "description": "Module names should comply with a naming convention [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1707",
-    "name": "Track \"TODO\" and \"FIXME\" comments that do not contain a reference to a person",
-    "description": "Track \"TODO\" and \"FIXME\" comments that do not contain a reference to a person [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1720",
-    "name": "Docstrings should be defined",
-    "description": "Docstrings should be defined [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1722",
-    "name": "New-style classes should be used",
-    "description": "New-style classes should be used [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S1845",
-    "name": "Methods and field names should not differ only by capitalization",
-    "description": "Methods and field names should not differ only by capitalization [Blocker] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S2710",
-    "name": "The first argument to class methods should follow the naming convention",
-    "description": "The first argument to class methods should follow the naming convention [Critical] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S5704",
-    "name": "Bare \"raise\" statements should not be used in \"finally\" blocks",
-    "description": "Bare \"raise\" statements should not be used in \"finally\" blocks [Critical] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S6545",
-    "name": "Built-in generic types should be preferred over the typing module in type hints",
-    "description": "Built-in generic types should be preferred over the typing module in type hints [Minor] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S6546",
-    "name": "Union type expressions should be preferred over \"typing.Union\" in type hints",
-    "description": "Union type expressions should be preferred over \"typing.Union\" in type hints [Major] tags: ",
-    "section": "Code Smell Rules (210)"
-  },
-  {
-    "id": "S7632",
-    "name": "Issue suppression comment should have the correct format",
-    "description": "Issue suppression comment should have the correct format [Major] tags: ",
-    "section": "Code Smell Rules (210)"
   }
 ]

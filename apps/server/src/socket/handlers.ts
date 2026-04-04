@@ -19,8 +19,7 @@ export interface AnalysisProgressPayload {
 
 // Track in-progress analyses so we can inform clients that join mid-analysis
 const activeAnalyses = new Map<string, AnalysisProgressPayload>();
-// Track in-progress code reviews (background LLM code analysis)
-const activeCodeReviews = new Map<string, { analysisId: string }>();
+
 
 export function setupHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
@@ -37,11 +36,7 @@ export function setupHandlers(io: SocketServer): void {
         socket.emit('analysis:progress', { repoId, ...progress });
       }
 
-      // If code review is running in background, inform late joiner
-      const codeReview = activeCodeReviews.get(repoId);
-      if (codeReview) {
-        socket.emit('code-review:progress', { repoId, analysisId: codeReview.analysisId });
-      }
+
     });
 
     socket.on('leaveRepo', async (repoId: string) => {
@@ -165,19 +160,6 @@ export function emitViolationsReady(
 
 export function emitAnalysisCanceled(repoId: string): void {
   activeAnalyses.delete(repoId);
-  activeCodeReviews.delete(repoId);
   const io = getIO();
   io.to(`repo:${repoId}`).emit('analysis:canceled', { repoId });
-}
-
-export function emitCodeReviewProgress(repoId: string, analysisId: string): void {
-  activeCodeReviews.set(repoId, { analysisId });
-  const io = getIO();
-  io.to(`repo:${repoId}`).emit('code-review:progress', { repoId, analysisId });
-}
-
-export function emitCodeReviewReady(repoId: string, analysisId: string): void {
-  activeCodeReviews.delete(repoId);
-  const io = getIO();
-  io.to(`repo:${repoId}`).emit('code-review:ready', { repoId, analysisId });
 }

@@ -167,10 +167,10 @@ export function deleteRepo(id: string): Promise<void> {
   return fetchApi<void>(`/api/repos/${id}`, { method: 'DELETE' });
 }
 
-export function analyzeRepo(id: string, options?: { branch?: string; codeReview?: boolean; deterministicOnly?: boolean }): Promise<{ jobId: string }> {
+export function analyzeRepo(id: string, options?: { branch?: string }): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>(`/api/repos/${id}/analyze`, {
     method: 'POST',
-    body: JSON.stringify({ branch: options?.branch, codeReview: options?.codeReview ?? false, deterministicOnly: options?.deterministicOnly ?? false }),
+    body: JSON.stringify({ branch: options?.branch }),
   });
 }
 
@@ -180,7 +180,6 @@ export type AnalysisSummary = {
   status: string;
   branch: string | null;
   commitHash: string | null;
-  codeReview: boolean;
   architecture: string;
   createdAt: string;
   serviceCount?: number;
@@ -221,10 +220,6 @@ export function deleteAnalysis(repoId: string, analysisId: string): Promise<{ ok
 
 export function cancelAnalysis(repoId: string): Promise<{ message: string }> {
   return fetchApi(`/api/repos/${repoId}/analyze/cancel`, { method: 'POST' });
-}
-
-export function runCodeReview(repoId: string, analysisId: string): Promise<{ message: string }> {
-  return fetchApi(`/api/repos/${repoId}/analyses/${analysisId}/code-review`, { method: 'POST' });
 }
 
 // Graph
@@ -474,7 +469,6 @@ export type DiffViolationItem = {
 
 export type DiffCheckResponse = {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
-  codeReview: boolean;
   resolvedViolations: ViolationResponse[];
   newViolations: DiffViolationItem[];
   summary: {

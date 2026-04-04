@@ -48,7 +48,7 @@ export function useRepo() {
     }
   }, []);
 
-  const analyzeRepo = useCallback(async (id: string, options?: { branch?: string; codeReview?: boolean }) => {
+  const analyzeRepo = useCallback(async (id: string, options?: { branch?: string }) => {
     try {
       return await api.analyzeRepo(id, options);
     } catch (err) {

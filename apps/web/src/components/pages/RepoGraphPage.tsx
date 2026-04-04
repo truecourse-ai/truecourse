@@ -95,7 +95,7 @@ export default function RepoGraphPage() {
   const [filteredNodes, setFilteredNodes] = useState<Node[]>([]);
   const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isCodeReviewing, setIsCodeReviewing] = useState(false);
+
   const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
@@ -392,31 +392,17 @@ export default function RepoGraphPage() {
     return unsub;
   }, [onEvent, refetchViolations, refetchCodeViolationSummary]);
 
-  // Listen for background code review completion
-  useEffect(() => {
-    const unsub1 = onEvent('code-review:progress', () => {
-      setIsCodeReviewing(true);
-    });
-    const unsub2 = onEvent('code-review:ready', () => {
-      setIsCodeReviewing(false);
-      refetchViolations();
-      refetchCodeViolationSummary();
-      refetchAnalyses();
-    });
-    return () => { unsub1(); unsub2(); };
-  }, [onEvent, refetchViolations, refetchCodeViolationSummary, refetchAnalyses]);
-
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
 
-  const handleAnalyze = async (options?: { codeReview?: boolean; deterministicOnly?: boolean }) => {
+  const handleAnalyze = async () => {
     if (isDiffMode) {
       runDiffCheckAnalysis();
     } else {
       try {
         setIsAnalyzing(true);
         setAnalysisError(null);
-        await api.analyzeRepo(repoId, { codeReview: options?.codeReview, deterministicOnly: options?.deterministicOnly });
+        await api.analyzeRepo(repoId);
       } catch (error) {
         setIsAnalyzing(false);
         setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');
@@ -932,34 +918,7 @@ export default function RepoGraphPage() {
         repoName={repo?.name}
         currentBranch={currentBranch}
         onAnalyze={isViewingHistory || repoError ? undefined : handleAnalyze}
-        onCodeReview={(() => {
-          if (isViewingHistory) return undefined;
-          if (isDiffMode) {
-            const diffId = diffResult?.diffAnalysisId;
-            if (!diffId || diffResult.codeReview) return undefined;
-            return async () => {
-              try {
-                setIsCodeReviewing(true);
-                await api.runCodeReview(repoId, diffId);
-              } catch {
-                setIsCodeReviewing(false);
-              }
-            };
-          }
-          if (!analyses?.length) return undefined;
-          const currentAnalysis = analyses[0];
-          if (currentAnalysis.codeReview) return undefined;
-          return async () => {
-            try {
-              setIsCodeReviewing(true);
-              await api.runCodeReview(repoId, currentAnalysis.id);
-            } catch {
-              setIsCodeReviewing(false);
-            }
-          };
-        })()}
         isAnalyzing={isAnalyzing || isDiffChecking}
-        isCodeReviewing={isCodeReviewing}
         showBack
         backHref="/"
         isChatOpen={isChatOpen}
@@ -975,7 +934,7 @@ export default function RepoGraphPage() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} isCodeReviewing={isCodeReviewing} badgeCounts={{
+        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} badgeCounts={{
           violations: isDiffMode && diffResult
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,

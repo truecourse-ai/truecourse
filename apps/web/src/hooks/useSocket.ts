@@ -71,13 +71,6 @@ export function useSocket(repoId?: string) {
       setAnalysisProgress(null);
       handlersRef.current.get('analysis:canceled')?.forEach((h) => h(data));
     });
-    socket.on('code-review:progress', (data: unknown) => {
-      handlersRef.current.get('code-review:progress')?.forEach((h) => h(data));
-    });
-    socket.on('code-review:ready', (data: unknown) => {
-      handlersRef.current.get('code-review:ready')?.forEach((h) => h(data));
-    });
-
     if (socket.connected && repoId) {
       joinRepoRoom(repoId);
     }
