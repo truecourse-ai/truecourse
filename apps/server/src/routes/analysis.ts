@@ -106,7 +106,7 @@ router.post(
           ? globalEnabledCategories
           : (repo.enabledCategories ?? undefined);
 
-        const trackerSteps = buildAnalysisSteps(effectiveCategories, enableLlmRules);
+        const trackerSteps = buildAnalysisSteps(effectiveCategories);
         const tracker = new StepTracker(id, trackerSteps);
 
         const analysisStartTime = Date.now();

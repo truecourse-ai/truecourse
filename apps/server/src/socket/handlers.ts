@@ -21,7 +21,6 @@ export const DOMAIN_LABELS: Record<string, string> = {
 
 export function buildAnalysisSteps(
   enabledCategories?: string[],
-  enableLlmRules?: boolean,
 ): { key: string; label: string }[] {
   const steps: { key: string; label: string }[] = [
     { key: 'parse', label: 'Parsing repository' },
@@ -30,14 +29,7 @@ export function buildAnalysisSteps(
   const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories?.length || enabledCategories.includes(d));
 
   for (const domain of activeDomains) {
-    steps.push({ key: `det-${domain}`, label: `${DOMAIN_LABELS[domain]} checks` });
-  }
-
-  if (enableLlmRules !== false) {
-    const llmDomains = LLM_DOMAINS.filter(d => activeDomains.includes(d));
-    for (const domain of llmDomains) {
-      steps.push({ key: `llm-${domain}`, label: `${DOMAIN_LABELS[domain]} analysis (LLM)` });
-    }
+    steps.push({ key: domain, label: `${DOMAIN_LABELS[domain]} checks` });
   }
 
   steps.push({ key: 'persist', label: 'Saving results' });

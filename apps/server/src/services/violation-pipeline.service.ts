@@ -207,7 +207,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const methodViolationResults: ModuleViolation[] = [];
 
   for (const domain of DOMAIN_ORDER) {
-    const stepKey = `det-${domain}`;
+    const stepKey = `${domain}`;
     const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
     if (domainRules.length === 0) {
       tracker?.done(stepKey); // skip silently
@@ -283,7 +283,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       if (domain === 'architecture') continue;
       const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
       if (domainRules.length > 0) {
-        tracker?.start(`det-${domain}`);
+        tracker?.start(`${domain}`);
       }
     }
     onProgress?.({ step: 'analyzing', percent: 82, detail: 'Running code checks...' });
@@ -321,7 +321,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   for (const domain of DOMAIN_ORDER) {
     if (domain === 'architecture') continue; // already done above
-    const stepKey = `det-${domain}`;
+    const stepKey = `${domain}`;
     const count = codeViolationsByDomain.get(domain) ?? 0;
     tracker?.done(stepKey, count > 0 ? `${count} violations` : 'Clean');
   }
@@ -468,12 +468,12 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allNewViolations: DiffViolationItem[] = [];
   const allResolvedViolationIds: string[] = [];
 
-  // Start LLM domain steps
+  // Re-activate domain steps for LLM phase (same step, updated detail)
   if (enableLlmRules !== false) {
+    const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories || enabledCategories.includes(d));
     for (const domain of LLM_DOMAINS) {
-      const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories || enabledCategories.includes(d));
       if (activeDomains.includes(domain)) {
-        tracker?.start(`llm-${domain}`);
+        tracker?.start(domain, 'Running LLM analysis...');
       }
     }
   }
@@ -734,7 +734,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     if (hasLlmOnlyExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
         llmStepCount++;
-        tracker?.detail('llm-architecture', step);
+        tracker?.detail('architecture', step);
         emitProgress(87 + llmStepCount * 2, step);
       }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
@@ -764,7 +764,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     } else {
       const archResult = await generateViolations(violationInput, (step) => {
         llmStepCount++;
-        tracker?.detail('llm-architecture', step);
+        tracker?.detail('architecture', step);
         emitProgress(87 + llmStepCount * 2, step);
       }, provider);
       serviceDescriptions = archResult.serviceDescriptions;
@@ -810,7 +810,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     // Mark all LLM domain steps done
     for (const domain of LLM_DOMAINS) {
-      tracker?.done(`llm-${domain}`);
+      tracker?.done(domain);
     }
   })();
 
@@ -828,9 +828,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (llmResult.status === 'rejected') {
     const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
     log(`[Violations] LLM rule analysis failed: ${msg}`);
-    // Mark all LLM steps as errored
+    // Mark all LLM domain steps as errored
     for (const domain of LLM_DOMAINS) {
-      tracker?.error(`llm-${domain}`, `Failed: ${msg.slice(0, 80)}`);
+      tracker?.error(domain, `LLM failed: ${msg.slice(0, 80)}`);
     }
   }
   // LLM steps are marked done inside the llmRulePromise itself
