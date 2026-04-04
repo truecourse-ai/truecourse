@@ -395,14 +395,14 @@ export default function RepoGraphPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
 
-  const handleAnalyze = async (options?: { codeReview?: boolean; deterministicOnly?: boolean }) => {
+  const handleAnalyze = async (options?: { codeReview?: boolean }) => {
     if (isDiffMode) {
       runDiffCheckAnalysis();
     } else {
       try {
         setIsAnalyzing(true);
         setAnalysisError(null);
-        await api.analyzeRepo(repoId, { codeReview: options?.codeReview, deterministicOnly: options?.deterministicOnly });
+        await api.analyzeRepo(repoId, { codeReview: options?.codeReview });
       } catch (error) {
         setIsAnalyzing(false);
         setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');

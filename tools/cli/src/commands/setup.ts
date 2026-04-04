@@ -216,8 +216,25 @@ export async function runSetup(): Promise<void> {
     process.exit(0);
   }
 
+  // Rule category selection
+  const categories = await p.multiselect({
+    message: "Which rule categories would you like to enable?",
+    options: [
+      { value: "architecture" as const, label: "Architecture rules (circular deps, god services, layer violations)", hint: "recommended" },
+      { value: "code" as const, label: "Code rules (code quality & security)", hint: "recommended" },
+      { value: "database" as const, label: "Database rules (schema analysis)", hint: "recommended" },
+    ],
+    initialValues: ["architecture", "code", "database"],
+    required: true,
+  });
+
+  if (p.isCancel(categories)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
   const { writeConfig } = await import("./helpers.js");
-  writeConfig({ runMode });
+  writeConfig({ runMode, enabledCategories: categories as string[] });
 
   if (runMode === "service") {
     p.log.info("Background service selected. Run `truecourse start` to install and start the service.");

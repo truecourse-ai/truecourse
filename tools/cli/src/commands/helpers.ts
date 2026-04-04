@@ -12,7 +12,10 @@ const DEFAULT_PORT = 3001;
 
 // --- Config utilities ---
 
-export type TrueCourseConfig = { runMode: "console" | "service" };
+export type TrueCourseConfig = {
+  runMode: "console" | "service";
+  enabledCategories?: string[];
+};
 
 const DEFAULT_CONFIG: TrueCourseConfig = { runMode: "console" };
 
@@ -153,10 +156,12 @@ export function severityIcon(severity: Severity): string {
 
 export function severityColor(severity: Severity): (text: string) => string {
   const s = severity.toLowerCase();
-  if (s === "critical") return (t) => `\x1b[91m${t}\x1b[0m`; // bright red
-  if (s === "high") return (t) => `\x1b[31m${t}\x1b[0m`; // red
-  if (s === "medium") return (t) => `\x1b[33m${t}\x1b[0m`; // yellow
-  return (t) => `\x1b[36m${t}\x1b[0m`; // cyan for low/info
+  // 256-color ANSI to match UI: critical=red-700, high=red-500, medium=orange-500, low=amber-500, info=blue-500
+  if (s === "critical") return (t) => `\x1b[38;5;160m${t}\x1b[0m`; // red-700
+  if (s === "high") return (t) => `\x1b[38;5;196m${t}\x1b[0m`; // red-500
+  if (s === "medium") return (t) => `\x1b[38;5;208m${t}\x1b[0m`; // orange-500
+  if (s === "low") return (t) => `\x1b[38;5;214m${t}\x1b[0m`; // amber-500
+  return (t) => `\x1b[38;5;33m${t}\x1b[0m`; // blue-500
 }
 
 export type Violation = {
@@ -199,8 +204,12 @@ function wrapText(text: string, indent: string, maxWidth: number): string {
   return lines.map((l, i) => (i === 0 ? l : `${indent}${l}`)).join("\n");
 }
 
-export function renderViolations(violations: Violation[]): void {
-  if (violations.length === 0) {
+const SEVERITY_ORDER: Record<string, number> = {
+  critical: 0, high: 1, medium: 2, low: 3, info: 4,
+};
+
+export function renderViolations(violations: Violation[], { total = violations.length, offset = 0 } = {}): void {
+  if (violations.length === 0 && total === 0) {
     p.log.info("No violations found. Run `truecourse analyze` first.");
     return;
   }
@@ -208,11 +217,12 @@ export function renderViolations(violations: Violation[]): void {
   console.log("");
 
   const counts: Record<string, number> = {};
-
   for (const v of violations) {
     const sev = v.severity.toLowerCase();
     counts[sev] = (counts[sev] || 0) + 1;
+  }
 
+  for (const v of violations) {
     const icon = severityIcon(v.severity);
     const color = severityColor(v.severity);
     const label = v.severity.toUpperCase();
@@ -236,7 +246,18 @@ export function renderViolations(violations: Violation[]): void {
   for (const sev of ["critical", "high", "medium", "low", "info"]) {
     if (counts[sev]) parts.push(`${counts[sev]} ${sev}`);
   }
-  console.log(`  ${violations.length} violations (${parts.join(", ")})`);
+
+  const showing = violations.length;
+  const end = offset + showing;
+
+  if (showing < total) {
+    console.log(`  Showing ${offset + 1}\u2013${end} of ${total} violations (${parts.join(", ")})`);
+    if (end < total) {
+      console.log(`  Next page: truecourse list --offset ${end}`);
+    }
+  } else {
+    console.log(`  ${total} violations (${parts.join(", ")})`);
+  }
   console.log("");
 }
 

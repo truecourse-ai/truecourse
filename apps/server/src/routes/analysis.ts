@@ -65,7 +65,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
-      const { codeReview: includeCodeReview, deterministicOnly } = parsed.data;
+      const { codeReview: includeCodeReview, enabledCategories: globalEnabledCategories } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -76,6 +76,18 @@ router.post(
       if (!repo) {
         throw createAppError('Repo not found', 404);
       }
+
+      // Resolve enabled categories: per-repo override > global default from CLI
+      // User-facing names → internal rule categories
+      const categoryMapping: Record<string, string[]> = {
+        architecture: ['service', 'module', 'method'],
+        code: ['code'],
+        database: ['database'],
+      };
+      const resolvedUserCategories = repo.enabledCategories ?? (globalEnabledCategories.length > 0 ? globalEnabledCategories : undefined);
+      const enabledCategories: string[] | undefined = resolvedUserCategories
+        ? resolvedUserCategories.flatMap((c: string) => categoryMapping[c] ?? [c])
+        : undefined;
 
       // Detect current branch and commit hash (never checkout — analyze what's on disk)
       const git = await getGit(repo.path);
@@ -105,12 +117,9 @@ router.post(
         const trackerSteps = [
           { key: 'parse', label: 'Parsing repository' },
           { key: 'detect', label: 'Deterministic checks' },
-          ...(!deterministicOnly ? [
-            { key: 'enrich', label: 'Enriching detections' },
-            { key: 'architecture', label: 'Architecture analysis' },
-          ] : []),
+          { key: 'architecture', label: 'Architecture analysis' },
           { key: 'persist', label: 'Saving results' },
-          ...(!deterministicOnly && includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
+          ...(includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
         ];
         const tracker = new StepTracker(id, trackerSteps);
 
@@ -172,7 +181,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview, deterministicOnly }, existingAnalysisId: runningAnalysis.id });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview }, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
@@ -346,12 +355,10 @@ router.post(
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
         tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
 
-        const provider = deterministicOnly ? undefined : createLLMProvider();
-        if (provider) {
-          provider.setAnalysisId(newAnalysisId);
-          provider.setRepoId(id);
-          provider.setAbortSignal(abortController.signal);
-        }
+        const provider = createLLMProvider();
+        provider.setAnalysisId(newAnalysisId);
+        provider.setRepoId(id);
+        provider.setAbortSignal(abortController.signal);
         let codeReviewPromise: Promise<void> | null = null;
         try {
           const pipelineResult = await runViolationPipeline({
@@ -368,8 +375,8 @@ router.post(
             previousDeterministicViolations,
             changedFileSet,
             tracker,
-            includeCodeReview: deterministicOnly ? false : includeCodeReview,
-            deterministicOnly,
+            includeCodeReview,
+            enabledCategories,
             provider,
             signal: abortController.signal,
           });

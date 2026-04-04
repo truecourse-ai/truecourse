@@ -37,6 +37,24 @@ program
   });
 
 program
+  .command("dashboard")
+  .description("Open the TrueCourse dashboard in your browser")
+  .action(async () => {
+    const { getServerUrl, openInBrowser } = await import("./commands/helpers.js");
+    const url = getServerUrl();
+    try {
+      const res = await fetch(`${url}/api/health`);
+      if (!res.ok) throw new Error();
+    } catch {
+      p.log.error("TrueCourse server is not running.");
+      p.log.info("Start it first with: truecourse start");
+      process.exit(1);
+    }
+    openInBrowser(url);
+    p.log.success(`Dashboard opened at ${url}`);
+  });
+
+program
   .command("add")
   .description("Add the current directory as a repository")
   .action(async () => {
@@ -48,13 +66,12 @@ program
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
   .option("--code-review", "Include LLM code review (off by default)")
-  .option("--no-llm", "Skip all LLM calls, run only deterministic checks")
   .option("--no-autostart", "Don't auto-start the server (for use from Claude Code skills)")
   .action(async (options) => {
     if (options.diff) {
       await runAnalyzeDiff({ noAutostart: !options.autostart });
     } else {
-      await runAnalyze({ noAutostart: !options.autostart, codeReview: options.codeReview ?? false, deterministicOnly: !options.llm });
+      await runAnalyze({ noAutostart: !options.autostart, codeReview: options.codeReview ?? false });
     }
   });
 
@@ -72,11 +89,93 @@ program
   .command("list")
   .description("List violations from the latest analysis")
   .option("--diff", "Show diff check results (new and resolved)")
+  .option("--limit <n>", "Number of violations to show (default: 20)", parseInt)
+  .option("--offset <n>", "Skip first N violations", parseInt)
+  .option("--all", "Show all violations")
   .action(async (options) => {
     if (options.diff) {
       await runListDiff();
     } else {
-      await runList();
+      await runList({ limit: options.all ? Infinity : (options.limit ?? 20), offset: options.offset ?? 0 });
+    }
+  });
+
+// Rules management
+const rulesCmd = program
+  .command("rules")
+  .description("Manage analysis rules");
+
+rulesCmd
+  .command("categories")
+  .description("View or override rule categories for this repository")
+  .option("--enable <category>", "Enable a category (architecture, code, database)")
+  .option("--disable <category>", "Disable a category (architecture, code, database)")
+  .option("--reset", "Reset to global default")
+  .action(async (options) => {
+    const { getServerUrl, ensureServer, ensureRepo } = await import("./commands/helpers.js");
+    await ensureServer();
+    const repo = await ensureRepo();
+    const serverUrl = getServerUrl();
+
+    const allCategories = ["architecture", "code", "database"];
+
+    if (options.reset) {
+      await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabledCategories: null }),
+      });
+      p.log.success("Reset to global default categories.");
+      return;
+    }
+
+    if (options.enable || options.disable) {
+      const cat = options.enable || options.disable;
+      if (!allCategories.includes(cat)) {
+        p.log.error(`Invalid category: ${cat}. Valid: ${allCategories.join(", ")}`);
+        process.exit(1);
+      }
+
+      // Fetch current repo state — start from per-repo override or global config
+      const { readConfig } = await import("./commands/helpers.js");
+      const globalConfig = readConfig();
+      const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
+      const repoData = (await repoRes.json()) as { enabledCategories?: string[] | null };
+      const hasOverride = repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
+      const current = new Set<string>(hasOverride ? repoData.enabledCategories! : (globalConfig.enabledCategories ?? allCategories));
+
+      if (options.enable) {
+        current.add(cat);
+      } else {
+        current.delete(cat);
+      }
+
+      await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabledCategories: [...current] }),
+      });
+      p.log.success(`${options.enable ? "Enabled" : "Disabled"} ${cat} rules for ${repo.name}.`);
+      return;
+    }
+
+    // Show current state — per-repo override > global config
+    const { readConfig } = await import("./commands/helpers.js");
+    const globalConfig = readConfig();
+    const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
+    const repoData = (await repoRes.json()) as { enabledCategories?: string[] | null };
+    const isOverride = repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
+    const enabled = new Set<string>(isOverride ? repoData.enabledCategories! : (globalConfig.enabledCategories ?? allCategories));
+
+    const status = (cat: string) => enabled.has(cat) ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
+
+    p.log.info(`Rule categories for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}:`);
+    console.log(`  Architecture: ${status("architecture")}`);
+    console.log(`  Code:         ${status("code")}`);
+    console.log(`  Database:     ${status("database")}`);
+    console.log("");
+    if (!isOverride) {
+      p.log.info("Override with: truecourse rules categories --enable/--disable <category>");
     }
   });
 

@@ -217,36 +217,65 @@ router.get(
         );
       }
 
-      const analysisViolations = await db
-        .select({
-          id: violations.id,
-          type: violations.type,
-          title: violations.title,
-          content: violations.content,
-          severity: violations.severity,
-          status: violations.status,
-          targetServiceId: violations.targetServiceId,
-          targetServiceName: services.name,
-          targetDatabaseId: violations.targetDatabaseId,
-          targetDatabaseName: databases.name,
-          targetModuleId: violations.targetModuleId,
-          targetModuleName: modules.name,
-          targetMethodId: violations.targetMethodId,
-          targetMethodName: methods.name,
-          targetTable: violations.targetTable,
-          fixPrompt: violations.fixPrompt,
-          firstSeenAt: violations.firstSeenAt,
-          createdAt: violations.createdAt,
-        })
+      // Severity ordering for consistent sort
+      const severityOrder = sql`CASE ${violations.severity}
+        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
+        WHEN 'low' THEN 3 WHEN 'info' THEN 4 ELSE 5 END`;
+
+      const selectFields = {
+        id: violations.id,
+        type: violations.type,
+        title: violations.title,
+        content: violations.content,
+        severity: violations.severity,
+        status: violations.status,
+        targetServiceId: violations.targetServiceId,
+        targetServiceName: services.name,
+        targetDatabaseId: violations.targetDatabaseId,
+        targetDatabaseName: databases.name,
+        targetModuleId: violations.targetModuleId,
+        targetModuleName: modules.name,
+        targetMethodId: violations.targetMethodId,
+        targetMethodName: methods.name,
+        targetTable: violations.targetTable,
+        fixPrompt: violations.fixPrompt,
+        firstSeenAt: violations.firstSeenAt,
+        createdAt: violations.createdAt,
+        ruleKey: violations.ruleKey,
+      };
+
+      // Pagination
+      const limitParam = parseInt(req.query.limit as string) || 0;
+      const offsetParam = parseInt(req.query.offset as string) || 0;
+
+      let query = db
+        .select(selectFields)
         .from(violations)
         .leftJoin(services, eq(violations.targetServiceId, services.id))
         .leftJoin(databases, eq(violations.targetDatabaseId, databases.id))
         .leftJoin(modules, eq(violations.targetModuleId, modules.id))
         .leftJoin(methods, eq(violations.targetMethodId, methods.id))
         .where(and(...queryConditions))
-        .orderBy(desc(violations.createdAt));
+        .orderBy(severityOrder, desc(violations.createdAt))
+        .$dynamic();
 
-      res.json(analysisViolations);
+      if (limitParam > 0) {
+        query = query.limit(limitParam).offset(offsetParam);
+      }
+
+      const [analysisViolations, totalResult] = await Promise.all([
+        query,
+        db.select({ count: count() }).from(violations).where(and(...queryConditions)),
+      ]);
+
+      const total = totalResult[0]?.count ?? 0;
+
+      // If pagination requested, return object with total; otherwise return array for backward compat
+      if (limitParam > 0 || offsetParam > 0) {
+        res.json({ violations: analysisViolations, total });
+      } else {
+        res.json(analysisViolations);
+      }
     } catch (error) {
       next(error);
     }

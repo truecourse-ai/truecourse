@@ -10,7 +10,6 @@ import {
   ModuleViolationOutputSchema,
   DiffViolationOutputSchema,
   LifecycleServiceOutputSchema,
-  EnrichmentOutputSchema,
   CodeViolationOutputSchema,
   CodeViolationLifecycleOutputSchema,
   FlowEnrichmentOutputSchema,
@@ -25,11 +24,9 @@ import {
   buildModuleTemplateVars,
   buildCodeTemplateVars,
   buildFlowTemplateVars,
-  buildEnrichmentTemplateVars,
   resolveId,
   resolveIds,
   type FlowEnrichmentContext,
-  type DeterministicDetectionForEnrichment,
   type PromptIdMap,
 } from './prompts.js';
 
@@ -191,17 +188,6 @@ export interface DiffViolationItem {
   ruleKey: string;
 }
 
-export interface EnrichedDeterministicViolation {
-  id: string;
-  title: string;
-  content: string;
-  fixPrompt: string;
-}
-
-export interface EnrichmentResult {
-  enrichedViolations: EnrichedDeterministicViolation[];
-}
-
 export interface DiffViolationsResult {
   resolvedViolationIds: string[];
   newViolations: DiffViolationItem[];
@@ -285,7 +271,6 @@ export interface LLMProvider {
   generateAllViolationsWithLifecycle(contexts: AllViolationsInput, onStepComplete?: (step: string) => void): Promise<AllViolationsLifecycleResult>;
   generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
-  enrichDeterministicViolations(detections: DeterministicDetectionForEnrichment[], architectureContext: string): Promise<EnrichmentResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
   setAnalysisId(id: string): void;
@@ -835,37 +820,6 @@ class AISDKProvider implements LLMProvider {
     },
     { name: 'generate-all-code-violations' },
   );
-
-  async enrichDeterministicViolations(
-    detections: DeterministicDetectionForEnrichment[],
-    architectureContext: string,
-  ): Promise<EnrichmentResult> {
-    if (detections.length === 0) return { enrichedViolations: [] };
-
-    const { vars, idMap } = buildEnrichmentTemplateVars(detections, architectureContext);
-    const { text: prompt, langfusePrompt } = await getPrompt('violations-enrich-deterministic', vars);
-    const model = getModel();
-
-    console.log(`[LLM] Enrichment call starting for ${detections.length} detections...`);
-    const t0 = Date.now();
-    const { output: object, usage } = await generateText({
-      model,
-      output: Output.object({ schema: EnrichmentOutputSchema }),
-      prompt,
-      abortSignal: this._abortSignal ?? undefined,
-      experimental_telemetry: telemetry('violations-enrich-deterministic', langfusePrompt),
-    });
-    const dur = Date.now() - t0;
-    console.log(`[LLM] Enrichment call done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
-    this.collectUsage('enrichment', usage, dur);
-
-    return {
-      enrichedViolations: object.enrichedViolations.map((e) => ({
-        ...e,
-        id: resolveId(e.id, idMap) || e.id,
-      })),
-    };
-  }
 
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {
     const { text: prompt, langfusePrompt } = await getPrompt('flow-enrichment', buildFlowTemplateVars(context));

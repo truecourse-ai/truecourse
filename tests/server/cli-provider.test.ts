@@ -202,7 +202,6 @@ describe('createLLMProvider factory', () => {
     expect(typeof provider.generateAllViolationsWithLifecycle).toBe('function');
     expect(typeof provider.generateCodeViolations).toBe('function');
     expect(typeof provider.generateAllCodeViolations).toBe('function');
-    expect(typeof provider.enrichDeterministicViolations).toBe('function');
     expect(typeof provider.enrichFlow).toBe('function');
     expect(typeof provider.chat).toBe('function');
   });
