@@ -49,11 +49,12 @@ export async function setup() {
 
   await pg.start();
 
-  // Create test database
+  // Create test database (throws if it already exists)
   try {
     await pg.createDatabase(TEST_DB);
-  } catch {
-    // Already exists
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (!msg.includes('already exists')) throw error;
   }
 
   // Run migrations
@@ -70,11 +71,7 @@ export async function setup() {
 
 export async function teardown() {
   if (pg) {
-    try {
-      await pg.stop();
-    } catch {
-      // Ignore stop errors
-    }
+    await pg.stop();
     pg = null;
   }
 

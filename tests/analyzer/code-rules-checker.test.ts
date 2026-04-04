@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { checkCodeRules } from '../../packages/analyzer/src/rules/code-rules-checker';
-import { CODE_RULES } from '../../packages/analyzer/src/rules/code-rules';
+import { checkCodeRules } from '../../packages/analyzer/src/rules/combined-code-checker';
+import { CODE_RULES } from '../../packages/analyzer/src/rules/index';
 import { parseCode } from '../../packages/analyzer/src/parser';
 
 const enabledRules = CODE_RULES.filter((r) => r.enabled);
@@ -11,12 +11,12 @@ function check(code: string, language: 'typescript' | 'javascript' | 'python' = 
   return checkCodeRules(tree, `/test/file${ext}`, code, enabledRules, language);
 }
 
-describe('code/empty-catch', () => {
+describe('bugs/deterministic/empty-catch', () => {
   it('detects empty catch blocks', () => {
     const violations = check(`
       try { doSomething(); } catch (e) {}
     `);
-    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('Empty catch block');
   });
@@ -25,7 +25,7 @@ describe('code/empty-catch', () => {
     const violations = check(`
       try { doSomething(); } catch (e) { console.error(e); }
     `);
-    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
     expect(matches).toHaveLength(0);
   });
 
@@ -33,68 +33,68 @@ describe('code/empty-catch', () => {
     const violations = check(`
       try { doSomething(); } catch (e) { /* intentionally empty */ }
     `);
-    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
     // Comments-only catch blocks are still flagged since there's no actual error handling
     expect(matches).toHaveLength(1);
   });
 });
 
-describe('code/console-log', () => {
+describe('code-quality/deterministic/console-log', () => {
   it('detects console.log', () => {
     const violations = check(`console.log("hello");`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('console.log call');
   });
 
   it('detects console.debug', () => {
     const violations = check(`console.debug("debug info");`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('console.debug call');
   });
 
   it('does not flag console.error', () => {
     const violations = check(`console.error("error");`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag console.warn', () => {
     const violations = check(`console.warn("warning");`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('code/hardcoded-secret', () => {
+describe('security/deterministic/hardcoded-secret', () => {
   it('detects AWS access key pattern', () => {
     const violations = check(`const key = "AKIAIOSFODNN7EXAMPLE";`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('detects Stripe-like key pattern', () => {
     const violations = check(`const key = "sk_live_abcdefghijklmnop";`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('detects password variable assignment', () => {
     const violations = check(`const password = "supersecret123";`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag short strings', () => {
     const violations = check(`const x = "hello";`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag normal strings', () => {
     const violations = check(`const greeting = "Hello, World! Welcome to the app";`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches).toHaveLength(0);
   });
 
@@ -106,94 +106,94 @@ config = {
     "access_token": creds.token,
 }
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag variable names containing uri/url/endpoint', () => {
     const violations = check(`token_uri = "https://oauth2.googleapis.com/token"`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag Bearer as a secret value', () => {
     const violations = check(`token_type = "Bearer"`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/hardcoded-secret');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('code/todo-fixme', () => {
+describe('code-quality/deterministic/todo-fixme', () => {
   it('detects TODO comments', () => {
     const violations = check(`// TODO: fix this later`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/todo-fixme');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/todo-fixme');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('TODO comment');
   });
 
   it('detects FIXME comments', () => {
     const violations = check(`/* FIXME: broken logic */`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/todo-fixme');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/todo-fixme');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('FIXME comment');
   });
 
   it('detects HACK comments', () => {
     const violations = check(`// HACK: workaround for issue #123`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/todo-fixme');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/todo-fixme');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('HACK comment');
   });
 
   it('does not flag regular comments', () => {
     const violations = check(`// This function handles user authentication`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/todo-fixme');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/todo-fixme');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('code/no-explicit-any', () => {
+describe('code-quality/deterministic/no-explicit-any', () => {
   it('detects explicit any type annotations', () => {
     const violations = check(`function foo(x: any): void {}`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/no-explicit-any');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-explicit-any');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag specific types', () => {
     const violations = check(`function foo(x: string): void {}`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/no-explicit-any');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-explicit-any');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag unknown type', () => {
     const violations = check(`function foo(x: unknown): void {}`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/no-explicit-any');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-explicit-any');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('code/sql-injection', () => {
+describe('security/deterministic/sql-injection', () => {
   it('detects template literal in query()', () => {
     const violations = check('db.query(`SELECT * FROM users WHERE id = ${userId}`);');
-    const matches = violations.filter((v) => v.ruleKey === 'code/sql-injection');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/sql-injection');
     expect(matches).toHaveLength(1);
   });
 
   it('detects string concatenation in query()', () => {
     const violations = check(`db.query("SELECT * FROM users WHERE id = " + userId);`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/sql-injection');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/sql-injection');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag parameterized queries', () => {
     const violations = check(`db.query("SELECT * FROM users WHERE id = $1", [userId]);`);
-    const matches = violations.filter((v) => v.ruleKey === 'code/sql-injection');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/sql-injection');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag non-query method calls', () => {
     const violations = check('const x = format(`hello ${name}`);');
-    const matches = violations.filter((v) => v.ruleKey === 'code/sql-injection');
+    const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/sql-injection');
     expect(matches).toHaveLength(0);
   });
 });
@@ -215,7 +215,7 @@ describe('checkCodeRules integration', () => {
     `);
     // Should only get magic-number false positives from array index or similar
     const significant = violations.filter(
-      (v) => v.ruleKey !== 'code/magic-number',
+      (v) => v.ruleKey !== 'code-quality/llm/magic-number',
     );
     expect(significant).toHaveLength(0);
   });
@@ -228,19 +228,19 @@ describe('checkCodeRules integration', () => {
       const apiKey = "sk_live_abc123defghijk";
     `);
     const ruleKeys = new Set(violations.map((v) => v.ruleKey));
-    expect(ruleKeys.has('code/todo-fixme')).toBe(true);
-    expect(ruleKeys.has('code/empty-catch')).toBe(true);
-    expect(ruleKeys.has('code/console-log')).toBe(true);
-    expect(ruleKeys.has('code/hardcoded-secret')).toBe(true);
+    expect(ruleKeys.has('code-quality/deterministic/todo-fixme')).toBe(true);
+    expect(ruleKeys.has('bugs/deterministic/empty-catch')).toBe(true);
+    expect(ruleKeys.has('code-quality/deterministic/console-log')).toBe(true);
+    expect(ruleKeys.has('security/deterministic/hardcoded-secret')).toBe(true);
   });
 
   it('respects disabled rules', () => {
     const rulesWithDisabled = CODE_RULES.map((r) =>
-      r.key === 'code/console-log' ? { ...r, enabled: false } : r,
+      r.key === 'code-quality/deterministic/console-log' ? { ...r, enabled: false } : r,
     );
     const tree = parseCode(`console.log("test");`, 'typescript');
     const violations = checkCodeRules(tree, '/test.ts', `console.log("test");`, rulesWithDisabled, 'typescript');
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(0);
   });
 });
@@ -249,7 +249,7 @@ describe('checkCodeRules integration', () => {
 // Python code rules
 // ---------------------------------------------------------------------------
 
-describe('Python: code/empty-catch', () => {
+describe('Python: bugs/deterministic/empty-catch', () => {
   it('detects except with only pass', () => {
     const violations = check(`
 try:
@@ -257,7 +257,7 @@ try:
 except Exception:
     pass
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
     expect(matches).toHaveLength(1);
   });
 
@@ -268,35 +268,35 @@ try:
 except Exception as e:
     logger.error(e)
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/empty-catch');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('Python: code/console-log (print)', () => {
+describe('Python: code-quality/deterministic/console-log (print)', () => {
   it('detects print() calls', () => {
     const violations = check(`print("hello world")`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(1);
     expect(matches[0].title).toBe('print() call');
   });
 
   it('does not flag non-print calls', () => {
     const violations = check(`logger.info("hello")`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/console-log');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('Python: code/todo-fixme', () => {
+describe('Python: code-quality/deterministic/todo-fixme', () => {
   it('detects TODO comments', () => {
     const violations = check(`# TODO: fix this later\nx = 1`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/todo-fixme');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/todo-fixme');
     expect(matches).toHaveLength(1);
   });
 });
 
-describe('Python: code/bare-except', () => {
+describe('Python: bugs/deterministic/bare-except', () => {
   it('detects bare except clause', () => {
     const violations = check(`
 try:
@@ -304,7 +304,7 @@ try:
 except:
     handle_error()
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/bare-except');
     expect(matches).toHaveLength(1);
   });
 
@@ -315,7 +315,7 @@ try:
 except Exception:
     handle_error()
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/bare-except');
     expect(matches).toHaveLength(0);
   });
 
@@ -326,7 +326,7 @@ try:
 except BaseException:
     handle_error()
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/bare-except');
     expect(matches).toHaveLength(1);
   });
 
@@ -337,7 +337,7 @@ try:
 except (ValueError, TypeError):
     handle_error()
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/bare-except');
     expect(matches).toHaveLength(0);
   });
 
@@ -349,52 +349,52 @@ try:
 except json.JSONDecodeError:
     pass
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/bare-except');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('Python: code/mutable-default-arg', () => {
+describe('Python: bugs/deterministic/mutable-default-arg', () => {
   it('detects list default', () => {
     const violations = check(`def foo(items=[]):\n    pass`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/mutable-default-arg');
     expect(matches).toHaveLength(1);
   });
 
   it('detects dict default', () => {
     const violations = check(`def foo(data={}):\n    pass`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/mutable-default-arg');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag None default', () => {
     const violations = check(`def foo(items=None):\n    pass`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/mutable-default-arg');
     expect(matches).toHaveLength(0);
   });
 
   it('does not flag immutable defaults', () => {
     const violations = check(`def foo(x=5, name="default", flag=True):\n    pass`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/mutable-default-arg');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('Python: code/star-import', () => {
+describe('Python: code-quality/deterministic/star-import', () => {
   it('detects from module import *', () => {
     const violations = check(`from os import *`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/star-import');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/star-import');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag named imports', () => {
     const violations = check(`from os import path, getcwd`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/star-import');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/star-import');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('Python: code/global-statement', () => {
+describe('Python: code-quality/deterministic/global-statement', () => {
   it('detects global inside function', () => {
     const violations = check(`
 x = 0
@@ -402,27 +402,27 @@ def increment():
     global x
     x += 1
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/global-statement');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag global at module level', () => {
     const violations = check(`global x\nx = 1`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/global-statement');
     expect(matches).toHaveLength(0);
   });
 });
 
-describe('JS: code/global-statement (var)', () => {
+describe('JS: code-quality/deterministic/global-statement (var)', () => {
   it('detects var inside function', () => {
     const violations = check(`function foo() { var x = 1; }`, 'javascript');
-    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/global-statement');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag let/const inside function', () => {
     const violations = check(`function foo() { let x = 1; const y = 2; }`, 'javascript');
-    const matches = violations.filter((v) => v.ruleKey === 'code/global-statement');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/global-statement');
     expect(matches).toHaveLength(0);
   });
 });
@@ -442,13 +442,13 @@ describe('Python: language isolation', () => {
 
   it('does not fire bare-except on JS code', () => {
     const violations = check(`try { x() } catch(e) {}`, 'javascript');
-    const matches = violations.filter((v) => v.ruleKey === 'code/bare-except');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/bare-except');
     expect(matches).toHaveLength(0);
   });
 
   it('does not fire mutable-default-arg on JS code', () => {
     const violations = check(`function foo(x = []) {}`, 'javascript');
-    const matches = violations.filter((v) => v.ruleKey === 'code/mutable-default-arg');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/mutable-default-arg');
     expect(matches).toHaveLength(0);
   });
 });

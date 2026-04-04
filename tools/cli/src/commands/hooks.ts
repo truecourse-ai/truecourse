@@ -15,7 +15,7 @@ exec truecourse hooks run
 `;
 
 type BlockRule =
-  | string // rule key like "hardcoded-secret" or "code/hardcoded-secret"
+  | string // rule key like "hardcoded-secret" or "security/deterministic/hardcoded-secret"
   | { severity: string };
 
 type HooksConfig = {
@@ -26,7 +26,7 @@ type HooksConfig = {
 };
 
 const DEFAULT_BLOCK_ON: BlockRule[] = [
-  "code/hardcoded-secret",
+  "security/deterministic/hardcoded-secret",
   { severity: "critical" },
 ];
 
@@ -198,7 +198,7 @@ export function runHooksStatus(): void {
       const timeoutMs = getTimeoutMs(config);
       console.log(`Timeout: ${timeoutMs / 1000}s`);
     } else {
-      console.log("\nNo config file. Using defaults (block on: code/hardcoded-secret, severity: critical).");
+      console.log("\nNo config file. Using defaults (block on: security/deterministic/hardcoded-secret, severity: critical).");
     }
   }
 }
@@ -222,10 +222,10 @@ type CodeViolation = {
 function shouldBlock(violation: CodeViolation, blockRules: BlockRule[]): boolean {
   for (const rule of blockRules) {
     if (typeof rule === "string") {
-      // Match by rule key — support both "hardcoded-secret" and "code/hardcoded-secret"
+      // Match by rule key — support both short name ("hardcoded-secret") and full key
       if (
         violation.ruleKey === rule ||
-        violation.ruleKey === `code/${rule}`
+        violation.ruleKey.endsWith(`/${rule}`)
       ) {
         return true;
       }

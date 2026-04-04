@@ -1,9 +1,9 @@
 /**
- * Language-agnostic code rule visitors — work on all languages.
+ * Security domain language-agnostic visitors.
  */
 
-import type { CodeRuleVisitor } from './common.js'
-import { makeViolation } from './common.js'
+import type { CodeRuleVisitor } from '../../types.js'
+import { makeViolation } from '../../types.js'
 
 const SECRET_PATTERNS = [
   /^(?:sk|pk)[-_](?:live|test)[-_]/i,
@@ -15,7 +15,7 @@ const SECRET_PATTERNS = [
 ]
 
 export const hardcodedSecretVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/hardcoded-secret',
+  ruleKey: 'security/deterministic/hardcoded-secret',
   nodeTypes: ['string', 'template_string'],
   visit(node, filePath, sourceCode) {
     const text = node.text
@@ -76,25 +76,6 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
   },
 }
 
-export const todoFixmeVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/todo-fixme',
-  nodeTypes: ['comment'],
-  visit(node, filePath, sourceCode) {
-    const text = node.text
-    const match = text.match(/\b(TODO|FIXME|HACK)\b/i)
-    if (!match) return null
-
-    const tag = match[1].toUpperCase()
-    return makeViolation(
-      this.ruleKey, node, filePath, 'low',
-      `${tag} comment`,
-      `${tag} comment found: ${text.trim().slice(0, 100)}`,
-      sourceCode,
-    )
-  },
-}
-
-export const UNIVERSAL_VISITORS: CodeRuleVisitor[] = [
+export const SECURITY_UNIVERSAL_VISITORS: CodeRuleVisitor[] = [
   hardcodedSecretVisitor,
-  todoFixmeVisitor,
 ]

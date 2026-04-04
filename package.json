@@ -1,6 +1,7 @@
 {
   "name": "truecourse",
   "version": "0.2.4",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "turbo dev",

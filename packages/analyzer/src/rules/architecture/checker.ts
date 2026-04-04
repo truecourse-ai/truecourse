@@ -1,5 +1,106 @@
-import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
-import { getMaxParameters } from '../language-config.js'
+import type { ServiceInfo, ServiceDependencyInfo, ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
+import { getMaxParameters } from '../../language-config.js'
+
+// ---------------------------------------------------------------------------
+// Violation types
+// ---------------------------------------------------------------------------
+
+export interface ServiceViolation {
+  ruleKey: string
+  title: string
+  description: string
+  severity: string
+  serviceName: string
+  /** For dependency violations: the service on the other end of the edge */
+  relatedServiceName?: string
+}
+
+export interface ModuleViolation {
+  ruleKey: string
+  title: string
+  description: string
+  severity: string
+  serviceName: string
+  moduleName?: string
+  methodName?: string
+  filePath: string
+  /** For dependency violations: the module on the other end of the edge */
+  relatedModuleName?: string
+}
+
+// ---------------------------------------------------------------------------
+// Service-level checks
+// ---------------------------------------------------------------------------
+
+const GOD_SERVICE_FILE_THRESHOLD = 20
+const GOD_SERVICE_LAYER_THRESHOLD = 4
+
+/**
+ * Check deterministic service-level rules and return violations.
+ */
+export function checkServiceRules(
+  services: ServiceInfo[],
+  dependencies: ServiceDependencyInfo[],
+  enabledRules: AnalysisRule[],
+): ServiceViolation[] {
+  const violations: ServiceViolation[] = []
+  const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
+
+  // Circular service dependency
+  if (ruleKeys.has('architecture/deterministic/circular-service-dependency')) {
+    const depSet = new Map<string, Set<string>>()
+    for (const dep of dependencies) {
+      if (!depSet.has(dep.source)) depSet.set(dep.source, new Set())
+      depSet.get(dep.source)!.add(dep.target)
+    }
+
+    const reported = new Set<string>()
+    for (const [source, targets] of depSet) {
+      for (const target of targets) {
+        if (depSet.get(target)?.has(source) && !reported.has(`${target}::${source}`)) {
+          reported.add(`${source}::${target}`)
+          violations.push({
+            ruleKey: 'architecture/deterministic/circular-service-dependency',
+            title: `Circular dependency: ${source} ↔ ${target}`,
+            description: `${source} and ${target} depend on each other, creating a circular dependency. Consider extracting shared logic into a separate service or reversing one direction.`,
+            severity: 'high',
+            serviceName: source,
+            relatedServiceName: target,
+          })
+        }
+      }
+    }
+  }
+
+  // God service
+  if (ruleKeys.has('architecture/deterministic/god-service')) {
+    for (const svc of services) {
+      const layerCount = svc.layers?.length || 0
+      if (svc.fileCount > GOD_SERVICE_FILE_THRESHOLD || layerCount >= GOD_SERVICE_LAYER_THRESHOLD) {
+        const reasons: string[] = []
+        if (svc.fileCount > GOD_SERVICE_FILE_THRESHOLD) {
+          reasons.push(`${svc.fileCount} files (threshold: ${GOD_SERVICE_FILE_THRESHOLD})`)
+        }
+        if (layerCount >= GOD_SERVICE_LAYER_THRESHOLD) {
+          reasons.push(`${layerCount} layers (threshold: ${GOD_SERVICE_LAYER_THRESHOLD})`)
+        }
+        violations.push({
+          ruleKey: 'architecture/deterministic/god-service',
+          title: `God service: ${svc.name}`,
+          description: `${svc.name} has ${reasons.join(' and ')}, suggesting too many responsibilities. Consider splitting into smaller, focused services.`,
+          severity: 'medium',
+          serviceName: svc.name,
+        })
+      }
+    }
+  }
+
+  return violations
+}
+
+// ---------------------------------------------------------------------------
+// Module-level checks
+// ---------------------------------------------------------------------------
 
 /** Build a map of direct function calls and references per file (no member access like obj.method). */
 function buildSameFileCalls(fileAnalyses?: FileAnalysis[]): Map<string, Set<string>> {
@@ -31,19 +132,6 @@ function buildSameFileCalls(fileAnalyses?: FileAnalysis[]): Map<string, Set<stri
   return result
 }
 
-export interface ModuleViolation {
-  ruleKey: string
-  title: string
-  description: string
-  severity: string
-  serviceName: string
-  moduleName?: string
-  methodName?: string
-  filePath: string
-  /** For dependency violations: the module on the other end of the edge */
-  relatedModuleName?: string
-}
-
 const GOD_MODULE_THRESHOLD = 15
 
 /**
@@ -65,11 +153,11 @@ export function checkModuleRules(
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
 
   // God module
-  if (ruleKeys.has('arch/god-module')) {
+  if (ruleKeys.has('architecture/deterministic/god-module')) {
     for (const mod of modules) {
       if (mod.methodCount > GOD_MODULE_THRESHOLD) {
         violations.push({
-          ruleKey: 'arch/god-module',
+          ruleKey: 'architecture/deterministic/god-module',
           title: `God module: ${mod.name}`,
           description: `${mod.name} has ${mod.methodCount} methods (threshold: ${GOD_MODULE_THRESHOLD}). Consider splitting into smaller, focused modules.`,
           severity: 'medium',
@@ -116,7 +204,7 @@ export function checkModuleRules(
 
   // Unused export — skip framework entry files (Next.js pages, layouts, route handlers, etc.)
   // and framework convention export names (GET, POST, generateMetadata, etc.)
-  if (ruleKeys.has('arch/unused-export')) {
+  if (ruleKeys.has('architecture/deterministic/unused-export')) {
     const importedTargets = new Set<string>()
     for (const dep of fileDependencies) {
       for (const name of dep.importedNames) {
@@ -165,7 +253,7 @@ export function checkModuleRules(
         if (calledInOwnFile.get(method.filePath)?.has(method.name)) continue
 
         violations.push({
-          ruleKey: 'arch/unused-export',
+          ruleKey: 'architecture/deterministic/unused-export',
           title: `Unused export: ${method.name}`,
           description: `${method.name} is exported from ${method.moduleName} but never imported elsewhere in the codebase.`,
           severity: 'low',
@@ -185,7 +273,7 @@ export function checkModuleRules(
         if (usedAsType.has(mod.name)) continue
 
         violations.push({
-          ruleKey: 'arch/unused-export',
+          ruleKey: 'architecture/deterministic/unused-export',
           title: `Unused export: ${mod.name}`,
           description: `Class ${mod.name} appears exported but is never imported elsewhere in the codebase.`,
           severity: 'low',
@@ -198,7 +286,7 @@ export function checkModuleRules(
   }
 
   // Dead module — skip framework entry files (loaded by the framework, not via imports)
-  if (ruleKeys.has('arch/dead-module') && moduleLevelDeps) {
+  if (ruleKeys.has('architecture/deterministic/dead-module') && moduleLevelDeps) {
     const connectedModules = new Set<string>()
     for (const dep of moduleLevelDeps) {
       connectedModules.add(`${dep.sourceService}::${dep.sourceModule}`)
@@ -239,7 +327,7 @@ export function checkModuleRules(
         }
 
         violations.push({
-          ruleKey: 'arch/dead-module',
+          ruleKey: 'architecture/deterministic/dead-module',
           title: `Dead module: ${mod.name}`,
           description: `${mod.name} in ${mod.serviceName} has no incoming or outgoing dependencies — it may be unused.`,
           severity: 'low',
@@ -253,7 +341,7 @@ export function checkModuleRules(
 
   // Orphan file — skip framework entry files (Next.js pages, layouts, route handlers, etc.)
   // and common non-importable files (tests, configs, migrations, scripts)
-  if (ruleKeys.has('arch/orphan-file') && fileAnalyses) {
+  if (ruleKeys.has('architecture/deterministic/orphan-file') && fileAnalyses) {
     // Test/config files that are never imported but shouldn't be flagged as orphans
     const TEST_CONFIG_PATTERN = /\.test\.[^/]+$|\.spec\.[^/]+$|(?:^|\/)__tests__\/|\.config\.[^/]+$|(?:^|\/)migrations\/|(?:^|\/)seeds\/|(?:^|\/)bin\/|(?:^|\/)scripts\//
 
@@ -272,7 +360,7 @@ export function checkModuleRules(
       const fileName = fa.filePath.split('/').pop() || fa.filePath
 
       violations.push({
-        ruleKey: 'arch/orphan-file',
+        ruleKey: 'architecture/deterministic/orphan-file',
         title: `Orphan file: ${fileName}`,
         description: `${fa.filePath} is never imported by any other file in the codebase. It may be an unused module or a missing entry point.`,
         severity: 'low',
@@ -285,9 +373,9 @@ export function checkModuleRules(
   // Layer violations
   if (moduleLevelDeps) {
     const layerViolationRules: [string, string, string][] = []
-    if (ruleKeys.has('arch/module-layer-data-api')) layerViolationRules.push(['arch/module-layer-data-api', 'data', 'api'])
-    if (ruleKeys.has('arch/module-layer-data-external')) layerViolationRules.push(['arch/module-layer-data-external', 'data', 'external'])
-    if (ruleKeys.has('arch/module-layer-external-api')) layerViolationRules.push(['arch/module-layer-external-api', 'external', 'api'])
+    if (ruleKeys.has('architecture/deterministic/data-layer-depends-on-api')) layerViolationRules.push(['architecture/deterministic/data-layer-depends-on-api', 'data', 'api'])
+    if (ruleKeys.has('architecture/deterministic/data-layer-depends-on-external')) layerViolationRules.push(['architecture/deterministic/data-layer-depends-on-external', 'data', 'external'])
+    if (ruleKeys.has('architecture/deterministic/external-layer-depends-on-api')) layerViolationRules.push(['architecture/deterministic/external-layer-depends-on-api', 'external', 'api'])
 
     const moduleByKey = new Map(modules.map(m => [`${m.serviceName}::${m.name}`, m]))
 
@@ -303,7 +391,7 @@ export function checkModuleRules(
               ruleKey,
               title: `Layer violation: ${srcMod.name} → ${tgtMod.name}`,
               description: `${srcMod.name} (${srcLayer} layer) imports from ${tgtMod.name} (${tgtLayer} layer) in ${srcMod.serviceName}. ${srcLayer} layer should not depend on ${tgtLayer} layer.`,
-              severity: ruleKey === 'arch/module-layer-data-api' ? 'high' : 'medium',
+              severity: ruleKey === 'architecture/deterministic/data-layer-depends-on-api' ? 'high' : 'medium',
               serviceName: srcMod.serviceName,
               moduleName: srcMod.name,
               filePath: srcMod.filePath,
@@ -315,7 +403,7 @@ export function checkModuleRules(
     }
 
     // Cross-service internal import (skip library services — their internals are public)
-    if (ruleKeys.has('arch/cross-service-internal-import')) {
+    if (ruleKeys.has('architecture/deterministic/cross-service-internal-import')) {
       const internalLayers = new Set(['data', 'service', 'external'])
 
       for (const dep of moduleLevelDeps) {
@@ -327,7 +415,7 @@ export function checkModuleRules(
         if (!internalLayers.has(tgtMod.layerName)) continue
 
         violations.push({
-          ruleKey: 'arch/cross-service-internal-import',
+          ruleKey: 'architecture/deterministic/cross-service-internal-import',
           title: `Cross-service internal import: ${srcMod.name} → ${tgtMod.name}`,
           description: `${srcMod.name} in ${srcMod.serviceName} imports ${tgtMod.name} from ${tgtMod.serviceName}'s ${tgtMod.layerName} layer. Services should only depend on each other's API layer, not internal modules.`,
           severity: 'high',
@@ -342,6 +430,10 @@ export function checkModuleRules(
 
   return violations
 }
+
+// ---------------------------------------------------------------------------
+// Method-level checks
+// ---------------------------------------------------------------------------
 
 const LONG_METHOD_STATEMENTS = 30
 const TOO_MANY_PARAMS = 5
@@ -362,11 +454,11 @@ export function checkMethodRules(
   const calledInOwnFile = buildSameFileCalls(fileAnalyses)
 
   // Long method
-  if (ruleKeys.has('arch/long-method')) {
+  if (ruleKeys.has('architecture/deterministic/long-method')) {
     for (const method of methods) {
       if (method.statementCount != null && method.statementCount > LONG_METHOD_STATEMENTS) {
         violations.push({
-          ruleKey: 'arch/long-method',
+          ruleKey: 'architecture/deterministic/long-method',
           title: `Long method: ${method.moduleName}.${method.name}`,
           description: `${method.name} has ${method.statementCount} statements (threshold: ${LONG_METHOD_STATEMENTS}). Extract sub-routines to improve readability.`,
           severity: 'low',
@@ -380,12 +472,12 @@ export function checkMethodRules(
   }
 
   // Too many parameters
-  if (ruleKeys.has('arch/too-many-parameters')) {
+  if (ruleKeys.has('architecture/deterministic/too-many-parameters')) {
     for (const method of methods) {
       const paramThreshold = getMaxParameters(method.filePath)
       if (method.paramCount >= paramThreshold) {
         violations.push({
-          ruleKey: 'arch/too-many-parameters',
+          ruleKey: 'architecture/deterministic/too-many-parameters',
           title: `Too many parameters: ${method.moduleName}.${method.name}`,
           description: `${method.name} has ${method.paramCount} parameters (threshold: ${paramThreshold}). Consider using an options object or splitting the function.`,
           severity: 'low',
@@ -399,11 +491,11 @@ export function checkMethodRules(
   }
 
   // Deeply nested logic
-  if (ruleKeys.has('arch/deeply-nested-logic')) {
+  if (ruleKeys.has('architecture/deterministic/deeply-nested-logic')) {
     for (const method of methods) {
       if (method.maxNestingDepth != null && method.maxNestingDepth > DEEP_NESTING_THRESHOLD) {
         violations.push({
-          ruleKey: 'arch/deeply-nested-logic',
+          ruleKey: 'architecture/deterministic/deeply-nested-logic',
           title: `Deeply nested: ${method.moduleName}.${method.name}`,
           description: `${method.name} has nesting depth ${method.maxNestingDepth} (threshold: ${DEEP_NESTING_THRESHOLD}). Use early returns or extract helper functions to flatten the logic.`,
           severity: 'medium',
@@ -418,7 +510,7 @@ export function checkMethodRules(
 
   // Dead method — skip methods in framework entry files (React components, route handlers, etc.)
   // These are either consumed by the framework router or are internal functions called from JSX.
-  if (ruleKeys.has('arch/dead-method') && methodLevelDeps) {
+  if (ruleKeys.has('architecture/deterministic/dead-method') && methodLevelDeps) {
     const connectedMethods = new Set<string>()
     for (const dep of methodLevelDeps) {
       connectedMethods.add(`${dep.callerService}::${dep.callerModule}::${dep.callerMethod}`)
@@ -439,7 +531,7 @@ export function checkMethodRules(
         if (method.isImplicitCall) continue
 
         violations.push({
-          ruleKey: 'arch/dead-method',
+          ruleKey: 'architecture/deterministic/dead-method',
           title: `Dead method: ${method.moduleName}.${method.name}`,
           description: `${method.name} in ${method.moduleName} (${method.serviceName}) has no incoming or outgoing calls — it may be unused.`,
           severity: 'low',

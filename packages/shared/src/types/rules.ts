@@ -1,5 +1,8 @@
 import { z } from 'zod'
 
+export const RuleDomainSchema = z.enum(['architecture', 'security', 'bugs', 'code-quality', 'database', 'performance', 'reliability'])
+export type RuleDomain = z.infer<typeof RuleDomainSchema>
+
 export const RuleCategorySchema = z.enum(['service', 'database', 'module', 'method', 'code'])
 export type RuleCategory = z.infer<typeof RuleCategorySchema>
 
@@ -12,6 +15,7 @@ export type RuleType = z.infer<typeof RuleTypeSchema>
 export const AnalysisRuleSchema = z.object({
   key: z.string(),
   category: RuleCategorySchema,
+  domain: RuleDomainSchema.optional(),
   name: z.string(),
   description: z.string(),
   prompt: z.string().optional(),

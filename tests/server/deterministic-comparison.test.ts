@@ -101,12 +101,12 @@ describe('compareDeterministicViolations', () => {
 
   it('disambiguates same rule+service with different titles', () => {
     const current = [
-      { ruleKey: 'arch/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: auth.ts', moduleName: null, methodName: null },
-      { ruleKey: 'arch/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: redis.ts', moduleName: null, methodName: null },
+      { ruleKey: 'architecture/deterministic/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: auth.ts', moduleName: null, methodName: null },
+      { ruleKey: 'architecture/deterministic/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: redis.ts', moduleName: null, methodName: null },
     ];
     const previous = [
-      { ruleKey: 'arch/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: auth.ts', moduleName: null, methodName: null },
-      { ruleKey: 'arch/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: redis.ts', moduleName: null, methodName: null },
+      { ruleKey: 'architecture/deterministic/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: auth.ts', moduleName: null, methodName: null },
+      { ruleKey: 'architecture/deterministic/orphan-file', serviceName: 'api-gateway', title: 'Orphan file: redis.ts', moduleName: null, methodName: null },
     ];
 
     const result = compareDeterministicViolations(current, previous);

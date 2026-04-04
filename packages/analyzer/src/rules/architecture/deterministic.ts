@@ -1,10 +1,11 @@
 import type { AnalysisRule } from '@truecourse/shared'
 
-export const DETERMINISTIC_RULES: AnalysisRule[] = [
+export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
   // Service-level deterministic rules
   {
-    key: 'arch/circular-service-dependency',
+    key: 'architecture/deterministic/circular-service-dependency',
     category: 'service',
+    domain: 'architecture',
     name: 'Circular service dependency',
     description: 'Two services depend on each other, creating a circular dependency.',
     enabled: true,
@@ -13,8 +14,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     isDependencyViolation: true,
   },
   {
-    key: 'arch/god-service',
+    key: 'architecture/deterministic/god-service',
     category: 'service',
+    domain: 'architecture',
     name: 'God service',
     description: 'Service has too many files or spans too many layers, suggesting too many responsibilities.',
     enabled: true,
@@ -24,8 +26,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
 
   // Module-level deterministic rules
   {
-    key: 'arch/module-layer-data-api',
+    key: 'architecture/deterministic/data-layer-depends-on-api',
     category: 'module',
+    domain: 'architecture',
     name: 'Data layer depends on API layer',
     description: 'Data layer should not import from the API layer.',
     enabled: true,
@@ -34,8 +37,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     isDependencyViolation: true,
   },
   {
-    key: 'arch/module-layer-external-api',
+    key: 'architecture/deterministic/external-layer-depends-on-api',
     category: 'module',
+    domain: 'architecture',
     name: 'External layer depends on API layer',
     description: 'External integrations should not depend on the API layer directly.',
     enabled: true,
@@ -44,8 +48,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     isDependencyViolation: true,
   },
   {
-    key: 'arch/module-layer-data-external',
+    key: 'architecture/deterministic/data-layer-depends-on-external',
     category: 'module',
+    domain: 'architecture',
     name: 'Data layer depends on external layer',
     description: 'Data layer should not call external services.',
     enabled: true,
@@ -54,8 +59,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     isDependencyViolation: true,
   },
   {
-    key: 'arch/cross-service-internal-import',
+    key: 'architecture/deterministic/cross-service-internal-import',
     category: 'module',
+    domain: 'architecture',
     name: 'Cross-service internal import',
     description: 'Module imports from another service\'s internal layer (data, service, external) instead of its API.',
     enabled: true,
@@ -64,8 +70,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     isDependencyViolation: true,
   },
   {
-    key: 'arch/god-module',
+    key: 'architecture/deterministic/god-module',
     category: 'module',
+    domain: 'architecture',
     name: 'God module with too many methods',
     description: 'Class or module has too many methods (>15), suggesting too many responsibilities.',
     enabled: true,
@@ -73,8 +80,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'arch/unused-export',
+    key: 'architecture/deterministic/unused-export',
     category: 'module',
+    domain: 'architecture',
     name: 'Unused export',
     description: 'Exported function or class not imported anywhere in the codebase.',
     enabled: true,
@@ -82,8 +90,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'arch/dead-module',
+    key: 'architecture/deterministic/dead-module',
     category: 'module',
+    domain: 'architecture',
     name: 'Dead module',
     description: 'Module has no incoming or outgoing dependencies — likely unused.',
     enabled: true,
@@ -91,8 +100,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'arch/orphan-file',
+    key: 'architecture/deterministic/orphan-file',
     category: 'module',
+    domain: 'architecture',
     name: 'Orphan file',
     description: 'Source file is never imported by any other file in the codebase.',
     enabled: true,
@@ -102,8 +112,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
 
   // Method-level deterministic rules
   {
-    key: 'arch/long-method',
+    key: 'architecture/deterministic/long-method',
     category: 'method',
+    domain: 'architecture',
     name: 'Long method',
     description: 'Function has too many statements (>30), making it hard to understand.',
     enabled: true,
@@ -111,8 +122,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'arch/too-many-parameters',
+    key: 'architecture/deterministic/too-many-parameters',
     category: 'method',
+    domain: 'architecture',
     name: 'Too many parameters',
     description: 'Function has 5 or more parameters, suggesting it needs refactoring.',
     enabled: true,
@@ -120,8 +132,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'arch/deeply-nested-logic',
+    key: 'architecture/deterministic/deeply-nested-logic',
     category: 'method',
+    domain: 'architecture',
     name: 'Deeply nested logic',
     description: 'Function has excessive nesting depth (>4 levels), making it hard to follow.',
     enabled: true,
@@ -129,8 +142,9 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'arch/dead-method',
+    key: 'architecture/deterministic/dead-method',
     category: 'method',
+    domain: 'architecture',
     name: 'Dead method',
     description: 'Method has no incoming or outgoing calls — likely unused.',
     enabled: true,

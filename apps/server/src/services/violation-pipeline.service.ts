@@ -191,9 +191,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     signal,
   } = input;
 
-  // 1. Load rules (filter to enabled categories, and filter out LLM rules if disabled)
+  // 1. Load rules (filter to enabled categories/domains, and filter out LLM rules if disabled)
   const allRules = (await getEnabledRules())
-    .filter((r) => !enabledCategories || enabledCategories.includes(r.category))
+    .filter((r) => !enabledCategories || enabledCategories.includes(r.domain ?? r.category))
     .filter((r) => enableLlmRules !== false || r.type !== 'llm');
 
   throwIfAborted(signal);
@@ -242,9 +242,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   // 4. Run code-level rules and collect file contents for LLM code rules
-  const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
+  const codeDomains = new Set(['security', 'bugs', 'code-quality'])
+  const enabledCodeRules = allRules.filter((r) => (r.domain ? codeDomains.has(r.domain) : r.category === 'code') && r.type === 'deterministic');
   const enabledLlmCodeRules = enableLlmRules !== false
-    ? allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt)
+    ? allRules.filter((r) => (r.domain ? codeDomains.has(r.domain) : r.category === 'code') && r.type === 'llm' && r.prompt)
     : [];
   const allCodeViolations: CodeViolation[] = [];
   const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
@@ -300,7 +301,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const prevLlmCodeByFile = new Map<string, typeof previousActiveCodeViolations>();
   for (const cv of previousActiveCodeViolations) {
     // Only include LLM-generated code violations (not deterministic ones)
-    if (!cv.ruleKey.startsWith('llm/')) continue;
+    if (!cv.ruleKey.includes('/llm/')) continue;
     if (!prevLlmCodeByFile.has(cv.filePath)) prevLlmCodeByFile.set(cv.filePath, []);
     prevLlmCodeByFile.get(cv.filePath)!.push(cv);
   }
@@ -547,8 +548,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // 7. FLOW 2: LLM rule analysis (LLM-handled lifecycle)
   // =========================================================================
 
+  const archAndDbDomains = new Set(['architecture', 'database'])
   const enabledLlmRules = allRules
-    .filter((r) => r.type === 'llm' && r.prompt && r.category !== 'code')
+    .filter((r) => r.type === 'llm' && r.prompt && (r.domain ? archAndDbDomains.has(r.domain) : r.category !== 'code'))
     .map((r) => ({ key: r.key, name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
   const analysisServices = result.services.map((s) => ({
@@ -802,7 +804,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // b) Deterministic matching for code violations in scanned files
   // (No LLM lifecycle IDs yet — those will be handled in the background)
   const prevForDeterministicMatching = previousActiveCodeViolations.filter(
-    (v) => scannedFilePaths.has(v.filePath) && !v.ruleKey.startsWith('llm/'),
+    (v) => scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
   );
 
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
@@ -823,7 +825,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // c) Auto carry forward violations for unchanged files (non-LLM only now)
   const prevInUnchangedFiles = previousActiveCodeViolations.filter(
-    (v) => !scannedFilePaths.has(v.filePath) && !v.ruleKey.startsWith('llm/'),
+    (v) => !scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
   );
 
   for (const prev of prevInUnchangedFiles) {
@@ -916,7 +918,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     // Persist new LLM code violations via deterministic matching
     const llmPrevForMatching = previousActiveCodeViolations.filter(
-      (v) => v.ruleKey.startsWith('llm/') && scannedFilePaths.has(v.filePath)
+      (v) => v.ruleKey.includes('/llm/') && scannedFilePaths.has(v.filePath)
         && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
     );
 
@@ -930,7 +932,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     // Carry forward LLM violations for unchanged files
     const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
-      (v) => v.ruleKey.startsWith('llm/') && !scannedFilePaths.has(v.filePath),
+      (v) => v.ruleKey.includes('/llm/') && !scannedFilePaths.has(v.filePath),
     );
 
     for (const prev of llmPrevUnchangedFiles) {

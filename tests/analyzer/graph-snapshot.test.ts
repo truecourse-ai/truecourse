@@ -4,8 +4,7 @@ import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 import { analyzeFile } from '../../packages/analyzer/src/file-analyzer';
 import { buildDependencyGraph, findEntryPoints } from '../../packages/analyzer/src/dependency-graph';
 import { performSplitAnalysis, type SplitAnalysisResult } from '../../packages/analyzer/src/split-analyzer';
-import { checkModuleRules, checkMethodRules } from '../../packages/analyzer/src/rules/module-rules-checker';
-import { checkServiceRules } from '../../packages/analyzer/src/rules/service-rules-checker';
+import { checkModuleRules, checkMethodRules, checkServiceRules } from '../../packages/analyzer/src/rules/architecture/checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules';
 import type { FileAnalysis, ModuleDependency } from '../../packages/shared/src/types/analysis';
 

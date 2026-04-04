@@ -36,7 +36,13 @@ describe('flow.service (integration)', () => {
     analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true });
 
     // Create a repo record in DB (use unique path suffix to avoid conflicts with routes.test.ts)
+    // Clean up any leftover from a previous crashed run
     const uniquePath = `${FIXTURE_PATH}#flow-test`;
+    const existing = await db.select().from(schema.repos).where(eq(schema.repos.path, uniquePath));
+    if (existing.length > 0) {
+      await db.delete(schema.analyses).where(eq(schema.analyses.repoId, existing[0].id));
+      await db.delete(schema.repos).where(eq(schema.repos.id, existing[0].id));
+    }
     const [repo] = await db
       .insert(schema.repos)
       .values({ name: 'flow-test-repo', path: uniquePath })

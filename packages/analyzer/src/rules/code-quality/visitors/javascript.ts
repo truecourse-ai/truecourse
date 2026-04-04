@@ -1,33 +1,12 @@
 /**
- * JS/TS code rule visitors.
+ * Code quality domain JS/TS visitors.
  */
 
-import type { CodeRuleVisitor } from './common.js'
-import { makeViolation } from './common.js'
-
-export const emptyCatchVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/empty-catch',
-  languages: ['typescript', 'tsx', 'javascript'],
-  nodeTypes: ['catch_clause'],
-  visit(node, filePath, sourceCode) {
-    const body = node.childForFieldName('body')
-    if (!body) return null
-    const statements = body.namedChildren.filter((c) => c.type !== 'comment')
-    if (statements.length === 0) {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'medium',
-        'Empty catch block',
-        'This catch block swallows errors silently. Add error handling or at least log the error.',
-        sourceCode,
-        'Add error logging or re-throw the error in this catch block.',
-      )
-    }
-    return null
-  },
-}
+import type { CodeRuleVisitor } from '../../types.js'
+import { makeViolation } from '../../types.js'
 
 export const consoleLogVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/console-log',
+  ruleKey: 'code-quality/deterministic/console-log',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
@@ -50,7 +29,7 @@ export const consoleLogVisitor: CodeRuleVisitor = {
 }
 
 export const noExplicitAnyVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/no-explicit-any',
+  ruleKey: 'code-quality/deterministic/no-explicit-any',
   languages: ['typescript', 'tsx'],
   nodeTypes: ['type_annotation'],
   visit(node, filePath, sourceCode) {
@@ -69,67 +48,8 @@ export const noExplicitAnyVisitor: CodeRuleVisitor = {
   },
 }
 
-const QUERY_METHOD_NAMES = new Set([
-  'query', 'execute', 'exec', 'raw', 'rawQuery',
-  'sequelize', '$queryRaw', '$executeRaw',
-])
-
-export const sqlInjectionVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/sql-injection',
-  languages: ['typescript', 'tsx', 'javascript'],
-  nodeTypes: ['call_expression'],
-  visit(node, filePath, sourceCode) {
-    const fn = node.childForFieldName('function')
-    if (!fn) return null
-
-    let methodName = ''
-    if (fn.type === 'member_expression') {
-      const prop = fn.childForFieldName('property')
-      if (prop) methodName = prop.text
-    } else if (fn.type === 'identifier') {
-      methodName = fn.text
-    }
-
-    if (!QUERY_METHOD_NAMES.has(methodName)) return null
-
-    const args = node.childForFieldName('arguments')
-    if (!args) return null
-
-    const firstArg = args.namedChildren[0]
-    if (!firstArg) return null
-
-    if (firstArg.type === 'template_string') {
-      const hasSubstitution = firstArg.namedChildren.some((c) => c.type === 'template_substitution')
-      if (hasSubstitution) {
-        return makeViolation(
-          this.ruleKey, node, filePath, 'high',
-          'Potential SQL injection',
-          `Template literal with interpolation passed to ${methodName}(). Use parameterized queries instead.`,
-          sourceCode,
-          'Use parameterized queries (e.g., $1, ?) instead of string interpolation in SQL.',
-        )
-      }
-    }
-
-    if (firstArg.type === 'binary_expression') {
-      const operator = firstArg.children.find((c) => c.type === '+')
-      if (operator) {
-        return makeViolation(
-          this.ruleKey, node, filePath, 'high',
-          'Potential SQL injection',
-          `String concatenation passed to ${methodName}(). Use parameterized queries instead.`,
-          sourceCode,
-          'Use parameterized queries (e.g., $1, ?) instead of string concatenation in SQL.',
-        )
-      }
-    }
-
-    return null
-  },
-}
-
 export const jsStarImportVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/star-import',
+  ruleKey: 'code-quality/deterministic/star-import',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['import_statement'],
   visit(node, filePath, sourceCode) {
@@ -150,7 +70,7 @@ export const jsStarImportVisitor: CodeRuleVisitor = {
 }
 
 export const jsVarDeclarationVisitor: CodeRuleVisitor = {
-  ruleKey: 'code/global-statement',
+  ruleKey: 'code-quality/deterministic/global-statement',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['variable_declaration'],
   visit(node, filePath, sourceCode) {
@@ -176,11 +96,9 @@ export const jsVarDeclarationVisitor: CodeRuleVisitor = {
   },
 }
 
-export const JS_VISITORS: CodeRuleVisitor[] = [
-  emptyCatchVisitor,
+export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   noExplicitAnyVisitor,
-  sqlInjectionVisitor,
   jsStarImportVisitor,
   jsVarDeclarationVisitor,
 ]

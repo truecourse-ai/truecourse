@@ -68,12 +68,49 @@ export { extractModulesAndMethods, type ModuleExtractionResult } from './module-
 export { traceFlows, type TracedFlow, type TracedFlowStep, type CrossServiceCall, type RouteHandler } from './flow-tracer.js'
 export { AnalysisGraph, type AnalysisGraphInput } from './analysis-graph.js'
 
-// Rules
-export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES, LLM_CODE_RULES, CODE_RULES } from './rules/index.js'
+// Rules — domain-based structure
+export {
+  // Rule arrays
+  DETERMINISTIC_RULES,
+  LLM_ARCHITECTURE_RULES,
+  LLM_DATABASE_RULES,
+  LLM_MODULE_RULES,
+  LLM_CODE_RULES,
+  CODE_RULES,
+  ALL_DEFAULT_RULES,
+  // Domain-specific rule arrays
+  ARCHITECTURE_DETERMINISTIC_RULES,
+  ARCHITECTURE_LLM_RULES,
+  SECURITY_DETERMINISTIC_RULES,
+  SECURITY_LLM_RULES,
+  BUGS_DETERMINISTIC_RULES,
+  BUGS_LLM_RULES,
+  CODE_QUALITY_DETERMINISTIC_RULES,
+  CODE_QUALITY_LLM_RULES,
+  DATABASE_LLM_RULES,
+  PERFORMANCE_DETERMINISTIC_RULES,
+  RELIABILITY_DETERMINISTIC_RULES,
+  // Checkers
+  checkServiceRules,
+  checkModuleRules,
+  checkMethodRules,
+  checkSecurityRules,
+  checkBugsRules,
+  checkCodeQualityRules,
+  // Types
+  type ServiceViolation,
+  type ModuleViolation,
+  type CodeRuleVisitor,
+  makeViolation,
+  walkAstWithVisitors,
+} from './rules/index.js'
 export { getAllDefaultRules } from './rule-engine.js'
-export { checkModuleRules, checkMethodRules, type ModuleViolation } from './rules/module-rules-checker.js'
-export { checkServiceRules, type ServiceViolation } from './rules/service-rules-checker.js'
-export { checkCodeRules } from './rules/code-rules-checker.js'
+
+/**
+ * Combined code-rule checker that runs all AST-based domain checkers.
+ * Drop-in replacement for the old checkCodeRules function.
+ */
+export { checkCodeRules } from './rules/combined-code-checker.js'
 
 /**
  * High-level function to analyze an entire repository

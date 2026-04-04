@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { ServiceInfo, ServiceDependencyInfo } from '../../packages/shared/src/types';
-import { checkServiceRules } from '../../packages/analyzer/src/rules/service-rules-checker';
-import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/deterministic-rules';
+import { checkServiceRules } from '../../packages/analyzer/src/rules/architecture/checker';
+import { ARCHITECTURE_DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/architecture/deterministic';
 
-const enabledRules = DETERMINISTIC_RULES.filter((r) => r.enabled);
+const enabledRules = ARCHITECTURE_DETERMINISTIC_RULES.filter((r) => r.enabled);
 
 function makeService(overrides: Partial<ServiceInfo>): ServiceInfo {
   return {
@@ -33,7 +33,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, deps, enabledRules);
 
-    const circular = violations.filter((v) => v.ruleKey === 'arch/circular-service-dependency');
+    const circular = violations.filter((v) => v.ruleKey === 'architecture/deterministic/circular-service-dependency');
     expect(circular).toHaveLength(1);
     expect(circular[0].title).toContain('A');
     expect(circular[0].title).toContain('B');
@@ -46,7 +46,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, deps, enabledRules);
 
-    const circular = violations.filter((v) => v.ruleKey === 'arch/circular-service-dependency');
+    const circular = violations.filter((v) => v.ruleKey === 'architecture/deterministic/circular-service-dependency');
     expect(circular).toHaveLength(0);
   });
 
@@ -56,7 +56,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, deps, enabledRules);
 
-    const circular = violations.filter((v) => v.ruleKey === 'arch/circular-service-dependency');
+    const circular = violations.filter((v) => v.ruleKey === 'architecture/deterministic/circular-service-dependency');
     expect(circular).toHaveLength(1);
   });
 
@@ -71,7 +71,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, deps, enabledRules);
 
-    const circular = violations.filter((v) => v.ruleKey === 'arch/circular-service-dependency');
+    const circular = violations.filter((v) => v.ruleKey === 'architecture/deterministic/circular-service-dependency');
     expect(circular).toHaveLength(2);
   });
 
@@ -81,7 +81,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, [], enabledRules);
 
-    const god = violations.filter((v) => v.ruleKey === 'arch/god-service');
+    const god = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-service');
     expect(god).toHaveLength(1);
     expect(god[0].title).toContain('big-svc');
     expect(god[0].description).toContain('25 files');
@@ -101,7 +101,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, [], enabledRules);
 
-    const god = violations.filter((v) => v.ruleKey === 'arch/god-service');
+    const god = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-service');
     expect(god).toHaveLength(1);
     expect(god[0].description).toContain('4 layers');
   });
@@ -118,7 +118,7 @@ describe('checkServiceRules', () => {
 
     const violations = checkServiceRules(services, [], enabledRules);
 
-    const god = violations.filter((v) => v.ruleKey === 'arch/god-service');
+    const god = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-service');
     expect(god).toHaveLength(0);
   });
 

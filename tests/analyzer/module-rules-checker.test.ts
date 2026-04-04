@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import type { ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '../../packages/shared/src/types';
-import { checkModuleRules, checkMethodRules } from '../../packages/analyzer/src/rules/module-rules-checker';
-import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/deterministic-rules';
+import { checkModuleRules, checkMethodRules } from '../../packages/analyzer/src/rules/architecture/checker';
+import { ARCHITECTURE_DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules/architecture/deterministic';
 
-const enabledRules = DETERMINISTIC_RULES.filter((r) => r.enabled);
+const enabledRules = ARCHITECTURE_DETERMINISTIC_RULES.filter((r) => r.enabled);
 
 function makeModule(overrides: Partial<ModuleInfo>): ModuleInfo {
   return {
@@ -39,7 +39,7 @@ describe('checkModuleRules', () => {
     const modules = [makeModule({ name: 'GodClass', methodCount: 20 })];
     const violations = checkModuleRules(modules, [], [], enabledRules);
 
-    const godViolations = violations.filter((v) => v.ruleKey === 'arch/god-module');
+    const godViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-module');
     expect(godViolations).toHaveLength(1);
     expect(godViolations[0].title).toContain('GodClass');
     expect(godViolations[0].description).toContain('20 methods');
@@ -48,7 +48,7 @@ describe('checkModuleRules', () => {
   it('does not flag module with <=15 methods', () => {
     const modules = [makeModule({ methodCount: 15 })];
     const violations = checkModuleRules(modules, [], [], enabledRules);
-    const godViolations = violations.filter((v) => v.ruleKey === 'arch/god-module');
+    const godViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-module');
     expect(godViolations).toHaveLength(0);
   });
 
@@ -57,7 +57,7 @@ describe('checkModuleRules', () => {
     const fileDeps: ModuleDependency[] = [];
     const violations = checkModuleRules([], methods, fileDeps, enabledRules);
 
-    const unusedViolations = violations.filter((v) => v.ruleKey === 'arch/unused-export');
+    const unusedViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/unused-export');
     expect(unusedViolations.length).toBeGreaterThanOrEqual(1);
     expect(unusedViolations[0].title).toContain('unusedFn');
   });
@@ -70,7 +70,7 @@ describe('checkModuleRules', () => {
     const violations = checkModuleRules([], methods, fileDeps, enabledRules);
 
     const unusedViolations = violations.filter(
-      (v) => v.ruleKey === 'arch/unused-export' && v.methodName === 'usedFn'
+      (v) => v.ruleKey === 'architecture/deterministic/unused-export' && v.methodName === 'usedFn'
     );
     expect(unusedViolations).toHaveLength(0);
   });
@@ -100,7 +100,7 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
 
-    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-module');
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-module');
     expect(deadViolations).toHaveLength(1);
     expect(deadViolations[0].title).toContain('DeadModule');
   });
@@ -119,20 +119,20 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
 
-    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-module');
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-module');
     expect(deadViolations).toHaveLength(0);
   });
 
   it('does not flag dead module when rule is disabled', () => {
     const onlyDeadModuleDisabled = enabledRules.map((r) =>
-      r.key === 'arch/dead-module' ? { ...r, enabled: false } : r
+      r.key === 'architecture/deterministic/dead-module' ? { ...r, enabled: false } : r
     );
     const modules = [makeModule({ name: 'Isolated', serviceName: 'svc' })];
     const moduleLevelDeps: ModuleLevelDependency[] = [];
 
     const violations = checkModuleRules(modules, [], [], onlyDeadModuleDisabled, moduleLevelDeps);
 
-    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-module');
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-module');
     expect(deadViolations).toHaveLength(0);
   });
 
@@ -157,7 +157,7 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules(modules, [], fileDeps, enabledRules, undefined, undefined, fileAnalyses);
 
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/orphan-file');
     expect(orphanViolations).toHaveLength(1);
     expect(orphanViolations[0].title).toContain('orphan.ts');
     expect(orphanViolations[0].serviceName).toBe('svc');
@@ -171,7 +171,7 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules([], [], fileDeps, enabledRules, undefined, undefined, fileAnalyses);
 
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/orphan-file');
     expect(orphanViolations).toHaveLength(0);
   });
 
@@ -191,7 +191,7 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules([], [], [], enabledRules, undefined, undefined, fileAnalyses, undefined, entryPointFiles);
 
-    const orphanViolations = violations.filter((v) => v.ruleKey === 'arch/orphan-file');
+    const orphanViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/orphan-file');
     expect(orphanViolations).toHaveLength(0);
   });
 
@@ -213,7 +213,7 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
 
-    const layerViolations = violations.filter((v) => v.ruleKey === 'arch/module-layer-data-api');
+    const layerViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/data-layer-depends-on-api');
     expect(layerViolations).toHaveLength(1);
     expect(layerViolations[0].title).toContain('DataModule');
     expect(layerViolations[0].title).toContain('ApiModule');
@@ -236,7 +236,7 @@ describe('checkModuleRules', () => {
 
     const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
 
-    const layerViolations = violations.filter((v) => v.ruleKey.startsWith('arch/module-layer'));
+    const layerViolations = violations.filter((v) => v.ruleKey.includes('layer-depends-on'));
     expect(layerViolations).toHaveLength(0);
   });
 });
@@ -246,7 +246,7 @@ describe('checkMethodRules', () => {
     const methods = [makeMethod({ name: 'longFn', statementCount: 35 })];
     const violations = checkMethodRules(methods, enabledRules);
 
-    const longViolations = violations.filter((v) => v.ruleKey === 'arch/long-method');
+    const longViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/long-method');
     expect(longViolations).toHaveLength(1);
     expect(longViolations[0].description).toContain('35 statements');
   });
@@ -254,7 +254,7 @@ describe('checkMethodRules', () => {
   it('does not flag method with <=30 statements', () => {
     const methods = [makeMethod({ statementCount: 30 })];
     const violations = checkMethodRules(methods, enabledRules);
-    const longViolations = violations.filter((v) => v.ruleKey === 'arch/long-method');
+    const longViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/long-method');
     expect(longViolations).toHaveLength(0);
   });
 
@@ -262,7 +262,7 @@ describe('checkMethodRules', () => {
     const methods = [makeMethod({ name: 'manyParams', paramCount: 6 })];
     const violations = checkMethodRules(methods, enabledRules);
 
-    const paramViolations = violations.filter((v) => v.ruleKey === 'arch/too-many-parameters');
+    const paramViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/too-many-parameters');
     expect(paramViolations).toHaveLength(1);
     expect(paramViolations[0].description).toContain('6 parameters');
   });
@@ -270,7 +270,7 @@ describe('checkMethodRules', () => {
   it('does not flag method with <5 parameters', () => {
     const methods = [makeMethod({ paramCount: 4 })];
     const violations = checkMethodRules(methods, enabledRules);
-    const paramViolations = violations.filter((v) => v.ruleKey === 'arch/too-many-parameters');
+    const paramViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/too-many-parameters');
     expect(paramViolations).toHaveLength(0);
   });
 
@@ -278,7 +278,7 @@ describe('checkMethodRules', () => {
     const methods = [makeMethod({ name: 'nested', maxNestingDepth: 6 })];
     const violations = checkMethodRules(methods, enabledRules);
 
-    const nestViolations = violations.filter((v) => v.ruleKey === 'arch/deeply-nested-logic');
+    const nestViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/deeply-nested-logic');
     expect(nestViolations).toHaveLength(1);
     expect(nestViolations[0].description).toContain('nesting depth 6');
   });
@@ -286,7 +286,7 @@ describe('checkMethodRules', () => {
   it('does not flag method with <=4 nesting depth', () => {
     const methods = [makeMethod({ maxNestingDepth: 4 })];
     const violations = checkMethodRules(methods, enabledRules);
-    const nestViolations = violations.filter((v) => v.ruleKey === 'arch/deeply-nested-logic');
+    const nestViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/deeply-nested-logic');
     expect(nestViolations).toHaveLength(0);
   });
 
@@ -309,7 +309,7 @@ describe('checkMethodRules', () => {
 
     const violations = checkMethodRules(methods, enabledRules, methodLevelDeps);
 
-    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-method');
     expect(deadViolations).toHaveLength(1);
     expect(deadViolations[0].title).toContain('deadMethod');
   });
@@ -333,7 +333,7 @@ describe('checkMethodRules', () => {
 
     const violations = checkMethodRules(methods, enabledRules, methodLevelDeps);
 
-    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-method');
     expect(deadViolations).toHaveLength(0);
   });
 
@@ -342,7 +342,7 @@ describe('checkMethodRules', () => {
 
     const violations = checkMethodRules(methods, enabledRules);
 
-    const deadViolations = violations.filter((v) => v.ruleKey === 'arch/dead-method');
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-method');
     expect(deadViolations).toHaveLength(0);
   });
 
@@ -353,9 +353,9 @@ describe('checkMethodRules', () => {
     const violations = checkMethodRules(methods, enabledRules);
 
     const ruleKeys = violations.map((v) => v.ruleKey);
-    expect(ruleKeys).toContain('arch/long-method');
-    expect(ruleKeys).toContain('arch/too-many-parameters');
-    expect(ruleKeys).toContain('arch/deeply-nested-logic');
+    expect(ruleKeys).toContain('architecture/deterministic/long-method');
+    expect(ruleKeys).toContain('architecture/deterministic/too-many-parameters');
+    expect(ruleKeys).toContain('architecture/deterministic/deeply-nested-logic');
   });
 
   it('respects disabled rules', () => {
