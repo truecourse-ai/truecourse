@@ -38,7 +38,7 @@ import {
   unregisterAnalysis,
   cancelAnalysis,
 } from '../services/analysis-registry.js';
-import { buildUnifiedGraph, buildAllLevelGraph, type GraphLevel } from '../services/graph.service.js';
+import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
 import {
   loadActiveViolations,
   loadActiveCodeViolations,
@@ -654,14 +654,6 @@ router.get(
         dbConnections: analysisDbConnections,
         deterministicViolations: analysisDetViolations,
       };
-
-      // level=all returns the full hierarchy for semantic zoom
-      if (level === 'all') {
-        const allData = buildAllLevelGraph(unifiedInput);
-        res.set('Cache-Control', 'no-store');
-        res.json(allData);
-        return;
-      }
 
       const graphLevel = level.replace(/s$/, '') as GraphLevel;
       const graphData = buildUnifiedGraph(graphLevel, unifiedInput);

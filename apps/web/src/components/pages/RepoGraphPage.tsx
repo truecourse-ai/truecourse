@@ -302,21 +302,8 @@ export default function RepoGraphPage() {
   const graphAnalysisId = isDiffMode && diffResult?.diffAnalysisId
     ? diffResult.diffAnalysisId
     : selectedAnalysisId ?? undefined;
-  const { nodes, edges, savedCollapsedIds, allLevelData, isLoading: graphLoading, error: graphError, refetch: refetchGraph, refetchAll: refetchAllLevels } =
+  const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
     useGraph(repoId, currentBranch, depthLevel, graphAnalysisId);
-
-  // Semantic zoom feature flag
-  const [semanticZoomEnabled] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('truecourse:semanticZoom') === 'true';
-  });
-
-  // Fetch all-level data when semantic zoom is enabled
-  useEffect(() => {
-    if (semanticZoomEnabled && !allLevelData) {
-      refetchAllLevels();
-    }
-  }, [semanticZoomEnabled, allLevelData, refetchAllLevels]);
 
   const { summary: rawCodeViolationSummary, refetch: refetchCodeViolationSummary } = useCodeViolationSummary(repoId, graphAnalysisId);
   const codeViolationSummary = emptyViolations ? undefined : rawCodeViolationSummary;
@@ -370,7 +357,7 @@ export default function RepoGraphPage() {
       setIsAnalyzing(false);
       setIsCancelling(false);
       refetchGraph();
-      if (semanticZoomEnabled) refetchAllLevels();
+
       refetchAnalyses();
       refetchCodeViolationSummary();
       refetchFlows();
@@ -1416,8 +1403,7 @@ export default function RepoGraphPage() {
                 onExitDiffMode={handleExitDiffMode}
                 highlightedNodeIds={highlightedNodeIds}
                 savedCollapsedIds={savedCollapsedIds}
-                allLevelData={allLevelData}
-                semanticZoomEnabled={semanticZoomEnabled}
+
               />
             </>
           )}

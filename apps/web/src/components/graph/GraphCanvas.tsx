@@ -23,7 +23,7 @@ import { ServiceGroupNode } from '@/components/graph/nodes/ServiceGroupNode';
 import { DatabaseNode } from '@/components/graph/nodes/DatabaseNode';
 import { ModuleNode } from '@/components/graph/nodes/ModuleNode';
 import { MethodNode } from '@/components/graph/nodes/MethodNode';
-import { DirectoryNode } from '@/components/graph/nodes/DirectoryNode';
+
 import { DependencyEdge } from '@/components/graph/edges/DependencyEdge';
 import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
@@ -34,8 +34,8 @@ import * as api from '@/lib/api';
 import { useCollapseState } from '@/hooks/useCollapseState';
 import { applyCollapseState } from '@/lib/collapse';
 import type { DepthLevel, SemanticZoomLevel } from '@/types/graph';
-import type { AllLevelGraphResponse, DiffCheckResponse } from '@/lib/api';
-import { useSemanticZoom } from '@/hooks/useSemanticZoom';
+import type { DiffCheckResponse } from '@/lib/api';
+
 
 type GraphCanvasProps = {
   initialNodes: Node[];
@@ -58,9 +58,6 @@ type GraphCanvasProps = {
   onExitDiffMode?: () => void;
   highlightedNodeIds?: Set<string> | null;
   savedCollapsedIds?: string[];
-  // Semantic zoom
-  allLevelData?: AllLevelGraphResponse | null;
-  semanticZoomEnabled?: boolean;
 };
 
 const nodeTypes: NodeTypes = {
@@ -70,7 +67,7 @@ const nodeTypes: NodeTypes = {
   database: DatabaseNode as unknown as NodeTypes[string],
   module: ModuleNode as unknown as NodeTypes[string],
   method: MethodNode as unknown as NodeTypes[string],
-  directory: DirectoryNode as unknown as NodeTypes[string],
+
 };
 
 const edgeTypes: EdgeTypes = {
@@ -101,8 +98,6 @@ function GraphCanvasInner({
   onExitDiffMode,
   highlightedNodeIds,
   savedCollapsedIds,
-  allLevelData,
-  semanticZoomEnabled,
 }: GraphCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(() => {
@@ -121,26 +116,8 @@ function GraphCanvasInner({
   const nodesRef = useRef<Node[]>([]);
   const { fitView } = useReactFlow();
 
-  // Semantic zoom
-  const {
-    nodes: szNodes,
-    edges: szEdges,
-    zoomLevel: szZoomLevel,
-    onViewportChange: szOnViewportChange,
-  } = useSemanticZoom({
-    data: allLevelData ?? null,
-    enabled: !!semanticZoomEnabled,
-  });
-
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-
-  // When semantic zoom is active, override nodes/edges from the zoom hook
-  useEffect(() => {
-    if (!semanticZoomEnabled || szNodes.length === 0) return;
-    setNodes(szNodes);
-    setEdges(szEdges);
-  }, [semanticZoomEnabled, szNodes, szEdges, setNodes, setEdges]);
 
   // Collapse state for modules/methods modes
   const { collapsedIds, toggle: toggleCollapseRaw, expandAll: expandAllRaw, collapseAll: collapseAllRaw, isBulkAction } = useCollapseState(repoId, depthLevel, initialNodes, branch, savedCollapsedIds);
@@ -451,14 +428,8 @@ function GraphCanvasInner({
   return (
     <div className={`h-full w-full${animationsEnabled ? '' : ' no-animations'}`}>
       <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 flex items-center gap-2">
-        {!semanticZoomEnabled && <DepthToggle level={depthLevel} onChange={onDepthChange} />}
-        {semanticZoomEnabled && (
-          <div className="flex items-center rounded-md border border-border bg-card px-3 py-1.5 shadow-sm text-xs text-muted-foreground">
-            <span className="font-medium text-foreground capitalize">{szZoomLevel}</span>
-            <span className="ml-1.5 text-[10px] text-muted-foreground/60">(scroll to zoom)</span>
-          </div>
-        )}
-        {!semanticZoomEnabled && depthLevel !== 'services' && (
+        <DepthToggle level={depthLevel} onChange={onDepthChange} />
+        {depthLevel !== 'services' && (
           <button
             onClick={() => { collapsedIds.size > 0 ? expandAll() : collapseAll(); }}
             className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -516,14 +487,13 @@ function GraphCanvasInner({
         onNodeMouseLeave={onNodeMouseLeave}
         onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
-        onViewportChange={semanticZoomEnabled ? szOnViewportChange : undefined}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodesConnectable={false}
         nodesDraggable={!panMode}
         elementsSelectable={!panMode}
-        minZoom={0.05}
-        maxZoom={2.5}
+        minZoom={0.1}
+        maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
