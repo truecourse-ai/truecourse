@@ -11,6 +11,7 @@ import { BUGS_LLM_RULES } from './bugs/llm.js'
 import { CODE_QUALITY_DETERMINISTIC_RULES } from './code-quality/deterministic.js'
 import { CODE_QUALITY_LLM_RULES } from './code-quality/llm.js'
 import { DATABASE_LLM_RULES } from './database/llm.js'
+import { STYLE_DETERMINISTIC_RULES } from './style/deterministic.js'
 import { PERFORMANCE_DETERMINISTIC_RULES } from './performance/deterministic.js'
 import { RELIABILITY_DETERMINISTIC_RULES } from './reliability/deterministic.js'
 
@@ -24,6 +25,7 @@ export { BUGS_DETERMINISTIC_RULES } from './bugs/deterministic.js'
 export { BUGS_LLM_RULES } from './bugs/llm.js'
 export { CODE_QUALITY_DETERMINISTIC_RULES } from './code-quality/deterministic.js'
 export { CODE_QUALITY_LLM_RULES } from './code-quality/llm.js'
+export { STYLE_DETERMINISTIC_RULES } from './style/deterministic.js'
 export { DATABASE_LLM_RULES } from './database/llm.js'
 export { PERFORMANCE_DETERMINISTIC_RULES } from './performance/deterministic.js'
 export { RELIABILITY_DETERMINISTIC_RULES } from './reliability/deterministic.js'
@@ -34,6 +36,7 @@ export { checkServiceRules, checkModuleRules, checkMethodRules, type ServiceViol
 export { checkSecurityRules } from './security/checker.js'
 export { checkBugsRules } from './bugs/checker.js'
 export { checkCodeQualityRules } from './code-quality/checker.js'
+export { checkStyleRules } from './style/checker.js'
 
 // --- Re-export types ---
 
@@ -48,6 +51,7 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
   ...SECURITY_DETERMINISTIC_RULES,
   ...BUGS_DETERMINISTIC_RULES,
   ...CODE_QUALITY_DETERMINISTIC_RULES,
+  ...STYLE_DETERMINISTIC_RULES,
   ...PERFORMANCE_DETERMINISTIC_RULES,
   ...RELIABILITY_DETERMINISTIC_RULES,
 ]
