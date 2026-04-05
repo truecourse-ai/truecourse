@@ -3403,6 +3403,228 @@ export const s3UnrestrictedAccessVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// aws-public-api (JS/TS CDK)
+// Detects API Gateway constructs without authorization
+// ---------------------------------------------------------------------------
+
+export const awsPublicApiVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-public-api',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'RestApi' && ctorName !== 'HttpApi' && ctorName !== 'LambdaRestApi') return null
+
+    // Check if defaultMethodOptions with authorizationType is absent or NONE
+    const nodeText = node.text
+    if (/authorizationType.*AuthorizationType\.NONE/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Public API Gateway',
+        `new ${ctorName}() configured with AuthorizationType.NONE. The API accepts unauthenticated requests.`,
+        sourceCode,
+        'Configure an authorizer (Cognito, Lambda, or IAM) for the API Gateway.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-public-resource (JS/TS CDK)
+// Detects RDS/EC2 resources with publiclyAccessible: true
+// ---------------------------------------------------------------------------
+
+export const awsPublicResourceVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-public-resource',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['pair'],
+  visit(node, filePath, sourceCode) {
+    const key = node.childForFieldName('key')
+    const value = node.childForFieldName('value')
+
+    const keyText = key?.text?.replace(/['"]/g, '')
+    if ((keyText === 'publiclyAccessible' || keyText === 'multiAz') && value?.text === 'true') {
+      if (keyText === 'publiclyAccessible') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Public cloud resource',
+          'publiclyAccessible: true exposes this AWS resource to the public internet.',
+          sourceCode,
+          'Set publiclyAccessible to false and use a VPC with private subnets.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-ebs (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedEbsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-ebs',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Volume' && ctorName !== 'CfnVolume') return null
+
+    const nodeText = node.text
+    // Flag if encrypted: false or encrypted is absent
+    if (/encrypted\s*:\s*false/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted EBS volume',
+        `new ${ctorName}() created with encrypted: false. Data at rest is unprotected.`,
+        sourceCode,
+        'Set encrypted: true to enable EBS volume encryption.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-efs (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedEfsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-efs',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'FileSystem' && ctorName !== 'CfnFileSystem') return null
+
+    const nodeText = node.text
+    if (/encrypted\s*:\s*false/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted EFS file system',
+        `new ${ctorName}() created with encrypted: false. File system data at rest is unprotected.`,
+        sourceCode,
+        'Set encrypted: true on the EFS FileSystem construct.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-iam-all-privileges (JS/TS CDK)
+// Detects PolicyStatement with actions ["*"]
+// ---------------------------------------------------------------------------
+
+export const awsIamAllPrivilegesVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-all-privileges',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'PolicyStatement' && ctorName !== 'ManagedPolicy') return null
+
+    const nodeText = node.text
+    // actions: ['*'] or actions: ["*"]
+    if (/actions\s*:\s*\[[^\]]*['"][*]['"][^\]]*\]/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'IAM grants all privileges',
+        `new ${ctorName}() with actions: ["*"] grants every possible AWS action.`,
+        sourceCode,
+        'Restrict actions to only those explicitly required by the resource.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-iam-all-resources (JS/TS CDK)
+// Detects PolicyStatement with resources ["*"]
+// ---------------------------------------------------------------------------
+
+export const awsIamAllResourcesVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-all-resources',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'PolicyStatement') return null
+
+    const nodeText = node.text
+    // resources: ['*'] or resources: ["*"]
+    if (/resources\s*:\s*\[[^\]]*['"][*]['"][^\]]*\]/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'IAM grants access to all resources',
+        `new ${ctorName}() with resources: ["*"] applies to every resource in the AWS account.`,
+        sourceCode,
+        'Scope resources to specific ARNs instead of using wildcard "*".',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   sqlInjectionVisitor,
   evalUsageVisitor,
@@ -3475,4 +3697,11 @@ export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   s3PublicBucketAccessVisitor,
   s3InsecureHttpVisitor,
   s3UnrestrictedAccessVisitor,
+  // AWS CDK / cloud-infrastructure
+  awsPublicApiVisitor,
+  awsPublicResourceVisitor,
+  awsUnencryptedEbsVisitor,
+  awsUnencryptedEfsVisitor,
+  awsIamAllPrivilegesVisitor,
+  awsIamAllResourcesVisitor,
 ]

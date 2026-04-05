@@ -2019,6 +2019,883 @@ export const pythonWildcardInOsCommandVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// aws-iam-overly-broad-policy / aws-iam-all-privileges-python (Python CDK)
+// Detects IAM PolicyStatement / PolicyDocument with actions="*"
+// ---------------------------------------------------------------------------
+
+export const pythonAwsIamOverlyBroadPolicyVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-overly-broad-policy',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'PolicyStatement' && funcName !== 'ManagedPolicy') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'actions' && value) {
+          const valText = value.text
+          // actions=["*"] or actions="*"
+          if (valText.includes('"*"') || valText.includes("'*'")) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'critical',
+              'Overly broad IAM policy',
+              'IAM PolicyStatement with actions="*" grants every possible AWS action.',
+              sourceCode,
+              'List only the specific actions required by the role or user.',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+export const pythonAwsIamAllPrivilegesVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-all-privileges-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'PolicyStatement') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'actions' && value) {
+          const valText = value.text
+          if (valText.includes('"*"') || valText.includes("'*'")) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'critical',
+              'IAM grants all privileges',
+              'IAM PolicyStatement with actions=["*"] grants all AWS privileges.',
+              sourceCode,
+              'Restrict actions to only those explicitly required.',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-iam-all-resources-python (Python CDK)
+// ---------------------------------------------------------------------------
+
+export const pythonAwsIamAllResourcesVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-all-resources-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'PolicyStatement') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'resources' && value) {
+          const valText = value.text
+          if (valText.includes('"*"') || valText.includes("'*'")) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'critical',
+              'IAM grants access to all resources',
+              'IAM PolicyStatement with resources=["*"] applies to every resource in the account.',
+              sourceCode,
+              'Scope resources to specific ARNs instead of using wildcard "*".',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unrestricted-admin-access (Python CDK/boto3)
+// Detects security group ingress on port 22/3389 from 0.0.0.0/0
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnrestrictedAdminAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unrestricted-admin-access',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    } else if (fn.type === 'identifier') {
+      funcName = fn.text
+    }
+
+    if (funcName !== 'add_ingress_rule' && funcName !== 'authorize_security_group_ingress' &&
+        funcName !== 'SecurityGroup' && funcName !== 'CfnSecurityGroup') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const nodeText = node.text
+    const hasAdminPort = /port.*(?:22|3389)|from_port.*(?:22|3389)|to_port.*(?:22|3389)/i.test(nodeText)
+    const hasWildcard = nodeText.includes('0.0.0.0/0') || nodeText.includes('::/0') ||
+      nodeText.includes('Peer.any_ipv4()') || nodeText.includes('Peer.any_ipv6()')
+
+    if (hasAdminPort && hasWildcard) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unrestricted admin IP access',
+        'Security group allows SSH/RDP access from any IP address (0.0.0.0/0). This exposes admin services to the internet.',
+        sourceCode,
+        'Restrict admin access to specific trusted IP ranges.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-public-policy / aws-public-resource-python (Python CDK/boto3)
+// Detects IAM/resource policies with Principal: "*"
+// ---------------------------------------------------------------------------
+
+export const pythonAwsPublicPolicyVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-public-policy',
+  languages: ['python'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const val = node.text.replace(/^[rRbBuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    // JSON policy string with Principal: "*"
+    if ((val.includes('"Principal"') || val.includes("'Principal'")) &&
+        (val.includes('"*"') || val.includes("'*'"))) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'Public AWS resource policy',
+        'AWS policy string contains Principal: "*", granting public access to this resource.',
+        sourceCode,
+        'Restrict the Principal to specific accounts or IAM roles.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const pythonAwsPublicResourceVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-public-resource-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    const PUBLIC_RESOURCE_CONSTRUCTS = new Set([
+      'CfnDBInstance', 'DatabaseInstance', 'CfnInstance',
+      'CfnReplicationInstance', 'Instance',
+    ])
+
+    if (!PUBLIC_RESOURCE_CONSTRUCTS.has(funcName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if ((name?.text === 'publicly_accessible' || name?.text === 'multi_az') &&
+            value?.text === 'True') {
+          if (name.text === 'publicly_accessible') {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'high',
+              'Public cloud resource',
+              `${funcName}() created with publicly_accessible=True. The instance is exposed to the internet.`,
+              sourceCode,
+              'Set publicly_accessible=False and use a private VPC with a bastion host or VPN.',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unrestricted-outbound (Python CDK)
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnrestrictedOutboundVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unrestricted-outbound',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'add_egress_rule' && funcName !== 'authorize_security_group_egress') return null
+
+    const nodeText = node.text
+    const hasAllTraffic = nodeText.includes('ALL_TRAFFIC') || nodeText.includes('all_traffic') ||
+      /port.*-1|from_port.*0.*to_port.*65535/i.test(nodeText)
+    const hasWildcard = nodeText.includes('0.0.0.0/0') || nodeText.includes('::/0') ||
+      nodeText.includes('Peer.any_ipv4()') || nodeText.includes('Peer.any_ipv6()')
+
+    if (hasAllTraffic && hasWildcard) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Unrestricted outbound communications',
+        'Security group allows all outbound traffic to any destination. This increases the blast radius of a compromise.',
+        sourceCode,
+        'Restrict egress rules to specific ports and destinations required by the application.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-ebs-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedEbsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-ebs-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'Volume' && funcName !== 'CfnVolume') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check for encrypted=False or missing encrypted keyword arg
+    let hasEncrypted = false
+    let encryptedFalse = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'encrypted') {
+          hasEncrypted = true
+          if (value?.text === 'False') encryptedFalse = true
+        }
+      }
+    }
+
+    if (encryptedFalse || (!hasEncrypted && (funcName === 'Volume' || funcName === 'CfnVolume'))) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted EBS volume',
+        `${funcName}() created without encryption. Data at rest is unprotected.`,
+        sourceCode,
+        'Add encrypted=True to encrypt the EBS volume.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-rds-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedRdsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-rds-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'DatabaseInstance' && funcName !== 'CfnDBInstance') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'storage_encrypted' && value?.text === 'False') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Unencrypted RDS database',
+            `${funcName}() created with storage_encrypted=False. Database data at rest is unprotected.`,
+            sourceCode,
+            'Set storage_encrypted=True to enable RDS storage encryption.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-opensearch-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedOpenSearchVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-opensearch-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'Domain' && funcName !== 'CfnDomain') return null
+
+    // Look for encryption_at_rest or EncryptionAtRestOptions with enabled=False
+    const nodeText = node.text
+    if (/encryption_at_rest.*enabled.*False|EncryptionAtRestOptions.*Enabled.*False/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted OpenSearch domain',
+        `${funcName}() configured with encryption at rest disabled.`,
+        sourceCode,
+        'Enable encryption at rest for the OpenSearch domain.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-sagemaker-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedSageMakerVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-sagemaker-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'CfnNotebookInstance' && funcName !== 'NotebookInstance') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Flag if kms_key_id is absent
+    let hasKmsKey = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        if (name?.text === 'kms_key_id' || name?.text === 'kms_key') {
+          hasKmsKey = true
+        }
+      }
+    }
+
+    if (!hasKmsKey) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SageMaker notebook',
+        `${funcName}() created without a KMS key. Notebook instance data is not encrypted.`,
+        sourceCode,
+        'Provide a kms_key_id to encrypt the SageMaker notebook instance.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-sns-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedSnsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-sns-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'Topic' && funcName !== 'CfnTopic') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    let hasMasterKey = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        if (name?.text === 'master_key' || name?.text === 'kms_master_key_id') {
+          hasMasterKey = true
+        }
+      }
+    }
+
+    if (!hasMasterKey) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SNS topic',
+        `${funcName}() created without a KMS master key. Messages are not encrypted at rest.`,
+        sourceCode,
+        'Provide a master_key to enable SNS encryption.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-sqs-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedSqsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-sqs-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'Queue' && funcName !== 'CfnQueue') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    let hasEncryption = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        if (name?.text === 'encryption' || name?.text === 'kms_master_key_id' ||
+            name?.text === 'kms_key') {
+          hasEncryption = true
+        }
+      }
+    }
+
+    if (!hasEncryption) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SQS queue',
+        `${funcName}() created without encryption. Queue messages are not encrypted at rest.`,
+        sourceCode,
+        'Provide an encryption key to enable SQS server-side encryption.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-efs-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsUnencryptedEfsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-efs-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'FileSystem' && funcName !== 'CfnFileSystem') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    let hasEncryption = false
+    let encryptedFalse = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'encrypted') {
+          hasEncryption = true
+          if (value?.text === 'False') encryptedFalse = true
+        }
+      }
+    }
+
+    if (encryptedFalse || !hasEncryption) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted EFS file system',
+        `${funcName}() created without encryption at rest. File system data is unprotected.`,
+        sourceCode,
+        'Add encrypted=True to enable EFS encryption at rest.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-public-api-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsPublicApiVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-public-api-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'RestApi' && funcName !== 'HttpApi' && funcName !== 'CfnRestApi') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check for default_method_options with authorization_type=NONE or missing
+    const nodeText = node.text
+    if (/authorization_type.*NONE/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Public API Gateway',
+        `${funcName}() configured with authorization_type=NONE. The API is publicly accessible without authentication.`,
+        sourceCode,
+        'Configure an authorizer (Cognito, Lambda, or IAM) for the API Gateway.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-s3-no-versioning-python
+// ---------------------------------------------------------------------------
+
+export const pythonAwsS3NoVersioningVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-s3-no-versioning-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (funcName !== 'Bucket' && funcName !== 'CfnBucket') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Flag if versioning is disabled or absent
+    const nodeText = node.text
+    if (/versioning.*VersioningConfiguration.*Status.*Suspended/i.test(nodeText) ||
+        /versioning_configuration.*status.*"suspended"/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'S3 bucket without versioning',
+        `${funcName}() configured with versioning suspended. Objects cannot be recovered after accidental deletion.`,
+        sourceCode,
+        'Enable versioning: set versioning=BucketVersioning.ENABLED.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// subprocess-without-shell (Python) — ruff S603
+// Flag subprocess.call/run with user-sourced list arg (not shell=True)
+// ---------------------------------------------------------------------------
+
+export const pythonSubprocessWithoutShellVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/subprocess-without-shell',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    const SUBPROCESS_CALL_METHODS = new Set(['call', 'run', 'check_output', 'check_call'])
+    if (objectName !== 'subprocess' || !SUBPROCESS_CALL_METHODS.has(methodName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Flag when first argument is a variable (could be user-controlled), not a literal list
+    if (firstArg.type === 'identifier') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Subprocess call without shell review',
+        `subprocess.${methodName}() called with a variable argument. If the value contains user input, shell injection is possible.`,
+        sourceCode,
+        'Ensure the command is not built from user input. Use a literal list of arguments.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// process-with-partial-path (Python) — ruff S607
+// ---------------------------------------------------------------------------
+
+export const pythonProcessWithPartialPathVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/process-with-partial-path',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    const SUBPROCESS_METHODS = new Set(['call', 'run', 'Popen', 'check_output', 'check_call'])
+    if (objectName !== 'subprocess' || !SUBPROCESS_METHODS.has(methodName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // If it's a list, check the first element
+    if (firstArg.type === 'list') {
+      const firstElem = firstArg.namedChildren[0]
+      if (firstElem && firstElem.type === 'string') {
+        const cmd = firstElem.text.replace(/['"]/g, '')
+        if (!cmd.startsWith('/') && !cmd.startsWith('C:\\') && cmd.length > 0 &&
+            !cmd.startsWith('python') && !cmd.startsWith('./')) {
+          // Only flag short command names (no path separators)
+          if (!cmd.includes('/') && !cmd.includes('\\')) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'medium',
+              'Process started with partial path',
+              `subprocess.${methodName}() uses relative command "${cmd}". A malicious PATH entry could execute a different binary.`,
+              sourceCode,
+              'Use the full path to the executable, e.g. "/usr/bin/python3".',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ssl-no-version (Python) — ruff S504
+// ---------------------------------------------------------------------------
+
+export const pythonSslNoVersionVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/ssl-no-version',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) funcName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'ssl' || funcName !== 'SSLContext') return null
+
+    const args = node.childForFieldName('arguments')
+    // SSLContext with no arguments or only PROTOCOL_TLS (deprecated)
+    if (!args || args.namedChildren.length === 0) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'SSL context without protocol version',
+        'ssl.SSLContext() called without specifying a protocol version. This may use insecure defaults.',
+        sourceCode,
+        'Use ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT) or ssl.create_default_context() for secure TLS.',
+      )
+    }
+
+    const firstArg = args.namedChildren[0]
+    if (firstArg && (firstArg.text.includes('PROTOCOL_TLS') && !firstArg.text.includes('PROTOCOL_TLS_CLIENT') &&
+        !firstArg.text.includes('PROTOCOL_TLS_SERVER'))) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'SSL context without protocol version',
+        `ssl.SSLContext(${firstArg.text}) uses a deprecated protocol selector. Specify minimum version explicitly.`,
+        sourceCode,
+        'Use ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT) and set ctx.minimum_version.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonSqlInjectionVisitor,
   pythonEvalUsageVisitor,
@@ -2064,4 +2941,25 @@ export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonS3UnrestrictedAccessVisitor,
   pythonLongTermAwsKeysInCodeVisitor,
   pythonWildcardInOsCommandVisitor,
+  // AWS CDK / cloud-infrastructure
+  pythonAwsIamOverlyBroadPolicyVisitor,
+  pythonAwsIamAllPrivilegesVisitor,
+  pythonAwsIamAllResourcesVisitor,
+  pythonAwsUnrestrictedAdminAccessVisitor,
+  pythonAwsPublicPolicyVisitor,
+  pythonAwsPublicResourceVisitor,
+  pythonAwsUnrestrictedOutboundVisitor,
+  pythonAwsUnencryptedEbsVisitor,
+  pythonAwsUnencryptedRdsVisitor,
+  pythonAwsUnencryptedOpenSearchVisitor,
+  pythonAwsUnencryptedSageMakerVisitor,
+  pythonAwsUnencryptedSnsVisitor,
+  pythonAwsUnencryptedSqsVisitor,
+  pythonAwsUnencryptedEfsVisitor,
+  pythonAwsPublicApiVisitor,
+  pythonAwsS3NoVersioningVisitor,
+  // Subprocess / SSL
+  pythonSubprocessWithoutShellVisitor,
+  pythonProcessWithPartialPathVisitor,
+  pythonSslNoVersionVisitor,
 ]

@@ -1130,6 +1130,1049 @@ export const pythonZipWithoutStrictVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// raise-literal: raise "error" or raise 42
+// ---------------------------------------------------------------------------
+
+export const pythonRaiseLiteralVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/raise-literal',
+  languages: ['python'],
+  nodeTypes: ['raise_statement'],
+  visit(node, filePath, sourceCode) {
+    const raised = node.namedChildren[0]
+    if (!raised) return null
+
+    const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'true', 'false', 'none', 'concatenated_string'])
+    if (LITERAL_TYPES.has(raised.type)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Raising a literal value',
+        `\`raise ${raised.text}\` raises a TypeError in Python 3 — you must raise an exception instance or class, not a literal.`,
+        sourceCode,
+        `Replace with \`raise Exception(${raised.text})\` or a more specific exception.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// bad-open-mode: open(f, "rw") or open(f, "ab+x") — invalid mode strings
+// ---------------------------------------------------------------------------
+
+const VALID_OPEN_MODES = new Set([
+  'r', 'w', 'a', 'x', 'rb', 'wb', 'ab', 'xb', 'rt', 'wt', 'at', 'xt',
+  'r+', 'w+', 'a+', 'x+', 'r+b', 'w+b', 'a+b', 'x+b', 'rb+', 'wb+', 'ab+', 'xb+',
+  'r+t', 'w+t', 'a+t', 'x+t',
+])
+
+export const pythonBadOpenModeVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/bad-open-mode',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.text !== 'open') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argChildren = args.namedChildren
+    if (argChildren.length < 2) return null
+
+    // Second positional arg is the mode
+    const modeArg = argChildren[1]
+    if (!modeArg || modeArg.type !== 'string') return null
+
+    // Strip quotes
+    const raw = modeArg.text
+    const mode = raw.slice(1, -1)
+
+    if (!VALID_OPEN_MODES.has(mode)) {
+      return makeViolation(
+        this.ruleKey, modeArg, filePath, 'high',
+        'Invalid file open mode',
+        `\`open(..., "${mode}")\` uses an invalid mode string — this will raise a ValueError at runtime.`,
+        sourceCode,
+        `Use a valid mode string such as "r", "w", "a", "rb", "w+", etc.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// loop-at-most-one-iteration: for/while loop body always exits on first iteration
+// ---------------------------------------------------------------------------
+
+export const pythonLoopAtMostOneIterationVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/loop-at-most-one-iteration',
+  languages: ['python'],
+  nodeTypes: ['for_statement', 'while_statement'],
+  visit(node, filePath, sourceCode) {
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    const statements = body.namedChildren.filter((c) => c.type !== 'comment')
+    if (statements.length === 0) return null
+
+    const last = statements[statements.length - 1]
+    const EXITS = new Set(['return_statement', 'raise_statement', 'break_statement'])
+
+    if (EXITS.has(last.type)) {
+      // Ensure there's no conditional path that could skip the exit
+      const hasContinue = statements.some((s) => s.type === 'continue_statement')
+      if (hasContinue) return null
+
+      // Check the last statement is not inside an if
+      if (last.parent?.type !== 'block') return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Loop with at most one iteration',
+        `Loop body always exits on the first iteration via \`${last.type.replace('_statement', '')}\` — the loop is redundant.`,
+        sourceCode,
+        'Replace the loop with a plain if statement, or move the exit out of the unconditional position.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// break-continue-in-finally: break or continue inside a finally block
+// ---------------------------------------------------------------------------
+
+export const pythonBreakContinueInFinallyVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/break-continue-in-finally',
+  languages: ['python'],
+  nodeTypes: ['finally_clause'],
+  visit(node, filePath, sourceCode) {
+    const body = node.namedChildren.find((c) => c.type === 'block')
+    if (!body) return null
+
+    function findBreakOrContinue(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      if (n.type === 'break_statement' || n.type === 'continue_statement') return n
+      // Don't recurse into nested loops — break/continue there is fine
+      if (n.type === 'for_statement' || n.type === 'while_statement') return null
+      // Don't recurse into nested functions
+      if (n.type === 'function_definition') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findBreakOrContinue(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const bad = findBreakOrContinue(body)
+    if (bad) {
+      return makeViolation(
+        this.ruleKey, bad, filePath, 'high',
+        'break/continue in finally block',
+        `\`${bad.type.replace('_statement', '')}\` inside a \`finally\` block silently discards any active exception.`,
+        sourceCode,
+        'Remove the break/continue from the finally block.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// infinite-recursion: function calls itself unconditionally
+// ---------------------------------------------------------------------------
+
+export const pythonInfiniteRecursionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/infinite-recursion',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name) return null
+    const funcName = name.text
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    const statements = body.namedChildren.filter((c) => c.type !== 'comment')
+    if (statements.length === 0) return null
+
+    // Check if the first statement (without any condition) is a recursive call
+    // We look for expression_statement containing a call to the same function
+    function isRecursiveCall(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'call') {
+        const fn = n.childForFieldName('function')
+        if (fn?.type === 'identifier' && fn.text === funcName) return true
+        // Also handle self.method() — not applicable for module-level functions but skip
+      }
+      return false
+    }
+
+    const first = statements[0]
+    // Flag if the very first statement is an unconditional recursive call
+    if (first.type === 'expression_statement') {
+      const expr = first.namedChildren[0]
+      if (expr && isRecursiveCall(expr)) {
+        return makeViolation(
+          this.ruleKey, first, filePath, 'critical',
+          'Infinite recursion',
+          `\`${funcName}\` calls itself unconditionally as its first statement — this always raises RecursionError.`,
+          sourceCode,
+          'Add a base case that terminates the recursion before the recursive call.',
+        )
+      }
+    }
+
+    // Flag if it's the only statement (or the only return path is recursive)
+    if (statements.length === 1 && first.type === 'return_statement') {
+      const val = first.namedChildren[0]
+      if (val && isRecursiveCall(val)) {
+        return makeViolation(
+          this.ruleKey, first, filePath, 'critical',
+          'Infinite recursion',
+          `\`${funcName}\` always returns a call to itself — this always raises RecursionError.`,
+          sourceCode,
+          'Add a base case that terminates the recursion.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-handler-exception: except (ValueError, ValueError): or except ValueError: ... except ValueError:
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateHandlerExceptionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-handler-exception',
+  languages: ['python'],
+  nodeTypes: ['try_statement'],
+  visit(node, filePath, sourceCode) {
+    // Collect all except clause exception types across the try block
+    const seenAcross = new Set<string>()
+
+    for (const child of node.namedChildren) {
+      if (child.type !== 'except_clause') continue
+
+      // Check for duplicates within a single except clause (e.g. except (E, E):)
+      const children = child.children
+      // Find the exception type list — it may be a tuple or a single identifier
+      const typeNode = children.find((c) =>
+        c.type === 'identifier' || c.type === 'tuple' || c.type === 'dotted_name' || c.type === 'attribute'
+      )
+      if (!typeNode) continue
+
+      if (typeNode.type === 'tuple') {
+        const seen = new Set<string>()
+        for (const item of typeNode.namedChildren) {
+          const name = item.text
+          if (seen.has(name)) {
+            return makeViolation(
+              this.ruleKey, child, filePath, 'medium',
+              'Duplicate exception in handler',
+              `Exception \`${name}\` appears more than once in the except clause — the duplicate is unreachable.`,
+              sourceCode,
+              `Remove the duplicate \`${name}\` from the except clause.`,
+            )
+          }
+          seen.add(name)
+        }
+      }
+
+      // Check for the same exception type across multiple except clauses
+      const typeName = typeNode.text
+      if (seenAcross.has(typeName)) {
+        return makeViolation(
+          this.ruleKey, child, filePath, 'medium',
+          'Duplicate exception in handler',
+          `Exception \`${typeName}\` is caught by an earlier except clause — this handler is unreachable.`,
+          sourceCode,
+          `Remove the duplicate except clause for \`${typeName}\`.`,
+        )
+      }
+      seenAcross.add(typeName)
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// mutable-class-default: class Foo: items = []  (class-level mutable var)
+// ---------------------------------------------------------------------------
+
+export const pythonMutableClassDefaultVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/mutable-class-default',
+  languages: ['python'],
+  nodeTypes: ['class_definition'],
+  visit(node, filePath, sourceCode) {
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    for (const child of body.namedChildren) {
+      // Class-level assignment: name = [] or name = {} or name = set()
+      if (child.type === 'expression_statement') {
+        const expr = child.namedChildren[0]
+        if (!expr || expr.type !== 'assignment') continue
+        const right = expr.childForFieldName('right')
+        if (!right) continue
+
+        const isMutable = right.type === 'list' || right.type === 'dictionary' || right.type === 'set'
+        if (isMutable) {
+          const left = expr.childForFieldName('left')
+          const varName = left?.text ?? 'attribute'
+          return makeViolation(
+            this.ruleKey, expr, filePath, 'high',
+            'Mutable class variable default',
+            `Class variable \`${varName}\` is a mutable \`${right.type}\` — it is shared across all instances and mutations affect every instance.`,
+            sourceCode,
+            `Move the initialization to \`__init__\`: \`self.${varName} = ${right.type === 'list' ? '[]' : right.type === 'dictionary' ? '{}' : 'set()'}\`.`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// mutable-dataclass-default: @dataclass field = [] instead of field(default_factory=list)
+// ---------------------------------------------------------------------------
+
+export const pythonMutableDataclassDefaultVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/mutable-dataclass-default',
+  languages: ['python'],
+  nodeTypes: ['class_definition'],
+  visit(node, filePath, sourceCode) {
+    // Check if this class is decorated with @dataclass
+    const parent = node.parent
+    if (!parent || parent.type !== 'decorated_definition') return null
+
+    const decorators = parent.namedChildren.filter((c) => c.type === 'decorator')
+    const isDataclass = decorators.some((d) => {
+      const expr = d.namedChildren[0]
+      if (!expr) return false
+      return (expr.type === 'identifier' && expr.text === 'dataclass') ||
+        (expr.type === 'call' && expr.childForFieldName('function')?.text === 'dataclass')
+    })
+    if (!isDataclass) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    for (const child of body.namedChildren) {
+      if (child.type === 'expression_statement') {
+        const expr = child.namedChildren[0]
+        if (!expr || expr.type !== 'assignment') continue
+
+        const right = expr.childForFieldName('right')
+        if (!right) continue
+
+        if (right.type === 'list' || right.type === 'dictionary' || right.type === 'set') {
+          const left = expr.childForFieldName('left')
+          const varName = left?.text ?? 'field'
+          const factory = right.type === 'list' ? 'list' : right.type === 'dictionary' ? 'dict' : 'set'
+          return makeViolation(
+            this.ruleKey, expr, filePath, 'high',
+            'Mutable dataclass field default',
+            `Dataclass field \`${varName}\` has a mutable default value — this is shared across all instances. Use \`field(default_factory=${factory})\` instead.`,
+            sourceCode,
+            `Replace \`${varName} = ${right.text}\` with \`${varName}: ${factory} = field(default_factory=${factory})\`.`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// await-outside-async: await used outside an async function
+// ---------------------------------------------------------------------------
+
+export const pythonAwaitOutsideAsyncVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/await-outside-async',
+  languages: ['python'],
+  nodeTypes: ['await'],
+  visit(node, filePath, sourceCode) {
+    // Walk up and check if we are inside an async function
+    let current = node.parent
+    while (current) {
+      if (current.type === 'function_definition') {
+        // Check if it has async keyword
+        const isAsync = current.children.some((c) => c.type === 'async' || c.text === 'async')
+        if (isAsync) return null // inside async — fine
+        // Inside a non-async function — flag it
+        return makeViolation(
+          this.ruleKey, node, filePath, 'critical',
+          'await outside async function',
+          '`await` is used inside a non-async function — this is a SyntaxError.',
+          sourceCode,
+          'Add `async` to the function definition: `async def ...`.',
+        )
+      }
+      current = current.parent
+    }
+
+    // Top-level await — flag it (only valid in REPL/notebooks, not in modules)
+    return makeViolation(
+      this.ruleKey, node, filePath, 'critical',
+      'await outside async function',
+      '`await` at the module/top level is only valid in interactive Python sessions.',
+      sourceCode,
+      'Move the await inside an async function.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// asyncio-dangling-task: asyncio.create_task() result not stored
+// ---------------------------------------------------------------------------
+
+export const pythonAsyncioDanglingTaskVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/asyncio-dangling-task',
+  languages: ['python'],
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr || expr.type !== 'call') return null
+
+    const fn = expr.childForFieldName('function')
+    if (!fn) return null
+
+    // Match asyncio.create_task(...)
+    let isCreateTask = false
+    if (fn.type === 'attribute') {
+      const obj = fn.childForFieldName('object')
+      const attr = fn.childForFieldName('attribute')
+      if (obj?.text === 'asyncio' && attr?.text === 'create_task') isCreateTask = true
+    }
+    // Also match bare create_task(...) if imported
+    if (fn.type === 'identifier' && fn.text === 'create_task') isCreateTask = true
+
+    if (!isCreateTask) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Asyncio dangling task',
+      '`asyncio.create_task()` result is not saved. The task may be garbage-collected before it completes, silently cancelling it.',
+      sourceCode,
+      'Save the task reference: `task = asyncio.create_task(...)` and keep it alive for the task\'s duration.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unexpected-special-method-signature: dunder with wrong param count
+// ---------------------------------------------------------------------------
+
+// Expected minimum param counts for common dunder methods (including self)
+const DUNDER_PARAM_COUNTS: Record<string, { min: number; max: number }> = {
+  __init__: { min: 1, max: Infinity },
+  __del__: { min: 1, max: 1 },
+  __repr__: { min: 1, max: 1 },
+  __str__: { min: 1, max: 1 },
+  __bytes__: { min: 1, max: 1 },
+  __hash__: { min: 1, max: 1 },
+  __bool__: { min: 1, max: 1 },
+  __len__: { min: 1, max: 1 },
+  __iter__: { min: 1, max: 1 },
+  __next__: { min: 1, max: 1 },
+  __enter__: { min: 1, max: 1 },
+  __exit__: { min: 4, max: 4 },
+  __get__: { min: 3, max: 3 },
+  __set__: { min: 3, max: 3 },
+  __delete__: { min: 2, max: 2 },
+  __call__: { min: 1, max: Infinity },
+  __getitem__: { min: 2, max: 2 },
+  __setitem__: { min: 3, max: 3 },
+  __delitem__: { min: 2, max: 2 },
+  __contains__: { min: 2, max: 2 },
+  __add__: { min: 2, max: 2 },
+  __radd__: { min: 2, max: 2 },
+  __iadd__: { min: 2, max: 2 },
+  __eq__: { min: 2, max: 2 },
+  __ne__: { min: 2, max: 2 },
+  __lt__: { min: 2, max: 2 },
+  __le__: { min: 2, max: 2 },
+  __gt__: { min: 2, max: 2 },
+  __ge__: { min: 2, max: 2 },
+}
+
+export const pythonUnexpectedSpecialMethodSignatureVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unexpected-special-method-signature',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name) return null
+
+    const methodName = name.text
+    const expected = DUNDER_PARAM_COUNTS[methodName]
+    if (!expected) return null
+
+    const params = node.childForFieldName('parameters')
+    if (!params) return null
+
+    // Count non-special params (exclude *args, **kwargs, /)
+    const paramCount = params.namedChildren.filter((c) =>
+      c.type === 'identifier' || c.type === 'typed_parameter' || c.type === 'default_parameter' ||
+      c.type === 'typed_default_parameter'
+    ).length
+
+    if (paramCount < expected.min || paramCount > expected.max) {
+      const expectedDesc = expected.min === expected.max
+        ? `${expected.min}`
+        : expected.max === Infinity ? `at least ${expected.min}` : `${expected.min}–${expected.max}`
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Wrong special method signature',
+        `\`${methodName}\` should have ${expectedDesc} parameter(s) but has ${paramCount}.`,
+        sourceCode,
+        `Fix the number of parameters for \`${methodName}\` to match the expected signature.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-function-arguments: foo(x=1, x=2)
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateFunctionArgumentsVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-function-arguments',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const seen = new Set<string>()
+    for (const child of args.namedChildren) {
+      if (child.type === 'keyword_argument') {
+        const kw = child.childForFieldName('name')
+        if (!kw) continue
+        const kwName = kw.text
+        if (seen.has(kwName)) {
+          return makeViolation(
+            this.ruleKey, child, filePath, 'high',
+            'Duplicate keyword argument',
+            `Keyword argument \`${kwName}\` is passed more than once — this raises a TypeError at runtime.`,
+            sourceCode,
+            `Remove the duplicate \`${kwName}=...\` argument.`,
+          )
+        }
+        seen.add(kwName)
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// not-implemented-in-bool-context: if NotImplemented: or assert NotImplemented
+// ---------------------------------------------------------------------------
+
+export const pythonNotImplementedInBoolContextVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/not-implemented-in-bool-context',
+  languages: ['python'],
+  nodeTypes: ['if_statement', 'assert_statement', 'while_statement'],
+  visit(node, filePath, sourceCode) {
+    let condNode: import('tree-sitter').SyntaxNode | null = null
+    if (node.type === 'assert_statement') {
+      condNode = node.namedChildren[0] ?? null
+    } else {
+      condNode = node.childForFieldName('condition')
+    }
+    if (!condNode) return null
+
+    if (condNode.type === 'identifier' && condNode.text === 'NotImplemented') {
+      return makeViolation(
+        this.ruleKey, condNode, filePath, 'high',
+        'NotImplemented in boolean context',
+        '`NotImplemented` is a truthy singleton, not an exception. Using it in a boolean context is always `True`.',
+        sourceCode,
+        'Raise `NotImplementedError` instead, or use the correct exception.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// cancellation-exception-not-reraised: except asyncio.CancelledError / concurrent.futures.CancelledError without re-raise
+// ---------------------------------------------------------------------------
+
+const CANCELLATION_EXCEPTIONS = new Set(['CancelledError', 'Cancelled'])
+
+export const pythonCancellationExceptionNotReraisedVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/cancellation-exception-not-reraised',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+
+    // Check if this except clause catches CancelledError
+    let catchesCancelledError = false
+    for (const child of children) {
+      if (child.type === 'identifier' && CANCELLATION_EXCEPTIONS.has(child.text)) {
+        catchesCancelledError = true
+        break
+      }
+      if (child.type === 'attribute') {
+        const attr = child.childForFieldName('attribute')
+        if (attr && CANCELLATION_EXCEPTIONS.has(attr.text)) {
+          catchesCancelledError = true
+          break
+        }
+      }
+    }
+    if (!catchesCancelledError) return null
+
+    const body = node.namedChildren.find((c) => c.type === 'block')
+    if (!body) return null
+
+    // Check if the body re-raises (bare raise or raise <same var>)
+    function hasReraise(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'raise_statement') {
+        // Bare raise — re-raises current exception
+        if (n.namedChildren.length === 0) return true
+        // raise e or raise ... from ...
+        return true
+      }
+      if (n.type === 'function_definition') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasReraise(child)) return true
+      }
+      return false
+    }
+
+    if (!hasReraise(body)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Cancellation exception swallowed',
+        'Catching `CancelledError` without re-raising prevents task cancellation and may deadlock the event loop.',
+        sourceCode,
+        'Add `raise` at the end of the except block to re-raise the cancellation.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// assert-raises-too-broad: pytest.raises(Exception) — too broad
+// ---------------------------------------------------------------------------
+
+const BROAD_EXCEPTIONS = new Set(['Exception', 'BaseException'])
+
+export const pythonAssertRaisesTooBroadVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/assert-raises-too-broad',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Match pytest.raises(...)
+    let isPytestRaises = false
+    if (fn.type === 'attribute') {
+      const obj = fn.childForFieldName('object')
+      const attr = fn.childForFieldName('attribute')
+      if (obj?.text === 'pytest' && attr?.text === 'raises') isPytestRaises = true
+    }
+    if (!isPytestRaises) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const argText = firstArg.type === 'identifier' ? firstArg.text : null
+    if (argText && BROAD_EXCEPTIONS.has(argText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'pytest.raises with broad exception',
+        `\`pytest.raises(${argText})\` is too broad — the test will pass even if the wrong exception is raised. Use a more specific exception type.`,
+        sourceCode,
+        `Replace \`${argText}\` with a more specific exception class.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// hashable-set-dict-member: {[1,2]: "val"} or {[1,2], 3}
+// ---------------------------------------------------------------------------
+
+export const pythonHashableSetDictMemberVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/hashable-set-dict-member',
+  languages: ['python'],
+  nodeTypes: ['dictionary', 'set'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'dictionary') {
+      for (const child of node.namedChildren) {
+        if (child.type === 'pair') {
+          const key = child.childForFieldName('key')
+          if (key && (key.type === 'list' || key.type === 'dictionary' || key.type === 'set')) {
+            return makeViolation(
+              this.ruleKey, key, filePath, 'high',
+              'Unhashable type as dict key',
+              `Using a \`${key.type}\` as a dict key will raise a TypeError — only hashable (immutable) types can be dict keys.`,
+              sourceCode,
+              'Use a tuple instead of a list/set/dict as the dict key.',
+            )
+          }
+        }
+      }
+    }
+
+    if (node.type === 'set') {
+      for (const child of node.namedChildren) {
+        if (child.type === 'list' || child.type === 'dictionary' || child.type === 'set') {
+          return makeViolation(
+            this.ruleKey, child, filePath, 'high',
+            'Unhashable type in set',
+            `Using a \`${child.type}\` as a set member will raise a TypeError — set members must be hashable.`,
+            sourceCode,
+            'Use a tuple instead of a list/set/dict as the set member.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// iter-not-returning-iterator: __iter__ method that doesn't return self or yield
+// ---------------------------------------------------------------------------
+
+export const pythonIterNotReturningIteratorVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/iter-not-returning-iterator',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name || name.text !== '__iter__') return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    // Check if there's a yield statement (makes it a generator — fine)
+    function hasYield(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'yield' || n.type === 'yield_statement') return true
+      if (n.type === 'function_definition') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasYield(child)) return true
+      }
+      return false
+    }
+    if (hasYield(body)) return null
+
+    // Check if there's a return self statement
+    function hasReturnSelf(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'return_statement') {
+        const val = n.namedChildren[0]
+        if (val?.type === 'identifier' && val.text === 'self') return true
+      }
+      if (n.type === 'function_definition') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasReturnSelf(child)) return true
+      }
+      return false
+    }
+
+    function hasAnyReturn(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
+      if (n.type === 'function_definition') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasAnyReturn(child)) return true
+      }
+      return false
+    }
+
+    if (hasAnyReturn(body) && !hasReturnSelf(body)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        '__iter__ not returning iterator',
+        '`__iter__` should return `self` (if the object is its own iterator) or a dedicated iterator — returning other values breaks the iterator protocol.',
+        sourceCode,
+        'Return `self` from `__iter__`, or implement `__next__` and return `self`, or use `yield` to make it a generator.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// modified-loop-iterator: mutating set/dict/list during iteration
+// Detect: for x in coll: ... coll.add/remove/append/pop/clear/discard/update/del
+// ---------------------------------------------------------------------------
+
+const MUTATING_METHODS = new Set(['add', 'remove', 'discard', 'pop', 'clear', 'update', 'append', 'insert', 'extend', 'del'])
+
+export const pythonModifiedLoopIteratorVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/modified-loop-iterator',
+  languages: ['python'],
+  nodeTypes: ['for_statement'],
+  visit(node, filePath, sourceCode) {
+    const iterExpr = node.childForFieldName('right')
+    if (!iterExpr || iterExpr.type !== 'identifier') return null
+    const collName = iterExpr.text
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    function findMutation(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      // call_expression: coll.add(...), coll.remove(...)
+      if (n.type === 'call') {
+        const fn = n.childForFieldName('function')
+        if (fn?.type === 'attribute') {
+          const obj = fn.childForFieldName('object')
+          const attr = fn.childForFieldName('attribute')
+          if (obj?.text === collName && attr && MUTATING_METHODS.has(attr.text)) {
+            return n
+          }
+        }
+      }
+      // del coll[...] or del coll
+      if (n.type === 'delete_statement') {
+        const targets = n.namedChildren
+        for (const t of targets) {
+          if (t.type === 'subscript' || t.type === 'identifier') {
+            const base = t.type === 'subscript' ? t.childForFieldName('value') : t
+            if (base?.text === collName) return n
+          }
+        }
+      }
+      // Don't recurse into nested functions
+      if (n.type === 'function_definition') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findMutation(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const mutation = findMutation(body)
+    if (mutation) {
+      return makeViolation(
+        this.ruleKey, mutation, filePath, 'high',
+        'Modifying collection while iterating',
+        `\`${collName}\` is being mutated inside the loop that iterates over it — this raises RuntimeError for sets/dicts or produces unexpected results for lists.`,
+        sourceCode,
+        `Iterate over a copy: \`for x in list(${collName}):\` or collect changes and apply after the loop.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// undefined-export: name in __all__ not defined in the module
+// ---------------------------------------------------------------------------
+
+export const pythonUndefinedExportVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/undefined-export',
+  languages: ['python'],
+  nodeTypes: ['module'],
+  visit(node, filePath, sourceCode) {
+    // Find __all__ = [...] assignment at the top level
+    let allList: import('tree-sitter').SyntaxNode | null = null
+    const definedNames = new Set<string>()
+
+    for (const child of node.namedChildren) {
+      // Collect defined names: function defs, class defs, imports, assignments
+      if (child.type === 'function_definition') {
+        const name = child.childForFieldName('name')
+        if (name) definedNames.add(name.text)
+      }
+      if (child.type === 'class_definition') {
+        const name = child.childForFieldName('name')
+        if (name) definedNames.add(name.text)
+      }
+      if (child.type === 'import_statement' || child.type === 'import_from_statement') {
+        // Collect imported names
+        for (const importChild of child.namedChildren) {
+          if (importChild.type === 'dotted_name' || importChild.type === 'identifier') {
+            definedNames.add(importChild.text)
+          }
+          if (importChild.type === 'aliased_import') {
+            const alias = importChild.childForFieldName('alias')
+            if (alias) definedNames.add(alias.text)
+          }
+        }
+      }
+      if (child.type === 'expression_statement') {
+        const expr = child.namedChildren[0]
+        if (!expr) continue
+        if (expr.type === 'assignment') {
+          const left = expr.childForFieldName('left')
+          const right = expr.childForFieldName('right')
+          if (left?.text === '__all__' && right?.type === 'list') {
+            allList = right
+          } else if (left?.type === 'identifier') {
+            definedNames.add(left.text)
+          }
+        }
+      }
+      if (child.type === 'decorated_definition') {
+        const inner = child.namedChildren.find((c) => c.type === 'function_definition' || c.type === 'class_definition')
+        if (inner) {
+          const name = inner.childForFieldName('name')
+          if (name) definedNames.add(name.text)
+        }
+      }
+    }
+
+    if (!allList) return null
+
+    for (const item of allList.namedChildren) {
+      if (item.type === 'string') {
+        const exportName = item.text.slice(1, -1) // strip quotes
+        if (exportName && !definedNames.has(exportName)) {
+          return makeViolation(
+            this.ruleKey, item, filePath, 'high',
+            'Undefined name in __all__',
+            `\`"${exportName}"\` is listed in \`__all__\` but is not defined in this module — importing it will raise an AttributeError.`,
+            sourceCode,
+            `Define \`${exportName}\` in this module or remove it from \`__all__\`.`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// string-format-mismatch: "hello %s %s" % (x,) — wrong count
+// ---------------------------------------------------------------------------
+
+export const pythonStringFormatMismatchVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/string-format-mismatch',
+  languages: ['python'],
+  nodeTypes: ['binary_operator'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.text === '%')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    // Only check string literals on the left
+    if (left.type !== 'string') return null
+
+    const fmt = left.text.slice(1, -1) // strip quotes
+
+    // Count %s, %d, %f, %r, %x, %o, %e, %g, %c, %i (but not %% which is literal %)
+    const placeholders = (fmt.match(/%[^%sdfrxoegci]/g) || []).length
+    const realPlaceholders = (fmt.match(/%[sdfrxoegci]/g) || []).length
+
+    if (realPlaceholders === 0) return null // no format placeholders
+
+    // Count the right-hand side arguments
+    let argCount = 0
+    if (right.type === 'tuple') {
+      argCount = right.namedChildren.length
+    } else {
+      // Single value
+      argCount = 1
+    }
+
+    if (realPlaceholders !== argCount) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'String format argument count mismatch',
+        `Format string has ${realPlaceholders} placeholder(s) but ${argCount} argument(s) were provided — this will raise a TypeError at runtime.`,
+        sourceCode,
+        `Provide exactly ${realPlaceholders} argument(s) for the format string.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// property-without-return: @property getter with no return statement
+// (This overlaps with getter-missing-return — this catches the more general case
+// including class methods that lack @property but are named like getters.)
+// We implement the specific pattern: def get_foo(self): with no return
+// but only flag when there's a @property-decorated method missing return
+// that isn't already caught by pythonGetterMissingReturnVisitor.
+// Instead, implement duplicate-import for Python.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// duplicate-import: same module imported more than once
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateImportVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-import',
+  languages: ['python'],
+  nodeTypes: ['module'],
+  visit(node, filePath, sourceCode) {
+    const seenModules = new Set<string>()
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'import_statement') {
+        for (const importedName of child.namedChildren) {
+          const name = importedName.type === 'dotted_name' ? importedName.text
+            : importedName.type === 'aliased_import' ? importedName.childForFieldName('name')?.text ?? null
+            : null
+          if (name) {
+            if (seenModules.has(name)) {
+              return makeViolation(
+                this.ruleKey, child, filePath, 'medium',
+                'Duplicate import',
+                `\`import ${name}\` is already imported earlier — the later import shadows the earlier one.`,
+                sourceCode,
+                'Remove the duplicate import.',
+              )
+            }
+            seenModules.add(name)
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
   pythonBareExceptVisitor,
@@ -1162,4 +2205,26 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonFloatEqualityComparisonVisitor,
   pythonFunctionCallInDefaultArgVisitor,
   pythonZipWithoutStrictVisitor,
+  // New batch
+  pythonRaiseLiteralVisitor,
+  pythonBadOpenModeVisitor,
+  pythonLoopAtMostOneIterationVisitor,
+  pythonBreakContinueInFinallyVisitor,
+  pythonInfiniteRecursionVisitor,
+  pythonDuplicateHandlerExceptionVisitor,
+  pythonMutableClassDefaultVisitor,
+  pythonMutableDataclassDefaultVisitor,
+  pythonAwaitOutsideAsyncVisitor,
+  pythonAsyncioDanglingTaskVisitor,
+  pythonUnexpectedSpecialMethodSignatureVisitor,
+  pythonDuplicateFunctionArgumentsVisitor,
+  pythonNotImplementedInBoolContextVisitor,
+  pythonCancellationExceptionNotReraisedVisitor,
+  pythonAssertRaisesTooBroadVisitor,
+  pythonHashableSetDictMemberVisitor,
+  pythonIterNotReturningIteratorVisitor,
+  pythonModifiedLoopIteratorVisitor,
+  pythonUndefinedExportVisitor,
+  pythonStringFormatMismatchVisitor,
+  pythonDuplicateImportVisitor,
 ]

@@ -2468,3 +2468,444 @@ const policy = '{"Version":"2012-10-17","Statement":[{"Principal":"*","Effect":"
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// aws-iam-overly-broad-policy (Python CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-overly-broad-policy', () => {
+  const ruleKey = 'security/deterministic/aws-iam-overly-broad-policy';
+
+  it('detects PolicyStatement with wildcard actions', () => {
+    const violations = check(`stmt = PolicyStatement(actions=["*"], resources=["arn:aws:s3:::bucket"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag PolicyStatement with specific actions', () => {
+    const violations = check(`stmt = PolicyStatement(actions=["s3:GetObject"], resources=["arn:aws:s3:::bucket/*"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-iam-all-privileges-python
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-all-privileges-python', () => {
+  const ruleKey = 'security/deterministic/aws-iam-all-privileges-python';
+
+  it('detects PolicyStatement actions=["*"]', () => {
+    const violations = check(`stmt = PolicyStatement(actions=["*"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag restricted actions', () => {
+    const violations = check(`stmt = PolicyStatement(actions=["ec2:Describe*"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-iam-all-resources-python
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-all-resources-python', () => {
+  const ruleKey = 'security/deterministic/aws-iam-all-resources-python';
+
+  it('detects PolicyStatement resources=["*"]', () => {
+    const violations = check(`stmt = PolicyStatement(actions=["s3:Get*"], resources=["*"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag specific resource ARNs', () => {
+    const violations = check(`stmt = PolicyStatement(actions=["s3:GetObject"], resources=["arn:aws:s3:::my-bucket/*"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unrestricted-admin-access (Python CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unrestricted-admin-access', () => {
+  const ruleKey = 'security/deterministic/aws-unrestricted-admin-access';
+
+  it('detects security group ingress for SSH from any IP', () => {
+    const violations = check(
+      `sg.add_ingress_rule(Peer.any_ipv4(), Port.tcp(22), "SSH from anywhere")`,
+      'python',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag restricted SSH access', () => {
+    const violations = check(
+      `sg.add_ingress_rule(Peer.ipv4("10.0.0.0/8"), Port.tcp(22), "SSH from VPN")`,
+      'python',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-public-policy (Python)
+// ===========================================================================
+
+describe('security/deterministic/aws-public-policy', () => {
+  const ruleKey = 'security/deterministic/aws-public-policy';
+
+  it('detects policy string with Principal "*"', () => {
+    const violations = check(`policy = '{"Statement": [{"Principal": "*", "Action": "s3:*"}]}'`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag policy with specific principal', () => {
+    const violations = check(`policy = '{"Statement": [{"Principal": {"AWS": "arn:aws:iam::123:role/MyRole"}}]}'`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unrestricted-outbound (Python CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unrestricted-outbound', () => {
+  const ruleKey = 'security/deterministic/aws-unrestricted-outbound';
+
+  it('detects unrestricted egress to 0.0.0.0/0 with all traffic', () => {
+    const violations = check(
+      `sg.add_egress_rule(Peer.any_ipv4(), Port.ALL_TRAFFIC, "Allow all outbound")`,
+      'python',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag restricted egress', () => {
+    const violations = check(
+      `sg.add_egress_rule(Peer.ipv4("10.0.0.0/8"), Port.tcp(443), "HTTPS to VPC")`,
+      'python',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-ebs-python
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-ebs-python', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-ebs-python';
+
+  it('detects Volume with encrypted=False', () => {
+    const violations = check(`vol = Volume(self, "MyVol", availability_zone="us-east-1a", encrypted=False)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Volume with encrypted=True', () => {
+    const violations = check(`vol = Volume(self, "MyVol", availability_zone="us-east-1a", encrypted=True)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-rds-python
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-rds-python', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-rds-python';
+
+  it('detects DatabaseInstance with storage_encrypted=False', () => {
+    const violations = check(`db = DatabaseInstance(self, "DB", engine=engine, storage_encrypted=False)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag DatabaseInstance with storage_encrypted=True', () => {
+    const violations = check(`db = DatabaseInstance(self, "DB", engine=engine, storage_encrypted=True)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-sns-python
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-sns-python', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-sns-python';
+
+  it('detects Topic without master_key', () => {
+    const violations = check(`topic = Topic(self, "MyTopic", display_name="My Topic")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Topic with master_key', () => {
+    const violations = check(`topic = Topic(self, "MyTopic", master_key=my_key)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-sqs-python
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-sqs-python', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-sqs-python';
+
+  it('detects Queue without encryption', () => {
+    const violations = check(`q = Queue(self, "MyQueue", visibility_timeout=Duration.seconds(300))`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Queue with encryption key', () => {
+    const violations = check(`q = Queue(self, "MyQueue", encryption=QueueEncryption.KMS, encryption_master_key=key)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-public-api-python
+// ===========================================================================
+
+describe('security/deterministic/aws-public-api-python', () => {
+  const ruleKey = 'security/deterministic/aws-public-api-python';
+
+  it('detects RestApi with authorization_type=NONE', () => {
+    const violations = check(
+      `api = RestApi(self, "API", default_method_options=MethodOptions(authorization_type=AuthorizationType.NONE))`,
+      'python',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag RestApi with Cognito authorizer', () => {
+    const violations = check(
+      `api = RestApi(self, "API", default_method_options=MethodOptions(authorization_type=AuthorizationType.COGNITO_USER_POOLS))`,
+      'python',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// subprocess-without-shell (Python)
+// ===========================================================================
+
+describe('security/deterministic/subprocess-without-shell', () => {
+  const ruleKey = 'security/deterministic/subprocess-without-shell';
+
+  it('detects subprocess.call with variable argument', () => {
+    const violations = check(`subprocess.call(user_cmd)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag subprocess.call with literal list', () => {
+    const violations = check(`subprocess.call(["ls", "-la"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// process-with-partial-path (Python)
+// ===========================================================================
+
+describe('security/deterministic/process-with-partial-path', () => {
+  const ruleKey = 'security/deterministic/process-with-partial-path';
+
+  it('detects subprocess.run with partial path command', () => {
+    const violations = check(`subprocess.run(["git", "status"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag subprocess.run with full path', () => {
+    const violations = check(`subprocess.run(["/usr/bin/git", "status"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// ssl-no-version (Python)
+// ===========================================================================
+
+describe('security/deterministic/ssl-no-version', () => {
+  const ruleKey = 'security/deterministic/ssl-no-version';
+
+  it('detects ssl.SSLContext() with no arguments', () => {
+    const violations = check(`ctx = ssl.SSLContext()`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects ssl.SSLContext(ssl.PROTOCOL_TLS)', () => {
+    const violations = check(`ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)', () => {
+    const violations = check(`ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-public-api (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-public-api', () => {
+  const ruleKey = 'security/deterministic/aws-public-api';
+
+  it('detects RestApi with AuthorizationType.NONE', () => {
+    const violations = check(`
+const api = new RestApi(this, 'MyApi', {
+  defaultMethodOptions: { authorizationType: AuthorizationType.NONE },
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag RestApi with COGNITO_USER_POOLS auth', () => {
+    const violations = check(`
+const api = new RestApi(this, 'MyApi', {
+  defaultMethodOptions: { authorizationType: AuthorizationType.COGNITO_USER_POOLS },
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-public-resource (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-public-resource', () => {
+  const ruleKey = 'security/deterministic/aws-public-resource';
+
+  it('detects publiclyAccessible: true on CDK resource', () => {
+    const violations = check(`
+const db = new DatabaseInstance(this, 'DB', {
+  engine: DatabaseInstanceEngine.POSTGRES,
+  publiclyAccessible: true,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag publiclyAccessible: false', () => {
+    const violations = check(`
+const db = new DatabaseInstance(this, 'DB', {
+  engine: DatabaseInstanceEngine.POSTGRES,
+  publiclyAccessible: false,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-ebs (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-ebs', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-ebs';
+
+  it('detects new Volume with encrypted: false', () => {
+    const violations = check(`
+const vol = new Volume(this, 'Vol', {
+  availabilityZone: 'us-east-1a',
+  encrypted: false,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Volume with encrypted: true', () => {
+    const violations = check(`
+const vol = new Volume(this, 'Vol', {
+  availabilityZone: 'us-east-1a',
+  encrypted: true,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-efs (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-efs', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-efs';
+
+  it('detects new FileSystem with encrypted: false', () => {
+    const violations = check(`
+const fs = new FileSystem(this, 'EFS', {
+  vpc,
+  encrypted: false,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag FileSystem with encrypted: true', () => {
+    const violations = check(`
+const fs = new FileSystem(this, 'EFS', {
+  vpc,
+  encrypted: true,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-iam-all-privileges (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-all-privileges', () => {
+  const ruleKey = 'security/deterministic/aws-iam-all-privileges';
+
+  it('detects new PolicyStatement with actions ["*"]', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['*'],
+  resources: ['arn:aws:s3:::my-bucket'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag PolicyStatement with specific actions', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['s3:GetObject', 's3:PutObject'],
+  resources: ['arn:aws:s3:::my-bucket/*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-iam-all-resources (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-all-resources', () => {
+  const ruleKey = 'security/deterministic/aws-iam-all-resources';
+
+  it('detects new PolicyStatement with resources ["*"]', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['s3:GetObject'],
+  resources: ['*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag PolicyStatement with specific resources', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['s3:GetObject'],
+  resources: ['arn:aws:s3:::my-bucket/*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});

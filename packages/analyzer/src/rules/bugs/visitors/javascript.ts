@@ -3219,6 +3219,191 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// misleading-character-class: regex containing multi-codepoint chars (emoji etc.)
+// ---------------------------------------------------------------------------
+
+export const misleadingCharacterClassVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/misleading-character-class',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const pattern = node.childForFieldName('pattern')
+    if (!pattern) return null
+
+    const patternText = pattern.text
+
+    // Find character classes in the regex pattern
+    // Look for [...] blocks that contain characters with code points > 0xFFFF (multi-codepoint)
+    // or emoji-like sequences (common emojis are in range U+1F000+)
+    // We detect this by checking if any char in a character class has a code point > 0xFFFF
+    // which means it's represented as a surrogate pair in JS strings
+    let insideClass = false
+    for (let i = 0; i < patternText.length; i++) {
+      const ch = patternText[i]
+      if (ch === '\\') { i++; continue } // skip escaped chars
+      if (ch === '[') { insideClass = true; continue }
+      if (ch === ']') { insideClass = false; continue }
+      if (insideClass) {
+        const cp = patternText.codePointAt(i)
+        if (cp !== undefined && cp > 0xFFFF) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Misleading character class in regex',
+            `Regex character class contains a multi-codepoint character (code point U+${cp.toString(16).toUpperCase().padStart(4, '0')}) — in JavaScript, this is represented as a surrogate pair and the character class will only match individual surrogates, not the full character.`,
+            sourceCode,
+            'Use the `u` or `v` flag and escape the character as \\u{...}: `/[\\u{1F600}]/u`.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// race-condition-assignment: x = await ...; ... x = await ... (re-assignment after await)
+// Pattern: augmented_assignment_expression += on a variable that is awaited
+// More practically: detect `x += 1` where x is also read via await (require-atomic-updates ESLint rule)
+// Simplified: detect `x += expr` where expr contains await, meaning we have a TOCTOU on x
+// ---------------------------------------------------------------------------
+
+export const raceConditionAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/race-condition-assignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['augmented_assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    // Only flag x += await ... or x -= await ...
+    const right = node.childForFieldName('right')
+    if (!right) return null
+
+    function containsAwait(n: SyntaxNode): boolean {
+      if (n.type === 'await_expression') return true
+      // Don't recurse into nested functions
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && containsAwait(child)) return true
+      }
+      return false
+    }
+
+    if (!containsAwait(right)) return null
+
+    // Make sure we're inside an async function
+    let current: SyntaxNode | null = node.parent
+    let inAsync = false
+    while (current) {
+      if (current.type === 'function_declaration' || current.type === 'function' ||
+          current.type === 'arrow_function' || current.type === 'method_definition') {
+        inAsync = current.children.some((c) => c.text === 'async')
+        break
+      }
+      current = current.parent
+    }
+    if (!inAsync) return null
+
+    const left = node.childForFieldName('left')
+    const op = node.children.find((c) => ['+=', '-=', '*=', '/=', '|=', '&='].includes(c.text))
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Race condition assignment',
+      `\`${left?.text} ${op?.text} await ...\` reads \`${left?.text}\`, suspends at \`await\`, and writes back — a concurrent modification between the read and write is silently overwritten.`,
+      sourceCode,
+      'Store the awaited value in a local variable first, then apply the operation atomically.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// regex-group-reference-mismatch: "str".replace(/(...)(...)/, "$3") — group doesn't exist
+// ---------------------------------------------------------------------------
+
+export const regexGroupReferenceMismatchVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/regex-group-reference-mismatch',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (!prop || prop.text !== 'replace') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argNodes = args.namedChildren
+    if (argNodes.length < 2) return null
+
+    const regexArg = argNodes[0]
+    const replacementArg = argNodes[1]
+
+    if (!regexArg || !replacementArg) return null
+    if (regexArg.type !== 'regex') return null
+    if (replacementArg.type !== 'string') return null
+
+    const pattern = regexArg.childForFieldName('pattern')?.text ?? ''
+    const replacement = replacementArg.text.slice(1, -1) // strip quotes
+
+    // Count capturing groups in the pattern (non-escaped open parens, not (?:, (?=, etc.)
+    const captureCount = (pattern.match(/(?<!\\)\((?!\?)/g) || []).length
+
+    // Find all $N references in the replacement string
+    const refs = replacement.match(/\$(\d+)/g) || []
+    for (const ref of refs) {
+      const groupNum = parseInt(ref.slice(1), 10)
+      if (groupNum > captureCount) {
+        return makeViolation(
+          this.ruleKey, replacementArg, filePath, 'high',
+          'Regex group reference mismatch',
+          `Replacement \`"${replacement}"\` references capture group \`$${groupNum}\` but the regex only has ${captureCount} capturing group(s) — the reference will be replaced with an empty string.`,
+          sourceCode,
+          `Fix the replacement to reference only existing groups ($1–$${captureCount}).`,
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-import: same module imported more than once (JS/TS)
+// ---------------------------------------------------------------------------
+
+export const duplicateImportVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-import',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    const seenSources = new Set<string>()
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'import_statement') {
+        const source = child.namedChildren.find((c) => c.type === 'string')
+        if (source) {
+          const src = source.text
+          if (seenSources.has(src)) {
+            return makeViolation(
+              this.ruleKey, child, filePath, 'medium',
+              'Duplicate import',
+              `Module ${src} is imported more than once — consolidate into a single import statement.`,
+              sourceCode,
+              'Merge the duplicate imports into a single import statement.',
+            )
+          }
+          seenSources.add(src)
+        }
+      }
+    }
+
+    return null
+  },
+}
+
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
   selfComparisonVisitor,
@@ -3294,4 +3479,9 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   misleadingArrayReverseVisitor,
   globalThisUsageVisitor,
   inconsistentReturnVisitor,
+  // New batch
+  misleadingCharacterClassVisitor,
+  raceConditionAssignmentVisitor,
+  regexGroupReferenceMismatchVisitor,
+  duplicateImportVisitor,
 ]

@@ -3123,6 +3123,905 @@ export const equalsInForTerminationVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// Batch 4 — 25 new rules
+// ---------------------------------------------------------------------------
+
+export const preferIncludesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-includes',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    // Pattern: expr.indexOf(x) !== -1  or  expr.indexOf(x) === -1  or  >= 0  or  < 0
+    const op = node.children.find((c) => c.type === '!==' || c.type === '===' || c.type === '>=' || c.type === '<')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    // Check for indexof on the left, -1 on the right (or the reverse)
+    function isIndexOfCall(n: SyntaxNode): boolean {
+      if (n.type !== 'call_expression') return false
+      const fn = n.childForFieldName('function')
+      if (fn?.type !== 'member_expression') return false
+      const prop = fn.childForFieldName('property')
+      return prop?.text === 'indexOf'
+    }
+
+    function isNegOne(n: SyntaxNode): boolean {
+      // -1 as unary_expression or number
+      if (n.type === 'number' && n.text === '-1') return true
+      if (n.type === 'unary_expression') {
+        const op = n.children[0]
+        const operand = n.children[1]
+        return op?.text === '-' && operand?.text === '1'
+      }
+      return false
+    }
+
+    function isZero(n: SyntaxNode): boolean {
+      return n.type === 'number' && n.text === '0'
+    }
+
+    const leftIsIndexOf = isIndexOfCall(left)
+    const rightIsIndexOf = isIndexOfCall(right)
+
+    if (!leftIsIndexOf && !rightIsIndexOf) return null
+
+    // Valid patterns:
+    // indexOf() !== -1 (includes check) || indexOf() === -1 (not-includes check)
+    // indexOf() >= 0 || indexOf() < 0
+    const indexOfNode = leftIsIndexOf ? left : right
+    const otherNode = leftIsIndexOf ? right : left
+
+    const valid = isNegOne(otherNode) || isZero(otherNode)
+    if (!valid) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Prefer includes()',
+      '`indexOf() !== -1` can be replaced with the cleaner `includes()` method.',
+      sourceCode,
+      'Replace `arr.indexOf(x) !== -1` with `arr.includes(x)`.',
+    )
+  },
+}
+
+export const banTsCommentVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/ban-ts-comment',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['comment'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text.trim()
+    // Match @ts-ignore, @ts-nocheck, @ts-expect-error without a description
+    const match = text.match(/^\/\/\s*@(ts-ignore|ts-nocheck|ts-expect-error)\s*(.*)$/)
+    if (!match) return null
+
+    const directive = match[1]
+    const description = match[2]?.trim()
+
+    if (!description) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        `@${directive} without description`,
+        `\`@${directive}\` suppresses TypeScript errors without explaining why. Add a reason.`,
+        sourceCode,
+        `Add a description after \`@${directive}\` explaining why the error is suppressed.`,
+      )
+    }
+    return null
+  },
+}
+
+export const nonNullAssertionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/non-null-assertion',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['non_null_expression'],
+  visit(node, filePath, sourceCode) {
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Non-null assertion',
+      '`!` postfix asserts a value is non-null, bypassing TypeScript null checks. This can cause runtime errors.',
+      sourceCode,
+      'Add a proper null check or use optional chaining (`?.`) instead.',
+    )
+  },
+}
+
+export const unnecessaryBooleanCompareVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unnecessary-boolean-compare',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.type === '===' || c.type === '!=='
+      || c.type === '==' || c.type === '!=')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    const leftIsBoolean = left.text === 'true' || left.text === 'false'
+    const rightIsBoolean = right.text === 'true' || right.text === 'false'
+
+    if (!leftIsBoolean && !rightIsBoolean) return null
+    if (leftIsBoolean && rightIsBoolean) return null // comparing two literals
+
+    const boolLiteral = leftIsBoolean ? left.text : right.text
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Unnecessary boolean comparison',
+      `Comparing to \`${boolLiteral}\` is redundant — use the expression directly or negate it.`,
+      sourceCode,
+      `Remove the \`=== ${boolLiteral}\` comparison and use the expression directly.`,
+    )
+  },
+}
+
+export const unnecessaryBlockVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unnecessary-block',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['statement_block'],
+  visit(node, filePath, sourceCode) {
+    const parent = node.parent
+    if (!parent) return null
+
+    // statement_block is unnecessary when it's a direct child of another statement_block
+    // (not a function body, not control structure body)
+    const CONTROL_PARENTS = new Set([
+      'function_declaration', 'function_expression', 'arrow_function', 'method_definition',
+      'if_statement', 'else_clause', 'while_statement', 'for_statement', 'for_in_statement',
+      'do_statement', 'try_statement', 'catch_clause', 'finally_clause', 'switch_case',
+      'switch_default', 'class_body', 'program',
+    ])
+
+    if (CONTROL_PARENTS.has(parent.type)) return null
+
+    // It's a lone block inside another block
+    if (parent.type === 'statement_block') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Unnecessary block statement',
+        'Standalone `{ }` block serves no purpose — remove it or use a function to create proper scope.',
+        sourceCode,
+        'Remove the unnecessary block or extract its contents into a named function.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const unnecessaryCallApplyVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unnecessary-call-apply',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (prop?.text !== 'call' && prop?.text !== 'apply') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argList = args.namedChildren
+
+    if (prop.text === 'call') {
+      // fn.call() with no args (useless) — but fn.call(this) or fn.call(null) w/ no other args is useless if using the same context
+      if (argList.length === 0) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Unnecessary .call()',
+          '`.call()` with no arguments is identical to a direct function call.',
+          sourceCode,
+          'Remove `.call()` and call the function directly.',
+        )
+      }
+    }
+
+    if (prop.text === 'apply') {
+      // fn.apply() with no args is useless
+      if (argList.length === 0) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Unnecessary .apply()',
+          '`.apply()` with no arguments is identical to a direct function call.',
+          sourceCode,
+          'Remove `.apply()` and call the function directly.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// Helper: extract regex source from a regex_pattern or string node
+function getRegexSource(node: SyntaxNode): string | null {
+  if (node.type === 'regex') {
+    // tree-sitter: regex node has regex_pattern child
+    const pattern = node.namedChildren.find((c) => c.type === 'regex_pattern')
+    return pattern?.text ?? null
+  }
+  if (node.type === 'new_expression') {
+    // new RegExp("pattern") — first arg is the pattern
+    const ctor = node.childForFieldName('constructor')
+    if (ctor?.text !== 'RegExp') return null
+    const args = node.childForFieldName('arguments')
+    const firstArg = args?.namedChildren[0]
+    if (firstArg?.type === 'string') {
+      return firstArg.text.slice(1, -1) // strip quotes
+    }
+  }
+  return null
+}
+
+export const regexEmptyGroupVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-empty-group',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Check for () — empty group (not preceded by ?, * etc. that might be intentional like lookahead (?=))
+    if (/(?<!\?[=!<])\(\)/.test(src)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Empty regex group',
+        'Regular expression contains an empty group `()` which matches an empty string — likely a mistake.',
+        sourceCode,
+        'Remove the empty group or add a pattern inside it.',
+      )
+    }
+    return null
+  },
+}
+
+export const regexEmptyRepetitionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-empty-repetition',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Patterns like (a*)*, (a+)+, (a?)+ etc. where quantifier already allows empty
+    // Simple heuristic: group followed by * or + where the group contains * or +
+    if (/\([^)]*[*+][^)]*\)[*+]/.test(src)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Empty string repetition in regex',
+        'Repeated group can match an empty string, which may cause catastrophic backtracking.',
+        sourceCode,
+        'Restructure the regex to avoid nested quantifiers on patterns that can match empty strings.',
+      )
+    }
+    return null
+  },
+}
+
+export const regexSingleCharClassVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-single-char-class',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Match character classes with a single plain character (not ranges, not escape sequences with 2+ chars, not ^ negation)
+    if (/\[([^\\\]^-])\]/.test(src)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Single character in character class',
+        'Character class with a single character `[x]` should just be `x` directly.',
+        sourceCode,
+        'Replace `[x]` with `x` in the regular expression.',
+      )
+    }
+    return null
+  },
+}
+
+export const regexSingleCharAlternationVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-single-char-alternation',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Match alternation of only single characters like (a|b|c) or a|b where all alternatives are one char
+    // Simple: look for pattern like \(X\|X\|X\) where X is a single non-special char
+    if (/\(([^()|]{1}\|){2,}[^()|]{1}\)/.test(src)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Single character alternation in regex',
+        'Alternation of single characters like `(a|b|c)` is more efficient as a character class `[abc]`.',
+        sourceCode,
+        'Replace `(a|b|c)` with `[abc]` for better readability and performance.',
+      )
+    }
+    return null
+  },
+}
+
+export const regexDuplicateCharClassVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-duplicate-char-class',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Find character classes and check for duplicates within each
+    const classRegex = /\[([^\]]*)\]/g
+    let match: RegExpExecArray | null
+    while ((match = classRegex.exec(src)) !== null) {
+      const classContent = match[1]
+      const chars: string[] = []
+      for (let i = 0; i < classContent.length; i++) {
+        if (classContent[i] === '\\' && i + 1 < classContent.length) {
+          chars.push(classContent.slice(i, i + 2))
+          i++
+        } else if (classContent[i] !== '-') {
+          chars.push(classContent[i])
+        }
+      }
+      const seen = new Set<string>()
+      for (const ch of chars) {
+        if (seen.has(ch)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'low',
+            'Duplicate character in regex class',
+            `Character class contains duplicate character \`${ch}\`.`,
+            sourceCode,
+            'Remove the duplicate character from the character class.',
+          )
+        }
+        seen.add(ch)
+      }
+    }
+    return null
+  },
+}
+
+export const regexUnusedGroupVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-unused-group',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Find named capture groups: (?<name>...)
+    const namedGroups: string[] = []
+    const namedGroupRegex = /\(\?<([a-zA-Z_][a-zA-Z0-9_]*)>/g
+    let m: RegExpExecArray | null
+    while ((m = namedGroupRegex.exec(src)) !== null) {
+      namedGroups.push(m[1])
+    }
+    if (namedGroups.length === 0) return null
+
+    // Check if any named groups are referenced in the JS code surrounding the regex
+    // We look at the parent nodes to find .groups or destructuring
+    // Simple heuristic: scan the parent statement's text for group name references
+    let scope = node.parent
+    while (scope && scope.type !== 'statement_block' && scope.type !== 'program') {
+      scope = scope.parent
+    }
+    const scopeText = scope?.text ?? ''
+
+    for (const groupName of namedGroups) {
+      // Look for .groups.name or groups[name] or destructuring { name }
+      const used = scopeText.includes(`.groups.${groupName}`)
+        || scopeText.includes(`groups["${groupName}"]`)
+        || scopeText.includes(`groups['${groupName}']`)
+        || scopeText.includes(`{ ${groupName} }`)
+        || scopeText.includes(`{${groupName}}`)
+      if (!used) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Unused named capture group',
+          `Named capture group \`(?<${groupName}>...)\` is never referenced in the code.`,
+          sourceCode,
+          `Reference the group via \`match.groups.${groupName}\` or convert to a non-capturing group \`(?:...)\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const regexAnchorPrecedenceVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-anchor-precedence',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Pattern: anchors adjacent to alternation without proper grouping
+    // e.g., /^foo|bar$/ (likely meant /^(foo|bar)$/)
+    // Only flag when the | is at the top level (not inside a group)
+    // Heuristic: starts with ^ but NOT ^( ... so the first alternative has the anchor
+    // and ends with a top-level |, i.e. the anchor does not cover all alternatives
+    if (/\|/.test(src)) {
+      // ^X|Y where ^ is not followed by ( — means only X is anchored at start
+      const hasStartAnchorWithoutGroup = /^\^[^(]/.test(src) && /\|/.test(src)
+      // X|Y$ where $ is not preceded by ) — means only Y is anchored at end
+      const hasEndAnchorWithoutGroup = /[^)]\$$/.test(src) && /\|/.test(src)
+      // Make sure the regex actually has a | NOT inside parens (simple check: src without groups has |)
+      // Strip top-level groups from src for a rough check
+      const topLevelHasAlternation = (() => {
+        let depth = 0
+        for (const ch of src) {
+          if (ch === '(') depth++
+          else if (ch === ')') depth--
+          else if (ch === '|' && depth === 0) return true
+        }
+        return false
+      })()
+
+      if (topLevelHasAlternation && (hasStartAnchorWithoutGroup || hasEndAnchorWithoutGroup)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Regex anchor precedence issue',
+          '`^` or `$` anchor in regex alternation only anchors one alternative. Wrap in a group: `^(foo|bar)$`.',
+          sourceCode,
+          'Wrap the alternation in a group: `^(a|b)$` instead of `^a|b$`.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const preferRegexExecVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-regex-exec',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (prop?.text !== 'match') return null
+
+    const args = node.childForFieldName('arguments')
+    const firstArg = args?.namedChildren[0]
+    if (!firstArg) return null
+
+    // The argument is a regex literal — check if it has global flag
+    if (firstArg.type === 'regex') {
+      const flagsNode = firstArg.namedChildren.find((c) => c.type === 'regex_flags')
+      const flags = flagsNode?.text ?? ''
+      if (!flags.includes('g')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Prefer RegExp.exec() over String.match()',
+          '`String.match()` without the `g` flag should use `RegExp.exec()` for clarity.',
+          sourceCode,
+          'Replace `str.match(/regex/)` with `/regex/.exec(str)` for non-global matching.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const caseWithoutBreakVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/case-without-break',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['switch_case'],
+  visit(node, filePath, sourceCode) {
+    // The switch_case namedChildren include the value (test expression) + body statements
+    const valueNode = node.childForFieldName('value')
+    const stmts = node.namedChildren.filter((c) => c !== valueNode)
+
+    // A case with no body statements is an intentional fallthrough (like case 1: case 2: body)
+    if (stmts.length === 0) return null
+
+    // Check last statement — must be break, return, throw, or continue
+    const last = stmts[stmts.length - 1]
+    if (last.type === 'break_statement' || last.type === 'return_statement'
+      || last.type === 'throw_statement' || last.type === 'continue_statement') {
+      return null
+    }
+
+    // Also check for explicit fallthrough comment
+    const nodeText = node.text
+    if (/fallthrough|falls?\s*through|fall-through/i.test(nodeText)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Switch case without break',
+      'Switch case falls through to the next case — add a `break`, `return`, or `throw`, or mark intentional fallthrough with a comment.',
+      sourceCode,
+      'Add `break;` at the end of the case, or add a `// fallthrough` comment if intentional.',
+    )
+  },
+}
+
+export const undefinedPassedAsOptionalVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/undefined-passed-as-optional',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argList = args.namedChildren
+    if (argList.length === 0) return null
+
+    // Check if last argument is `undefined`
+    const lastArg = argList[argList.length - 1]
+    if (lastArg.text === 'undefined') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Explicit undefined as optional argument',
+        'Passing `undefined` explicitly as a trailing argument is redundant — just omit it.',
+        sourceCode,
+        'Remove the explicit `undefined` argument — optional parameters default to `undefined` automatically.',
+      )
+    }
+    return null
+  },
+}
+
+export const undefinedAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/undefined-assignment',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['assignment_expression', 'variable_declarator'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'assignment_expression') {
+      const right = node.childForFieldName('right')
+      if (right?.text === 'undefined') {
+        const left = node.childForFieldName('left')
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Assignment to undefined',
+          `Assigning \`undefined\` to \`${left?.text ?? 'variable'}\` is confusing. Use \`delete\` or let the variable go out of scope.`,
+          sourceCode,
+          'Remove the assignment or use `delete obj.prop` for object properties.',
+        )
+      }
+    }
+
+    if (node.type === 'variable_declarator') {
+      const value = node.childForFieldName('value')
+      if (value?.text === 'undefined') {
+        const name = node.childForFieldName('name')
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Initialization to undefined',
+          `\`${name?.text ?? 'variable'} = undefined\` is redundant — variables are \`undefined\` by default when declared without a value.`,
+          sourceCode,
+          'Remove the `= undefined` initialization.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+export const associativeArrayVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/associative-array',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    if (!left || left.type !== 'subscript_expression') return null
+
+    const index = left.childForFieldName('index')
+    if (!index) return null
+
+    // Flag when string key is used on what looks like an array variable
+    if (index.type === 'string') {
+      const obj = left.childForFieldName('object')
+      if (!obj) return null
+      // Heuristic: variable names like arr, items, list, data, array
+      const arrPatterns = /arr|items|list|array|data|collection/i
+      if (obj.type === 'identifier' && arrPatterns.test(obj.text)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Array used as associative array',
+          `Using string key \`${index.text}\` on \`${obj.text}\` — use an object or Map instead.`,
+          sourceCode,
+          'Replace the array with an object literal `{}` or a `Map` for string-keyed storage.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const selectorParameterVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/selector-parameter',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const params = node.childForFieldName('parameters')
+    if (!params) return null
+
+    const paramList = params.namedChildren
+    if (paramList.length === 0) return null
+
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    for (const param of paramList) {
+      let paramName: string | null = null
+
+      if (param.type === 'identifier') {
+        paramName = param.text
+      } else if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
+        const p = param.childForFieldName('pattern') ?? param.namedChildren[0]
+        if (p?.type === 'identifier') paramName = p.text
+      }
+
+      if (!paramName) continue
+
+      // Check if the parameter is used as a boolean condition in an if statement directly
+      function isUsedAsSelector(n: SyntaxNode): boolean {
+        if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return false
+        if (n.type === 'if_statement') {
+          const condition = n.childForFieldName('condition')
+          if (condition) {
+            // Unwrap parenthesized_expression if needed
+            let condExpr: SyntaxNode | null = condition
+            if (condExpr.type === 'parenthesized_expression') {
+              condExpr = condExpr.namedChildren[0] ?? null
+            }
+            if (condExpr?.type === 'identifier' && condExpr.text === paramName) return true
+            // if (!param)
+            if (condExpr?.type === 'unary_expression' && condExpr.children[0]?.text === '!'
+              && condExpr.namedChildren[0]?.text === paramName) return true
+          }
+        }
+        for (let i = 0; i < n.childCount; i++) {
+          const child = n.child(i)
+          if (child && isUsedAsSelector(child)) return true
+        }
+        return false
+      }
+
+      // Check if the function body has ternary/if based on this param
+      if (isUsedAsSelector(bodyNode)) {
+        // Only flag if param name looks like a flag/selector
+        const selectorNames = /^(is|has|should|with|use|enable|show|force|flag|toggle|include|exclude|allow|skip|only)/i
+        if (selectorNames.test(paramName) || paramName.endsWith('Flag') || paramName.endsWith('Mode') || paramName === 'mode') {
+          return makeViolation(
+            this.ruleKey, param, filePath, 'low',
+            'Selector parameter',
+            `Parameter \`${paramName}\` controls function behavior like a boolean flag. Consider splitting into two separate functions.`,
+            sourceCode,
+            `Split the function into two: one for each behavior controlled by \`${paramName}\`.`,
+          )
+        }
+      }
+    }
+    return null
+  },
+}
+
+export const stringComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/string-comparison',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.type === '<' || c.type === '>' || c.type === '<=' || c.type === '>=')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    // Flag if both sides are string literals (clear cut)
+    if (left.type === 'string' && right.type === 'string') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'String comparison with relational operator',
+        `Comparing string literals with \`${op.text}\` is locale-dependent. Use \`localeCompare()\` for sorting.`,
+        sourceCode,
+        'Use `a.localeCompare(b)` for locale-aware string comparison.',
+      )
+    }
+    return null
+  },
+}
+
+export const unnecessaryBindVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unnecessary-bind',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (prop?.text !== 'bind') return null
+
+    let callee = fn.childForFieldName('object')
+    if (!callee) return null
+
+    // Unwrap parenthesized_expression: (() => ...).bind(this)
+    if (callee.type === 'parenthesized_expression') {
+      callee = callee.namedChildren[0] ?? callee
+    }
+
+    // Flag .bind() on arrow functions — they don't bind this anyway
+    if (callee.type === 'arrow_function') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Unnecessary .bind() on arrow function',
+        'Arrow functions do not have their own `this` — `.bind()` has no effect on them.',
+        sourceCode,
+        'Remove the `.bind()` call — arrow functions capture `this` lexically.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const implicitTypeCoercionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/implicit-type-coercion',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['unary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children[0]
+    if (!op) return null
+
+    // +str coercion (unary + on non-number context)
+    if (op.text === '+') {
+      const operand = node.namedChildren[0]
+      if (!operand) return null
+      // Skip numeric literals (those are fine: +1)
+      if (operand.type === 'number') return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Implicit numeric coercion',
+        '`+value` coerces to a number implicitly. Use `Number(value)` or `parseInt(value)` for clarity.',
+        sourceCode,
+        'Replace `+value` with `Number(value)` or `parseInt(value, 10)` for explicit conversion.',
+      )
+    }
+
+    // ~arr.indexOf() coercion
+    if (op.text === '~') {
+      const operand = node.namedChildren[0]
+      if (operand?.type === 'call_expression') {
+        const fn = operand.childForFieldName('function')
+        if (fn?.type === 'member_expression') {
+          const fnProp = fn.childForFieldName('property')
+          if (fnProp?.text === 'indexOf') {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'low',
+              'Implicit coercion via ~indexOf()',
+              '`~arr.indexOf(x)` as a boolean check is confusing. Use `arr.includes(x)` instead.',
+              sourceCode,
+              'Replace `~arr.indexOf(x)` with `arr.includes(x)`.',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+export const deepCallbackNestingVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/deep-callback-nesting',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['function_expression', 'arrow_function'],
+  visit(node, filePath, sourceCode) {
+    // Count how many nested callback levels we're in
+    // A "callback level" is a function_expression or arrow_function passed as argument to another call
+    let depth = 0
+    let parent = node.parent
+
+    while (parent) {
+      // Check if this function node is an argument to a call_expression
+      if (parent.type === 'arguments') {
+        // We're inside an arguments list — we're a callback
+        depth++
+        if (depth >= 4) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Deep callback nesting',
+            `Callback nested ${depth} levels deep — refactor using async/await or named functions.`,
+            sourceCode,
+            'Extract nested callbacks into named functions or use async/await to flatten the nesting.',
+          )
+        }
+      }
+
+      // Stop at non-callback function boundaries (module-level function declarations)
+      if ((parent.type === 'function_declaration') || parent.type === 'program') break
+
+      parent = parent.parent
+    }
+    return null
+  },
+}
+
+export const tooManyClassesPerFileVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-classes-per-file',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    let classCount = 0
+
+    function walk(n: SyntaxNode) {
+      if (n.type === 'class_declaration') {
+        classCount++
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(node)
+
+    if (classCount > 3) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Too many classes per file',
+        `File has ${classCount} class declarations (max 3). Split into separate modules for better maintainability.`,
+        sourceCode,
+        'Move each class to its own file.',
+      )
+    }
+    return null
+  },
+}
+
+export const noExtraneousClassVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-extraneous-class',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['class_declaration'],
+  visit(node, filePath, sourceCode) {
+    const body = node.namedChildren.find((c) => c.type === 'class_body')
+    if (!body) return null
+
+    const members = body.namedChildren.filter((c) =>
+      c.type === 'method_definition' || c.type === 'field_definition' || c.type === 'public_field_definition'
+    )
+
+    if (members.length === 0) return null
+
+    // Check all members are static
+    const allStatic = members.every((m) => m.children.some((c) => c.type === 'static'))
+    if (!allStatic) return null
+
+    // Skip if it has a constructor
+    const hasConstructor = members.some((m) => {
+      const nameNode = m.childForFieldName('name')
+      return nameNode?.text === 'constructor'
+    })
+    if (hasConstructor) return null
+
+    const nameNode = node.childForFieldName('name')
+    const name = nameNode?.text ?? 'class'
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Class used as namespace',
+      `Class \`${name}\` contains only static members — use a module, plain object, or namespace instead.`,
+      sourceCode,
+      'Convert to a plain object `const Name = { ... }` or use ES module exports.',
+    )
+  },
+}
+
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   noExplicitAnyVisitor,
@@ -3209,4 +4108,30 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   redundantOptionalVisitor,
   duplicateTypeConstituentVisitor,
   equalsInForTerminationVisitor,
+  // Batch 4
+  preferIncludesVisitor,
+  banTsCommentVisitor,
+  nonNullAssertionVisitor,
+  unnecessaryBooleanCompareVisitor,
+  unnecessaryBlockVisitor,
+  unnecessaryCallApplyVisitor,
+  regexEmptyGroupVisitor,
+  regexEmptyRepetitionVisitor,
+  regexSingleCharClassVisitor,
+  regexSingleCharAlternationVisitor,
+  regexDuplicateCharClassVisitor,
+  regexUnusedGroupVisitor,
+  regexAnchorPrecedenceVisitor,
+  preferRegexExecVisitor,
+  caseWithoutBreakVisitor,
+  undefinedPassedAsOptionalVisitor,
+  undefinedAssignmentVisitor,
+  associativeArrayVisitor,
+  selectorParameterVisitor,
+  stringComparisonVisitor,
+  unnecessaryBindVisitor,
+  implicitTypeCoercionVisitor,
+  deepCallbackNestingVisitor,
+  tooManyClassesPerFileVisitor,
+  noExtraneousClassVisitor,
 ]
