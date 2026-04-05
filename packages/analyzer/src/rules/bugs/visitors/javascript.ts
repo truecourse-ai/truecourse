@@ -955,6 +955,935 @@ export const noPromiseExecutorReturnVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// unreachable-loop: loop body always exits on first iteration
+// ---------------------------------------------------------------------------
+
+export const unreachableLoopVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unreachable-loop',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['for_statement', 'for_in_statement', 'while_statement', 'do_statement'],
+  visit(node, filePath, sourceCode) {
+    let body: SyntaxNode | null = null
+    if (node.type === 'for_statement' || node.type === 'while_statement' || node.type === 'do_statement') {
+      body = node.childForFieldName('body')
+    } else if (node.type === 'for_in_statement') {
+      body = node.childForFieldName('body')
+    }
+    if (!body) return null
+
+    // Get the actual statement block
+    const block = body.type === 'statement_block' ? body : null
+    if (!block) return null
+
+    const statements = block.namedChildren.filter((c) => c.type !== 'comment')
+    if (statements.length === 0) return null
+
+    const last = statements[statements.length - 1]
+    const EXITS = new Set(['return_statement', 'throw_statement', 'break_statement'])
+
+    if (EXITS.has(last.type)) {
+      // Check there's no continue or conditional before the exit
+      const hasContinue = statements.some((s) => s.type === 'continue_statement')
+      if (hasContinue) return null
+
+      // If the exit is inside an if, it's conditional — skip
+      // We only flag when the unconditional last statement is an exit
+      if (last.parent?.type !== 'statement_block') return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Unreachable loop',
+        `Loop body always exits on the first iteration via \`${last.type.replace('_statement', '')}\`.`,
+        sourceCode,
+        'If intentional, use an if statement instead. Otherwise, move the exit into a condition.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// constant-binary-expression: "string" + undefined, null === undefined, etc.
+// ---------------------------------------------------------------------------
+
+const LITERAL_TYPES = new Set(['string', 'number', 'true', 'false', 'null', 'undefined'])
+
+function isLiteralNode(n: SyntaxNode): boolean {
+  return LITERAL_TYPES.has(n.type) || n.type === 'template_string'
+}
+
+export const constantBinaryExpressionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/constant-binary-expression',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    const operator = node.children.find((c) =>
+      ['===', '!==', '==', '!=', '+', '-', '*', '/', '%', '**'].includes(c.text)
+    )
+
+    if (!left || !right || !operator) return null
+
+    // Both operands must be literals
+    if (!isLiteralNode(left) || !isLiteralNode(right)) return null
+
+    // String concatenation of two string literals is fine (minifier output)
+    if (left.type === 'string' && right.type === 'string' && operator.text === '+') return null
+
+    // Numeric math on two numbers is fine (compile-time constant)
+    if (left.type === 'number' && right.type === 'number') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Constant binary expression',
+      `\`${node.text}\` is a constant expression that always produces the same result.`,
+      sourceCode,
+      'Replace with the computed value or fix the operands.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// loop-counter-assignment: assigning (not incrementing) loop counter in body
+// ---------------------------------------------------------------------------
+
+export const loopCounterAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/loop-counter-assignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['for_statement'],
+  visit(node, filePath, sourceCode) {
+    // Get the loop variable from the initializer
+    const init = node.childForFieldName('initializer')
+    if (!init) return null
+
+    let loopVar: string | null = null
+    if (init.type === 'lexical_declaration' || init.type === 'variable_declaration') {
+      const declarator = init.namedChildren.find((c) => c.type === 'variable_declarator')
+      if (declarator) {
+        const name = declarator.childForFieldName('name')
+        if (name) loopVar = name.text
+      }
+    }
+    if (!loopVar) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    // Search for plain assignment to the loop counter in the body
+    function findAssignment(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'assignment_expression') {
+        const left = n.childForFieldName('left')
+        const op = n.children.find((c) => c.text === '=')
+        if (left?.text === loopVar && op?.text === '=') {
+          // Make sure it's plain = not += or -=
+          return n
+        }
+      }
+      // Don't recurse into nested functions
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findAssignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const assignment = findAssignment(body)
+    if (assignment) {
+      return makeViolation(
+        this.ruleKey, assignment, filePath, 'high',
+        'Loop counter assignment',
+        `Loop counter \`${loopVar}\` is assigned inside the loop body instead of being incremented/decremented.`,
+        sourceCode,
+        'Use += or -= to modify the loop counter, or restructure the loop.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unmodified-loop-condition: while (x > 0) where x is never modified
+// ---------------------------------------------------------------------------
+
+export const unmodifiedLoopConditionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unmodified-loop-condition',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['while_statement'],
+  visit(node, filePath, sourceCode) {
+    const condition = node.childForFieldName('condition')
+    if (!condition) return null
+
+    // Get the inner condition (unwrap parenthesized_expression)
+    const inner = condition.type === 'parenthesized_expression'
+      ? condition.namedChildren[0]
+      : condition
+    if (!inner) return null
+
+    // Only handle simple binary conditions with an identifier
+    if (inner.type !== 'binary_expression') return null
+
+    const left = inner.childForFieldName('left')
+    const right = inner.childForFieldName('right')
+    if (!left || !right) return null
+
+    // Collect identifiers from the condition
+    const condVars: string[] = []
+    if (left.type === 'identifier') condVars.push(left.text)
+    if (right.type === 'identifier') condVars.push(right.text)
+    if (condVars.length === 0) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    // Check if any condition variable is modified in the body
+    function isModified(n: SyntaxNode): boolean {
+      // Assignment: x = ..., x += ...
+      if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
+        const lhs = n.childForFieldName('left')
+        if (lhs && condVars.includes(lhs.text)) return true
+      }
+      // Update: x++, x--, ++x, --x
+      if (n.type === 'update_expression') {
+        const arg = n.childForFieldName('argument')
+        if (arg && condVars.includes(arg.text)) return true
+      }
+      // Function call could modify anything — bail out
+      if (n.type === 'call_expression') return true
+      // yield/await could modify state
+      if (n.type === 'yield_expression' || n.type === 'await_expression') return true
+      // Don't recurse into nested functions
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && isModified(child)) return true
+      }
+      return false
+    }
+
+    if (!isModified(body)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unmodified loop condition',
+        `Condition variable${condVars.length > 1 ? 's' : ''} \`${condVars.join('`, `')}\` ${condVars.length > 1 ? 'are' : 'is'} never modified inside the loop body.`,
+        sourceCode,
+        'Modify the condition variable inside the loop or use a different loop structure.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// const-reassignment: reassigning a const variable
+// ---------------------------------------------------------------------------
+
+export const constReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/const-reassignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    // Collect all const declarations in the top scope and function scopes
+    const constVars = new Map<string, SyntaxNode>()
+
+    function collectConsts(block: SyntaxNode) {
+      for (const child of block.namedChildren) {
+        if (child.type === 'lexical_declaration') {
+          // Check if it's a const
+          const constKeyword = child.children.find((c) => c.text === 'const')
+          if (constKeyword) {
+            for (const decl of child.namedChildren) {
+              if (decl.type === 'variable_declarator') {
+                const name = decl.childForFieldName('name')
+                if (name?.type === 'identifier') {
+                  constVars.set(name.text, name)
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    collectConsts(node)
+
+    // Now find any reassignments
+    function findReassignment(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && constVars.has(left.text)) {
+          return n
+        }
+      }
+      if (n.type === 'update_expression') {
+        const arg = n.childForFieldName('argument')
+        if (arg?.type === 'identifier' && constVars.has(arg.text)) {
+          return n
+        }
+      }
+      // Don't recurse into nested scopes that might shadow the const
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReassignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const reassignment = findReassignment(node)
+    if (reassignment) {
+      const varName = reassignment.type === 'update_expression'
+        ? reassignment.childForFieldName('argument')?.text
+        : reassignment.childForFieldName('left')?.text
+      return makeViolation(
+        this.ruleKey, reassignment, filePath, 'high',
+        'Const reassignment',
+        `\`${varName}\` is declared with \`const\` and cannot be reassigned.`,
+        sourceCode,
+        `Use \`let\` instead of \`const\` if you need to reassign \`${varName}\`.`,
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// class-reassignment: reassigning a class declaration
+// ---------------------------------------------------------------------------
+
+export const classReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/class-reassignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    const classNames = new Set<string>()
+    for (const child of node.namedChildren) {
+      if (child.type === 'class_declaration') {
+        const name = child.childForFieldName('name')
+        if (name) classNames.add(name.text)
+      }
+    }
+    if (classNames.size === 0) return null
+
+    function findReassignment(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && classNames.has(left.text)) {
+          return n
+        }
+      }
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReassignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const reassignment = findReassignment(node)
+    if (reassignment) {
+      const varName = reassignment.childForFieldName('left')?.text
+      return makeViolation(
+        this.ruleKey, reassignment, filePath, 'high',
+        'Class reassignment',
+        `\`${varName}\` is a class declaration and should not be reassigned.`,
+        sourceCode,
+        'Use a different variable name instead of reassigning the class.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// function-reassignment: reassigning a function declaration
+// ---------------------------------------------------------------------------
+
+export const functionReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/function-reassignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    const funcNames = new Set<string>()
+    for (const child of node.namedChildren) {
+      if (child.type === 'function_declaration') {
+        const name = child.childForFieldName('name')
+        if (name) funcNames.add(name.text)
+      }
+    }
+    if (funcNames.size === 0) return null
+
+    function findReassignment(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && funcNames.has(left.text)) {
+          return n
+        }
+      }
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReassignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const reassignment = findReassignment(node)
+    if (reassignment) {
+      const varName = reassignment.childForFieldName('left')?.text
+      return makeViolation(
+        this.ruleKey, reassignment, filePath, 'high',
+        'Function reassignment',
+        `\`${varName}\` is a function declaration and should not be reassigned.`,
+        sourceCode,
+        'Use a different variable name instead of reassigning the function.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// import-reassignment: reassigning an import binding
+// ---------------------------------------------------------------------------
+
+export const importReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/import-reassignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    const importNames = new Set<string>()
+    for (const child of node.namedChildren) {
+      if (child.type === 'import_statement') {
+        // Collect all imported identifiers
+        function collectImportNames(n: SyntaxNode) {
+          if (n.type === 'identifier' && n.parent?.type === 'import_clause') {
+            importNames.add(n.text)
+          }
+          if (n.type === 'import_specifier') {
+            const alias = n.childForFieldName('alias')
+            const name = n.childForFieldName('name')
+            importNames.add(alias?.text || name?.text || '')
+          }
+          if (n.type === 'namespace_import') {
+            const name = n.namedChildren.find((c) => c.type === 'identifier')
+            if (name) importNames.add(name.text)
+          }
+          for (let i = 0; i < n.childCount; i++) {
+            const c = n.child(i)
+            if (c) collectImportNames(c)
+          }
+        }
+        collectImportNames(child)
+      }
+    }
+    if (importNames.size === 0) return null
+
+    function findReassignment(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && importNames.has(left.text)) {
+          return n
+        }
+      }
+      if (n.type === 'update_expression') {
+        const arg = n.childForFieldName('argument')
+        if (arg?.type === 'identifier' && importNames.has(arg.text)) {
+          return n
+        }
+      }
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReassignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const reassignment = findReassignment(node)
+    if (reassignment) {
+      const varName = reassignment.type === 'update_expression'
+        ? reassignment.childForFieldName('argument')?.text
+        : reassignment.childForFieldName('left')?.text
+      return makeViolation(
+        this.ruleKey, reassignment, filePath, 'high',
+        'Import reassignment',
+        `\`${varName}\` is an import binding and cannot be reassigned.`,
+        sourceCode,
+        'Use a different variable name instead of reassigning the import.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// getter-missing-return: property getter without return statement
+// ---------------------------------------------------------------------------
+
+export const getterMissingReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/getter-missing-return',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['method_definition'],
+  visit(node, filePath, sourceCode) {
+    const hasGetter = node.children.some((c) => c.text === 'get' && c.type !== 'property_identifier')
+    if (!hasGetter) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    const statements = body.namedChildren.filter((c) => c.type !== 'comment')
+    if (statements.length === 0) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Getter missing return',
+        'This getter has an empty body and will always return undefined.',
+        sourceCode,
+        'Add a return statement to the getter.',
+      )
+    }
+
+    // Check if there's at least one return statement with a value
+    function hasReturnWithValue(n: SyntaxNode): boolean {
+      if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasReturnWithValue(child)) return true
+      }
+      return false
+    }
+
+    if (!hasReturnWithValue(body)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Getter missing return',
+        'This getter never returns a value and will always return undefined.',
+        sourceCode,
+        'Add a return statement with a value to the getter.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// missing-super-call: constructor without super() in derived class
+// ---------------------------------------------------------------------------
+
+export const missingSuperCallVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/missing-super-call',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['class_declaration', 'class'],
+  visit(node, filePath, sourceCode) {
+    // Check if this class has an extends clause
+    const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
+    if (!heritage) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    // Find the constructor
+    let constructor: SyntaxNode | null = null
+    for (const member of body.namedChildren) {
+      if (member.type === 'method_definition') {
+        const name = member.childForFieldName('name')
+        if (name?.text === 'constructor') {
+          constructor = member
+          break
+        }
+      }
+    }
+    if (!constructor) return null
+
+    const ctorBody = constructor.childForFieldName('body')
+    if (!ctorBody) return null
+
+    // Check if super() is called
+    function hasSuperCall(n: SyntaxNode): boolean {
+      if (n.type === 'call_expression') {
+        const fn = n.childForFieldName('function')
+        if (fn?.type === 'super') return true
+      }
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasSuperCall(child)) return true
+      }
+      return false
+    }
+
+    if (!hasSuperCall(ctorBody)) {
+      return makeViolation(
+        this.ruleKey, constructor, filePath, 'high',
+        'Missing super call',
+        'Constructor in a derived class must call `super()` before using `this`.',
+        sourceCode,
+        'Add `super()` at the beginning of the constructor.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// this-before-super: using this before super() in derived constructor
+// ---------------------------------------------------------------------------
+
+export const thisBeforeSuperVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/this-before-super',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['class_declaration', 'class'],
+  visit(node, filePath, sourceCode) {
+    const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
+    if (!heritage) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    let constructor: SyntaxNode | null = null
+    for (const member of body.namedChildren) {
+      if (member.type === 'method_definition') {
+        const name = member.childForFieldName('name')
+        if (name?.text === 'constructor') {
+          constructor = member
+          break
+        }
+      }
+    }
+    if (!constructor) return null
+
+    const ctorBody = constructor.childForFieldName('body')
+    if (!ctorBody) return null
+
+    // Walk statements in order, find first `this` usage and first `super()` call
+    let foundSuper = false
+    function checkThisBeforeSuper(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'call_expression') {
+        const fn = n.childForFieldName('function')
+        if (fn?.type === 'super') {
+          foundSuper = true
+          return null
+        }
+      }
+      if (n.type === 'this' && !foundSuper) {
+        return n
+      }
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = checkThisBeforeSuper(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const thisNode = checkThisBeforeSuper(ctorBody)
+    if (thisNode) {
+      return makeViolation(
+        this.ruleKey, thisNode, filePath, 'high',
+        'This before super',
+        '`this` is used before `super()` is called in a derived constructor, which causes a ReferenceError.',
+        sourceCode,
+        'Move `super()` before any `this` usage.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// async-promise-executor: new Promise(async (resolve) => { ... })
+// ---------------------------------------------------------------------------
+
+export const asyncPromiseExecutorVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/async-promise-executor',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const constructor = node.childForFieldName('constructor')
+    if (!constructor || constructor.text !== 'Promise') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const executor = args.namedChildren[0]
+    if (!executor) return null
+
+    // Check if executor is async
+    if (executor.type === 'arrow_function' || executor.type === 'function') {
+      const isAsync = executor.children.some((c) => c.text === 'async')
+      if (isAsync) {
+        return makeViolation(
+          this.ruleKey, executor, filePath, 'high',
+          'Async Promise executor',
+          'Promise executor should not be async — errors thrown in an async executor are swallowed and not passed to reject.',
+          sourceCode,
+          'Remove `async` from the executor or handle errors with try/catch and call reject().',
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// empty-character-class: regex with empty character class []
+// ---------------------------------------------------------------------------
+
+export const emptyCharacterClassVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/empty-character-class',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const pattern = node.childForFieldName('pattern')
+    if (!pattern) return null
+
+    const patternText = pattern.text
+    // Match [] but not [^] or [\]] etc.
+    // Look for [] that isn't preceded by a backslash
+    const regex = /(?:^|[^\\])\[\]/
+    if (regex.test(patternText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Empty character class in regex',
+        'Empty character class `[]` in regex never matches anything.',
+        sourceCode,
+        'Add characters to the character class or remove it.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// invalid-regexp: regex with syntax errors
+// ---------------------------------------------------------------------------
+
+export const invalidRegexpVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/invalid-regexp',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['new_expression', 'call_expression'],
+  visit(node, filePath, sourceCode) {
+    // Handle both new RegExp(...) and RegExp(...)
+    const fn = node.type === 'new_expression'
+      ? node.childForFieldName('constructor')
+      : node.childForFieldName('function')
+    if (!fn || fn.text !== 'RegExp') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg || firstArg.type !== 'string') return null
+
+    const pattern = firstArg.text.slice(1, -1) // strip quotes
+    try {
+      new RegExp(pattern)
+    } catch {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Invalid regular expression',
+        `RegExp pattern \`${pattern}\` is invalid and will throw a SyntaxError at runtime.`,
+        sourceCode,
+        'Fix the regular expression pattern.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// control-chars-in-regex: regex with control characters
+// ---------------------------------------------------------------------------
+
+export const controlCharsInRegexVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/control-chars-in-regex',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const pattern = node.childForFieldName('pattern')
+    if (!pattern) return null
+
+    const patternText = pattern.text
+    // Check for control characters (0x01-0x1f) that are not common escape sequences
+    // eslint-disable-next-line no-control-regex
+    const controlCharRegex = /[\x01-\x08\x0e-\x1f]/
+    if (controlCharRegex.test(patternText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Control characters in regex',
+        'This regex contains control characters that are likely unintentional.',
+        sourceCode,
+        'Use escape sequences like \\x01 instead of literal control characters.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// sparse-array: array with empty slots [1,,3]
+// ---------------------------------------------------------------------------
+
+export const sparseArrayVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/sparse-array',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['array'],
+  visit(node, filePath, sourceCode) {
+    // In tree-sitter, empty array slots show up as consecutive commas
+    // Check the raw children for consecutive commas (ignoring whitespace)
+    const children = node.children
+    for (let i = 0; i < children.length - 1; i++) {
+      if (children[i].text === ',' && children[i + 1].text === ',') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Sparse array',
+          `Array literal \`${node.text}\` has empty slots — likely a typo or accidental extra comma.`,
+          sourceCode,
+          'Remove the extra comma or fill in the missing element.',
+        )
+      }
+      // Also catch [,x] — comma right after [
+      if (children[i].text === '[' && children[i + 1].text === ',') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Sparse array',
+          `Array literal \`${node.text}\` has empty slots — likely a typo or accidental extra comma.`,
+          sourceCode,
+          'Remove the leading comma or fill in the missing element.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// prototype-pollution: obj[key] = value where key is dynamic
+// ---------------------------------------------------------------------------
+
+export const prototypePollutionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/prototype-pollution',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['assignment_expression', 'augmented_assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    if (!left || left.type !== 'subscript_expression') return null
+
+    // obj[key] = value — check if key is a dynamic variable (not a string literal)
+    const index = left.childForFieldName('index')
+    if (!index) return null
+
+    // Only flag if the index is a variable (identifier), not a literal
+    if (index.type !== 'identifier') return null
+
+    // Check if the object is not an array type (heuristic: skip numeric-looking contexts)
+    const obj = left.childForFieldName('object')
+    if (!obj) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Prototype pollution',
+      `\`${left.text}\` uses a dynamic key for property assignment — if \`${index.text}\` is \`"__proto__"\` or \`"constructor"\`, this enables prototype pollution.`,
+      sourceCode,
+      `Validate that \`${index.text}\` is not "__proto__", "constructor", or "prototype" before assignment, or use Map instead.`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// void-zero-argument: void 0 or void(0)
+// ---------------------------------------------------------------------------
+
+export const voidZeroArgumentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/void-zero-argument',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['unary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.text === 'void')
+    if (!op) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Unnecessary void expression',
+      `\`${node.text}\` can be replaced with \`undefined\` directly.`,
+      sourceCode,
+      'Use `undefined` instead of `void 0`.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// exception-reassignment: catch (e) { e = new Error() }
+// ---------------------------------------------------------------------------
+
+export const exceptionReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/exception-reassignment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['catch_clause'],
+  visit(node, filePath, sourceCode) {
+    const param = node.childForFieldName('parameter')
+    if (!param) return null
+
+    // The parameter might be an identifier or a destructuring pattern
+    const paramName = param.type === 'identifier' ? param.text : null
+    if (!paramName) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    function findReassignment(n: SyntaxNode): SyntaxNode | null {
+      if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && left.text === paramName) {
+          return n
+        }
+      }
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReassignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const reassignment = findReassignment(body)
+    if (reassignment) {
+      return makeViolation(
+        this.ruleKey, reassignment, filePath, 'high',
+        'Exception parameter reassignment',
+        `Reassigning catch parameter \`${paramName}\` loses the original error information.`,
+        sourceCode,
+        'Use a different variable name instead of reassigning the catch parameter.',
+      )
+    }
+    return null
+  },
+}
+
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
   selfComparisonVisitor,
@@ -981,4 +1910,23 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   noConstructorReturnVisitor,
   noSetterReturnVisitor,
   noPromiseExecutorReturnVisitor,
+  unreachableLoopVisitor,
+  constantBinaryExpressionVisitor,
+  loopCounterAssignmentVisitor,
+  unmodifiedLoopConditionVisitor,
+  constReassignmentVisitor,
+  classReassignmentVisitor,
+  functionReassignmentVisitor,
+  importReassignmentVisitor,
+  getterMissingReturnVisitor,
+  missingSuperCallVisitor,
+  thisBeforeSuperVisitor,
+  asyncPromiseExecutorVisitor,
+  emptyCharacterClassVisitor,
+  invalidRegexpVisitor,
+  controlCharsInRegexVisitor,
+  sparseArrayVisitor,
+  prototypePollutionVisitor,
+  voidZeroArgumentVisitor,
+  exceptionReassignmentVisitor,
 ]

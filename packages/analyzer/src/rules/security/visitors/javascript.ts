@@ -1176,6 +1176,664 @@ export const unsafeUnzipVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// file-permissions-world-accessible (JS)
+// ---------------------------------------------------------------------------
+
+const WORLD_PERMS = new Set(['0o777', '0o776', '0o766', '0o667', '0o666'])
+
+export const filePermissionsWorldAccessibleVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/file-permissions-world-accessible',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'chmod' && methodName !== 'chmodSync' && methodName !== 'writeFile' && methodName !== 'writeFileSync') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // For chmod/chmodSync: second arg is mode; for writeFile: options object or third arg
+    for (const arg of args.namedChildren) {
+      const t = arg.text.toLowerCase()
+      if (WORLD_PERMS.has(t) || t === '511' || t === '438') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'World-accessible file permissions',
+          `${methodName}() sets overly permissive file permissions (${arg.text}).`,
+          sourceCode,
+          'Use restrictive permissions like 0o600 or 0o644.',
+        )
+      }
+      if (arg.type === 'object') {
+        for (const prop of arg.namedChildren) {
+          if (prop.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            const value = prop.childForFieldName('value')
+            if (key?.text === 'mode' && value) {
+              const vt = value.text.toLowerCase()
+              if (WORLD_PERMS.has(vt) || vt === '511' || vt === '438') {
+                return makeViolation(
+                  this.ruleKey, node, filePath, 'high',
+                  'World-accessible file permissions',
+                  `${methodName}() sets overly permissive file permissions (${value.text}).`,
+                  sourceCode,
+                  'Use restrictive permissions like 0o600 or 0o644.',
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unrestricted-file-upload (JS)
+// ---------------------------------------------------------------------------
+
+export const unrestrictedFileUploadVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unrestricted-file-upload',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) funcName = prop.text
+    }
+
+    if (funcName !== 'multer') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check if fileFilter is provided in the options object
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        for (const prop of arg.namedChildren) {
+          if (prop.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            if (key?.text === 'fileFilter') return null
+          }
+        }
+      }
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Unrestricted file upload',
+      'multer() configured without fileFilter. Any file type can be uploaded.',
+      sourceCode,
+      'Add a fileFilter option to validate file types and sizes.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// hidden-file-exposure (JS)
+// ---------------------------------------------------------------------------
+
+export const hiddenFileExposureVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hidden-file-exposure',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // express.static(path) or static(path)
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'static') return null
+    // Only flag express.static
+    if (fn.type === 'member_expression' && objectName !== 'express') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check for options object with dotfiles: 'deny'
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        for (const prop of arg.namedChildren) {
+          if (prop.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            const value = prop.childForFieldName('value')
+            if (key?.text === 'dotfiles') {
+              const val = value?.text.replace(/['"]/g, '').toLowerCase()
+              if (val === 'deny' || val === 'ignore') return null
+            }
+          }
+        }
+      }
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Hidden file exposure',
+      'express.static() serves dotfiles by default. Files like .env or .git may be exposed.',
+      sourceCode,
+      'Add { dotfiles: "deny" } option to express.static().',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// link-target-blank (JSX)
+// ---------------------------------------------------------------------------
+
+export const linkTargetBlankVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/link-target-blank',
+  languages: ['tsx'],
+  nodeTypes: ['jsx_self_closing_element', 'jsx_opening_element'],
+  visit(node, filePath, sourceCode) {
+    // Check if it's an <a> tag
+    const tagName = node.namedChildren[0]
+    if (!tagName || tagName.text !== 'a') return null
+
+    let hasTargetBlank = false
+    let hasRelNoopener = false
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'jsx_attribute') {
+        const attrName = child.namedChildren[0]
+        if (!attrName) continue
+
+        if (attrName.text === 'target') {
+          const attrValue = child.namedChildren[1]
+          if (attrValue) {
+            const val = attrValue.text.replace(/['"{}]/g, '').toLowerCase()
+            if (val === '_blank') hasTargetBlank = true
+          }
+        }
+
+        if (attrName.text === 'rel') {
+          const attrValue = child.namedChildren[1]
+          if (attrValue) {
+            const val = attrValue.text.replace(/['"{}]/g, '').toLowerCase()
+            if (val.includes('noopener')) hasRelNoopener = true
+          }
+        }
+      }
+    }
+
+    if (hasTargetBlank && !hasRelNoopener) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Unsafe target="_blank" link',
+        '<a target="_blank"> without rel="noopener" allows reverse tabnabbing attacks.',
+        sourceCode,
+        'Add rel="noopener noreferrer" to links with target="_blank".',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// confidential-info-logging (JS)
+// ---------------------------------------------------------------------------
+
+const JS_LOG_METHODS = new Set(['log', 'info', 'warn', 'error', 'debug', 'trace'])
+const SENSITIVE_VAR_PATTERNS = /(?:password|passwd|secret|token|apiKey|api_key|private_key|privateKey|credential|mnemonic)/i
+
+export const confidentialInfoLoggingVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/confidential-info-logging',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    }
+
+    if (!JS_LOG_METHODS.has(methodName)) return null
+    if (objectName !== 'console' && objectName !== 'logger' && objectName !== 'log') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'identifier' && SENSITIVE_VAR_PATTERNS.test(arg.text)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Confidential info logging',
+          `Logging sensitive variable "${arg.text}". This may expose secrets in logs.`,
+          sourceCode,
+          'Remove sensitive data from log statements or redact it.',
+        )
+      }
+      if (arg.type === 'member_expression') {
+        const prop = arg.childForFieldName('property')
+        if (prop && SENSITIVE_VAR_PATTERNS.test(prop.text)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Confidential info logging',
+            `Logging sensitive property "${prop.text}". This may expose secrets in logs.`,
+            sourceCode,
+            'Remove sensitive data from log statements or redact it.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// production-debug-enabled (JS)
+// ---------------------------------------------------------------------------
+
+export const productionDebugEnabledVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/production-debug-enabled',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['pair'],
+  visit(node, filePath, sourceCode) {
+    const key = node.childForFieldName('key')
+    const value = node.childForFieldName('value')
+
+    if (key?.text === 'debug' && value?.text === 'true') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Production debug enabled',
+        'Debug mode is enabled in configuration. This may leak sensitive information.',
+        sourceCode,
+        'Set debug to false in production configurations.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// insecure-random (JS)
+// ---------------------------------------------------------------------------
+
+export const insecureRandomVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/insecure-random',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    if (fn.type === 'member_expression') {
+      const obj = fn.childForFieldName('object')
+      const prop = fn.childForFieldName('property')
+      if (obj?.text === 'Math' && prop?.text === 'random') {
+        // Check if it's in a security-sensitive context by looking at ancestors
+        let parent = node.parent
+        while (parent) {
+          const parentText = parent.text.toLowerCase()
+          if (parentText.includes('token') || parentText.includes('secret') ||
+              parentText.includes('key') || parentText.includes('nonce') ||
+              parentText.includes('salt') || parentText.includes('csrf') ||
+              parentText.includes('password') || parentText.includes('session')) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'high',
+              'Insecure random number generator',
+              'Math.random() is not cryptographically secure. Do not use it for tokens, keys, or secrets.',
+              sourceCode,
+              'Use crypto.randomBytes() or crypto.randomUUID() instead.',
+            )
+          }
+          if (parent.type === 'expression_statement' || parent.type === 'variable_declaration' ||
+              parent.type === 'assignment_expression' || parent.type === 'lexical_declaration') break
+          parent = parent.parent
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ip-forwarding (JS)
+// ---------------------------------------------------------------------------
+
+export const ipForwardingVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/ip-forwarding',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['subscript_expression'],
+  visit(node, filePath, sourceCode) {
+    const obj = node.childForFieldName('object')
+    const index = node.childForFieldName('index')
+
+    if (!obj || !index) return null
+
+    const indexText = index.text.replace(/['"]/g, '').toLowerCase()
+    if (indexText !== 'x-forwarded-for') return null
+
+    // Check that it's accessing headers
+    if (obj.text.includes('headers')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Untrusted IP forwarding header',
+        'Accessing X-Forwarded-For header directly. This header can be spoofed by clients.',
+        sourceCode,
+        'Use a trusted proxy configuration (e.g., app.set("trust proxy")) and req.ip instead.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// dompurify-unsafe-config (JS)
+// ---------------------------------------------------------------------------
+
+const UNSAFE_DOMPURIFY_OPTIONS = new Set(['ALLOW_UNKNOWN_PROTOCOLS', 'ADD_TAGS', 'ADD_ATTR'])
+
+export const dompurifyUnsafeConfigVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/dompurify-unsafe-config',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'sanitize') return null
+    if (objectName !== 'DOMPurify' && objectName !== 'dompurify') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        for (const prop of arg.namedChildren) {
+          if (prop.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            if (key && UNSAFE_DOMPURIFY_OPTIONS.has(key.text)) {
+              return makeViolation(
+                this.ruleKey, node, filePath, 'high',
+                'DOMPurify unsafe configuration',
+                `DOMPurify.sanitize() with ${key.text} weakens sanitization and may allow XSS.`,
+                sourceCode,
+                'Remove unsafe DOMPurify options like ALLOW_UNKNOWN_PROTOCOLS and ADD_TAGS.',
+              )
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// disabled-resource-integrity (JSX)
+// ---------------------------------------------------------------------------
+
+export const disabledResourceIntegrityVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/disabled-resource-integrity',
+  languages: ['tsx'],
+  nodeTypes: ['jsx_self_closing_element', 'jsx_opening_element'],
+  visit(node, filePath, sourceCode) {
+    const tagName = node.namedChildren[0]
+    if (!tagName || (tagName.text !== 'script' && tagName.text !== 'link')) return null
+
+    let hasSrc = false
+    let hasIntegrity = false
+    let isExternal = false
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'jsx_attribute') {
+        const attrName = child.namedChildren[0]
+        if (!attrName) continue
+
+        if (attrName.text === 'src' || attrName.text === 'href') {
+          hasSrc = true
+          const attrValue = child.namedChildren[1]
+          if (attrValue) {
+            const val = attrValue.text.replace(/['"{}]/g, '')
+            if (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('//')) {
+              isExternal = true
+            }
+          }
+        }
+
+        if (attrName.text === 'integrity') {
+          hasIntegrity = true
+        }
+      }
+    }
+
+    if (hasSrc && isExternal && !hasIntegrity) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Missing subresource integrity',
+        `<${tagName.text}> loads an external resource without an integrity attribute. A compromised CDN could serve malicious code.`,
+        sourceCode,
+        'Add an integrity attribute with the resource hash (e.g., integrity="sha384-...").',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// path-command-injection (JS)
+// ---------------------------------------------------------------------------
+
+export const pathCommandInjectionVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/path-command-injection',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'path' || methodName !== 'join') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check if any argument references user input patterns
+    for (const arg of args.namedChildren) {
+      const argText = arg.text.toLowerCase()
+      if (argText.includes('req.') || argText.includes('params') ||
+          argText.includes('query') || argText.includes('body') ||
+          argText.includes('userinput') || argText.includes('user_input')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Path-based command injection',
+          'path.join() with user-controlled input may allow path traversal attacks.',
+          sourceCode,
+          'Validate and sanitize user input before using it in file paths. Use path.resolve() and verify the result is within the expected directory.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// mixed-content (JSX)
+// ---------------------------------------------------------------------------
+
+export const mixedContentVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/mixed-content',
+  languages: ['tsx'],
+  nodeTypes: ['jsx_attribute'],
+  visit(node, filePath, sourceCode) {
+    const attrName = node.namedChildren[0]
+    if (!attrName) return null
+
+    if (attrName.text !== 'src' && attrName.text !== 'href' && attrName.text !== 'action') return null
+
+    const attrValue = node.namedChildren[1]
+    if (!attrValue) return null
+
+    const val = attrValue.text.replace(/['"{}]/g, '')
+    if (val.startsWith('http://') && !val.startsWith('http://localhost') && !val.startsWith('http://127.0.0.1')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Mixed content',
+        `Loading HTTP resource "${val}" in a JSX attribute. This causes mixed content warnings and security issues on HTTPS pages.`,
+        sourceCode,
+        'Use HTTPS URLs or protocol-relative URLs (//) for external resources.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ssl-version-unsafe (JS)
+// ---------------------------------------------------------------------------
+
+export const sslVersionUnsafeVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/ssl-version-unsafe',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['pair'],
+  visit(node, filePath, sourceCode) {
+    const key = node.childForFieldName('key')
+    const value = node.childForFieldName('value')
+
+    if (key?.text === 'minVersion' && value) {
+      const version = value.text.replace(/['"]/g, '').toLowerCase()
+      if (version === 'tlsv1' || version === 'tlsv1.0' || version === 'tlsv1.1') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Unsafe SSL/TLS minimum version',
+          `Minimum TLS version set to "${value.text.replace(/['"]/g, '')}". TLS 1.0 and 1.1 are deprecated.`,
+          sourceCode,
+          'Set minVersion to "TLSv1.2" or higher.',
+        )
+      }
+    }
+
+    if (key?.text === 'maxVersion' && value) {
+      const version = value.text.replace(/['"]/g, '').toLowerCase()
+      if (version === 'tlsv1' || version === 'tlsv1.0' || version === 'tlsv1.1') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Unsafe SSL/TLS minimum version',
+          `Maximum TLS version set to "${value.text.replace(/['"]/g, '')}". This prevents use of modern TLS.`,
+          sourceCode,
+          'Set maxVersion to "TLSv1.3" or remove the restriction.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unverified-cross-origin-message (JS)
+// ---------------------------------------------------------------------------
+
+export const unverifiedCrossOriginMessageVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unverified-cross-origin-message',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'addEventListener') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const eventType = firstArg.text.replace(/['"]/g, '')
+    if (eventType !== 'message') return null
+
+    // Get the handler function
+    const handler = args.namedChildren[1]
+    if (!handler) return null
+
+    // Check if the handler body references .origin
+    const handlerText = handler.text
+    if (!handlerText.includes('origin')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unverified cross-origin message',
+        'Message event listener without origin verification. Any window can send messages.',
+        sourceCode,
+        'Check event.origin against a trusted list before processing the message.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   sqlInjectionVisitor,
   evalUsageVisitor,
@@ -1201,4 +1859,18 @@ export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   unverifiedHostnameVisitor,
   xmlXxeVisitor,
   unsafeUnzipVisitor,
+  filePermissionsWorldAccessibleVisitor,
+  unrestrictedFileUploadVisitor,
+  hiddenFileExposureVisitor,
+  linkTargetBlankVisitor,
+  confidentialInfoLoggingVisitor,
+  productionDebugEnabledVisitor,
+  insecureRandomVisitor,
+  ipForwardingVisitor,
+  dompurifyUnsafeConfigVisitor,
+  disabledResourceIntegrityVisitor,
+  pathCommandInjectionVisitor,
+  mixedContentVisitor,
+  sslVersionUnsafeVisitor,
+  unverifiedCrossOriginMessageVisitor,
 ]

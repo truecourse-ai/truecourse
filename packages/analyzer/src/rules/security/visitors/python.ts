@@ -739,6 +739,453 @@ export const pythonUnsafeUnzipVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// file-permissions-world-accessible (Python)
+// ---------------------------------------------------------------------------
+
+const PYTHON_WORLD_PERMS = new Set(['0o777', '0o776', '0o766', '0o667', '0o666'])
+
+export const pythonFilePermissionsWorldAccessibleVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/file-permissions-world-accessible',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'chmod') return null
+    if (objectName !== 'os') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      const t = arg.text.toLowerCase()
+      if (PYTHON_WORLD_PERMS.has(t) || t === '511' || t === '438') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'World-accessible file permissions',
+          `os.chmod() sets overly permissive file permissions (${arg.text}).`,
+          sourceCode,
+          'Use restrictive permissions like 0o600 or 0o644.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// confidential-info-logging (Python)
+// ---------------------------------------------------------------------------
+
+const PYTHON_LOG_METHODS = new Set(['info', 'warning', 'error', 'debug', 'critical', 'log'])
+const PYTHON_SENSITIVE_PATTERN = /(?:password|passwd|secret|token|api_key|private_key|credential|mnemonic)/i
+
+export const pythonConfidentialInfoLoggingVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/confidential-info-logging',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    const isPrint = methodName === 'print'
+    const isLogging = PYTHON_LOG_METHODS.has(methodName) && (objectName === 'logging' || objectName === 'logger' || objectName === 'log')
+
+    if (!isPrint && !isLogging) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'identifier' && PYTHON_SENSITIVE_PATTERN.test(arg.text)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Confidential info logging',
+          `Logging sensitive variable "${arg.text}". This may expose secrets in logs.`,
+          sourceCode,
+          'Remove sensitive data from log statements or redact it.',
+        )
+      }
+      if (arg.type === 'attribute') {
+        const attrChild = arg.childForFieldName('attribute')
+        if (attrChild && PYTHON_SENSITIVE_PATTERN.test(attrChild.text)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Confidential info logging',
+            `Logging sensitive attribute "${attrChild.text}". This may expose secrets in logs.`,
+            sourceCode,
+            'Remove sensitive data from log statements or redact it.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// production-debug-enabled (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonProductionDebugEnabledVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/production-debug-enabled',
+  languages: ['python'],
+  nodeTypes: ['assignment'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+
+    if (!left || !right) return null
+
+    // DEBUG = True or app.debug = True
+    const leftText = left.text.toLowerCase()
+    if ((leftText === 'debug' || leftText.endsWith('.debug')) && right.text === 'True') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Production debug enabled',
+        'Debug mode is enabled. This may leak sensitive information in production.',
+        sourceCode,
+        'Set DEBUG = False in production configurations.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// insecure-random (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonInsecureRandomVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/insecure-random',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'random') return null
+    if (methodName !== 'random' && methodName !== 'randint' && methodName !== 'choice') return null
+
+    // Check if used in security-sensitive context
+    let parent = node.parent
+    while (parent) {
+      const parentText = parent.text.toLowerCase()
+      if (parentText.includes('token') || parentText.includes('secret') ||
+          parentText.includes('key') || parentText.includes('nonce') ||
+          parentText.includes('salt') || parentText.includes('password') ||
+          parentText.includes('session')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Insecure random number generator',
+          `random.${methodName}() is not cryptographically secure. Do not use it for tokens, keys, or secrets.`,
+          sourceCode,
+          'Use secrets.token_hex() or secrets.token_urlsafe() instead.',
+        )
+      }
+      if (parent.type === 'expression_statement' || parent.type === 'assignment') break
+      parent = parent.parent
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// subprocess-security (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonSubprocessSecurityVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/subprocess-security',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'subprocess' || methodName !== 'Popen') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Check if first arg is a list with a non-absolute-path first element
+    if (firstArg.type === 'list') {
+      const firstElem = firstArg.namedChildren[0]
+      if (firstElem && firstElem.type === 'string') {
+        const cmd = firstElem.text.replace(/['"]/g, '')
+        if (!cmd.startsWith('/') && !cmd.startsWith('C:\\')) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Subprocess without full path',
+            `subprocess.Popen() uses relative command "${cmd}". A malicious PATH could substitute a different binary.`,
+            sourceCode,
+            'Use the full path to the executable (e.g., "/usr/bin/ls").',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// partial-path-execution (Python)
+// ---------------------------------------------------------------------------
+
+const PYTHON_OS_EXEC_METHODS = new Set(['execl', 'execle', 'execlp', 'execlpe', 'execv', 'execve', 'execvp', 'execvpe'])
+
+export const pythonPartialPathExecutionVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/partial-path-execution',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'os' || !PYTHON_OS_EXEC_METHODS.has(methodName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    if (firstArg.type === 'string') {
+      const cmd = firstArg.text.replace(/['"]/g, '')
+      if (!cmd.startsWith('/') && !cmd.startsWith('C:\\')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Partial path execution',
+          `os.${methodName}() uses relative path "${cmd}". A malicious PATH could substitute a different binary.`,
+          sourceCode,
+          'Use the full path to the executable (e.g., "/usr/bin/ls").',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ssl-version-unsafe (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonSslVersionUnsafeVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/ssl-version-unsafe',
+  languages: ['python'],
+  nodeTypes: ['assignment'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+
+    if (!left || !right) return null
+
+    // ctx.minimum_version = ssl.TLSVersion.TLSv1 or TLSv1_1
+    if (left.type === 'attribute') {
+      const attr = left.childForFieldName('attribute')
+      if (attr?.text === 'minimum_version') {
+        const val = right.text
+        if (val.includes('TLSv1_1') || (val.includes('TLSv1') && !val.includes('TLSv1_2') && !val.includes('TLSv1_3'))) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Unsafe SSL/TLS minimum version',
+            `Setting minimum TLS version to ${val}. TLS 1.0 and 1.1 are deprecated.`,
+            sourceCode,
+            'Set minimum_version to ssl.TLSVersion.TLSv1_2 or higher.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// vulnerable-library-import (Python)
+// ---------------------------------------------------------------------------
+
+const VULNERABLE_MODULES = new Set(['httpoxy', 'pyghmi', 'pycrypto', 'telnetlib'])
+
+export const pythonVulnerableLibraryImportVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/vulnerable-library-import',
+  languages: ['python'],
+  nodeTypes: ['import_statement', 'import_from_statement'],
+  visit(node, filePath, sourceCode) {
+    // import httpoxy / from httpoxy import ...
+    for (const child of node.namedChildren) {
+      if (child.type === 'dotted_name' || child.type === 'aliased_import') {
+        const name = child.type === 'aliased_import' ? child.namedChildren[0]?.text : child.text
+        if (name && VULNERABLE_MODULES.has(name)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Vulnerable library import',
+            `Importing "${name}" which has known security vulnerabilities.`,
+            sourceCode,
+            `Replace "${name}" with a maintained, secure alternative.`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// process-start-no-shell (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonProcessStartNoShellVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/process-start-no-shell',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'subprocess' || methodName !== 'Popen') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Flag if first arg is a string (not a list) — indicating shell command as string
+    if (firstArg.type === 'string' || firstArg.type === 'concatenated_string') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Subprocess with string command',
+        'subprocess.Popen() with a string argument may invoke the shell implicitly. Use a list of arguments instead.',
+        sourceCode,
+        'Pass command as a list: subprocess.Popen(["cmd", "arg1", "arg2"]).',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// non-octal-file-permissions (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonNonOctalFilePermissionsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/non-octal-file-permissions',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'chmod') return null
+    if (objectName !== 'os') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Second arg is the mode
+    const modeArg = args.namedChildren[1]
+    if (!modeArg) return null
+
+    if (modeArg.type === 'integer') {
+      const text = modeArg.text
+      // If it's a decimal number (not starting with 0o, 0x, 0b) and common permission values
+      if (!text.startsWith('0o') && !text.startsWith('0O') && !text.startsWith('0x') && !text.startsWith('0b')) {
+        const num = parseInt(text, 10)
+        // Common mistaken decimal permissions: 777, 755, 644, 666, etc.
+        if (num >= 100 && num <= 777) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Non-octal file permissions',
+            `os.chmod() called with decimal ${text} instead of octal 0o${text}. Decimal ${text} is octal ${num.toString(8)}, which is likely not the intended permission.`,
+            sourceCode,
+            `Use octal notation: os.chmod(path, 0o${text}).`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonSqlInjectionVisitor,
   pythonEvalUsageVisitor,
@@ -756,4 +1203,14 @@ export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonUnverifiedHostnameVisitor,
   pythonXmlXxeVisitor,
   pythonUnsafeUnzipVisitor,
+  pythonFilePermissionsWorldAccessibleVisitor,
+  pythonConfidentialInfoLoggingVisitor,
+  pythonProductionDebugEnabledVisitor,
+  pythonInsecureRandomVisitor,
+  pythonSubprocessSecurityVisitor,
+  pythonPartialPathExecutionVisitor,
+  pythonSslVersionUnsafeVisitor,
+  pythonVulnerableLibraryImportVisitor,
+  pythonProcessStartNoShellVisitor,
+  pythonNonOctalFilePermissionsVisitor,
 ]

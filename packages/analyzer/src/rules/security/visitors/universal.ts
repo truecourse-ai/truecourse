@@ -145,8 +145,137 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// hardcoded-blockchain-mnemonic
+// ---------------------------------------------------------------------------
+
+// BIP39 common words that appear in seed phrases - we look for 12+ word sequences
+const BIP39_COMMON_WORDS = new Set([
+  'abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract', 'absurd', 'abuse',
+  'access', 'accident', 'account', 'accuse', 'achieve', 'acid', 'acoustic', 'acquire', 'across', 'act',
+  'action', 'actor', 'actress', 'actual', 'adapt', 'add', 'addict', 'address', 'adjust', 'admit',
+  'adult', 'advance', 'advice', 'aerobic', 'affair', 'afford', 'afraid', 'again', 'age', 'agent',
+  'agree', 'ahead', 'aim', 'air', 'airport', 'aisle', 'alarm', 'album', 'alcohol', 'alert',
+  'alien', 'all', 'alley', 'allow', 'almost', 'alone', 'alpha', 'already', 'also', 'alter',
+  'always', 'amateur', 'amazing', 'among', 'amount', 'amused', 'analyst', 'anchor', 'ancient', 'anger',
+  'angle', 'angry', 'animal', 'ankle', 'announce', 'annual', 'another', 'answer', 'antenna', 'antique',
+  'anxiety', 'any', 'apart', 'apology', 'appear', 'apple', 'approve', 'april', 'arch', 'arctic',
+  'area', 'arena', 'argue', 'arm', 'armed', 'armor', 'army', 'arrange', 'arrest', 'arrive',
+  'arrow', 'art', 'artefact', 'artist', 'artwork', 'ask', 'aspect', 'assault', 'asset', 'assist',
+  'assume', 'asthma', 'athlete', 'atom', 'attack', 'attend', 'attitude', 'attract', 'auction', 'audit',
+  'august', 'aunt', 'author', 'auto', 'autumn', 'average', 'avocado', 'avoid', 'awake', 'aware',
+  'basket', 'battle', 'beach', 'beauty', 'because', 'become', 'before', 'begin', 'behind', 'believe',
+  'below', 'bench', 'benefit', 'best', 'betray', 'better', 'between', 'beyond', 'bicycle', 'bid',
+  'blanket', 'blast', 'bleak', 'bless', 'blind', 'blood', 'blossom', 'blue', 'blur', 'board',
+  'boat', 'body', 'bomb', 'bone', 'bonus', 'book', 'boost', 'border', 'boring', 'borrow',
+  'boss', 'bottom', 'bounce', 'box', 'boy', 'bracket', 'brain', 'brand', 'brass', 'brave',
+  'bread', 'breeze', 'brick', 'bridge', 'brief', 'bright', 'bring', 'brisk', 'broken', 'brother',
+  'brown', 'brush', 'bubble', 'buddy', 'budget', 'buffalo', 'build', 'bulb', 'bulk', 'bullet',
+  'burden', 'burger', 'burst', 'bus', 'business', 'busy', 'butter', 'buyer', 'buzz', 'cabbage',
+  'cabin', 'cable', 'cactus', 'cage', 'cake', 'call', 'calm', 'camera', 'camp', 'can',
+  'canal', 'cancel', 'candy', 'cannon', 'canoe', 'canvas', 'canyon', 'capable', 'capital', 'captain',
+  'carbon', 'card', 'cargo', 'carpet', 'carry', 'cart', 'case', 'cash', 'casino', 'castle',
+  'catalog', 'catch', 'category', 'cattle', 'caught', 'cause', 'caution', 'cave', 'ceiling', 'celery',
+  'cement', 'census', 'century', 'cereal', 'certain', 'chair', 'chalk', 'champion', 'change', 'chaos',
+  'chapter', 'charge', 'chase', 'cheap', 'check', 'cheese', 'cherry', 'chest', 'chicken', 'chief',
+  'child', 'chimney', 'choice', 'choose', 'chronic', 'chunk', 'churn', 'citizen', 'city', 'civil',
+  'claim', 'clap', 'clarify', 'claw', 'clay', 'clean', 'clerk', 'clever', 'cliff', 'climb',
+  'decorate', 'decrease', 'deer', 'defense', 'define', 'defy', 'degree', 'delay', 'deliver', 'demand',
+  'destroy', 'detail', 'detect', 'develop', 'device', 'devote', 'diagram', 'dial', 'diamond', 'diary',
+  'differ', 'digital', 'dignity', 'dilemma', 'dinner', 'dinosaur', 'direct', 'dirt', 'disagree', 'discover',
+  'disease', 'dish', 'dismiss', 'disorder', 'display', 'distance', 'divert', 'divide', 'dizzy', 'doctor',
+  'electric', 'elegant', 'element', 'elephant', 'elevator', 'elite', 'else', 'embark', 'embody', 'embrace',
+  'emerge', 'emotion', 'employ', 'empower', 'empty', 'enable', 'enact', 'enforce', 'engage', 'engine',
+  'enhance', 'enjoy', 'enlist', 'enough', 'enrich', 'enroll', 'ensure', 'enter', 'entire', 'entry',
+  'fabric', 'face', 'faculty', 'fade', 'faint', 'faith', 'fall', 'false', 'fame', 'family',
+  'fantasy', 'fashion', 'fatal', 'father', 'fatigue', 'fault', 'favorite', 'feature', 'february', 'federal',
+  'fire', 'firm', 'fiscal', 'fish', 'flag', 'flame', 'flash', 'flat', 'flavor', 'flee',
+  'garden', 'garlic', 'garment', 'gas', 'gasp', 'gate', 'gather', 'gauge', 'gaze', 'general',
+  'genius', 'genre', 'gentle', 'genuine', 'gesture', 'ghost', 'giant', 'gift', 'giggle', 'ginger',
+  'giraffe', 'girl', 'give', 'glad', 'glance', 'glare', 'glass', 'glide', 'glimpse', 'globe',
+  'gloom', 'glory', 'glove', 'glow', 'glue', 'goat', 'goddess', 'gold', 'good', 'goose',
+  'gorilla', 'gospel', 'gossip', 'govern', 'gown', 'grab', 'grace', 'grain', 'grant', 'grape',
+  'harvest', 'hat', 'have', 'hawk', 'hazard', 'head', 'health', 'heart', 'heavy', 'hedgehog',
+  'height', 'hello', 'helmet', 'help', 'hen', 'hero', 'hip', 'hire', 'history', 'hobby',
+  'hockey', 'hold', 'hole', 'holiday', 'hollow', 'home', 'honey', 'hood', 'hope', 'horn',
+  'horror', 'horse', 'hospital', 'host', 'hotel', 'hour', 'hover', 'hub', 'huge', 'human',
+  'hungry', 'hunt', 'hurdle', 'hurry', 'hurt', 'husband', 'hybrid', 'ice', 'icon', 'idea',
+  'identify', 'idle', 'ignore', 'ill', 'illegal', 'illness', 'image', 'imitate', 'immense', 'immune',
+  'impact', 'impose', 'improve', 'impulse', 'inch', 'include', 'income', 'increase', 'index', 'indicate',
+  'indoor', 'industry', 'infant', 'inflict', 'inform', 'initial', 'inject', 'inmate', 'inner', 'innocent',
+  'input', 'inquiry', 'insane', 'insect', 'inside', 'inspire', 'install', 'intact', 'interest', 'into',
+  'invest', 'invite', 'involve', 'iron', 'island', 'isolate', 'issue', 'item', 'ivory', 'jacket',
+  'jaguar', 'jar', 'jazz', 'jealous', 'jeans', 'jelly', 'jewel', 'job', 'join', 'joke',
+  'journey', 'joy', 'judge', 'juice', 'jungle', 'junior', 'junk', 'kangaroo', 'keen', 'keep',
+  'ketchup', 'key', 'kick', 'kid', 'kidney', 'kind', 'kingdom', 'kiss', 'kit', 'kitchen',
+  'kite', 'kitten', 'kiwi', 'knee', 'knife', 'knock', 'know', 'lab', 'label', 'labor',
+  'ladder', 'lady', 'lake', 'lamp', 'language', 'laptop', 'large', 'later', 'latin', 'laugh',
+  'laundry', 'lava', 'lawn', 'lawsuit', 'layer', 'lazy', 'leader', 'leaf', 'learn', 'leave',
+  'lecture', 'left', 'leg', 'legal', 'legend', 'leisure', 'lemon', 'lend', 'length', 'lens',
+  'leopard', 'lesson', 'letter', 'level', 'liberty', 'library', 'license', 'life', 'lift', 'light',
+  'like', 'limb', 'limit', 'link', 'lion', 'liquid', 'list', 'little', 'live', 'lizard',
+  'load', 'loan', 'lobster', 'local', 'lock', 'logic', 'lonely', 'long', 'loop', 'lottery',
+  'mango', 'mansion', 'manual', 'maple', 'marble', 'march', 'margin', 'marine', 'market', 'marriage',
+  'narrow', 'nasty', 'nation', 'nature', 'near', 'neck', 'need', 'negative', 'neglect', 'neither',
+  'nephew', 'nerve', 'nest', 'net', 'network', 'neutral', 'never', 'news', 'next', 'nice',
+  'ocean', 'october', 'odor', 'off', 'offer', 'office', 'often', 'oil', 'okay', 'old',
+  'olive', 'olympic', 'omit', 'once', 'one', 'onion', 'online', 'only', 'open', 'opera',
+  'opinion', 'oppose', 'option', 'orange', 'orbit', 'orchard', 'order', 'ordinary', 'organ', 'orient',
+  'original', 'orphan', 'ostrich', 'other', 'outdoor', 'outer', 'output', 'outside', 'oval', 'oven',
+  'pilot', 'pink', 'pioneer', 'pipe', 'pistol', 'pitch', 'pizza', 'place', 'planet', 'plastic',
+  'plate', 'play', 'please', 'pledge', 'pluck', 'plug', 'plunge', 'poem', 'poet', 'point',
+  'polar', 'pole', 'police', 'pond', 'pony', 'pool', 'popular', 'portion', 'position', 'possible',
+  'quality', 'quantum', 'quarter', 'question', 'quick', 'quit', 'quiz', 'quote', 'rabbit', 'raccoon',
+  'race', 'rack', 'radar', 'radio', 'rail', 'rain', 'raise', 'rally', 'ramp', 'ranch',
+  'random', 'range', 'rapid', 'rare', 'rate', 'rather', 'raven', 'raw', 'razor', 'ready',
+  'real', 'reason', 'rebel', 'rebuild', 'recall', 'receive', 'recipe', 'record', 'recycle', 'reduce',
+  'skull', 'slab', 'slam', 'sleep', 'slender', 'slice', 'slide', 'slight', 'slim', 'slogan',
+  'slot', 'slow', 'slush', 'small', 'smart', 'smile', 'smoke', 'smooth', 'snack', 'snake',
+  'snap', 'sniff', 'snow', 'soap', 'soccer', 'social', 'sock', 'soda', 'soft', 'solar',
+  'transfer', 'trap', 'trash', 'travel', 'tray', 'treat', 'tree', 'trend', 'trial', 'tribe',
+  'trick', 'trigger', 'trim', 'trip', 'trophy', 'trouble', 'truck', 'truly', 'trumpet', 'trust',
+  'vacuum', 'valid', 'valley', 'valve', 'van', 'vanish', 'vapor', 'various', 'vast', 'vault',
+  'vehicle', 'velvet', 'vendor', 'venture', 'venue', 'verb', 'verify', 'version', 'very', 'vessel',
+  'wage', 'wagon', 'wait', 'walk', 'wall', 'walnut', 'want', 'warfare', 'warm', 'warrior',
+  'wash', 'wasp', 'waste', 'water', 'wave', 'way', 'wealth', 'weapon', 'wear', 'weasel',
+  'weather', 'web', 'wedding', 'weekend', 'weird', 'welcome', 'west', 'wet', 'whale', 'what',
+  'wheat', 'wheel', 'when', 'where', 'whip', 'whisper', 'wide', 'width', 'wife', 'wild',
+  'will', 'win', 'window', 'wine', 'wing', 'wink', 'winner', 'winter', 'wire', 'wisdom',
+  'wise', 'wish', 'witness', 'wolf', 'woman', 'wonder', 'wood', 'wool', 'word', 'work',
+  'world', 'worry', 'worth', 'wrap', 'wreck', 'wrestle', 'wrist', 'write', 'wrong', 'yard',
+  'year', 'yellow', 'you', 'young', 'youth', 'zebra', 'zero', 'zone', 'zoo',
+])
+
+export const hardcodedBlockchainMnemonicVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-blockchain-mnemonic',
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    const words = stripped.trim().split(/\s+/)
+    // BIP39 mnemonics are 12 or 24 words
+    if (words.length !== 12 && words.length !== 24) return null
+
+    const bip39Count = words.filter((w) => BIP39_COMMON_WORDS.has(w.toLowerCase())).length
+    // Require at least 80% of words to be BIP39 words
+    if (bip39Count / words.length >= 0.8) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'Hardcoded blockchain mnemonic',
+        'This string appears to be a BIP39 mnemonic seed phrase. Hardcoded mnemonics compromise wallet security.',
+        sourceCode,
+        'Never hardcode mnemonic phrases. Store them securely in a hardware wallet or encrypted vault.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_UNIVERSAL_VISITORS: CodeRuleVisitor[] = [
   hardcodedSecretVisitor,
   hardcodedIpVisitor,
   clearTextProtocolVisitor,
+  hardcodedBlockchainMnemonicVisitor,
 ]

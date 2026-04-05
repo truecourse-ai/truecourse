@@ -120,25 +120,25 @@ Rules about secrets, injection, XSS, CSRF, crypto, authentication, permissions.
 | security/deterministic/xml-xxe | XML external entity attack | XML parsers should not be vulnerable to XXE attacks | high | sonarjs, sonar-python, ruff | S2755 (xml-parser-xxe), S313-S320 (SuspiciousXML*Usage) | implemented | all |
 | security/deterministic/unsafe-unzip | Unsafe archive extraction | Expanding archive files without controlling resource consumption (zip bomb) | high | sonarjs, sonar-python, ruff | S5042 (no-unsafe-unzip), S202 (TarfileUnsafeMembers) | implemented | all |
 | security/deterministic/os-command-injection | OS command injection | Using shell interpreter when executing OS commands | critical | sonarjs, ruff | S4721 (os-command), S602 (SubprocessPopenWithShellEqualsTrue), S604 (CallWithShellEqualsTrue), S605 (StartProcessWithAShell) | implemented | all |
-| security/deterministic/file-permissions-world-accessible | World-accessible file permissions | File permissions should not be set to world-accessible values | high | sonarjs, sonar-python, ruff | S2612 (file-permissions), S103 (BadFilePermissions) | new | all |
-| security/deterministic/unrestricted-file-upload | Unrestricted file upload | File uploads should be restricted by type and size | medium | sonarjs | S2598 (file-uploads) | new | js/ts |
-| security/deterministic/hidden-file-exposure | Hidden file exposure | Statically serving hidden files is security-sensitive | medium | sonarjs | S5691 (hidden-files) | new | js/ts |
-| security/deterministic/unverified-cross-origin-message | Unverified cross-origin message | Origins should be verified during cross-origin communications | medium | sonarjs | S2819 (post-message) | new | js/ts |
-| security/deterministic/link-target-blank | Unsafe target blank | Opened window can access back to originating window via window.opener | low | sonarjs | S5148 (link-with-target-blank) | new | js/ts |
+| security/deterministic/file-permissions-world-accessible | World-accessible file permissions | File permissions should not be set to world-accessible values | high | sonarjs, sonar-python, ruff | S2612 (file-permissions), S103 (BadFilePermissions) | implemented | all |
+| security/deterministic/unrestricted-file-upload | Unrestricted file upload | File uploads should be restricted by type and size | medium | sonarjs | S2598 (file-uploads) | implemented | js/ts |
+| security/deterministic/hidden-file-exposure | Hidden file exposure | Statically serving hidden files is security-sensitive | medium | sonarjs | S5691 (hidden-files) | implemented | js/ts |
+| security/deterministic/unverified-cross-origin-message | Unverified cross-origin message | Origins should be verified during cross-origin communications | medium | sonarjs | S2819 (post-message) | implemented | js/ts |
+| security/deterministic/link-target-blank | Unsafe target blank | Opened window can access back to originating window via window.opener | low | sonarjs | S5148 (link-with-target-blank) | implemented | js/ts |
 | security/deterministic/intrusive-permissions | Intrusive permissions | Using intrusive browser/device permissions | medium | sonarjs | S5604 (no-intrusive-permissions) | new | js/ts |
-| security/deterministic/confidential-info-logging | Confidential information logging | Allowing confidential information to be logged | medium | sonarjs | S5757 (confidential-information-logging) | new | js/ts |
-| security/deterministic/production-debug-enabled | Debug mode in production | Delivering code in production with debug features activated (e.g., Flask debug=True) | medium | sonarjs, sonar-python, ruff | S4507 (production-debug), S201 (FlaskDebugTrue) | new | all |
-| security/deterministic/insecure-random | Insecure random number generator | Using Math.random(), random.random(), or equivalent PRNG for security-sensitive operations | medium | sonarjs, sonar-python, ruff | S2245 (pseudo-random), S311 (SuspiciousNonCryptographicRandomUsage) | new | all |
+| security/deterministic/confidential-info-logging | Confidential information logging | Allowing confidential information to be logged | medium | sonarjs | S5757 (confidential-information-logging) | implemented | js/ts |
+| security/deterministic/production-debug-enabled | Debug mode in production | Delivering code in production with debug features activated (e.g., Flask debug=True) | medium | sonarjs, sonar-python, ruff | S4507 (production-debug), S201 (FlaskDebugTrue) | implemented | all |
+| security/deterministic/insecure-random | Insecure random number generator | Using Math.random(), random.random(), or equivalent PRNG for security-sensitive operations | medium | sonarjs, sonar-python, ruff | S2245 (pseudo-random), S311 (SuspiciousNonCryptographicRandomUsage) | implemented | all |
 | security/deterministic/session-not-regenerated | Session not regenerated | A new session should be created during user authentication | medium | sonarjs | S5876 (session-regeneration) | new | js/ts |
-| security/deterministic/ip-forwarding | IP forwarding | Forwarding client IP address is security-sensitive | low | sonarjs | S5759 (no-ip-forward) | new | js/ts |
+| security/deterministic/ip-forwarding | IP forwarding | Forwarding client IP address is security-sensitive | low | sonarjs | S5759 (no-ip-forward) | implemented | js/ts |
 | security/deterministic/publicly-writable-directory | Publicly writable directory | Using publicly writable directories for sensitive operations | medium | sonarjs, sonar-python, ruff | S5443 (publicly-writable-directories), S108 (HardcodedTempFile) | new | all |
-| security/deterministic/hardcoded-blockchain-mnemonic | Hardcoded wallet phrase | Wallet/mnemonic phrases should not be hard-coded | critical | sonarjs | S7639 (review-blockchain-mnemonic) | new | js/ts |
-| security/deterministic/dompurify-unsafe-config | DOMPurify bypass | DOMPurify configuration should not be bypassable | high | sonarjs | S8479 (dompurify-unsafe-config) | new | js/ts |
-| security/deterministic/disabled-resource-integrity | Missing subresource integrity | Using remote artifacts without integrity checks | medium | sonarjs | S5725 (disabled-resource-integrity) | new | js/ts |
+| security/deterministic/hardcoded-blockchain-mnemonic | Hardcoded wallet phrase | Wallet/mnemonic phrases should not be hard-coded | critical | sonarjs | S7639 (review-blockchain-mnemonic) | implemented | js/ts |
+| security/deterministic/dompurify-unsafe-config | DOMPurify bypass | DOMPurify configuration should not be bypassable | high | sonarjs | S8479 (dompurify-unsafe-config) | implemented | js/ts |
+| security/deterministic/disabled-resource-integrity | Missing subresource integrity | Using remote artifacts without integrity checks | medium | sonarjs | S5725 (disabled-resource-integrity) | implemented | js/ts |
 | security/deterministic/dynamically-constructed-template | Dynamically constructed template | Templates should not be constructed dynamically (template injection) | high | sonarjs | S7790 (dynamically-constructed-templates) | new | js/ts |
 | security/deterministic/angular-sanitization-bypass | Angular sanitization bypass | Disabling Angular built-in sanitization | high | sonarjs | S6268 (no-angular-bypass-sanitization) | new | js/ts |
-| security/deterministic/path-command-injection | Path command injection | Searching OS commands in PATH is security-sensitive | high | sonarjs | S4036 | new | js/ts |
-| security/deterministic/mixed-content | Mixed content | Allowing mixed HTTP/HTTPS content downgrades security | medium | sonarjs | S5730 | new | js/ts |
+| security/deterministic/path-command-injection | Path command injection | Searching OS commands in PATH is security-sensitive | high | sonarjs | S4036 | implemented | js/ts |
+| security/deterministic/mixed-content | Mixed content | Allowing mixed HTTP/HTTPS content downgrades security | medium | sonarjs | S5730 | implemented | js/ts |
 | security/deterministic/session-cookie-on-static | Session cookie on static | Static assets serving session cookies | medium | sonarjs | S8441 | new | js/ts |
 | security/deterministic/user-id-from-request-body | User ID taken from request body | Using user-supplied ID for authorization instead of extracting from authenticated session/token | critical | truecourse | - | new | all |
 | security/deterministic/mass-assignment | Mass assignment from request body | Spreading or assigning entire req.body to database model — allows setting any field including admin/role | high | truecourse | - | new | all |
@@ -203,9 +203,9 @@ Rules about secrets, injection, XSS, CSRF, crypto, authentication, permissions.
 | security/deterministic/subprocess-without-shell | Subprocess call without shell security review | subprocess.call() or Popen() without shell=True — ensure user input is not passed directly | medium | ruff | S603 (SubprocessWithoutShellEqualsTrue) | new | python |
 | security/deterministic/process-with-partial-path | Process started with partial path | Starting process without full path — PATH manipulation could run unexpected executable | medium | ruff | S607 (StartProcessWithPartialPath) | new | python |
 | security/deterministic/ssl-no-version | SSL context without protocol version | Creating SSL context without specifying protocol version — may use insecure defaults | medium | ruff | S504 (SslWithNoVersion) | new | python |
-| security/deterministic/vulnerable-library-import | Vulnerable library import | Importing libraries with known security vulnerabilities — httpoxy-vulnerable CGI handlers, pyghmi IPMI with known concerns | medium | ruff | S412 (SuspiciousHttpoxyImport), S415 (SuspiciousPyghmiImport) | new | python |
-| security/deterministic/process-start-no-shell | Process started without shell — security review | Starting a process without shell=True — ensure the command and arguments cannot be influenced by user input | medium | ruff | S606 (StartProcessWithNoShell) | new | python |
-| security/deterministic/non-octal-file-permissions | File permissions not in octal format | File permission values should use octal notation (e.g., 0o755) for clarity — decimal values are error-prone | medium | ruff | RUF064 (NonOctalPermissions) | new | python |
+| security/deterministic/vulnerable-library-import | Vulnerable library import | Importing libraries with known security vulnerabilities — httpoxy-vulnerable CGI handlers, pyghmi IPMI with known concerns | medium | ruff | S412 (SuspiciousHttpoxyImport), S415 (SuspiciousPyghmiImport) | implemented | python |
+| security/deterministic/process-start-no-shell | Process started without shell — security review | Starting a process without shell=True — ensure the command and arguments cannot be influenced by user input | medium | ruff | S606 (StartProcessWithNoShell) | implemented | python |
+| security/deterministic/non-octal-file-permissions | File permissions not in octal format | File permission values should use octal notation (e.g., 0o755) for clarity — decimal values are error-prone | medium | ruff | RUF064 (NonOctalPermissions) | implemented | python |
 
 ### Security / LLM
 
@@ -256,9 +256,9 @@ Rules about actual runtime bugs: null deref, infinite loops, unreachable code, t
 |---------|------|-------------|----------|--------|-----------|--------|----------|
 | bugs/deterministic/null-dereference | Null dereference | Accessing properties of null or undefined values | critical | sonarjs | S2259 (null-dereference) | new | js/ts |
 | bugs/deterministic/unreachable-code | Unreachable code | Code after return, throw, continue, or break is never executed | high | eslint, sonar-python, ruff | no-unreachable, S1763, PLW0101 (UnreachableCode) | implemented | all |
-| bugs/deterministic/unreachable-loop | Unreachable loop | Loop body allows only one iteration | medium | eslint | no-unreachable-loop | new | js/ts |
+| bugs/deterministic/unreachable-loop | Unreachable loop | Loop body allows only one iteration | medium | eslint | no-unreachable-loop | implemented | js/ts |
 | bugs/deterministic/constant-condition | Constant condition | Constant expression in if/while/for/ternary condition | medium | eslint, sonarjs, sonar-python | no-constant-condition, S2589 (no-gratuitous-expressions), S5797 | implemented | all |
-| bugs/deterministic/constant-binary-expression | Constant binary expression | Binary expression where the operation does not affect the value | medium | eslint | no-constant-binary-expression | new | js/ts |
+| bugs/deterministic/constant-binary-expression | Constant binary expression | Binary expression where the operation does not affect the value | medium | eslint | no-constant-binary-expression | implemented | js/ts |
 | bugs/deterministic/self-comparison | Self comparison | Comparing a value to itself is always true or always false | medium | eslint, sonarjs, sonar-python, ruff | no-self-compare, S1764 (no-identical-expressions), PLR0124 (ComparisonWithItself) | implemented | all |
 | bugs/deterministic/self-assignment | Self assignment | Assigning a variable to itself has no effect | medium | eslint, sonar-python, ruff | no-self-assign, S1656, PLW0127 (SelfAssigningVariable) | implemented | all |
 | bugs/deterministic/assignment-in-condition | Assignment in condition | Assignment operator used where comparison was likely intended | high | eslint, sonarjs | no-cond-assign, S1121 (no-nested-assignment) | implemented | js/ts |
@@ -278,26 +278,26 @@ Rules about actual runtime bugs: null deref, infinite loops, unreachable code, t
 | bugs/deterministic/unsafe-finally | Unsafe finally | Control flow statements in finally blocks override try/catch flow | high | eslint | no-unsafe-finally | implemented | js/ts |
 | bugs/deterministic/fallthrough-case | Fallthrough case | Switch case without break, return, or throw falls through to next case | medium | eslint, sonarjs | no-fallthrough, S128 (no-fallthrough) | implemented | js/ts |
 | bugs/deterministic/for-direction | Wrong for-loop direction | For loop counter moves in wrong direction (infinite loop) | high | eslint, sonarjs | for-direction, S2251 (for-loop-increment-sign) | implemented | js/ts |
-| bugs/deterministic/loop-counter-assignment | Loop counter assigned in body | Loop counter modified inside loop body instead of update clause | medium | sonarjs | S2310 (updated-loop-counter), S1994 (misplaced-loop-counter) | new | js/ts |
-| bugs/deterministic/unmodified-loop-condition | Unmodified loop condition | Loop condition variable never modified inside the loop (possible infinite loop) | high | eslint | no-unmodified-loop-condition | new | js/ts |
-| bugs/deterministic/const-reassignment | Const variable reassignment | Reassigning a const variable | critical | eslint, sonarjs | no-const-assign, S3500 (updated-const-var) | new | js/ts |
-| bugs/deterministic/class-reassignment | Class variable reassignment | Reassigning a class declaration | high | eslint | no-class-assign | new | js/ts |
-| bugs/deterministic/function-reassignment | Function reassignment | Reassigning a function declaration | high | eslint | no-func-assign | new | js/ts |
-| bugs/deterministic/import-reassignment | Import binding reassignment | Assigning to an imported binding | high | eslint | no-import-assign | new | js/ts |
-| bugs/deterministic/exception-reassignment | Exception variable reassignment | Reassigning exception variable in catch clause | medium | eslint | no-ex-assign | new | js/ts |
+| bugs/deterministic/loop-counter-assignment | Loop counter assigned in body | Loop counter modified inside loop body instead of update clause | medium | sonarjs | S2310 (updated-loop-counter), S1994 (misplaced-loop-counter) | implemented | js/ts |
+| bugs/deterministic/unmodified-loop-condition | Unmodified loop condition | Loop condition variable never modified inside the loop (possible infinite loop) | high | eslint | no-unmodified-loop-condition | implemented | js/ts |
+| bugs/deterministic/const-reassignment | Const variable reassignment | Reassigning a const variable | critical | eslint, sonarjs | no-const-assign, S3500 (updated-const-var) | implemented | js/ts |
+| bugs/deterministic/class-reassignment | Class variable reassignment | Reassigning a class declaration | high | eslint | no-class-assign | implemented | js/ts |
+| bugs/deterministic/function-reassignment | Function reassignment | Reassigning a function declaration | high | eslint | no-func-assign | implemented | js/ts |
+| bugs/deterministic/import-reassignment | Import binding reassignment | Assigning to an imported binding | high | eslint | no-import-assign | implemented | js/ts |
+| bugs/deterministic/exception-reassignment | Exception variable reassignment | Reassigning exception variable in catch clause | medium | eslint | no-ex-assign | implemented | js/ts |
 | bugs/deterministic/constructor-return | Constructor with return value | Constructor returning a value is confusing and often a bug | medium | eslint | no-constructor-return | new | js/ts |
 | bugs/deterministic/setter-return | Setter with return value | Setters should not return a value | medium | eslint | no-setter-return | new | js/ts |
-| bugs/deterministic/getter-missing-return | Getter without return | Getter function does not return a value | high | eslint | getter-return | new | js/ts |
-| bugs/deterministic/missing-super-call | Missing super() call | Constructor in derived class does not call super() | high | eslint | constructor-super | new | js/ts |
-| bugs/deterministic/this-before-super | this before super | Using this/super before calling super() in constructor | high | eslint | no-this-before-super | new | js/ts |
-| bugs/deterministic/async-promise-executor | Async promise executor | Using async function as Promise executor | high | eslint | no-async-promise-executor | new | js/ts |
+| bugs/deterministic/getter-missing-return | Getter without return | Getter function does not return a value | high | eslint | getter-return | implemented | js/ts |
+| bugs/deterministic/missing-super-call | Missing super() call | Constructor in derived class does not call super() | high | eslint | constructor-super | implemented | js/ts |
+| bugs/deterministic/this-before-super | this before super | Using this/super before calling super() in constructor | high | eslint | no-this-before-super | implemented | js/ts |
+| bugs/deterministic/async-promise-executor | Async promise executor | Using async function as Promise executor | high | eslint | no-async-promise-executor | implemented | js/ts |
 | bugs/deterministic/promise-executor-return | Promise executor return | Returning a value from Promise executor function | medium | eslint | no-promise-executor-return | new | js/ts |
-| bugs/deterministic/empty-character-class | Empty regex character class | Empty character class in regular expression matches nothing | medium | eslint, sonarjs | no-empty-character-class, S2639 (no-empty-character-class) | new | js/ts |
-| bugs/deterministic/invalid-regexp | Invalid regular expression | Syntactically invalid regular expression | high | eslint, sonarjs | no-invalid-regexp, S5856 (no-invalid-regexp) | new | js/ts |
-| bugs/deterministic/control-chars-in-regex | Control characters in regex | Regular expression contains control characters | medium | eslint, sonarjs | no-control-regex, S6324 (no-control-regex) | new | js/ts |
+| bugs/deterministic/empty-character-class | Empty regex character class | Empty character class in regular expression matches nothing | medium | eslint, sonarjs | no-empty-character-class, S2639 (no-empty-character-class) | implemented | js/ts |
+| bugs/deterministic/invalid-regexp | Invalid regular expression | Syntactically invalid regular expression | high | eslint, sonarjs | no-invalid-regexp, S5856 (no-invalid-regexp) | implemented | js/ts |
+| bugs/deterministic/control-chars-in-regex | Control characters in regex | Regular expression contains control characters | medium | eslint, sonarjs | no-control-regex, S6324 (no-control-regex) | implemented | js/ts |
 | bugs/deterministic/useless-backreference | Useless backreference | Backreference in regex that will always match empty string | medium | eslint | no-useless-backreference | new | js/ts |
 | bugs/deterministic/misleading-character-class | Misleading character class | Characters made with multiple code points in regex character class | medium | eslint, sonarjs | no-misleading-character-class, S5868 (no-misleading-character-class) | new | js/ts |
-| bugs/deterministic/sparse-array | Sparse array | Array literal with holes (missing elements) | medium | eslint | no-sparse-arrays | new | js/ts |
+| bugs/deterministic/sparse-array | Sparse array | Array literal with holes (missing elements) | medium | eslint | no-sparse-arrays | implemented | js/ts |
 | bugs/deterministic/template-curly-in-string | Template syntax in regular string | Template literal placeholder ${} in regular string (forgot backticks) | medium | eslint | no-template-curly-in-string | new | js/ts |
 | bugs/deterministic/unexpected-multiline | Unexpected multiline expression | Confusing multiline expression that looks like two separate statements | medium | eslint | no-unexpected-multiline | new | js/ts |
 | bugs/deterministic/await-in-loop | Sequential await in loop | Using await inside a loop causes sequential execution instead of parallel | medium | eslint | no-await-in-loop | new | js/ts |
@@ -655,29 +655,29 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/var-declaration | var declaration | Using var instead of let/const (function-scoped, not block-scoped) | medium | truecourse-existing, eslint | code/global-statement, no-var | existing | js/ts |
 | code-quality/deterministic/global-statement | Global state mutation | Using global/nonlocal keyword to modify module-level state from inside a function | medium | truecourse-existing | code/global-statement | existing | python |
 | code-quality/deterministic/todo-fixme | TODO/FIXME comment | Unresolved TODO, FIXME, HACK, or XXX comment in codebase | low | truecourse-existing, sonarjs, ruff, eslint, sonar-python | code/todo-fixme, S1135 (todo-tag), S1134 (fixme-tag), FIX003 (LineContainsXxx), no-warning-comments, S1707 | existing | all |
-| code-quality/deterministic/cognitive-complexity | High cognitive complexity | Function has high cognitive complexity, hard to understand | medium | sonarjs, sonar-python | S3776 (cognitive-complexity) | new | all |
-| code-quality/deterministic/cyclomatic-complexity | High cyclomatic complexity | Function has too many independent code paths | medium | sonarjs, sonar-python, eslint, ruff | S1541 (cyclomatic-complexity), FunctionComplexity, C901 (ComplexStructure), complexity | new | all |
+| code-quality/deterministic/cognitive-complexity | High cognitive complexity | Function has high cognitive complexity, hard to understand | medium | sonarjs, sonar-python | S3776 (cognitive-complexity) | implemented | all |
+| code-quality/deterministic/cyclomatic-complexity | High cyclomatic complexity | Function has too many independent code paths | medium | sonarjs, sonar-python, eslint, ruff | S1541 (cyclomatic-complexity), FunctionComplexity, C901 (ComplexStructure), complexity | implemented | all |
 | code-quality/deterministic/expression-complexity | Complex expression | Expression with too many operators, hard to understand | medium | sonarjs | S1067 (expression-complexity) | new | js/ts |
-| code-quality/deterministic/too-many-lines | File too long | File has too many lines of code | low | sonarjs, eslint | S104 (max-lines), max-lines | new | all |
+| code-quality/deterministic/too-many-lines | File too long | File has too many lines of code | low | sonarjs, eslint | S104 (max-lines), max-lines | implemented | all |
 | code-quality/deterministic/too-many-return-statements | Too many return statements | Function has too many return statements | low | sonar-python, ruff | S1142, PLR0911 (TooManyReturnStatements) | implemented | python |
-| code-quality/deterministic/too-many-branches | Too many branches | Function has too many branches | low | ruff | PLR0912 (TooManyBranches) | new | python |
+| code-quality/deterministic/too-many-branches | Too many branches | Function has too many branches | low | ruff | PLR0912 (TooManyBranches) | implemented | python |
 | code-quality/deterministic/too-many-switch-cases | Too many switch cases | Switch statement with too many case clauses | low | sonarjs | S1479 (max-switch-cases) | new | js/ts |
 | code-quality/deterministic/too-many-union-members | Too many union members | Union type with too many elements, hard to maintain | low | sonarjs | S4622 (max-union-size) | new | js/ts |
 | code-quality/deterministic/nested-ternary | Nested ternary | Ternary operators nested inside each other | medium | eslint, sonarjs, sonar-python | no-nested-ternary, S3358 (no-nested-conditional) | implemented | all |
-| code-quality/deterministic/nested-switch | Nested switch | Switch statement inside another switch statement | medium | sonarjs | S1821 (no-nested-switch) | new | js/ts |
+| code-quality/deterministic/nested-switch | Nested switch | Switch statement inside another switch statement | medium | sonarjs | S1821 (no-nested-switch) | implemented | js/ts |
 | code-quality/deterministic/nested-template-literal | Nested template literal | Template literals nested inside other template literals | low | sonarjs | S4624 (no-nested-template-literals) | implemented | js/ts |
-| code-quality/deterministic/deeply-nested-functions | Deeply nested functions | Functions nested too many levels deep | medium | sonarjs | S2004 (no-nested-functions) | new | js/ts |
+| code-quality/deterministic/deeply-nested-functions | Deeply nested functions | Functions nested too many levels deep | medium | sonarjs | S2004 (no-nested-functions) | implemented | js/ts |
 | code-quality/deterministic/too-many-breaks | Too many breaks in loop | Loop with multiple break or continue statements | low | sonarjs | S135 (too-many-break-or-continue-in-loop) | new | js/ts |
-| code-quality/deterministic/duplicate-string | Duplicate string literal | Same string literal duplicated across the codebase | low | sonarjs, sonar-python | S1192 (no-duplicate-string) | new | all |
+| code-quality/deterministic/duplicate-string | Duplicate string literal | Same string literal duplicated across the codebase | low | sonarjs, sonar-python | S1192 (no-duplicate-string) | implemented | all |
 | code-quality/deterministic/identical-functions | Identical functions | Multiple functions with identical implementations | medium | sonarjs, sonar-python | S4144 (no-identical-functions) | new | all |
 | code-quality/deterministic/unused-variable | Unused variable | Local variable or function declared but never used | low | eslint, sonarjs, sonar-python, ruff, @typescript-eslint | no-unused-vars, S1481 (no-unused-vars), F841 (UnusedVariable) | new | all |
 | code-quality/deterministic/unused-private-member | Unused private class member | Private class field or method never referenced | low | eslint, @typescript-eslint | no-unused-private-class-members | new | js/ts |
-| code-quality/deterministic/unused-expression | Unused expression | Expression that is computed but result is never used | low | eslint, @typescript-eslint | no-unused-expressions | new | js/ts |
+| code-quality/deterministic/unused-expression | Unused expression | Expression that is computed but result is never used | low | eslint, @typescript-eslint | no-unused-expressions | implemented | js/ts |
 | code-quality/deterministic/dead-store | Dead store | Variable assigned a value that is never read | low | sonarjs, sonar-python, eslint | S1854 (no-dead-store), no-useless-assignment | new | all |
 | code-quality/deterministic/unused-collection | Unused collection | Collection created and populated but never read | low | sonarjs | S4030 (no-unused-collection) | new | js/ts |
 | code-quality/deterministic/redundant-assignment | Redundant assignment | Assignment that has no effect because variable already holds that value | low | sonarjs | S4165 (no-redundant-assignments) | new | js/ts |
 | code-quality/deterministic/redundant-boolean | Redundant boolean literal | Boolean literals used unnecessarily in comparisons | low | sonarjs, eslint | S1125 (no-redundant-boolean), no-extra-boolean-cast | implemented | js/ts |
-| code-quality/deterministic/redundant-jump | Redundant jump statement | return, break, or continue that has no effect | low | sonarjs, sonar-python, eslint, ruff | S3626 (no-redundant-jump), no-useless-return, PLR1711 (UselessReturn) | new | all |
+| code-quality/deterministic/redundant-jump | Redundant jump statement | return, break, or continue that has no effect | low | sonarjs, sonar-python, eslint, ruff | S3626 (no-redundant-jump), no-useless-return, PLR1711 (UselessReturn) | implemented | all |
 | code-quality/deterministic/useless-catch | Useless catch | Catch/except clause that just rethrows the exception without modification | low | eslint, sonarjs, sonar-python | no-useless-catch, S2737 (no-useless-catch) | new | all |
 | code-quality/deterministic/useless-constructor | Useless constructor | Empty constructor or one that just calls super() | low | eslint, sonarjs, @typescript-eslint | no-useless-constructor | new | js/ts |
 | code-quality/deterministic/useless-escape | Useless escape | Escape character in string/regex that is not necessary | low | eslint | no-useless-escape | new | js/ts |
@@ -694,7 +694,7 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/prefer-single-boolean-return | Wrapping boolean in if-else | Returning boolean literal from if-else instead of the condition | low | sonarjs | S1126 (prefer-single-boolean-return) | new | js/ts |
 | code-quality/deterministic/prefer-immediate-return | Unnecessary temporary variable | Local variable declared only to be immediately returned | low | sonarjs | S1488 (prefer-immediate-return) | new | js/ts |
 | code-quality/deterministic/prefer-while | For loop as while | For loop without init/update that should be a while loop | low | sonarjs | S1264 (prefer-while) | new | js/ts |
-| code-quality/deterministic/prefer-const | Reassignment-free let | Variable declared with let but never reassigned (should be const) | low | eslint | prefer-const | new | js/ts |
+| code-quality/deterministic/prefer-const | Reassignment-free let | Variable declared with let but never reassigned (should be const) | low | eslint | prefer-const | implemented | js/ts |
 | code-quality/deterministic/prefer-template | String concatenation over template | Using string concatenation where template literal is cleaner | low | eslint | prefer-template | new | js/ts |
 | code-quality/deterministic/prefer-rest-params | Arguments object usage | Using arguments object instead of rest parameters | low | eslint, sonarjs | prefer-rest-params, S3513 (arguments-usage) | new | js/ts |
 | code-quality/deterministic/prefer-spread | Apply instead of spread | Using .apply() where spread operator is cleaner | low | eslint | prefer-spread | new | js/ts |
@@ -719,14 +719,14 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/accessor-pairs | Missing getter or setter | Object has setter without getter or vice versa | medium | eslint | accessor-pairs | new | js/ts |
 | code-quality/deterministic/no-return-assign | Assignment in return | Assignment expression inside return statement | medium | eslint | no-return-assign | new | js/ts |
 | code-quality/deterministic/no-sequences | Comma operator | Using comma operator which makes code harder to read | low | eslint | no-sequences | new | js/ts |
-| code-quality/deterministic/no-void | Void operator usage | Using void operator which is unnecessary in modern JS | low | eslint, sonarjs | no-void, S3735 (void-use) | new | js/ts |
-| code-quality/deterministic/no-script-url | javascript: URL | Using javascript: URL is equivalent to eval | high | eslint | no-script-url | new | js/ts |
-| code-quality/deterministic/no-proto | __proto__ usage | Using __proto__ property instead of Object.getPrototypeOf | low | eslint | no-proto | new | js/ts |
+| code-quality/deterministic/no-void | Void operator usage | Using void operator which is unnecessary in modern JS | low | eslint, sonarjs | no-void, S3735 (void-use) | implemented | js/ts |
+| code-quality/deterministic/no-script-url | javascript: URL | Using javascript: URL is equivalent to eval | high | eslint | no-script-url | implemented | js/ts |
+| code-quality/deterministic/no-proto | __proto__ usage | Using __proto__ property instead of Object.getPrototypeOf | low | eslint | no-proto | implemented | js/ts |
 | code-quality/deterministic/no-caller | arguments.caller usage | Using arguments.caller or arguments.callee | medium | eslint | no-caller | new | js/ts |
 | code-quality/deterministic/no-iterator | __iterator__ usage | Using __iterator__ property which is non-standard | low | eslint | no-iterator | new | js/ts |
 | code-quality/deterministic/deprecated-api-usage | Deprecated API usage | Using code marked as @deprecated | medium | sonarjs, @typescript-eslint | S1874 (deprecation), no-deprecated | new | js/ts |
 | code-quality/deterministic/require-yield | Generator without yield | Generator function that never yields | medium | eslint, sonarjs | require-yield, S3531 (generator-without-yield) | new | js/ts |
-| code-quality/deterministic/require-await | Async without await | Async function that never uses await | low | eslint, @typescript-eslint | require-await | new | js/ts |
+| code-quality/deterministic/require-await | Async without await | Async function that never uses await | low | eslint, @typescript-eslint | require-await | implemented | js/ts |
 | code-quality/deterministic/class-prototype-assignment | Prototype assignment in class | Using prototype assignments instead of class methods | low | sonarjs | S3525 (class-prototype) | new | js/ts |
 | code-quality/deterministic/multiline-block-without-braces | Multiline block without braces | Multiple statements indented under if/for without enclosing braces | high | sonarjs | S2681 (no-unenclosed-multiline-block) | new | js/ts |
 | code-quality/deterministic/case-without-break | Case label in switch without break | Non-case label inside switch statement | medium | sonarjs | S1219 (no-case-label-in-switch) | new | js/ts |

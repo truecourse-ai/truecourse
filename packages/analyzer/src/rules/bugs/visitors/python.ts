@@ -437,6 +437,171 @@ export const pythonUnsafeFinallyVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// getter-missing-return: @property getter without return statement
+// ---------------------------------------------------------------------------
+
+export const pythonGetterMissingReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/getter-missing-return',
+  languages: ['python'],
+  nodeTypes: ['decorated_definition'],
+  visit(node, filePath, sourceCode) {
+    // Check if decorated with @property
+    const decorators = node.namedChildren.filter((c) => c.type === 'decorator')
+    const isProperty = decorators.some((d) => {
+      const expr = d.namedChildren[0]
+      return expr?.type === 'identifier' && expr.text === 'property'
+    })
+    if (!isProperty) return null
+
+    const funcDef = node.namedChildren.find((c) => c.type === 'function_definition')
+    if (!funcDef) return null
+
+    const body = funcDef.childForFieldName('body')
+    if (!body) return null
+
+    const statements = body.namedChildren.filter((c) => c.type !== 'comment')
+    // Skip if only pass
+    if (statements.length === 1 && statements[0].type === 'pass_statement') {
+      return makeViolation(
+        this.ruleKey, funcDef, filePath, 'high',
+        'Getter missing return',
+        'This @property getter only contains `pass` and will always return None.',
+        sourceCode,
+        'Add a return statement to the property getter.',
+      )
+    }
+
+    function hasReturn(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
+      if (n.type === 'function_definition') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasReturn(child)) return true
+      }
+      return false
+    }
+
+    if (!hasReturn(body)) {
+      return makeViolation(
+        this.ruleKey, funcDef, filePath, 'high',
+        'Getter missing return',
+        'This @property getter never returns a value and will always return None.',
+        sourceCode,
+        'Add a return statement with a value to the property getter.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// empty-character-class: regex with empty character class []
+// ---------------------------------------------------------------------------
+
+export const pythonEmptyCharacterClassVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/empty-character-class',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Match re.compile(), re.search(), re.match(), re.findall(), etc.
+    let iReCall = false
+    if (fn.type === 'attribute') {
+      const obj = fn.childForFieldName('object')
+      const attr = fn.childForFieldName('attribute')
+      if (obj?.text === 're' && attr) iReCall = true
+    }
+    if (!iReCall) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg || firstArg.type !== 'string') return null
+
+    const patternText = firstArg.text
+    const regex = /(?:^|[^\\])\[\]/
+    if (regex.test(patternText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Empty character class in regex',
+        'Empty character class `[]` in regex never matches anything.',
+        sourceCode,
+        'Add characters to the character class or remove it.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// exception-reassignment: except Exception as e: e = ...
+// ---------------------------------------------------------------------------
+
+export const pythonExceptionReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/exception-reassignment',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    // Find the exception variable from the as_pattern
+    let exceptionVar: string | null = null
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'as_pattern') {
+        const target = child.namedChildren.find((c) => c.type === 'as_pattern_target')
+        if (target) {
+          const id = target.namedChildren.find((c) => c.type === 'identifier')
+          if (id) exceptionVar = id.text
+        }
+      }
+    }
+    if (!exceptionVar) return null
+
+    const body = node.namedChildren.find((c) => c.type === 'block')
+    if (!body) return null
+
+    // Find assignment to the exception variable
+    function findReassignment(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      if (n.type === 'assignment') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && left.text === exceptionVar) {
+          return n
+        }
+      }
+      if (n.type === 'augmented_assignment') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && left.text === exceptionVar) {
+          return n
+        }
+      }
+      if (n.type === 'function_definition') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReassignment(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const reassignment = findReassignment(body)
+    if (reassignment) {
+      return makeViolation(
+        this.ruleKey, reassignment, filePath, 'high',
+        'Exception parameter reassignment',
+        `Reassigning except parameter \`${exceptionVar}\` loses the original error information.`,
+        sourceCode,
+        'Use a different variable name instead of reassigning the except parameter.',
+      )
+    }
+    return null
+  },
+}
+
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
   pythonBareExceptVisitor,
@@ -451,4 +616,7 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonDuplicateClassMembersVisitor,
   pythonDuplicateElseIfVisitor,
   pythonUnsafeFinallyVisitor,
+  pythonGetterMissingReturnVisitor,
+  pythonEmptyCharacterClassVisitor,
+  pythonExceptionReassignmentVisitor,
 ]

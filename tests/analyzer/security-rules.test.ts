@@ -850,3 +850,480 @@ describe('security/deterministic/unsafe-unzip', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// file-permissions-world-accessible
+// ===========================================================================
+
+describe('security/deterministic/file-permissions-world-accessible', () => {
+  const ruleKey = 'security/deterministic/file-permissions-world-accessible';
+
+  it('detects fs.chmod with 0o777 in JS', () => {
+    const violations = check(`fs.chmod("/tmp/file", 0o777, callback);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects fs.chmodSync with 0o777 in JS', () => {
+    const violations = check(`fs.chmodSync("/tmp/file", 0o777);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag restrictive permissions in JS', () => {
+    const violations = check(`fs.chmodSync("/tmp/file", 0o644);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('detects os.chmod with 0o777 in Python', () => {
+    const violations = check(`os.chmod("/tmp/file", 0o777)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag restrictive permissions in Python', () => {
+    const violations = check(`os.chmod("/tmp/file", 0o644)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// unrestricted-file-upload
+// ===========================================================================
+
+describe('security/deterministic/unrestricted-file-upload', () => {
+  const ruleKey = 'security/deterministic/unrestricted-file-upload';
+
+  it('detects multer without fileFilter', () => {
+    const violations = check(`const upload = multer({ dest: "uploads/" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag multer with fileFilter', () => {
+    const violations = check(`const upload = multer({ dest: "uploads/", fileFilter: myFilter });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// hidden-file-exposure
+// ===========================================================================
+
+describe('security/deterministic/hidden-file-exposure', () => {
+  const ruleKey = 'security/deterministic/hidden-file-exposure';
+
+  it('detects express.static without dotfiles option', () => {
+    const violations = check(`app.use(express.static("public"));`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag express.static with dotfiles: "deny"', () => {
+    const violations = check(`app.use(express.static("public", { dotfiles: "deny" }));`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag express.static with dotfiles: "ignore"', () => {
+    const violations = check(`app.use(express.static("public", { dotfiles: "ignore" }));`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// link-target-blank
+// ===========================================================================
+
+describe('security/deterministic/link-target-blank', () => {
+  const ruleKey = 'security/deterministic/link-target-blank';
+
+  it('detects <a target="_blank"> without rel="noopener" in JSX', () => {
+    const tree = parseCode(`const el = <a href="https://example.com" target="_blank">Link</a>;`, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', `const el = <a href="https://example.com" target="_blank">Link</a>;`, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag <a target="_blank" rel="noopener"> in JSX', () => {
+    const tree = parseCode(`const el = <a href="https://example.com" target="_blank" rel="noopener">Link</a>;`, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', `const el = <a href="https://example.com" target="_blank" rel="noopener">Link</a>;`, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// confidential-info-logging
+// ===========================================================================
+
+describe('security/deterministic/confidential-info-logging', () => {
+  const ruleKey = 'security/deterministic/confidential-info-logging';
+
+  it('detects console.log(password) in JS', () => {
+    const violations = check(`console.log(password);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects console.log(user.secretKey) in JS', () => {
+    const violations = check(`console.log(user.secretKey);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag console.log with safe variables', () => {
+    const violations = check(`console.log(username);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('detects logging.info(password) in Python', () => {
+    const violations = check(`logging.info(password)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects print(secret_token) in Python', () => {
+    const violations = check(`print(secret_token)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag print with safe variables in Python', () => {
+    const violations = check(`print(username)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// production-debug-enabled
+// ===========================================================================
+
+describe('security/deterministic/production-debug-enabled', () => {
+  const ruleKey = 'security/deterministic/production-debug-enabled';
+
+  it('detects debug: true in JS config', () => {
+    const violations = check(`const config = { debug: true };`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag debug: false in JS', () => {
+    const violations = check(`const config = { debug: false };`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('detects DEBUG = True in Python', () => {
+    const violations = check(`DEBUG = True`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects app.debug = True in Python', () => {
+    const violations = check(`app.debug = True`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag DEBUG = False in Python', () => {
+    const violations = check(`DEBUG = False`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// insecure-random
+// ===========================================================================
+
+describe('security/deterministic/insecure-random', () => {
+  const ruleKey = 'security/deterministic/insecure-random';
+
+  it('detects Math.random() for token generation in JS', () => {
+    const violations = check(`const token = Math.random().toString(36);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects random.random() for token generation in Python', () => {
+    const violations = check(`token = random.random()`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// ip-forwarding
+// ===========================================================================
+
+describe('security/deterministic/ip-forwarding', () => {
+  const ruleKey = 'security/deterministic/ip-forwarding';
+
+  it('detects req.headers["x-forwarded-for"] in JS', () => {
+    const violations = check(`const ip = req.headers["x-forwarded-for"];`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag other headers', () => {
+    const violations = check(`const ct = req.headers["content-type"];`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// hardcoded-blockchain-mnemonic
+// ===========================================================================
+
+describe('security/deterministic/hardcoded-blockchain-mnemonic', () => {
+  const ruleKey = 'security/deterministic/hardcoded-blockchain-mnemonic';
+
+  it('detects 12-word BIP39 mnemonic in JS', () => {
+    const violations = check(`const mnemonic = "abandon ability able about above absent absorb abstract absurd abuse access accident";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects 12-word BIP39 mnemonic in Python', () => {
+    const violations = check(`mnemonic = "abandon ability able about above absent absorb abstract absurd abuse access accident"`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag normal 12-word sentences', () => {
+    const violations = check(`const msg = "this is just a normal sentence that has exactly twelve words total here";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// dompurify-unsafe-config
+// ===========================================================================
+
+describe('security/deterministic/dompurify-unsafe-config', () => {
+  const ruleKey = 'security/deterministic/dompurify-unsafe-config';
+
+  it('detects DOMPurify.sanitize with ALLOW_UNKNOWN_PROTOCOLS', () => {
+    const violations = check(`const clean = DOMPurify.sanitize(dirty, { ALLOW_UNKNOWN_PROTOCOLS: true });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects DOMPurify.sanitize with ADD_TAGS', () => {
+    const violations = check(`const clean = DOMPurify.sanitize(dirty, { ADD_TAGS: ["iframe"] });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag DOMPurify.sanitize without unsafe options', () => {
+    const violations = check(`const clean = DOMPurify.sanitize(dirty);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// disabled-resource-integrity
+// ===========================================================================
+
+describe('security/deterministic/disabled-resource-integrity', () => {
+  const ruleKey = 'security/deterministic/disabled-resource-integrity';
+
+  it('detects <script src="https://..."> without integrity in JSX', () => {
+    const code = `const el = <script src="https://cdn.example.com/lib.js" />;`;
+    const tree = parseCode(code, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', code, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag <script> with integrity in JSX', () => {
+    const code = `const el = <script src="https://cdn.example.com/lib.js" integrity="sha384-abc123" />;`;
+    const tree = parseCode(code, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', code, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag local script src in JSX', () => {
+    const code = `const el = <script src="/static/app.js" />;`;
+    const tree = parseCode(code, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', code, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// path-command-injection
+// ===========================================================================
+
+describe('security/deterministic/path-command-injection', () => {
+  const ruleKey = 'security/deterministic/path-command-injection';
+
+  it('detects path.join with req.params', () => {
+    const violations = check(`const filePath = path.join(uploadDir, req.params.filename);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects path.join with req.query', () => {
+    const violations = check(`const filePath = path.join(baseDir, req.query.file);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag path.join with static args', () => {
+    const violations = check(`const filePath = path.join(__dirname, "public", "index.html");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// mixed-content
+// ===========================================================================
+
+describe('security/deterministic/mixed-content', () => {
+  const ruleKey = 'security/deterministic/mixed-content';
+
+  it('detects http:// in JSX src attribute', () => {
+    const code = `const el = <img src="http://example.com/img.png" />;`;
+    const tree = parseCode(code, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', code, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag https:// in JSX src', () => {
+    const code = `const el = <img src="https://example.com/img.png" />;`;
+    const tree = parseCode(code, 'tsx' as any);
+    const results = checkCodeRules(tree, '/test/file.tsx', code, enabledRules, 'tsx' as any);
+    expect(results.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// subprocess-security
+// ===========================================================================
+
+describe('security/deterministic/subprocess-security', () => {
+  const ruleKey = 'security/deterministic/subprocess-security';
+
+  it('detects subprocess.Popen with relative command', () => {
+    const violations = check(`subprocess.Popen(["ls", "-la"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag subprocess.Popen with absolute path', () => {
+    const violations = check(`subprocess.Popen(["/usr/bin/ls", "-la"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// partial-path-execution
+// ===========================================================================
+
+describe('security/deterministic/partial-path-execution', () => {
+  const ruleKey = 'security/deterministic/partial-path-execution';
+
+  it('detects os.execv with relative path', () => {
+    const violations = check(`os.execv("python", ["python", "script.py"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag os.execv with absolute path', () => {
+    const violations = check(`os.execv("/usr/bin/python", ["python", "script.py"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// ssl-version-unsafe
+// ===========================================================================
+
+describe('security/deterministic/ssl-version-unsafe', () => {
+  const ruleKey = 'security/deterministic/ssl-version-unsafe';
+
+  it('detects minVersion: "TLSv1" in JS', () => {
+    const violations = check(`const opts = { minVersion: "TLSv1" };`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects minVersion: "TLSv1.1" in JS', () => {
+    const violations = check(`const opts = { minVersion: "TLSv1.1" };`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag minVersion: "TLSv1.2" in JS', () => {
+    const violations = check(`const opts = { minVersion: "TLSv1.2" };`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('detects minimum_version = ssl.TLSVersion.TLSv1 in Python', () => {
+    const violations = check(`ctx.minimum_version = ssl.TLSVersion.TLSv1`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag minimum_version = ssl.TLSVersion.TLSv1_2 in Python', () => {
+    const violations = check(`ctx.minimum_version = ssl.TLSVersion.TLSv1_2`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// vulnerable-library-import
+// ===========================================================================
+
+describe('security/deterministic/vulnerable-library-import', () => {
+  const ruleKey = 'security/deterministic/vulnerable-library-import';
+
+  it('detects import pycrypto', () => {
+    const violations = check(`import pycrypto`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects import telnetlib', () => {
+    const violations = check(`import telnetlib`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag import os', () => {
+    const violations = check(`import os`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// process-start-no-shell
+// ===========================================================================
+
+describe('security/deterministic/process-start-no-shell', () => {
+  const ruleKey = 'security/deterministic/process-start-no-shell';
+
+  it('detects subprocess.Popen with string arg', () => {
+    const violations = check(`subprocess.Popen("ls -la /tmp")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag subprocess.Popen with list arg', () => {
+    const violations = check(`subprocess.Popen(["ls", "-la"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// non-octal-file-permissions
+// ===========================================================================
+
+describe('security/deterministic/non-octal-file-permissions', () => {
+  const ruleKey = 'security/deterministic/non-octal-file-permissions';
+
+  it('detects os.chmod with decimal 777', () => {
+    const violations = check(`os.chmod("/tmp/file", 777)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects os.chmod with decimal 755', () => {
+    const violations = check(`os.chmod("/tmp/file", 755)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag os.chmod with octal 0o755', () => {
+    const violations = check(`os.chmod("/tmp/file", 0o755)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// unverified-cross-origin-message
+// ===========================================================================
+
+describe('security/deterministic/unverified-cross-origin-message', () => {
+  const ruleKey = 'security/deterministic/unverified-cross-origin-message';
+
+  it('detects addEventListener("message") without origin check', () => {
+    const violations = check(`window.addEventListener("message", (e) => { doSomething(e.data); });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag addEventListener("message") with origin check', () => {
+    const violations = check(`window.addEventListener("message", (e) => { if (e.origin !== "https://trusted.com") return; doSomething(e.data); });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag addEventListener for other events', () => {
+    const violations = check(`window.addEventListener("click", handler);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});

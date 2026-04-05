@@ -466,6 +466,699 @@ export const noVarDeclarationVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// New rules
+// ---------------------------------------------------------------------------
+
+type SyntaxNode = import('tree-sitter').SyntaxNode
+
+const JS_FUNCTION_TYPES = ['function_declaration', 'function_expression', 'arrow_function', 'method_definition']
+
+function getFunctionBody(node: SyntaxNode): SyntaxNode | null {
+  if (node.type === 'method_definition') {
+    return node.namedChildren.find((c) => c.type === 'statement_block') ?? null
+  }
+  return node.childForFieldName('body')
+}
+
+function getFunctionName(node: SyntaxNode): string {
+  const nameNode = node.childForFieldName('name')
+  return nameNode?.text || 'anonymous'
+}
+
+export const cognitiveComplexityVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/cognitive-complexity',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    let complexity = 0
+    const NESTING_TYPES = new Set(['if_statement', 'for_statement', 'for_in_statement', 'while_statement', 'do_statement', 'switch_statement', 'catch_clause', 'ternary_expression'])
+    const INCREMENT_TYPES = new Set(['if_statement', 'for_statement', 'for_in_statement', 'while_statement', 'do_statement', 'switch_statement', 'catch_clause', 'ternary_expression'])
+
+    function walk(n: SyntaxNode, nesting: number) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+
+      if (INCREMENT_TYPES.has(n.type)) {
+        complexity += 1 + nesting
+      }
+      // else_clause adds 1 but no nesting increment
+      if (n.type === 'else_clause') {
+        complexity += 1
+      }
+      // Logical operators && and || add 1 each
+      if (n.type === 'binary_expression') {
+        const op = n.children.find((c) => c.type === '&&' || c.type === '||')
+        if (op) complexity += 1
+      }
+
+      const nextNesting = NESTING_TYPES.has(n.type) ? nesting + 1 : nesting
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child, nextNesting)
+      }
+    }
+
+    walk(bodyNode, 0)
+
+    if (complexity > 15) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'High cognitive complexity',
+        `Function \`${name}\` has cognitive complexity ${complexity} (max 15). Simplify by extracting helper functions or reducing nesting.`,
+        sourceCode,
+        'Break the function into smaller, focused helper functions.',
+      )
+    }
+    return null
+  },
+}
+
+export const cyclomaticComplexityVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/cyclomatic-complexity',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    let complexity = 1 // Start at 1 for the function itself
+    const DECISION_TYPES = new Set(['if_statement', 'for_statement', 'for_in_statement', 'while_statement', 'do_statement', 'catch_clause', 'ternary_expression'])
+
+    function walk(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (DECISION_TYPES.has(n.type)) complexity++
+      // switch_case (each case adds a path)
+      if (n.type === 'switch_case') complexity++
+      // Logical && and || each add a path
+      if (n.type === 'binary_expression') {
+        const op = n.children.find((c) => c.type === '&&' || c.type === '||')
+        if (op) complexity++
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (complexity > 10) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'High cyclomatic complexity',
+        `Function \`${name}\` has cyclomatic complexity ${complexity} (max 10). Consider splitting into smaller functions.`,
+        sourceCode,
+        'Reduce decision points by extracting logic into helper functions or using lookup tables.',
+      )
+    }
+    return null
+  },
+}
+
+export const tooManyLinesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-lines',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    const lineCount = bodyNode.endPosition.row - bodyNode.startPosition.row + 1
+    if (lineCount > 50) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Function too long',
+        `Function \`${name}\` has ${lineCount} lines (max 50). Split into smaller, focused functions.`,
+        sourceCode,
+        'Extract logical sections into separate helper functions.',
+      )
+    }
+    return null
+  },
+}
+
+export const tooManyBranchesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-branches',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    let branchCount = 0
+    const BRANCH_TYPES = new Set(['if_statement', 'else_clause', 'switch_case'])
+
+    function walk(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (BRANCH_TYPES.has(n.type)) branchCount++
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (branchCount > 10) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Too many branches',
+        `Function \`${name}\` has ${branchCount} branches (max 10). Consider using lookup tables or extracting logic.`,
+        sourceCode,
+        'Reduce branches by extracting logic, using strategy patterns, or lookup tables.',
+      )
+    }
+    return null
+  },
+}
+
+export const nestedSwitchVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/nested-switch',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['switch_statement'],
+  visit(node, filePath, sourceCode) {
+    // Check if any ancestor is also a switch_statement
+    let parent = node.parent
+    while (parent) {
+      if (parent.type === 'switch_statement') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Nested switch statement',
+          'Switch inside another switch is hard to read. Extract the inner switch into a helper function.',
+          sourceCode,
+          'Extract the inner switch into a separate function.',
+        )
+      }
+      parent = parent.parent
+    }
+    return null
+  },
+}
+
+export const deeplyNestedFunctionsVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/deeply-nested-functions',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['function_declaration', 'function_expression', 'arrow_function'],
+  visit(node, filePath, sourceCode) {
+    let depth = 0
+    let parent = node.parent
+    while (parent) {
+      if (parent.type === 'function_declaration' || parent.type === 'function_expression'
+        || parent.type === 'arrow_function' || parent.type === 'method_definition') {
+        depth++
+      }
+      parent = parent.parent
+    }
+
+    if (depth >= 3) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Deeply nested function',
+        `Function \`${name}\` is nested ${depth} levels deep. Extract to module scope for better readability.`,
+        sourceCode,
+        'Move the function to module scope or a separate file.',
+      )
+    }
+    return null
+  },
+}
+
+export const duplicateStringVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/duplicate-string',
+  languages: ['typescript', 'tsx', 'javascript'],
+  // Use program to scan the whole file once
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    const stringCounts = new Map<string, { count: number; firstNode: SyntaxNode }>()
+
+    function walk(n: SyntaxNode) {
+      if (n.type === 'string') {
+        // Get the text content without quotes
+        const content = n.text
+        // Skip short strings (1-2 chars inside quotes, e.g., "" or "x")
+        if (content.length <= 3) return
+        // Skip import/require strings
+        const parent = n.parent
+        if (parent?.type === 'import_statement' || parent?.type === 'call_expression') return
+
+        const existing = stringCounts.get(content)
+        if (existing) {
+          existing.count++
+        } else {
+          stringCounts.set(content, { count: 1, firstNode: n })
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(node)
+
+    // Report the first string that appears 3+ times
+    for (const [content, info] of stringCounts) {
+      if (info.count >= 3) {
+        return makeViolation(
+          this.ruleKey, info.firstNode, filePath, 'low',
+          'Duplicate string literal',
+          `String ${content} appears ${info.count} times. Extract to a named constant.`,
+          sourceCode,
+          'Extract the repeated string into a constant variable.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const unusedExpressionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unused-expression',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr) return null
+
+    // Skip call expressions (they have side effects)
+    if (expr.type === 'call_expression') return null
+    // Skip assignment expressions
+    if (expr.type === 'assignment_expression') return null
+    // Skip augmented assignment (+=, etc.)
+    if (expr.type === 'augmented_assignment_expression') return null
+    // Skip update expressions (i++, --i)
+    if (expr.type === 'update_expression') return null
+    // Skip await expressions
+    if (expr.type === 'await_expression') return null
+    // Skip yield expressions
+    if (expr.type === 'yield_expression') return null
+    // Skip delete expressions
+    if (expr.type === 'unary_expression' && expr.children[0]?.text === 'delete') return null
+    // Skip void expressions (handled by no-void)
+    if (expr.type === 'unary_expression' && expr.children[0]?.text === 'void') return null
+    // Skip string literals that are directives (first statement in function/program)
+    if (expr.type === 'string') {
+      const parent = node.parent
+      if (parent) {
+        const idx = parent.namedChildren.indexOf(node)
+        if (idx === 0) return null // likely a directive like "use strict"
+      }
+    }
+    // Skip template literals (could have side effects via tagged templates)
+    if (expr.type === 'template_string') return null
+    // Skip new expressions (constructor side effects)
+    if (expr.type === 'new_expression') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Unused expression',
+      `Expression \`${expr.text.slice(0, 50)}\` has no effect. Did you forget to assign or use the result?`,
+      sourceCode,
+      'Assign the result to a variable, use it in a condition, or remove the expression.',
+    )
+  },
+}
+
+export const redundantJumpVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-jump',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['return_statement', 'continue_statement'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'return_statement') {
+      // return with a value is not redundant
+      if (node.namedChildren.length > 0) return null
+      // Check if this is the last statement in the function body
+      const parent = node.parent
+      if (!parent) return null
+      const stmts = parent.namedChildren
+      if (stmts[stmts.length - 1] !== node) return null
+      // parent should be a statement_block that is a function body
+      const grandparent = parent.parent
+      if (!grandparent) return null
+      if (!JS_FUNCTION_TYPES.includes(grandparent.type)) return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant return',
+        'return at the end of a void function is unnecessary.',
+        sourceCode,
+        'Remove the redundant return statement.',
+      )
+    }
+
+    if (node.type === 'continue_statement') {
+      // Check if this continue is the last statement in its loop body
+      const parent = node.parent
+      if (!parent) return null
+      const stmts = parent.namedChildren
+      if (stmts[stmts.length - 1] !== node) return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant continue',
+        'continue at the end of a loop body is unnecessary.',
+        sourceCode,
+        'Remove the redundant continue statement.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const noScriptUrlVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-script-url',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    if (/javascript\s*:/i.test(text)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Script URL',
+        '`javascript:` URLs are a form of eval. Use event handlers instead.',
+        sourceCode,
+        'Replace javascript: URL with an event handler or proper navigation.',
+      )
+    }
+    return null
+  },
+}
+
+export const noThrowLiteralVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-throw-literal',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['throw_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr) return null
+    // Flag if throwing a string, number, or other literal (not an Error)
+    if (expr.type === 'string' || expr.type === 'number' || expr.type === 'template_string'
+      || expr.type === 'null' || expr.type === 'undefined' || expr.type === 'true' || expr.type === 'false') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Throw literal',
+        `Throwing a literal (${expr.text.slice(0, 30)}) loses the stack trace. Throw an Error object instead.`,
+        sourceCode,
+        'Replace with `throw new Error(...)` to preserve the stack trace.',
+      )
+    }
+    return null
+  },
+}
+
+export const noLabelVarVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-label-var',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['labeled_statement'],
+  visit(node, filePath, sourceCode) {
+    const labelNode = node.children[0]
+    if (!labelNode || labelNode.type !== 'statement_identifier') return null
+    const labelName = labelNode.text
+
+    // Walk up the scope looking for variable declarations with the same name
+    let scope: SyntaxNode | null = node.parent
+    while (scope) {
+      for (let i = 0; i < scope.namedChildCount; i++) {
+        const child = scope.namedChild(i)
+        if (child?.type === 'variable_declaration' || child?.type === 'lexical_declaration') {
+          for (let j = 0; j < child.namedChildCount; j++) {
+            const declarator = child.namedChild(j)
+            const name = declarator?.childForFieldName('name')
+            if (name?.text === labelName) {
+              return makeViolation(
+                this.ruleKey, node, filePath, 'medium',
+                'Label shadows variable',
+                `Label \`${labelName}\` has the same name as a variable in scope.`,
+                sourceCode,
+                'Rename the label to avoid confusion with the variable.',
+              )
+            }
+          }
+        }
+      }
+      scope = scope.parent
+    }
+    return null
+  },
+}
+
+export const noNewWrappersVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-new-wrappers',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const constructor = node.childForFieldName('constructor')
+    if (!constructor) return null
+    const name = constructor.text
+    if (name === 'String' || name === 'Number' || name === 'Boolean') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Primitive wrapper object',
+        `\`new ${name}()\` creates a wrapper object, not a primitive. Use \`${name}()\` without \`new\` or use a literal.`,
+        sourceCode,
+        `Remove \`new\` to call ${name}() as a type conversion, or use a literal.`,
+      )
+    }
+    return null
+  },
+}
+
+export const noProtoVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-proto',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['member_expression'],
+  visit(node, filePath, sourceCode) {
+    const prop = node.childForFieldName('property')
+    if (prop?.text === '__proto__') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        '__proto__ usage',
+        '`__proto__` is deprecated. Use `Object.getPrototypeOf()` or `Object.setPrototypeOf()` instead.',
+        sourceCode,
+        'Replace __proto__ with Object.getPrototypeOf() or Object.setPrototypeOf().',
+      )
+    }
+    return null
+  },
+}
+
+export const noVoidVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-void',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['unary_expression'],
+  visit(node, filePath, sourceCode) {
+    const operator = node.children[0]
+    if (operator?.text !== 'void') return null
+    // Allow void 0 (common idiom for undefined)
+    const operand = node.children[1]
+    if (operand?.text === '0') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Void expression',
+      'The `void` operator is confusing. Use `undefined` directly or omit the return value.',
+      sourceCode,
+      'Replace `void expr` with `undefined` or remove the expression.',
+    )
+  },
+}
+
+export const preferConstVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-const',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['lexical_declaration'],
+  visit(node, filePath, sourceCode) {
+    // Only check `let` declarations
+    if (!node.text.startsWith('let ')) return null
+
+    // Get all declarator names
+    const declarators = node.namedChildren.filter((c) => c.type === 'variable_declarator')
+    if (declarators.length === 0) return null
+
+    // For each declarator, check if its name is reassigned anywhere in the enclosing scope
+    for (const declarator of declarators) {
+      const nameNode = declarator.childForFieldName('name')
+      if (!nameNode) continue
+      const varName = nameNode.text
+
+      // Find the enclosing scope
+      let scope = node.parent
+      if (!scope) continue
+
+      let isReassigned = false
+
+      function checkReassignment(n: SyntaxNode) {
+        if (isReassigned) return
+        // assignment_expression: x = ...
+        if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
+          const left = n.childForFieldName('left')
+          if (left?.text === varName) {
+            isReassigned = true
+            return
+          }
+        }
+        // update_expression: x++, x--
+        if (n.type === 'update_expression') {
+          if (n.text.includes(varName)) {
+            isReassigned = true
+            return
+          }
+        }
+        // for-in/for-of: for (let x of ...)
+        if ((n.type === 'for_in_statement') && n !== node.parent) {
+          const left = n.childForFieldName('left')
+          if (left?.text?.includes(varName)) {
+            isReassigned = true
+            return
+          }
+        }
+        for (let i = 0; i < n.childCount; i++) {
+          const child = n.child(i)
+          if (child) checkReassignment(child)
+        }
+      }
+
+      checkReassignment(scope)
+
+      if (!isReassigned) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Prefer const',
+          `\`let ${varName}\` is never reassigned. Use \`const\` instead for immutability.`,
+          sourceCode,
+          'Replace `let` with `const`.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const noDebuggerVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-debugger',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['debugger_statement'],
+  visit(node, filePath, sourceCode) {
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Debugger statement',
+      '`debugger` statement must be removed before deploying to production.',
+      sourceCode,
+      'Remove the debugger statement.',
+    )
+  },
+}
+
+export const noAlertVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-alert',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'identifier') return null
+    if (fn.text === 'alert' || fn.text === 'confirm' || fn.text === 'prompt') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        `${fn.text}() call`,
+        `\`${fn.text}()\` blocks the UI thread and should not be used in production. Use a modal dialog or custom UI instead.`,
+        sourceCode,
+        `Replace ${fn.text}() with a non-blocking modal or custom UI component.`,
+      )
+    }
+    return null
+  },
+}
+
+export const requireAwaitVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/require-await',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    // Check if function is async
+    const isAsync = node.children.some((c) => c.type === 'async')
+    if (!isAsync) return null
+
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    let hasAwait = false
+
+    function walk(n: SyntaxNode) {
+      if (hasAwait) return
+      if (n.type === 'await_expression') {
+        hasAwait = true
+        return
+      }
+      // Don't descend into nested functions
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (!hasAwait) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Async without await',
+        `Async function \`${name}\` does not use \`await\`. Remove the \`async\` keyword or add an \`await\`.`,
+        sourceCode,
+        'Remove the `async` keyword if the function does not need to be async.',
+      )
+    }
+    return null
+  },
+}
+
+export const noReturnAwaitVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-return-await',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['return_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr || expr.type !== 'await_expression') return null
+
+    // Check if we're inside an async function
+    let parent = node.parent
+    while (parent) {
+      if (JS_FUNCTION_TYPES.includes(parent.type)) {
+        const isAsync = parent.children.some((c) => c.type === 'async')
+        if (isAsync) {
+          // Check it's NOT inside a try block (return await in try is useful)
+          let tryParent = node.parent
+          while (tryParent && tryParent !== parent) {
+            if (tryParent.type === 'try_statement') return null
+            tryParent = tryParent.parent
+          }
+
+          return makeViolation(
+            this.ruleKey, node, filePath, 'low',
+            'Redundant return await',
+            '`return await` is redundant in an async function. The function already returns a promise.',
+            sourceCode,
+            'Remove the `await` keyword: `return promise` instead of `return await promise`.',
+          )
+        }
+        break
+      }
+      parent = parent.parent
+    }
+    return null
+  },
+}
+
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   noExplicitAnyVisitor,
@@ -481,4 +1174,24 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   noUselessCatchVisitor,
   preferTemplateLiteralVisitor,
   noVarDeclarationVisitor,
+  cognitiveComplexityVisitor,
+  cyclomaticComplexityVisitor,
+  tooManyLinesVisitor,
+  tooManyBranchesVisitor,
+  nestedSwitchVisitor,
+  deeplyNestedFunctionsVisitor,
+  duplicateStringVisitor,
+  unusedExpressionVisitor,
+  redundantJumpVisitor,
+  noScriptUrlVisitor,
+  noThrowLiteralVisitor,
+  noLabelVarVisitor,
+  noNewWrappersVisitor,
+  noProtoVisitor,
+  noVoidVisitor,
+  preferConstVisitor,
+  noDebuggerVisitor,
+  noAlertVisitor,
+  requireAwaitVisitor,
+  noReturnAwaitVisitor,
 ]

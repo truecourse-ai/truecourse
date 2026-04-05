@@ -585,6 +585,785 @@ def foo(x):
 });
 
 // ---------------------------------------------------------------------------
+// New deterministic rules (batch 2) — JS/TS
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/cognitive-complexity', () => {
+  it('detects function with cognitive complexity > 15', () => {
+    const violations = check(`
+      function complex(a: number, b: number, c: number, d: number) {
+        if (a > 0) {
+          if (b > 0) {
+            if (c > 0) {
+              if (d > 0) {
+                for (let i = 0; i < 10; i++) {
+                  if (i % 2 === 0) {
+                    while (a > 0) {
+                      a--;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (a || b) {
+          if (c && d) {
+            return true;
+          }
+        }
+        return false;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag simple function', () => {
+    const violations = check(`
+      function simple(x: number): number {
+        if (x > 0) return x;
+        return -x;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/cyclomatic-complexity', () => {
+  it('detects function with cyclomatic complexity > 10', () => {
+    const violations = check(`
+      function route(action: string) {
+        if (action === "a") return 1;
+        if (action === "b") return 2;
+        if (action === "c") return 3;
+        if (action === "d") return 4;
+        if (action === "e") return 5;
+        if (action === "f") return 6;
+        if (action === "g") return 7;
+        if (action === "h") return 8;
+        if (action === "i") return 9;
+        if (action === "j") return 10;
+        if (action === "k") return 11;
+        return 0;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cyclomatic-complexity');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag simple function', () => {
+    const violations = check(`
+      function add(a: number, b: number): number {
+        return a + b;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cyclomatic-complexity');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/too-many-lines', () => {
+  it('detects function with > 50 lines', () => {
+    const lines = Array.from({ length: 55 }, (_, i) => `  const v${i} = ${i};`).join('\n');
+    const violations = check(`function longFn() {\n${lines}\n}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-lines');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag short function', () => {
+    const violations = check(`function short() { return 1; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-lines');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/too-many-branches', () => {
+  it('detects function with > 10 branches', () => {
+    const violations = check(`
+      function manyBranches(x: number) {
+        if (x === 1) return 'a';
+        else if (x === 2) return 'b';
+        else if (x === 3) return 'c';
+        else if (x === 4) return 'd';
+        else if (x === 5) return 'e';
+        else if (x === 6) return 'f';
+        else if (x === 7) return 'g';
+        else if (x === 8) return 'h';
+        else if (x === 9) return 'i';
+        else if (x === 10) return 'j';
+        else if (x === 11) return 'k';
+        else return 'z';
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-branches');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag function with few branches', () => {
+    const violations = check(`
+      function fewBranches(x: number) {
+        if (x > 0) return 'positive';
+        else return 'non-positive';
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-branches');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/nested-switch', () => {
+  it('detects switch inside switch', () => {
+    const violations = check(`
+      function test(a: string, b: string) {
+        switch (a) {
+          case 'x':
+            switch (b) {
+              case 'y': return 1;
+            }
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/nested-switch');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag single switch', () => {
+    const violations = check(`
+      function test(a: string) {
+        switch (a) {
+          case 'x': return 1;
+          case 'y': return 2;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/nested-switch');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/deeply-nested-functions', () => {
+  it('detects function 3+ levels deep', () => {
+    const violations = check(`
+      function a() {
+        function b() {
+          function c() {
+            const d = () => 1;
+          }
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/deeply-nested-functions');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag 2 levels of nesting', () => {
+    const violations = check(`
+      function a() {
+        function b() {
+          return 1;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/deeply-nested-functions');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/duplicate-string', () => {
+  it('detects string used 3+ times', () => {
+    const violations = check(`
+      const a = "repeated-value";
+      const b = "repeated-value";
+      const c = "repeated-value";
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/duplicate-string');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag string used less than 3 times', () => {
+    const violations = check(`
+      const a = "unique-one";
+      const b = "unique-two";
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/duplicate-string');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unused-expression', () => {
+  it('detects expression with no side effect', () => {
+    const violations = check(`
+      function foo() {
+        x + 1;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag function calls', () => {
+    const violations = check(`
+      function foo() {
+        doSomething();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag assignments', () => {
+    const violations = check(`
+      function foo() {
+        x = 1;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-expression');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/redundant-jump', () => {
+  it('detects redundant return at end of void function', () => {
+    const violations = check(`
+      function foo() {
+        doSomething();
+        return;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag return with value', () => {
+    const violations = check(`
+      function foo() {
+        return 42;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-script-url', () => {
+  it('detects javascript: URL in string', () => {
+    const violations = check(`const href = "javascript:void(0)";`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-script-url');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag regular strings', () => {
+    const violations = check(`const url = "https://example.com";`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-script-url');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-throw-literal', () => {
+  it('detects throw string', () => {
+    const violations = check(`throw "something went wrong";`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-throw-literal');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag throw new Error', () => {
+    const violations = check(`throw new Error("something went wrong");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-throw-literal');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-label-var', () => {
+  it('detects label with same name as variable', () => {
+    const violations = check(`
+      function foo() {
+        let x = 1;
+        x: for (let i = 0; i < 10; i++) {
+          break x;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-label-var');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag label with unique name', () => {
+    const violations = check(`
+      function foo() {
+        let x = 1;
+        outer: for (let i = 0; i < 10; i++) {
+          break outer;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-label-var');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-new-wrappers', () => {
+  it('detects new String()', () => {
+    const violations = check(`const s = new String("hello");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-new-wrappers');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects new Number()', () => {
+    const violations = check(`const n = new Number(42);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-new-wrappers');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects new Boolean()', () => {
+    const violations = check(`const b = new Boolean(true);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-new-wrappers');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag new Error()', () => {
+    const violations = check(`const e = new Error("oops");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-new-wrappers');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-proto', () => {
+  it('detects __proto__ usage', () => {
+    const violations = check(`const proto = obj.__proto__;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-proto');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag Object.getPrototypeOf', () => {
+    const violations = check(`const proto = Object.getPrototypeOf(obj);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-proto');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-void', () => {
+  it('detects void expression', () => {
+    const violations = check(`void someFunction();`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag void 0', () => {
+    const violations = check(`const undef = void 0;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/prefer-const', () => {
+  it('detects let that is never reassigned', () => {
+    const violations = check(`
+      function foo() {
+        let x = 1;
+        return x + 1;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-const');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag let that is reassigned', () => {
+    const violations = check(`
+      function foo() {
+        let x = 1;
+        x = 2;
+        return x;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-const');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag const', () => {
+    const violations = check(`
+      function foo() {
+        const x = 1;
+        return x + 1;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-const');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-debugger', () => {
+  it('detects debugger statement in JS/TS', () => {
+    const violations = check(`function foo() { debugger; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-debugger');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag regular code', () => {
+    const violations = check(`function foo() { return 1; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-debugger');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-alert', () => {
+  it('detects alert()', () => {
+    const violations = check(`alert("Hello");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-alert');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects confirm()', () => {
+    const violations = check(`confirm("Are you sure?");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-alert');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects prompt()', () => {
+    const violations = check(`prompt("Enter name:");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-alert');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag other function calls', () => {
+    const violations = check(`console.error("test");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-alert');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/require-await', () => {
+  it('detects async function without await', () => {
+    const violations = check(`
+      async function fetchData() {
+        return someValue;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag async function with await', () => {
+    const violations = check(`
+      async function fetchData() {
+        const data = await fetch("/api");
+        return data;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag non-async function', () => {
+    const violations = check(`
+      function fetchData() {
+        return someValue;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/no-return-await', () => {
+  it('detects return await in async function', () => {
+    const violations = check(`
+      async function fetchData() {
+        return await fetch("/api");
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-return-await');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag return without await', () => {
+    const violations = check(`
+      async function fetchData() {
+        const data = await fetch("/api");
+        return data;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-return-await');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag return await inside try block', () => {
+    const violations = check(`
+      async function fetchData() {
+        try {
+          return await fetch("/api");
+        } catch (e) {
+          return null;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-return-await');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New deterministic rules (batch 2) — Python
+// ---------------------------------------------------------------------------
+
+describe('Python: code-quality/deterministic/cognitive-complexity', () => {
+  it('detects function with high cognitive complexity', () => {
+    const violations = check(`
+def complex_fn(a, b, c, d):
+    if a > 0:
+        if b > 0:
+            if c > 0:
+                if d > 0:
+                    for i in range(10):
+                        if i % 2 == 0:
+                            while a > 0:
+                                a -= 1
+    if a or b:
+        if c and d:
+            return True
+    return False
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag simple function', () => {
+    const violations = check(`
+def simple(x):
+    if x > 0:
+        return x
+    return -x
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cognitive-complexity');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/cyclomatic-complexity', () => {
+  it('detects function with cyclomatic complexity > 10', () => {
+    const violations = check(`
+def route(action):
+    if action == "a":
+        return 1
+    if action == "b":
+        return 2
+    if action == "c":
+        return 3
+    if action == "d":
+        return 4
+    if action == "e":
+        return 5
+    if action == "f":
+        return 6
+    if action == "g":
+        return 7
+    if action == "h":
+        return 8
+    if action == "i":
+        return 9
+    if action == "j":
+        return 10
+    if action == "k":
+        return 11
+    return 0
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cyclomatic-complexity');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag simple function', () => {
+    const violations = check(`
+def add(a, b):
+    return a + b
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/cyclomatic-complexity');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/too-many-lines', () => {
+  it('detects function with > 50 lines', () => {
+    const lines = Array.from({ length: 55 }, (_, i) => `    v${i} = ${i}`).join('\n');
+    const violations = check(`def long_fn():\n${lines}`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-lines');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag short function', () => {
+    const violations = check(`
+def short():
+    return 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-lines');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/too-many-branches', () => {
+  it('detects function with > 10 branches', () => {
+    const violations = check(`
+def many_branches(x):
+    if x == 1:
+        return 'a'
+    elif x == 2:
+        return 'b'
+    elif x == 3:
+        return 'c'
+    elif x == 4:
+        return 'd'
+    elif x == 5:
+        return 'e'
+    elif x == 6:
+        return 'f'
+    elif x == 7:
+        return 'g'
+    elif x == 8:
+        return 'h'
+    elif x == 9:
+        return 'i'
+    elif x == 10:
+        return 'j'
+    else:
+        return 'z'
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-branches');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag function with few branches', () => {
+    const violations = check(`
+def few(x):
+    if x > 0:
+        return 'positive'
+    else:
+        return 'non-positive'
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/too-many-branches');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/deeply-nested-functions', () => {
+  it('detects function 3+ levels deep', () => {
+    const violations = check(`
+def a():
+    def b():
+        def c():
+            def d():
+                return 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/deeply-nested-functions');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag 2 levels', () => {
+    const violations = check(`
+def a():
+    def b():
+        return 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/deeply-nested-functions');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/duplicate-string', () => {
+  it('detects string used 3+ times', () => {
+    const violations = check(`
+a = "repeated-value"
+b = "repeated-value"
+c = "repeated-value"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/duplicate-string');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag string used less than 3 times', () => {
+    const violations = check(`
+a = "unique-one"
+b = "unique-two"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/duplicate-string');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/redundant-jump', () => {
+  it('detects redundant return at end of function', () => {
+    const violations = check(`
+def foo():
+    do_something()
+    return
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag return with value', () => {
+    const violations = check(`
+def foo():
+    return 42
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/no-debugger', () => {
+  it('detects breakpoint()', () => {
+    const violations = check(`
+def foo():
+    breakpoint()
+    return 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-debugger');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects pdb.set_trace()', () => {
+    const violations = check(`
+import pdb
+def foo():
+    pdb.set_trace()
+    return 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-debugger');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag regular function calls', () => {
+    const violations = check(`
+def foo():
+    return bar()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-debugger');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('Python: code-quality/deterministic/require-await', () => {
+  it('detects async function without await', () => {
+    const violations = check(`
+async def fetch_data():
+    return some_value
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag async function with await', () => {
+    const violations = check(`
+async def fetch_data():
+    data = await fetch("/api")
+    return data
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Language isolation
 // ---------------------------------------------------------------------------
 

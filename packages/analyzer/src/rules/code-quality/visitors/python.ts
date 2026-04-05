@@ -251,6 +251,360 @@ export const pythonUnnecessaryElseAfterReturnVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// New rules
+// ---------------------------------------------------------------------------
+
+type SyntaxNode = import('tree-sitter').SyntaxNode
+
+export const pythonCognitiveComplexityVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/cognitive-complexity',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const bodyNode = node.childForFieldName('body')
+    if (!bodyNode) return null
+
+    let complexity = 0
+    const NESTING_TYPES = new Set(['if_statement', 'for_statement', 'while_statement', 'except_clause', 'with_statement'])
+    const INCREMENT_TYPES = new Set(['if_statement', 'for_statement', 'while_statement', 'except_clause', 'with_statement'])
+
+    function walk(n: SyntaxNode, nesting: number) {
+      if (n.type === 'function_definition' && n !== node) return
+
+      if (INCREMENT_TYPES.has(n.type)) {
+        complexity += 1 + nesting
+      }
+      if (n.type === 'else_clause' || n.type === 'elif_clause') {
+        complexity += 1
+      }
+      if (n.type === 'boolean_operator') {
+        complexity += 1
+      }
+
+      const nextNesting = NESTING_TYPES.has(n.type) ? nesting + 1 : nesting
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child, nextNesting)
+      }
+    }
+
+    walk(bodyNode, 0)
+
+    if (complexity > 15) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'High cognitive complexity',
+        `Function \`${name}\` has cognitive complexity ${complexity} (max 15). Simplify by extracting helper functions or reducing nesting.`,
+        sourceCode,
+        'Break the function into smaller, focused helper functions.',
+      )
+    }
+    return null
+  },
+}
+
+export const pythonCyclomaticComplexityVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/cyclomatic-complexity',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const bodyNode = node.childForFieldName('body')
+    if (!bodyNode) return null
+
+    let complexity = 1
+    const DECISION_TYPES = new Set(['if_statement', 'for_statement', 'while_statement', 'except_clause'])
+
+    function walk(n: SyntaxNode) {
+      if (n.type === 'function_definition' && n !== node) return
+      if (DECISION_TYPES.has(n.type)) complexity++
+      if (n.type === 'elif_clause') complexity++
+      if (n.type === 'boolean_operator') complexity++
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (complexity > 10) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'High cyclomatic complexity',
+        `Function \`${name}\` has cyclomatic complexity ${complexity} (max 10). Consider splitting into smaller functions.`,
+        sourceCode,
+        'Reduce decision points by extracting logic into helper functions.',
+      )
+    }
+    return null
+  },
+}
+
+export const pythonTooManyLinesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-lines',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const bodyNode = node.childForFieldName('body')
+    if (!bodyNode) return null
+
+    const lineCount = bodyNode.endPosition.row - bodyNode.startPosition.row + 1
+    if (lineCount > 50) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Function too long',
+        `Function \`${name}\` has ${lineCount} lines (max 50). Split into smaller, focused functions.`,
+        sourceCode,
+        'Extract logical sections into separate helper functions.',
+      )
+    }
+    return null
+  },
+}
+
+export const pythonTooManyBranchesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-branches',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const bodyNode = node.childForFieldName('body')
+    if (!bodyNode) return null
+
+    let branchCount = 0
+    const BRANCH_TYPES = new Set(['if_statement', 'elif_clause', 'else_clause'])
+
+    function walk(n: SyntaxNode) {
+      if (n.type === 'function_definition' && n !== node) return
+      if (BRANCH_TYPES.has(n.type)) branchCount++
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (branchCount > 10) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Too many branches',
+        `Function \`${name}\` has ${branchCount} branches (max 10). Consider using lookup tables or extracting logic.`,
+        sourceCode,
+        'Reduce branches by extracting logic or using dictionaries for dispatch.',
+      )
+    }
+    return null
+  },
+}
+
+export const pythonDeeplyNestedFunctionsVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/deeply-nested-functions',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    let depth = 0
+    let parent = node.parent
+    while (parent) {
+      if (parent.type === 'function_definition') depth++
+      parent = parent.parent
+    }
+
+    if (depth >= 3) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Deeply nested function',
+        `Function \`${name}\` is nested ${depth} levels deep. Extract to module scope for better readability.`,
+        sourceCode,
+        'Move the function to module scope or a separate file.',
+      )
+    }
+    return null
+  },
+}
+
+export const pythonDuplicateStringVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/duplicate-string',
+  languages: ['python'],
+  nodeTypes: ['module'],
+  visit(node, filePath, sourceCode) {
+    const stringCounts = new Map<string, { count: number; firstNode: SyntaxNode }>()
+
+    function walk(n: SyntaxNode) {
+      if (n.type === 'string') {
+        const content = n.text
+        if (content.length <= 3) return
+        // Skip imports
+        const parent = n.parent
+        if (parent?.type === 'import_from_statement' || parent?.type === 'import_statement') return
+
+        const existing = stringCounts.get(content)
+        if (existing) {
+          existing.count++
+        } else {
+          stringCounts.set(content, { count: 1, firstNode: n })
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(node)
+
+    for (const [content, info] of stringCounts) {
+      if (info.count >= 3) {
+        return makeViolation(
+          this.ruleKey, info.firstNode, filePath, 'low',
+          'Duplicate string literal',
+          `String ${content} appears ${info.count} times. Extract to a named constant.`,
+          sourceCode,
+          'Extract the repeated string into a constant variable.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const pythonRedundantJumpVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-jump',
+  languages: ['python'],
+  nodeTypes: ['return_statement', 'continue_statement'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'return_statement') {
+      // return with a value is not redundant
+      if (node.namedChildren.length > 0) return null
+      const parent = node.parent
+      if (!parent || parent.type !== 'block') return null
+      const stmts = parent.namedChildren
+      if (stmts[stmts.length - 1] !== node) return null
+      // parent.parent should be a function_definition
+      const grandparent = parent.parent
+      if (!grandparent || grandparent.type !== 'function_definition') return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant return',
+        'return at the end of a function with no value is unnecessary.',
+        sourceCode,
+        'Remove the redundant return statement.',
+      )
+    }
+
+    if (node.type === 'continue_statement') {
+      const parent = node.parent
+      if (!parent || parent.type !== 'block') return null
+      const stmts = parent.namedChildren
+      if (stmts[stmts.length - 1] !== node) return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant continue',
+        'continue at the end of a loop body is unnecessary.',
+        sourceCode,
+        'Remove the redundant continue statement.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const pythonNoDebuggerVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-debugger',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // breakpoint()
+    if (fn.type === 'identifier' && fn.text === 'breakpoint') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Debugger statement',
+        '`breakpoint()` must be removed before deploying to production.',
+        sourceCode,
+        'Remove the breakpoint() call.',
+      )
+    }
+
+    // pdb.set_trace()
+    if (fn.type === 'attribute') {
+      const obj = fn.childForFieldName('object')
+      const attr = fn.childForFieldName('attribute')
+      if (obj?.text === 'pdb' && attr?.text === 'set_trace') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Debugger statement',
+          '`pdb.set_trace()` must be removed before deploying to production.',
+          sourceCode,
+          'Remove the pdb.set_trace() call.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/require-await',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    // Check if function is async (has async keyword before def)
+    const isAsync = node.children.some((c) => c.type === 'async')
+    if (!isAsync) return null
+
+    const bodyNode = node.childForFieldName('body')
+    if (!bodyNode) return null
+
+    let hasAwait = false
+
+    function walk(n: SyntaxNode) {
+      if (hasAwait) return
+      if (n.type === 'await') {
+        hasAwait = true
+        return
+      }
+      // Don't descend into nested functions
+      if (n.type === 'function_definition' && n !== node) return
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (!hasAwait) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Async without await',
+        `Async function \`${name}\` does not use \`await\`. Remove the \`async\` keyword or add an \`await\`.`,
+        sourceCode,
+        'Remove the `async` keyword if the function does not need to be async.',
+      )
+    }
+    return null
+  },
+}
+
 export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonPrintVisitor,
   pythonExplicitAnyVisitor,
@@ -260,4 +614,13 @@ export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonCollapsibleIfVisitor,
   pythonNoEmptyFunctionVisitor,
   pythonUnnecessaryElseAfterReturnVisitor,
+  pythonCognitiveComplexityVisitor,
+  pythonCyclomaticComplexityVisitor,
+  pythonTooManyLinesVisitor,
+  pythonTooManyBranchesVisitor,
+  pythonDeeplyNestedFunctionsVisitor,
+  pythonDuplicateStringVisitor,
+  pythonRedundantJumpVisitor,
+  pythonNoDebuggerVisitor,
+  pythonRequireAwaitVisitor,
 ]
