@@ -2021,7 +2021,7 @@ Collect anonymous, privacy-safe usage metrics to understand real adoption — ho
 - Opt-out, not opt-in (industry standard for dev tools)
 - No telemetry in test/CI environments (`CI=true` env var disables automatically)
 
-## Phase 21: CLI & Setup Improvements `STATUS: TODO`
+## Phase 21: CLI & Setup Improvements `STATUS: DONE`
 
 ### Dashboard Command
 
@@ -2887,25 +2887,17 @@ Architecture-level violations (service-level, no line number) appear in a dedica
 
 ---
 
-## Phase 30: Comprehensive Code Rules `STATUS: TODO`
+## Phase 30: Comprehensive Code Rules `STATUS: IN PROGRESS`
 
-Build all valuable ESLint, @typescript-eslint, eslint-plugin-security, eslint-plugin-sonarjs, and SonarQube rules into TrueCourse's tree-sitter analysis engine. The goal is not to match these tools — it's to **beat them**: better detection, fewer false positives, one tool instead of four.
+Build all valuable ESLint, @typescript-eslint, eslint-plugin-security, eslint-plugin-sonarjs, Ruff, and SonarQube rules into TrueCourse's tree-sitter analysis engine. The goal is not to match these tools — it's to **beat them**: better detection, fewer false positives, one tool instead of four.
 
-Detailed rule inventory and implementation approach in `docs/ESLINT-SONARQUBE-COVERAGE.md`.
+Master rule catalog: `docs/research/ALL-RULES.md` (1,156 rules). Private sync repo for tracking linter releases: `truecourse-rules-sync`.
 
-Stylistic/formatting rules (~80 ESLint rules) are intentionally skipped — that's Prettier's job.
+Rule domains: security, bugs, architecture, code-quality, style, performance, reliability, database.
 
-### 30.1 AST Pattern Matching (Priority 1 — Low Effort) `STATUS: TODO`
+### 30.1 AST Pattern Matching `STATUS: DONE`
 
-Pure tree-sitter node matching — same approach as existing rules. 22 new rules.
-
-**Bugs (13 rules):** `no-self-compare`, `no-cond-assign`, `use-isnan`, `no-unreachable`, `no-async-promise-executor`, `no-template-curly-in-string`, `no-identical-conditions`, `no-identical-expressions`, `no-one-iteration-loop`, `no-constructor-return`, `no-setter-return`, `no-promise-executor-return`, `no-fallthrough`
-
-**Security (5 rules):** `eval-with-expression`, `command-injection`, `non-literal-regexp`, `no-prototype-builtins`, `object-injection`
-
-**Complexity (4 rules):** `cognitive-complexity` (SonarQube's flagship metric, threshold 15), `max-nesting-depth`, `max-params`, `max-function-lines`
-
-All rules support both JS/TS and Python where applicable.
+Pure tree-sitter node matching. 958 rules implemented across all 8 domains with 2,622 tests. File-per-rule visitor structure. 92 rules skipped (need type inference/data flow — see 30.2/30.3). 81 LLM rules need prompt text (no code).
 
 ### 30.2 Local Data-Flow Tracking (Priority 2 — Medium Effort) `STATUS: TODO`
 
@@ -2964,145 +2956,7 @@ Token-based comparison algorithm to detect copy-pasted code blocks across the co
 4. Merge overlapping matches into contiguous duplicate blocks
 5. Report duplicate blocks with file locations and percentage
 
-### 30.6 Head-to-Head Competition Framework `STATUS: TODO`
-
-We don't just want to match ESLint + SonarQube + madge + gitleaks — we want to **prove we're better**. This requires a systematic testing and benchmarking approach.
-
-#### Benchmark Repository Suite
-
-Curate a set of real-world open-source repos for head-to-head comparison:
-
-- **Repos with known circular deps** — compare madge vs TrueCourse
-- **Repos with planted/known secrets** — compare gitleaks vs TrueCourse
-- **Repos previously scanned by SonarQube** — compare findings
-- **Our own test fixtures** — files with intentional bugs, security holes, code smells, and crucially: files with tricky patterns that cause false positives in other tools
-
-#### Automated Comparison Test Suite
-
-For each rule we implement, an automated test that:
-
-1. Runs ESLint / SonarQube / madge / gitleaks on the same code
-2. Runs TrueCourse on the same code
-3. Compares:
-   - **True positives** — did we catch everything they caught?
-   - **Unique finds** — did we catch things they missed?
-   - **False positives** — did we flag things they correctly ignored?
-   - **False negatives** — did they flag things we missed?
-
-Runs in CI on every change to the rules engine. Any regression = build fails.
-
-#### False Positive Rate Tracking
-
-For each rule, track FP rate across benchmark repos:
-
-- **Target: lower FP rate than the tool we're replacing**
-- If a rule has >5% FP rate on benchmarks, fix it before shipping
-- Dashboard tracking FP rates over time (like a test coverage report but for accuracy)
-
-#### Performance Benchmark
-
-TrueCourse must be fast enough to replace these tools in real workflows:
-
-- **Full analysis** — target: < 2x ESLint time on same repo
-- **Staged files check (git hook)** — target: < 5 seconds
-- **Incremental analysis** — target: < 1 second for single file change
-- Benchmark runs on repos of varying sizes (100, 1K, 10K, 50K files)
-
-#### Coverage Scorecard
-
-A comparison table updated with each release, tracking what TrueCourse covers vs the competition:
-
-```
-                        ESLint  SonarQube  madge  gitleaks  TrueCourse
-Bug detection             ✅       ✅       —       —         ✅
-Code smells               ✅       ✅       —       —         ✅
-Security (single-file)    ⚠️       ✅       —       —         ✅
-Security (cross-file)     —        ✅       —       —         ✅
-Secret scanning           —        —        —       ✅        ✅
-Circular deps             —        —        ✅      —         ✅
-Architecture analysis     —        —        —       —         ✅
-Type-aware checks         ✅       ✅       —       —         ✅
-Duplicate detection       —        ✅       —       —         ✅
-Custom rules              ✅       ✅       —       —         ✅
-False positive rate       Medium   Medium   Low     Low       Lower
-Setup complexity          Config   Server   npx     npx       One tool
-```
-
-### 30.7 Linter Config Import `STATUS: TODO`
-
-Import existing linter configurations so users can switch to TrueCourse and get the exact same behavior — same rules enabled, same severities, same exclusions. Then delete ESLint/Ruff.
-
-#### Supported Linters
-
-- **JS/TS**: ESLint (`.eslintrc`, `eslint.config.js`, `eslint.config.mjs`)
-- **Python**: Ruff (`ruff.toml`, `pyproject.toml [tool.ruff]`), Pylint (`.pylintrc`, `pyproject.toml [tool.pylint]`)
-- More linters added as Phase 12 (Multi-Language) expands language support
-
-#### How It Works
-
-```bash
-truecourse linter import              # Auto-detect linter config in current project
-truecourse linter import --from eslint
-truecourse linter import --from ruff
-```
-
-1. Reads the linter config file
-2. Maps every linter rule to its TrueCourse equivalent
-3. Applies their settings: enabled/disabled state, severity, file exclusions
-4. For custom ESLint plugin rules with no TrueCourse equivalent: flags them as "not covered — use `truecourse rules import` (Phase 23) to create custom rules for these"
-
-#### Migration Report
-
-```
-Imported ESLint config (.eslintrc.json):
-
- Matched (TrueCourse will use your settings):
-   no-console → off (disabled)
-   no-explicit-any → warn
-   no-empty → off (disabled)
-   no-self-compare → error
-   ... 47 more
-
- Not covered (need custom rules):
-   @typescript-eslint/naming-convention → warn
-   my-plugin/custom-rule → error
-   ... 3 more
-
- TrueCourse extras (not in your ESLint):
-   arch/circular-service-dependency
-   arch/god-service
-   code/cognitive-complexity
-   ... 20 more
-
-You can safely remove ESLint. Run `truecourse rules import --text "..."` for uncovered rules.
-```
-
-#### CLI
-
-```bash
-truecourse linter import              # Auto-detect and import
-truecourse linter import --from eslint
-truecourse linter import --from ruff
-truecourse linter status              # Show current linter integration state
-```
-
-#### Rule Mapping Table
-
-A maintained mapping between linter rule IDs and TrueCourse rule keys. Examples:
-
-| ESLint Rule | TrueCourse Rule |
-|---|---|
-| `no-console` | `code/console-log` |
-| `no-explicit-any` | `code/no-explicit-any` |
-| `no-empty` | `code/empty-catch` |
-| `no-self-compare` | `code/no-self-compare` |
-| `no-cond-assign` | `code/no-cond-assign` |
-| `@typescript-eslint/no-floating-promises` | `code/no-floating-promises` |
-| `sonarjs/cognitive-complexity` | `code/cognitive-complexity` |
-
-This table grows as we implement more rules in 30.1–30.5.
-
-### 30.8 Secret Scanning Overhaul `STATUS: TODO`
+### 30.6 Secret Scanning Overhaul `STATUS: TODO`
 
 Overhaul hardcoded secret detection to dramatically reduce false positives and expand coverage. Current implementation uses 6 regex patterns with basic filtering. Detailed research and implementation priorities in `docs/SECRET-DETECTION-RESEARCH.md`.
 
@@ -3116,7 +2970,7 @@ Overhaul hardcoded secret detection to dramatically reduce false positives and e
 6. **Keyword pre-filtering** — fast substring check before regex (performance)
 7. **Per-rule allowlists** — surgical FP suppression
 
-### 30.9 Smarter Circular Dependency Detection `STATUS: TODO`
+### 30.7 Smarter Circular Dependency Detection `STATUS: TODO`
 
 Improve circular dependency detection with proper graph algorithms and lazy import awareness. Current implementation uses simple bidirectional edge checking. Detailed research in `docs/MADGE-RESEARCH.md`.
 
@@ -3178,3 +3032,109 @@ Add a Settings page to the web UI for per-repo configuration. Web UI counterpart
 4. Toggle "Code" back on → all categories enabled
 5. Visual indicator shows when repo differs from global default
 6. `pnpm build` and `pnpm test` pass
+
+---
+
+## Phase 32: Head-to-Head Competition Framework `STATUS: TODO`
+
+Prove TrueCourse is better than the tools it replaces. Systematic benchmarking against ESLint, SonarQube, madge, and gitleaks.
+
+### Benchmark Repository Suite
+
+Curate real-world open-source repos for head-to-head comparison:
+
+- **Repos with known circular deps** — compare madge vs TrueCourse
+- **Repos with planted/known secrets** — compare gitleaks vs TrueCourse
+- **Repos previously scanned by SonarQube** — compare findings
+- **Test fixtures** — intentional bugs, security holes, code smells, and patterns that cause false positives in other tools
+
+### Automated Comparison Test Suite
+
+For each rule, automated test that:
+
+1. Runs ESLint / SonarQube / madge / gitleaks on the same code
+2. Runs TrueCourse on the same code
+3. Compares: true positives, unique finds, false positives, false negatives
+
+Runs in CI on every change to the rules engine. Any regression = build fails.
+
+### False Positive Rate Tracking
+
+- Target: lower FP rate than the tool we're replacing
+- If a rule has >5% FP rate on benchmarks, fix before shipping
+- Dashboard tracking FP rates over time
+
+### Performance Benchmark
+
+- Full analysis — target: < 2x ESLint time on same repo
+- Staged files check (git hook) — target: < 5 seconds
+- Incremental analysis — target: < 1 second for single file change
+- Benchmark on repos of varying sizes (100, 1K, 10K, 50K files)
+
+### Coverage Scorecard
+
+```
+                        ESLint  SonarQube  madge  gitleaks  TrueCourse
+Bug detection             ✅       ✅       —       —         ✅
+Code smells               ✅       ✅       —       —         ✅
+Security (single-file)    ⚠️       ✅       —       —         ✅
+Security (cross-file)     —        ✅       —       —         ✅
+Secret scanning           —        —        —       ✅        ✅
+Circular deps             —        —        ✅      —         ✅
+Architecture analysis     —        —        —       —         ✅
+Type-aware checks         ✅       ✅       —       —         ✅
+Duplicate detection       —        ✅       —       —         ✅
+Custom rules              ✅       ✅       —       —         ✅
+False positive rate       Medium   Medium   Low     Low       Lower
+Setup complexity          Config   Server   npx     npx       One tool
+```
+
+---
+
+## Phase 33: Linter Config Import `STATUS: TODO`
+
+Import existing linter configurations so users can switch to TrueCourse and get the exact same behavior — same rules enabled, same severities, same exclusions. Then delete ESLint/Ruff.
+
+### Supported Linters
+
+- **JS/TS**: ESLint (`.eslintrc`, `eslint.config.js`, `eslint.config.mjs`)
+- **Python**: Ruff (`ruff.toml`, `pyproject.toml [tool.ruff]`), Pylint (`.pylintrc`, `pyproject.toml [tool.pylint]`)
+- More linters added as Phase 12 (Multi-Language) expands language support
+
+### How It Works
+
+```bash
+truecourse linter import              # Auto-detect linter config in current project
+truecourse linter import --from eslint
+truecourse linter import --from ruff
+```
+
+1. Reads the linter config file
+2. Maps every linter rule to its TrueCourse equivalent
+3. Applies settings: enabled/disabled state, severity, file exclusions
+4. For custom plugin rules with no equivalent: flags as "not covered — use `truecourse rules import` (Phase 23) to create custom rules"
+
+### Migration Report
+
+```
+Imported ESLint config (.eslintrc.json):
+
+ Matched (TrueCourse will use your settings):
+   no-console → off (disabled)
+   no-explicit-any → warn
+   no-self-compare → error
+   ... 47 more
+
+ Not covered (need custom rules):
+   @typescript-eslint/naming-convention → warn
+   my-plugin/custom-rule → error
+   ... 3 more
+
+ TrueCourse extras (not in your ESLint):
+   architecture/deterministic/circular-service-dependency
+   architecture/deterministic/god-service
+   code-quality/deterministic/cognitive-complexity
+   ... 20 more
+
+You can safely remove ESLint.
+```
