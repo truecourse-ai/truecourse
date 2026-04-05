@@ -11,6 +11,7 @@ import { BUGS_PYTHON_VISITORS } from './bugs/visitors/python.js'
 import { CODE_QUALITY_JS_VISITORS } from './code-quality/visitors/javascript.js'
 import { CODE_QUALITY_PYTHON_VISITORS } from './code-quality/visitors/python.js'
 import { CODE_QUALITY_UNIVERSAL_VISITORS } from './code-quality/visitors/universal.js'
+import { PERFORMANCE_JS_VISITORS } from './performance/visitors/javascript.js'
 
 const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   ...SECURITY_JS_VISITORS,
@@ -21,6 +22,7 @@ const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   ...CODE_QUALITY_JS_VISITORS,
   ...CODE_QUALITY_PYTHON_VISITORS,
   ...CODE_QUALITY_UNIVERSAL_VISITORS,
+  ...PERFORMANCE_JS_VISITORS,
 ]
 
 /**

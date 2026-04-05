@@ -105,8 +105,236 @@ export const pythonMutableDefaultArgVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// self-comparison: x == x, x != x, x is x, x is not x
+// ---------------------------------------------------------------------------
+
+const PY_COMPARISON_OPERATORS = new Set(['==', '!=', '>', '<', '>=', '<=', 'is', 'is not'])
+
+export const pythonSelfComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/self-comparison',
+  languages: ['python'],
+  nodeTypes: ['comparison_operator'],
+  visit(node, filePath, sourceCode) {
+    const children = node.namedChildren
+    if (children.length !== 2) return null
+
+    const left = children[0]
+    const right = children[1]
+
+    if (left.text === right.text && left.type === right.type) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Self comparison',
+        `Comparing \`${left.text}\` to itself is likely a bug.`,
+        sourceCode,
+        'Compare against a different value, or remove this comparison.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// self-assignment: x = x
+// ---------------------------------------------------------------------------
+
+export const pythonSelfAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/self-assignment',
+  languages: ['python'],
+  nodeTypes: ['assignment'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+
+    if (!left || !right) return null
+
+    if (left.text === right.text && left.type === right.type) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Self assignment',
+        `Assigning \`${left.text}\` to itself has no effect.`,
+        sourceCode,
+        'Assign a different value or remove this statement.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-keys: dict literal with duplicate keys
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateKeysVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-keys',
+  languages: ['python'],
+  nodeTypes: ['dictionary'],
+  visit(node, filePath, sourceCode) {
+    const seen = new Set<string>()
+    for (const child of node.namedChildren) {
+      if (child.type === 'pair') {
+        const key = child.childForFieldName('key')
+        if (key) {
+          const keyText = key.text
+          if (seen.has(keyText)) {
+            return makeViolation(
+              this.ruleKey, child, filePath, 'high',
+              'Duplicate dictionary key',
+              `Key \`${keyText}\` is duplicated — the later value silently overwrites the earlier one.`,
+              sourceCode,
+              'Remove the duplicate key or rename one of them.',
+            )
+          }
+          seen.add(keyText)
+        }
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-args: function with duplicate parameter names
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateArgsVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-args',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const params = node.childForFieldName('parameters')
+    if (!params) return null
+
+    const seen = new Set<string>()
+    for (const child of params.namedChildren) {
+      let paramName: string | null = null
+      if (child.type === 'identifier') {
+        paramName = child.text
+      } else if (child.type === 'typed_parameter' || child.type === 'default_parameter' || child.type === 'typed_default_parameter') {
+        const name = child.childForFieldName('name')
+        if (name) paramName = name.text
+      }
+
+      if (paramName && paramName !== 'self' && paramName !== 'cls') {
+        if (seen.has(paramName)) {
+          return makeViolation(
+            this.ruleKey, child, filePath, 'high',
+            'Duplicate function argument',
+            `Parameter \`${paramName}\` is duplicated — the later parameter shadows the earlier one.`,
+            sourceCode,
+            'Rename one of the duplicate parameters.',
+          )
+        }
+        seen.add(paramName)
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// all-branches-identical: if/else where all branches are the same
+// ---------------------------------------------------------------------------
+
+export const pythonAllBranchesIdenticalVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/all-branches-identical',
+  languages: ['python'],
+  nodeTypes: ['if_statement'],
+  visit(node, filePath, sourceCode) {
+    const consequence = node.childForFieldName('consequence')
+    const alternative = node.childForFieldName('alternative')
+
+    if (!consequence || !alternative) return null
+
+    // The alternative is an else_clause; get the body block
+    let altBody = alternative
+    if (alternative.type === 'else_clause') {
+      const block = alternative.namedChildren.find((c) => c.type === 'block')
+      if (block) altBody = block
+    }
+
+    if (consequence.text.trim() === altBody.text.trim()) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'All branches identical',
+        'The if and else branches contain identical code — the condition has no effect.',
+        sourceCode,
+        'Remove the condition and keep only the body, or fix the branches to differ.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// constant-condition: if True, if False
+// ---------------------------------------------------------------------------
+
+export const pythonConstantConditionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/constant-condition',
+  languages: ['python'],
+  nodeTypes: ['if_statement', 'while_statement'],
+  visit(node, filePath, sourceCode) {
+    const condition = node.childForFieldName('condition')
+    if (!condition) return null
+
+    // while True is idiomatic in Python — skip it
+    if (node.type === 'while_statement' && condition.text === 'True') return null
+
+    const PY_CONSTANTS = new Set(['True', 'False', 'None'])
+    if (PY_CONSTANTS.has(condition.text) || condition.type === 'integer' || condition.type === 'float') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Constant condition',
+        `Condition is always \`${condition.text}\` — this ${node.type === 'if_statement' ? 'branch' : 'loop'} is ${condition.text === 'False' || condition.text === 'None' || condition.text === '0' ? 'dead code' : 'always taken'}.`,
+        sourceCode,
+        'Remove the condition or fix the logic.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unreachable-code: code after return, raise, break, continue
+// ---------------------------------------------------------------------------
+
+const PY_TERMINAL_TYPES = new Set(['return_statement', 'raise_statement', 'break_statement', 'continue_statement'])
+
+export const pythonUnreachableCodeVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unreachable-code',
+  languages: ['python'],
+  nodeTypes: ['block'],
+  visit(node, filePath, sourceCode) {
+    const children = node.namedChildren.filter((c) => c.type !== 'comment')
+    for (let i = 0; i < children.length - 1; i++) {
+      if (PY_TERMINAL_TYPES.has(children[i].type)) {
+        const unreachable = children[i + 1]
+        // Skip function/class definitions (they're declarations, not executable code at that point)
+        if (unreachable.type === 'function_definition' || unreachable.type === 'class_definition') continue
+        return makeViolation(
+          this.ruleKey, unreachable, filePath, 'medium',
+          'Unreachable code',
+          `Code after \`${children[i].type.replace('_statement', '')}\` can never execute.`,
+          sourceCode,
+          'Remove the unreachable code or move it before the terminating statement.',
+        )
+      }
+    }
+    return null
+  },
+}
+
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
   pythonBareExceptVisitor,
   pythonMutableDefaultArgVisitor,
+  pythonSelfComparisonVisitor,
+  pythonSelfAssignmentVisitor,
+  pythonDuplicateKeysVisitor,
+  pythonDuplicateArgsVisitor,
+  pythonAllBranchesIdenticalVisitor,
+  pythonConstantConditionVisitor,
+  pythonUnreachableCodeVisitor,
 ]

@@ -255,19 +255,19 @@ Rules about actual runtime bugs: null deref, infinite loops, unreachable code, t
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
 | bugs/deterministic/null-dereference | Null dereference | Accessing properties of null or undefined values | critical | sonarjs | S2259 (null-dereference) | new | js/ts |
-| bugs/deterministic/unreachable-code | Unreachable code | Code after return, throw, continue, or break is never executed | high | eslint, sonar-python, ruff | no-unreachable, S1763, PLW0101 (UnreachableCode) | new | all |
+| bugs/deterministic/unreachable-code | Unreachable code | Code after return, throw, continue, or break is never executed | high | eslint, sonar-python, ruff | no-unreachable, S1763, PLW0101 (UnreachableCode) | implemented | all |
 | bugs/deterministic/unreachable-loop | Unreachable loop | Loop body allows only one iteration | medium | eslint | no-unreachable-loop | new | js/ts |
-| bugs/deterministic/constant-condition | Constant condition | Constant expression in if/while/for/ternary condition | medium | eslint, sonarjs, sonar-python | no-constant-condition, S2589 (no-gratuitous-expressions), S5797 | new | all |
+| bugs/deterministic/constant-condition | Constant condition | Constant expression in if/while/for/ternary condition | medium | eslint, sonarjs, sonar-python | no-constant-condition, S2589 (no-gratuitous-expressions), S5797 | implemented | all |
 | bugs/deterministic/constant-binary-expression | Constant binary expression | Binary expression where the operation does not affect the value | medium | eslint | no-constant-binary-expression | new | js/ts |
-| bugs/deterministic/self-comparison | Self comparison | Comparing a value to itself is always true or always false | medium | eslint, sonarjs, sonar-python, ruff | no-self-compare, S1764 (no-identical-expressions), PLR0124 (ComparisonWithItself) | new | all |
-| bugs/deterministic/self-assignment | Self assignment | Assigning a variable to itself has no effect | medium | eslint, sonar-python, ruff | no-self-assign, S1656, PLW0127 (SelfAssigningVariable) | new | all |
-| bugs/deterministic/assignment-in-condition | Assignment in condition | Assignment operator used where comparison was likely intended | high | eslint, sonarjs | no-cond-assign, S1121 (no-nested-assignment) | new | js/ts |
-| bugs/deterministic/duplicate-case | Duplicate case label | Duplicate case values in switch statement | high | eslint, sonarjs | no-duplicate-case, S1862 (no-identical-conditions) | new | js/ts |
-| bugs/deterministic/duplicate-keys | Duplicate object keys | Duplicate keys in object literal | high | eslint | no-dupe-keys | new | js/ts |
-| bugs/deterministic/duplicate-args | Duplicate function arguments | Duplicate parameter names in function definition | high | eslint | no-dupe-args | new | js/ts |
+| bugs/deterministic/self-comparison | Self comparison | Comparing a value to itself is always true or always false | medium | eslint, sonarjs, sonar-python, ruff | no-self-compare, S1764 (no-identical-expressions), PLR0124 (ComparisonWithItself) | implemented | all |
+| bugs/deterministic/self-assignment | Self assignment | Assigning a variable to itself has no effect | medium | eslint, sonar-python, ruff | no-self-assign, S1656, PLW0127 (SelfAssigningVariable) | implemented | all |
+| bugs/deterministic/assignment-in-condition | Assignment in condition | Assignment operator used where comparison was likely intended | high | eslint, sonarjs | no-cond-assign, S1121 (no-nested-assignment) | implemented | js/ts |
+| bugs/deterministic/duplicate-case | Duplicate case label | Duplicate case values in switch statement | high | eslint, sonarjs | no-duplicate-case, S1862 (no-identical-conditions) | implemented | js/ts |
+| bugs/deterministic/duplicate-keys | Duplicate object keys | Duplicate keys in object literal | high | eslint | no-dupe-keys | implemented | js/ts |
+| bugs/deterministic/duplicate-args | Duplicate function arguments | Duplicate parameter names in function definition | high | eslint | no-dupe-args | implemented | js/ts |
 | bugs/deterministic/duplicate-class-members | Duplicate class members | Duplicate method/property names in class | high | eslint, @typescript-eslint | no-dupe-class-members | new | js/ts |
 | bugs/deterministic/duplicate-else-if | Duplicate else-if conditions | Same condition repeated in if-else-if chain | medium | eslint, sonarjs, sonar-python | no-dupe-else-if, S1862 (no-identical-conditions) | new | all |
-| bugs/deterministic/all-branches-identical | All branches identical | All branches in conditional have exactly the same implementation | high | sonarjs, sonar-python | S3923 (no-all-duplicated-branches) | new | all |
+| bugs/deterministic/all-branches-identical | All branches identical | All branches in conditional have exactly the same implementation | high | sonarjs, sonar-python | S3923 (no-all-duplicated-branches) | implemented | all |
 | bugs/deterministic/duplicate-branches | Duplicate branches | Two branches in conditional have identical implementation | medium | sonarjs, sonar-python | S1871 (no-duplicated-branches) | new | all |
 | bugs/deterministic/invalid-typeof | Invalid typeof comparison | Comparing typeof against an invalid string value | high | eslint | valid-typeof | new | js/ts |
 | bugs/deterministic/use-isnan | NaN comparison | Comparing directly against NaN instead of using isNaN() | high | eslint, sonarjs | use-isnan, S3757 (operation-returning-nan) | new | js/ts |
@@ -659,13 +659,13 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/cyclomatic-complexity | High cyclomatic complexity | Function has too many independent code paths | medium | sonarjs, sonar-python, eslint, ruff | S1541 (cyclomatic-complexity), FunctionComplexity, C901 (ComplexStructure), complexity | new | all |
 | code-quality/deterministic/expression-complexity | Complex expression | Expression with too many operators, hard to understand | medium | sonarjs | S1067 (expression-complexity) | new | js/ts |
 | code-quality/deterministic/too-many-lines | File too long | File has too many lines of code | low | sonarjs, eslint | S104 (max-lines), max-lines | new | all |
-| code-quality/deterministic/too-many-return-statements | Too many return statements | Function has too many return statements | low | sonar-python, ruff | S1142, PLR0911 (TooManyReturnStatements) | new | python |
+| code-quality/deterministic/too-many-return-statements | Too many return statements | Function has too many return statements | low | sonar-python, ruff | S1142, PLR0911 (TooManyReturnStatements) | implemented | python |
 | code-quality/deterministic/too-many-branches | Too many branches | Function has too many branches | low | ruff | PLR0912 (TooManyBranches) | new | python |
 | code-quality/deterministic/too-many-switch-cases | Too many switch cases | Switch statement with too many case clauses | low | sonarjs | S1479 (max-switch-cases) | new | js/ts |
 | code-quality/deterministic/too-many-union-members | Too many union members | Union type with too many elements, hard to maintain | low | sonarjs | S4622 (max-union-size) | new | js/ts |
-| code-quality/deterministic/nested-ternary | Nested ternary | Ternary operators nested inside each other | medium | eslint, sonarjs, sonar-python | no-nested-ternary, S3358 (no-nested-conditional) | new | all |
+| code-quality/deterministic/nested-ternary | Nested ternary | Ternary operators nested inside each other | medium | eslint, sonarjs, sonar-python | no-nested-ternary, S3358 (no-nested-conditional) | implemented | all |
 | code-quality/deterministic/nested-switch | Nested switch | Switch statement inside another switch statement | medium | sonarjs | S1821 (no-nested-switch) | new | js/ts |
-| code-quality/deterministic/nested-template-literal | Nested template literal | Template literals nested inside other template literals | low | sonarjs | S4624 (no-nested-template-literals) | new | js/ts |
+| code-quality/deterministic/nested-template-literal | Nested template literal | Template literals nested inside other template literals | low | sonarjs | S4624 (no-nested-template-literals) | implemented | js/ts |
 | code-quality/deterministic/deeply-nested-functions | Deeply nested functions | Functions nested too many levels deep | medium | sonarjs | S2004 (no-nested-functions) | new | js/ts |
 | code-quality/deterministic/too-many-breaks | Too many breaks in loop | Loop with multiple break or continue statements | low | sonarjs | S135 (too-many-break-or-continue-in-loop) | new | js/ts |
 | code-quality/deterministic/duplicate-string | Duplicate string literal | Same string literal duplicated across the codebase | low | sonarjs, sonar-python | S1192 (no-duplicate-string) | new | all |
@@ -676,7 +676,7 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/dead-store | Dead store | Variable assigned a value that is never read | low | sonarjs, sonar-python, eslint | S1854 (no-dead-store), no-useless-assignment | new | all |
 | code-quality/deterministic/unused-collection | Unused collection | Collection created and populated but never read | low | sonarjs | S4030 (no-unused-collection) | new | js/ts |
 | code-quality/deterministic/redundant-assignment | Redundant assignment | Assignment that has no effect because variable already holds that value | low | sonarjs | S4165 (no-redundant-assignments) | new | js/ts |
-| code-quality/deterministic/redundant-boolean | Redundant boolean literal | Boolean literals used unnecessarily in comparisons | low | sonarjs, eslint | S1125 (no-redundant-boolean), no-extra-boolean-cast | new | js/ts |
+| code-quality/deterministic/redundant-boolean | Redundant boolean literal | Boolean literals used unnecessarily in comparisons | low | sonarjs, eslint | S1125 (no-redundant-boolean), no-extra-boolean-cast | implemented | js/ts |
 | code-quality/deterministic/redundant-jump | Redundant jump statement | return, break, or continue that has no effect | low | sonarjs, sonar-python, eslint, ruff | S3626 (no-redundant-jump), no-useless-return, PLR1711 (UselessReturn) | new | all |
 | code-quality/deterministic/useless-catch | Useless catch | Catch/except clause that just rethrows the exception without modification | low | eslint, sonarjs, sonar-python | no-useless-catch, S2737 (no-useless-catch) | new | all |
 | code-quality/deterministic/useless-constructor | Useless constructor | Empty constructor or one that just calls super() | low | eslint, sonarjs, @typescript-eslint | no-useless-constructor | new | js/ts |
@@ -689,7 +689,7 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/alert-usage | Alert/confirm/prompt usage | Using browser alert, confirm, or prompt dialogs | low | eslint | no-alert | new | js/ts |
 | code-quality/deterministic/commented-out-code | Commented out code | Sections of code that are commented out instead of removed | low | sonarjs, sonar-python, ruff | S125 (no-commented-code), ERA001 (CommentedOutCode) | new | all |
 | code-quality/deterministic/empty-function | Empty function | Function body is empty with no implementation | low | eslint, sonarjs, sonar-python, @typescript-eslint | no-empty-function, no-empty, S1186 | new | all |
-| code-quality/deterministic/collapsible-if | Collapsible if statements | Nested if statements that could be merged into one | low | sonarjs, sonar-python, ruff | S1066 (no-collapsible-if), SIM102 (CollapsibleIf) | new | all |
+| code-quality/deterministic/collapsible-if | Collapsible if statements | Nested if statements that could be merged into one | low | sonarjs, sonar-python, ruff | S1066 (no-collapsible-if), SIM102 (CollapsibleIf) | implemented | all |
 | code-quality/deterministic/inverted-boolean | Inverted boolean check | Boolean check that is unnecessarily inverted | low | sonarjs | S1940 (no-inverted-boolean-check) | new | js/ts |
 | code-quality/deterministic/prefer-single-boolean-return | Wrapping boolean in if-else | Returning boolean literal from if-else instead of the condition | low | sonarjs | S1126 (prefer-single-boolean-return) | new | js/ts |
 | code-quality/deterministic/prefer-immediate-return | Unnecessary temporary variable | Local variable declared only to be immediately returned | low | sonarjs | S1488 (prefer-immediate-return) | new | js/ts |
@@ -812,7 +812,7 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 | code-quality/deterministic/collapsible-else-if | Collapsible else-if | if as only statement in else block should be else if | low | eslint | no-lonely-if | new | js/ts |
 | code-quality/deterministic/negated-condition | Negated condition | Negated condition with else block should be inverted for readability | low | eslint | no-negated-condition | new | js/ts |
 | code-quality/deterministic/verbose-object-constructor | Verbose object constructor | Using new Object() instead of {} literal | low | eslint | no-object-constructor | new | js/ts |
-| code-quality/deterministic/unnecessary-else-after-return | Unnecessary else after return | else block after return statement is unnecessary | low | eslint | no-else-return | new | js/ts |
+| code-quality/deterministic/unnecessary-else-after-return | Unnecessary else after return | else block after return statement is unnecessary | low | eslint | no-else-return | implemented | js/ts |
 | code-quality/deterministic/trivial-ternary | Trivial ternary | Ternary that simplifies to the condition itself (x ? true : false) | low | eslint | no-unneeded-ternary | new | js/ts |
 | code-quality/deterministic/legacy-has-own-property | Legacy hasOwnProperty | Should use Object.hasOwn() instead of hasOwnProperty.call() | low | eslint | prefer-object-has-own | new | js/ts |
 | code-quality/deterministic/missing-destructuring | Missing destructuring | Not using destructuring from arrays/objects when applicable | low | eslint, sonarjs | prefer-destructuring, S3514 | new | js/ts |
@@ -1225,20 +1225,20 @@ Rules about runtime efficiency, memory usage, rendering, caching, and data acces
 
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
-| performance/deterministic/inline-function-in-jsx-prop | Inline function in JSX prop | Arrow function or .bind() in JSX props causes new reference every render, defeating React.memo and PureComponent | low | truecourse | - | new | js/ts |
-| performance/deterministic/inline-object-in-jsx-prop | Inline object literal in JSX prop | Object literal `style={{...}}` or `options={{...}}` in JSX creates new reference every render | low | truecourse | - | new | js/ts |
-| performance/deterministic/missing-cleanup-useeffect | useEffect without cleanup for subscriptions | useEffect that adds event listeners, timers, or subscriptions but returns no cleanup function | high | truecourse | - | new | js/ts |
+| performance/deterministic/inline-function-in-jsx-prop | Inline function in JSX prop | Arrow function or .bind() in JSX props causes new reference every render, defeating React.memo and PureComponent | low | truecourse | - | implemented | js/ts |
+| performance/deterministic/inline-object-in-jsx-prop | Inline object literal in JSX prop | Object literal `style={{...}}` or `options={{...}}` in JSX creates new reference every render | low | truecourse | - | implemented | js/ts |
+| performance/deterministic/missing-cleanup-useeffect | useEffect without cleanup for subscriptions | useEffect that adds event listeners, timers, or subscriptions but returns no cleanup function | high | truecourse | - | implemented | js/ts |
 | performance/deterministic/settimeout-setinterval-no-clear | Timer created without corresponding clear | setInterval/setTimeout assigned but never cleared — memory leak in long-running processes | medium | truecourse | - | new | js/ts |
-| performance/deterministic/event-listener-no-remove | Event listener added without removal | addEventListener without corresponding removeEventListener in cleanup or destroy path | medium | truecourse | - | new | all |
-| performance/deterministic/sync-fs-in-request-handler | Synchronous filesystem operation in request path | fs.readFileSync, fs.writeFileSync etc. used inside Express/Fastify/Koa route handler — blocks event loop | high | truecourse | - | new | js/ts |
-| performance/deterministic/json-parse-in-loop | JSON.parse or JSON.stringify inside hot loop | Serialization/deserialization inside a loop body — expensive and often avoidable | medium | truecourse | - | new | js/ts |
-| performance/deterministic/regex-in-loop | Regex compilation inside loop | `new RegExp()` inside loop body — regex should be compiled once outside the loop | low | truecourse | - | new | all |
+| performance/deterministic/event-listener-no-remove | Event listener added without removal | addEventListener without corresponding removeEventListener in cleanup or destroy path | medium | truecourse | - | implemented | all |
+| performance/deterministic/sync-fs-in-request-handler | Synchronous filesystem operation in request path | fs.readFileSync, fs.writeFileSync etc. used inside Express/Fastify/Koa route handler — blocks event loop | high | truecourse | - | implemented | js/ts |
+| performance/deterministic/json-parse-in-loop | JSON.parse or JSON.stringify inside hot loop | Serialization/deserialization inside a loop body — expensive and often avoidable | medium | truecourse | - | implemented | js/ts |
+| performance/deterministic/regex-in-loop | Regex compilation inside loop | `new RegExp()` inside loop body — regex should be compiled once outside the loop | low | truecourse | - | implemented | all |
 | performance/deterministic/unbounded-array-growth | Array pushed to without bounds check | Array.push in loop or recurring callback without size limit — potential unbounded memory growth | medium | truecourse | - | new | js/ts |
-| performance/deterministic/large-bundle-import | Full library import when partial available | Importing entire library (lodash, moment, date-fns) instead of specific function paths | medium | truecourse | - | new | js/ts |
+| performance/deterministic/large-bundle-import | Full library import when partial available | Importing entire library (lodash, moment, date-fns) instead of specific function paths | medium | truecourse | - | implemented | js/ts |
 | performance/deterministic/missing-usememo-expensive | Expensive computation without memoization | Array.filter/map/sort/reduce on large datasets in render body without useMemo | low | truecourse | - | new | js/ts |
-| performance/deterministic/state-update-in-loop | Multiple setState calls in loop | Calling setState inside a loop instead of batching — causes multiple re-renders | medium | truecourse | - | new | js/ts |
+| performance/deterministic/state-update-in-loop | Multiple setState calls in loop | Calling setState inside a loop instead of batching — causes multiple re-renders | medium | truecourse | - | implemented | js/ts |
 | performance/deterministic/synchronous-crypto | Synchronous crypto operations | Using crypto.pbkdf2Sync, crypto.scryptSync etc. — blocks event loop on CPU-intensive work | medium | truecourse | - | new | js/ts |
-| performance/deterministic/spread-in-reduce | Spread operator in reduce accumulator | `{...acc, [key]: value}` in reduce creates new object each iteration — O(n^2) behavior | medium | truecourse | - | new | js/ts |
+| performance/deterministic/spread-in-reduce | Spread operator in reduce accumulator | `{...acc, [key]: value}` in reduce creates new object each iteration — O(n^2) behavior | medium | truecourse | - | implemented | js/ts |
 | performance/deterministic/missing-react-memo | Component receiving unchanged props re-renders | Pure display component without React.memo receiving same props from parent re-render | low | truecourse | - | new | js/ts |
 | performance/deterministic/unnecessary-context-provider | Context provider value changes on every render | Context value is new object/array each render — all consumers re-render every time | medium | truecourse | - | new | js/ts |
 | performance/deterministic/sync-require-in-handler | Dynamic require() in request handler | require() inside request handler — synchronous file read on every request, blocks event loop | medium | truecourse | - | new | js/ts |
