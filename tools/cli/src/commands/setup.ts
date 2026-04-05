@@ -216,20 +216,25 @@ export async function runSetup(): Promise<void> {
     process.exit(0);
   }
 
-  // Rule category selection
+  // Rule category selection — use saved config if available
+  const { readConfig: readExistingConfig } = await import("./helpers.js");
+  const existingConfig = readExistingConfig();
+  const defaultCategories = ["security", "bugs", "architecture", "performance", "reliability", "code-quality", "database"];
+  const savedCategories = existingConfig.enabledCategories?.length ? existingConfig.enabledCategories : defaultCategories;
+
   const categories = await p.multiselect({
     message: "Which rule categories would you like to enable?",
     options: [
-      { value: "architecture" as const, label: "Architecture (service boundaries, layers, coupling)", hint: "recommended" },
       { value: "security" as const, label: "Security (secrets, injection, crypto, auth)", hint: "recommended" },
       { value: "bugs" as const, label: "Bugs (runtime errors, null derefs, type issues)", hint: "recommended" },
-      { value: "code-quality" as const, label: "Code Quality (complexity, dead code, smells)", hint: "recommended" },
-      { value: "style" as const, label: "Style (formatting, naming conventions, docstrings)" },
+      { value: "architecture" as const, label: "Architecture (service boundaries, layers, coupling)", hint: "recommended" },
       { value: "performance" as const, label: "Performance (N+1 queries, memory leaks, inefficient patterns)", hint: "recommended" },
       { value: "reliability" as const, label: "Reliability (error handling, timeouts, retries)", hint: "recommended" },
+      { value: "code-quality" as const, label: "Code Quality (complexity, dead code, smells)", hint: "recommended" },
       { value: "database" as const, label: "Database (schema, indexes, constraints)", hint: "recommended" },
+      { value: "style" as const, label: "Style (formatting, naming conventions, docstrings)" },
     ],
-    initialValues: ["architecture", "security", "bugs", "code-quality", "performance", "reliability", "database"] as string[],
+    initialValues: savedCategories,
     required: true,
   });
 
@@ -238,10 +243,10 @@ export async function runSetup(): Promise<void> {
     process.exit(0);
   }
 
-  // LLM rules toggle
+  // LLM rules toggle — use saved config if available
   const enableLlm = await p.confirm({
     message: "Enable LLM-powered rules? (costs tokens, slower but deeper analysis)",
-    initialValue: true,
+    initialValue: existingConfig.enableLlmRules ?? true,
   });
 
   if (p.isCancel(enableLlm)) {

@@ -160,17 +160,17 @@ rulesCmd
     const status = (cat: string) => enabled.has(cat) ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
 
     p.log.info(`Rule categories for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}:`);
-    console.log(`  Architecture:  ${status("architecture")}`);
-    console.log(`  Security:      ${status("security")}`);
-    console.log(`  Bugs:          ${status("bugs")}`);
-    console.log(`  Code Quality:  ${status("code-quality")}`);
-    console.log(`  Style:         ${status("style")}`);
-    console.log(`  Performance:   ${status("performance")}`);
-    console.log(`  Reliability:   ${status("reliability")}`);
-    console.log(`  Database:      ${status("database")}`);
+    console.log(`  security       ${status("security")}`);
+    console.log(`  bugs           ${status("bugs")}`);
+    console.log(`  architecture   ${status("architecture")}`);
+    console.log(`  performance    ${status("performance")}`);
+    console.log(`  reliability    ${status("reliability")}`);
+    console.log(`  code-quality   ${status("code-quality")}`);
+    console.log(`  database       ${status("database")}`);
+    console.log(`  style          ${status("style")}`);
     console.log("");
     if (!isOverride) {
-      p.log.info("Override with: truecourse rules categories --enable/--disable <category>");
+      p.log.info("Override with: truecourse rules categories --enable/--disable <name>");
     }
   });
 
