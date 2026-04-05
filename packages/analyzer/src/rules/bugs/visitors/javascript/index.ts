@@ -106,6 +106,35 @@ import { nullComparisonWithoutTypeCheckVisitor } from './null-comparison-without
 import { extraNonNullAssertionVisitor } from './extra-non-null-assertion.js'
 import { labelVariableCollisionVisitor } from './label-variable-collision.js'
 import { unassignedVariableVisitor } from './unassigned-variable.js'
+import { futureReservedWordVisitor } from './future-reserved-word.js'
+import { labelOnNonLoopVisitor } from './label-on-non-loop.js'
+import { usestateObjectMutationVisitor } from './usestate-object-mutation.js'
+import { useeffectObjectDepVisitor } from './useeffect-object-dep.js'
+import { conditionalHookVisitor } from './conditional-hook.js'
+import { sharedMutableModuleStateVisitor } from './shared-mutable-module-state.js'
+import { errorTypeAnyVisitor } from './error-type-any.js'
+import { errorSwallowedInCallbackVisitor } from './error-swallowed-in-callback.js'
+import { nestedTryCatchVisitor } from './nested-try-catch.js'
+import { ambiguousDivRegexVisitor } from './ambiguous-div-regex.js'
+import { mixedEnumValuesVisitor } from './mixed-enum-values.js'
+import { unsafeDeclarationMergingVisitor } from './unsafe-declaration-merging.js'
+import { tryPromiseCatchVisitor } from './try-promise-catch.js'
+import { misusedNewKeywordVisitor } from './misused-new-keyword.js'
+import { contradictoryNonNullCoalescingVisitor } from './contradictory-non-null-coalescing.js'
+import { emptyObjectTypeVisitor } from './empty-object-type.js'
+import { wrapperObjectTypeVisitor } from './wrapper-object-type.js'
+import { invalidVoidTypeVisitor } from './invalid-void-type.js'
+import { getterSetterTypeMismatchVisitor } from './getter-setter-type-mismatch.js'
+import { fragileEnumOrderingVisitor } from './fragile-enum-ordering.js'
+import { missingReturnAwaitVisitor } from './missing-return-await.js'
+import { arrayCallbackMissingReturnVisitor } from './array-callback-missing-return.js'
+import { redosVulnerableRegexVisitor } from './redos-vulnerable-regex.js'
+import { invisibleWhitespaceVisitor } from './invisible-whitespace.js'
+import { confusingIncrementDecrementVisitor } from './confusing-increment-decrement.js'
+import { asyncVoidFunctionVisitor } from './async-void-function.js'
+import { missingAwaitVisitor } from './missing-await.js'
+import { genericErrorMessageVisitor } from './generic-error-message.js'
+import { useeffectMissingDepsVisitor } from './useeffect-missing-deps.js'
 
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
@@ -214,4 +243,33 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   extraNonNullAssertionVisitor,
   labelVariableCollisionVisitor,
   unassignedVariableVisitor,
+  futureReservedWordVisitor,
+  labelOnNonLoopVisitor,
+  usestateObjectMutationVisitor,
+  useeffectObjectDepVisitor,
+  conditionalHookVisitor,
+  sharedMutableModuleStateVisitor,
+  errorTypeAnyVisitor,
+  errorSwallowedInCallbackVisitor,
+  nestedTryCatchVisitor,
+  ambiguousDivRegexVisitor,
+  mixedEnumValuesVisitor,
+  unsafeDeclarationMergingVisitor,
+  tryPromiseCatchVisitor,
+  misusedNewKeywordVisitor,
+  contradictoryNonNullCoalescingVisitor,
+  emptyObjectTypeVisitor,
+  wrapperObjectTypeVisitor,
+  invalidVoidTypeVisitor,
+  getterSetterTypeMismatchVisitor,
+  fragileEnumOrderingVisitor,
+  missingReturnAwaitVisitor,
+  arrayCallbackMissingReturnVisitor,
+  redosVulnerableRegexVisitor,
+  invisibleWhitespaceVisitor,
+  confusingIncrementDecrementVisitor,
+  asyncVoidFunctionVisitor,
+  missingAwaitVisitor,
+  genericErrorMessageVisitor,
+  useeffectMissingDepsVisitor,
 ]

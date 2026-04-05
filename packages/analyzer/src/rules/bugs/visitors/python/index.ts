@@ -99,6 +99,97 @@ import { pythonRedefinedWhileUnusedVisitor } from './redefined-while-unused.js'
 import { pythonBadStringFormatCharacterVisitor } from './bad-string-format-character.js'
 import { pythonNonlocalWithoutBindingVisitor } from './nonlocal-without-binding.js'
 import { pythonLoadBeforeGlobalDeclarationVisitor } from './load-before-global-declaration.js'
+import { pythonAsyncFunctionWithTimeoutVisitor } from './async-function-with-timeout.js'
+import { pythonAsyncBusyWaitVisitor } from './async-busy-wait.js'
+import { pythonWarningsNoStacklevelVisitor } from './warnings-no-stacklevel.js'
+import { pythonUnusedLoopVariableVisitor } from './unused-loop-variable.js'
+import { pythonReturnInGeneratorVisitor } from './return-in-generator.js'
+import { pythonBatchedWithoutStrictVisitor } from './batched-without-strict.js'
+import { pythonDatetimeWithoutTimezoneVisitor } from './datetime-without-timezone.js'
+import { pythonDatetimeMinMaxVisitor } from './datetime-min-max.js'
+import { pythonLoggingDeprecatedWarnVisitor } from './logging-deprecated-warn.js'
+import { pythonLoggingInvalidGetloggerVisitor } from './logging-invalid-getlogger.js'
+import { pythonLoggingExceptionOutsideHandlerVisitor } from './logging-exception-outside-handler.js'
+import { pythonInvalidMockAccessVisitor } from './invalid-mock-access.js'
+import { pythonUselessExceptionStatementVisitor } from './useless-exception-statement.js'
+import { pythonSelfOrClsAssignmentVisitor } from './self-or-cls-assignment.js'
+import { pythonGlobalAtModuleLevelVisitor } from './global-at-module-level.js'
+import { pythonBadStaticmethodArgumentVisitor } from './bad-staticmethod-argument.js'
+import { pythonSubprocessPopenPreexecFnVisitor } from './subprocess-popen-preexec-fn.js'
+import { pythonRedefinedArgumentFromLocalVisitor } from './redefined-argument-from-local.js'
+import { pythonDuplicateEntryDunderAllVisitor } from './duplicate-entry-dunder-all.js'
+import { pythonUselessFinallyVisitor } from './useless-finally.js'
+import { pythonFalsyDictGetFallbackVisitor } from './falsy-dict-get-fallback.js'
+import { pythonAssertionAfterExpectedExceptionVisitor } from './assertion-after-expected-exception.js'
+import { pythonMathIscloseZeroNoAbstolVisitor } from './math-isclose-zero-no-abstol.js'
+import { pythonDatetime12hFormatWithoutAmpmVisitor } from './datetime-12h-format-without-ampm.js'
+import { pythonSklearnEstimatorTrailingUnderscoreVisitor } from './sklearn-estimator-trailing-underscore.js'
+import { pythonYieldReturnOutsideFunctionVisitor } from './yield-return-outside-function.js'
+import { pythonPytestAssertAlwaysFalseVisitor } from './pytest-assert-always-false.js'
+import { pythonUnaryPrefixIncrementDecrementVisitor } from './unary-prefix-increment-decrement.js'
+import { pythonSingleStringSlotsVisitor } from './single-string-slots.js'
+import { pythonMapWithoutStrictVisitor } from './map-without-strict.js'
+import { pythonNestedTryCatchVisitor } from './nested-try-catch.js'
+import { pythonSharedMutableModuleStateVisitor } from './shared-mutable-module-state.js'
+import { pythonPandasNuniqueConstantSeriesVisitor } from './pandas-nunique-constant-series.js'
+import { pythonUnsupportedMethodCallOnAllVisitor } from './unsupported-method-call-on-all.js'
+import { pythonInvalidPathlibWithSuffixVisitor } from './invalid-pathlib-with-suffix.js'
+import { pythonDataclassEnumConflictVisitor } from './dataclass-enum-conflict.js'
+import { pythonAccessAnnotationsFromClassDictVisitor } from './access-annotations-from-class-dict.js'
+import { pythonInvalidPrintSyntaxVisitor } from './invalid-print-syntax.js'
+import { pythonDefaultExceptNotLastVisitor } from './default-except-not-last.js'
+import { pythonUnreliableSysVersionCheckVisitor } from './unreliable-sys-version-check.js'
+import { pythonLowercaseEnvironmentVariableVisitor } from './lowercase-environment-variable.js'
+import { pythonFstringInGettextVisitor } from './fstring-in-gettext.js'
+import { pythonExitMethodWrongSignatureVisitor } from './exit-method-wrong-signature.js'
+import { pythonMembersDifferOnlyByCaseVisitor } from './members-differ-only-by-case.js'
+import { pythonClassmethodFirstArgumentNamingVisitor } from './classmethod-first-argument-naming.js'
+import { pythonImportStarUndefinedVisitor } from './import-star-undefined.js'
+import { pythonFutureFeatureNotDefinedVisitor } from './future-feature-not-defined.js'
+import { pythonIfTupleAlwaysTrueVisitor } from './if-tuple-always-true.js'
+import { pythonTrioSyncCallVisitor } from './trio-sync-call.js'
+import { pythonReturnInTryExceptFinallyVisitor } from './return-in-try-except-finally.js'
+import { pythonBareRaiseInFinallyVisitor } from './bare-raise-in-finally.js'
+import { pythonOsPathCommonprefixBugVisitor } from './os-path-commonprefix-bug.js'
+import { pythonLoggingExceptionNoExcInfoVisitor } from './logging-exception-no-exc-info.js'
+import { pythonIterReturnsIterableVisitor } from './iter-returns-iterable.js'
+import { pythonLegacyPytestRaisesVisitor } from './legacy-pytest-raises.js'
+import { pythonLoggingArgsMismatchVisitor } from './logging-args-mismatch.js'
+import { pythonNonSlotAssignmentVisitor } from './non-slot-assignment.js'
+import { pythonInvalidIndexTypeVisitor } from './invalid-index-type.js'
+import { pythonNonIterableUnpackingVisitor } from './non-iterable-unpacking.js'
+import { pythonBlockingCallInAsyncVisitor } from './blocking-call-in-async.js'
+import { pythonCancelScopeNoCheckpointVisitor } from './cancel-scope-no-checkpoint.js'
+import { pythonControlFlowInTaskGroupVisitor } from './control-flow-in-task-group.js'
+import { pythonPotentialIndexErrorVisitor } from './potential-index-error.js'
+import { pythonRegexInvalidPythonVisitor } from './regex-invalid-python.js'
+import { pythonRegexEmptyAlternativePythonVisitor } from './regex-empty-alternative-python.js'
+import { pythonRegexBackreferenceInvalidVisitor } from './regex-backreference-invalid.js'
+import { pythonRegexGroupReferenceMismatchPythonVisitor } from './regex-group-reference-mismatch-python.js'
+import { pythonTemplateStringNotProcessedVisitor } from './template-string-not-processed.js'
+import { pythonTemplateStrConcatenationVisitor } from './template-str-concatenation.js'
+import { pythonInconsistentTupleReturnLengthVisitor } from './inconsistent-tuple-return-length.js'
+import { pythonInvalidAssertMessageVisitor } from './invalid-assert-message.js'
+import { pythonNeverUnionVisitor } from './never-union.js'
+import { pythonImplicitOptionalVisitor } from './implicit-optional.js'
+import { pythonInEmptyCollectionVisitor } from './in-empty-collection.js'
+import { pythonMissingFstringSyntaxVisitor } from './missing-fstring-syntax.js'
+import { pythonUnrawRePatternVisitor } from './unraw-re-pattern.js'
+import { pythonLambdaAssignmentVisitor } from './lambda-assignment.js'
+import { pythonDjangoJsonResponseSafeFlagVisitor } from './django-json-response-safe-flag.js'
+import { pythonFlaskQueryParamsInPostVisitor } from './flask-query-params-in-post.js'
+import { pythonFlaskHeaderAccessKeyerrorVisitor } from './flask-header-access-keyerror.js'
+import { pythonFlaskClassViewDecoratorWrongVisitor } from './flask-class-view-decorator-wrong.js'
+import { pythonFlaskPreprocessReturnUnhandledVisitor } from './flask-preprocess-return-unhandled.js'
+import { pythonFlaskSendFileMissingMimetypeVisitor } from './flask-send-file-missing-mimetype.js'
+import { pythonFastapi204WithBodyVisitor } from './fastapi-204-with-body.js'
+import { pythonFastapiChildRouterOrderVisitor } from './fastapi-child-router-order.js'
+import { pythonFastapiUnusedPathParameterVisitor } from './fastapi-unused-path-parameter.js'
+import { pythonFastapiRedundantResponseModelVisitor } from './fastapi-redundant-response-model.js'
+import { pythonLambdaNetworkCallNoTimeoutVisitor } from './lambda-network-call-no-timeout.js'
+import { pythonLambdaTmpNotCleanedVisitor } from './lambda-tmp-not-cleaned.js'
+import { pythonPytorchNnModuleMissingSuperVisitor } from './pytorch-nn-module-missing-super.js'
+import { pythonGenericErrorMessageVisitor } from './generic-error-message.js'
 
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
@@ -200,4 +291,95 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonBadStringFormatCharacterVisitor,
   pythonNonlocalWithoutBindingVisitor,
   pythonLoadBeforeGlobalDeclarationVisitor,
+  pythonAsyncFunctionWithTimeoutVisitor,
+  pythonAsyncBusyWaitVisitor,
+  pythonWarningsNoStacklevelVisitor,
+  pythonUnusedLoopVariableVisitor,
+  pythonReturnInGeneratorVisitor,
+  pythonBatchedWithoutStrictVisitor,
+  pythonDatetimeWithoutTimezoneVisitor,
+  pythonDatetimeMinMaxVisitor,
+  pythonLoggingDeprecatedWarnVisitor,
+  pythonLoggingInvalidGetloggerVisitor,
+  pythonLoggingExceptionOutsideHandlerVisitor,
+  pythonInvalidMockAccessVisitor,
+  pythonUselessExceptionStatementVisitor,
+  pythonSelfOrClsAssignmentVisitor,
+  pythonGlobalAtModuleLevelVisitor,
+  pythonBadStaticmethodArgumentVisitor,
+  pythonSubprocessPopenPreexecFnVisitor,
+  pythonRedefinedArgumentFromLocalVisitor,
+  pythonDuplicateEntryDunderAllVisitor,
+  pythonUselessFinallyVisitor,
+  pythonFalsyDictGetFallbackVisitor,
+  pythonAssertionAfterExpectedExceptionVisitor,
+  pythonMathIscloseZeroNoAbstolVisitor,
+  pythonDatetime12hFormatWithoutAmpmVisitor,
+  pythonSklearnEstimatorTrailingUnderscoreVisitor,
+  pythonYieldReturnOutsideFunctionVisitor,
+  pythonPytestAssertAlwaysFalseVisitor,
+  pythonUnaryPrefixIncrementDecrementVisitor,
+  pythonSingleStringSlotsVisitor,
+  pythonMapWithoutStrictVisitor,
+  pythonNestedTryCatchVisitor,
+  pythonSharedMutableModuleStateVisitor,
+  pythonPandasNuniqueConstantSeriesVisitor,
+  pythonUnsupportedMethodCallOnAllVisitor,
+  pythonInvalidPathlibWithSuffixVisitor,
+  pythonDataclassEnumConflictVisitor,
+  pythonAccessAnnotationsFromClassDictVisitor,
+  pythonInvalidPrintSyntaxVisitor,
+  pythonDefaultExceptNotLastVisitor,
+  pythonUnreliableSysVersionCheckVisitor,
+  pythonLowercaseEnvironmentVariableVisitor,
+  pythonFstringInGettextVisitor,
+  pythonExitMethodWrongSignatureVisitor,
+  pythonMembersDifferOnlyByCaseVisitor,
+  pythonClassmethodFirstArgumentNamingVisitor,
+  pythonImportStarUndefinedVisitor,
+  pythonFutureFeatureNotDefinedVisitor,
+  pythonIfTupleAlwaysTrueVisitor,
+  pythonTrioSyncCallVisitor,
+  pythonReturnInTryExceptFinallyVisitor,
+  pythonBareRaiseInFinallyVisitor,
+  pythonOsPathCommonprefixBugVisitor,
+  pythonLoggingExceptionNoExcInfoVisitor,
+  pythonIterReturnsIterableVisitor,
+  pythonLegacyPytestRaisesVisitor,
+  pythonLoggingArgsMismatchVisitor,
+  pythonNonSlotAssignmentVisitor,
+  pythonInvalidIndexTypeVisitor,
+  pythonNonIterableUnpackingVisitor,
+  pythonBlockingCallInAsyncVisitor,
+  pythonCancelScopeNoCheckpointVisitor,
+  pythonControlFlowInTaskGroupVisitor,
+  pythonPotentialIndexErrorVisitor,
+  pythonRegexInvalidPythonVisitor,
+  pythonRegexEmptyAlternativePythonVisitor,
+  pythonRegexBackreferenceInvalidVisitor,
+  pythonRegexGroupReferenceMismatchPythonVisitor,
+  pythonTemplateStringNotProcessedVisitor,
+  pythonTemplateStrConcatenationVisitor,
+  pythonInconsistentTupleReturnLengthVisitor,
+  pythonInvalidAssertMessageVisitor,
+  pythonNeverUnionVisitor,
+  pythonImplicitOptionalVisitor,
+  pythonInEmptyCollectionVisitor,
+  pythonMissingFstringSyntaxVisitor,
+  pythonUnrawRePatternVisitor,
+  pythonLambdaAssignmentVisitor,
+  pythonDjangoJsonResponseSafeFlagVisitor,
+  pythonFlaskQueryParamsInPostVisitor,
+  pythonFlaskHeaderAccessKeyerrorVisitor,
+  pythonFlaskClassViewDecoratorWrongVisitor,
+  pythonFlaskPreprocessReturnUnhandledVisitor,
+  pythonFlaskSendFileMissingMimetypeVisitor,
+  pythonFastapi204WithBodyVisitor,
+  pythonFastapiChildRouterOrderVisitor,
+  pythonFastapiUnusedPathParameterVisitor,
+  pythonFastapiRedundantResponseModelVisitor,
+  pythonLambdaNetworkCallNoTimeoutVisitor,
+  pythonLambdaTmpNotCleanedVisitor,
+  pythonPytorchNnModuleMissingSuperVisitor,
+  pythonGenericErrorMessageVisitor,
 ]

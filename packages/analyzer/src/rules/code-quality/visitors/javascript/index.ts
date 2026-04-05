@@ -164,6 +164,40 @@ import { misleadingSameLineConditionalVisitor } from './misleading-same-line-con
 import { magicNumberVisitor } from './magic-number.js'
 import { asyncPromiseFunctionVisitor } from './async-promise-function.js'
 import { filenameClassMismatchVisitor } from './filename-class-mismatch.js'
+import { symbolDescriptionVisitor } from './symbol-description.js'
+import { defaultCaseInSwitchVisitor } from './default-case-in-switch.js'
+import { dotNotationEnforcementVisitor } from './dot-notation-enforcement.js'
+import { maxNestingDepthVisitor } from './max-nesting-depth.js'
+import { maxStatementsPerFunctionVisitor } from './max-statements-per-function.js'
+import { unnecessaryLabelVisitor } from './unnecessary-label.js'
+import { implicitGlobalDeclarationVisitor } from './implicit-global-declaration.js'
+import { undefInitVisitor } from './undef-init.js'
+import { undefinedAsIdentifierVisitor } from './undefined-as-identifier.js'
+import { requireUnicodeRegexpVisitor } from './require-unicode-regexp.js'
+import { inferrableTypesVisitor } from './inferrable-types.js'
+import { mixedTypeImportsVisitor } from './mixed-type-imports.js'
+import { mixedTypeExportsVisitor } from './mixed-type-exports.js'
+import { missingReturnTypeVisitor } from './missing-return-type.js'
+import { missingBoundaryTypesVisitor } from './missing-boundary-types.js'
+import { uselessDefaultAssignmentVisitor } from './useless-default-assignment.js'
+import { typeImportSideEffectsVisitor } from './type-import-side-effects.js'
+import { testExclusiveVisitor } from './test-exclusive.js'
+import { testSkippedVisitor } from './test-skipped.js'
+import { testMissingAssertionVisitor } from './test-missing-assertion.js'
+import { testEmptyFileVisitor } from './test-empty-file.js'
+import { testInvertedArgumentsVisitor } from './test-inverted-arguments.js'
+import { testSameArgumentVisitor } from './test-same-argument.js'
+import { reactLeakedRenderVisitor } from './react-leaked-render.js'
+import { reactHookSetterInBodyVisitor } from './react-hook-setter-in-body.js'
+import { reactUselessSetStateVisitor } from './react-useless-set-state.js'
+import { reactUnstableKeyVisitor } from './react-unstable-key.js'
+import { reactReadonlyPropsVisitor } from './react-readonly-props.js'
+import { preferTemplateVisitor } from './prefer-template.js'
+import { regexComplexityVisitor } from './regex-complexity.js'
+import { regexConciseVisitor } from './regex-concise.js'
+import { missingDestructuringVisitor } from './missing-destructuring.js'
+import { preferObjectLiteralVisitor } from './prefer-object-literal.js'
+import { magicStringVisitor } from './magic-string.js'
 
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
@@ -329,4 +363,41 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   magicNumberVisitor,
   asyncPromiseFunctionVisitor,
   filenameClassMismatchVisitor,
+  // Batch 7
+  symbolDescriptionVisitor,
+  // Batch 8
+  defaultCaseInSwitchVisitor,
+  dotNotationEnforcementVisitor,
+  maxNestingDepthVisitor,
+  maxStatementsPerFunctionVisitor,
+  unnecessaryLabelVisitor,
+  implicitGlobalDeclarationVisitor,
+  undefInitVisitor,
+  undefinedAsIdentifierVisitor,
+  requireUnicodeRegexpVisitor,
+  inferrableTypesVisitor,
+  mixedTypeImportsVisitor,
+  mixedTypeExportsVisitor,
+  missingReturnTypeVisitor,
+  missingBoundaryTypesVisitor,
+  uselessDefaultAssignmentVisitor,
+  typeImportSideEffectsVisitor,
+  testExclusiveVisitor,
+  testSkippedVisitor,
+  testMissingAssertionVisitor,
+  testEmptyFileVisitor,
+  testInvertedArgumentsVisitor,
+  testSameArgumentVisitor,
+  reactLeakedRenderVisitor,
+  reactHookSetterInBodyVisitor,
+  reactUselessSetStateVisitor,
+  reactUnstableKeyVisitor,
+  reactReadonlyPropsVisitor,
+  // Batch 9 — new JS/TS rules from first 106 unimplemented
+  preferTemplateVisitor,
+  regexComplexityVisitor,
+  regexConciseVisitor,
+  missingDestructuringVisitor,
+  preferObjectLiteralVisitor,
+  magicStringVisitor,
 ]
