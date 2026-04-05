@@ -567,6 +567,571 @@ def foo():
 });
 
 // ---------------------------------------------------------------------------
+// JS/TS: duplicate-class-members
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/duplicate-class-members', () => {
+  it('detects duplicate method names', () => {
+    const violations = check(`
+      class Foo {
+        bar() { return 1; }
+        bar() { return 2; }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-class-members');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag unique method names', () => {
+    const violations = check(`
+      class Foo {
+        bar() { return 1; }
+        baz() { return 2; }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-class-members');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: duplicate-class-members
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/duplicate-class-members', () => {
+  it('detects duplicate method names', () => {
+    const violations = check(`
+class Foo:
+    def bar(self):
+        return 1
+    def bar(self):
+        return 2
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-class-members');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag unique method names', () => {
+    const violations = check(`
+class Foo:
+    def bar(self):
+        return 1
+    def baz(self):
+        return 2
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-class-members');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: duplicate-else-if
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/duplicate-else-if', () => {
+  it('detects duplicate conditions in if/else if chain', () => {
+    const violations = check(`
+      if (x > 1) {
+        a();
+      } else if (x > 2) {
+        b();
+      } else if (x > 1) {
+        c();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-else-if');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag unique conditions', () => {
+    const violations = check(`
+      if (x > 1) {
+        a();
+      } else if (x > 2) {
+        b();
+      } else if (x > 3) {
+        c();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-else-if');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: duplicate-else-if
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/duplicate-else-if', () => {
+  it('detects duplicate conditions in if/elif chain', () => {
+    const violations = check(`
+if x > 1:
+    a()
+elif x > 2:
+    b()
+elif x > 1:
+    c()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-else-if');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag unique elif conditions', () => {
+    const violations = check(`
+if x > 1:
+    a()
+elif x > 2:
+    b()
+elif x > 3:
+    c()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-else-if');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: duplicate-branches
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/duplicate-branches', () => {
+  it('detects if/else if with identical branch bodies', () => {
+    const violations = check(`
+      if (x > 1) {
+        doA();
+      } else if (x > 2) {
+        doA();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-branches');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag different branch bodies', () => {
+    const violations = check(`
+      if (x > 1) {
+        doA();
+      } else if (x > 2) {
+        doB();
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-branches');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: invalid-typeof
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/invalid-typeof', () => {
+  it('detects typeof compared to invalid string', () => {
+    const violations = check(`if (typeof x === "strig") {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/invalid-typeof');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid typeof comparison', () => {
+    const violations = check(`if (typeof x === "string") {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/invalid-typeof');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('detects "undefind" typo', () => {
+    const violations = check(`if (typeof x === "undefind") {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/invalid-typeof');
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: use-isnan
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/use-isnan', () => {
+  it('detects x === NaN', () => {
+    const violations = check(`if (x === NaN) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-isnan');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects NaN == y', () => {
+    const violations = check(`const bad = NaN == y;`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-isnan');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag Number.isNaN(x)', () => {
+    const violations = check(`if (Number.isNaN(x)) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-isnan');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: compare-neg-zero
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/compare-neg-zero', () => {
+  it('detects x === -0', () => {
+    const violations = check(`if (x === -0) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/compare-neg-zero');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag x === 0', () => {
+    const violations = check(`if (x === 0) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/compare-neg-zero');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: loss-of-precision
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/loss-of-precision', () => {
+  it('detects number exceeding safe integer range', () => {
+    const violations = check(`const big = 9007199254740993;`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/loss-of-precision');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag safe integers', () => {
+    const violations = check(`const safe = 9007199254740991;`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/loss-of-precision');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag BigInt literals', () => {
+    const violations = check(`const big = 9007199254740993n;`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/loss-of-precision');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: unsafe-negation
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/unsafe-negation', () => {
+  it('detects !a instanceof B', () => {
+    const violations = check(`if (!a instanceof B) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-negation');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag !(a instanceof B)', () => {
+    const violations = check(`if (!(a instanceof B)) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-negation');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('detects !a in B', () => {
+    const violations = check(`if (!key in obj) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-negation');
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: unsafe-optional-chaining
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/unsafe-optional-chaining', () => {
+  it('detects (obj?.method)()', () => {
+    const violations = check(`(obj?.method)();`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-optional-chaining');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag obj?.method()', () => {
+    const violations = check(`obj?.method();`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-optional-chaining');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: unsafe-finally
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/unsafe-finally', () => {
+  it('detects return in finally', () => {
+    const violations = check(`
+      function foo() {
+        try {
+          return 1;
+        } finally {
+          return 2;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-finally');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects throw in finally', () => {
+    const violations = check(`
+      function foo() {
+        try {
+          return 1;
+        } finally {
+          throw new Error("oops");
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-finally');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag finally without return/throw', () => {
+    const violations = check(`
+      function foo() {
+        try {
+          return 1;
+        } finally {
+          cleanup();
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-finally');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: unsafe-finally
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/unsafe-finally', () => {
+  it('detects return in finally', () => {
+    const violations = check(`
+def foo():
+    try:
+        return 1
+    finally:
+        return 2
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-finally');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects raise in finally', () => {
+    const violations = check(`
+def foo():
+    try:
+        return 1
+    finally:
+        raise ValueError("oops")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-finally');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag finally without return/raise', () => {
+    const violations = check(`
+def foo():
+    try:
+        return 1
+    finally:
+        cleanup()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unsafe-finally');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: fallthrough-case
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/fallthrough-case', () => {
+  it('detects case without break', () => {
+    const violations = check(`
+      switch (x) {
+        case 1:
+          doSomething();
+        case 2:
+          doOther();
+          break;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/fallthrough-case');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag case with break', () => {
+    const violations = check(`
+      switch (x) {
+        case 1:
+          doSomething();
+          break;
+        case 2:
+          doOther();
+          break;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/fallthrough-case');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag empty case (intentional grouping)', () => {
+    const violations = check(`
+      switch (x) {
+        case 1:
+        case 2:
+          doSomething();
+          break;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/fallthrough-case');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: for-direction
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/for-direction', () => {
+  it('detects wrong direction: i-- with i < 10', () => {
+    const violations = check(`for (let i = 0; i < 10; i--) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/for-direction');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects wrong direction: i++ with i > 0', () => {
+    const violations = check(`for (let i = 10; i > 0; i++) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/for-direction');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag correct direction: i++ with i < 10', () => {
+    const violations = check(`for (let i = 0; i < 10; i++) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/for-direction');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag correct direction: i-- with i > 0', () => {
+    const violations = check(`for (let i = 10; i > 0; i--) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/for-direction');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: no-constructor-return
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/no-constructor-return', () => {
+  it('detects return value in constructor', () => {
+    const violations = check(`
+      class Foo {
+        constructor() {
+          return { bad: true };
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-constructor-return');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag constructor without return value', () => {
+    const violations = check(`
+      class Foo {
+        constructor() {
+          this.x = 1;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-constructor-return');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag empty return in constructor', () => {
+    const violations = check(`
+      class Foo {
+        constructor() {
+          if (!valid) return;
+          this.x = 1;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-constructor-return');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: no-setter-return
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/no-setter-return', () => {
+  it('detects return value in setter', () => {
+    const violations = check(`
+      class Foo {
+        set name(val) {
+          this._name = val;
+          return val;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-setter-return');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag setter without return value', () => {
+    const violations = check(`
+      class Foo {
+        set name(val) {
+          this._name = val;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-setter-return');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS/TS: no-promise-executor-return
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/no-promise-executor-return', () => {
+  it('detects return value in Promise executor', () => {
+    const violations = check(`
+      const p = new Promise((resolve) => {
+        return 42;
+      });
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-promise-executor-return');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag resolve() in Promise executor', () => {
+    const violations = check(`
+      const p = new Promise((resolve) => {
+        resolve(42);
+      });
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-promise-executor-return');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag empty return in Promise executor', () => {
+    const violations = check(`
+      const p = new Promise((resolve) => {
+        if (!valid) return;
+        resolve(42);
+      });
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-promise-executor-return');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Language isolation
 // ---------------------------------------------------------------------------
 
