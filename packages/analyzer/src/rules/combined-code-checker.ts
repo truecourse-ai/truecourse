@@ -19,6 +19,8 @@ import { STYLE_JS_VISITORS } from './style/visitors/javascript.js'
 import { STYLE_PYTHON_VISITORS } from './style/visitors/python.js'
 import { ARCHITECTURE_JS_VISITORS } from './architecture/visitors/javascript.js'
 import { ARCHITECTURE_PYTHON_VISITORS } from './architecture/visitors/python.js'
+import { DATABASE_JS_VISITORS } from './database/visitors/javascript.js'
+import { DATABASE_PYTHON_VISITORS } from './database/visitors/python.js'
 
 const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   ...SECURITY_JS_VISITORS,
@@ -37,6 +39,8 @@ const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   ...STYLE_PYTHON_VISITORS,
   ...ARCHITECTURE_JS_VISITORS,
   ...ARCHITECTURE_PYTHON_VISITORS,
+  ...DATABASE_JS_VISITORS,
+  ...DATABASE_PYTHON_VISITORS,
 ]
 
 /**

@@ -383,9 +383,12 @@ describe('code rules integration', () => {
     `);
     // Filter out LLM-only rules (not deterministic) and reliability rules
     // that flag catch patterns — this test validates code-quality rules only
+    // Also exclude unknown-catch-variable since idiomatic TS often omits the type annotation
     const significant = violations.filter(
       (v) => v.ruleKey !== 'code-quality/llm/magic-number'
-        && !v.ruleKey.startsWith('reliability/'),
+        && !v.ruleKey.startsWith('reliability/')
+        && !v.ruleKey.startsWith('database/')
+        && v.ruleKey !== 'code-quality/deterministic/unknown-catch-variable',
     );
     expect(significant).toHaveLength(0);
   });
@@ -3041,6 +3044,314 @@ describe('code-quality/deterministic/no-extraneous-class', () => {
       }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-extraneous-class');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch 5 — 25 new rules
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/default-parameter-position', () => {
+  it('detects required param after default param', () => {
+    const violations = check(`function foo(a = 1, b: string) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/default-parameter-position');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag default param last', () => {
+    const violations = check(`function foo(a: string, b = 1) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/default-parameter-position');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unnamed-regex-capture', () => {
+  it('detects unnamed capture group in regex', () => {
+    const violations = check(`const re = /(\\d+)/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-capturing group', () => {
+    const violations = check(`const re = /(?:\\d+)/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag named capture group', () => {
+    const violations = check(`const re = /(?<year>\\d{4})/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnamed-regex-capture');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unnecessary-regex-constructor', () => {
+  it('detects new RegExp with string literal', () => {
+    const violations = check(`const re = new RegExp("\\\\d+");`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-regex-constructor');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag new RegExp with variable', () => {
+    const violations = check(`const re = new RegExp(pattern);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-regex-constructor');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/ungrouped-accessor-pair', () => {
+  it('detects getter and setter not adjacent', () => {
+    const violations = check(`
+      class Foo {
+        get name() { return this._name; }
+        doSomething() {}
+        set name(v: string) { this._name = v; }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/ungrouped-accessor-pair');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag adjacent getter/setter', () => {
+    const violations = check(`
+      class Foo {
+        get name() { return this._name; }
+        set name(v: string) { this._name = v; }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/ungrouped-accessor-pair');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/this-aliasing', () => {
+  it('detects const self = this', () => {
+    const violations = check(`
+      function Foo() {
+        const self = this;
+        return self;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/this-aliasing');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag const x = obj.this', () => {
+    const violations = check(`const x = obj.value;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/this-aliasing');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/require-import', () => {
+  it('detects require() in TypeScript', () => {
+    const violations = check(`const fs = require('fs');`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-import');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag import statement', () => {
+    const violations = check(`import fs from 'fs';`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-import');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unsafe-function-type', () => {
+  it('detects Function type in annotation', () => {
+    const violations = check(`function foo(cb: Function) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unsafe-function-type');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag specific function signature', () => {
+    const violations = check(`function foo(cb: () => void) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unsafe-function-type');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/redundant-type-constraint', () => {
+  it('detects T extends any constraint', () => {
+    const violations = check(`function foo<T extends any>(x: T): T { return x; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-type-constraint');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects T extends unknown constraint', () => {
+    const violations = check(`function foo<T extends unknown>(x: T): T { return x; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-type-constraint');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag T extends object', () => {
+    const violations = check(`function foo<T extends object>(x: T): T { return x; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-type-constraint');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/literal-assertion-over-const', () => {
+  it('detects as string-literal assertion', () => {
+    const violations = check(`const x = "hello" as "hello";`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/literal-assertion-over-const');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag as const', () => {
+    const violations = check(`const x = "hello" as const;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/literal-assertion-over-const');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/filter-first-over-find', () => {
+  it('detects .filter()[0]', () => {
+    const violations = check(`const x = arr.filter(n => n > 0)[0];`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filter-first-over-find');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag .find()', () => {
+    const violations = check(`const x = arr.find(n => n > 0);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filter-first-over-find');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/substring-over-starts-ends', () => {
+  it('detects indexOf() === 0', () => {
+    const violations = check(`if (str.indexOf("hello") === 0) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/substring-over-starts-ends');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag startsWith', () => {
+    const violations = check(`if (str.startsWith("hello")) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/substring-over-starts-ends');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/triple-slash-reference', () => {
+  it('detects triple-slash reference directive', () => {
+    const violations = check(`/// <reference path="./types.d.ts" />`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/triple-slash-reference');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag regular comments', () => {
+    const violations = check(`// This is a regular comment`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/triple-slash-reference');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/useless-empty-export', () => {
+  it('detects empty export {}', () => {
+    const violations = check(`export {};`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-empty-export');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag export with names', () => {
+    const violations = check(`export { foo, bar };`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-empty-export');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/redundant-template-expression', () => {
+  it('detects template with only a variable', () => {
+    const violations = check('const x = `${name}`;');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-template-expression');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag template with surrounding text', () => {
+    const violations = check('const x = `Hello ${name}!`;');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-template-expression');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/dynamic-delete', () => {
+  it('detects delete with computed key', () => {
+    const violations = check(`delete obj[key];`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/dynamic-delete');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag delete with literal key', () => {
+    const violations = check(`delete obj["name"];`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/dynamic-delete');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag delete of simple property', () => {
+    const violations = check(`delete obj.name;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/dynamic-delete');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/useless-type-intersection', () => {
+  it('detects intersection with never', () => {
+    const violations = check(`type Foo = string & never;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-type-intersection');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects intersection with any', () => {
+    const violations = check(`type Foo = string & any;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-type-intersection');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag useful intersection', () => {
+    const violations = check(`type Foo = A & B;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-type-intersection');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/regex-empty-alternative', () => {
+  it('detects empty alternative at end', () => {
+    const violations = check(`const re = /foo|/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-empty-alternative');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects empty alternative at start', () => {
+    const violations = check(`const re = /|bar/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-empty-alternative');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid alternation', () => {
+    const violations = check(`const re = /foo|bar/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-empty-alternative');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/regex-unicode-awareness', () => {
+  it('detects unicode property escape without u flag', () => {
+    const violations = check(String.raw`const re = /\p{Letter}/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-unicode-awareness');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag regex with u flag', () => {
+    const violations = check(String.raw`const re = /\p{Letter}/u;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-unicode-awareness');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag regex without unicode escapes', () => {
+    const violations = check(`const re = /hello/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-unicode-awareness');
     expect(matches).toHaveLength(0);
   });
 });

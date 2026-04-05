@@ -2173,6 +2173,815 @@ export const pythonDuplicateImportVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---- New batch (22 Python rules) --------------------------------------------
+
+// ---------------------------------------------------------------------------
+// exception-not-from-base-exception: raise/except with non-exception values
+// Detects literal raises like `raise 42` or `except 42:` (not identifiers/classes)
+// ---------------------------------------------------------------------------
+
+export const pythonExceptionNotFromBaseExceptionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/exception-not-from-base-exception',
+  languages: ['python'],
+  nodeTypes: ['raise_statement', 'except_clause'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'raise_statement') {
+      const raised = node.namedChildren[0]
+      if (!raised) return null
+      // Raising a literal (int, float, string, boolean, list, dict, tuple, set) is always wrong
+      const badTypes = new Set(['integer', 'float', 'string', 'concatenated_string', 'list', 'dictionary', 'set', 'true', 'false', 'none'])
+      if (badTypes.has(raised.type)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'critical',
+          'Exception not derived from BaseException',
+          `Raising a \`${raised.type}\` literal will cause a TypeError — only instances or subclasses of BaseException can be raised.`,
+          sourceCode,
+          'Raise an exception instance or class that derives from BaseException.',
+        )
+      }
+    }
+    if (node.type === 'except_clause') {
+      // Look for `except 42:` — numeric or other literal as exception type
+      const children = node.children
+      const exceptIdx = children.findIndex((c) => c.text === 'except')
+      const colonIdx = children.findIndex((c) => c.text === ':')
+      if (exceptIdx === -1 || colonIdx === -1) return null
+      const typeNodes = children.slice(exceptIdx + 1, colonIdx).filter((c) => c.type !== 'comment')
+      for (const t of typeNodes) {
+        if (t.type === 'integer' || t.type === 'float' || t.type === 'concatenated_string') {
+          return makeViolation(
+            this.ruleKey, t, filePath, 'critical',
+            'Exception not derived from BaseException',
+            `Catching a \`${t.type}\` literal in an except clause will raise a TypeError — only BaseException subclasses can be caught.`,
+            sourceCode,
+            'Replace the literal with a valid exception class.',
+          )
+        }
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// invalid-special-method-return-type: __len__ returning string, __bool__ returning int, etc.
+// ---------------------------------------------------------------------------
+
+const SPECIAL_METHOD_RETURN_CONSTRAINTS: Record<string, { forbiddenTypes: string[], expected: string }> = {
+  '__len__': { forbiddenTypes: ['string', 'float', 'true', 'false', 'none', 'list', 'dictionary', 'set', 'tuple'], expected: 'non-negative integer' },
+  '__bool__': { forbiddenTypes: ['string', 'integer', 'float', 'list', 'dictionary', 'set', 'tuple', 'none'], expected: 'bool (True or False)' },
+  '__hash__': { forbiddenTypes: ['string', 'float', 'true', 'false', 'list', 'dictionary', 'set', 'tuple'], expected: 'integer or None' },
+  '__str__': { forbiddenTypes: ['integer', 'float', 'true', 'false', 'none', 'list', 'dictionary', 'set', 'tuple'], expected: 'str' },
+  '__repr__': { forbiddenTypes: ['integer', 'float', 'true', 'false', 'none', 'list', 'dictionary', 'set', 'tuple'], expected: 'str' },
+  '__index__': { forbiddenTypes: ['string', 'float', 'true', 'false', 'none', 'list', 'dictionary', 'set', 'tuple'], expected: 'integer' },
+}
+
+export const pythonInvalidSpecialMethodReturnTypeVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/invalid-special-method-return-type',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name) return null
+    const constraint = SPECIAL_METHOD_RETURN_CONSTRAINTS[name.text]
+    if (!constraint) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    const methodName = name.text
+    // Find any return statements with a literal of the wrong type
+    function findBadReturn(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      if (n.type === 'return_statement') {
+        const val = n.namedChildren[0]
+        if (val && constraint.forbiddenTypes.includes(val.type)) {
+          // Special case: __bool__ allows True/False (those are 'true'/'false' node types)
+          if (methodName === '__bool__' && (val.text === 'True' || val.text === 'False')) return null
+          return n
+        }
+      }
+      if (n.type === 'function_definition') return null
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findBadReturn(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const badReturn = findBadReturn(body)
+    if (badReturn) {
+      return makeViolation(
+        this.ruleKey, badReturn, filePath, 'high',
+        'Invalid special method return type',
+        `\`${methodName}\` must return ${constraint.expected} — returning a different type will cause a TypeError at runtime.`,
+        sourceCode,
+        `Change the return value to match the required type: ${constraint.expected}.`,
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// exception-group-misuse: ExceptionGroup caught with bare except*
+// Detect: `except* ExceptionGroup:` or `except* BaseExceptionGroup:`
+// (Python raises RecursionError when ExceptionGroup catches itself)
+// ---------------------------------------------------------------------------
+
+export const pythonExceptionGroupMisuseVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/exception-group-misuse',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    // except* ExceptionGroup: — tree-sitter parses this as except_clause with a '*' child
+    const children = node.children
+    // Check if this is except* (has a '*' token after 'except')
+    const exceptIdx = children.findIndex((c) => c.text === 'except')
+    if (exceptIdx === -1) return null
+    const starChild = children[exceptIdx + 1]
+    if (!starChild || starChild.text !== '*') return null
+
+    // Look for ExceptionGroup or BaseExceptionGroup as caught type
+    for (const child of children) {
+      if (child.type === 'identifier' &&
+          (child.text === 'ExceptionGroup' || child.text === 'BaseExceptionGroup')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'ExceptionGroup caught with except*',
+          `Catching \`${child.text}\` with \`except*\` causes infinite recursion — \`except*\` already wraps exceptions in an ExceptionGroup.`,
+          sourceCode,
+          `Use plain \`except ${child.text}:\` instead of \`except* ${child.text}:\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unreliable-callable-check: hasattr(x, '__call__') instead of callable(x)
+// ---------------------------------------------------------------------------
+
+export const pythonUnreliableCallableCheckVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unreliable-callable-check',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.text !== 'hasattr') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argNodes = args.namedChildren
+    if (argNodes.length < 2) return null
+
+    const secondArg = argNodes[1]
+    // Look for hasattr(x, '__call__')
+    if (secondArg?.type === 'string' && secondArg.text.replace(/['"]/g, '') === '__call__') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Unreliable callable check',
+        '`hasattr(x, "__call__")` is unreliable — it can miss many edge cases. Use `callable(x)` instead.',
+        sourceCode,
+        'Replace `hasattr(x, "__call__")` with `callable(x)`.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// strip-with-multi-chars: str.strip('abc') strips individual chars, not the substring
+// ---------------------------------------------------------------------------
+
+export const pythonStripWithMultiCharsVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/strip-with-multi-chars',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'attribute') return null
+
+    const attr = fn.childForFieldName('attribute')
+    if (!attr || !['strip', 'lstrip', 'rstrip'].includes(attr.text)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argNodes = args.namedChildren
+    if (argNodes.length === 0) return null
+
+    const firstArg = argNodes[0]
+    if (!firstArg || firstArg.type !== 'string') return null
+
+    // Strip the quotes and check if it's a multi-character string
+    const rawStr = firstArg.text
+    // Handle both 'abc' and "abc" and triple-quoted strings
+    let content = rawStr
+    if (content.startsWith('"""') || content.startsWith("'''")) {
+      content = content.slice(3, -3)
+    } else if (content.startsWith('"') || content.startsWith("'")) {
+      content = content.slice(1, -1)
+    }
+
+    // Only flag if more than one character (and not an escape sequence for one char)
+    if (content.length > 1 && !content.startsWith('\\')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'strip() with multi-character string',
+        `\`${attr.text}("${content}")\` strips each individual character in "${content}", not the substring "${content}" — this is a common misunderstanding.`,
+        sourceCode,
+        `If you want to remove the prefix/suffix "${content}", use \`.removeprefix()\` / \`.removesuffix()\` (Python 3.9+) or check manually.`,
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// assert-false: assert False instead of raise
+// ---------------------------------------------------------------------------
+
+export const pythonAssertFalseVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/assert-false',
+  languages: ['python'],
+  nodeTypes: ['assert_statement'],
+  visit(node, filePath, sourceCode) {
+    const condition = node.namedChildren[0]
+    if (!condition) return null
+
+    if (condition.type === 'false' || condition.text === 'False') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'assert False instead of raise',
+        '`assert False` is removed when Python is run with the `-O` optimization flag — use `raise AssertionError(...)` or another exception instead.',
+        sourceCode,
+        'Replace `assert False, message` with `raise AssertionError(message)` or an appropriate exception.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// redundant-tuple-in-exception: except (ValueError,): — trailing comma is redundant
+// ---------------------------------------------------------------------------
+
+export const pythonRedundantTupleInExceptionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/redundant-tuple-in-exception',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    // Find the caught type — look for a tuple with exactly one element
+    const children = node.children
+    const exceptIdx = children.findIndex((c) => c.text === 'except')
+    const colonIdx = children.findIndex((c) => c.text === ':')
+    if (exceptIdx === -1 || colonIdx === -1) return null
+
+    const typeNodes = children.slice(exceptIdx + 1, colonIdx).filter((c) => c.type !== 'comment' && c.text !== 'as')
+    for (const t of typeNodes) {
+      if (t.type === 'tuple' && t.namedChildren.length === 1) {
+        return makeViolation(
+          this.ruleKey, t, filePath, 'low',
+          'Redundant tuple in except handler',
+          `\`except (${t.namedChildren[0].text},):\` has an unnecessary trailing comma — use \`except ${t.namedChildren[0].text}:\` instead.`,
+          sourceCode,
+          `Remove the trailing comma: \`except ${t.namedChildren[0].text}:\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// except-with-empty-tuple: except (): catches nothing
+// ---------------------------------------------------------------------------
+
+export const pythonExceptWithEmptyTupleVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/except-with-empty-tuple',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+    const exceptIdx = children.findIndex((c) => c.text === 'except')
+    const colonIdx = children.findIndex((c) => c.text === ':')
+    if (exceptIdx === -1 || colonIdx === -1) return null
+
+    const typeNodes = children.slice(exceptIdx + 1, colonIdx).filter((c) => c.type !== 'comment' && c.text !== 'as')
+    for (const t of typeNodes) {
+      if (t.type === 'tuple' && t.namedChildren.length === 0) {
+        return makeViolation(
+          this.ruleKey, t, filePath, 'high',
+          'Except with empty tuple',
+          '`except ():` catches no exceptions — this handler is useless and likely a bug.',
+          sourceCode,
+          'Add exception types to the tuple or use `except Exception:` to catch all exceptions.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unintentional-type-annotation: x: int as a standalone expression (no assignment)
+// ---------------------------------------------------------------------------
+
+export const pythonUnintentionalTypeAnnotationVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unintentional-type-annotation',
+  languages: ['python'],
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    // expression_statement containing only a type annotation (no assignment value)
+    const expr = node.namedChildren[0]
+    if (!expr) return null
+
+    // In tree-sitter Python, a bare annotation `x: int` is an `expression_statement`
+    // containing a `type_annotation` (Python 3.6+ syntax as an assignment without value)
+    // Actually tree-sitter represents `x: int` as an assignment with no value — check for it
+    if (expr.type === 'assignment') {
+      // assignment with type annotation but no right side: `x: int`
+      // tree-sitter represents this as type annotation only when there's no `=`
+      const hasEquals = expr.children.some((c) => c.text === '=')
+      if (!hasEquals && expr.childForFieldName('type') !== null) {
+        const left = expr.childForFieldName('left')
+        const typeNode = expr.childForFieldName('type')
+        if (left && typeNode) {
+          return makeViolation(
+            this.ruleKey, expr, filePath, 'medium',
+            'Unintentional type annotation',
+            `\`${left.text}: ${typeNode.text}\` is a bare type annotation with no value — if you meant to assign a value, add \`= value\`. The annotation itself has no runtime effect.`,
+            sourceCode,
+            `Add an assignment: \`${left.text}: ${typeNode.text} = value\`.`,
+          )
+        }
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// re-sub-positional-args: re.sub(pattern, repl, string, flags=...) confusion
+// Detects re.sub called with 5 positional args (4th is count, 5th is flags)
+// Common mistake: re.sub(pat, repl, str, re.IGNORECASE) — 4th arg is count not flags
+// ---------------------------------------------------------------------------
+
+export const pythonReSubPositionalArgsVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/re-sub-positional-args',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Match re.sub or re.subn
+    const isReSub = (fn.type === 'attribute' &&
+        fn.childForFieldName('object')?.text === 're' &&
+        (fn.childForFieldName('attribute')?.text === 'sub' || fn.childForFieldName('attribute')?.text === 'subn'))
+
+    if (!isReSub) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argNodes = args.namedChildren
+    // Count positional args (non-keyword)
+    const positionalArgs = argNodes.filter((a) => a.type !== 'keyword_argument')
+
+    // If 4 or more positional args, the 4th is count (not flags)
+    // Detect: 4th positional arg looks like a flag (re.IGNORECASE, re.MULTILINE, etc.)
+    if (positionalArgs.length >= 4) {
+      const fourthArg = positionalArgs[3]
+      const fourthText = fourthArg.text
+      const RE_FLAGS = new Set(['re.IGNORECASE', 're.MULTILINE', 're.DOTALL', 're.VERBOSE', 're.ASCII', 're.UNICODE', 're.LOCALE', 'IGNORECASE', 'MULTILINE', 'DOTALL', 'VERBOSE', 'ASCII', 'UNICODE'])
+      if (RE_FLAGS.has(fourthText) ||
+          (fourthArg.type === 'attribute' && fourthArg.childForFieldName('object')?.text === 're')) {
+        return makeViolation(
+          this.ruleKey, fourthArg, filePath, 'medium',
+          're.sub positional arguments confusion',
+          `\`re.sub\` signature is \`re.sub(pattern, repl, string, count=0, flags=0)\` — the 4th positional argument is \`count\`, not \`flags\`. Passing \`${fourthText}\` as the 4th positional argument sets \`count\` to an unexpected value.`,
+          sourceCode,
+          `Use keyword arguments: \`re.sub(pattern, repl, string, flags=${fourthText})\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// static-key-dict-comprehension: {literal_key: v for x in xs}
+// ---------------------------------------------------------------------------
+
+export const pythonStaticKeyDictComprehensionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/static-key-dict-comprehension',
+  languages: ['python'],
+  nodeTypes: ['dictionary_comprehension'],
+  visit(node, filePath, sourceCode) {
+    // Tree-sitter Python parses `{key: val for ...}` as:
+    //   dictionary_comprehension -> pair -> key / value, + for_in_clause
+    const pairNode = node.namedChildren.find((c) => c.type === 'pair')
+    if (!pairNode) return null
+
+    const keyNode = pairNode.childForFieldName('key')
+    if (!keyNode) return null
+
+    // A static key is a literal (string, integer, float, true, false, none)
+    const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'true', 'false', 'none'])
+    if (LITERAL_TYPES.has(keyNode.type)) {
+      return makeViolation(
+        this.ruleKey, keyNode, filePath, 'high',
+        'Static key in dict comprehension',
+        `Dict comprehension with constant key \`${keyNode.text}\` — every iteration overwrites the same key, leaving only the last value.`,
+        sourceCode,
+        'Use a variable as the key, or use a list comprehension if you only need the values.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// fstring-docstring: f"..." used as the first statement in a function/class/module
+// ---------------------------------------------------------------------------
+
+export const pythonFstringDocstringVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/fstring-docstring',
+  languages: ['python'],
+  nodeTypes: ['function_definition', 'class_definition', 'module'],
+  visit(node, filePath, sourceCode) {
+    let body: import('tree-sitter').SyntaxNode | null = null
+    if (node.type === 'module') {
+      body = node
+    } else {
+      body = node.childForFieldName('body')
+    }
+    if (!body) return null
+
+    // Get the first non-comment statement
+    const firstStmt = body.namedChildren.find((c) => c.type !== 'comment')
+    if (!firstStmt) return null
+
+    // Check if it's an expression_statement containing an f-string
+    if (firstStmt.type !== 'expression_statement') return null
+
+    const expr = firstStmt.namedChildren[0]
+    if (!expr) return null
+
+    // f-string in tree-sitter is of type 'string' but starts with f" or f'
+    if (expr.type === 'string' && (expr.text.startsWith('f"') || expr.text.startsWith("f'") ||
+        expr.text.startsWith('f"""') || expr.text.startsWith("f'''"))) {
+      return makeViolation(
+        this.ruleKey, expr, filePath, 'medium',
+        'f-string used as docstring',
+        'An f-string cannot serve as a docstring — `__doc__` will be `None`. Use a plain string literal for the docstring.',
+        sourceCode,
+        'Change the f-string to a plain string literal (remove the `f` prefix).',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// useless-contextlib-suppress: contextlib.suppress() with no exception arguments
+// ---------------------------------------------------------------------------
+
+export const pythonUselessContextlibSuppressVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/useless-contextlib-suppress',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    const isSuppress = (fn.type === 'attribute' &&
+        fn.childForFieldName('object')?.text === 'contextlib' &&
+        fn.childForFieldName('attribute')?.text === 'suppress') ||
+      (fn.type === 'identifier' && fn.text === 'suppress')
+
+    if (!isSuppress) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // No arguments — suppress() with no exceptions does nothing
+    if (args.namedChildren.length === 0) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Useless contextlib.suppress',
+        '`contextlib.suppress()` called with no exception types suppresses nothing — this is a no-op.',
+        sourceCode,
+        'Pass at least one exception type to suppress, e.g. `contextlib.suppress(FileNotFoundError)`.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// star-arg-after-keyword: f(a=1, *args) — unpacking after keyword argument
+// ---------------------------------------------------------------------------
+
+export const pythonStarArgAfterKeywordVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/star-arg-after-keyword',
+  languages: ['python'],
+  nodeTypes: ['argument_list'],
+  visit(node, filePath, sourceCode) {
+    const args = node.namedChildren
+    let seenKeyword = false
+    for (const arg of args) {
+      if (arg.type === 'keyword_argument') {
+        seenKeyword = true
+      } else if (arg.type === 'list_splat' && seenKeyword) {
+        // *args after keyword argument
+        return makeViolation(
+          this.ruleKey, arg, filePath, 'high',
+          'Star-arg unpacking after keyword argument',
+          '`*args` unpacking appears after a keyword argument — positional arguments must come before keyword arguments.',
+          sourceCode,
+          'Move all positional and `*args` arguments before keyword arguments.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// nan-comparison: x == float('nan') or x == NaN
+// ---------------------------------------------------------------------------
+
+export const pythonNanComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/nan-comparison',
+  languages: ['python'],
+  nodeTypes: ['comparison_operator'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+    // Find == or != operators
+    for (let i = 0; i < children.length; i++) {
+      const op = children[i]
+      if (op.text !== '==' && op.text !== '!=') continue
+
+      // Check left and right operands around this operator
+      const left = children[i - 1]
+      const right = children[i + 1]
+
+      for (const operand of [left, right]) {
+        if (!operand) continue
+        // float('nan') or float("nan")
+        if (operand.type === 'call') {
+          const fn = operand.childForFieldName('function')
+          if (fn?.text === 'float') {
+            const callArgs = operand.childForFieldName('arguments')
+            const firstArg = callArgs?.namedChildren[0]
+            if (firstArg?.type === 'string') {
+              const val = firstArg.text.toLowerCase().replace(/['"]/g, '')
+              if (val === 'nan') {
+                return makeViolation(
+                  this.ruleKey, node, filePath, 'high',
+                  'NaN comparison with ==',
+                  '`== float("nan")` is always False — NaN is never equal to itself. Use `math.isnan()` instead.',
+                  sourceCode,
+                  'Use `import math; math.isnan(x)` or `numpy.isnan(x)` to check for NaN.',
+                )
+              }
+            }
+          }
+        }
+        // Direct identifier named NaN
+        if (operand.type === 'identifier' && operand.text === 'NaN') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'NaN comparison with ==',
+            '`== NaN` is always False — NaN is never equal to itself. Use `math.isnan()` instead.',
+            sourceCode,
+            'Use `import math; math.isnan(x)` to check for NaN.',
+          )
+        }
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// assignment-to-os-environ: os.environ = {...}
+// ---------------------------------------------------------------------------
+
+export const pythonAssignmentToOsEnvironVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/assignment-to-os-environ',
+  languages: ['python'],
+  nodeTypes: ['assignment'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    if (!left) return null
+
+    if (left.type === 'attribute' &&
+        left.childForFieldName('object')?.text === 'os' &&
+        left.childForFieldName('attribute')?.text === 'environ') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Direct assignment to os.environ',
+        '`os.environ = {...}` replaces the entire environment mapping object — future changes may not propagate. Use `os.environ.update({...})` instead.',
+        sourceCode,
+        'Replace `os.environ = {...}` with `os.environ.update({...})`.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// assert-on-string-literal: assert "message" — always True
+// ---------------------------------------------------------------------------
+
+export const pythonAssertOnStringLiteralVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/assert-on-string-literal',
+  languages: ['python'],
+  nodeTypes: ['assert_statement'],
+  visit(node, filePath, sourceCode) {
+    const condition = node.namedChildren[0]
+    if (!condition) return null
+
+    if (condition.type === 'string' || condition.type === 'concatenated_string') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Assert on string literal',
+        `\`assert ${condition.text}\` is always True because a non-empty string is truthy — the assertion never fails.`,
+        sourceCode,
+        'Pass the string as the assertion message: `assert condition, "message"`.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// binary-op-exception: except ValueError or TypeError — or/and in except clause
+// ---------------------------------------------------------------------------
+
+export const pythonBinaryOpExceptionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/binary-op-exception',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+    const exceptIdx = children.findIndex((c) => c.text === 'except')
+    const colonIdx = children.findIndex((c) => c.text === ':')
+    if (exceptIdx === -1 || colonIdx === -1) return null
+
+    const typeNodes = children.slice(exceptIdx + 1, colonIdx).filter((c) => c.type !== 'comment' && c.text !== 'as')
+    for (const t of typeNodes) {
+      if (t.type === 'boolean_operator') {
+        const op = t.children.find((c) => c.text === 'or' || c.text === 'and')
+        return makeViolation(
+          this.ruleKey, t, filePath, 'high',
+          'Binary operation on exception in except clause',
+          `\`except ${t.text}:\` uses \`${op?.text}\` which evaluates as a boolean expression — only one side is caught. Use a tuple \`except (A, B):\` to catch multiple exceptions.`,
+          sourceCode,
+          `Change to \`except (${t.children.filter((c) => c.type === 'identifier').map((c) => c.text).join(', ')}):\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// super-without-brackets: using `super` instead of `super()`
+// ---------------------------------------------------------------------------
+
+export const pythonSuperWithoutBracketsVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/super-without-brackets',
+  languages: ['python'],
+  nodeTypes: ['attribute'],
+  visit(node, filePath, sourceCode) {
+    // super.method — the object is `super` identifier (not a call)
+    // In tree-sitter Python:
+    //   `super.method` -> attribute { object: identifier('super'), attribute: identifier('method') }
+    //   `super().method` -> attribute { object: call { function: identifier('super') }, ... }
+    const obj = node.childForFieldName('object')
+    if (!obj || obj.type !== 'identifier' || obj.text !== 'super') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'super without parentheses',
+      '`super.method` references the `super` built-in without calling it — the MRO proxy is never created. Use `super().method` instead.',
+      sourceCode,
+      'Add parentheses: `super().method`.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// yield-from-in-async: yield from inside async function — SyntaxError
+// ---------------------------------------------------------------------------
+
+export const pythonYieldFromInAsyncVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/yield-from-in-async',
+  languages: ['python'],
+  nodeTypes: ['yield'],
+  visit(node, filePath, sourceCode) {
+    // Check if this is `yield from ...`
+    const hasFrom = node.children.some((c) => c.text === 'from')
+    if (!hasFrom) return null
+
+    // Check if we're inside an async function
+    let current = node.parent
+    while (current) {
+      if (current.type === 'function_definition') {
+        const isAsync = current.children.some((c) => c.text === 'async')
+        if (isAsync) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'critical',
+            'yield from in async function',
+            '`yield from` inside an async function is a SyntaxError in Python — use `async for` to iterate asynchronously.',
+            sourceCode,
+            'Replace `yield from iterable` with `async for item in iterable: yield item`.',
+          )
+        }
+        break // stop at function boundary
+      }
+      current = current.parent
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// invalid-all-object: non-string in __all__
+// ---------------------------------------------------------------------------
+
+export const pythonInvalidAllObjectVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/invalid-all-object',
+  languages: ['python'],
+  nodeTypes: ['assignment'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    if (!left || left.text !== '__all__') return null
+
+    const right = node.childForFieldName('right')
+    if (!right || right.type !== 'list') return null
+
+    for (const item of right.namedChildren) {
+      if (item.type !== 'string') {
+        return makeViolation(
+          this.ruleKey, item, filePath, 'high',
+          'Non-string in __all__',
+          `\`__all__\` contains a non-string value \`${item.text}\` (${item.type}) — this will cause a TypeError when importing with \`*\`.`,
+          sourceCode,
+          'All entries in `__all__` must be string literals.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// mutable-fromkeys-value: dict.fromkeys(keys, []) — shared mutable default
+// ---------------------------------------------------------------------------
+
+export const pythonMutableFromkeysValueVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/mutable-fromkeys-value',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'attribute') return null
+
+    const attr = fn.childForFieldName('attribute')
+    if (!attr || attr.text !== 'fromkeys') return null
+
+    // Could be dict.fromkeys(...) or MyClass.fromkeys(...)
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argNodes = args.namedChildren
+    if (argNodes.length < 2) return null
+
+    const defaultValue = argNodes[1]
+    // Mutable defaults: list, dict, set literals
+    if (defaultValue.type === 'list' || defaultValue.type === 'dictionary' || defaultValue.type === 'set') {
+      return makeViolation(
+        this.ruleKey, defaultValue, filePath, 'high',
+        'Mutable value in dict.fromkeys',
+        `\`dict.fromkeys(keys, ${defaultValue.text})\` — all keys share the same mutable ${defaultValue.type} instance. Mutating the value for one key affects all keys.`,
+        sourceCode,
+        `Use a dict comprehension instead: \`{k: ${defaultValue.type === 'list' ? '[]' : defaultValue.type === 'set' ? 'set()' : '{}'} for k in keys}\`.`,
+      )
+    }
+    return null
+  },
+}
+
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
   pythonBareExceptVisitor,
@@ -2227,4 +3036,27 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonUndefinedExportVisitor,
   pythonStringFormatMismatchVisitor,
   pythonDuplicateImportVisitor,
+  // New batch (ALL-RULES.md catalog keys)
+  pythonExceptionNotFromBaseExceptionVisitor,
+  pythonInvalidSpecialMethodReturnTypeVisitor,
+  pythonExceptionGroupMisuseVisitor,
+  pythonUnreliableCallableCheckVisitor,
+  pythonStripWithMultiCharsVisitor,
+  pythonAssertFalseVisitor,
+  pythonRedundantTupleInExceptionVisitor,
+  pythonExceptWithEmptyTupleVisitor,
+  pythonUnintentionalTypeAnnotationVisitor,
+  pythonReSubPositionalArgsVisitor,
+  pythonStaticKeyDictComprehensionVisitor,
+  pythonFstringDocstringVisitor,
+  pythonUselessContextlibSuppressVisitor,
+  pythonStarArgAfterKeywordVisitor,
+  pythonNanComparisonVisitor,
+  pythonAssignmentToOsEnvironVisitor,
+  pythonAssertOnStringLiteralVisitor,
+  pythonBinaryOpExceptionVisitor,
+  pythonSuperWithoutBracketsVisitor,
+  pythonYieldFromInAsyncVisitor,
+  pythonInvalidAllObjectVisitor,
+  pythonMutableFromkeysValueVisitor,
 ]

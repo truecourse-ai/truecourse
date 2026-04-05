@@ -11,6 +11,7 @@ import { BUGS_LLM_RULES } from './bugs/llm.js'
 import { CODE_QUALITY_DETERMINISTIC_RULES } from './code-quality/deterministic.js'
 import { CODE_QUALITY_LLM_RULES } from './code-quality/llm.js'
 import { DATABASE_LLM_RULES } from './database/llm.js'
+import { DATABASE_DETERMINISTIC_RULES } from './database/deterministic.js'
 import { STYLE_DETERMINISTIC_RULES } from './style/deterministic.js'
 import { PERFORMANCE_DETERMINISTIC_RULES } from './performance/deterministic.js'
 import { RELIABILITY_DETERMINISTIC_RULES } from './reliability/deterministic.js'
@@ -27,6 +28,7 @@ export { CODE_QUALITY_DETERMINISTIC_RULES } from './code-quality/deterministic.j
 export { CODE_QUALITY_LLM_RULES } from './code-quality/llm.js'
 export { STYLE_DETERMINISTIC_RULES } from './style/deterministic.js'
 export { DATABASE_LLM_RULES } from './database/llm.js'
+export { DATABASE_DETERMINISTIC_RULES } from './database/deterministic.js'
 export { PERFORMANCE_DETERMINISTIC_RULES } from './performance/deterministic.js'
 export { RELIABILITY_DETERMINISTIC_RULES } from './reliability/deterministic.js'
 
@@ -54,6 +56,7 @@ export const DETERMINISTIC_RULES: AnalysisRule[] = [
   ...STYLE_DETERMINISTIC_RULES,
   ...PERFORMANCE_DETERMINISTIC_RULES,
   ...RELIABILITY_DETERMINISTIC_RULES,
+  ...DATABASE_DETERMINISTIC_RULES,
 ]
 
 /** LLM architecture rules (service + module level). */

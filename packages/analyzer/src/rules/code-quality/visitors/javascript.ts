@@ -4022,6 +4022,819 @@ export const noExtraneousClassVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// Batch 5 — 25 new rules
+// ---------------------------------------------------------------------------
+
+export const defaultParameterPositionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/default-parameter-position',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const params = node.childForFieldName('parameters')
+    if (!params) return null
+
+    const paramList = params.namedChildren
+    let foundDefault = false
+
+    for (const param of paramList) {
+      // In TypeScript: required_parameter with a '=' child has a default
+      // In JavaScript: assignment_pattern has a default
+      // optional_parameter (x?: T) does NOT have a default
+      const hasDefault = param.type === 'assignment_pattern'
+        || (param.type === 'required_parameter' && param.children.some((c) => c.type === '='))
+        || (param.type === 'optional_parameter' && param.children.some((c) => c.type === '='))
+
+      // A param is "required" if it has no default and is not a rest param
+      const isRest = param.type === 'rest_pattern' || param.type === 'rest_element'
+        || (param.type === 'required_parameter' && param.children.some((c) => c.type === '...'))
+        || param.text.startsWith('...')
+
+      if (isRest) break // rest params are always last, stop checking
+
+      if (hasDefault) {
+        foundDefault = true
+      } else if (foundDefault) {
+        // Required param after a default param
+        const nameNode = param.childForFieldName('pattern') ?? param.childForFieldName('name') ?? param.namedChildren[0]
+        const name = nameNode?.text ?? 'parameter'
+        return makeViolation(
+          this.ruleKey, param, filePath, 'low',
+          'Default parameter not last',
+          `Required parameter \`${name}\` appears after a default parameter. Default parameters should come last.`,
+          sourceCode,
+          'Move default parameters to the end of the parameter list.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const unnamedRegexCaptureVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unnamed-regex-capture',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const pattern = node.namedChildren.find((c) => c.type === 'regex_pattern')
+    const src = pattern?.text ?? ''
+
+    // Check for unnamed capture groups (not non-capturing (?:), not named (?<name>), not lookahead/lookbehind (?=, ?!, ?<=, ?<!)
+    // Simple heuristic: find ( not followed by ?: or ?< or ?= or ?! (then check if it's a real capture group)
+    let hasUnnamed = false
+    for (let i = 0; i < src.length; i++) {
+      if (src[i] === '\\') { i++; continue } // skip escaped chars
+      if (src[i] === '(') {
+        const next = src[i + 1]
+        if (next !== '?') {
+          hasUnnamed = true
+          break
+        }
+        // (?<name>...) is named — skip
+        // (?:...) is non-capturing — skip
+        // (?=...) (?!...) are lookaheads — skip
+      }
+    }
+
+    if (hasUnnamed) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Unnamed capture group',
+        'Regex contains unnamed capture groups. Use named groups `(?<name>...)` for better readability.',
+        sourceCode,
+        'Convert capture groups to named: `(?<name>...)` or non-capturing: `(?:...)`.',
+      )
+    }
+    return null
+  },
+}
+
+export const unnecessaryRegexConstructorVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unnecessary-regex-constructor',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (ctor?.text !== 'RegExp') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argList = args.namedChildren
+    // Only flag when the first arg is a string literal (static pattern — no dynamic parts)
+    if (argList.length === 0 || argList.length > 2) return null
+    const firstArg = argList[0]
+    if (firstArg.type !== 'string') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Unnecessary RegExp constructor',
+      '`new RegExp("pattern")` with a string literal can be written as a regex literal `/pattern/`.',
+      sourceCode,
+      'Replace `new RegExp("pattern")` with `/pattern/` for clarity and performance.',
+    )
+  },
+}
+
+export const ungroupedAccessorPairVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/ungrouped-accessor-pair',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['class_body'],
+  visit(node, filePath, sourceCode) {
+    // Collect getter/setter positions
+    const accessorPositions = new Map<string, { getIdx: number; setIdx: number }>()
+
+    const members = node.namedChildren
+    for (let i = 0; i < members.length; i++) {
+      const member = members[i]
+      if (member.type !== 'method_definition') continue
+
+      const kindNode = member.children.find((c) => c.type === 'get' || c.type === 'set')
+      if (!kindNode) continue
+
+      const nameNode = member.childForFieldName('name')
+      if (!nameNode) continue
+      const name = nameNode.text
+
+      const entry = accessorPositions.get(name) ?? { getIdx: -1, setIdx: -1 }
+      if (kindNode.type === 'get') entry.getIdx = i
+      else entry.setIdx = i
+      accessorPositions.set(name, entry)
+    }
+
+    for (const [name, { getIdx, setIdx }] of accessorPositions) {
+      if (getIdx === -1 || setIdx === -1) continue
+      // They should be adjacent (differ by 1)
+      if (Math.abs(getIdx - setIdx) > 1) {
+        const reportNode = members[Math.min(getIdx, setIdx)]
+        return makeViolation(
+          this.ruleKey, reportNode, filePath, 'low',
+          'Ungrouped getter/setter pair',
+          `Getter and setter for \`${name}\` are not adjacent. Place them next to each other.`,
+          sourceCode,
+          'Move the getter and setter so they appear consecutively in the class body.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const thisAliasingVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/this-aliasing',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['variable_declarator'],
+  visit(node, filePath, sourceCode) {
+    const value = node.childForFieldName('value')
+    if (!value || value.text !== 'this') return null
+
+    const nameNode = node.childForFieldName('name')
+    const name = nameNode?.text ?? 'variable'
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'This aliasing',
+      `\`const ${name} = this\` creates an unnecessary alias. Use arrow functions to preserve \`this\` context instead.`,
+      sourceCode,
+      'Replace the `this` alias with an arrow function that captures `this` lexically.',
+    )
+  },
+}
+
+export const requireImportVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/require-import',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'identifier' || fn.text !== 'require') return null
+
+    // Must be a direct call: require("module")
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argList = args.namedChildren
+    if (argList.length === 0) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'require() in TypeScript',
+      '`require()` is CommonJS syntax. Use ES module `import` syntax in TypeScript files.',
+      sourceCode,
+      'Replace `const x = require("module")` with `import x from "module"`.',
+    )
+  },
+}
+
+export const namespaceUsageVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/namespace-usage',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['module'],
+  visit(node, filePath, sourceCode) {
+    // tree-sitter-typescript: 'module' node type represents namespace/module declarations
+    // Check if it uses the 'namespace' keyword
+    const keywordChild = node.children.find((c) => c.type === 'namespace' || c.text === 'namespace')
+    if (!keywordChild) return null
+
+    const nameNode = node.childForFieldName('name')
+    const name = nameNode?.text ?? 'namespace'
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'TypeScript namespace',
+      `\`namespace ${name}\` is discouraged. Use ES module syntax (\`export\`) instead.`,
+      sourceCode,
+      'Replace the `namespace` declaration with individual ES module exports.',
+    )
+  },
+}
+
+export const unsafeFunctionTypeVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unsafe-function-type',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['type_annotation'],
+  visit(node, filePath, sourceCode) {
+    // Look for type_identifier or predefined_type with text "Function" inside the annotation
+    function hasFunctionType(n: SyntaxNode): boolean {
+      if ((n.type === 'predefined_type' || n.type === 'type_identifier') && n.text === 'Function') return true
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i)
+        if (child && hasFunctionType(child)) return true
+      }
+      return false
+    }
+
+    if (hasFunctionType(node)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Unsafe Function type',
+        'The `Function` type accepts any function. Use a specific signature like `() => void` for type safety.',
+        sourceCode,
+        'Replace `Function` with a specific function type signature.',
+      )
+    }
+    return null
+  },
+}
+
+export const redundantTypeConstraintVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-type-constraint',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['type_parameter'],
+  visit(node, filePath, sourceCode) {
+    // type_parameter has a constraint child: T extends any | T extends unknown
+    const constraint = node.namedChildren.find((c) => c.type === 'constraint')
+    if (!constraint) return null
+
+    // The constraint's value is inside the constraint node
+    const constraintType = constraint.namedChildren[0]
+    if (!constraintType) return null
+
+    const constraintText = constraintType.text
+    if (constraintText === 'any' || constraintText === 'unknown') {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text ?? 'T'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant type constraint',
+        `\`${name} extends ${constraintText}\` is redundant — all types satisfy \`${constraintText}\`.`,
+        sourceCode,
+        `Remove the \`extends ${constraintText}\` constraint.`,
+      )
+    }
+    return null
+  },
+}
+
+export const literalAssertionOverConstVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/literal-assertion-over-const',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['as_expression'],
+  visit(node, filePath, sourceCode) {
+    // as_expression: expr as Type
+    const typeNode = node.namedChildren[node.namedChildCount - 1]
+    if (!typeNode) return null
+
+    // The assertion type should be a literal_type (string or number literal)
+    if (typeNode.type === 'literal_type') {
+      const lit = typeNode.namedChildren[0]
+      if (lit?.type === 'string' || lit?.type === 'number') {
+        const expr = node.namedChildren[0]
+        const exprText = expr?.text ?? 'value'
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Prefer as const over literal assertion',
+          `\`${exprText} as ${typeNode.text}\` — use \`${exprText} as const\` to preserve the literal type.`,
+          sourceCode,
+          `Replace \`as ${typeNode.text}\` with \`as const\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const indexedLoopOverForOfVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/indexed-loop-over-for-of',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['for_statement'],
+  visit(node, filePath, sourceCode) {
+    const initializer = node.childForFieldName('initializer')
+    const condition = node.childForFieldName('condition')
+    const increment = node.childForFieldName('increment')
+    const body = node.childForFieldName('body')
+
+    if (!initializer || !condition || !increment || !body) return null
+
+    // Pattern: for (let i = 0; i < arr.length; i++) { ... arr[i] ... }
+    // Detect: init declares i = 0, condition uses i < something, increment is i++
+    // Violation: if `i` is only used as an index (arr[i]) and the array is not modified
+
+    // Check init: let i = 0
+    if (initializer.type !== 'lexical_declaration' && initializer.type !== 'variable_declaration') return null
+    const declarator = initializer.namedChildren.find((c) => c.type === 'variable_declarator')
+    if (!declarator) return null
+    const indexNameNode = declarator.childForFieldName('name')
+    const initValue = declarator.childForFieldName('value')
+    if (!indexNameNode || initValue?.text !== '0') return null
+    const indexName = indexNameNode.text
+
+    // Check increment: i++ or ++i
+    const isIncrement = increment.type === 'update_expression'
+      && increment.text.includes(indexName)
+    if (!isIncrement) return null
+
+    // Check condition: i < arr.length or i <= arr.length - 1
+    const condText = condition.text
+    if (!condText.includes(indexName)) return null
+
+    // Check body: the index variable is ONLY used for array access arr[i]
+    // If the index value itself is used for something other than indexing, skip
+    let usedOutsideIndex = false
+    function checkIndexUsage(n: SyntaxNode) {
+      if (usedOutsideIndex) return
+      if (n.type === 'identifier' && n.text === indexName) {
+        const parent = n.parent
+        // OK: used as subscript index: arr[i]
+        if (parent?.type === 'subscript_expression' && parent.childForFieldName('index') === n) return
+        // OK: used in the condition or increment (handled externally)
+        if (parent === condition || parent === increment) return
+        // Also skip if it's part of a member_expression in condition like i < arr.length
+        let p: SyntaxNode | null = n.parent
+        while (p) {
+          if (p === condition || p === increment || p === initializer) return
+          p = p.parent
+        }
+        usedOutsideIndex = true
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) checkIndexUsage(child)
+      }
+    }
+
+    checkIndexUsage(body)
+
+    if (!usedOutsideIndex) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Indexed loop when index not needed',
+        `Index variable \`${indexName}\` is only used for array access. Use \`for...of\` instead.`,
+        sourceCode,
+        `Replace with \`for (const item of arr) { ... }\`.`,
+      )
+    }
+    return null
+  },
+}
+
+export const interfaceOverFunctionTypeVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/interface-over-function-type',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['interface_declaration'],
+  visit(node, filePath, sourceCode) {
+    const body = node.namedChildren.find((c) => c.type === 'object_type')
+    if (!body) return null
+
+    const members = body.namedChildren
+    if (members.length !== 1) return null
+
+    const onlyMember = members[0]
+    // call_signature: (args) => ReturnType
+    if (onlyMember.type === 'call_signature') {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text ?? 'Interface'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Interface with single call signature',
+        `\`interface ${name}\` has only a call signature — use a function type instead: \`type ${name} = (...) => ...\`.`,
+        sourceCode,
+        `Replace the interface with a type alias: \`type ${name} = ${onlyMember.text}\`.`,
+      )
+    }
+    return null
+  },
+}
+
+export const filterFirstOverFindVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/filter-first-over-find',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['subscript_expression'],
+  visit(node, filePath, sourceCode) {
+    const index = node.childForFieldName('index')
+    if (!index || index.text !== '0') return null
+
+    const object = node.childForFieldName('object')
+    if (!object || object.type !== 'call_expression') return null
+
+    const fn = object.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (prop?.text !== 'filter') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'filter()[0] instead of find()',
+      '`.filter(...)[0]` creates a full array to get one item. Use `.find(...)` instead.',
+      sourceCode,
+      'Replace `.filter(fn)[0]` with `.find(fn)`.',
+    )
+  },
+}
+
+export const substringOverStartsEndsVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/substring-over-starts-ends',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.type === '===' || c.type === '==' || c.type === '!==' || c.type === '!=')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    // Pattern: str.indexOf(x) === 0  — startsWith
+    function isIndexOfZero(call: SyntaxNode, zero: SyntaxNode): boolean {
+      if (call.type !== 'call_expression') return false
+      if (zero.text !== '0') return false
+      const fn = call.childForFieldName('function')
+      if (fn?.type !== 'member_expression') return false
+      const prop = fn.childForFieldName('property')
+      return prop?.text === 'indexOf'
+    }
+
+    if (isIndexOfZero(left, right) || isIndexOfZero(right, left)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Prefer startsWith()',
+        '`str.indexOf(x) === 0` can be replaced with `str.startsWith(x)` for clarity.',
+        sourceCode,
+        'Replace `str.indexOf(x) === 0` with `str.startsWith(x)`.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const tripleSlashReferenceVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/triple-slash-reference',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['comment'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text.trim()
+    if (/^\/\/\/\s*<reference\s+(path|types|lib)=/.test(text)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Triple-slash reference directive',
+        'Triple-slash `/// <reference ...>` directives are legacy. Use `import` statements instead.',
+        sourceCode,
+        'Replace the triple-slash reference with an `import` statement.',
+      )
+    }
+    return null
+  },
+}
+
+export const computedEnumValueVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/computed-enum-value',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['enum_assignment'],
+  visit(node, filePath, sourceCode) {
+    const value = node.namedChildren[0]
+    if (!value) return null
+
+    // Literal values are allowed: string, number, unary minus before number
+    if (value.type === 'string' || value.type === 'number') return null
+    if (value.type === 'unary_expression') {
+      const op = value.children[0]
+      const operand = value.namedChildren[0]
+      if (op?.text === '-' && operand?.type === 'number') return null
+    }
+
+    // Computed: binary_expression, call_expression, member_expression, etc.
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Computed enum member value',
+      'Enum members should have literal values. Computed values can cause unexpected behavior.',
+      sourceCode,
+      'Replace the computed expression with a literal constant.',
+    )
+  },
+}
+
+export const uselessEmptyExportVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-empty-export',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['export_statement'],
+  visit(node, filePath, sourceCode) {
+    // export {} — export_statement with named_exports that has no children
+    const namedExports = node.namedChildren.find((c) => c.type === 'named_exports' || c.type === 'export_clause')
+    if (!namedExports) return null
+
+    if (namedExports.namedChildCount === 0) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Useless empty export',
+        '`export {}` does nothing useful. Remove it unless it is needed to mark the file as a module.',
+        sourceCode,
+        'Remove the empty `export {}` statement.',
+      )
+    }
+    return null
+  },
+}
+
+export const unknownCatchVariableVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unknown-catch-variable',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['catch_clause'],
+  visit(node, filePath, sourceCode) {
+    const param = node.childForFieldName('parameter')
+    if (!param) return null
+
+    // In TypeScript, catch params can optionally have a type annotation
+    // tree-sitter-typescript: the parameter may be typed as: catch (e: unknown) or catch (e: any)
+    // Look for type_annotation on the param
+    const typeAnnotation = param.namedChildren.find((c) => c.type === 'type_annotation')
+    if (typeAnnotation) return null // already typed
+
+    // Catch param without type annotation — should be typed as unknown
+    const paramName = param.text
+    return makeViolation(
+      this.ruleKey, param, filePath, 'low',
+      'Untyped catch variable',
+      `Catch variable \`${paramName}\` should be typed as \`unknown\` for type safety: \`catch (${paramName}: unknown)\`.`,
+      sourceCode,
+      `Add ': unknown' type annotation: \`catch (${paramName}: unknown)\`.`,
+    )
+  },
+}
+
+export const redundantTemplateExpressionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-template-expression',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['template_string'],
+  visit(node, filePath, sourceCode) {
+    // Template with only one substitution and no surrounding text: `${x}`
+    const children = node.children
+    // Children of template_string: ` ... ${...} ... `
+    // If the only content is a single template_substitution with no text chars around it
+    // The raw children look like: ` ${ expr } `
+    // Named children are the substitutions only
+
+    const namedChildren = node.namedChildren
+    if (namedChildren.length !== 1) return null
+
+    const sub = namedChildren[0]
+    if (sub.type !== 'template_substitution') return null
+
+    // Check that there's no text between the backticks and the substitution
+    // The raw text should look like `${...}` exactly
+    const raw = node.text
+    if (!/^`\$\{.*\}`$/.test(raw.replace(/\s/g, ''))) {
+      // Has text around it
+      return null
+    }
+
+    // Check the text is EXACTLY `${x}` — no leading or trailing text
+    // We check the children directly: first child is ` , then template_substitution, then `
+    const nonSubChildren = children.filter((c) => c.type !== 'template_substitution')
+    const textContent = nonSubChildren.map((c) => c.text).join('').replace(/[`]/g, '')
+    if (textContent.trim() !== '') return null
+
+    const exprNode = sub.namedChildren[0]
+    const exprText = exprNode?.text ?? 'expr'
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Redundant template expression',
+      `\`\${${exprText}}\` is a template literal with only a variable — use \`${exprText}\` directly or \`String(${exprText})\`.`,
+      sourceCode,
+      `Remove the template literal wrapper: use \`${exprText}\` directly.`,
+    )
+  },
+}
+
+export const dynamicDeleteVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/dynamic-delete',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['unary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children[0]
+    if (op?.text !== 'delete') return null
+
+    const operand = node.namedChildren[0]
+    if (!operand) return null
+
+    // Flag delete on subscript_expression with a computed key (not a literal)
+    if (operand.type === 'subscript_expression') {
+      const index = operand.childForFieldName('index')
+      if (!index) return null
+
+      // Allow delete obj["literal"] or delete obj[0] — these are static
+      if (index.type === 'string' || index.type === 'number') return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Dynamic delete',
+        '`delete obj[dynamicKey]` with a computed key is unsafe and can cause unexpected behavior.',
+        sourceCode,
+        'Avoid using `delete` with dynamic keys. Use a Map or set the property to `undefined` instead.',
+      )
+    }
+    return null
+  },
+}
+
+export const ungroupedShorthandPropertiesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/ungrouped-shorthand-properties',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['object'],
+  visit(node, filePath, sourceCode) {
+    const properties = node.namedChildren.filter((c) => c.type === 'pair' || c.type === 'shorthand_property_identifier')
+
+    if (properties.length < 3) return null
+
+    // Check if shorthand properties are all grouped together
+    let shorthandSection = false
+    let regularSection = false
+    let ungrouped = false
+
+    for (const prop of properties) {
+      const isShorthand = prop.type === 'shorthand_property_identifier'
+        || (prop.type === 'pair' && (() => {
+          // pair where key and value are the same identifier
+          const key = prop.childForFieldName('key')
+          const value = prop.childForFieldName('value')
+          return key?.type === 'property_identifier' && value?.type === 'identifier' && key.text === value.text
+        })())
+
+      if (isShorthand) {
+        if (regularSection) ungrouped = true
+        shorthandSection = true
+      } else {
+        if (shorthandSection) regularSection = true
+      }
+    }
+
+    if (ungrouped) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Ungrouped shorthand properties',
+        'Shorthand property declarations are interleaved with regular properties. Group shorthand properties together.',
+        sourceCode,
+        'Move all shorthand properties to the beginning or end of the object literal.',
+      )
+    }
+    return null
+  },
+}
+
+export const publicStaticReadonlyVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/public-static-readonly',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['class_body'],
+  visit(node, filePath, sourceCode) {
+    for (const member of node.namedChildren) {
+      if (member.type !== 'public_field_definition' && member.type !== 'field_definition') continue
+
+      const isStatic = member.children.some((c) => c.type === 'static')
+      const isPublic = !member.children.some((c) => c.type === 'accessibility_modifier'
+        && (c.text === 'private' || c.text === 'protected'))
+      const isReadonly = member.children.some((c) => c.type === 'readonly')
+
+      if (isStatic && isPublic && !isReadonly) {
+        const nameNode = member.childForFieldName('name')
+        const name = nameNode?.text ?? 'field'
+        return makeViolation(
+          this.ruleKey, member, filePath, 'medium',
+          'Mutable public static field',
+          `Public static field \`${name}\` is not \`readonly\`. Static public fields that are constants should be readonly.`,
+          sourceCode,
+          `Add the \`readonly\` modifier: \`public static readonly ${name}\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const uselessTypeIntersectionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-type-intersection',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['intersection_type'],
+  visit(node, filePath, sourceCode) {
+    if (node.parent?.type === 'intersection_type') return null
+
+    function flatten(n: SyntaxNode): string[] {
+      if (n.type === 'intersection_type') {
+        const results: string[] = []
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child) results.push(...flatten(child))
+        }
+        return results
+      }
+      return [n.text.trim()]
+    }
+
+    const members = flatten(node)
+
+    // Intersection with never → never (useless, always never)
+    if (members.includes('never')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Useless type intersection with never',
+        '`T & never` always resolves to `never`. Remove the `never` member or check the type logic.',
+        sourceCode,
+        'Remove the `never` from the intersection or rethink the type.',
+      )
+    }
+
+    // Intersection with any → any (useless, loses information)
+    if (members.includes('any')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Useless type intersection with any',
+        '`T & any` always resolves to `any`. This defeats the purpose of the intersection.',
+        sourceCode,
+        'Remove the `any` from the intersection.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const regexEmptyAlternativeVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-empty-alternative',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex', 'new_expression'],
+  visit(node, filePath, sourceCode) {
+    const src = getRegexSource(node)
+    if (!src) return null
+
+    // Check for empty alternatives: starts with |, ends with |, or has ||
+    if (/\|\|/.test(src) || /^\|/.test(src) || /\|$/.test(src) || /\(\|/.test(src) || /\|\)/.test(src)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Empty regex alternative',
+        'Regular expression contains an empty alternative `|` which matches an empty string — likely a mistake.',
+        sourceCode,
+        'Remove the empty alternative or add a pattern.',
+      )
+    }
+    return null
+  },
+}
+
+export const regexUnicodeAwarenessVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/regex-unicode-awareness',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const pattern = node.namedChildren.find((c) => c.type === 'regex_pattern')
+    const flagsNode = node.namedChildren.find((c) => c.type === 'regex_flags')
+    const src = pattern?.text ?? ''
+    const flags = flagsNode?.text ?? ''
+
+    // Check for Unicode property escapes \p{...} or \P{...} which require the u flag
+    if (/\\[pP]\{/.test(src) && !flags.includes('u') && !flags.includes('v')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Missing unicode flag in regex',
+        'Regex contains Unicode property escapes `\\p{...}` or `\\P{...}` which require the `u` or `v` flag.',
+        sourceCode,
+        'Add the `u` flag to the regex: `/.../u`.',
+      )
+    }
+    return null
+  },
+}
+
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   noExplicitAnyVisitor,
@@ -4134,4 +4947,30 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   deepCallbackNestingVisitor,
   tooManyClassesPerFileVisitor,
   noExtraneousClassVisitor,
+  // Batch 5
+  defaultParameterPositionVisitor,
+  unnamedRegexCaptureVisitor,
+  unnecessaryRegexConstructorVisitor,
+  ungroupedAccessorPairVisitor,
+  thisAliasingVisitor,
+  requireImportVisitor,
+  namespaceUsageVisitor,
+  unsafeFunctionTypeVisitor,
+  redundantTypeConstraintVisitor,
+  literalAssertionOverConstVisitor,
+  indexedLoopOverForOfVisitor,
+  interfaceOverFunctionTypeVisitor,
+  filterFirstOverFindVisitor,
+  substringOverStartsEndsVisitor,
+  tripleSlashReferenceVisitor,
+  computedEnumValueVisitor,
+  uselessEmptyExportVisitor,
+  unknownCatchVariableVisitor,
+  redundantTemplateExpressionVisitor,
+  dynamicDeleteVisitor,
+  ungroupedShorthandPropertiesVisitor,
+  publicStaticReadonlyVisitor,
+  uselessTypeIntersectionVisitor,
+  regexEmptyAlternativeVisitor,
+  regexUnicodeAwarenessVisitor,
 ]

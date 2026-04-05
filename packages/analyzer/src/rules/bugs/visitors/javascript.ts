@@ -3404,6 +3404,120 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---- New batch: constructor-return, setter-return, promise-executor-return ---
+// These mirror the no-* variants above but use the keys from ALL-RULES.md catalog.
+
+export const constructorReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/constructor-return',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['method_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name || name.text !== 'constructor') return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    function findReturnWithValue(block: SyntaxNode): SyntaxNode | null {
+      for (const child of block.namedChildren) {
+        if (child.type === 'return_statement' && child.namedChildren.length > 0) return child
+        if (child.type === 'function_declaration' || child.type === 'arrow_function' ||
+            child.type === 'function' || child.type === 'class_declaration') continue
+        if (child.type === 'if_statement' || child.type === 'statement_block' || child.type === 'else_clause') {
+          const found = findReturnWithValue(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const returnNode = findReturnWithValue(body)
+    if (returnNode) {
+      return makeViolation(
+        this.ruleKey, returnNode, filePath, 'medium',
+        'Constructor with return value',
+        'Returning a value from a constructor replaces the constructed instance — this is confusing and often a bug.',
+        sourceCode,
+        'Remove the return value from the constructor.',
+      )
+    }
+    return null
+  },
+}
+
+export const setterReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/setter-return',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['method_definition'],
+  visit(node, filePath, sourceCode) {
+    const hasSetter = node.children.some((c) => c.text === 'set' && c.type !== 'property_identifier')
+    if (!hasSetter) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    function findReturnWithValue(block: SyntaxNode): SyntaxNode | null {
+      for (const child of block.namedChildren) {
+        if (child.type === 'return_statement' && child.namedChildren.length > 0) return child
+        if (child.type === 'function_declaration' || child.type === 'arrow_function' ||
+            child.type === 'function' || child.type === 'class_declaration') continue
+        if (child.type === 'if_statement' || child.type === 'statement_block' || child.type === 'else_clause') {
+          const found = findReturnWithValue(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const returnNode = findReturnWithValue(body)
+    if (returnNode) {
+      return makeViolation(
+        this.ruleKey, returnNode, filePath, 'medium',
+        'Setter with return value',
+        'Setters should not return a value — the return value is always ignored.',
+        sourceCode,
+        'Remove the return value from the setter.',
+      )
+    }
+    return null
+  },
+}
+
+export const promiseExecutorReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/promise-executor-return',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const constructor = node.childForFieldName('constructor')
+    if (!constructor || constructor.text !== 'Promise') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const executor = args.namedChildren[0]
+    if (!executor) return null
+
+    let body: SyntaxNode | null = null
+    if (executor.type === 'arrow_function' || executor.type === 'function') {
+      body = executor.childForFieldName('body')
+    }
+    if (!body || body.type !== 'statement_block') return null
+
+    for (const child of body.namedChildren) {
+      if (child.type === 'return_statement' && child.namedChildren.length > 0) {
+        return makeViolation(
+          this.ruleKey, child, filePath, 'medium',
+          'Promise executor return',
+          'Returning a value from a Promise executor function has no effect — the return value is ignored. Use `resolve(value)` instead.',
+          sourceCode,
+          'Replace `return value` with `resolve(value)` in the Promise executor.',
+        )
+      }
+    }
+    return null
+  },
+}
+
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
   selfComparisonVisitor,
@@ -3484,4 +3598,8 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   raceConditionAssignmentVisitor,
   regexGroupReferenceMismatchVisitor,
   duplicateImportVisitor,
+  // New batch (ALL-RULES.md catalog keys)
+  constructorReturnVisitor,
+  setterReturnVisitor,
+  promiseExecutorReturnVisitor,
 ]
