@@ -265,11 +265,14 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // 4. Run code-level rules and collect file contents for LLM code rules
   const codeDomains = new Set(['security', 'bugs', 'code-quality'])
-  const enabledCodeRules = allRules.filter((r) => (r.domain ? codeDomains.has(r.domain) : r.category === 'code') && r.type === 'deterministic');
+  // Include security/bugs/code-quality rules, plus architecture rules that operate at the
+  // code/file level (category === 'code') — those are AST-visitor rules that produce
+  // CodeViolation objects and will be converted to ModuleViolations below.
+  const enabledCodeRules = allRules.filter((r) => (r.domain ? (codeDomains.has(r.domain) || (r.domain === 'architecture' && r.category === 'code')) : r.category === 'code') && r.type === 'deterministic');
   const enabledLlmCodeRules = enableLlmRules !== false
     ? allRules.filter((r) => (r.domain ? codeDomains.has(r.domain) : r.category === 'code') && r.type === 'llm' && r.prompt)
     : [];
-  const allCodeViolations: CodeViolation[] = [];
+  let allCodeViolations: CodeViolation[] = [];
   const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
 
   // Determine which files to scan
@@ -311,6 +314,52 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   throwIfAborted(signal);
+
+  // Convert architecture-domain code violations into ModuleViolation format so they
+  // get persisted to the violations table with targetServiceId/targetModuleId context.
+  const archCodeViolations = allCodeViolations.filter((v) => v.ruleKey.startsWith('architecture/'));
+  if (archCodeViolations.length > 0) {
+    const convertedArchViolations: ModuleViolation[] = [];
+    for (const cv of archCodeViolations) {
+      const module = result.modules?.find(
+        (m) => cv.filePath.endsWith(m.filePath) || m.filePath.endsWith(cv.filePath),
+      );
+      if (module) {
+        convertedArchViolations.push({
+          ruleKey: cv.ruleKey,
+          title: cv.title,
+          description: cv.content,
+          severity: cv.severity,
+          serviceName: module.serviceName,
+          moduleName: module.name,
+          filePath: cv.filePath,
+        });
+      }
+    }
+
+    // Persist converted arch violations to deterministic_violations (step 3 ran before the scan).
+    for (const v of convertedArchViolations) {
+      const [row] = await db.insert(deterministicViolations).values({
+        analysisId,
+        ruleKey: v.ruleKey,
+        category: 'module',
+        title: v.title,
+        description: v.description,
+        severity: v.severity,
+        serviceName: v.serviceName,
+        moduleName: v.moduleName || null,
+        filePath: v.filePath || null,
+      }).returning({ id: deterministicViolations.id });
+      detViolationIdMap.set(`module::${v.ruleKey}::${v.serviceName}::${v.title}`, row.id);
+    }
+
+    // Add to moduleViolationResults so they flow into allDetEntries with proper target IDs.
+    moduleViolationResults.push(...convertedArchViolations);
+
+    // Remove arch violations from code violations — they now flow through the
+    // deterministic_violations → violations path with proper target IDs.
+    allCodeViolations = allCodeViolations.filter((v) => !v.ruleKey.startsWith('architecture/'));
+  }
 
   // Mark non-architecture domain steps done with per-domain violation counts
   const codeViolationsByDomain = new Map<string, number>();

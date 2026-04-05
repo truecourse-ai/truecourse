@@ -1452,6 +1452,573 @@ export const pythonFlaskSecretKeyDisclosedVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// django-raw-sql (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonDjangoRawSqlVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/django-raw-sql',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) methodName = attr.text
+    }
+
+    if (methodName !== 'raw' && methodName !== 'extra') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Flag f-string interpolation or string concatenation in the SQL argument
+    const isUnsafe =
+      (firstArg.type === 'string' && firstArg.text.startsWith('f')) ||
+      firstArg.type === 'binary_operator' ||
+      firstArg.type === 'call' // e.g., format()
+
+    if (isUnsafe || firstArg.type !== 'none') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Django raw SQL query',
+        `${methodName}() bypasses Django ORM protections. Ensure the query is not built from user input.`,
+        sourceCode,
+        'Avoid raw() and extra(). Use Django ORM queryset methods or parameterized queries.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unsafe-markup (Python)
+// ---------------------------------------------------------------------------
+
+const UNSAFE_MARKUP_FUNCS = new Set(['Markup', 'mark_safe'])
+
+export const pythonUnsafeMarkupVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unsafe-markup',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr) funcName = attr.text
+    }
+
+    if (!UNSAFE_MARKUP_FUNCS.has(funcName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Flag when the argument is not a plain string literal (could be user input)
+    if (firstArg.type !== 'string' || firstArg.text.startsWith('f')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unsafe HTML markup injection',
+        `${funcName}() called with a non-literal argument. If the value contains user input, this enables XSS.`,
+        sourceCode,
+        'Never pass user-controlled data to Markup() or mark_safe(). Escape user input first.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// logging-config-insecure-listen (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonLoggingConfigInsecureListenVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/logging-config-insecure-listen',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    if (fn.type !== 'attribute') return null
+    const attr = fn.childForFieldName('attribute')
+    const obj = fn.childForFieldName('object')
+
+    if (attr?.text !== 'listen') return null
+
+    // Check parent object is logging.config or config
+    const objText = obj?.text ?? ''
+    if (!objText.includes('config') && !objText.includes('logging')) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Insecure logging config listener',
+      `${objText}.listen() opens a network socket that can receive and apply arbitrary logging configuration.`,
+      sourceCode,
+      'Avoid logging.config.listen(). Use file-based configuration or authenticated configuration endpoints.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unsafe-torch-load (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonUnsafeTorchLoadVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unsafe-torch-load',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'load') return null
+    if (objectName !== 'torch' && objectName !== '') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Must have at least one argument (the file path)
+    if (args.namedChildren.length === 0) return null
+
+    // Check if weights_only=True is set
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'weights_only' && value?.text === 'True') {
+          return null
+        }
+      }
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Unsafe torch.load() call',
+      'torch.load() without weights_only=True uses pickle, which can execute arbitrary code.',
+      sourceCode,
+      'Add weights_only=True: torch.load(path, weights_only=True).',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// paramiko-call (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonParamikoCallVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/paramiko-call',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'connect') return null
+
+    // Check if the object's text suggests paramiko (e.g., client, ssh, paramiko)
+    const nodeText = node.text
+    if (!nodeText.includes('paramiko') && !nodeText.includes('SSHClient') && !nodeText.includes('client')) {
+      return null
+    }
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check if look_for_keys or allow_agent are explicitly disabled along with missing host key check
+    let hasAutoAddPolicy = false
+    let parent = node.parent
+    let depth = 0
+    while (parent && depth < 10) {
+      if (parent.text.includes('AutoAddPolicy') || parent.text.includes('WarningPolicy')) {
+        hasAutoAddPolicy = true
+        break
+      }
+      parent = parent.parent
+      depth++
+    }
+
+    if (hasAutoAddPolicy) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Paramiko without host key verification',
+        'Paramiko SSH client is connecting without strict host key verification (AutoAddPolicy or WarningPolicy).',
+        sourceCode,
+        'Use RejectPolicy or explicitly load known_hosts: client.load_system_host_keys().',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// suspicious-url-open (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonSuspiciousUrlOpenVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/suspicious-url-open',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'urlopen') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Flag when the URL is not a plain string literal (could be user-controlled)
+    if (firstArg.type !== 'string' || firstArg.text.startsWith('f')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'urlopen with user-controlled URL',
+        `${objectName ? objectName + '.' : ''}urlopen() called with a non-literal URL. User-controlled URLs enable SSRF.`,
+        sourceCode,
+        'Validate and allowlist URLs before passing them to urlopen().',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// redos-vulnerable-regex-python (Python)
+// ---------------------------------------------------------------------------
+
+// Patterns indicative of catastrophic backtracking: nested quantifiers like (a+)+, (a*)*
+const REDOS_PATTERN = /\([^)]*[+*]\)[+*]|\([^)]*[+*]\)[{][0-9]/
+
+export const pythonRedosVulnerableRegexVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/redos-vulnerable-regex-python',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 're') return null
+    if (!['compile', 'match', 'search', 'findall', 'fullmatch'].includes(methodName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg || firstArg.type !== 'string') return null
+
+    const pattern = firstArg.text.replace(/^[rRbBuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    if (REDOS_PATTERN.test(pattern)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'ReDoS-vulnerable regex pattern',
+        `Regex pattern "${pattern}" contains nested quantifiers that may cause catastrophic backtracking.`,
+        sourceCode,
+        'Simplify the regex or use possessive quantifiers. Consider using the `regex` library with atomic groups.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// fastapi-file-upload-body (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonFastapiFileUploadBodyVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/fastapi-file-upload-body',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const params = node.childForFieldName('parameters')
+    if (!params) return null
+
+    // Check parameters for UploadFile type annotation without size constraint
+    for (const param of params.namedChildren) {
+      const paramText = param.text
+      if (/UploadFile/.test(paramText) && !/max_size|size_limit/.test(paramText)) {
+        // Check if there's no max_size validation in the function body
+        const body = node.childForFieldName('body')
+        if (body && !/max_size|size_limit|content.length|\.size/.test(body.text)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'FastAPI file upload without size limit',
+            'FastAPI endpoint accepts file uploads (UploadFile) without enforcing a maximum file size.',
+            sourceCode,
+            'Add a file size check: if file.size > MAX_SIZE: raise HTTPException(413).',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// snmp-insecure-version (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonSnmpInsecureVersionVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/snmp-insecure-version',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'CommunityData' && methodName !== 'cmdgen') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // CommunityData('community', mpModel=0) means SNMPv1, mpModel=1 means SNMPv2c
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'mpModel' && (value?.text === '0' || value?.text === '1')) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'SNMP insecure version',
+            `CommunityData with mpModel=${value?.text} uses SNMP v${value?.text === '0' ? '1' : '2c'} without encryption.`,
+            sourceCode,
+            'Use UsmUserData for SNMPv3 with authentication and encryption.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// s3-insecure-http (Python - boto3)
+// ---------------------------------------------------------------------------
+
+export const pythonS3InsecureHttpVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/s3-insecure-http',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'client' && methodName !== 'resource') return null
+    if (objectName !== 'boto3' && objectName !== '') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'use_ssl' && value?.text === 'False') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'S3 client without SSL',
+            'boto3 client created with use_ssl=False. Data in transit will not be encrypted.',
+            sourceCode,
+            'Remove use_ssl=False to ensure encrypted communication with S3.',
+          )
+        }
+        if (name?.text === 'endpoint_url' && value) {
+          const url = value.text.replace(/['"]/g, '')
+          if (url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1')) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'high',
+              'S3 client without SSL',
+              `boto3 client endpoint "${url}" uses HTTP instead of HTTPS.`,
+              sourceCode,
+              'Use an HTTPS endpoint URL for boto3 S3 clients.',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// s3-unrestricted-access (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonS3UnrestrictedAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/s3-unrestricted-access',
+  languages: ['python'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const val = node.text.replace(/^[rRbBuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    if (val.includes('"Principal"') && val.includes('"*"')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'S3 bucket policy with wildcard principal',
+        'S3 bucket policy string contains a wildcard principal (*), granting public access.',
+        sourceCode,
+        'Restrict the Principal to specific AWS accounts or IAM roles.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// long-term-aws-keys-in-code (Python)
+// ---------------------------------------------------------------------------
+
+const PYTHON_AWS_KEY_PATTERN = /^AKIA[0-9A-Z]{16}$/
+
+export const pythonLongTermAwsKeysInCodeVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/long-term-aws-keys-in-code',
+  languages: ['python'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const val = node.text.replace(/^[rRbBuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    if (PYTHON_AWS_KEY_PATTERN.test(val)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'AWS access key hardcoded',
+        `Hardcoded AWS access key ID detected: "${val}". Use IAM roles or environment variables.`,
+        sourceCode,
+        'Remove the hardcoded key and use boto3 credential chain (env vars, IAM role, etc.).',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// wildcard-in-os-command (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonWildcardInOsCommandVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/wildcard-in-os-command',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (objectName !== 'os' || (methodName !== 'system' && methodName !== 'popen')) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const argText = firstArg.text
+    if (/ \*/.test(argText) || /\*/.test(argText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Wildcard in OS command',
+        `Glob wildcard (*) in os.${methodName}() command can be exploited via specially named files.`,
+        sourceCode,
+        'Avoid wildcards in shell commands. Enumerate files explicitly using os.listdir() or pathlib.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonSqlInjectionVisitor,
   pythonEvalUsageVisitor,
@@ -1484,4 +2051,17 @@ export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonSshNoHostKeyVerificationVisitor,
   pythonUnsafeTempFileVisitor,
   pythonFlaskSecretKeyDisclosedVisitor,
+  pythonDjangoRawSqlVisitor,
+  pythonUnsafeMarkupVisitor,
+  pythonLoggingConfigInsecureListenVisitor,
+  pythonUnsafeTorchLoadVisitor,
+  pythonParamikoCallVisitor,
+  pythonSuspiciousUrlOpenVisitor,
+  pythonRedosVulnerableRegexVisitor,
+  pythonFastapiFileUploadBodyVisitor,
+  pythonSnmpInsecureVersionVisitor,
+  pythonS3InsecureHttpVisitor,
+  pythonS3UnrestrictedAccessVisitor,
+  pythonLongTermAwsKeysInCodeVisitor,
+  pythonWildcardInOsCommandVisitor,
 ]

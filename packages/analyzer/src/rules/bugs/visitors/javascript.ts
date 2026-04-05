@@ -2759,6 +2759,466 @@ export const dissimilarTypeComparisonVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// index-of-positive-check: indexOf(x) > 0, indexOf(x) >= 1, etc.
+// ---------------------------------------------------------------------------
+
+export const indexOfPositiveCheckVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/index-of-positive-check',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    const operator = node.children.find((c) => ['>', '>=', '<', '<=', '===', '==', '!==', '!='].includes(c.text))
+
+    if (!left || !right || !operator) return null
+
+    function isIndexOfCall(n: SyntaxNode): boolean {
+      if (n.type !== 'call_expression') return false
+      const fn = n.childForFieldName('function')
+      if (!fn || fn.type !== 'member_expression') return false
+      const prop = fn.childForFieldName('property')
+      return prop?.text === 'indexOf' || prop?.text === 'lastIndexOf'
+    }
+
+    // Flag any comparison to a non-negative integer (0 or positive) — only -1 is meaningful
+    function isNonNegativeNumber(n: SyntaxNode): boolean {
+      if (n.type !== 'number') return false
+      const val = Number(n.text)
+      return Number.isInteger(val) && val >= 0
+    }
+
+    if (isIndexOfCall(left) && isNonNegativeNumber(right)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'indexOf compared to positive number',
+        `\`indexOf()\` returns -1 when not found. Comparing to \`${right.text}\` misses the case where the element is at index 0. Use \`!== -1\` to check if found.`,
+        sourceCode,
+        'Compare to -1: use `indexOf(x) !== -1` (found) or `indexOf(x) === -1` (not found).',
+      )
+    }
+
+    if (isIndexOfCall(right) && isNonNegativeNumber(left)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'indexOf compared to positive number',
+        `\`indexOf()\` returns -1 when not found. Comparing to \`${left.text}\` misses the case where the element is at index 0. Use \`!== -1\` to check if found.`,
+        sourceCode,
+        'Compare to -1: use `indexOf(x) !== -1` (found) or `indexOf(x) === -1` (not found).',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// array-delete: delete arr[i] leaves a hole
+// ---------------------------------------------------------------------------
+
+export const arrayDeleteVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/array-delete',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['unary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.text === 'delete')
+    if (!op) return null
+
+    const argument = node.childForFieldName('argument')
+    if (!argument || argument.type !== 'subscript_expression') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'delete on array element',
+      `\`${node.text}\` leaves a hole (undefined slot) in the array instead of removing the element. Use \`splice()\` to properly remove elements.`,
+      sourceCode,
+      'Use `arr.splice(index, 1)` to remove an element without leaving a hole.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// comma-in-switch-case: case a, b: or case (a || b):
+// ---------------------------------------------------------------------------
+
+export const commaInSwitchCaseVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/comma-in-switch-case',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['switch_case'],
+  visit(node, filePath, sourceCode) {
+    const value = node.childForFieldName('value')
+    if (!value) return null
+
+    // Detect comma expression in case value: case a, b: or case (a, b):
+    // tree-sitter parses `case (a, b):` as parenthesized_expression > sequence_expression
+    let checkNode = value
+    if (value.type === 'parenthesized_expression' && value.namedChildren.length === 1) {
+      checkNode = value.namedChildren[0]
+    }
+
+    if (checkNode.type === 'sequence_expression') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Comma in switch case',
+        `\`case ${value.text}:\` uses a comma expression — only the last value (\`${checkNode.namedChildren[checkNode.namedChildren.length - 1]?.text}\`) is actually matched. Use separate case labels.`,
+        sourceCode,
+        'Use separate `case` labels instead of a comma-separated list.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// literal-call: 5(), "str"(), true() — calling a literal as a function
+// ---------------------------------------------------------------------------
+
+export const literalCallVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/literal-call',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    const LITERAL_CALL_TYPES = new Set(['number', 'string', 'true', 'false', 'null', 'undefined', 'template_string'])
+
+    if (LITERAL_CALL_TYPES.has(fn.type)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Literal used as function',
+        `\`${fn.text}\` is a ${fn.type} literal, not a function — calling it will throw a TypeError.`,
+        sourceCode,
+        'Replace the literal with the intended function reference.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// prototype-builtins-call: obj.hasOwnProperty(), obj.isPrototypeOf(), etc.
+// ---------------------------------------------------------------------------
+
+const PROTOTYPE_BUILTINS = new Set([
+  'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable',
+])
+
+export const prototypeBuiltinsCallVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/prototype-builtins-call',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (!prop || !PROTOTYPE_BUILTINS.has(prop.text)) return null
+
+    const obj = fn.childForFieldName('object')
+    if (!obj) return null
+
+    // Skip if already called via Object.prototype: Object.prototype.hasOwnProperty.call(obj, key)
+    if (obj.type === 'member_expression') {
+      const objProp = obj.childForFieldName('property')
+      if (objProp?.text === 'call' || objProp?.text === 'apply') return null
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Prototype builtin called directly',
+      `\`${prop.text}()\` is called directly on the object. If the object has a custom \`${prop.text}\` property this will throw. Use \`Object.prototype.${prop.text}.call(${obj.text}, ...)\` instead.`,
+      sourceCode,
+      `Use \`Object.prototype.${prop.text}.call(obj, ...args)\` for safe access.`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// stateful-regex: regex literal with global or sticky flag used inline
+// ---------------------------------------------------------------------------
+
+export const statefulRegexVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/stateful-regex',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const flags = node.childForFieldName('flags')
+    if (!flags) return null
+
+    const flagsText = flags.text
+    // Only flag g or y (global or sticky) — those have stateful lastIndex
+    if (!flagsText.includes('g') && !flagsText.includes('y')) return null
+
+    // Only flag if the regex is used directly in a call (not stored in a variable)
+    // i.e., the parent is a call_expression argument, not a variable_declarator
+    const parent = node.parent
+    if (!parent) return null
+
+    // If stored in a variable, it's fine — only flag inline use in function calls
+    if (parent.type === 'variable_declarator' || parent.type === 'assignment_expression') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Stateful regex',
+      `Regex \`${node.text}\` has the \`${flagsText.includes('g') ? 'g' : 'y'}\` flag which maintains \`lastIndex\` state between calls. Reusing it across invocations can cause unexpected results.`,
+      sourceCode,
+      'Store the regex in a variable and reset `lastIndex` between uses, or remove the global/sticky flag if not needed.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// incorrect-string-concat: "string" + number where both are used in expressions
+// ---------------------------------------------------------------------------
+
+export const incorrectStringConcatVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/incorrect-string-concat',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    const operator = node.children.find((c) => c.text === '+')
+
+    if (!left || !right || !operator) return null
+
+    // Flag: string_literal + number_literal or number_literal + string_literal
+    // where both are literals — this is always a type-coercion surprise
+    const leftIsString = left.type === 'string' || left.type === 'template_string'
+    const rightIsString = right.type === 'string' || right.type === 'template_string'
+    const leftIsNumber = left.type === 'number'
+    const rightIsNumber = right.type === 'number'
+
+    if ((leftIsString && rightIsNumber) || (leftIsNumber && rightIsString)) {
+      // Only flag if embedded in a larger context (not standalone assignment to a const)
+      // — flag all cases: string concatenation with numbers is always potentially confusing
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Incorrect string concatenation',
+        `\`${node.text}\` adds a string and a number — the number is coerced to a string. Use template literals or explicit \`String()\` / \`Number()\` conversion for clarity.`,
+        sourceCode,
+        'Use a template literal: `` `${left.text}${right.text}` `` or explicitly convert: `String(value) + other`.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// misleading-array-reverse: spreading/copying then calling reverse/sort inline
+// e.g. const sorted = arr.reverse()  —  mutates arr and also returns it
+// ---------------------------------------------------------------------------
+
+export const misleadingArrayReverseVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/misleading-array-reverse',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (!prop || (prop.text !== 'reverse' && prop.text !== 'sort')) return null
+
+    const obj = fn.childForFieldName('object')
+    if (!obj) return null
+
+    // Only flag if: the result of calling reverse/sort is assigned to a variable
+    // and the receiver is a simple identifier (so the original is also mutated)
+    const parent = node.parent
+    if (!parent) return null
+
+    // Flag when: const x = arr.reverse() or let x = arr.sort(...)
+    // i.e., parent is variable_declarator or assignment_expression right-hand side
+    if (
+      (parent.type === 'variable_declarator' && parent.childForFieldName('value') === node) ||
+      (parent.type === 'assignment_expression' && parent.childForFieldName('right') === node)
+    ) {
+      if (obj.type === 'identifier') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Misleading array mutation',
+          `\`${obj.text}.${prop.text}()\` mutates \`${obj.text}\` in place AND returns it. Assigning the result looks non-mutating but the original \`${obj.text}\` is also changed.`,
+          sourceCode,
+          `Use \`[...${obj.text}].${prop.text}()\` or \`${obj.text}.${prop.text === 'sort' ? 'toSorted' : 'toReversed'}()\` (ES2023) to avoid mutating the original.`,
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// global-this-usage: using `this` at module/program top level
+// ---------------------------------------------------------------------------
+
+export const globalThisUsageVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/global-this-usage',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['this'],
+  visit(node, filePath, sourceCode) {
+    // Walk up to see if we're inside a function/class method/arrow function
+    let current = node.parent
+    while (current) {
+      const t = current.type
+      if (
+        t === 'function_declaration' ||
+        t === 'function' ||
+        t === 'method_definition' ||
+        t === 'class_declaration' ||
+        t === 'class'
+      ) {
+        return null // `this` is valid inside a function or class
+      }
+      // Arrow functions inherit `this` from enclosing scope — keep walking
+      if (t === 'arrow_function') {
+        current = current.parent
+        continue
+      }
+      current = current.parent
+    }
+
+    // If we got here, `this` is at the top level (program scope)
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Global this usage',
+      '`this` at the top level of a module is `undefined` in strict mode or the global object otherwise — use `globalThis` for a portable reference.',
+      sourceCode,
+      'Replace `this` with `globalThis` or move the code into a function/class.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// inconsistent-return: function sometimes returns value, sometimes does not
+// ---------------------------------------------------------------------------
+
+export const inconsistentReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/inconsistent-return',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['function_declaration', 'function', 'arrow_function', 'method_definition'],
+  visit(node, filePath, sourceCode) {
+    let body: SyntaxNode | null = null
+
+    if (node.type === 'method_definition') {
+      body = node.childForFieldName('body')
+    } else if (node.type === 'arrow_function') {
+      body = node.childForFieldName('body')
+      // Arrow function with expression body always returns — skip
+      if (body && body.type !== 'statement_block') return null
+    } else {
+      body = node.childForFieldName('body')
+    }
+
+    if (!body || body.type !== 'statement_block') return null
+
+    // Skip constructor, setter — they can have inconsistent returns by design
+    if (node.type === 'method_definition') {
+      const name = node.childForFieldName('name')
+      if (name?.text === 'constructor') return null
+      // Skip setters
+      if (node.children.some((c) => c.text === 'set' && c.type !== 'property_identifier')) return null
+    }
+
+    let hasValueReturn = false
+    let hasVoidReturn = false
+
+    function scanReturns(n: SyntaxNode) {
+      if (n.type === 'return_statement') {
+        if (n.namedChildren.length > 0) {
+          hasValueReturn = true
+        } else {
+          hasVoidReturn = true
+        }
+        return
+      }
+      // Don't recurse into nested function bodies
+      if (
+        n !== body &&
+        (n.type === 'function_declaration' || n.type === 'function' || n.type === 'arrow_function' || n.type === 'method_definition')
+      ) return
+
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) scanReturns(child)
+      }
+    }
+
+    scanReturns(body)
+
+    // Also detect fall-through: if the function has return-with-value paths but the last statement
+    // in the body is NOT a terminal (return/throw), the function can fall through returning undefined
+    if (hasValueReturn && !hasVoidReturn) {
+      const bodyStatements = body.namedChildren.filter((c) => c.type !== 'comment')
+      if (bodyStatements.length > 0) {
+        const last = bodyStatements[bodyStatements.length - 1]
+        const TERMINALS = new Set(['return_statement', 'throw_statement'])
+
+        // Check if the last statement terminates all paths
+        function isTerminal(stmt: SyntaxNode): boolean {
+          if (TERMINALS.has(stmt.type)) return true
+          // try_statement: terminates if all try+catch blocks terminate
+          if (stmt.type === 'try_statement') {
+            const tryBlock = stmt.namedChildren.find((c) => c.type === 'statement_block')
+            const catchClause = stmt.namedChildren.find((c) => c.type === 'catch_clause')
+            const finallyClause = stmt.namedChildren.find((c) => c.type === 'finally_clause')
+
+            // If there's a finally with a terminal, the whole thing terminates
+            if (finallyClause) {
+              const finallyBlock = finallyClause.namedChildren.find((c) => c.type === 'statement_block')
+              if (finallyBlock) {
+                const finStatements = finallyBlock.namedChildren.filter((c) => c.type !== 'comment')
+                if (finStatements.length > 0 && TERMINALS.has(finStatements[finStatements.length - 1].type)) return true
+              }
+            }
+
+            // try+catch both must terminate
+            if (tryBlock && catchClause) {
+              const tryStatements = tryBlock.namedChildren.filter((c) => c.type !== 'comment')
+              const tryTerminates = tryStatements.length > 0 && isTerminal(tryStatements[tryStatements.length - 1])
+
+              const catchBody = catchClause.namedChildren.find((c) => c.type === 'statement_block')
+              const catchStatements = catchBody?.namedChildren.filter((c) => c.type !== 'comment') ?? []
+              const catchTerminates = catchStatements.length > 0 && isTerminal(catchStatements[catchStatements.length - 1])
+
+              return tryTerminates && catchTerminates
+            }
+            return false
+          }
+          return false
+        }
+
+        if (!isTerminal(last)) {
+          hasVoidReturn = true // implicit void return at end of function
+        }
+      }
+    }
+
+    if (hasValueReturn && hasVoidReturn) {
+      const namePart = node.type === 'function_declaration'
+        ? (node.childForFieldName('name')?.text ?? 'function')
+        : node.type === 'method_definition'
+          ? (node.childForFieldName('name')?.text ?? 'method')
+          : 'function'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Inconsistent return',
+        `\`${namePart}\` sometimes returns a value and sometimes falls through without returning — callers receive \`undefined\` on the no-return paths.`,
+        sourceCode,
+        'Ensure all code paths either return a value or none of them do.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
   selfComparisonVisitor,
@@ -2824,4 +3284,14 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   newOperatorMisuseVisitor,
   uselessBackreferenceVisitor,
   dissimilarTypeComparisonVisitor,
+  indexOfPositiveCheckVisitor,
+  arrayDeleteVisitor,
+  commaInSwitchCaseVisitor,
+  literalCallVisitor,
+  prototypeBuiltinsCallVisitor,
+  statefulRegexVisitor,
+  incorrectStringConcatVisitor,
+  misleadingArrayReverseVisitor,
+  globalThisUsageVisitor,
+  inconsistentReturnVisitor,
 ]

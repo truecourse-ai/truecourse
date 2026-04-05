@@ -2661,6 +2661,748 @@ export const hardcodedPasswordFunctionArgVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// jwt-secret-key-disclosed
+// ---------------------------------------------------------------------------
+
+export const jwtSecretKeyDisclosedVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/jwt-secret-key-disclosed',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'sign' && methodName !== 'verify') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Second argument is the secret for jwt.sign(payload, secret, ...)
+    const secretArg = args.namedChildren[1]
+    if (!secretArg) return null
+
+    if (secretArg.type === 'string' || secretArg.type === 'template_string') {
+      const val = secretArg.text.replace(/^['"`]|['"`]$/g, '')
+      if (val.length >= 4) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'critical',
+          'JWT secret key hardcoded',
+          `jwt.${methodName}() called with a hardcoded secret key. Use an environment variable instead.`,
+          sourceCode,
+          'Load the JWT secret from process.env.JWT_SECRET or a secrets manager.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// bind-all-interfaces
+// ---------------------------------------------------------------------------
+
+export const bindAllInterfacesVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/bind-all-interfaces',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (methodName !== 'listen') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'string') {
+        const val = arg.text.replace(/['"]/g, '')
+        if (val === '0.0.0.0') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Server binding to all interfaces',
+            'server.listen() binding to 0.0.0.0 exposes the service on all network interfaces.',
+            sourceCode,
+            'Bind to a specific interface (e.g., 127.0.0.1) or use an environment variable for the host.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// non-standard-crypto
+// ---------------------------------------------------------------------------
+
+const NON_STANDARD_CRYPTO_PATTERNS = [
+  /xor.?crypt/i,
+  /rot13/i,
+  /caesar.?cipher/i,
+  /vigenere/i,
+  /homebrew.?crypt/i,
+  /custom.?encrypt/i,
+  /simple.?encrypt/i,
+  /my.?encrypt/i,
+]
+
+export const nonStandardCryptoVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/non-standard-crypto',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['function_declaration', 'variable_declarator', 'method_definition'],
+  visit(node, filePath, sourceCode) {
+    const nameNode =
+      node.childForFieldName('name') ??
+      (node.type === 'variable_declarator' ? node.childForFieldName('name') : null)
+    if (!nameNode) return null
+
+    const name = nameNode.text.toLowerCase()
+    for (const pattern of NON_STANDARD_CRYPTO_PATTERNS) {
+      if (pattern.test(name)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Non-standard cryptography',
+          `"${nameNode.text}" appears to implement custom/non-standard cryptography. Use a vetted library instead.`,
+          sourceCode,
+          'Use the Node.js built-in crypto module or a well-known library like libsodium.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// graphql-dos-vulnerability
+// ---------------------------------------------------------------------------
+
+export const graphqlDosVulnerabilityVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/graphql-dos-vulnerability',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) funcName = prop.text
+    }
+
+    if (funcName !== 'buildSchema' && funcName !== 'makeExecutableSchema') return null
+
+    // Check that depthLimit or complexityLimit are not applied to the result
+    let parent = node.parent
+    let depth = 0
+    while (parent && depth < 5) {
+      const parentText = parent.text
+      if (/depthLimit|complexityLimit|queryDepth|queryComplexity/.test(parentText)) {
+        return null
+      }
+      parent = parent.parent
+      depth++
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'GraphQL without query depth/complexity limiting',
+      `${funcName}() used without configuring depth or complexity limits, enabling DoS via deeply nested queries.`,
+      sourceCode,
+      'Add graphql-depth-limit and/or graphql-query-complexity middleware to your GraphQL server.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// graphql-introspection-enabled
+// ---------------------------------------------------------------------------
+
+export const graphqlIntrospectionEnabledVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/graphql-introspection-enabled',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression', 'object'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'object') {
+      // Look for { introspection: true } in graphql server config objects
+      for (const prop of node.namedChildren) {
+        if (prop.type === 'pair') {
+          const key = prop.childForFieldName('key')
+          const value = prop.childForFieldName('value')
+          if (key?.text?.replace(/['"]/g, '') === 'introspection' && value?.text === 'true') {
+            // Check that the parent context is a GraphQL server call
+            let parent = node.parent
+            let depth = 0
+            while (parent && depth < 5) {
+              const pText = parent.text
+              if (/ApolloServer|GraphQLServer|graphqlHTTP|createServer/.test(pText)) {
+                return makeViolation(
+                  this.ruleKey, node, filePath, 'medium',
+                  'GraphQL introspection enabled',
+                  'GraphQL introspection is explicitly enabled. This exposes your full API schema to attackers.',
+                  sourceCode,
+                  'Disable introspection in production: set introspection: process.env.NODE_ENV !== "production".',
+                )
+              }
+              parent = parent.parent
+              depth++
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unsafe-xml-signature
+// ---------------------------------------------------------------------------
+
+export const unsafeXmlSignatureVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unsafe-xml-signature',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'SignedXml') return null
+
+    const args = node.childForFieldName('arguments')
+    // If no args or no options object with secure config, flag it
+    if (!args || args.namedChildren.length === 0) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unsafe XML signature verification',
+        'new SignedXml() without explicit security configuration may allow signature wrapping attacks.',
+        sourceCode,
+        'Configure allowedTransforms and warnOnDuplicateAttributes in the SignedXml options.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// mixed-http-methods
+// ---------------------------------------------------------------------------
+
+export const mixedHttpMethodsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/mixed-http-methods',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    if (fn.type !== 'member_expression') return null
+    const prop = fn.childForFieldName('property')
+    if (!prop) return null
+
+    if (prop.text !== 'all') return null
+
+    const obj = fn.childForFieldName('object')
+    if (!obj) return null
+
+    const objText = obj.text
+    if (!/(app|router|server|express)/.test(objText.toLowerCase())) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Route handling mixed HTTP methods',
+      `${objText}.all() registers the route for all HTTP methods including GET, which should not trigger state changes.`,
+      sourceCode,
+      'Use specific HTTP method handlers (app.get, app.post) instead of app.all().',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// process-signaling
+// ---------------------------------------------------------------------------
+
+export const processSignalingVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/process-signaling',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    if (fn.type !== 'member_expression') return null
+    const obj = fn.childForFieldName('object')
+    const prop = fn.childForFieldName('property')
+    if (!obj || !prop) return null
+
+    if (obj.text !== 'process' || prop.text !== 'kill') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const pidArg = args.namedChildren[0]
+    if (!pidArg) return null
+
+    // Flag when the PID argument is not a literal — it may be user-controlled
+    if (pidArg.type !== 'number') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Sending signals to arbitrary processes',
+        'process.kill() called with a non-literal PID. If the PID is user-controlled, this enables process manipulation.',
+        sourceCode,
+        'Validate and sanitize the PID before passing it to process.kill().',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// long-term-aws-keys-in-code
+// ---------------------------------------------------------------------------
+
+const AWS_KEY_PATTERN = /^AKIA[0-9A-Z]{16}$/
+const AWS_SECRET_NAMES = new Set(['aws_secret_access_key', 'aws_secret_key', 'secretaccesskey', 'awssecret'])
+
+export const longTermAwsKeysInCodeVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/long-term-aws-keys-in-code',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const val = node.text.replace(/['"]/g, '')
+
+    if (AWS_KEY_PATTERN.test(val)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'AWS access key hardcoded',
+        `Hardcoded AWS access key ID detected: "${val}". Use IAM roles or environment variables instead.`,
+        sourceCode,
+        'Remove the hardcoded key and use AWS_ACCESS_KEY_ID from environment variables or an IAM role.',
+      )
+    }
+
+    // Check for secret key assignment
+    const parent = node.parent
+    if (parent) {
+      const keyNode = parent.childForFieldName('key') ?? parent.childForFieldName('name')
+      if (keyNode) {
+        const keyName = keyNode.text.toLowerCase().replace(/['"]/g, '')
+        if (AWS_SECRET_NAMES.has(keyName) && val.length >= 20) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'critical',
+            'AWS secret access key hardcoded',
+            `AWS secret key assigned to "${keyNode.text}" as a hardcoded string.`,
+            sourceCode,
+            'Use environment variables (AWS_SECRET_ACCESS_KEY) or an IAM role.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// snmp-insecure-version
+// ---------------------------------------------------------------------------
+
+export const snmpInsecureVersionVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/snmp-insecure-version',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) funcName = prop.text
+    } else if (fn.type === 'identifier') {
+      funcName = fn.text
+    }
+
+    if (funcName !== 'createSession' && funcName !== 'Session') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        for (const prop of arg.namedChildren) {
+          if (prop.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            const value = prop.childForFieldName('value')
+            if (key?.text?.replace(/['"]/g, '') === 'version' && value) {
+              const versionText = value.text.replace(/['"]/g, '')
+              // snmp v1 = "1" or snmp.Version1; v2c = "2c" or snmp.Version2c
+              if (versionText === '1' || versionText === '2c' || /Version1|Version2c/.test(versionText)) {
+                return makeViolation(
+                  this.ruleKey, node, filePath, 'high',
+                  'SNMP insecure version',
+                  `SNMP session using version "${versionText}" which lacks encryption and authentication.`,
+                  sourceCode,
+                  'Use SNMPv3 with authPriv security level for encrypted and authenticated communication.',
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// snmp-weak-crypto
+// ---------------------------------------------------------------------------
+
+const SNMP_WEAK_CRYPTO = new Set(['md5', 'des', 'sha1'])
+
+export const snmpWeakCryptoVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/snmp-weak-crypto',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) funcName = prop.text
+    } else if (fn.type === 'identifier') {
+      funcName = fn.text
+    }
+
+    if (funcName !== 'createSession' && funcName !== 'Session') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        for (const prop of arg.namedChildren) {
+          if (prop.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            const value = prop.childForFieldName('value')
+            const keyText = key?.text?.replace(/['"]/g, '').toLowerCase() ?? ''
+            if ((keyText === 'authalgorithm' || keyText === 'privalgorithm') && value) {
+              const alg = value.text.replace(/['"]/g, '').toLowerCase()
+              if (SNMP_WEAK_CRYPTO.has(alg) || /md5|des|sha1/.test(alg)) {
+                return makeViolation(
+                  this.ruleKey, node, filePath, 'high',
+                  'SNMP weak cryptography',
+                  `SNMP session configured with weak algorithm "${value.text.replace(/['"]/g, '')}".`,
+                  sourceCode,
+                  'Use SHA-256 or AES-128 for SNMP v3 authentication and privacy algorithms.',
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// hardcoded-sql-expression
+// ---------------------------------------------------------------------------
+
+const SQL_FORMAT_FUNCTIONS = new Set(['format', 'sprintf', 'vsprintf'])
+
+export const hardcodedSqlExpressionVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-sql-expression',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) funcName = prop.text
+    }
+
+    if (!SQL_FORMAT_FUNCTIONS.has(funcName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const firstArgText = firstArg.text.toLowerCase()
+    if (/select|insert|update|delete|from|where|into/.test(firstArgText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Hardcoded SQL expression via string building',
+        `${funcName}() used to build a SQL query. This is vulnerable to SQL injection.`,
+        sourceCode,
+        'Use parameterized queries instead of string formatting for SQL.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// wildcard-in-os-command
+// ---------------------------------------------------------------------------
+
+export const wildcardInOsCommandVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/wildcard-in-os-command',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (!EXEC_METHODS.has(methodName) && methodName !== 'execFile' && methodName !== 'execFileSync') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const argText = firstArg.text
+    // Check for wildcard in a shell command string
+    if ((firstArg.type === 'string' || firstArg.type === 'template_string') && /\*/.test(argText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Wildcard in OS command',
+        `Glob wildcard (*) in OS command "${argText}" can be exploited via specially named files.`,
+        sourceCode,
+        'Avoid wildcards in shell commands. Enumerate files explicitly or use a library.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// s3-missing-bucket-owner
+// ---------------------------------------------------------------------------
+
+export const s3MissingBucketOwnerVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/s3-missing-bucket-owner',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (methodName !== 'putBucketAcl' && methodName !== 'putObject' && methodName !== 'createBucket') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        const keys = arg.namedChildren
+          .filter((c) => c.type === 'pair')
+          .map((c) => c.childForFieldName('key')?.text?.replace(/['"]/g, '') ?? '')
+        if (!keys.includes('ExpectedBucketOwner')) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'S3 operation without bucket owner check',
+            `${methodName}() called without ExpectedBucketOwner, which can allow confused deputy attacks.`,
+            sourceCode,
+            'Add ExpectedBucketOwner to S3 operations to prevent confused deputy attacks.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// s3-public-bucket-access
+// ---------------------------------------------------------------------------
+
+export const s3PublicBucketAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/s3-public-bucket-access',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (methodName !== 'putPublicAccessBlock') return null
+
+    // Search the full call text for BlockPublicAcls or BlockPublicPolicy set to false
+    const callText = node.text
+    const falseBlockMatch = /BlockPublicAcls\s*:\s*false|BlockPublicPolicy\s*:\s*false/.exec(callText)
+    if (falseBlockMatch) {
+      const key = falseBlockMatch[0].split(':')[0].trim()
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'S3 bucket with public access enabled',
+        `S3 putPublicAccessBlock with ${key}: false allows public access to the bucket.`,
+        sourceCode,
+        'Set BlockPublicAcls and BlockPublicPolicy to true to block all public access.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// s3-insecure-http
+// ---------------------------------------------------------------------------
+
+export const s3InsecureHttpVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/s3-insecure-http',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['new_expression', 'call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function') ?? node.childForFieldName('constructor')
+    if (!fn) return null
+
+    let name = ''
+    if (fn.type === 'identifier') {
+      name = fn.text
+    } else if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) name = prop.text
+    }
+
+    if (name !== 'S3' && name !== 'S3Client') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'object') {
+        for (const child of arg.namedChildren) {
+          if (child.type === 'pair') {
+            const key = child.childForFieldName('key')?.text?.replace(/['"]/g, '')
+            const value = child.childForFieldName('value')
+            if (key === 'ssl' && value?.text === 'false') {
+              return makeViolation(
+                this.ruleKey, node, filePath, 'high',
+                'S3 client without SSL',
+                'S3 client configured with ssl: false. Data in transit will not be encrypted.',
+                sourceCode,
+                'Remove ssl: false or set ssl: true to ensure encrypted S3 communication.',
+              )
+            }
+            // endpoint with http://
+            if (key === 'endpoint' && value) {
+              const ep = value.text.replace(/['"]/g, '')
+              if (ep.startsWith('http://') && !ep.includes('localhost') && !ep.includes('127.0.0.1')) {
+                return makeViolation(
+                  this.ruleKey, node, filePath, 'high',
+                  'S3 client without SSL',
+                  `S3 client endpoint "${ep}" uses HTTP instead of HTTPS.`,
+                  sourceCode,
+                  'Use an HTTPS endpoint for S3 to encrypt data in transit.',
+                )
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// s3-unrestricted-access
+// ---------------------------------------------------------------------------
+
+export const s3UnrestrictedAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/s3-unrestricted-access',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    // Use raw text for pattern matching to preserve inner double quotes
+    const raw = node.text
+
+    // Detect JSON bucket policy with wildcard principal
+    if (raw.includes('"Principal"') && (raw.includes('"*"') || raw.includes(': "*"') || raw.includes(':"*"'))) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'S3 bucket policy with wildcard principal',
+        'S3 bucket policy grants access to all principals (*), making the bucket publicly accessible.',
+        sourceCode,
+        'Restrict the Principal to specific AWS accounts or IAM roles.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   sqlInjectionVisitor,
   evalUsageVisitor,
@@ -2716,4 +3458,21 @@ export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   sensitiveDataInUrlVisitor,
   expressTrustProxyNotSetVisitor,
   hardcodedPasswordFunctionArgVisitor,
+  jwtSecretKeyDisclosedVisitor,
+  bindAllInterfacesVisitor,
+  nonStandardCryptoVisitor,
+  graphqlDosVulnerabilityVisitor,
+  graphqlIntrospectionEnabledVisitor,
+  unsafeXmlSignatureVisitor,
+  mixedHttpMethodsVisitor,
+  processSignalingVisitor,
+  longTermAwsKeysInCodeVisitor,
+  snmpInsecureVersionVisitor,
+  snmpWeakCryptoVisitor,
+  hardcodedSqlExpressionVisitor,
+  wildcardInOsCommandVisitor,
+  s3MissingBucketOwnerVisitor,
+  s3PublicBucketAccessVisitor,
+  s3InsecureHttpVisitor,
+  s3UnrestrictedAccessVisitor,
 ]

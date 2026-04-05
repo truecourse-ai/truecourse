@@ -602,6 +602,534 @@ export const pythonExceptionReassignmentVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// assert-on-tuple: assert (condition, "message") — always True
+// ---------------------------------------------------------------------------
+
+export const pythonAssertOnTupleVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/assert-on-tuple',
+  languages: ['python'],
+  nodeTypes: ['assert_statement'],
+  visit(node, filePath, sourceCode) {
+    // assert_statement children: assert <expr> [, <message>]
+    // We look for the test expression being a tuple
+    const testExpr = node.namedChildren[0]
+    if (!testExpr) return null
+
+    if (testExpr.type === 'tuple') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Assert on non-empty tuple',
+        `\`assert (${testExpr.text})\` always passes because a non-empty tuple is truthy. Did you mean \`assert ${testExpr.namedChildren[0]?.text ?? testExpr.text}, ${testExpr.namedChildren[1]?.text ?? ''}\`?`,
+        sourceCode,
+        'Change to `assert condition, message` (no extra parentheses that create a tuple).',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// fstring-missing-placeholders: f"string without braces"
+// ---------------------------------------------------------------------------
+
+export const pythonFstringMissingPlaceholdersVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/fstring-missing-placeholders',
+  languages: ['python'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    // f-strings in tree-sitter python start with f" or f' (or triple-quoted variants)
+    if (!text.startsWith('f"') && !text.startsWith("f'") && !text.startsWith('f"""') && !text.startsWith("f'''")) return null
+
+    // Check if there's any { } interpolation
+    if (!/{/.test(text)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'f-string without placeholders',
+        `\`${text.slice(0, 60)}\` is an f-string but contains no \`{...}\` interpolation — the \`f\` prefix is unnecessary or interpolation was forgotten.`,
+        sourceCode,
+        'Remove the `f` prefix if no interpolation is needed, or add `{expression}` placeholders.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// raise-not-implemented: raise NotImplemented (should be NotImplementedError)
+// ---------------------------------------------------------------------------
+
+export const pythonRaiseNotImplementedVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/raise-not-implemented',
+  languages: ['python'],
+  nodeTypes: ['raise_statement'],
+  visit(node, filePath, sourceCode) {
+    const raised = node.namedChildren[0]
+    if (!raised) return null
+
+    // raise NotImplemented — an identifier, not a call
+    if (raised.type === 'identifier' && raised.text === 'NotImplemented') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'raise NotImplemented instead of NotImplementedError',
+        '`raise NotImplemented` raises a TypeError (NotImplemented is not an exception). Use `raise NotImplementedError` instead.',
+        sourceCode,
+        'Change `raise NotImplemented` to `raise NotImplementedError`.',
+      )
+    }
+
+    // raise NotImplemented() — a call expression
+    if (raised.type === 'call') {
+      const fn = raised.childForFieldName('function')
+      if (fn?.type === 'identifier' && fn.text === 'NotImplemented') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'raise NotImplemented instead of NotImplementedError',
+          '`raise NotImplemented()` raises a TypeError (NotImplemented is not an exception class). Use `raise NotImplementedError()` instead.',
+          sourceCode,
+          'Change `raise NotImplemented()` to `raise NotImplementedError()`.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// is-literal-comparison: x is "string", x is 42
+// ---------------------------------------------------------------------------
+
+export const pythonIsLiteralComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/is-literal-comparison',
+  languages: ['python'],
+  nodeTypes: ['comparison_operator'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+
+    // Look for `is` or `is not` operator
+    let isOperator = false
+    for (const child of children) {
+      if (child.type === 'is' || (child.type === 'is' && child.text === 'is')) isOperator = true
+      if (child.text === 'is' || child.text === 'is not') isOperator = true
+    }
+    if (!isOperator) return null
+
+    const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'concatenated_string', 'bytes'])
+
+    for (const child of node.namedChildren) {
+      if (LITERAL_TYPES.has(child.type)) {
+        const opText = children.find((c) => c.text === 'is' || c.text === 'is not')?.text ?? 'is'
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Identity comparison with literal',
+          `Using \`${opText}\` with a literal value (\`${child.text}\`) is unreliable — Python may or may not intern the value. Use \`==\` for value equality.`,
+          sourceCode,
+          `Replace \`${opText}\` with \`==\` or \`!=\` for value comparison.`,
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// none-comparison-with-equality: x == None instead of x is None
+// ---------------------------------------------------------------------------
+
+export const pythonNoneComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/none-comparison-with-equality',
+  languages: ['python'],
+  nodeTypes: ['comparison_operator'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+
+    // Look for == or != (not is/is not)
+    const eqOp = children.find((c) => c.text === '==' || c.text === '!=')
+    if (!eqOp) return null
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'none') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'None compared with ==',
+          `\`${node.text}\` uses \`${eqOp.text}\` to compare with \`None\`. Use \`is\`/\`is not\` instead — \`==\` may give unexpected results if \`__eq__\` is overridden.`,
+          sourceCode,
+          `Replace \`${eqOp.text} None\` with \`${eqOp.text === '==' ? 'is' : 'is not'} None\`.`,
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// type-comparison-instead-of-isinstance: type(x) == Y
+// ---------------------------------------------------------------------------
+
+export const pythonTypeComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/type-comparison-instead-of-isinstance',
+  languages: ['python'],
+  nodeTypes: ['comparison_operator'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+    const eqOp = children.find((c) => c.text === '==' || c.text === '!=' || c.text === 'is' || c.text === 'is not')
+    if (!eqOp) return null
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'call') {
+        const fn = child.childForFieldName('function')
+        if (fn?.type === 'identifier' && fn.text === 'type') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Direct type comparison',
+            `\`${node.text}\` compares with \`type()\` — use \`isinstance()\` instead to also match subclasses.`,
+            sourceCode,
+            `Replace \`type(x) ${eqOp.text} Y\` with \`isinstance(x, Y)\`.`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-set-value: {1, 2, 1} — duplicate values in set literal
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateSetValueVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-set-value',
+  languages: ['python'],
+  nodeTypes: ['set'],
+  visit(node, filePath, sourceCode) {
+    const seen = new Set<string>()
+    for (const child of node.namedChildren) {
+      const val = child.text
+      if (seen.has(val)) {
+        return makeViolation(
+          this.ruleKey, child, filePath, 'medium',
+          'Duplicate set value',
+          `Value \`${val}\` appears more than once in the set literal — the duplicate is silently ignored.`,
+          sourceCode,
+          'Remove the duplicate value from the set literal.',
+        )
+      }
+      seen.add(val)
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// loop-variable-overrides-iterator: for x in x:
+// ---------------------------------------------------------------------------
+
+export const pythonLoopVariableOverridesIteratorVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/loop-variable-overrides-iterator',
+  languages: ['python'],
+  nodeTypes: ['for_statement'],
+  visit(node, filePath, sourceCode) {
+    const loopVar = node.childForFieldName('left')
+    const iterExpr = node.childForFieldName('right')
+
+    if (!loopVar || !iterExpr) return null
+
+    // Only handle simple identifier loop variables
+    if (loopVar.type !== 'identifier') return null
+    const varName = loopVar.text
+
+    // Check if the iterator expression contains the same identifier
+    function containsIdentifier(n: import('tree-sitter').SyntaxNode, name: string): boolean {
+      if (n.type === 'identifier' && n.text === name) return true
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && containsIdentifier(child, name)) return true
+      }
+      return false
+    }
+
+    if (containsIdentifier(iterExpr, varName)) {
+      return makeViolation(
+        this.ruleKey, loopVar, filePath, 'high',
+        'Loop variable overrides iterator',
+        `Loop variable \`${varName}\` has the same name as the iterable \`${iterExpr.text}\` — after the first iteration \`${varName}\` no longer references the original iterable.`,
+        sourceCode,
+        `Rename the loop variable to something different from \`${iterExpr.text}\`.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// raise-without-from-in-except: raise NewException() inside except without from
+// ---------------------------------------------------------------------------
+
+export const pythonRaiseWithoutFromVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/raise-without-from-in-except',
+  languages: ['python'],
+  nodeTypes: ['except_clause'],
+  visit(node, filePath, sourceCode) {
+    const body = node.namedChildren.find((c) => c.type === 'block')
+    if (!body) return null
+
+    for (const stmt of body.namedChildren) {
+      if (stmt.type === 'raise_statement') {
+        const raisedChildren = stmt.namedChildren
+        // A raise with a value but no `from` clause
+        if (raisedChildren.length > 0) {
+          // Check there's no `from` keyword
+          const hasFrom = stmt.children.some((c) => c.text === 'from')
+          if (!hasFrom) {
+            return makeViolation(
+              this.ruleKey, stmt, filePath, 'medium',
+              'Raise without from in except',
+              'Raising a new exception inside an `except` block without `from` hides the original error context. Use `raise NewException() from e` to preserve the traceback.',
+              sourceCode,
+              'Add `from e` (or `from None` to suppress the original) to the raise statement.',
+            )
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// init-return-value: __init__ returning a non-None value
+// ---------------------------------------------------------------------------
+
+export const pythonInitReturnValueVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/init-return-value',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name || name.text !== '__init__') return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    function findReturnWithValue(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      if (n.type === 'return_statement') {
+        const val = n.namedChildren[0]
+        if (val && val.type !== 'none') return n
+      }
+      if (n.type === 'function_definition') return null // don't recurse into nested functions
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findReturnWithValue(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const badReturn = findReturnWithValue(body)
+    if (badReturn) {
+      return makeViolation(
+        this.ruleKey, badReturn, filePath, 'high',
+        '__init__ returns a value',
+        '`__init__` must return `None`. Python ignores any return value from `__init__`, so this is almost certainly a bug.',
+        sourceCode,
+        'Remove the return value from `__init__`, or move the logic to a class method or `__new__`.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// yield-in-init: using yield inside __init__
+// ---------------------------------------------------------------------------
+
+export const pythonYieldInInitVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/yield-in-init',
+  languages: ['python'],
+  nodeTypes: ['function_definition'],
+  visit(node, filePath, sourceCode) {
+    const name = node.childForFieldName('name')
+    if (!name || name.text !== '__init__') return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    function findYield(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      if (n.type === 'yield' || n.type === 'yield_statement') return n
+      if (n.type === 'function_definition') return null // don't recurse
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const found = findYield(child)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    const yieldNode = findYield(body)
+    if (yieldNode) {
+      return makeViolation(
+        this.ruleKey, yieldNode, filePath, 'high',
+        'yield in __init__',
+        '`yield` in `__init__` makes it a generator function — calling `MyClass()` returns a generator object instead of an instance.',
+        sourceCode,
+        'Remove `yield` from `__init__`. Use a separate generator method if needed.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// duplicate-base-classes: class Foo(A, B, A): duplicate base
+// ---------------------------------------------------------------------------
+
+export const pythonDuplicateBaseClassesVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/duplicate-base-classes',
+  languages: ['python'],
+  nodeTypes: ['class_definition'],
+  visit(node, filePath, sourceCode) {
+    const args = node.childForFieldName('superclasses')
+    if (!args) return null
+
+    const seen = new Set<string>()
+    for (const child of args.namedChildren) {
+      if (child.type === 'identifier' || child.type === 'attribute') {
+        const name = child.text
+        if (seen.has(name)) {
+          return makeViolation(
+            this.ruleKey, child, filePath, 'high',
+            'Duplicate base class',
+            `Base class \`${name}\` is listed more than once — this causes a TypeError.`,
+            sourceCode,
+            `Remove the duplicate \`${name}\` from the base class list.`,
+          )
+        }
+        seen.add(name)
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// float-equality-comparison: x == 0.5 or y != 1.0
+// ---------------------------------------------------------------------------
+
+export const pythonFloatEqualityComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/float-equality-comparison',
+  languages: ['python'],
+  nodeTypes: ['comparison_operator'],
+  visit(node, filePath, sourceCode) {
+    const children = node.children
+    const eqOp = children.find((c) => c.text === '==' || c.text === '!=')
+    if (!eqOp) return null
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'float') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Float equality comparison',
+          `Comparing a float (\`${child.text}\`) with \`${eqOp.text}\` is unreliable due to floating-point representation issues.`,
+          sourceCode,
+          'Use `math.isclose(a, b)` for float comparisons instead of `==`.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// function-call-in-default-argument: def foo(x=datetime.now()): — evaluated once
+// ---------------------------------------------------------------------------
+
+const SAFE_DEFAULT_CALLS = new Set(['list', 'dict', 'set', 'tuple', 'frozenset', 'str', 'int', 'float', 'bool', 'bytes'])
+
+export const pythonFunctionCallInDefaultArgVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/function-call-in-default-argument',
+  languages: ['python'],
+  nodeTypes: ['default_parameter', 'typed_default_parameter'],
+  visit(node, filePath, sourceCode) {
+    const value = node.childForFieldName('value')
+    if (!value || value.type !== 'call') return null
+
+    const fn = value.childForFieldName('function')
+    if (!fn) return null
+
+    // Allow known safe calls like list(), dict(), etc. (although they'd be caught by mutable-default-arg)
+    if (fn.type === 'identifier' && SAFE_DEFAULT_CALLS.has(fn.text)) return null
+
+    // Flag any other function call — it runs once at definition time
+    const paramName = node.childForFieldName('name')?.text ?? 'parameter'
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Function call in default argument',
+      `Default value for \`${paramName}\` is a function call \`${value.text}\` — this is evaluated once when the function is defined, not on each call.`,
+      sourceCode,
+      `Use \`${paramName}=None\` and call the function inside the function body: \`if ${paramName} is None: ${paramName} = ${value.text}\`.`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// zip-without-strict: zip(a, b) without strict=True
+// ---------------------------------------------------------------------------
+
+export const pythonZipWithoutStrictVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/zip-without-strict',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'identifier' || fn.text !== 'zip') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argChildren = args.namedChildren
+    // Need at least 2 iterables for zip to be meaningful
+    if (argChildren.length < 2) return null
+
+    // Check if strict=True is present
+    const hasStrict = argChildren.some((c) => {
+      if (c.type === 'keyword_argument') {
+        const kw = c.childForFieldName('name')
+        return kw?.text === 'strict'
+      }
+      return false
+    })
+
+    if (!hasStrict) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'zip() without strict',
+        `\`${node.text}\` silently truncates to the shortest iterable. If the iterables should have equal lengths, pass \`strict=True\` to raise a \`ValueError\` on mismatch.`,
+        sourceCode,
+        'Add `strict=True` to `zip()` to detect length mismatches: `zip(a, b, strict=True)`.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
   pythonBareExceptVisitor,
@@ -619,4 +1147,19 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonGetterMissingReturnVisitor,
   pythonEmptyCharacterClassVisitor,
   pythonExceptionReassignmentVisitor,
+  pythonAssertOnTupleVisitor,
+  pythonFstringMissingPlaceholdersVisitor,
+  pythonRaiseNotImplementedVisitor,
+  pythonIsLiteralComparisonVisitor,
+  pythonNoneComparisonVisitor,
+  pythonTypeComparisonVisitor,
+  pythonDuplicateSetValueVisitor,
+  pythonLoopVariableOverridesIteratorVisitor,
+  pythonRaiseWithoutFromVisitor,
+  pythonInitReturnValueVisitor,
+  pythonYieldInInitVisitor,
+  pythonDuplicateBaseClassesVisitor,
+  pythonFloatEqualityComparisonVisitor,
+  pythonFunctionCallInDefaultArgVisitor,
+  pythonZipWithoutStrictVisitor,
 ]

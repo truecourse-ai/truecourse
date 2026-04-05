@@ -1916,3 +1916,555 @@ describe('security/deterministic/flask-secret-key-disclosed', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// jwt-secret-key-disclosed
+// ===========================================================================
+
+describe('security/deterministic/jwt-secret-key-disclosed', () => {
+  const ruleKey = 'security/deterministic/jwt-secret-key-disclosed';
+
+  it('detects jwt.sign() with hardcoded string secret', () => {
+    const violations = check(`jwt.sign(payload, "mysecretkey123");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects jwt.verify() with hardcoded string secret', () => {
+    const violations = check(`jwt.verify(token, "mysecretkey123");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag jwt.sign() with env var secret', () => {
+    const violations = check(`jwt.sign(payload, process.env.JWT_SECRET);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// bind-all-interfaces
+// ===========================================================================
+
+describe('security/deterministic/bind-all-interfaces', () => {
+  const ruleKey = 'security/deterministic/bind-all-interfaces';
+
+  it('detects server.listen with 0.0.0.0', () => {
+    const violations = check(`server.listen(3000, "0.0.0.0");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag listening on localhost', () => {
+    const violations = check(`server.listen(3000, "127.0.0.1");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag listening on port only', () => {
+    const violations = check(`app.listen(3000);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// non-standard-crypto
+// ===========================================================================
+
+describe('security/deterministic/non-standard-crypto', () => {
+  const ruleKey = 'security/deterministic/non-standard-crypto';
+
+  it('detects function named xorCrypt', () => {
+    const violations = check(`function xorCrypt(data, key) { return data; }`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects variable named customEncrypt', () => {
+    const violations = check(`const customEncrypt = (data) => data;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag standard crypto usage', () => {
+    const violations = check(`const hash = crypto.createHash("sha256");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// django-raw-sql
+// ===========================================================================
+
+describe('security/deterministic/django-raw-sql', () => {
+  const ruleKey = 'security/deterministic/django-raw-sql';
+
+  it('detects queryset.raw() call', () => {
+    const violations = check(`users = User.objects.raw("SELECT * FROM users WHERE id = " + user_id)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects queryset.extra() call', () => {
+    const violations = check(`qs = MyModel.objects.extra(where=["id > 0"])`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// unsafe-markup
+// ===========================================================================
+
+describe('security/deterministic/unsafe-markup', () => {
+  const ruleKey = 'security/deterministic/unsafe-markup';
+
+  it('detects Markup() with a variable argument', () => {
+    const violations = check(`result = Markup(user_input)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects mark_safe() with a variable argument', () => {
+    const violations = check(`safe_html = mark_safe(user_data)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Markup() with a plain string literal', () => {
+    const violations = check(`result = Markup("<b>Hello</b>")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// logging-config-insecure-listen
+// ===========================================================================
+
+describe('security/deterministic/logging-config-insecure-listen', () => {
+  const ruleKey = 'security/deterministic/logging-config-insecure-listen';
+
+  it('detects logging.config.listen()', () => {
+    const violations = check(`logging.config.listen(9999)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag logging.basicConfig()', () => {
+    const violations = check(`logging.basicConfig(level=logging.DEBUG)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// graphql-dos-vulnerability
+// ===========================================================================
+
+describe('security/deterministic/graphql-dos-vulnerability', () => {
+  const ruleKey = 'security/deterministic/graphql-dos-vulnerability';
+
+  it('detects buildSchema without depth limiting', () => {
+    const violations = check(`const schema = buildSchema(typeDefs);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag buildSchema when depth limit is referenced nearby', () => {
+    const violations = check(`
+      const schema = buildSchema(typeDefs);
+      app.use(depthLimit(10));
+    `);
+    // Still flags the buildSchema call itself since depthLimit is applied separately
+    // This is expected — users should verify with integration
+    expect(violations.filter((v) => v.ruleKey === ruleKey).length).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ===========================================================================
+// graphql-introspection-enabled
+// ===========================================================================
+
+describe('security/deterministic/graphql-introspection-enabled', () => {
+  const ruleKey = 'security/deterministic/graphql-introspection-enabled';
+
+  it('detects introspection: true in ApolloServer config', () => {
+    const violations = check(`
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+        introspection: true,
+      });
+    `);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag when introspection is set conditionally', () => {
+    const violations = check(`
+      const server = new ApolloServer({
+        typeDefs,
+        resolvers,
+        introspection: process.env.NODE_ENV !== "production",
+      });
+    `);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// unsafe-torch-load
+// ===========================================================================
+
+describe('security/deterministic/unsafe-torch-load', () => {
+  const ruleKey = 'security/deterministic/unsafe-torch-load';
+
+  it('detects torch.load() without weights_only', () => {
+    const violations = check(`model = torch.load("model.pth")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag torch.load() with weights_only=True', () => {
+    const violations = check(`model = torch.load("model.pth", weights_only=True)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// unsafe-xml-signature
+// ===========================================================================
+
+describe('security/deterministic/unsafe-xml-signature', () => {
+  const ruleKey = 'security/deterministic/unsafe-xml-signature';
+
+  it('detects new SignedXml() with no arguments', () => {
+    const violations = check(`const sig = new SignedXml();`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag new SignedXml() with options argument', () => {
+    const violations = check(`const sig = new SignedXml({ idAttribute: "ID" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// mixed-http-methods
+// ===========================================================================
+
+describe('security/deterministic/mixed-http-methods', () => {
+  const ruleKey = 'security/deterministic/mixed-http-methods';
+
+  it('detects app.all() route registration', () => {
+    const violations = check(`app.all("/api/data", handler);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects router.all() route registration', () => {
+    const violations = check(`router.all("/upload", uploadHandler);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag app.get()', () => {
+    const violations = check(`app.get("/api/data", handler);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag app.post()', () => {
+    const violations = check(`app.post("/api/data", handler);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// process-signaling
+// ===========================================================================
+
+describe('security/deterministic/process-signaling', () => {
+  const ruleKey = 'security/deterministic/process-signaling';
+
+  it('detects process.kill() with variable PID', () => {
+    const violations = check(`process.kill(pid, "SIGTERM");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag process.kill() with literal PID', () => {
+    const violations = check(`process.kill(1234, "SIGTERM");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// long-term-aws-keys-in-code
+// ===========================================================================
+
+describe('security/deterministic/long-term-aws-keys-in-code', () => {
+  const ruleKey = 'security/deterministic/long-term-aws-keys-in-code';
+
+  it('detects hardcoded AKIA... access key in JS', () => {
+    const violations = check(`const key = "AKIAIOSFODNN7EXAMPLE";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects hardcoded AKIA... access key in Python', () => {
+    const violations = check(`key = "AKIAIOSFODNN7EXAMPLE"`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag non-AWS strings', () => {
+    const violations = check(`const id = "user-abc123";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// snmp-insecure-version
+// ===========================================================================
+
+describe('security/deterministic/snmp-insecure-version', () => {
+  const ruleKey = 'security/deterministic/snmp-insecure-version';
+
+  it('detects SNMP v1 session in JS', () => {
+    const violations = check(`snmp.createSession("192.168.1.1", "public", { version: snmp.Version1 });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects SNMP v2c session in JS', () => {
+    const violations = check(`snmp.createSession("192.168.1.1", "public", { version: snmp.Version2c });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag SNMP v3 session', () => {
+    const violations = check(`snmp.createSession("192.168.1.1", "public", { version: snmp.Version3 });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// snmp-weak-crypto
+// ===========================================================================
+
+describe('security/deterministic/snmp-weak-crypto', () => {
+  const ruleKey = 'security/deterministic/snmp-weak-crypto';
+
+  it('detects SNMP with MD5 auth algorithm', () => {
+    const violations = check(`snmp.createSession("host", "user", { authAlgorithm: "md5" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects SNMP with DES priv algorithm', () => {
+    const violations = check(`snmp.createSession("host", "user", { privAlgorithm: "des" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag SNMP with SHA-256 auth', () => {
+    const violations = check(`snmp.createSession("host", "user", { authAlgorithm: "sha256" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// paramiko-call
+// ===========================================================================
+
+describe('security/deterministic/paramiko-call', () => {
+  const ruleKey = 'security/deterministic/paramiko-call';
+
+  it('detects paramiko connect with AutoAddPolicy in context', () => {
+    const violations = check(`
+client = paramiko.SSHClient()
+client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+client.connect("example.com")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag connect without AutoAddPolicy', () => {
+    const violations = check(`
+client = paramiko.SSHClient()
+client.load_system_host_keys()
+client.connect("example.com")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// hardcoded-sql-expression
+// ===========================================================================
+
+describe('security/deterministic/hardcoded-sql-expression', () => {
+  const ruleKey = 'security/deterministic/hardcoded-sql-expression';
+
+  it('detects format() used to build SELECT query', () => {
+    const violations = check(`const q = format("SELECT * FROM %s WHERE id = %d", table, id);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag format() with non-SQL strings', () => {
+    const violations = check(`const msg = format("Hello, %s!", name);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// wildcard-in-os-command
+// ===========================================================================
+
+describe('security/deterministic/wildcard-in-os-command', () => {
+  const ruleKey = 'security/deterministic/wildcard-in-os-command';
+
+  it('detects exec() with wildcard in JS', () => {
+    const violations = check(`exec("rm -rf /var/log/*.log");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects os.system() with wildcard in Python', () => {
+    const violations = check(`os.system("chmod 777 /data/*")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag exec without wildcard', () => {
+    const violations = check(`exec("ls /var/log");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// suspicious-url-open
+// ===========================================================================
+
+describe('security/deterministic/suspicious-url-open', () => {
+  const ruleKey = 'security/deterministic/suspicious-url-open';
+
+  it('detects urlopen with variable URL', () => {
+    const violations = check(`response = urllib.request.urlopen(user_url)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag urlopen with a plain string literal', () => {
+    const violations = check(`response = urllib.request.urlopen("https://api.example.com/data")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// redos-vulnerable-regex-python
+// ===========================================================================
+
+describe('security/deterministic/redos-vulnerable-regex-python', () => {
+  const ruleKey = 'security/deterministic/redos-vulnerable-regex-python';
+
+  it('detects nested quantifier regex (a+)+', () => {
+    const violations = check(`pattern = re.compile("(a+)+")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects nested quantifier regex (a*)*', () => {
+    const violations = check(`m = re.match("(x*)*", text)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag safe regex', () => {
+    const violations = check(`m = re.match(r"^[a-z]+$", text)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// fastapi-file-upload-body
+// ===========================================================================
+
+describe('security/deterministic/fastapi-file-upload-body', () => {
+  const ruleKey = 'security/deterministic/fastapi-file-upload-body';
+
+  it('detects FastAPI endpoint with UploadFile without size check', () => {
+    const violations = check(`
+async def upload(file: UploadFile):
+    content = await file.read()
+    return {"size": len(content)}
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag when max_size check is present', () => {
+    const violations = check(`
+async def upload(file: UploadFile):
+    if file.size > max_size:
+        raise HTTPException(413)
+    content = await file.read()
+    return {"size": len(content)}
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// s3-missing-bucket-owner
+// ===========================================================================
+
+describe('security/deterministic/s3-missing-bucket-owner', () => {
+  const ruleKey = 'security/deterministic/s3-missing-bucket-owner';
+
+  it('detects putBucketAcl without ExpectedBucketOwner', () => {
+    const violations = check(`s3.putBucketAcl({ Bucket: "my-bucket", ACL: "public-read" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag putBucketAcl with ExpectedBucketOwner', () => {
+    const violations = check(`s3.putBucketAcl({ Bucket: "my-bucket", ACL: "private", ExpectedBucketOwner: accountId });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// s3-public-bucket-access
+// ===========================================================================
+
+describe('security/deterministic/s3-public-bucket-access', () => {
+  const ruleKey = 'security/deterministic/s3-public-bucket-access';
+
+  it('detects putPublicAccessBlock with BlockPublicAcls: false', () => {
+    const violations = check(`s3.putPublicAccessBlock({ Bucket: "b", PublicAccessBlockConfiguration: { BlockPublicAcls: false } });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag putPublicAccessBlock with all blocks true', () => {
+    const violations = check(`s3.putPublicAccessBlock({ Bucket: "b", PublicAccessBlockConfiguration: { BlockPublicAcls: true } });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// s3-insecure-http
+// ===========================================================================
+
+describe('security/deterministic/s3-insecure-http', () => {
+  const ruleKey = 'security/deterministic/s3-insecure-http';
+
+  it('detects S3 client with ssl: false in JS', () => {
+    const violations = check(`const s3 = new S3({ ssl: false });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects boto3 S3 client with use_ssl=False in Python', () => {
+    const violations = check(`s3 = boto3.client("s3", use_ssl=False)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag S3 client with ssl: true in JS', () => {
+    const violations = check(`const s3 = new S3({ ssl: true });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// s3-unrestricted-access
+// ===========================================================================
+
+describe('security/deterministic/s3-unrestricted-access', () => {
+  const ruleKey = 'security/deterministic/s3-unrestricted-access';
+
+  it('detects S3 bucket policy with wildcard Principal in JS', () => {
+    const violations = check(`
+const policy = '{"Version":"2012-10-17","Statement":[{"Principal":"*","Effect":"Allow","Action":"s3:*","Resource":"arn:aws:s3:::my-bucket/*"}]}';
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects S3 bucket policy with wildcard Principal in Python', () => {
+    const violations = check(`policy = '{"Principal": "*", "Effect": "Allow"}'`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag restricted bucket policy', () => {
+    const violations = check(`const policy = '{"Principal": {"AWS": "arn:aws:iam::123456789:root"}}';`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});

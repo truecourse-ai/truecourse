@@ -2260,6 +2260,869 @@ export const preferNullishCoalescingVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// Batch 3 — 25 new rules
+// ---------------------------------------------------------------------------
+
+export const preferRestParamsVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-rest-params',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['identifier'],
+  visit(node, filePath, sourceCode) {
+    if (node.text !== 'arguments') return null
+    // Must be inside a function body (not an arrow function, which doesn't have arguments)
+    let parent = node.parent
+    while (parent) {
+      if (parent.type === 'arrow_function') return null // arrow functions don't bind arguments
+      if (parent.type === 'function_declaration' || parent.type === 'function_expression' || parent.type === 'method_definition') {
+        // Check this isn't in a property definition context (like arguments.length as part of a name)
+        const nodeParent = node.parent
+        if (nodeParent?.type === 'member_expression' && nodeParent.childForFieldName('object') === node) {
+          // arguments.xxx — definitely the arguments object
+        } else if (nodeParent?.type === 'call_expression' && nodeParent.childForFieldName('function') === node) {
+          // arguments() — shouldn't happen but skip
+          return null
+        }
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Arguments object usage',
+          '`arguments` object is error-prone and cannot be used in arrow functions. Use rest parameters `...args` instead.',
+          sourceCode,
+          'Replace `arguments` with a rest parameter: `function fn(...args) { ... }`.',
+        )
+      }
+      parent = parent.parent
+    }
+    return null
+  },
+}
+
+export const preferSpreadVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-spread',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (prop?.text !== 'apply') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argList = args.namedChildren
+    // fn.apply(context, argsArray) — 2 args
+    if (argList.length === 2) {
+      const contextArg = argList[0]
+      // If context is null or the same object, spread is cleaner
+      if (contextArg.text === 'null' || contextArg.text === 'undefined' || contextArg.text === 'this') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Prefer spread over apply',
+          '`fn.apply(ctx, args)` can be replaced with `fn(...args)` using the spread operator.',
+          sourceCode,
+          'Replace `.apply(ctx, args)` with `fn(...args)` or `fn.call(ctx, ...args)`.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const parameterReassignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/parameter-reassignment',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const params = node.childForFieldName('parameters')
+    if (!params) return null
+
+    // Collect parameter names
+    const paramNames = new Set<string>()
+    function collectParamNames(n: SyntaxNode) {
+      if (n.type === 'identifier') {
+        paramNames.add(n.text)
+        return
+      }
+      // patterns: assignment_pattern, rest_pattern, object_pattern, array_pattern
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i)
+        if (child) collectParamNames(child)
+      }
+    }
+    for (let i = 0; i < params.namedChildCount; i++) {
+      const p = params.namedChild(i)
+      if (p) {
+        if (p.type === 'identifier') paramNames.add(p.text)
+        else if (p.type === 'required_parameter' || p.type === 'optional_parameter') {
+          // TypeScript parameter nodes
+          const nameNode = p.childForFieldName('pattern') ?? p.namedChildren[0]
+          if (nameNode?.type === 'identifier') paramNames.add(nameNode.text)
+        } else if (p.type === 'assignment_pattern') {
+          const left = p.childForFieldName('left')
+          if (left?.type === 'identifier') paramNames.add(left.text)
+        } else if (p.type === 'rest_pattern') {
+          const inner = p.namedChildren[0]
+          if (inner?.type === 'identifier') paramNames.add(inner.text)
+        }
+      }
+    }
+
+    if (paramNames.size === 0) return null
+
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    // Look for assignments to param names
+    function findReassignment(n: SyntaxNode): SyntaxNode | null {
+      // Don't descend into nested functions
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return null
+
+      if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier' && paramNames.has(left.text)) {
+          return left
+        }
+      }
+      if (n.type === 'update_expression') {
+        // i++ or ++i — find the identifier
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child?.type === 'identifier' && paramNames.has(child.text)) return child
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) {
+          const result = findReassignment(child)
+          if (result) return result
+        }
+      }
+      return null
+    }
+
+    const reassigned = findReassignment(bodyNode)
+    if (reassigned) {
+      return makeViolation(
+        this.ruleKey, reassigned, filePath, 'medium',
+        'Parameter reassignment',
+        `Parameter \`${reassigned.text}\` is reassigned. Use a local variable instead to keep function parameters immutable.`,
+        sourceCode,
+        `Introduce a local variable: \`let local = ${reassigned.text};\` and modify that instead.`,
+      )
+    }
+    return null
+  },
+}
+
+export const labelsUsageVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/labels-usage',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['labeled_statement'],
+  visit(node, filePath, sourceCode) {
+    const labelNode = node.children[0]
+    const labelName = labelNode?.text ?? 'label'
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Labeled statement',
+      `Label \`${labelName}\` makes control flow hard to follow. Refactor using helper functions or early returns.`,
+      sourceCode,
+      'Refactor to remove the label — use functions or break/continue without labels.',
+    )
+  },
+}
+
+export const extendNativeVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/extend-native',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    if (!left || left.type !== 'member_expression') return null
+
+    const obj = left.childForFieldName('object')
+    const prop = left.childForFieldName('property')
+    if (!obj || !prop) return null
+
+    // Pattern: BuiltIn.prototype.something = ...
+    if (obj.type !== 'member_expression') return null
+    const builtinName = obj.childForFieldName('object')
+    const prototypeProp = obj.childForFieldName('property')
+
+    if (prototypeProp?.text !== 'prototype') return null
+
+    const BUILTINS = new Set(['Array', 'Object', 'String', 'Number', 'Boolean', 'Function',
+      'RegExp', 'Date', 'Error', 'Map', 'Set', 'Promise', 'Symbol', 'Math', 'JSON'])
+
+    if (builtinName?.type === 'identifier' && BUILTINS.has(builtinName.text)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Extending native type',
+        `Modifying \`${builtinName.text}.prototype\` is dangerous — it can conflict with libraries and future language features.`,
+        sourceCode,
+        'Use a utility function or subclass instead of modifying the native prototype.',
+      )
+    }
+    return null
+  },
+}
+
+export const arrayConstructorVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/array-constructor',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (ctor?.text !== 'Array') return null
+
+    const args = node.childForFieldName('arguments')
+    const argList = args?.namedChildren ?? []
+
+    // new Array() with 0 args → use []
+    // new Array(x, y) with multiple args → use [x, y]
+    // new Array(n) with one number arg is arguably OK (pre-allocation) but still flagged by eslint
+    if (argList.length !== 1) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Array constructor',
+        '`new Array(...)` is ambiguous. Use array literal syntax `[...]` instead.',
+        sourceCode,
+        'Replace `new Array(...)` with `[...]`.',
+      )
+    }
+    return null
+  },
+}
+
+export const functionInLoopVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/function-in-loop',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['function_declaration', 'function_expression', 'arrow_function'],
+  visit(node, filePath, sourceCode) {
+    const LOOP_TYPES = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement'])
+    let parent = node.parent
+    while (parent) {
+      if (LOOP_TYPES.has(parent.type)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Function defined in loop',
+          'Function defined inside a loop captures loop variables by reference, which can cause subtle bugs.',
+          sourceCode,
+          'Move the function outside the loop, or use block-scoped `let` and closures carefully.',
+        )
+      }
+      // Stop at enclosing function boundary
+      if (JS_FUNCTION_TYPES.includes(parent.type) && parent !== node) break
+      parent = parent.parent
+    }
+    return null
+  },
+}
+
+export const multiAssignVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/multi-assign',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    // Chained assignment: a = b = c — the right side is also an assignment_expression
+    const right = node.childForFieldName('right')
+    if (right?.type === 'assignment_expression') {
+      // Only flag the outermost (don't fire if parent is also assignment_expression)
+      const parent = node.parent
+      if (parent?.type === 'assignment_expression') return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Chained assignment',
+        'Chained assignments like `a = b = c` are hard to read. Use separate assignment statements.',
+        sourceCode,
+        'Split into separate assignment statements.',
+      )
+    }
+    return null
+  },
+}
+
+export const bitwiseInBooleanVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/bitwise-in-boolean',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.type === '&' || c.type === '|')
+    if (!op) return null
+
+    // Walk up through parenthesized_expression wrappers to find the boolean context
+    const BOOL_CONTEXT_TYPES = new Set(['if_statement', 'while_statement', 'for_statement', 'do_statement', 'ternary_expression'])
+    let current: SyntaxNode | null = node
+    let parent: SyntaxNode | null = node.parent
+
+    // Unwrap through parenthesized_expression layers
+    while (parent?.type === 'parenthesized_expression') {
+      current = parent
+      parent = parent.parent
+    }
+
+    if (!parent) return null
+
+    // Check if we're in a condition slot
+    const isBoolContext = BOOL_CONTEXT_TYPES.has(parent.type)
+      && parent.childForFieldName('condition') === current
+
+    if (!isBoolContext) return null
+
+    const intended = op.type === '&' ? '&&' : '||'
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Bitwise operator in boolean context',
+      `Bitwise \`${op.type}\` used in a boolean context — did you mean logical \`${intended}\`?`,
+      sourceCode,
+      `Replace \`${op.type}\` with \`${intended}\` if a logical operator was intended.`,
+    )
+  },
+}
+
+export const forInWithoutFilterVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/for-in-without-filter',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['for_in_statement'],
+  visit(node, filePath, sourceCode) {
+    // Only flag for...in (not for...of which is the 'of' keyword)
+    const hasOf = node.children.some((c) => c.type === 'of')
+    if (hasOf) return null
+
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    // Check if the body contains a hasOwnProperty call
+    function hasOwnPropertyCheck(n: SyntaxNode): boolean {
+      if (n.type === 'call_expression') {
+        const fn = n.childForFieldName('function')
+        if (fn?.type === 'member_expression') {
+          const prop = fn.childForFieldName('property')
+          if (prop?.text === 'hasOwnProperty' || prop?.text === 'hasOwn') return true
+        }
+      }
+      // Also accept Object.prototype.hasOwnProperty.call(...)
+      if (n.type === 'string' && (n.text.includes('hasOwnProperty') || n.text.includes('hasOwn'))) return true
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasOwnPropertyCheck(child)) return true
+      }
+      return false
+    }
+
+    if (!hasOwnPropertyCheck(body)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'for-in without hasOwnProperty check',
+        '`for...in` iterates inherited properties. Add an `Object.hasOwn(obj, key)` check inside the loop.',
+        sourceCode,
+        'Add `if (!Object.hasOwn(obj, key)) continue;` at the start of the loop body, or use `for...of Object.keys(obj)` instead.',
+      )
+    }
+    return null
+  },
+}
+
+export const withStatementVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/with-statement',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['with_statement'],
+  visit(node, filePath, sourceCode) {
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'with statement',
+      '`with` statement is confusing, deprecated in strict mode, and disallowed in TypeScript. Remove it.',
+      sourceCode,
+      'Replace `with (obj) { ... }` by assigning `obj` to a variable and accessing its properties explicitly.',
+    )
+  },
+}
+
+export const defaultCaseLastVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/default-case-last',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['switch_statement'],
+  visit(node, filePath, sourceCode) {
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    const cases = body.namedChildren
+    if (cases.length === 0) return null
+
+    // Find the default case
+    let defaultIndex = -1
+    for (let i = 0; i < cases.length; i++) {
+      if (cases[i].type === 'switch_default') {
+        defaultIndex = i
+        break
+      }
+    }
+
+    if (defaultIndex === -1) return null // no default case
+    if (defaultIndex === cases.length - 1) return null // default is already last
+
+    return makeViolation(
+      this.ruleKey, cases[defaultIndex], filePath, 'low',
+      'Default case not last',
+      'The `default` clause should be the last case in a `switch` statement for readability.',
+      sourceCode,
+      'Move the `default` clause to the end of the switch statement.',
+    )
+  },
+}
+
+export const elseifWithoutElseVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/elseif-without-else',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['if_statement'],
+  visit(node, filePath, sourceCode) {
+    // Only flag top-level if statements (not the inner if of an else-if chain)
+    const parent = node.parent
+    if (parent?.type === 'else_clause') return null // this is the inner if of an else-if
+
+    // Must have at least one else-if clause (i.e., else body is an if_statement)
+    let hasElseIf = false
+    let hasElse = false
+
+    let currentNode: SyntaxNode | null = node
+    while (currentNode?.type === 'if_statement') {
+      const elseClause: import('tree-sitter').SyntaxNode | undefined = currentNode.children.find((c) => c.type === 'else_clause')
+      if (!elseClause) break
+
+      const elseBody: import('tree-sitter').SyntaxNode | undefined = elseClause.namedChildren[0]
+      if (!elseBody) break
+
+      if (elseBody.type === 'if_statement') {
+        hasElseIf = true
+        currentNode = elseBody
+      } else {
+        hasElse = true
+        break
+      }
+    }
+
+    if (hasElseIf && !hasElse) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'else-if chain without final else',
+        '`if...else if` chain has no final `else` clause — unhandled cases may be silently ignored.',
+        sourceCode,
+        'Add a final `else` clause to handle unexpected cases, or document why it is intentionally omitted.',
+      )
+    }
+    return null
+  },
+}
+
+export const accessorPairsVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/accessor-pairs',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['object'],
+  visit(node, filePath, sourceCode) {
+    const getters = new Set<string>()
+    const setters = new Set<string>()
+
+    for (const child of node.namedChildren) {
+      if (child.type === 'method_definition' || child.type === 'pair') {
+        // method_definition: get/set methods in objects
+        if (child.type === 'method_definition') {
+          const kindNode = child.children.find((c) => c.type === 'get' || c.type === 'set')
+          const nameNode = child.childForFieldName('name')
+          if (!kindNode || !nameNode) continue
+          if (kindNode.type === 'get') getters.add(nameNode.text)
+          else if (kindNode.type === 'set') setters.add(nameNode.text)
+        }
+      }
+    }
+
+    // Also check for get/set shorthand in object literals
+    for (const child of node.namedChildren) {
+      if (child.type === 'method_definition') {
+        // Already handled
+      } else if (child.type === 'pair') {
+        // Regular pair, not a getter/setter
+      }
+    }
+
+    // Check for setters without getters
+    for (const name of setters) {
+      if (!getters.has(name)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Setter without getter',
+          `Object has a setter for \`${name}\` but no corresponding getter. Add a getter or use a regular property.`,
+          sourceCode,
+          `Add a getter for \`${name}\`, or convert to a regular data property.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const noReturnAssignVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-return-assign',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['return_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr) return null
+
+    // Direct assignment in return: return x = value
+    if (expr.type === 'assignment_expression' || expr.type === 'augmented_assignment_expression') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Assignment in return',
+        'Assignment expression inside `return` statement is confusing — it looks like a comparison.',
+        sourceCode,
+        'Assign the value to a variable before the `return`, or wrap in extra parentheses if intentional.',
+      )
+    }
+    // Parenthesized assignment: return (x = value)
+    if (expr.type === 'parenthesized_expression') {
+      const inner = expr.namedChildren[0]
+      if (inner?.type === 'assignment_expression' || inner?.type === 'augmented_assignment_expression') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Assignment in return',
+          'Assignment expression inside `return` statement is confusing — it looks like a comparison.',
+          sourceCode,
+          'Assign the value to a variable before the `return`.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const noSequencesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-sequences',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['sequence_expression'],
+  visit(node, filePath, sourceCode) {
+    // Don't flag comma expressions in for loop initializer/update positions
+    const parent = node.parent
+    if (parent?.type === 'for_statement') {
+      const initializer = parent.childForFieldName('initializer')
+      const increment = parent.childForFieldName('increment')
+      if (initializer === node || increment === node) return null
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Comma operator usage',
+      'The comma operator evaluates both expressions but only returns the last value — this is rarely intentional.',
+      sourceCode,
+      'Use separate statements instead of the comma operator.',
+    )
+  },
+}
+
+export const noCallerVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-caller',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['member_expression'],
+  visit(node, filePath, sourceCode) {
+    const obj = node.childForFieldName('object')
+    const prop = node.childForFieldName('property')
+
+    if (obj?.text === 'arguments' && (prop?.text === 'caller' || prop?.text === 'callee')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        `arguments.${prop?.text} usage`,
+        `\`arguments.${prop?.text}\` is deprecated, forbidden in strict mode, and can cause performance issues.`,
+        sourceCode,
+        `Remove the use of \`arguments.${prop?.text}\`. Use named functions or rest parameters instead.`,
+      )
+    }
+    return null
+  },
+}
+
+export const noIteratorVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-iterator',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['member_expression', 'pair'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'member_expression') {
+      const prop = node.childForFieldName('property')
+      if (prop?.text === '__iterator__') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          '__iterator__ usage',
+          '`__iterator__` is non-standard and not supported in modern environments. Use the `Symbol.iterator` protocol instead.',
+          sourceCode,
+          'Replace `__iterator__` with `[Symbol.iterator]()` to use the standard iteration protocol.',
+        )
+      }
+    }
+    if (node.type === 'pair') {
+      const key = node.childForFieldName('key')
+      if (key?.text === '__iterator__' || key?.text === '"__iterator__"' || key?.text === "'__iterator__'") {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          '__iterator__ usage',
+          '`__iterator__` is non-standard and not supported in modern environments. Use the `Symbol.iterator` protocol instead.',
+          sourceCode,
+          'Replace `__iterator__` with `[Symbol.iterator]()` to use the standard iteration protocol.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const requireYieldVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/require-yield',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['generator_function', 'generator_function_declaration'],
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node) ?? node.namedChildren.find((c) => c.type === 'statement_block')
+    if (!bodyNode) return null
+
+    let hasYield = false
+
+    function walk(n: SyntaxNode) {
+      if (hasYield) return
+      if (n.type === 'yield_expression') {
+        hasYield = true
+        return
+      }
+      // Don't descend into nested generators
+      if ((n.type === 'generator_function' || n.type === 'generator_function_declaration') && n !== node) return
+      // Don't descend into regular nested functions either
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (!hasYield) {
+      const nameNode = node.childForFieldName('name')
+      const name = nameNode?.text || 'anonymous'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Generator without yield',
+        `Generator function \`${name}\` never uses \`yield\`. Either add \`yield\` or remove the \`*\` to make it a regular function.`,
+        sourceCode,
+        'Add a `yield` expression, or remove the `*` to make this a regular function.',
+      )
+    }
+    return null
+  },
+}
+
+export const classPrototypeAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/class-prototype-assignment',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    if (!left || left.type !== 'member_expression') return null
+
+    const obj = left.childForFieldName('object')
+    const prop = left.childForFieldName('property')
+    if (!obj || !prop) return null
+
+    // Pattern: ClassName.prototype.methodName = function(...)
+    if (obj.type !== 'member_expression') return null
+    const prototypeProp = obj.childForFieldName('property')
+    if (prototypeProp?.text !== 'prototype') return null
+
+    const right = node.childForFieldName('right')
+    if (right?.type === 'function_expression' || right?.type === 'arrow_function') {
+      // Make sure it's not already flagged as extend-native (not a built-in)
+      const builtinObj = obj.childForFieldName('object')
+      const BUILTINS = new Set(['Array', 'Object', 'String', 'Number', 'Boolean', 'Function',
+        'RegExp', 'Date', 'Error', 'Map', 'Set', 'Promise', 'Symbol'])
+      if (builtinObj?.type === 'identifier' && BUILTINS.has(builtinObj.text)) return null // handled by extend-native
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Prototype assignment in class context',
+        `Assigning methods via \`${obj.text}\` is inconsistent with ES6 class syntax. Use class method definitions instead.`,
+        sourceCode,
+        'Move the method into a class body definition.',
+      )
+    }
+    return null
+  },
+}
+
+export const functionInBlockVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/function-in-block',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['function_declaration'],
+  visit(node, filePath, sourceCode) {
+    const parent = node.parent
+    if (!parent) return null
+
+    // Function declaration directly inside a statement_block that is itself inside a control structure
+    if (parent.type === 'statement_block') {
+      const grandparent = parent.parent
+      const CONTROL_TYPES = new Set(['if_statement', 'else_clause', 'while_statement', 'for_statement',
+        'for_in_statement', 'do_statement', 'switch_case', 'switch_default'])
+      if (grandparent && CONTROL_TYPES.has(grandparent.type)) {
+        const nameNode = node.childForFieldName('name')
+        const name = nameNode?.text || 'anonymous'
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Function declaration in block',
+          `Function \`${name}\` is declared inside a control flow block. Behavior is inconsistent across environments.`,
+          sourceCode,
+          'Move the function declaration outside the block, or use a function expression assigned to a `const`.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const redundantTypeAliasVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-type-alias',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['type_alias_declaration'],
+  visit(node, filePath, sourceCode) {
+    const nameNode = node.childForFieldName('name')
+    const typeNode = node.childForFieldName('value')
+    if (!nameNode || !typeNode) return null
+
+    // The value should be a single type reference (not a union, intersection, or complex type)
+    if (typeNode.type === 'type_identifier') {
+      // type Foo = Bar — just a rename with no added meaning
+      if (typeNode.text === nameNode.text) return null // self-referential (should not happen but skip)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant type alias',
+        `Type alias \`${nameNode.text}\` just wraps \`${typeNode.text}\` without adding meaning.`,
+        sourceCode,
+        `Use \`${typeNode.text}\` directly, or rename it to convey semantic meaning.`,
+      )
+    }
+    return null
+  },
+}
+
+export const redundantOptionalVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-optional',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['optional_parameter', 'property_signature', 'public_field_definition'],
+  visit(node, filePath, sourceCode) {
+    // Check for optional property/parameter (has ?) that also includes | undefined in type
+    const isOptional = node.children.some((c) => c.text === '?')
+    if (!isOptional) return null
+
+    // Find the type annotation node — it's a direct child of type 'type_annotation'
+    const typeAnnotation = node.namedChildren.find((c) => c.type === 'type_annotation')
+    if (!typeAnnotation) return null
+
+    // The union_type is a named child inside the type_annotation
+    function hasUndefinedMember(n: SyntaxNode): boolean {
+      // predefined_type: undefined (plain TS)
+      if (n.type === 'predefined_type' && n.text === 'undefined') return true
+      // literal_type: undefined (tree-sitter-typescript represents `undefined` as literal_type in union)
+      if (n.type === 'literal_type' && n.text === 'undefined') return true
+      if (n.type === 'union_type') {
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child && hasUndefinedMember(child)) return true
+        }
+        return false
+      }
+      // Also recurse into type_annotation wrapper
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i)
+        if (child && hasUndefinedMember(child)) return true
+      }
+      return false
+    }
+
+    if (hasUndefinedMember(typeAnnotation)) {
+      const nameNode = node.childForFieldName('name') ?? node.childForFieldName('pattern')
+      const name = nameNode?.text ?? 'property'
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant optional with undefined',
+        `\`${name}?\` already implies \`| undefined\` — the explicit \`| undefined\` is redundant.`,
+        sourceCode,
+        `Remove the explicit \`| undefined\` from the type annotation.`,
+      )
+    }
+    return null
+  },
+}
+
+export const duplicateTypeConstituentVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/duplicate-type-constituent',
+  languages: ['typescript', 'tsx'],
+  nodeTypes: ['union_type', 'intersection_type'],
+  visit(node, filePath, sourceCode) {
+    // Only process the outermost union/intersection
+    if (node.parent?.type === node.type) return null
+
+    // Flatten all constituent types
+    function flatten(n: SyntaxNode): string[] {
+      if (n.type === node.type) {
+        const results: string[] = []
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child) results.push(...flatten(child))
+        }
+        return results
+      }
+      return [n.text.trim()]
+    }
+
+    const members = flatten(node)
+    const seen = new Set<string>()
+    for (const m of members) {
+      if (seen.has(m)) {
+        const typeWord = node.type === 'union_type' ? 'Union' : 'Intersection'
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Duplicate type constituent',
+          `${typeWord} type contains duplicate member \`${m}\`.`,
+          sourceCode,
+          `Remove the duplicate \`${m}\` from the type.`,
+        )
+      }
+      seen.add(m)
+    }
+    return null
+  },
+}
+
+export const equalsInForTerminationVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/equals-in-for-termination',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['for_statement'],
+  visit(node, filePath, sourceCode) {
+    const condition = node.childForFieldName('condition')
+    if (!condition) return null
+
+    function hasEqualityOp(n: SyntaxNode): boolean {
+      const op = n.children.find((c) => c.type === '==' || c.type === '===')
+      return !!op
+    }
+
+    if (hasEqualityOp(condition)) {
+      return makeViolation(
+        this.ruleKey, condition, filePath, 'low',
+        'Equality in for loop termination',
+        'Using `==` or `===` in a `for` loop termination condition may cause an infinite loop if the loop variable skips the exact value.',
+        sourceCode,
+        'Use `<`, `<=`, `>`, or `>=` instead of `==`/`===` for safer loop termination.',
+      )
+    }
+    return null
+  },
+}
+
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   noExplicitAnyVisitor,
@@ -2320,4 +3183,30 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   preferObjectSpreadVisitor,
   preferOptionalChainVisitor,
   preferNullishCoalescingVisitor,
+  // Batch 3
+  preferRestParamsVisitor,
+  preferSpreadVisitor,
+  parameterReassignmentVisitor,
+  labelsUsageVisitor,
+  extendNativeVisitor,
+  arrayConstructorVisitor,
+  functionInLoopVisitor,
+  multiAssignVisitor,
+  bitwiseInBooleanVisitor,
+  forInWithoutFilterVisitor,
+  withStatementVisitor,
+  defaultCaseLastVisitor,
+  elseifWithoutElseVisitor,
+  accessorPairsVisitor,
+  noReturnAssignVisitor,
+  noSequencesVisitor,
+  noCallerVisitor,
+  noIteratorVisitor,
+  requireYieldVisitor,
+  classPrototypeAssignmentVisitor,
+  functionInBlockVisitor,
+  redundantTypeAliasVisitor,
+  redundantOptionalVisitor,
+  duplicateTypeConstituentVisitor,
+  equalsInForTerminationVisitor,
 ]
