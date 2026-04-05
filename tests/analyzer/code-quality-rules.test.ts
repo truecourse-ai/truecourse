@@ -6844,3 +6844,385 @@ describe('code-quality/deterministic/fastapi-testclient-content (Python)', () =>
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// mutable-private-member
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/mutable-private-member', () => {
+  it('detects private member that is never reassigned', () => {
+    const violations = check(`
+class Service {
+  private name: string;
+  constructor(n: string) {
+    this.name = n;
+  }
+  getName() { return this.name; }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/mutable-private-member');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag private member that is reassigned', () => {
+    const violations = check(`
+class Counter {
+  private count: number = 0;
+  increment() { this.count++; }
+  decrement() { this.count--; }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/mutable-private-member');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inconsistent-function-call
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/inconsistent-function-call', () => {
+  it('detects function called both with and without new', () => {
+    const violations = check(`
+const a = new Foo(1);
+const b = Foo(2);
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/inconsistent-function-call');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag function always called with new', () => {
+    const violations = check(`
+const a = new Foo(1);
+const b = new Foo(2);
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/inconsistent-function-call');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag function always called without new', () => {
+    const violations = check(`
+const a = foo(1);
+const b = foo(2);
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/inconsistent-function-call');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// test-modifying-global-state
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/test-modifying-global-state', () => {
+  it('detects test assigning to module-level variable', () => {
+    const violations = check(`
+let config = { debug: false };
+
+it('sets debug mode', () => {
+  config = { debug: true };
+  expect(runSomething()).toBe(true);
+});
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/test-modifying-global-state');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag test that only reads module-level variable', () => {
+    const violations = check(`
+const config = { debug: false };
+
+it('reads config', () => {
+  expect(config.debug).toBe(false);
+});
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/test-modifying-global-state');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redundant-overload
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redundant-overload', () => {
+  it('detects two overloads differing only by one optional param', () => {
+    const violations = check(`
+function greet(name: string): void;
+function greet(name: string, greeting: string): void;
+function greet(name: string, greeting?: string): void {
+  console.log(greeting ?? 'Hello', name);
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-overload');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag overloads with different parameter types', () => {
+    const violations = check(`
+function parse(input: string): number;
+function parse(input: number): string;
+function parse(input: string | number): string | number {
+  return typeof input === 'string' ? parseInt(input) : String(input);
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-overload');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// type-guard-preference
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/type-guard-preference', () => {
+  it('detects boolean function using instanceof without type predicate', () => {
+    const violations = check(`
+function isError(value: unknown): boolean {
+  return value instanceof Error;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-guard-preference');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag function that already uses type predicate', () => {
+    const violations = check(`
+function isError(value: unknown): value is Error {
+  return value instanceof Error;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-guard-preference');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag non-boolean function with instanceof', () => {
+    const violations = check(`
+function processError(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  return String(value);
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-guard-preference');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// variable-shadowing
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/variable-shadowing', () => {
+  it('detects a variable that shadows an outer scope variable', () => {
+    const violations = check(`
+const value = 42;
+function foo() {
+  const value = 'hello';
+  return value;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/variable-shadowing');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag variables with unique names', () => {
+    const violations = check(`
+const outer = 42;
+function foo() {
+  const inner = 'hello';
+  return inner;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/variable-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag catch parameters (common pattern)', () => {
+    const violations = check(`
+function outer() {
+  try {
+    doSomething();
+  } catch (error) {
+    console.error(error);
+  }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/variable-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// implicit-global
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/implicit-global', () => {
+  it('detects assignment to undeclared variable (JavaScript)', () => {
+    const violations = check(`myGlobal = 42;`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/implicit-global');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag properly declared variable', () => {
+    const violations = check(`
+let myVar = 42;
+myVar = 100;
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/implicit-global');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// block-scoped-var
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/block-scoped-var', () => {
+  it('detects var used outside its declaring block', () => {
+    const violations = check(`
+function foo() {
+  if (true) {
+    var x = 1;
+  }
+  console.log(x);
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/block-scoped-var');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag var declared at function scope', () => {
+    const violations = check(`
+function foo() {
+  var x = 1;
+  return x;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/block-scoped-var');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unused-private-method
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unused-private-method', () => {
+  it('detects a private method never called', () => {
+    const violations = check(`
+class MyService {
+  private doSetup() { return true; }
+  public run() { return 'running'; }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-private-method');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag private method that is called', () => {
+    const violations = check(`
+class MyService {
+  private doSetup() { return true; }
+  public run() { this.doSetup(); return 'running'; }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-private-method');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unread-private-attribute
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unread-private-attribute', () => {
+  it('detects private attribute written but never read', () => {
+    const violations = check(`
+class Sink {
+  private buffer: string = '';
+  write(data: string) { this.buffer = data; }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unread-private-attribute');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag private attribute that is read', () => {
+    const violations = check(`
+class Tracker {
+  private count: number = 0;
+  increment() { this.count++; }
+  getCount() { return this.count; }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unread-private-attribute');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unused-scope-definition
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/unused-scope-definition', () => {
+  it('detects local variable defined but never used', () => {
+    const violations = check(`
+function process() {
+  const helper = (x: number) => x * 2;
+  return 42;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-scope-definition');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag local variable that is used', () => {
+    const violations = check(`
+function process() {
+  const helper = (x: number) => x * 2;
+  return helper(21);
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-scope-definition');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag underscore-prefixed variables', () => {
+    const violations = check(`
+function process() {
+  const _unused = 42;
+  return 0;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-scope-definition');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deprecated-api-usage
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/deprecated-api-usage', () => {
+  it('detects usage of a @deprecated function', () => {
+    const violations = check(`
+/** @deprecated Use newFn instead */
+function oldFn() { return 1; }
+
+const result = oldFn();
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/deprecated-api-usage');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag usage of non-deprecated functions', () => {
+    const violations = check(`
+/** Use this function for all processing */
+function newFn() { return 1; }
+
+const result = newFn();
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/deprecated-api-usage');
+    expect(matches).toHaveLength(0);
+  });
+});

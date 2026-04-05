@@ -1,12 +1,15 @@
 import type { SyntaxNode } from 'tree-sitter'
 import type { Tree } from 'tree-sitter'
 import type { CodeViolation, SupportedLanguage } from '@truecourse/shared'
+import { buildDataFlowContext } from '../data-flow/index.js'
+import type { DataFlowContext } from '../data-flow/index.js'
 
 export interface CodeRuleVisitor {
   ruleKey: string
   nodeTypes: string[]
   languages?: SupportedLanguage[]
-  visit(node: SyntaxNode, filePath: string, sourceCode: string): CodeViolation | null
+  needsDataFlow?: boolean
+  visit(node: SyntaxNode, filePath: string, sourceCode: string, dataFlow?: DataFlowContext): CodeViolation | null
 }
 
 export function makeViolation(
@@ -60,6 +63,12 @@ export function walkAstWithVisitors(
   })
   if (activeVisitors.length === 0) return []
 
+  // Build data flow context if any active visitor needs it
+  let dataFlow: DataFlowContext | undefined
+  if (language && activeVisitors.some((v) => v.needsDataFlow)) {
+    dataFlow = buildDataFlowContext(tree.rootNode, language)
+  }
+
   // Build nodeType → visitors lookup
   const visitorsByNodeType = new Map<string, typeof activeVisitors>()
   for (const visitor of activeVisitors) {
@@ -79,7 +88,7 @@ export function walkAstWithVisitors(
     const visitors = visitorsByNodeType.get(node.type)
     if (visitors) {
       for (const visitor of visitors) {
-        const violation = visitor.visit(node, filePath, sourceCode)
+        const violation = visitor.visit(node, filePath, sourceCode, visitor.needsDataFlow ? dataFlow : undefined)
         if (violation) {
           violations.push(violation)
         }

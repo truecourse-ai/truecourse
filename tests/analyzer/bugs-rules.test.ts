@@ -8306,3 +8306,168 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"])
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// invariant-return
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/invariant-return', () => {
+  it('detects function that always returns the same literal', () => {
+    const violations = check(`
+function getStatus(isActive: boolean): string {
+  if (isActive) {
+    return "ok";
+  }
+  return "ok";
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/invariant-return');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag function with different return values', () => {
+    const violations = check(`
+function getStatus(isActive: boolean): string {
+  if (isActive) {
+    return "active";
+  }
+  return "inactive";
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/invariant-return');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag single-return function', () => {
+    const violations = check(`
+function getVersion(): number {
+  return 1;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/invariant-return');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unbound-method
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/unbound-method', () => {
+  it('detects this.method passed as callback', () => {
+    const violations = check(`
+class Foo {
+  handleItem(item: string) { return item; }
+  run() {
+    const arr = ['a'];
+    arr.forEach(this.handleItem);
+  }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unbound-method');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag this.method when called directly', () => {
+    const violations = check(`
+class Foo {
+  handleItem(item: string) { return item; }
+  run() {
+    this.handleItem('x');
+  }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unbound-method');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag this.prop assignment', () => {
+    const violations = check(`
+class Foo {
+  name: string = '';
+  run() {
+    this.name = 'foo';
+  }
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/unbound-method');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// use-before-define
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/use-before-define', () => {
+  it('detects const used before declaration (TDZ)', () => {
+    const violations = check(`
+function foo() {
+  console.log(x);
+  const x = 42;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-before-define');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag variable declared before use', () => {
+    const violations = check(`
+function foo() {
+  const x = 42;
+  console.log(x);
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-before-define');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag var (hoisted)', () => {
+    const violations = check(`
+function foo() {
+  console.log(x);
+  var x = 42;
+}
+`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-before-define');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// no-undef
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/no-undef', () => {
+  it('detects undeclared variable reference in JavaScript', () => {
+    const violations = check(`
+function greet() {
+  return undeclaredVar.toString();
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag declared variables', () => {
+    const violations = check(`
+const name = 'Alice';
+function greet() {
+  return name.toString();
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag known globals', () => {
+    const violations = check(`
+function run() {
+  setTimeout(() => {}, 100);
+  console.log('done');
+}
+`, 'javascript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/no-undef');
+    expect(matches).toHaveLength(0);
+  });
+});

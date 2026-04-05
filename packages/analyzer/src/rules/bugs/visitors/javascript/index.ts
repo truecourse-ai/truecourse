@@ -136,6 +136,10 @@ import { missingAwaitVisitor } from './missing-await.js'
 import { genericErrorMessageVisitor } from './generic-error-message.js'
 import { useeffectMissingDepsVisitor } from './useeffect-missing-deps.js'
 import { promiseRejectNonErrorVisitor } from './promise-reject-non-error.js'
+import { invariantReturnVisitor } from './invariant-return.js'
+import { unboundMethodVisitor } from './unbound-method.js'
+import { useBeforeDefineVisitor } from './use-before-define.js'
+import { noUndefVisitor } from './no-undef.js'
 
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
@@ -274,4 +278,9 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   genericErrorMessageVisitor,
   useeffectMissingDepsVisitor,
   promiseRejectNonErrorVisitor,
+  invariantReturnVisitor,
+  unboundMethodVisitor,
+  // Data-flow rules (Tier 1)
+  useBeforeDefineVisitor,
+  noUndefVisitor,
 ]

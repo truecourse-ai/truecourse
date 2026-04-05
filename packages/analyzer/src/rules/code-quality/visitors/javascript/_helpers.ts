@@ -3,6 +3,9 @@
  */
 
 import type { SyntaxNode } from 'tree-sitter'
+import type { SupportedLanguage } from '@truecourse/shared'
+
+export const JS_LANGUAGES: SupportedLanguage[] = ['typescript', 'tsx', 'javascript']
 
 export type { SyntaxNode }
 

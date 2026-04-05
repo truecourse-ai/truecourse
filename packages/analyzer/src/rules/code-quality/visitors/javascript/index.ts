@@ -210,6 +210,19 @@ import { jsDebuggerStatementVisitor } from './debugger-statement.js'
 import { jsAlertUsageVisitor } from './alert-usage.js'
 import { jsEmptyFunctionVisitor } from './empty-function.js'
 import { jsPrimitiveWrapperVisitor } from './primitive-wrapper.js'
+import { mutablePrivateMemberVisitor } from './mutable-private-member.js'
+import { inconsistentFunctionCallVisitor } from './inconsistent-function-call.js'
+import { testModifyingGlobalStateVisitor } from './test-modifying-global-state.js'
+import { redundantOverloadVisitor } from './redundant-overload.js'
+import { typeGuardPreferenceVisitor } from './type-guard-preference.js'
+import { variableShadowingVisitor } from './variable-shadowing.js'
+import { implicitGlobalVisitor } from './implicit-global.js'
+import { blockScopedVarVisitor } from './block-scoped-var.js'
+import { unusedPrivateMethodVisitor } from './unused-private-method.js'
+import { unusedPrivateNestedClassVisitor } from './unused-private-nested-class.js'
+import { unreadPrivateAttributeVisitor } from './unread-private-attribute.js'
+import { unusedScopeDefinitionVisitor } from './unused-scope-definition.js'
+import { deprecatedApiUsageVisitor } from './deprecated-api-usage.js'
 
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
@@ -426,4 +439,18 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   jsAlertUsageVisitor,
   jsEmptyFunctionVisitor,
   jsPrimitiveWrapperVisitor,
+  mutablePrivateMemberVisitor,
+  inconsistentFunctionCallVisitor,
+  testModifyingGlobalStateVisitor,
+  redundantOverloadVisitor,
+  typeGuardPreferenceVisitor,
+  // Data-flow rules (Tier 1 + Tier 2)
+  variableShadowingVisitor,
+  implicitGlobalVisitor,
+  blockScopedVarVisitor,
+  unusedPrivateMethodVisitor,
+  unusedPrivateNestedClassVisitor,
+  unreadPrivateAttributeVisitor,
+  unusedScopeDefinitionVisitor,
+  deprecatedApiUsageVisitor,
 ]
