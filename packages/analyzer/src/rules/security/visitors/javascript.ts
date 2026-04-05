@@ -3625,6 +3625,583 @@ export const awsIamAllResourcesVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// aws-iam-privilege-escalation (JS/TS CDK)
+// Detects IAM policies allowing iam:* or sts:AssumeRole on resource "*"
+// ---------------------------------------------------------------------------
+
+export const awsIamPrivilegeEscalationVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-privilege-escalation',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'PolicyStatement' && ctorName !== 'ManagedPolicy') return null
+
+    const nodeText = node.text
+
+    // Detect iam:* action
+    if (/actions\s*:\s*\[[^\]]*['"]iam:\*['"][^\]]*\]/.test(nodeText) ||
+        /actions\s*:\s*\[[^\]]*['"]sts:AssumeRole['"][^\]]*\]/.test(nodeText)) {
+      // Check if resources is also broad (*)
+      const hasBroadResources = /resources\s*:\s*\[[^\]]*['"][*]['"][^\]]*\]/.test(nodeText)
+      if (hasBroadResources || /actions\s*:\s*\[[^\]]*['"]iam:\*['"][^\]]*\]/.test(nodeText)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'IAM privilege escalation',
+          `new ${ctorName}() grants IAM privilege escalation actions (iam:* or sts:AssumeRole) with broad scope.`,
+          sourceCode,
+          'Restrict IAM actions to the minimum required. Never grant iam:* in production policies.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-iam-public-access (JS/TS CDK)
+// Detects PolicyStatement with principal: { AWS: '*' } or AnyPrincipal
+// ---------------------------------------------------------------------------
+
+export const awsIamPublicAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-iam-public-access',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression', 'call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fnOrCtor = node.childForFieldName('constructor') ?? node.childForFieldName('function')
+    if (!fnOrCtor) return null
+
+    let name = ''
+    if (fnOrCtor.type === 'identifier') {
+      name = fnOrCtor.text
+    } else if (fnOrCtor.type === 'member_expression') {
+      const prop = fnOrCtor.childForFieldName('property')
+      if (prop) name = prop.text
+    }
+
+    // new PolicyStatement({ principal: { AWS: '*' } }) — JSON-style principal
+    if (name === 'PolicyStatement') {
+      const nodeText = node.text
+      // Detect inline JSON-style principal with wildcard: principal: { AWS: '*' }
+      if (/principal\s*:\s*\{\s*['"]?AWS['"]?\s*:\s*['"][*]['"]/.test(nodeText)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'IAM public access',
+          `new ${name}() grants access to all principals (*). This allows any AWS user to invoke this policy.`,
+          sourceCode,
+          'Restrict Principal to specific IAM roles, users, or accounts instead of using wildcard.',
+        )
+      }
+    }
+
+    // new AnyPrincipal() — standalone usage
+    if (name === 'AnyPrincipal' && node.type === 'new_expression') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'IAM public access',
+        'new AnyPrincipal() grants access to every AWS user and account.',
+        sourceCode,
+        'Use a specific principal (AccountPrincipal, ArnPrincipal, etc.) instead of AnyPrincipal.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-opensearch (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedOpenSearchVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-opensearch',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Domain' && ctorName !== 'CfnDomain') return null
+
+    // Only flag if it looks like an OpenSearch/Elasticsearch domain
+    const nodeText = node.text
+    if (!/opensearch|elasticsearch|OpenSearch|Elasticsearch/i.test(nodeText) &&
+        !/version.*OpenSearch|version.*Elasticsearch/i.test(nodeText)) {
+      // Check if the containing variable/call chain hints at OpenSearch
+      let parent = node.parent
+      let depth = 0
+      let foundHint = false
+      while (parent && depth < 5) {
+        if (/opensearch|elasticsearch/i.test(parent.text)) {
+          foundHint = true
+          break
+        }
+        parent = parent.parent
+        depth++
+      }
+      if (!foundHint) return null
+    }
+
+    // Flag if encryptionAtRest is explicitly false or absent
+    if (/encryptionAtRest\s*:\s*\{[^}]*enabled\s*:\s*false/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted OpenSearch domain',
+        `new ${ctorName}() has encryption at rest disabled. Data at rest is unprotected.`,
+        sourceCode,
+        'Set encryptionAtRest: { enabled: true } on the OpenSearch Domain construct.',
+      )
+    }
+
+    // If no encryptionAtRest block is specified, encryption defaults to disabled
+    if (!/encryptionAtRest/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted OpenSearch domain',
+        `new ${ctorName}() does not configure encryptionAtRest. Encryption at rest is disabled by default.`,
+        sourceCode,
+        'Add encryptionAtRest: { enabled: true } to the OpenSearch Domain construct.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-rds (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedRdsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-rds',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'DatabaseInstance' && ctorName !== 'CfnDBInstance' &&
+        ctorName !== 'DatabaseCluster' && ctorName !== 'CfnDBCluster') return null
+
+    const nodeText = node.text
+    if (/storageEncrypted\s*:\s*false/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted RDS database',
+        `new ${ctorName}() has storage encryption disabled. Data at rest is unprotected.`,
+        sourceCode,
+        'Set storageEncrypted: true on the RDS DatabaseInstance construct.',
+      )
+    }
+
+    if (!/storageEncrypted/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted RDS database',
+        `new ${ctorName}() does not set storageEncrypted. RDS storage encryption is disabled by default.`,
+        sourceCode,
+        'Add storageEncrypted: true to the RDS DatabaseInstance construct.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unrestricted-admin-ip (JS/TS CDK)
+// Detects SecurityGroup with SSH (22) or RDP (3389) ingress from 0.0.0.0/0
+// ---------------------------------------------------------------------------
+
+export const awsUnrestrictedAdminIpVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unrestricted-admin-ip',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (methodName !== 'addIngressRule') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args || args.namedChildren.length < 2) return null
+
+    const nodeText = node.text
+
+    // Check for 0.0.0.0/0 or ::/0 (AnyIpv4/AnyIpv6)
+    const hasOpenIngress = /AnyIpv4|AnyIpv6|Peer\.anyIpv4|Peer\.anyIpv6|0\.0\.0\.0\/0|::\/0/.test(nodeText)
+    if (!hasOpenIngress) return null
+
+    // Check for SSH (port 22) or RDP (port 3389)
+    const hasAdminPort = /Port\.tcp\(22\)|Port\.tcp\(3389\)|allTraffic|tcp\(22\)|tcp\(3389\)/.test(nodeText)
+    if (!hasAdminPort) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Unrestricted admin IP access',
+      'Security group addIngressRule() allows SSH/RDP (port 22/3389) from 0.0.0.0/0. This exposes admin ports to the internet.',
+      sourceCode,
+      'Restrict SSH/RDP access to specific known IP ranges instead of 0.0.0.0/0.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-s3-bucket-access (JS/TS CDK)
+// Detects S3 Bucket with grantPublicAccess or objectOwnership allowing all users
+// ---------------------------------------------------------------------------
+
+export const awsS3BucketAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-s3-bucket-access',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'grantPublicAccess') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Overly permissive S3 bucket',
+      `${objectName ? objectName + '.' : ''}grantPublicAccess() grants read access to all internet users.`,
+      sourceCode,
+      'Remove grantPublicAccess(). Use presigned URLs or CloudFront with OAI instead.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-s3-insecure-http (JS/TS CDK)
+// Detects S3 Bucket without enforceSSL: true
+// ---------------------------------------------------------------------------
+
+export const awsS3InsecureHttpVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-s3-insecure-http',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Bucket') return null
+
+    const nodeText = node.text
+
+    // Only apply if this looks like an S3 Bucket (not some other Bucket construct)
+    if (!/s3\.|S3\.|aws-s3|aws_s3/i.test(nodeText) && !/versioned|removalPolicy|encryption|blockPublicAccess|enforceSSL/i.test(nodeText)) {
+      return null
+    }
+
+    if (/enforceSSL\s*:\s*false/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'S3 bucket insecure HTTP',
+        `new Bucket() has enforceSSL: false. HTTP requests to the bucket are permitted.`,
+        sourceCode,
+        'Set enforceSSL: true to deny HTTP requests and require HTTPS.',
+      )
+    }
+
+    if (!/enforceSSL/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'S3 bucket insecure HTTP',
+        `new Bucket() does not set enforceSSL: true. HTTP access to the bucket may be allowed.`,
+        sourceCode,
+        'Add enforceSSL: true to the S3 Bucket construct to require HTTPS.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-s3-public-access (JS/TS CDK)
+// Detects S3 Bucket without blockPublicAccess: BlockPublicAccess.BLOCK_ALL
+// ---------------------------------------------------------------------------
+
+export const awsS3PublicAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-s3-public-access',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Bucket') return null
+
+    const nodeText = node.text
+
+    // Only apply to S3 buckets that have some AWS CDK S3 characteristics
+    if (!/versioned|removalPolicy|encryption|blockPublicAccess|enforceSSL|accessControl/i.test(nodeText) &&
+        !/s3\.|S3\.|aws-s3/i.test(nodeText)) {
+      return null
+    }
+
+    // Flag if accessControl is set to a public value
+    if (/accessControl\s*:\s*BucketAccessControl\.PUBLIC_READ|accessControl\s*:\s*BucketAccessControl\.PUBLIC_READ_WRITE|accessControl\s*:\s*BucketAccessControl\.AUTHENTICATED_READ/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'S3 bucket public access',
+        'S3 Bucket configured with a public accessControl ACL. The bucket contents may be publicly readable.',
+        sourceCode,
+        'Remove the public accessControl setting and use blockPublicAccess: BlockPublicAccess.BLOCK_ALL.',
+      )
+    }
+
+    // Flag if blockPublicAccess is absent
+    if (!/blockPublicAccess/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'S3 bucket public access',
+        `new Bucket() does not set blockPublicAccess. Public ACLs and policies may be applied to the bucket.`,
+        sourceCode,
+        'Add blockPublicAccess: BlockPublicAccess.BLOCK_ALL to the S3 Bucket construct.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-s3-no-versioning (JS/TS CDK)
+// Detects S3 Bucket with versioned: false or without versioned
+// ---------------------------------------------------------------------------
+
+export const awsS3NoVersioningVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-s3-no-versioning',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Bucket') return null
+
+    const nodeText = node.text
+
+    // Only check if this looks like an S3 CDK Bucket
+    if (!/versioned|removalPolicy|encryption|blockPublicAccess|enforceSSL/i.test(nodeText) &&
+        !/s3\.|S3\.|aws-s3/i.test(nodeText)) {
+      return null
+    }
+
+    if (/versioned\s*:\s*false/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'S3 bucket without versioning',
+        'S3 Bucket created with versioned: false. Object versions cannot be recovered after deletion or overwrite.',
+        sourceCode,
+        'Set versioned: true to enable versioning and protect against accidental deletion.',
+      )
+    }
+
+    if (!/versioned/.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'S3 bucket without versioning',
+        'S3 Bucket created without enabling versioning. Objects cannot be recovered after deletion.',
+        sourceCode,
+        'Add versioned: true to the S3 Bucket construct.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-sagemaker (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedSageMakerVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-sagemaker',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'CfnNotebookInstance' && ctorName !== 'NotebookInstance') return null
+
+    const nodeText = node.text
+    if (!/kmsKeyId|kmsKey/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SageMaker notebook',
+        `new ${ctorName}() does not specify a KMS key. Notebook storage is unencrypted.`,
+        sourceCode,
+        'Add kmsKeyId (for CfnNotebookInstance) or kmsKey to encrypt the SageMaker notebook instance.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-sns (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedSnsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-sns',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Topic' && ctorName !== 'CfnTopic') return null
+
+    const nodeText = node.text
+    if (!/masterKey|kmsMasterKeyId|kmsKey/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SNS topic',
+        `new ${ctorName}() does not configure a KMS master key. SNS messages are unencrypted at rest.`,
+        sourceCode,
+        'Add masterKey to the SNS Topic construct to enable server-side encryption.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// aws-unencrypted-sqs (JS/TS CDK)
+// ---------------------------------------------------------------------------
+
+export const awsUnencryptedSqsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/aws-unencrypted-sqs',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const ctor = node.childForFieldName('constructor')
+    if (!ctor) return null
+
+    let ctorName = ''
+    if (ctor.type === 'identifier') {
+      ctorName = ctor.text
+    } else if (ctor.type === 'member_expression') {
+      const prop = ctor.childForFieldName('property')
+      if (prop) ctorName = prop.text
+    }
+
+    if (ctorName !== 'Queue' && ctorName !== 'CfnQueue') return null
+
+    const nodeText = node.text
+    if (!/encryption\s*:|encryptionMasterKey|kmsKey|kmsMasterKeyId/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SQS queue',
+        `new ${ctorName}() does not configure encryption. SQS messages are unencrypted at rest.`,
+        sourceCode,
+        'Add encryption: QueueEncryption.KMS_MANAGED or a custom KMS key to the SQS Queue construct.',
+      )
+    }
+
+    // Also flag if encryption is explicitly set to UNENCRYPTED
+    if (/encryption\s*:\s*QueueEncryption\.UNENCRYPTED/i.test(nodeText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unencrypted SQS queue',
+        `new ${ctorName}() has encryption: QueueEncryption.UNENCRYPTED. SQS messages are not encrypted.`,
+        sourceCode,
+        'Use QueueEncryption.KMS_MANAGED or provide a custom KMS key.',
+      )
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   sqlInjectionVisitor,
   evalUsageVisitor,
@@ -3704,4 +4281,16 @@ export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   awsUnencryptedEfsVisitor,
   awsIamAllPrivilegesVisitor,
   awsIamAllResourcesVisitor,
+  awsIamPrivilegeEscalationVisitor,
+  awsIamPublicAccessVisitor,
+  awsUnencryptedOpenSearchVisitor,
+  awsUnencryptedRdsVisitor,
+  awsUnrestrictedAdminIpVisitor,
+  awsS3BucketAccessVisitor,
+  awsS3InsecureHttpVisitor,
+  awsS3PublicAccessVisitor,
+  awsS3NoVersioningVisitor,
+  awsUnencryptedSageMakerVisitor,
+  awsUnencryptedSnsVisitor,
+  awsUnencryptedSqsVisitor,
 ]

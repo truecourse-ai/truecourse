@@ -231,18 +231,18 @@ These rules apply to AWS CDK / CloudFormation / Terraform code written in JS/TS.
 | security/deterministic/aws-unencrypted-efs | Unencrypted EFS | Using unencrypted EFS file systems | high | sonarjs | S6332 (aws-efs-unencrypted) | implemented | js/ts |
 | security/deterministic/aws-iam-all-privileges | IAM policy grants all privileges | Policies granting all privileges are security-sensitive | critical | sonarjs | S6302 (aws-iam-all-privileges) | implemented | js/ts |
 | security/deterministic/aws-iam-all-resources | IAM policy grants all resources | Policies granting access to all resources of an account | critical | sonarjs | S6304 (aws-iam-all-resources-accessible) | implemented | js/ts |
-| security/deterministic/aws-iam-privilege-escalation | IAM privilege escalation | AWS IAM policies should limit the scope of permissions | high | sonarjs | S6317 (aws-iam-privilege-escalation) | new | js/ts |
-| security/deterministic/aws-iam-public-access | IAM public access | Policies authorizing public access to resources | high | sonarjs | S6270 (aws-iam-public-access) | new | js/ts |
-| security/deterministic/aws-unencrypted-opensearch | Unencrypted OpenSearch | Using unencrypted OpenSearch domains | high | sonarjs | S6308 (aws-opensearchservice-domain) | new | js/ts |
-| security/deterministic/aws-unencrypted-rds | Unencrypted RDS database | Using unencrypted RDS DB resources | high | sonarjs | S6303 (aws-rds-unencrypted-databases) | new | js/ts |
-| security/deterministic/aws-unrestricted-admin-ip | Unrestricted admin IP access | Administration services access should be restricted to specific IPs | high | sonarjs | S6321 (aws-restricted-ip-admin-access) | new | js/ts |
-| security/deterministic/aws-s3-bucket-access | Overly permissive S3 bucket | Granting access to S3 buckets to all or authenticated users | high | sonarjs | S6265 (aws-s3-bucket-granted-access) | new | js/ts |
-| security/deterministic/aws-s3-insecure-http | S3 bucket insecure HTTP | Authorizing HTTP communications with S3 buckets | high | sonarjs | S6249 (aws-s3-bucket-insecure-http) | new | js/ts |
-| security/deterministic/aws-s3-public-access | S3 bucket public access | Allowing public ACLs or policies on an S3 bucket | high | sonarjs | S6281 (aws-s3-bucket-public-access) | new | js/ts |
-| security/deterministic/aws-s3-no-versioning | S3 bucket without versioning | Disabling versioning of S3 buckets | medium | sonarjs | S6252 (aws-s3-bucket-versioning) | new | js/ts |
-| security/deterministic/aws-unencrypted-sagemaker | Unencrypted SageMaker notebook | Using unencrypted SageMaker notebook instances | high | sonarjs | S6319 (aws-sagemaker-unencrypted-notebook) | new | js/ts |
-| security/deterministic/aws-unencrypted-sns | Unencrypted SNS topic | Using unencrypted SNS topics | high | sonarjs | S6327 (aws-sns-unencrypted-topics) | new | js/ts |
-| security/deterministic/aws-unencrypted-sqs | Unencrypted SQS queue | Using unencrypted SQS queues | high | sonarjs | S6330 (aws-sqs-unencrypted-queue) | new | js/ts |
+| security/deterministic/aws-iam-privilege-escalation | IAM privilege escalation | AWS IAM policies should limit the scope of permissions | high | sonarjs | S6317 (aws-iam-privilege-escalation) | implemented | js/ts |
+| security/deterministic/aws-iam-public-access | IAM public access | Policies authorizing public access to resources | high | sonarjs | S6270 (aws-iam-public-access) | implemented | js/ts |
+| security/deterministic/aws-unencrypted-opensearch | Unencrypted OpenSearch | Using unencrypted OpenSearch domains | high | sonarjs | S6308 (aws-opensearchservice-domain) | implemented | js/ts |
+| security/deterministic/aws-unencrypted-rds | Unencrypted RDS database | Using unencrypted RDS DB resources | high | sonarjs | S6303 (aws-rds-unencrypted-databases) | implemented | js/ts |
+| security/deterministic/aws-unrestricted-admin-ip | Unrestricted admin IP access | Administration services access should be restricted to specific IPs | high | sonarjs | S6321 (aws-restricted-ip-admin-access) | implemented | js/ts |
+| security/deterministic/aws-s3-bucket-access | Overly permissive S3 bucket | Granting access to S3 buckets to all or authenticated users | high | sonarjs | S6265 (aws-s3-bucket-granted-access) | implemented | js/ts |
+| security/deterministic/aws-s3-insecure-http | S3 bucket insecure HTTP | Authorizing HTTP communications with S3 buckets | high | sonarjs | S6249 (aws-s3-bucket-insecure-http) | implemented | js/ts |
+| security/deterministic/aws-s3-public-access | S3 bucket public access | Allowing public ACLs or policies on an S3 bucket | high | sonarjs | S6281 (aws-s3-bucket-public-access) | implemented | js/ts |
+| security/deterministic/aws-s3-no-versioning | S3 bucket without versioning | Disabling versioning of S3 buckets | medium | sonarjs | S6252 (aws-s3-bucket-versioning) | implemented | js/ts |
+| security/deterministic/aws-unencrypted-sagemaker | Unencrypted SageMaker notebook | Using unencrypted SageMaker notebook instances | high | sonarjs | S6319 (aws-sagemaker-unencrypted-notebook) | implemented | js/ts |
+| security/deterministic/aws-unencrypted-sns | Unencrypted SNS topic | Using unencrypted SNS topics | high | sonarjs | S6327 (aws-sns-unencrypted-topics) | implemented | js/ts |
+| security/deterministic/aws-unencrypted-sqs | Unencrypted SQS queue | Using unencrypted SQS queues | high | sonarjs | S6330 (aws-sqs-unencrypted-queue) | implemented | js/ts |
 
 ---
 

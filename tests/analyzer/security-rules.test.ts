@@ -2909,3 +2909,433 @@ const stmt = new PolicyStatement({
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// aws-iam-privilege-escalation (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-privilege-escalation', () => {
+  const ruleKey = 'security/deterministic/aws-iam-privilege-escalation';
+
+  it('detects PolicyStatement with iam:* action', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['iam:*'],
+  resources: ['*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects PolicyStatement with sts:AssumeRole on all resources', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['sts:AssumeRole'],
+  resources: ['*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag PolicyStatement with specific scoped actions', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  actions: ['s3:GetObject', 's3:PutObject'],
+  resources: ['arn:aws:s3:::my-bucket/*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-iam-public-access (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-iam-public-access', () => {
+  const ruleKey = 'security/deterministic/aws-iam-public-access';
+
+  it('detects new AnyPrincipal()', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  principals: [new AnyPrincipal()],
+  actions: ['s3:GetObject'],
+  resources: ['*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects PolicyStatement with principal AWS: "*"', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  principal: { AWS: '*' },
+  actions: ['s3:GetObject'],
+  resources: ['arn:aws:s3:::bucket/*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag PolicyStatement with specific principal', () => {
+    const violations = check(`
+const stmt = new PolicyStatement({
+  principals: [new ArnPrincipal('arn:aws:iam::123456789012:role/MyRole')],
+  actions: ['s3:GetObject'],
+  resources: ['arn:aws:s3:::my-bucket/*'],
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-opensearch (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-opensearch', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-opensearch';
+
+  it('detects Domain with encryptionAtRest disabled', () => {
+    const violations = check(`
+import * as opensearch from 'aws-cdk-lib/aws-opensearchservice';
+const domain = new opensearch.Domain(this, 'MyDomain', {
+  version: opensearch.EngineVersion.OPENSEARCH_1_3,
+  encryptionAtRest: { enabled: false },
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects Domain without encryptionAtRest', () => {
+    const violations = check(`
+const domain = new Domain(this, 'Search', {
+  version: EngineVersion.OPENSEARCH_1_3,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Domain with encryptionAtRest enabled', () => {
+    const violations = check(`
+const domain = new Domain(this, 'Search', {
+  version: EngineVersion.OPENSEARCH_1_3,
+  encryptionAtRest: { enabled: true },
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-rds (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-rds', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-rds';
+
+  it('detects DatabaseInstance with storageEncrypted: false', () => {
+    const violations = check(`
+const db = new DatabaseInstance(this, 'DB', {
+  engine: DatabaseInstanceEngine.POSTGRES,
+  storageEncrypted: false,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects DatabaseInstance without storageEncrypted', () => {
+    const violations = check(`
+const db = new DatabaseInstance(this, 'DB', {
+  engine: DatabaseInstanceEngine.MYSQL,
+  instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag DatabaseInstance with storageEncrypted: true', () => {
+    const violations = check(`
+const db = new DatabaseInstance(this, 'DB', {
+  engine: DatabaseInstanceEngine.POSTGRES,
+  storageEncrypted: true,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unrestricted-admin-ip (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unrestricted-admin-ip', () => {
+  const ruleKey = 'security/deterministic/aws-unrestricted-admin-ip';
+
+  it('detects addIngressRule allowing SSH from AnyIpv4', () => {
+    const violations = check(`
+sg.addIngressRule(Peer.anyIpv4(), Port.tcp(22), 'Allow SSH');
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects addIngressRule allowing RDP from 0.0.0.0/0', () => {
+    const violations = check(`
+sg.addIngressRule(Peer.ipv4('0.0.0.0/0'), Port.tcp(3389), 'Allow RDP');
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag addIngressRule with restricted IP range', () => {
+    const violations = check(`
+sg.addIngressRule(Peer.ipv4('10.0.0.0/8'), Port.tcp(22), 'Allow SSH from VPN');
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag addIngressRule with non-admin port from any', () => {
+    const violations = check(`
+sg.addIngressRule(Peer.anyIpv4(), Port.tcp(443), 'Allow HTTPS');
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-s3-bucket-access (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-s3-bucket-access', () => {
+  const ruleKey = 'security/deterministic/aws-s3-bucket-access';
+
+  it('detects bucket.grantPublicAccess()', () => {
+    const violations = check(`
+const bucket = new s3.Bucket(this, 'MyBucket');
+bucket.grantPublicAccess();
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag bucket.grantRead()', () => {
+    const violations = check(`
+const bucket = new s3.Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+bucket.grantRead(new iam.Role(this, 'Role', { assumedBy: new ServicePrincipal('lambda.amazonaws.com') }));
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-s3-insecure-http (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-s3-insecure-http', () => {
+  const ruleKey = 'security/deterministic/aws-s3-insecure-http';
+
+  it('detects Bucket with enforceSSL: false', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: false,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects Bucket without enforceSSL', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Bucket with enforceSSL: true', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-s3-public-access (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-s3-public-access', () => {
+  const ruleKey = 'security/deterministic/aws-s3-public-access';
+
+  it('detects Bucket without blockPublicAccess', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: true,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects Bucket with public accessControl ACL', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: true,
+  accessControl: BucketAccessControl.PUBLIC_READ,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Bucket with BLOCK_ALL', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-s3-no-versioning (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-s3-no-versioning', () => {
+  const ruleKey = 'security/deterministic/aws-s3-no-versioning';
+
+  it('detects Bucket with versioned: false', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: false,
+  enforceSSL: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects Bucket without versioned property', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  enforceSSL: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Bucket with versioned: true', () => {
+    const violations = check(`
+const bucket = new Bucket(this, 'MyBucket', {
+  versioned: true,
+  enforceSSL: true,
+  blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-sagemaker (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-sagemaker', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-sagemaker';
+
+  it('detects CfnNotebookInstance without kmsKeyId', () => {
+    const violations = check(`
+const notebook = new CfnNotebookInstance(this, 'Notebook', {
+  instanceType: 'ml.t2.medium',
+  roleArn: role.roleArn,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag CfnNotebookInstance with kmsKeyId', () => {
+    const violations = check(`
+const notebook = new CfnNotebookInstance(this, 'Notebook', {
+  instanceType: 'ml.t2.medium',
+  roleArn: role.roleArn,
+  kmsKeyId: myKey.keyId,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-sns (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-sns', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-sns';
+
+  it('detects Topic without masterKey', () => {
+    const violations = check(`
+const topic = new Topic(this, 'MyTopic', {
+  displayName: 'My SNS Topic',
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Topic with masterKey', () => {
+    const violations = check(`
+const topic = new Topic(this, 'MyTopic', {
+  displayName: 'My SNS Topic',
+  masterKey: myKmsKey,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// aws-unencrypted-sqs (JS/TS CDK)
+// ===========================================================================
+
+describe('security/deterministic/aws-unencrypted-sqs', () => {
+  const ruleKey = 'security/deterministic/aws-unencrypted-sqs';
+
+  it('detects Queue without encryption', () => {
+    const violations = check(`
+const queue = new Queue(this, 'MyQueue', {
+  visibilityTimeout: Duration.seconds(300),
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects Queue with QueueEncryption.UNENCRYPTED', () => {
+    const violations = check(`
+const queue = new Queue(this, 'MyQueue', {
+  encryption: QueueEncryption.UNENCRYPTED,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag Queue with KMS encryption', () => {
+    const violations = check(`
+const queue = new Queue(this, 'MyQueue', {
+  encryption: QueueEncryption.KMS_MANAGED,
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
