@@ -1,8 +1,8 @@
 import type { Tree } from 'tree-sitter'
 import type { AnalysisRule, CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { walkAstWithVisitors } from '../types.js'
-import { BUGS_JS_VISITORS } from './visitors/javascript.js'
-import { BUGS_PYTHON_VISITORS } from './visitors/python.js'
+import { BUGS_JS_VISITORS } from './visitors/javascript/index.js'
+import { BUGS_PYTHON_VISITORS } from './visitors/python/index.js'
 import type { CodeRuleVisitor } from '../types.js'
 
 const ALL_BUGS_VISITORS: CodeRuleVisitor[] = [

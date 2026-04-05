@@ -3355,3 +3355,371 @@ describe('code-quality/deterministic/regex-unicode-awareness', () => {
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Batch 6 — 25 new rules
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/negated-condition', () => {
+  it('detects negated condition with else', () => {
+    const violations = check(`if (!isReady) { fallback(); } else { proceed(); }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag negated condition without else', () => {
+    const violations = check(`if (!isReady) { return; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag else-if chain', () => {
+    const violations = check(`if (!a) { } else if (b) { }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/negated-condition');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/verbose-object-constructor', () => {
+  it('detects new Object()', () => {
+    const violations = check(`const x = new Object();`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/verbose-object-constructor');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag new MyClass()', () => {
+    const violations = check(`const x = new MyClass();`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/verbose-object-constructor');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag object literal', () => {
+    const violations = check(`const x = {};`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/verbose-object-constructor');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/trivial-ternary', () => {
+  it('detects x ? true : false', () => {
+    const violations = check(`const flag = isActive ? true : false;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/trivial-ternary');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects x ? false : true', () => {
+    const violations = check(`const flag = isActive ? false : true;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/trivial-ternary');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag meaningful ternary', () => {
+    const violations = check(`const val = isActive ? 'yes' : 'no';`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/trivial-ternary');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/legacy-has-own-property', () => {
+  it('detects Object.prototype.hasOwnProperty.call()', () => {
+    const violations = check(`const has = Object.prototype.hasOwnProperty.call(obj, key);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/legacy-has-own-property');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag Object.hasOwn()', () => {
+    const violations = check(`const has = Object.hasOwn(obj, key);`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/legacy-has-own-property');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unused-constructor-result', () => {
+  it('detects new X() as statement', () => {
+    const violations = check(`new SomeClass();`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-constructor-result');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag assigned new expression', () => {
+    const violations = check(`const x = new SomeClass();`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-constructor-result');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/empty-static-block', () => {
+  it('detects empty static block', () => {
+    const violations = check(`class Foo { static { } }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/empty-static-block');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-empty static block', () => {
+    const violations = check(`class Foo { static { this.x = 1; } }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/empty-static-block');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/collapsible-else-if', () => {
+  it('detects else with single if inside', () => {
+    const violations = check(`if (a) { x(); } else { if (b) { y(); } }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/collapsible-else-if');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag proper else-if', () => {
+    const violations = check(`if (a) { x(); } else if (b) { y(); }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/collapsible-else-if');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag else with multiple statements', () => {
+    const violations = check(`if (a) { x(); } else { y(); z(); }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/collapsible-else-if');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/trivial-switch', () => {
+  it('detects switch with 1 case', () => {
+    const violations = check(`switch (x) { case 1: doA(); break; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/trivial-switch');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects switch with 2 cases', () => {
+    const violations = check(`switch (x) { case 1: doA(); break; case 2: doB(); break; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/trivial-switch');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag switch with 3 or more cases', () => {
+    const violations = check(`switch (x) { case 1: a(); break; case 2: b(); break; case 3: c(); break; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/trivial-switch');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/regex-multiple-spaces', () => {
+  it('detects multiple spaces in regex', () => {
+    const violations = check(`const re = /hello  world/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-multiple-spaces');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag single space in regex', () => {
+    const violations = check(`const re = /hello world/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-multiple-spaces');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag regex with quantifier', () => {
+    const violations = check(String.raw`const re = / {3}/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-multiple-spaces');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/regex-empty-after-reluctant', () => {
+  it('detects reluctant quantifier followed by optional', () => {
+    const violations = check(String.raw`const re = /a*?b?/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-empty-after-reluctant');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag normal reluctant quantifier', () => {
+    const violations = check(String.raw`const re = /a*?b/;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/regex-empty-after-reluctant');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unused-function-parameter', () => {
+  it('detects unused parameter', () => {
+    const violations = check(`function foo(a: string, b: number) { return a; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-function-parameter');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toContain('b');
+  });
+
+  it('does not flag used parameters', () => {
+    const violations = check(`function foo(a: string, b: number) { return a + b; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-function-parameter');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag underscore-prefixed parameters', () => {
+    const violations = check(`function foo(_unused: string, b: number) { return b; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-function-parameter');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/hardcoded-url', () => {
+  it('detects hardcoded http URL', () => {
+    const violations = check(`const url = "http://api.mycompany.com/v1/users";`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects hardcoded https URL', () => {
+    const violations = check(`const url = "https://api.mycompany.com/data";`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag localhost URL', () => {
+    const violations = check(`const url = "http://localhost:3000/api";`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/hardcoded-port', () => {
+  it('detects port in listen() call', () => {
+    const violations = check(`app.listen(8080, () => {});`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-port');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-port numbers', () => {
+    const violations = check(`const x = 42 + 5;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-port');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/missing-env-validation', () => {
+  it('detects unguarded process.env.X', () => {
+    const violations = check(`const val = process.env.API_KEY;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/missing-env-validation');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag process.env.X inside if check', () => {
+    const violations = check(`if (process.env.DEBUG) { console.log("debug"); }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/missing-env-validation');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/boolean-parameter-default', () => {
+  it('detects optional boolean without default', () => {
+    const violations = check(`function foo(enabled?: boolean) { return enabled; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-parameter-default');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag optional boolean with default', () => {
+    const violations = check(`function foo(enabled: boolean = false) { return enabled; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-parameter-default');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag required boolean', () => {
+    const violations = check(`function foo(enabled: boolean) { return enabled; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-parameter-default');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/unnecessary-promise-wrap', () => {
+  it('detects new Promise(resolve => resolve(x))', () => {
+    const violations = check(`const p = new Promise(resolve => resolve(42));`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-promise-wrap');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag Promise with reject', () => {
+    const violations = check(`const p = new Promise((resolve, reject) => { try { resolve(x); } catch(e) { reject(e); } });`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-promise-wrap');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag complex executor', () => {
+    const violations = check(`const p = new Promise(resolve => { setTimeout(() => resolve(42), 1000); });`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-promise-wrap');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/explicit-any-in-return', () => {
+  it('detects function with any return type', () => {
+    const violations = check(`function getData(): any { return {}; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/explicit-any-in-return');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag function with specific return type', () => {
+    const violations = check(`function getData(): object { return {}; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/explicit-any-in-return');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag function without return type', () => {
+    const violations = check(`function getData() { return {}; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/explicit-any-in-return');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/magic-number', () => {
+  it('detects magic number in binary expression', () => {
+    const violations = check(`const result = x * 3.14159;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-number');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag whitelisted numbers', () => {
+    const violations = check(`const result = x * 0 + y * 1;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-number');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag constant declarations', () => {
+    const violations = check(`const MAX_RETRIES = 5;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-number');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/async-promise-function', () => {
+  it('detects non-async function returning new Promise', () => {
+    const violations = check(`function fetchData() { return new Promise(resolve => resolve(42)); }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-promise-function');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag async function', () => {
+    const violations = check(`async function fetchData() { return 42; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-promise-function');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag non-Promise return', () => {
+    const violations = check(`function getData() { return { x: 1 }; }`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-promise-function');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+describe('code-quality/deterministic/filename-class-mismatch', () => {
+  function checkWithPath(code: string, filePath: string) {
+    const tree = parseCode(code, 'typescript');
+    return checkCodeRules(tree, filePath, code, enabledRules, 'typescript');
+  }
+
+  it('detects class name mismatch with filename', () => {
+    const violations = checkWithPath(`export default class UserService {}`, '/src/auth-service.ts');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag matching class name', () => {
+    const violations = checkWithPath(`export default class UserService {}`, '/src/UserService.ts');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+});

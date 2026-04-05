@@ -1,0 +1,217 @@
+import type { CodeRuleVisitor } from '../../../types.js'
+
+import { emptyCatchVisitor } from './empty-catch.js'
+import { selfComparisonVisitor } from './self-comparison.js'
+import { selfAssignmentVisitor } from './self-assignment.js'
+import { assignmentInConditionVisitor } from './assignment-in-condition.js'
+import { duplicateCaseVisitor } from './duplicate-case.js'
+import { duplicateKeysVisitor } from './duplicate-keys.js'
+import { allBranchesIdenticalVisitor } from './all-branches-identical.js'
+import { constantConditionVisitor } from './constant-condition.js'
+import { unreachableCodeVisitor } from './unreachable-code.js'
+import { noSelfCompareVisitor } from './no-self-compare.js'
+import { duplicateClassMembersVisitor } from './duplicate-class-members.js'
+import { duplicateElseIfVisitor } from './duplicate-else-if.js'
+import { duplicateBranchesVisitor } from './duplicate-branches.js'
+import { invalidTypeofVisitor } from './invalid-typeof.js'
+import { useIsNanVisitor } from './use-is-nan.js'
+import { compareNegZeroVisitor } from './compare-neg-zero.js'
+import { lossOfPrecisionVisitor } from './loss-of-precision.js'
+import { unsafeNegationVisitor } from './unsafe-negation.js'
+import { unsafeOptionalChainingVisitor } from './unsafe-optional-chaining.js'
+import { unsafeFinallyVisitor } from './unsafe-finally.js'
+import { fallthroughCaseVisitor } from './fallthrough-case.js'
+import { forDirectionVisitor } from './for-direction.js'
+import { noConstructorReturnVisitor } from './no-constructor-return.js'
+import { noSetterReturnVisitor } from './no-setter-return.js'
+import { noPromiseExecutorReturnVisitor } from './no-promise-executor-return.js'
+import { unreachableLoopVisitor } from './unreachable-loop.js'
+import { constantBinaryExpressionVisitor } from './constant-binary-expression.js'
+import { loopCounterAssignmentVisitor } from './loop-counter-assignment.js'
+import { unmodifiedLoopConditionVisitor } from './unmodified-loop-condition.js'
+import { constReassignmentVisitor } from './const-reassignment.js'
+import { classReassignmentVisitor } from './class-reassignment.js'
+import { functionReassignmentVisitor } from './function-reassignment.js'
+import { importReassignmentVisitor } from './import-reassignment.js'
+import { getterMissingReturnVisitor } from './getter-missing-return.js'
+import { missingSuperCallVisitor } from './missing-super-call.js'
+import { thisBeforeSuperVisitor } from './this-before-super.js'
+import { asyncPromiseExecutorVisitor } from './async-promise-executor.js'
+import { emptyCharacterClassVisitor } from './empty-character-class.js'
+import { invalidRegexpVisitor } from './invalid-regexp.js'
+import { controlCharsInRegexVisitor } from './control-chars-in-regex.js'
+import { sparseArrayVisitor } from './sparse-array.js'
+import { prototypePollutionVisitor } from './prototype-pollution.js'
+import { voidZeroArgumentVisitor } from './void-zero-argument.js'
+import { exceptionReassignmentVisitor } from './exception-reassignment.js'
+import { nullDereferenceVisitor } from './null-dereference.js'
+import { symbolDescriptionVisitor } from './symbol-description.js'
+import { arrayCallbackReturnVisitor } from './array-callback-return.js'
+import { noInnerDeclarationsVisitor } from './no-inner-declarations.js'
+import { templateCurlyInStringVisitor } from './template-curly-in-string.js'
+import { awaitInLoopVisitor } from './await-in-loop.js'
+import { elementOverwriteVisitor } from './element-overwrite.js'
+import { unthrownErrorVisitor } from './unthrown-error.js'
+import { nonExistentOperatorVisitor } from './non-existent-operator.js'
+import { inOperatorOnPrimitiveVisitor } from './in-operator-on-primitive.js'
+import { uselessIncrementVisitor } from './useless-increment.js'
+import { ignoredReturnValueVisitor } from './ignored-return-value.js'
+import { collectionSizeMischeckVisitor } from './collection-size-mischeck.js'
+import { argumentsOrderMismatchVisitor } from './arguments-order-mismatch.js'
+import { unexpectedMultilineVisitor } from './unexpected-multiline.js'
+import { emptyCollectionAccessVisitor } from './empty-collection-access.js'
+import { voidReturnValueUsedVisitor } from './void-return-value-used.js'
+import { newOperatorMisuseVisitor } from './new-operator-misuse.js'
+import { uselessBackreferenceVisitor } from './useless-backreference.js'
+import { dissimilarTypeComparisonVisitor } from './dissimilar-type-comparison.js'
+import { indexOfPositiveCheckVisitor } from './index-of-positive-check.js'
+import { arrayDeleteVisitor } from './array-delete.js'
+import { commaInSwitchCaseVisitor } from './comma-in-switch-case.js'
+import { literalCallVisitor } from './literal-call.js'
+import { prototypeBuiltinsCallVisitor } from './prototype-builtins-call.js'
+import { statefulRegexVisitor } from './stateful-regex.js'
+import { incorrectStringConcatVisitor } from './incorrect-string-concat.js'
+import { misleadingArrayReverseVisitor } from './misleading-array-reverse.js'
+import { globalThisUsageVisitor } from './global-this-usage.js'
+import { inconsistentReturnVisitor } from './inconsistent-return.js'
+import { misleadingCharacterClassVisitor } from './misleading-character-class.js'
+import { raceConditionAssignmentVisitor } from './race-condition-assignment.js'
+import { regexGroupReferenceMismatchVisitor } from './regex-group-reference-mismatch.js'
+import { duplicateImportVisitor } from './duplicate-import.js'
+import { constructorReturnVisitor } from './constructor-return.js'
+import { setterReturnVisitor } from './setter-return.js'
+import { promiseExecutorReturnVisitor } from './promise-executor-return.js'
+import { emptyPatternVisitor } from './empty-pattern.js'
+import { noObjCallsVisitor } from './no-obj-calls.js'
+import { asyncConstructorVisitor } from './async-constructor.js'
+import { globalReassignmentVisitor } from './global-reassignment.js'
+import { variableRedeclarationVisitor } from './variable-redeclaration.js'
+import { restrictedNameShadowingVisitor } from './restricted-name-shadowing.js'
+import { caseDeclarationLeakVisitor } from './case-declaration-leak.js'
+import { deleteVariableVisitor } from './delete-variable.js'
+import { octalLiteralVisitor } from './octal-literal.js'
+import { octalEscapeVisitor } from './octal-escape.js'
+import { nonstandardDecimalEscapeVisitor } from './nonstandard-decimal-escape.js'
+import { lostErrorContextVisitor } from './lost-error-context.js'
+import { missingRadixVisitor } from './missing-radix.js'
+import { extraArgumentsIgnoredVisitor } from './extra-arguments-ignored.js'
+import { forInArrayVisitor } from './for-in-array.js'
+import { onlyThrowErrorVisitor } from './only-throw-error.js'
+import { reduceMissingInitialVisitor } from './reduce-missing-initial.js'
+import { arraySortWithoutCompareVisitor } from './array-sort-without-compare.js'
+import { contradictoryOptionalChainVisitor } from './contradictory-optional-chain.js'
+import { duplicateEnumValueVisitor } from './duplicate-enum-value.js'
+import { confusingNonNullAssertionVisitor } from './confusing-non-null-assertion.js'
+import { nullComparisonWithoutTypeCheckVisitor } from './null-comparison-without-type-check.js'
+import { extraNonNullAssertionVisitor } from './extra-non-null-assertion.js'
+import { labelVariableCollisionVisitor } from './label-variable-collision.js'
+import { unassignedVariableVisitor } from './unassigned-variable.js'
+
+export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
+  emptyCatchVisitor,
+  selfComparisonVisitor,
+  selfAssignmentVisitor,
+  assignmentInConditionVisitor,
+  duplicateCaseVisitor,
+  duplicateKeysVisitor,
+  allBranchesIdenticalVisitor,
+  constantConditionVisitor,
+  unreachableCodeVisitor,
+  noSelfCompareVisitor,
+  duplicateClassMembersVisitor,
+  duplicateElseIfVisitor,
+  duplicateBranchesVisitor,
+  invalidTypeofVisitor,
+  useIsNanVisitor,
+  compareNegZeroVisitor,
+  lossOfPrecisionVisitor,
+  unsafeNegationVisitor,
+  unsafeOptionalChainingVisitor,
+  unsafeFinallyVisitor,
+  fallthroughCaseVisitor,
+  forDirectionVisitor,
+  noConstructorReturnVisitor,
+  noSetterReturnVisitor,
+  noPromiseExecutorReturnVisitor,
+  unreachableLoopVisitor,
+  constantBinaryExpressionVisitor,
+  loopCounterAssignmentVisitor,
+  unmodifiedLoopConditionVisitor,
+  constReassignmentVisitor,
+  classReassignmentVisitor,
+  functionReassignmentVisitor,
+  importReassignmentVisitor,
+  getterMissingReturnVisitor,
+  missingSuperCallVisitor,
+  thisBeforeSuperVisitor,
+  asyncPromiseExecutorVisitor,
+  emptyCharacterClassVisitor,
+  invalidRegexpVisitor,
+  controlCharsInRegexVisitor,
+  sparseArrayVisitor,
+  prototypePollutionVisitor,
+  voidZeroArgumentVisitor,
+  exceptionReassignmentVisitor,
+  nullDereferenceVisitor,
+  symbolDescriptionVisitor,
+  arrayCallbackReturnVisitor,
+  noInnerDeclarationsVisitor,
+  templateCurlyInStringVisitor,
+  awaitInLoopVisitor,
+  elementOverwriteVisitor,
+  unthrownErrorVisitor,
+  nonExistentOperatorVisitor,
+  inOperatorOnPrimitiveVisitor,
+  uselessIncrementVisitor,
+  ignoredReturnValueVisitor,
+  collectionSizeMischeckVisitor,
+  argumentsOrderMismatchVisitor,
+  unexpectedMultilineVisitor,
+  emptyCollectionAccessVisitor,
+  voidReturnValueUsedVisitor,
+  newOperatorMisuseVisitor,
+  uselessBackreferenceVisitor,
+  dissimilarTypeComparisonVisitor,
+  indexOfPositiveCheckVisitor,
+  arrayDeleteVisitor,
+  commaInSwitchCaseVisitor,
+  literalCallVisitor,
+  prototypeBuiltinsCallVisitor,
+  statefulRegexVisitor,
+  incorrectStringConcatVisitor,
+  misleadingArrayReverseVisitor,
+  globalThisUsageVisitor,
+  inconsistentReturnVisitor,
+  misleadingCharacterClassVisitor,
+  raceConditionAssignmentVisitor,
+  regexGroupReferenceMismatchVisitor,
+  duplicateImportVisitor,
+  constructorReturnVisitor,
+  setterReturnVisitor,
+  promiseExecutorReturnVisitor,
+  emptyPatternVisitor,
+  noObjCallsVisitor,
+  asyncConstructorVisitor,
+  globalReassignmentVisitor,
+  variableRedeclarationVisitor,
+  restrictedNameShadowingVisitor,
+  caseDeclarationLeakVisitor,
+  deleteVariableVisitor,
+  octalLiteralVisitor,
+  octalEscapeVisitor,
+  nonstandardDecimalEscapeVisitor,
+  lostErrorContextVisitor,
+  missingRadixVisitor,
+  extraArgumentsIgnoredVisitor,
+  forInArrayVisitor,
+  onlyThrowErrorVisitor,
+  reduceMissingInitialVisitor,
+  arraySortWithoutCompareVisitor,
+  contradictoryOptionalChainVisitor,
+  duplicateEnumValueVisitor,
+  confusingNonNullAssertionVisitor,
+  nullComparisonWithoutTypeCheckVisitor,
+  extraNonNullAssertionVisitor,
+  labelVariableCollisionVisitor,
+  unassignedVariableVisitor,
+]
