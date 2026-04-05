@@ -273,9 +273,174 @@ export const hardcodedBlockchainMnemonicVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// hardcoded-database-password
+// ---------------------------------------------------------------------------
+
+const DB_CONNECTION_PATTERNS = [
+  /(?:mysql|postgresql|postgres|mongodb|sqlite|mssql|oracle):\/\/[^:]+:([^@]+)@/i,
+  /password\s*=\s*['"][^'"]{4,}['"]/i,
+  /pwd\s*=\s*['"][^'"]{4,}['"]/i,
+]
+
+export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-database-password',
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    for (const pattern of DB_CONNECTION_PATTERNS) {
+      if (pattern.test(stripped)) {
+        // Exclude placeholders and env-var references
+        if (/\$\{|%s|<password>|\$\(|process\.env/i.test(stripped)) return null
+        return makeViolation(
+          this.ruleKey, node, filePath, 'critical',
+          'Hardcoded database password',
+          'Database connection string contains a hardcoded password.',
+          sourceCode,
+          'Load database credentials from environment variables.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ldap-unauthenticated
+// ---------------------------------------------------------------------------
+
+export const ldapUnauthenticatedVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/ldap-unauthenticated',
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    // LDAP anonymous bind DSN: ldap://host or ldaps://host without credentials
+    const text = node.text
+    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    const lower = stripped.toLowerCase()
+    if (!lower.startsWith('ldap://') && !lower.startsWith('ldaps://')) return null
+
+    // If there are no credentials (no user:pass@), it's an anonymous bind
+    if (!/@/.test(stripped)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unauthenticated LDAP bind',
+        'LDAP connection without credentials enables anonymous bind, which may grant unintended access.',
+        sourceCode,
+        'Provide authentication credentials in the LDAP bind call.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// password-stored-plaintext
+// ---------------------------------------------------------------------------
+
+const PASSWORD_STORAGE_METHODS = new Set([
+  'save', 'insert', 'create', 'update', 'set', 'put', 'store',
+  'insertOne', 'updateOne', 'findOneAndUpdate',
+])
+
+export const passwordStoredPlaintextVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/password-stored-plaintext',
+  nodeTypes: ['pair', 'assignment_expression', 'assignment'],
+  visit(node, filePath, sourceCode) {
+    if (node.type === 'pair' || node.type === 'assignment_expression' || node.type === 'assignment') {
+      const key = node.childForFieldName('key') ?? node.childForFieldName('left')
+      const value = node.childForFieldName('value') ?? node.childForFieldName('right')
+
+      if (!key || !value) return null
+
+      const keyText = key.text.toLowerCase().replace(/['"]/g, '')
+      if (keyText !== 'password' && keyText !== 'passwd' && keyText !== 'pwd') return null
+
+      // Flag if value is directly from request body or a plain identifier (not a hash function call)
+      const valueText = value.text.toLowerCase()
+      if (valueText.includes('req.body') || valueText.includes('request.form') ||
+          valueText.includes('request.data')) {
+        // Value is raw request input — check it's not going through a hash function
+        if (!valueText.includes('hash') && !valueText.includes('bcrypt') &&
+            !valueText.includes('argon') && !valueText.includes('scrypt') &&
+            !valueText.includes('pbkdf')) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'critical',
+            'Password stored in plaintext',
+            `Password field assigned directly from user input without hashing.`,
+            sourceCode,
+            'Hash passwords using bcrypt, argon2, or scrypt before storing.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unpredictable-salt-missing
+// ---------------------------------------------------------------------------
+
+const HASH_FUNCTIONS_NEEDING_SALT = new Set([
+  'createHash', 'md5', 'sha1', 'sha256', 'sha512',
+])
+
+export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unpredictable-salt-missing',
+  nodeTypes: ['call_expression', 'call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression' || fn.type === 'attribute') {
+      const prop = fn.childForFieldName('property') ?? fn.childForFieldName('attribute')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (!HASH_FUNCTIONS_NEEDING_SALT.has(methodName)) return null
+
+    // Only flag if this is in a password-hashing context
+    let parent = node.parent
+    while (parent) {
+      const parentText = parent.text.toLowerCase()
+      if (parentText.includes('password') || parentText.includes('passwd')) {
+        const args = node.childForFieldName('arguments')
+        if (args && args.namedChildren.length < 2) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Missing salt in hash',
+            `${methodName}() called without a salt in a password context. This allows rainbow table attacks.`,
+            sourceCode,
+            'Use a password hashing function like bcrypt, argon2, or PBKDF2 which handle salting automatically.',
+          )
+        }
+        return null
+      }
+      if (parent.type === 'function_declaration' || parent.type === 'function_definition' ||
+          parent.type === 'method_definition' || parent.type === 'program') break
+      parent = parent.parent
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_UNIVERSAL_VISITORS: CodeRuleVisitor[] = [
   hardcodedSecretVisitor,
   hardcodedIpVisitor,
   clearTextProtocolVisitor,
   hardcodedBlockchainMnemonicVisitor,
+  hardcodedDatabasePasswordVisitor,
+  ldapUnauthenticatedVisitor,
+  passwordStoredPlaintextVisitor,
+  unpredictableSaltMissingVisitor,
 ]

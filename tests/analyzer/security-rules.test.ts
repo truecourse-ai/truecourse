@@ -1327,3 +1327,592 @@ describe('security/deterministic/unverified-cross-origin-message', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// intrusive-permissions
+// ===========================================================================
+
+describe('security/deterministic/intrusive-permissions', () => {
+  const ruleKey = 'security/deterministic/intrusive-permissions';
+
+  it('detects getUserMedia()', () => {
+    const violations = check(`navigator.mediaDevices.getUserMedia({ video: true });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects getCurrentPosition()', () => {
+    const violations = check(`navigator.geolocation.getCurrentPosition(callback);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects permissions.query for geolocation', () => {
+    const violations = check(`navigator.permissions.query({ name: "geolocation" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag unrelated method calls', () => {
+    const violations = check(`fetch("https://api.example.com/data");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// session-not-regenerated
+// ===========================================================================
+
+describe('security/deterministic/session-not-regenerated', () => {
+  const ruleKey = 'security/deterministic/session-not-regenerated';
+
+  it('detects req.session.save() without regenerate', () => {
+    const violations = check(`
+      app.post('/login', (req, res) => {
+        req.session.userId = user.id;
+        req.session.save(() => res.json({ ok: true }));
+      });
+    `);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag req.session.save() with regenerate', () => {
+    const violations = check(`
+      app.post('/login', (req, res) => {
+        req.session.regenerate((err) => {
+          req.session.userId = user.id;
+          req.session.save(() => res.json({ ok: true }));
+        });
+      });
+    `);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// publicly-writable-directory
+// ===========================================================================
+
+describe('security/deterministic/publicly-writable-directory', () => {
+  const ruleKey = 'security/deterministic/publicly-writable-directory';
+
+  it('detects writeFile to /tmp/', () => {
+    const violations = check(`fs.writeFile("/tmp/data.json", data, callback);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects writeFileSync to /var/tmp/', () => {
+    const violations = check(`fs.writeFileSync("/var/tmp/upload.bin", buffer);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag writes to safe directories', () => {
+    const violations = check(`fs.writeFile("/home/app/data.json", content, cb);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// dynamically-constructed-template
+// ===========================================================================
+
+describe('security/deterministic/dynamically-constructed-template', () => {
+  const ruleKey = 'security/deterministic/dynamically-constructed-template';
+
+  it('detects render() with user input in template literal', () => {
+    const violations = check('template.render(`Hello ${req.body.name}`);');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects compile() with concatenated user input', () => {
+    const violations = check(`engine.compile("Hello " + req.query.name);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag render() with a static template', () => {
+    const violations = check('engine.render("Hello {{ name }}", { name: userName });');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// angular-sanitization-bypass
+// ===========================================================================
+
+describe('security/deterministic/angular-sanitization-bypass', () => {
+  const ruleKey = 'security/deterministic/angular-sanitization-bypass';
+
+  it('detects bypassSecurityTrustHtml()', () => {
+    const violations = check(`this.sanitizer.bypassSecurityTrustHtml(userInput);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects bypassSecurityTrustUrl()', () => {
+    const violations = check(`this.sanitizer.bypassSecurityTrustUrl(url);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects bypassSecurityTrustScript()', () => {
+    const violations = check(`this.sanitizer.bypassSecurityTrustScript(script);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag sanitize() calls', () => {
+    const violations = check(`this.sanitizer.sanitize(SecurityContext.HTML, input);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// user-id-from-request-body
+// ===========================================================================
+
+describe('security/deterministic/user-id-from-request-body', () => {
+  const ruleKey = 'security/deterministic/user-id-from-request-body';
+
+  it('detects req.body.userId', () => {
+    const violations = check(`const id = req.body.userId;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects req.body.user_id', () => {
+    const violations = check(`const id = req.body.user_id;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag req.user.id (from auth middleware)', () => {
+    const violations = check(`const id = req.user.id;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag req.body.name', () => {
+    const violations = check(`const name = req.body.name;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// mass-assignment
+// ===========================================================================
+
+describe('security/deterministic/mass-assignment', () => {
+  const ruleKey = 'security/deterministic/mass-assignment';
+
+  it('detects User.create(req.body)', () => {
+    const violations = check(`User.create(req.body);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects Model.update(id, req.body)', () => {
+    const violations = check(`Model.update(id, req.body);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects spread of req.body in create()', () => {
+    const violations = check(`User.create({ ...req.body, createdAt: new Date() });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag create() with allowlisted fields', () => {
+    const violations = check(`const { name, email } = req.body; User.create({ name, email });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// timing-attack-comparison
+// ===========================================================================
+
+describe('security/deterministic/timing-attack-comparison', () => {
+  const ruleKey = 'security/deterministic/timing-attack-comparison';
+
+  it('detects === comparison on token', () => {
+    const violations = check(`if (userToken === storedToken) { grant(); }`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects !== comparison on secret', () => {
+    const violations = check(`if (providedSecret !== expectedSecret) { deny(); }`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects === comparison on hmac', () => {
+    const violations = check(`if (computedHmac === receivedHmac) { ok(); }`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag === comparison on non-sensitive values', () => {
+    const violations = check(`if (status === "active") { proceed(); }`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// user-input-in-path
+// ===========================================================================
+
+describe('security/deterministic/user-input-in-path', () => {
+  const ruleKey = 'security/deterministic/user-input-in-path';
+
+  it('detects readFile with req.query', () => {
+    const violations = check(`fs.readFile(req.query.filename, "utf8", callback);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects readFileSync with req.params', () => {
+    const violations = check(`fs.readFileSync(req.params.file);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag readFile with a hardcoded path', () => {
+    const violations = check(`fs.readFile("/etc/config.json", "utf8", cb);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// user-input-in-redirect
+// ===========================================================================
+
+describe('security/deterministic/user-input-in-redirect', () => {
+  const ruleKey = 'security/deterministic/user-input-in-redirect';
+
+  it('detects res.redirect with req.query.returnUrl', () => {
+    const violations = check(`res.redirect(req.query.returnUrl);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects res.redirect with req.body.redirectUrl', () => {
+    const violations = check(`res.redirect(req.body.redirectUrl);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag res.redirect with a hardcoded URL', () => {
+    const violations = check(`res.redirect("/dashboard");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// missing-helmet-middleware
+// ===========================================================================
+
+describe('security/deterministic/missing-helmet-middleware', () => {
+  const ruleKey = 'security/deterministic/missing-helmet-middleware';
+
+  it('detects express() without helmet', () => {
+    const violations = check(`const app = express(); app.use(cors()); app.listen(3000);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag express() with helmet', () => {
+    const violations = check(`const app = express(); app.use(helmet()); app.listen(3000);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// jwt-no-expiry
+// ===========================================================================
+
+describe('security/deterministic/jwt-no-expiry', () => {
+  const ruleKey = 'security/deterministic/jwt-no-expiry';
+
+  it('detects jwt.sign() with only two args', () => {
+    const violations = check(`const token = jwt.sign({ userId: id }, secret);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects jwt.sign() options without expiresIn', () => {
+    const violations = check(`const token = jwt.sign({ userId: id }, secret, { algorithm: "RS256" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag jwt.sign() with expiresIn', () => {
+    const violations = check(`const token = jwt.sign({ userId: id }, secret, { expiresIn: "1h" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// sensitive-data-in-url
+// ===========================================================================
+
+describe('security/deterministic/sensitive-data-in-url', () => {
+  const ruleKey = 'security/deterministic/sensitive-data-in-url';
+
+  it('detects password in query string', () => {
+    const violations = check(`fetch("https://api.example.com/login?password=secret123");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects token in query string', () => {
+    const violations = check(`const url = "https://api.example.com/data?token=abc123";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag clean query strings', () => {
+    const violations = check(`const url = "https://api.example.com/data?page=1&limit=10";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// express-trust-proxy-not-set
+// ===========================================================================
+
+describe('security/deterministic/express-trust-proxy-not-set', () => {
+  const ruleKey = 'security/deterministic/express-trust-proxy-not-set';
+
+  it('detects app.set("trust proxy", false)', () => {
+    const violations = check(`app.set("trust proxy", false);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects app.set("trust proxy", 0)', () => {
+    const violations = check(`app.set("trust proxy", 0);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag app.set("trust proxy", 1)', () => {
+    const violations = check(`app.set("trust proxy", 1);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag other app.set calls', () => {
+    const violations = check(`app.set("view engine", "ejs");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// hardcoded-password-function-arg
+// ===========================================================================
+
+describe('security/deterministic/hardcoded-password-function-arg', () => {
+  const ruleKey = 'security/deterministic/hardcoded-password-function-arg';
+
+  it('detects hardcoded password in login()', () => {
+    const violations = check(`authenticate(username, "SuperSecret123!");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects hardcoded password in connect()', () => {
+    const violations = check(`db.connect(host, user, "hardcodedPass1");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag variable references', () => {
+    const violations = check(`authenticate(username, password);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Python: unsafe-yaml-load
+// ===========================================================================
+
+describe('security/deterministic/unsafe-yaml-load', () => {
+  const ruleKey = 'security/deterministic/unsafe-yaml-load';
+
+  it('detects yaml.load() without loader', () => {
+    const violations = check(`data = yaml.load(user_input)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects yaml.load() with unsafe loader', () => {
+    const violations = check(`data = yaml.load(user_input, Loader=yaml.Loader)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag yaml.safe_load()', () => {
+    const violations = check(`data = yaml.safe_load(user_input)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag yaml.load() with SafeLoader', () => {
+    const violations = check(`data = yaml.load(user_input, Loader=yaml.SafeLoader)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Python: unsafe-pickle-usage
+// ===========================================================================
+
+describe('security/deterministic/unsafe-pickle-usage', () => {
+  const ruleKey = 'security/deterministic/unsafe-pickle-usage';
+
+  it('detects pickle.loads()', () => {
+    const violations = check(`obj = pickle.loads(user_data)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects pickle.load()', () => {
+    const violations = check(`obj = pickle.load(file_handle)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag json.loads()', () => {
+    const violations = check(`data = json.loads(user_input)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Python: ssh-no-host-key-verification
+// ===========================================================================
+
+describe('security/deterministic/ssh-no-host-key-verification', () => {
+  const ruleKey = 'security/deterministic/ssh-no-host-key-verification';
+
+  it('detects AutoAddPolicy in set_missing_host_key_policy', () => {
+    const violations = check(`client.set_missing_host_key_policy(paramiko.AutoAddPolicy())`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects WarningPolicy in set_missing_host_key_policy', () => {
+    const violations = check(`client.set_missing_host_key_policy(paramiko.WarningPolicy())`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag RejectPolicy', () => {
+    const violations = check(`client.set_missing_host_key_policy(paramiko.RejectPolicy())`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Python: unsafe-temp-file
+// ===========================================================================
+
+describe('security/deterministic/unsafe-temp-file', () => {
+  const ruleKey = 'security/deterministic/unsafe-temp-file';
+
+  it('detects tempfile.mktemp()', () => {
+    const violations = check(`tmp_path = tempfile.mktemp()`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects NamedTemporaryFile(delete=False)', () => {
+    const violations = check(`f = tempfile.NamedTemporaryFile(delete=False)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag NamedTemporaryFile() without delete=False', () => {
+    const violations = check(`f = tempfile.NamedTemporaryFile()`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag tempfile.mkstemp()', () => {
+    const violations = check(`fd, path = tempfile.mkstemp()`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// hardcoded-database-password
+// ===========================================================================
+
+describe('security/deterministic/hardcoded-database-password', () => {
+  const ruleKey = 'security/deterministic/hardcoded-database-password';
+
+  it('detects postgres DSN with password', () => {
+    const violations = check(`const dsn = "postgresql://user:mypassword@localhost/db";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects mysql DSN with password', () => {
+    const violations = check(`const url = "mysql://admin:secret123@db.example.com/prod";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag DSN without password', () => {
+    const violations = check(`const url = "postgresql://localhost/mydb";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag DSN with env var placeholder', () => {
+    const violations = check('const url = `postgresql://user:${process.env.DB_PASS}@localhost/db`;');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// ldap-unauthenticated
+// ===========================================================================
+
+describe('security/deterministic/ldap-unauthenticated', () => {
+  const ruleKey = 'security/deterministic/ldap-unauthenticated';
+
+  it('detects anonymous LDAP bind URL', () => {
+    const violations = check(`const client = ldap.createClient({ url: "ldap://ldap.example.com" });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag LDAP URL with credentials', () => {
+    const violations = check(`const url = "ldap://cn=admin,dc=example,dc=com@ldap.example.com";`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// password-stored-plaintext
+// ===========================================================================
+
+describe('security/deterministic/password-stored-plaintext', () => {
+  const ruleKey = 'security/deterministic/password-stored-plaintext';
+
+  it('detects password: req.body.password in JS object', () => {
+    const violations = check(`db.create({ username: req.body.username, password: req.body.password });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag password: await bcrypt.hash(req.body.password, 10)', () => {
+    const violations = check(`db.create({ password: await bcrypt.hash(req.body.password, 10) });`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// unpredictable-salt-missing
+// ===========================================================================
+
+describe('security/deterministic/unpredictable-salt-missing', () => {
+  const ruleKey = 'security/deterministic/unpredictable-salt-missing';
+
+  it('detects createHash in password context without second arg', () => {
+    const violations = check(`const passwordHash = crypto.createHash("sha256").update(password).digest("hex");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag createHash for non-password use', () => {
+    const violations = check(`const fileHash = crypto.createHash("sha256").update(fileContent).digest("hex");`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// Python: flask-secret-key-disclosed
+// ===========================================================================
+
+describe('security/deterministic/flask-secret-key-disclosed', () => {
+  const ruleKey = 'security/deterministic/flask-secret-key-disclosed';
+
+  it('detects app.secret_key = "hardcoded"', () => {
+    const violations = check(`app.secret_key = "my_super_secret_key"`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects SECRET_KEY = "hardcoded"', () => {
+    const violations = check(`SECRET_KEY = "dev-secret-key-12345"`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('detects app.config["SECRET_KEY"] = "hardcoded"', () => {
+    const violations = check(`app.config["SECRET_KEY"] = "supersecretkey"`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag SECRET_KEY loaded from env', () => {
+    const violations = check(`app.secret_key = os.environ["SECRET_KEY"]`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});

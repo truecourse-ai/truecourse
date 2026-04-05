@@ -1884,6 +1884,881 @@ export const exceptionReassignmentVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// null-dereference: accessing property on potentially null/undefined value
+// ---------------------------------------------------------------------------
+
+export const nullDereferenceVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/null-dereference',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['member_expression', 'subscript_expression'],
+  visit(node, filePath, sourceCode) {
+    // Look for patterns like: (foo || null).bar, (maybeNull as SomeType).prop
+    // Specifically: member access where the object is a nullish literal cast or logical expression ending in null/undefined
+    const obj = node.childForFieldName('object')
+    if (!obj) return null
+
+    // Helper: is this node a null/undefined literal?
+    function isNullish(n: SyntaxNode): boolean {
+      return n.type === 'null' || n.type === 'undefined'
+    }
+
+    // Detect: null.prop or undefined.prop directly
+    if (isNullish(obj)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Null dereference',
+        `Accessing property on \`${obj.text}\` will always throw a TypeError.`,
+        sourceCode,
+        'Add a null check before accessing properties on this value.',
+      )
+    }
+
+    // Detect: (null).prop or (undefined).prop
+    if (obj.type === 'parenthesized_expression') {
+      const inner = obj.namedChildren[0]
+      if (!inner) return null
+      if (isNullish(inner)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Null dereference',
+          `Accessing property on \`${inner.text}\` will always throw a TypeError.`,
+          sourceCode,
+          'Add a null check before accessing properties on this value.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// symbol-description: Symbol() without description
+// ---------------------------------------------------------------------------
+
+export const symbolDescriptionVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/symbol-description',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.text !== 'Symbol') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Symbol() with no args or Symbol(undefined) — no description
+    const argChildren = args.namedChildren
+    if (argChildren.length === 0) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Symbol without description',
+        '`Symbol()` called without a description string makes debugging harder.',
+        sourceCode,
+        'Add a description string: `Symbol("mySymbol")`.',
+      )
+    }
+
+    // Symbol(undefined) is also no description
+    if (argChildren.length === 1 && (argChildren[0].type === 'undefined' || (argChildren[0].type === 'identifier' && argChildren[0].text === 'undefined'))) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Symbol without description',
+        '`Symbol(undefined)` has no description — use a string description for easier debugging.',
+        sourceCode,
+        'Add a description string: `Symbol("mySymbol")`.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// array-callback-return: array methods with callbacks missing return
+// ---------------------------------------------------------------------------
+
+const ARRAY_METHODS_REQUIRING_RETURN = new Set([
+  'map', 'filter', 'reduce', 'reduceRight', 'find', 'findIndex', 'some', 'every', 'flatMap', 'sort',
+])
+
+export const arrayCallbackReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/array-callback-return',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Look for .map(...), .filter(...), etc.
+    if (fn.type !== 'member_expression') return null
+    const prop = fn.childForFieldName('property')
+    if (!prop || !ARRAY_METHODS_REQUIRING_RETURN.has(prop.text)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // The callback must be arrow_function, function, or function_expression
+    if (firstArg.type !== 'arrow_function' && firstArg.type !== 'function' && firstArg.type !== 'function_expression') return null
+
+    const body = firstArg.childForFieldName('body')
+    if (!body) return null
+
+    // If the body is not a statement_block (i.e. it's an expression body), it has an implicit return
+    if (body.type !== 'statement_block') return null
+
+    // Check if there's any return statement with a value
+    function hasReturn(n: SyntaxNode): boolean {
+      if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
+      // Don't recurse into nested functions
+      if (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasReturn(child)) return true
+      }
+      return false
+    }
+
+    if (!hasReturn(body)) {
+      return makeViolation(
+        this.ruleKey, firstArg, filePath, 'high',
+        'Array callback missing return',
+        `Callback for \`${prop.text}()\` has no return statement — it will always return \`undefined\`.`,
+        sourceCode,
+        `Add a return statement to the \`${prop.text}\` callback.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// no-inner-declarations: function/var declaration inside block
+// ---------------------------------------------------------------------------
+
+export const noInnerDeclarationsVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/no-inner-declarations',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['function_declaration', 'variable_declaration'],
+  visit(node, filePath, sourceCode) {
+    // Only flag if the parent is a block that's inside if/else/while/for/etc (not a function body or module)
+    const parent = node.parent
+    if (!parent || parent.type !== 'statement_block') return null
+
+    const grandparent = parent.parent
+    if (!grandparent) return null
+
+    // Flag if inside if/else/while/for/do blocks — not top-level function bodies
+    const BLOCK_CONTAINERS = new Set([
+      'if_statement', 'else_clause', 'while_statement', 'for_statement',
+      'for_in_statement', 'do_statement', 'try_statement', 'catch_clause',
+    ])
+
+    if (!BLOCK_CONTAINERS.has(grandparent.type)) return null
+
+    if (node.type === 'function_declaration') {
+      const name = node.childForFieldName('name')
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Function declaration in block',
+        `Function \`${name?.text ?? ''}\` is declared inside a block. Hoisting behavior varies across environments.`,
+        sourceCode,
+        'Move the function declaration to the outer scope or use a function expression assigned to a `let`/`const`.',
+      )
+    }
+
+    if (node.type === 'variable_declaration') {
+      // Only flag `var`, not `let` or `const`
+      const hasVar = node.children.some((c) => c.text === 'var')
+      if (!hasVar) return null
+
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'var declaration in block',
+        '`var` inside a block is hoisted to the function scope, which can cause confusing behavior.',
+        sourceCode,
+        'Use `let` or `const` inside blocks instead of `var`.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// template-curly-in-string: "hello ${name}" — should be template literal
+// ---------------------------------------------------------------------------
+
+export const templateCurlyInStringVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/template-curly-in-string',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    // Match ${...} inside single or double quoted strings
+    if (/\$\{[^}]*\}/.test(text)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Template expression in regular string',
+        `String \`${text.slice(0, 60)}\` contains \`\${...}\` but is not a template literal — the interpolation will not be evaluated.`,
+        sourceCode,
+        'Change the string quotes to backticks: `` `...${expression}...` ``.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// await-in-loop: await inside a loop body
+// ---------------------------------------------------------------------------
+
+export const awaitInLoopVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/await-in-loop',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['await_expression'],
+  visit(node, filePath, sourceCode) {
+    // Walk up the tree to find if we're inside a loop
+    let current: SyntaxNode | null = node.parent
+    while (current) {
+      const t = current.type
+      if (t === 'for_statement' || t === 'for_in_statement' || t === 'while_statement' || t === 'do_statement') {
+        // Make sure we're in the loop body (not the initializer/condition of a for loop)
+        // and not inside a nested async function
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Await inside loop',
+          '`await` inside a loop forces sequential execution of async operations. Consider collecting promises and using `Promise.all()` for parallel execution.',
+          sourceCode,
+          'Extract the async calls into an array and use `await Promise.all(promises)` outside the loop.',
+        )
+      }
+      // Stop recursing if we hit a function boundary
+      if (t === 'function_declaration' || t === 'arrow_function' || t === 'function' || t === 'method_definition') {
+        break
+      }
+      current = current.parent
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// element-overwrite: array/object element assigned twice before being read
+// ---------------------------------------------------------------------------
+
+export const elementOverwriteVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/element-overwrite',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['statement_block'],
+  visit(node, filePath, sourceCode) {
+    // Look for consecutive assignments to the same array index/object key (literal)
+    const statements = node.namedChildren.filter((c) => c.type !== 'comment')
+
+    // Collect assignment targets (expression_statement > assignment_expression)
+    const assigns = new Map<string, { node: SyntaxNode; idx: number }>()
+
+    for (let i = 0; i < statements.length; i++) {
+      const stmt = statements[i]
+      if (stmt.type !== 'expression_statement') continue
+
+      const expr = stmt.namedChildren[0]
+      if (!expr || expr.type !== 'assignment_expression') continue
+
+      const left = expr.childForFieldName('left')
+      if (!left) continue
+
+      // Only handle subscript (arr[0]) and member access (obj.key)
+      if (left.type !== 'subscript_expression' && left.type !== 'member_expression') continue
+
+      const obj = left.childForFieldName('object')
+      const indexOrProp = left.type === 'subscript_expression'
+        ? left.childForFieldName('index')
+        : left.childForFieldName('property')
+
+      if (!obj || !indexOrProp) continue
+
+      // Only flag literal indices/property names for certainty
+      if (indexOrProp.type !== 'string' && indexOrProp.type !== 'number' && indexOrProp.type !== 'property_identifier') continue
+
+      const key = `${obj.text}[${indexOrProp.text}]`
+
+      if (assigns.has(key)) {
+        const prev = assigns.get(key)!
+        // Check if the key was read between the two assignments
+        let wasRead = false
+        for (let j = prev.idx + 1; j < i; j++) {
+          const between = statements[j]
+          if (between.text.includes(obj.text)) {
+            wasRead = true
+            break
+          }
+        }
+        if (!wasRead) {
+          return makeViolation(
+            this.ruleKey, expr, filePath, 'high',
+            'Element overwritten before read',
+            `\`${key}\` is assigned again before being read — the first assignment has no effect.`,
+            sourceCode,
+            'Remove the first assignment or use the value before overwriting it.',
+          )
+        }
+      }
+
+      assigns.set(key, { node: expr, idx: i })
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unthrown-error: new Error() without throw
+// ---------------------------------------------------------------------------
+
+export const unthrownErrorVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unthrown-error',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr || expr.type !== 'new_expression') return null
+
+    const constructor = expr.childForFieldName('constructor')
+    if (!constructor) return null
+
+    // Match Error, TypeError, RangeError, etc.
+    const name = constructor.text
+    if (!name.endsWith('Error')) return null
+
+    return makeViolation(
+      this.ruleKey, expr, filePath, 'high',
+      'Error created but not thrown',
+      `\`new ${name}(...)\` is created as a standalone expression but never thrown — the error is silently discarded.`,
+      sourceCode,
+      `Add \`throw\` before \`new ${name}(...)\` or assign it to a variable if needed.`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// non-existent-operator: =+ or =! instead of += or !=
+// ---------------------------------------------------------------------------
+
+export const nonExistentOperatorVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/non-existent-operator',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    const right = node.childForFieldName('right')
+    if (!right) return null
+
+    // Detect x = +y (where user meant x += y) and x = !y (where user meant x != y)
+    // This manifests as: assignment_expression where operator is = and right is unary_expression with + or -
+    const op = node.children.find((c) => c.text === '=')
+    if (!op) return null
+
+    // Make sure it's plain = (not +=, -=, etc.)
+    const opIdx = node.children.indexOf(op)
+    if (opIdx === 0) return null
+
+    const before = node.children[opIdx - 1]
+    // If the token before = is +, -, !, we have the non-existent operator pattern
+    // But this is already handled by the parser — we need to detect via the raw source text
+    const nodeText = node.text
+    // Match x =+ y, x =- y, x =! y patterns (space optional)
+    if (/=\+[^=]/.test(nodeText) || /=![^=]/.test(nodeText)) {
+      const pattern = /=\+[^=]/.test(nodeText) ? '=+' : '=!'
+      const intended = pattern === '=+' ? '+=' : '!='
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Non-existent operator',
+        `\`${pattern}\` is not a valid operator — did you mean \`${intended}\`?`,
+        sourceCode,
+        `Replace \`${pattern}\` with \`${intended}\`.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// in-operator-on-primitive: "prop" in number/string/boolean literal
+// ---------------------------------------------------------------------------
+
+const PRIMITIVE_TYPES = new Set(['number', 'string', 'true', 'false', 'null', 'undefined'])
+
+export const inOperatorOnPrimitiveVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/in-operator-on-primitive',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const operator = node.children.find((c) => c.text === 'in')
+    if (!operator) return null
+
+    const right = node.childForFieldName('right')
+    if (!right) return null
+
+    if (PRIMITIVE_TYPES.has(right.type)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'in operator on primitive',
+        `\`"prop" in ${right.text}\` will throw a TypeError — the \`in\` operator only works on objects.`,
+        sourceCode,
+        'Use an object or replace with `typeof` check.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// useless-increment: increment/decrement result not used
+// ---------------------------------------------------------------------------
+
+export const uselessIncrementVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/useless-increment',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr) return null
+
+    // Check for standalone x++ or ++x that's not inside a for loop increment
+    if (expr.type !== 'update_expression') return null
+
+    // Make sure the parent is not a for_statement increment position
+    const parent = node.parent
+    if (parent?.type === 'for_statement') {
+      // Check if this statement_block is the increment part — actually update_expression in for is not wrapped in expression_statement
+      // So this check is fine as-is, expression_statement in for body is the loop body
+    }
+
+    const arg = expr.childForFieldName('argument')
+    if (!arg) return null
+
+    // Only flag if this is the only expression (standalone statement) — that's what expression_statement means
+    // And the result is not used anywhere immediately after (we can't easily check that, so we skip this rule
+    // for now and only flag the specific case where the prefix result of ++x is the standalone expression)
+    const op = expr.children.find((c) => c.text === '++' || c.text === '--')
+    if (!op) return null
+
+    // Detect pre-increment whose result goes unused: the parent is expression_statement (already confirmed)
+    // and it's a pre-increment/decrement (operator before argument)
+    const isPre = expr.children.indexOf(op) < expr.children.indexOf(arg)
+    if (isPre) {
+      return makeViolation(
+        this.ruleKey, expr, filePath, 'medium',
+        'Useless pre-increment',
+        `The result of \`${expr.text}\` is not used — pre-increment/decrement as a standalone statement is equivalent to post-increment.`,
+        sourceCode,
+        `Replace \`${op.text}${arg.text}\` with \`${arg.text}${op.text}\` if the intent is to mutate, or use \`${arg.text} ${op.text === '++' ? '+= 1' : '-= 1'}\`.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ignored-return-value: ignoring return value of pure array methods
+// ---------------------------------------------------------------------------
+
+const PURE_ARRAY_METHODS = new Set([
+  'map', 'filter', 'slice', 'concat', 'flat', 'flatMap', 'reverse', 'sort', 'toSorted', 'toReversed',
+  'join', 'keys', 'values', 'entries', 'find', 'findIndex', 'findLast', 'findLastIndex',
+  'indexOf', 'lastIndexOf', 'includes', 'every', 'some', 'reduce', 'reduceRight',
+])
+
+export const ignoredReturnValueVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/ignored-return-value',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr || expr.type !== 'call_expression') return null
+
+    const fn = expr.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (!prop || !PURE_ARRAY_METHODS.has(prop.text)) return null
+
+    // Skip if used as an await expression target or similar
+    return makeViolation(
+      this.ruleKey, expr, filePath, 'high',
+      'Ignored return value',
+      `The return value of \`.${prop.text}()\` is ignored — this method does not mutate the array in place; the result must be used.`,
+      sourceCode,
+      `Assign the result: \`const result = arr.${prop.text}(...)\`.`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// collection-size-mischeck: arr.length === undefined / null
+// ---------------------------------------------------------------------------
+
+export const collectionSizeMischeckVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/collection-size-mischeck',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    const operator = node.children.find((c) => ['===', '!==', '==', '!='].includes(c.text))
+
+    if (!left || !right || !operator) return null
+
+    // Check if one side is .length and the other is undefined/null
+    function isSizeProp(n: SyntaxNode): boolean {
+      if (n.type !== 'member_expression') return false
+      const prop = n.childForFieldName('property')
+      return prop?.text === 'length' || prop?.text === 'size'
+    }
+
+    function isNullishLiteral(n: SyntaxNode): boolean {
+      return n.type === 'null' || n.type === 'undefined'
+    }
+
+    if (isSizeProp(left) && isNullishLiteral(right)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Collection size mischeck',
+        `\`${left.text} ${operator.text} ${right.text}\` is always ${operator.text === '===' || operator.text === '==' ? 'false' : 'true'} — \`${left.text}\` is always a number. Did you mean \`${left.text} > 0\`?`,
+        sourceCode,
+        `Replace with \`${left.text} > 0\` to check if the collection is non-empty.`,
+      )
+    }
+
+    if (isSizeProp(right) && isNullishLiteral(left)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Collection size mischeck',
+        `\`${left.text} ${operator.text} ${right.text}\` is always ${operator.text === '===' || operator.text === '==' ? 'false' : 'true'} — \`${right.text}\` is always a number. Did you mean \`${right.text} > 0\`?`,
+        sourceCode,
+        `Replace with \`${right.text} > 0\` to check if the collection is non-empty.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// arguments-order-mismatch: common swapped argument patterns
+// ---------------------------------------------------------------------------
+
+// Known functions where argument order is often swapped (name => [expected param names])
+const KNOWN_ARG_ORDERS: Array<{ fn: string; params: string[][] }> = [
+  { fn: 'startsWith', params: [['prefix', 'str', 'string', 'start', 'needle', 'search']] },
+  { fn: 'endsWith', params: [['suffix', 'str', 'string', 'end', 'needle', 'search']] },
+  { fn: 'includes', params: [['item', 'element', 'val', 'value', 'search', 'needle']] },
+  { fn: 'indexOf', params: [['item', 'element', 'val', 'value', 'search', 'needle']] },
+  { fn: 'replace', params: [['pattern', 'search', 'needle', 'from', 'old'], ['replacement', 'with', 'to', 'new', 'newVal']] },
+  { fn: 'substring', params: [['start', 'from', 'begin'], ['end', 'to', 'finish']] },
+]
+
+export const argumentsOrderMismatchVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/arguments-order-mismatch',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (!prop) return null
+
+    const methodName = prop.text
+    const spec = KNOWN_ARG_ORDERS.find((s) => s.fn === methodName)
+    if (!spec) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argNodes = args.namedChildren
+    if (argNodes.length < 1) return null
+
+    // Check if argument names suggest a mismatch: e.g. str.startsWith(str, prefix) instead of str.startsWith(prefix)
+    // We look at identifier names and compare to expected positions
+    const obj = fn.childForFieldName('object')
+    const receiverName = obj?.type === 'identifier' ? obj.text.toLowerCase() : ''
+
+    // For startsWith/endsWith/includes: the first arg should be the needle, not the receiver
+    // Flag if arg[0] looks like the receiver (same name or contains receiver name)
+    const firstArgText = argNodes[0].text.toLowerCase()
+
+    if (['startsWith', 'endsWith', 'includes', 'indexOf'].includes(methodName)) {
+      // Heuristic: if the first arg's identifier name matches the receiver variable name, they might be swapped
+      if (receiverName && firstArgText === receiverName) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Arguments in wrong order',
+          `\`${node.text}\` — the first argument to \`.${methodName}()\` looks like it might be the object itself. Check argument order.`,
+          sourceCode,
+          `Verify the argument order: \`haystack.${methodName}(needle)\`.`,
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unexpected-multiline: return followed by value on next line (ASI trap)
+// ---------------------------------------------------------------------------
+
+export const unexpectedMultilineVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/unexpected-multiline',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['return_statement'],
+  visit(node, filePath, sourceCode) {
+    // A bare `return` (no expression) whose token spans only one line
+    if (node.namedChildren.length > 0) return null
+
+    // Check if there's another non-empty statement immediately after on the next line
+    // In tree-sitter a bare `return;` is fine, but `return` (no semicolon) with value on next line
+    // gets parsed as a bare return_statement followed by an expression_statement.
+    // We flag if the bare return is NOT followed by a } — i.e., there's a sibling expression
+    // that might have been intended as the return value.
+    const parent = node.parent
+    if (!parent) return null
+
+    const siblings = parent.namedChildren
+    const idx = siblings.indexOf(node)
+    if (idx < 0 || idx >= siblings.length - 1) return null
+
+    const next = siblings[idx + 1]
+    if (!next) return null
+
+    // If the next sibling is an expression_statement on the very next line, warn
+    if (next.type !== 'expression_statement' && next.type !== 'call_expression') return null
+
+    const returnLine = node.endPosition.row
+    const nextLine = next.startPosition.row
+
+    if (nextLine === returnLine + 1) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unexpected multiline — bare return',
+        'A bare `return` followed by an expression on the next line returns `undefined` due to ASI — the expression is unreachable.',
+        sourceCode,
+        'Either move the expression to the same line as `return`, or add `return` before the expression.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// empty-collection-access: [][0] or {}["key"]
+// ---------------------------------------------------------------------------
+
+export const emptyCollectionAccessVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/empty-collection-access',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['subscript_expression'],
+  visit(node, filePath, sourceCode) {
+    const obj = node.childForFieldName('object')
+    if (!obj) return null
+
+    // Flag [][index]
+    if (obj.type === 'array' && obj.namedChildren.length === 0) {
+      const index = node.childForFieldName('index')
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Empty collection access',
+        `Accessing index \`${index?.text ?? '?'}\` on an empty array literal always returns \`undefined\`.`,
+        sourceCode,
+        'Check that you are accessing the correct array, or initialize it with elements first.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// void-return-value-used: using return value of void-returning functions
+// ---------------------------------------------------------------------------
+
+const VOID_RETURNING_METHODS = new Set([
+  'forEach', 'push', 'pop', 'shift', 'unshift', 'splice', 'reverse', 'fill',
+  'delete', 'clear', 'set', 'add',
+])
+
+const VOID_RETURNING_GLOBALS = new Set([
+  'console.log', 'console.error', 'console.warn', 'console.info', 'console.debug',
+])
+
+export const voidReturnValueUsedVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/void-return-value-used',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['variable_declarator', 'assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    // Look for: const x = arr.forEach(...) or x = console.log(...)
+    const valueField = node.type === 'variable_declarator' ? 'value' : 'right'
+    const value = node.childForFieldName(valueField)
+    if (!value || value.type !== 'call_expression') return null
+
+    const fn = value.childForFieldName('function')
+    if (!fn) return null
+
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop && VOID_RETURNING_METHODS.has(prop.text)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Void return value used',
+          `\`.${prop.text}()\` does not return a useful value — assigning its result is likely a bug.`,
+          sourceCode,
+          `Remove the assignment; call \`.${prop.text}()\` as a statement instead.`,
+        )
+      }
+
+      // Check console.log etc.
+      const obj = fn.childForFieldName('object')
+      if (obj && prop) {
+        const fullName = `${obj.text}.${prop.text}`
+        if (VOID_RETURNING_GLOBALS.has(fullName)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Void return value used',
+            `\`${fullName}()\` always returns \`undefined\` — assigning its result is likely a bug.`,
+            sourceCode,
+            `Remove the assignment; call \`${fullName}()\` as a statement.`,
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// new-operator-misuse: new Symbol(), new BigInt(), etc.
+// ---------------------------------------------------------------------------
+
+const NON_CONSTRUCTORS = new Set(['Symbol', 'BigInt', 'Math', 'JSON', 'Reflect', 'Atomics'])
+
+export const newOperatorMisuseVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/new-operator-misuse',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['new_expression'],
+  visit(node, filePath, sourceCode) {
+    const constructor = node.childForFieldName('constructor')
+    if (!constructor) return null
+
+    const name = constructor.text
+    if (NON_CONSTRUCTORS.has(name)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'new with non-constructor',
+        `\`new ${name}()\` throws a TypeError — \`${name}\` cannot be used as a constructor.`,
+        sourceCode,
+        `Remove \`new\` and call \`${name}()\` directly as a function.`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// useless-backreference: regex with backreference before group definition
+// ---------------------------------------------------------------------------
+
+export const uselessBackreferenceVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/useless-backreference',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['regex'],
+  visit(node, filePath, sourceCode) {
+    const pattern = node.childForFieldName('pattern')
+    if (!pattern) return null
+
+    const patternText = pattern.text
+
+    // Look for numbered backreferences \1, \2, etc. that reference groups that appear later
+    // e.g. /\1(abc)/ — \1 is a forward-reference, always matches empty string
+    const backrefMatch = patternText.match(/\\([1-9]\d*)/)
+    if (backrefMatch) {
+      const refNum = parseInt(backrefMatch[1], 10)
+      // Count capturing groups before the backreference position
+      const backrefPos = patternText.indexOf(backrefMatch[0])
+      const beforeRef = patternText.slice(0, backrefPos)
+      // Count unescaped opening parens that are capturing (not (?:, (?=, (?!, etc.)
+      const captureGroupsBefore = (beforeRef.match(/(?<!\\)\((?!\?)/g) || []).length
+      if (captureGroupsBefore < refNum) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Useless regex backreference',
+          `Backreference \`\\${refNum}\` references a group that hasn't been defined yet at that point in the pattern — it always matches the empty string.`,
+          sourceCode,
+          'Move the referenced group before the backreference, or use a named group with (?<name>...) and \\k<name>.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// dissimilar-type-comparison: "foo" === 42, true === 1, etc.
+// ---------------------------------------------------------------------------
+
+export const dissimilarTypeComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'bugs/deterministic/dissimilar-type-comparison',
+  languages: JS_LANGUAGES,
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    const operator = node.children.find((c) => c.text === '===' || c.text === '!==')
+
+    if (!left || !right || !operator) return null
+
+    // Check if left and right are different literal types (string vs number, string vs boolean, etc.)
+    function getLiteralType(n: SyntaxNode): 'string' | 'number' | 'boolean' | 'null' | 'undefined' | null {
+      if (n.type === 'string') return 'string'
+      if (n.type === 'number') return 'number'
+      if (n.type === 'true' || n.type === 'false') return 'boolean'
+      if (n.type === 'null') return 'null'
+      if (n.type === 'undefined') return 'undefined'
+      return null
+    }
+
+    const leftType = getLiteralType(left)
+    const rightType = getLiteralType(right)
+
+    if (!leftType || !rightType) return null
+    if (leftType === rightType) return null
+
+    // Skip null === undefined — that's a common idiom
+    if ((leftType === 'null' && rightType === 'undefined') || (leftType === 'undefined' && rightType === 'null')) return null
+
+    const always = operator.text === '===' ? 'always false' : 'always true'
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Dissimilar type comparison',
+      `\`${node.text}\` is ${always} — a ${leftType} and a ${rightType} are never strictly equal.`,
+      sourceCode,
+      'Use loose equality (== / !=) if type coercion is intended, or fix the comparison operands.',
+    )
+  },
+}
+
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
   selfComparisonVisitor,
@@ -1929,4 +2804,24 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   prototypePollutionVisitor,
   voidZeroArgumentVisitor,
   exceptionReassignmentVisitor,
+  nullDereferenceVisitor,
+  symbolDescriptionVisitor,
+  arrayCallbackReturnVisitor,
+  noInnerDeclarationsVisitor,
+  templateCurlyInStringVisitor,
+  awaitInLoopVisitor,
+  elementOverwriteVisitor,
+  unthrownErrorVisitor,
+  nonExistentOperatorVisitor,
+  inOperatorOnPrimitiveVisitor,
+  uselessIncrementVisitor,
+  ignoredReturnValueVisitor,
+  collectionSizeMischeckVisitor,
+  argumentsOrderMismatchVisitor,
+  unexpectedMultilineVisitor,
+  emptyCollectionAccessVisitor,
+  voidReturnValueUsedVisitor,
+  newOperatorMisuseVisitor,
+  uselessBackreferenceVisitor,
+  dissimilarTypeComparisonVisitor,
 ]

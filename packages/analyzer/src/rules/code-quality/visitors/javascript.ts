@@ -1159,6 +1159,1107 @@ export const noReturnAwaitVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// 25 new rules
+// ---------------------------------------------------------------------------
+
+export const expressionComplexityVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/expression-complexity',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['expression_statement', 'return_statement', 'variable_declarator', 'assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    // Find the expression to examine
+    let expr: SyntaxNode | null = null
+    if (node.type === 'expression_statement' || node.type === 'return_statement') {
+      expr = node.namedChildren[0] ?? null
+    } else if (node.type === 'variable_declarator') {
+      expr = node.childForFieldName('value')
+    } else if (node.type === 'assignment_expression') {
+      expr = node.childForFieldName('right')
+    }
+    if (!expr) return null
+
+    let operatorCount = 0
+    const BINARY_TYPES = new Set(['binary_expression', 'logical_expression'])
+
+    function countOps(n: SyntaxNode) {
+      if (BINARY_TYPES.has(n.type)) {
+        operatorCount++
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) countOps(child)
+      }
+    }
+
+    countOps(expr)
+
+    if (operatorCount > 5) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Complex expression',
+        `Expression has ${operatorCount} binary/logical operators (max 5). Break it into named variables for readability.`,
+        sourceCode,
+        'Split the expression into smaller, named intermediate variables.',
+      )
+    }
+    return null
+  },
+}
+
+export const tooManySwitchCasesVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-switch-cases',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['switch_statement'],
+  visit(node, filePath, sourceCode) {
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    const caseCount = body.namedChildren.filter((c) => c.type === 'switch_case').length
+    if (caseCount > 10) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Too many switch cases',
+        `Switch has ${caseCount} cases (max 10). Consider using a lookup table or polymorphism.`,
+        sourceCode,
+        'Replace the switch with an object lookup table or strategy pattern.',
+      )
+    }
+    return null
+  },
+}
+
+export const tooManyUnionMembersVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-union-members',
+  languages: ['typescript', 'tsx'],
+  // Only fire on the top-level union_type (not nested union_type children)
+  nodeTypes: ['union_type'],
+  visit(node, filePath, sourceCode) {
+    // Skip if parent is also a union_type (left-recursive tree — only process outermost)
+    if (node.parent?.type === 'union_type') return null
+
+    // Count total leaf members by recursively flattening
+    function countMembers(n: SyntaxNode): number {
+      if (n.type !== 'union_type') return 1
+      let total = 0
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i)
+        if (child) total += countMembers(child)
+      }
+      return total
+    }
+
+    const memberCount = countMembers(node)
+    if (memberCount > 5) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Too many union members',
+        `Union type has ${memberCount} members (max 5). Consider using an enum or a type alias for clarity.`,
+        sourceCode,
+        'Extract the union into a named type alias or use an enum.',
+      )
+    }
+    return null
+  },
+}
+
+export const tooManyBreaksVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/too-many-breaks',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    let breakCount = 0
+
+    function walk(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (n.type === 'break_statement') breakCount++
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(bodyNode)
+
+    if (breakCount > 5) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Too many break statements',
+        `Function \`${name}\` has ${breakCount} break statements (max 5). Consider refactoring the control flow.`,
+        sourceCode,
+        'Refactor using early returns, helper functions, or lookup tables to reduce break usage.',
+      )
+    }
+    return null
+  },
+}
+
+export const identicalFunctionsVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/identical-functions',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['program'],
+  visit(node, filePath, sourceCode) {
+    const bodies: Array<{ body: string; fnNode: SyntaxNode }> = []
+
+    function walk(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type)) {
+        const body = getFunctionBody(n)
+        if (body && body.namedChildCount > 0) {
+          // Normalize whitespace for comparison
+          const normalized = body.text.replace(/\s+/g, ' ').trim()
+          bodies.push({ body: normalized, fnNode: n })
+        }
+        // Walk into the function body to catch nested functions
+        if (body) {
+          for (let i = 0; i < body.childCount; i++) {
+            const child = body.child(i)
+            if (child) walk(child)
+          }
+        }
+        return
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(node)
+
+    // Find duplicates — report first duplicate pair found
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        if (bodies[i].body === bodies[j].body && bodies[i].body.length > 10) {
+          const nameA = getFunctionName(bodies[i].fnNode)
+          const nameB = getFunctionName(bodies[j].fnNode)
+          return makeViolation(
+            this.ruleKey, bodies[i].fnNode, filePath, 'medium',
+            'Identical function bodies',
+            `Functions \`${nameA}\` and \`${nameB}\` have identical bodies. Extract to a shared function.`,
+            sourceCode,
+            'Extract the shared logic into a helper function and call it from both places.',
+          )
+        }
+      }
+    }
+    return null
+  },
+}
+
+export const unusedVariableVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unused-variable',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    // Collect all local variable declarations in this function (not nested)
+    const declared = new Map<string, SyntaxNode>()
+    const read = new Set<string>()
+
+    function collectDeclarations(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if ((n.type === 'variable_declaration' || n.type === 'lexical_declaration')) {
+        for (const declarator of n.namedChildren) {
+          if (declarator.type === 'variable_declarator') {
+            const nameNode = declarator.childForFieldName('name')
+            if (nameNode && nameNode.type === 'identifier') {
+              declared.set(nameNode.text, nameNode)
+            }
+          }
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectDeclarations(child)
+      }
+    }
+
+    function collectReads(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) {
+        // For nested functions, mark everything they reference as read
+        collectReadsUnscoped(n)
+        return
+      }
+      if (n.type === 'identifier') {
+        // Check if this identifier is being read (not declared, not assigned-to)
+        const parent = n.parent
+        if (parent) {
+          // Skip: left side of assignment
+          if ((parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression')
+            && parent.childForFieldName('left') === n) return
+          // Skip: variable_declarator name
+          if (parent.type === 'variable_declarator' && parent.childForFieldName('name') === n) return
+          // Skip: for-in/for-of left side
+          if (parent.type === 'for_in_statement' && parent.childForFieldName('left') === n) return
+          // Skip: update expression (i++ counts as write AND read — we'll say it's a read)
+        }
+        read.add(n.text)
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectReads(child)
+      }
+    }
+
+    function collectReadsUnscoped(n: SyntaxNode) {
+      if (n.type === 'identifier') read.add(n.text)
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectReadsUnscoped(child)
+      }
+    }
+
+    collectDeclarations(bodyNode)
+    collectReads(bodyNode)
+
+    for (const [name, nameNode] of declared) {
+      if (!read.has(name) && !name.startsWith('_')) {
+        return makeViolation(
+          this.ruleKey, nameNode, filePath, 'medium',
+          'Unused variable',
+          `Variable \`${name}\` is declared but never read. Remove it or prefix with _ to mark as intentionally unused.`,
+          sourceCode,
+          'Remove the unused variable or prefix its name with _ to acknowledge it is intentionally unused.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const unusedPrivateMemberVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unused-private-member',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['class_declaration', 'class'],
+  visit(node, filePath, sourceCode) {
+    // tree-sitter uses 'class_body' as child type name
+    const body = node.namedChildren.find((c) => c.type === 'class_body')
+    if (!body) return null
+
+    // Collect private members — tree-sitter uses 'public_field_definition' for field declarations
+    const privateMembers = new Map<string, SyntaxNode>()
+    for (const member of body.namedChildren) {
+      if (member.type === 'method_definition' || member.type === 'field_definition'
+        || member.type === 'public_field_definition') {
+        const isPrivate = member.children.some((c) => c.type === 'accessibility_modifier' && c.text === 'private')
+          || member.children.some((c) => c.type === 'private_property_identifier')
+        if (!isPrivate) continue
+        // Name node may be property_identifier or private_property_identifier
+        const nameNode = member.children.find((c) => c.type === 'property_identifier' || c.type === 'private_property_identifier')
+        if (nameNode) {
+          const name = nameNode.text.replace(/^#/, '')
+          privateMembers.set(name, nameNode)
+        }
+      }
+    }
+
+    if (privateMembers.size === 0) return null
+
+    // Check usages throughout the class body
+    const usedNames = new Set<string>()
+
+    function walk(n: SyntaxNode) {
+      if (n.type === 'member_expression') {
+        const obj = n.childForFieldName('object')
+        const prop = n.childForFieldName('property')
+        if (obj?.text === 'this' && prop) {
+          usedNames.add(prop.text.replace(/^#/, ''))
+        }
+      }
+      if (n.type === 'private_property_identifier') {
+        usedNames.add(n.text.replace(/^#/, ''))
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
+      }
+    }
+
+    walk(body)
+
+    for (const [name, nameNode] of privateMembers) {
+      // The declaration itself uses the name, so >0 refs needed
+      if (!usedNames.has(name)) {
+        return makeViolation(
+          this.ruleKey, nameNode, filePath, 'medium',
+          'Unused private member',
+          `Private member \`${name}\` is never accessed. Remove it or make it used.`,
+          sourceCode,
+          'Remove the unused private member or access it somewhere in the class.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const deadStoreVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/dead-store',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const ruleKey = this.ruleKey
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    // Track the last write-node per variable (and whether it was read since)
+    const lastAssign = new Map<string, { assignNode: SyntaxNode; hasBeenRead: boolean }>()
+
+    function markRead(name: string) {
+      const entry = lastAssign.get(name)
+      if (entry) entry.hasBeenRead = true
+    }
+
+    function markReadsInExpr(n: SyntaxNode) {
+      if (n.type === 'identifier') markRead(n.text)
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) markReadsInExpr(child)
+      }
+    }
+
+    function processStmts(stmts: SyntaxNode[]): import('@truecourse/shared').CodeViolation | null {
+      for (const stmt of stmts) {
+        // Track initial declarations: let x = <expr>
+        if (stmt.type === 'lexical_declaration' || stmt.type === 'variable_declaration') {
+          for (const decl of stmt.namedChildren) {
+            if (decl.type === 'variable_declarator') {
+              const nameNode = decl.childForFieldName('name')
+              const value = decl.childForFieldName('value')
+              if (nameNode?.type === 'identifier') {
+                // Mark reads in the RHS first
+                if (value) markReadsInExpr(value)
+                lastAssign.set(nameNode.text, { assignNode: decl, hasBeenRead: false })
+              }
+            }
+          }
+          continue
+        }
+
+        // Track simple re-assignments: x = <expr>
+        if (stmt.type === 'expression_statement') {
+          const expr = stmt.namedChildren[0]
+          if (expr?.type === 'assignment_expression') {
+            const left = expr.childForFieldName('left')
+            const right = expr.childForFieldName('right')
+            const opNode = expr.children.find((c) => c.type === '=')
+            if (left?.type === 'identifier' && opNode && right) {
+              const varName = left.text
+              const existing = lastAssign.get(varName)
+              // Mark reads in the RHS before checking dead store
+              markReadsInExpr(right)
+              if (existing && !existing.hasBeenRead) {
+                return makeViolation(
+                  ruleKey, existing.assignNode, filePath, 'medium',
+                  'Dead store',
+                  `Value assigned to \`${varName}\` is overwritten before being read.`,
+                  sourceCode,
+                  'Remove the dead assignment or use the value before overwriting it.',
+                )
+              }
+              lastAssign.set(varName, { assignNode: expr, hasBeenRead: false })
+              continue
+            }
+          }
+        }
+
+        // For all other statements, mark any identifier as read
+        markReadsInExpr(stmt)
+      }
+      return null
+    }
+
+    return processStmts(bodyNode.namedChildren)
+  },
+}
+
+export const unusedCollectionVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/unused-collection',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    // Find variables initialized to [], new Set(), new Map()
+    const collections = new Map<string, SyntaxNode>()
+
+    function isCollectionInit(n: SyntaxNode): boolean {
+      if (n.type === 'array') return true
+      if (n.type === 'new_expression') {
+        const ctor = n.childForFieldName('constructor')
+        if (ctor?.text === 'Set' || ctor?.text === 'Map' || ctor?.text === 'Array') return true
+      }
+      return false
+    }
+
+    function collectDecls(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (n.type === 'variable_declaration' || n.type === 'lexical_declaration') {
+        for (const decl of n.namedChildren) {
+          if (decl.type === 'variable_declarator') {
+            const nameNode = decl.childForFieldName('name')
+            const value = decl.childForFieldName('value')
+            if (nameNode?.type === 'identifier' && value && isCollectionInit(value)) {
+              collections.set(nameNode.text, nameNode)
+            }
+          }
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectDecls(child)
+      }
+    }
+
+    const reads = new Set<string>()
+    function collectReads(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) {
+        // Mark all identifiers in nested functions as read
+        function markAll(m: SyntaxNode) {
+          if (m.type === 'identifier') reads.add(m.text)
+          for (let i = 0; i < m.childCount; i++) {
+            const c = m.child(i)
+            if (c) markAll(c)
+          }
+        }
+        markAll(n)
+        return
+      }
+      if (n.type === 'identifier') {
+        const parent = n.parent
+        if (parent) {
+          if ((parent.type === 'variable_declarator') && parent.childForFieldName('name') === n) {
+            // declaration — not a read
+          } else if ((parent.type === 'assignment_expression') && parent.childForFieldName('left') === n) {
+            // Pure assignment left side (x = something) — check for member calls like x.push
+          } else {
+            reads.add(n.text)
+          }
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectReads(child)
+      }
+    }
+
+    collectDecls(bodyNode)
+    collectReads(bodyNode)
+
+    for (const [name, nameNode] of collections) {
+      if (!reads.has(name) && !name.startsWith('_')) {
+        return makeViolation(
+          this.ruleKey, nameNode, filePath, 'medium',
+          'Unused collection',
+          `Collection \`${name}\` is created but never read. Remove it or use it.`,
+          sourceCode,
+          'Remove the unused collection or use its contents somewhere.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const redundantAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/redundant-assignment',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['assignment_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    // Self-assignment: x = x
+    if (left.type === 'identifier' && right.type === 'identifier' && left.text === right.text) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Redundant self-assignment',
+        `\`${left.text} = ${right.text}\` assigns a variable to itself — this has no effect.`,
+        sourceCode,
+        'Remove the self-assignment.',
+      )
+    }
+
+    return null
+  },
+}
+
+export const noLonelyIfVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/no-lonely-if',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['else_clause'],
+  visit(node, filePath, sourceCode) {
+    const body = node.namedChildren[0]
+    if (!body || body.type !== 'statement_block') return null
+
+    const stmts = body.namedChildren
+    if (stmts.length !== 1 || stmts[0].type !== 'if_statement') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Lonely if in else block',
+      '`if` is the only statement inside `else {}`. Use `else if` instead.',
+      sourceCode,
+      'Replace `else { if (...) }` with `else if (...)`.',
+    )
+  },
+}
+
+export const uselessConstructorVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-constructor',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['method_definition'],
+  visit(node, filePath, sourceCode) {
+    const nameNode = node.childForFieldName('name')
+    if (nameNode?.text !== 'constructor') return null
+
+    const body = node.namedChildren.find((c) => c.type === 'statement_block')
+    if (!body) return null
+
+    const stmts = body.namedChildren
+    if (stmts.length !== 1) return null
+
+    const stmt = stmts[0]
+    if (stmt.type !== 'expression_statement') return null
+
+    const expr = stmt.namedChildren[0]
+    if (!expr || expr.type !== 'call_expression') return null
+
+    const fn = expr.childForFieldName('function')
+    if (!fn) return null
+
+    // Check for super(...)
+    if (fn.type !== 'super') return null
+
+    // Check that arguments are only identifiers matching constructor params (same args forwarded)
+    const params = node.childForFieldName('parameters')
+    const args = expr.childForFieldName('arguments')
+
+    if (!params || !args) return null
+
+    const paramTexts = params.namedChildren.map((p) => {
+      const n = p.childForFieldName('pattern') ?? p
+      return n.text
+    })
+    const argTexts = args.namedChildren.map((a) => a.text)
+
+    if (JSON.stringify(paramTexts) === JSON.stringify(argTexts)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Useless constructor',
+        'This constructor only calls `super()` with the same arguments — it can be removed.',
+        sourceCode,
+        'Remove the constructor — the parent class constructor will be called automatically.',
+      )
+    }
+    return null
+  },
+}
+
+export const uselessEscapeVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-escape',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    // Determine quote character
+    const quoteChar = text[0]
+    if (quoteChar !== '"' && quoteChar !== "'") return null
+
+    // Characters that are valid to escape in strings
+    const validEscapes = new Set(['n', 'r', 't', 'b', 'f', 'v', '0', '\\', quoteChar, 'u', 'x', '\n'])
+
+    let i = 1 // skip opening quote
+    while (i < text.length - 1) {
+      if (text[i] === '\\' && i + 1 < text.length - 1) {
+        const next = text[i + 1]
+        if (!validEscapes.has(next) && next !== '\r') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'low',
+            'Unnecessary escape character',
+            `Unnecessary escape \`\\${next}\` in string — the backslash has no effect here.`,
+            sourceCode,
+            `Remove the backslash: use \`${next}\` instead of \`\\${next}\`.`,
+          )
+        }
+        i += 2
+      } else {
+        i++
+      }
+    }
+    return null
+  },
+}
+
+export const uselessRenameVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-rename',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['object_pattern', 'object'],
+  visit(node, filePath, sourceCode) {
+    // For destructuring: { x: x } — object_pattern contains pair_pattern where key === value
+    if (node.type === 'object_pattern') {
+      for (const child of node.namedChildren) {
+        if (child.type === 'pair_pattern') {
+          const key = child.childForFieldName('key')
+          const value = child.childForFieldName('value')
+          if (key?.type === 'property_identifier' && value?.type === 'identifier'
+            && key.text === value.text) {
+            return makeViolation(
+              this.ruleKey, child, filePath, 'low',
+              'Useless destructuring rename',
+              `\`{ ${key.text}: ${value.text} }\` renames to the same name — use \`{ ${key.text} }\` instead.`,
+              sourceCode,
+              `Replace \`{ ${key.text}: ${key.text} }\` with \`{ ${key.text} }\`.`,
+            )
+          }
+        }
+      }
+    }
+    return null
+  },
+}
+
+export const uselessComputedKeyVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-computed-key',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['pair'],
+  visit(node, filePath, sourceCode) {
+    const key = node.childForFieldName('key')
+    if (!key) return null
+
+    // Computed key is wrapped in computed_property_name
+    if (key.type !== 'computed_property_name') return null
+
+    const inner = key.namedChildren[0]
+    if (!inner) return null
+
+    // If the inner expression is a string literal, it's useless
+    if (inner.type === 'string') {
+      const strVal = inner.text.slice(1, -1) // strip quotes
+      // If it's a valid identifier, flag it
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(strVal)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Useless computed property key',
+          `\`[${inner.text}]\` is a computed key with a string literal — use \`${strVal}\` directly.`,
+          sourceCode,
+          `Replace \`[${inner.text}]\` with \`${strVal}\`.`,
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const uselessConcatVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/useless-concat',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.type === '+')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+
+    if (left?.type === 'string' && right?.type === 'string') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Useless string concatenation',
+        `Concatenating two string literals ${left.text} + ${right.text} — merge them into one string.`,
+        sourceCode,
+        'Combine the string literals into a single string.',
+      )
+    }
+    return null
+  },
+}
+
+export const strictEqualityVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/strict-equality',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children.find((c) => c.type === '==' || c.type === '!=')
+    if (!op) return null
+
+    const opText = op.text
+    const strict = opText === '==' ? '===' : '!=='
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Loose equality operator',
+      `Using \`${opText}\` performs type coercion. Use \`${strict}\` for predictable comparisons.`,
+      sourceCode,
+      `Replace \`${opText}\` with \`${strict}\`.`,
+    )
+  },
+}
+
+export const commentedOutCodeVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/commented-out-code',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['comment'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+
+    // Skip JSDoc/documentation comments
+    if (text.startsWith('/**')) return null
+
+    // Extract the inner content
+    let inner = text
+    if (inner.startsWith('//')) inner = inner.slice(2).trim()
+    else if (inner.startsWith('/*')) inner = inner.slice(2, -2).trim()
+
+    if (inner.length < 10) return null
+
+    // Heuristics: lines that look like code
+    const codePatterns = [
+      /^\s*(const|let|var|function|return|if|for|while|import|export|class|throw|try|catch)\s/,
+      /[;{}()]\s*$/,
+      /=>/,
+      /\w+\s*\(.*\)\s*[;{]?\s*$/,
+    ]
+
+    const matchCount = codePatterns.filter((p) => p.test(inner)).length
+    if (matchCount >= 2) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Commented-out code',
+        'This comment appears to contain commented-out code. Remove it or track it in version control.',
+        sourceCode,
+        'Delete the commented-out code. If needed, it can be recovered from version control.',
+      )
+    }
+    return null
+  },
+}
+
+export const invertedBooleanVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/inverted-boolean',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['unary_expression'],
+  visit(node, filePath, sourceCode) {
+    const op = node.children[0]
+    if (op?.text !== '!') return null
+
+    const operand = node.namedChildren[0]
+    if (!operand) return null
+
+    // Pattern: !!x
+    if (operand.type === 'unary_expression') {
+      const innerOp = operand.children[0]
+      if (innerOp?.text === '!') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Double negation',
+          '`!!x` converts to boolean but can be replaced with `Boolean(x)` for clarity.',
+          sourceCode,
+          'Replace `!!x` with `Boolean(x)` or use a direct boolean check.',
+        )
+      }
+    }
+
+    // Pattern: !(x) where x is already unary negation — !(!x)
+    if (operand.type === 'parenthesized_expression') {
+      const inner = operand.namedChildren[0]
+      if (inner?.type === 'unary_expression' && inner.children[0]?.text === '!') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Double negation',
+          '`!(!x)` is equivalent to `!!x` — use the original value directly or `Boolean(x)`.',
+          sourceCode,
+          'Remove the double negation and use the value directly.',
+        )
+      }
+    }
+    return null
+  },
+}
+
+export const preferSingleBooleanReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-single-boolean-return',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    // Find if the body has ONLY if statements that each return true or false
+    const stmts = bodyNode.namedChildren
+    if (stmts.length < 2) return null
+
+    let allBooleanReturns = true
+    let hasAtLeastOneBoolReturn = false
+
+    for (const stmt of stmts) {
+      if (stmt.type === 'return_statement') {
+        const val = stmt.namedChildren[0]
+        if (val && (val.text === 'true' || val.text === 'false')) {
+          hasAtLeastOneBoolReturn = true
+        } else {
+          allBooleanReturns = false
+          break
+        }
+      } else if (stmt.type === 'if_statement') {
+        function checkIfReturnsBoolean(n: SyntaxNode): boolean {
+          const consequence = n.childForFieldName('consequence')
+          if (!consequence) return false
+          function getReturn(block: SyntaxNode): string | null {
+            if (block.type === 'return_statement') {
+              const val = block.namedChildren[0]
+              return val?.text ?? null
+            }
+            if (block.type === 'statement_block') {
+              const s = block.namedChildren
+              if (s.length === 1) return getReturn(s[0])
+            }
+            return null
+          }
+          const retVal = getReturn(consequence)
+          if (retVal !== 'true' && retVal !== 'false') return false
+          hasAtLeastOneBoolReturn = true
+          return true
+        }
+        if (!checkIfReturnsBoolean(stmt)) {
+          allBooleanReturns = false
+          break
+        }
+      } else {
+        allBooleanReturns = false
+        break
+      }
+    }
+
+    if (allBooleanReturns && hasAtLeastOneBoolReturn && stmts.length >= 2) {
+      const name = getFunctionName(node)
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Prefer single boolean return',
+        `Function \`${name}\` returns true/false in multiple branches — use a single boolean expression.`,
+        sourceCode,
+        'Replace multiple boolean returns with a single `return <condition>` expression.',
+      )
+    }
+    return null
+  },
+}
+
+export const preferImmediateReturnVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-immediate-return',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: JS_FUNCTION_TYPES,
+  visit(node, filePath, sourceCode) {
+    const bodyNode = getFunctionBody(node)
+    if (!bodyNode) return null
+
+    const stmts = bodyNode.namedChildren
+    if (stmts.length < 2) return null
+
+    const last = stmts[stmts.length - 1]
+    const secondLast = stmts[stmts.length - 2]
+
+    // Last statement must be: return <identifier>
+    if (last.type !== 'return_statement') return null
+    const retVal = last.namedChildren[0]
+    if (!retVal || retVal.type !== 'identifier') return null
+    const retName = retVal.text
+
+    // Second-to-last must be: const/let retName = <expr>
+    if (secondLast.type !== 'variable_declaration' && secondLast.type !== 'lexical_declaration') return null
+    const declarators = secondLast.namedChildren.filter((c) => c.type === 'variable_declarator')
+    if (declarators.length !== 1) return null
+    const decl = declarators[0]
+    const nameNode = decl.childForFieldName('name')
+    if (nameNode?.text !== retName) return null
+
+    // Make sure the variable is not used elsewhere in the function
+    let usageCount = 0
+    function countUsages(n: SyntaxNode) {
+      if (n.type === 'identifier' && n.text === retName) {
+        const parent = n.parent
+        if (parent?.type === 'variable_declarator' && parent.childForFieldName('name') === n) return
+        usageCount++
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) countUsages(child)
+      }
+    }
+    countUsages(bodyNode)
+
+    if (usageCount === 1) {
+      return makeViolation(
+        this.ruleKey, secondLast, filePath, 'low',
+        'Prefer immediate return',
+        `Variable \`${retName}\` is assigned and immediately returned — return the expression directly.`,
+        sourceCode,
+        `Replace \`const ${retName} = expr; return ${retName};\` with \`return expr;\`.`,
+      )
+    }
+    return null
+  },
+}
+
+export const preferWhileVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-while',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['for_statement'],
+  visit(node, filePath, sourceCode) {
+    const initializer = node.childForFieldName('initializer')
+    const condition = node.childForFieldName('condition')
+    const increment = node.childForFieldName('increment')
+
+    // for(;condition;) — initializer is empty_statement (;), condition exists, no increment
+    const initIsEmpty = !initializer || initializer.type === 'empty_statement'
+    if (initIsEmpty && condition && !increment) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Prefer while loop',
+        '`for(;condition;)` with no initializer or increment is clearer as `while(condition)`.',
+        sourceCode,
+        'Replace `for(;condition;) { ... }` with `while(condition) { ... }`.',
+      )
+    }
+    return null
+  },
+}
+
+export const preferObjectSpreadVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-object-spread',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const obj = fn.childForFieldName('object')
+    const prop = fn.childForFieldName('property')
+    if (obj?.text !== 'Object' || prop?.text !== 'assign') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const argList = args.namedChildren
+    if (argList.length < 1) return null
+
+    // First arg should be an empty object literal {}
+    const firstArg = argList[0]
+    if (firstArg.type !== 'object' || firstArg.namedChildCount !== 0) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Prefer object spread',
+      '`Object.assign({}, ...)` can be replaced with `{ ...obj }` object spread syntax.',
+      sourceCode,
+      'Replace `Object.assign({}, obj)` with `{ ...obj }`.',
+    )
+  },
+}
+
+export const preferOptionalChainVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-optional-chain',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['logical_expression', 'binary_expression'],
+  visit(node, filePath, sourceCode) {
+    // Pattern: a && a.b  or  a && a.b && a.b.c
+    const op = node.children.find((c) => c.type === '&&')
+    if (!op) return null
+
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (!left || !right) return null
+
+    // left should be a simple identifier, right should be a member_expression starting with that identifier
+    if (left.type === 'identifier') {
+      if (right.type === 'member_expression') {
+        const rightObj = right.childForFieldName('object')
+        if (rightObj?.text === left.text) {
+          // Don't fire if parent is also a && expression (let the outermost handle it)
+          const parent = node.parent
+          if (parent?.type === 'logical_expression' || parent?.type === 'binary_expression') {
+            const parentOp = parent.children.find((c) => c.type === '&&')
+            if (parentOp) return null
+          }
+          return makeViolation(
+            this.ruleKey, node, filePath, 'low',
+            'Prefer optional chaining',
+            `\`${left.text} && ${right.text}\` can be simplified to \`${left.text}?.${right.childForFieldName('property')?.text}\`.`,
+            sourceCode,
+            'Use optional chaining (?.) instead of the && guard.',
+          )
+        }
+      }
+    }
+    return null
+  },
+}
+
+export const preferNullishCoalescingVisitor: CodeRuleVisitor = {
+  ruleKey: 'code-quality/deterministic/prefer-nullish-coalescing',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['ternary_expression'],
+  visit(node, filePath, sourceCode) {
+    // Pattern: a !== null && a !== undefined ? a : b
+    // or simpler: a != null ? a : b
+    const condition = node.childForFieldName('condition')
+    const consequence = node.childForFieldName('consequence')
+
+    if (!condition || !consequence) return null
+
+    function getCheckedVar(cond: SyntaxNode): string | null {
+      // a != null  (covers both null and undefined due to loose equality)
+      if (cond.type === 'binary_expression') {
+        const op = cond.children.find((c) => c.type === '!=' || c.type === '!==')
+        if (op) {
+          const left = cond.childForFieldName('left')
+          const right = cond.childForFieldName('right')
+          if (left?.type === 'identifier' && (right?.text === 'null' || right?.text === 'undefined')) {
+            return left.text
+          }
+        }
+      }
+      // a !== null && a !== undefined
+      if (cond.type === 'logical_expression' || cond.type === 'binary_expression') {
+        const logOp = cond.children.find((c) => c.type === '&&')
+        if (logOp) {
+          const l = cond.childForFieldName('left')
+          const r = cond.childForFieldName('right')
+          if (l && r) {
+            const lVar = getCheckedVar(l)
+            const rVar = getCheckedVar(r)
+            if (lVar && lVar === rVar) return lVar
+          }
+        }
+      }
+      return null
+    }
+
+    const checkedVar = getCheckedVar(condition)
+    if (!checkedVar) return null
+
+    // consequence should be the same variable
+    if (consequence.type === 'identifier' && consequence.text === checkedVar) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Prefer nullish coalescing',
+        `\`${condition.text} ? ${consequence.text} : ...\` can be simplified to \`${checkedVar} ?? ...\`.`,
+        sourceCode,
+        `Replace with \`${checkedVar} ?? <default>\`.`,
+      )
+    }
+    return null
+  },
+}
+
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
   noExplicitAnyVisitor,
@@ -1194,4 +2295,29 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   noAlertVisitor,
   requireAwaitVisitor,
   noReturnAwaitVisitor,
+  expressionComplexityVisitor,
+  tooManySwitchCasesVisitor,
+  tooManyUnionMembersVisitor,
+  tooManyBreaksVisitor,
+  identicalFunctionsVisitor,
+  unusedVariableVisitor,
+  unusedPrivateMemberVisitor,
+  deadStoreVisitor,
+  unusedCollectionVisitor,
+  redundantAssignmentVisitor,
+  noLonelyIfVisitor,
+  uselessConstructorVisitor,
+  uselessEscapeVisitor,
+  uselessRenameVisitor,
+  uselessComputedKeyVisitor,
+  uselessConcatVisitor,
+  strictEqualityVisitor,
+  commentedOutCodeVisitor,
+  invertedBooleanVisitor,
+  preferSingleBooleanReturnVisitor,
+  preferImmediateReturnVisitor,
+  preferWhileVisitor,
+  preferObjectSpreadVisitor,
+  preferOptionalChainVisitor,
+  preferNullishCoalescingVisitor,
 ]

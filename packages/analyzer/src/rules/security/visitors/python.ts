@@ -1186,6 +1186,272 @@ export const pythonNonOctalFilePermissionsVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// unsafe-yaml-load (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonUnsafeYamlLoadVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unsafe-yaml-load',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'load') return null
+    if (objectName !== 'yaml') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // If the second argument is not SafeLoader or FullLoader, flag it
+    if (args.namedChildren.length < 2) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unsafe YAML load',
+        'yaml.load() without a SafeLoader can deserialize arbitrary Python objects and execute code.',
+        sourceCode,
+        'Use yaml.safe_load() or pass Loader=yaml.SafeLoader.',
+      )
+    }
+
+    const loaderArg = args.namedChildren[1]
+    const loaderText = loaderArg?.text ?? ''
+    if (!loaderText.includes('SafeLoader') && !loaderText.includes('FullLoader') &&
+        !loaderText.includes('safe_load')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Unsafe YAML load',
+        `yaml.load() with Loader=${loaderText} may allow arbitrary code execution.`,
+        sourceCode,
+        'Use yaml.safe_load() or pass Loader=yaml.SafeLoader.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unsafe-pickle-usage (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonUnsafePickleUsageVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unsafe-pickle-usage',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    if (methodName !== 'loads' && methodName !== 'load') return null
+    if (objectName !== 'pickle' && objectName !== 'cPickle' && objectName !== '_pickle') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'critical',
+      'Unsafe pickle usage',
+      `${objectName}.${methodName}() on untrusted data can execute arbitrary code.`,
+      sourceCode,
+      'Never deserialize pickle data from untrusted sources. Use JSON or a safe format instead.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// ssh-no-host-key-verification (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonSshNoHostKeyVerificationVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/ssh-no-host-key-verification',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    }
+
+    // paramiko: client.set_missing_host_key_policy(AutoAddPolicy())
+    if (methodName === 'set_missing_host_key_policy') {
+      const args = node.childForFieldName('arguments')
+      if (args) {
+        for (const arg of args.namedChildren) {
+          const argText = arg.text
+          if (argText.includes('AutoAddPolicy') || argText.includes('WarningPolicy')) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'high',
+              'SSH without host key verification',
+              `set_missing_host_key_policy(${argText}) bypasses host key verification, enabling MITM attacks.`,
+              sourceCode,
+              'Use RejectPolicy or known_hosts verification: client.set_missing_host_key_policy(paramiko.RejectPolicy()).',
+            )
+          }
+        }
+      }
+    }
+
+    // fabric/asyncssh: connect(host, known_hosts=None)
+    if (methodName === 'connect' || methodName === 'SSHClient') {
+      const args = node.childForFieldName('arguments')
+      if (args) {
+        for (const arg of args.namedChildren) {
+          if (arg.type === 'keyword_argument') {
+            const name = arg.childForFieldName('name')
+            const value = arg.childForFieldName('value')
+            if ((name?.text === 'known_hosts' || name?.text === 'check_host_keys') &&
+                (value?.text === 'None' || value?.text === "'ignore'" || value?.text === '"ignore"')) {
+              return makeViolation(
+                this.ruleKey, node, filePath, 'high',
+                'SSH without host key verification',
+                `SSH connection with ${name.text}=${value.text} disables host key verification.`,
+                sourceCode,
+                'Provide a known_hosts file for host key verification.',
+              )
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// unsafe-temp-file (Python)
+// ---------------------------------------------------------------------------
+
+const PYTHON_UNSAFE_TEMPFILE_FUNCTIONS = new Set(['mktemp', 'NamedTemporaryFile'])
+
+export const pythonUnsafeTempFileVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/unsafe-temp-file',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      const obj = fn.childForFieldName('object')
+      if (attr) methodName = attr.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    // tempfile.mktemp() — insecure, race condition
+    if (methodName === 'mktemp' && (objectName === 'tempfile' || objectName === '')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Unsafe temporary file creation',
+        'tempfile.mktemp() is deprecated and insecure due to a TOCTOU race condition.',
+        sourceCode,
+        'Use tempfile.mkstemp() or tempfile.NamedTemporaryFile() instead.',
+      )
+    }
+
+    // tempfile.NamedTemporaryFile(delete=False) without mode restriction
+    if (methodName === 'NamedTemporaryFile' && (objectName === 'tempfile' || objectName === '')) {
+      const args = node.childForFieldName('arguments')
+      if (args) {
+        let hasDeleteFalse = false
+        for (const arg of args.namedChildren) {
+          if (arg.type === 'keyword_argument') {
+            const name = arg.childForFieldName('name')
+            const value = arg.childForFieldName('value')
+            if (name?.text === 'delete' && value?.text === 'False') {
+              hasDeleteFalse = true
+            }
+          }
+        }
+        if (hasDeleteFalse) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Unsafe temporary file creation',
+            'NamedTemporaryFile(delete=False) creates a persistent temp file that may not be cleaned up securely.',
+            sourceCode,
+            'Ensure the file is deleted securely after use, or use tempfile.mkstemp() and manage cleanup yourself.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// flask-secret-key-disclosed (Python)
+// ---------------------------------------------------------------------------
+
+export const pythonFlaskSecretKeyDisclosedVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/flask-secret-key-disclosed',
+  languages: ['python'],
+  nodeTypes: ['assignment'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+
+    if (!left || !right) return null
+
+    const leftText = left.text
+
+    // app.secret_key = "hardcoded" or app.config['SECRET_KEY'] = "hardcoded"
+    // or SECRET_KEY = "hardcoded"
+    const isSecretKey = leftText === 'SECRET_KEY' ||
+      leftText.endsWith('.secret_key') ||
+      leftText.includes("['SECRET_KEY']") ||
+      leftText.includes('["SECRET_KEY"]')
+
+    if (!isSecretKey) return null
+
+    // Flag if the value is a string literal
+    if (right.type === 'string' || right.type === 'concatenated_string') {
+      const val = right.text.replace(/^['"]+|['"]+$/g, '')
+      // Ignore env var references
+      if (!val.includes('environ') && !val.includes('getenv') && val.length >= 1) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'critical',
+          'Flask SECRET_KEY hardcoded',
+          `Flask SECRET_KEY is hardcoded as a string literal. This compromises session security.`,
+          sourceCode,
+          'Load the SECRET_KEY from an environment variable: app.secret_key = os.environ["SECRET_KEY"].',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonSqlInjectionVisitor,
   pythonEvalUsageVisitor,
@@ -1213,4 +1479,9 @@ export const SECURITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonVulnerableLibraryImportVisitor,
   pythonProcessStartNoShellVisitor,
   pythonNonOctalFilePermissionsVisitor,
+  pythonUnsafeYamlLoadVisitor,
+  pythonUnsafePickleUsageVisitor,
+  pythonSshNoHostKeyVerificationVisitor,
+  pythonUnsafeTempFileVisitor,
+  pythonFlaskSecretKeyDisclosedVisitor,
 ]

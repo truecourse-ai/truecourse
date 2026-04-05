@@ -1834,6 +1834,833 @@ export const unverifiedCrossOriginMessageVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// intrusive-permissions (JS)
+// ---------------------------------------------------------------------------
+
+const DANGEROUS_PERMISSIONS = new Set(['geolocation', 'camera', 'microphone', 'notifications', 'push'])
+
+export const intrusivePermissionsVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/intrusive-permissions',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // navigator.permissions.query({ name: 'geolocation' })
+    // navigator.geolocation.getCurrentPosition(...)
+    // navigator.mediaDevices.getUserMedia(...)
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (!prop || !obj) return null
+
+      if (prop.text === 'getUserMedia') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Intrusive permissions request',
+          'getUserMedia() requests camera/microphone access. Ensure the user is informed before requesting.',
+          sourceCode,
+          'Request permissions only when necessary and explain the purpose to the user.',
+        )
+      }
+
+      if (prop.text === 'getCurrentPosition' || prop.text === 'watchPosition') {
+        const objText = obj.text
+        if (objText.includes('geolocation') || objText.includes('navigator')) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'medium',
+            'Intrusive permissions request',
+            `${prop.text}() requests geolocation access. Ensure the user is informed before requesting.`,
+            sourceCode,
+            'Request permissions only when necessary and explain the purpose to the user.',
+          )
+        }
+      }
+
+      if (prop.text === 'query' && obj.type === 'member_expression') {
+        const innerProp = obj.childForFieldName('property')
+        if (innerProp?.text === 'permissions') {
+          const args = node.childForFieldName('arguments')
+          if (args) {
+            for (const arg of args.namedChildren) {
+              if (arg.type === 'object') {
+                for (const pair of arg.namedChildren) {
+                  if (pair.type === 'pair') {
+                    const key = pair.childForFieldName('key')
+                    const value = pair.childForFieldName('value')
+                    if (key?.text === 'name' && value) {
+                      const permName = value.text.replace(/['"]/g, '').toLowerCase()
+                      if (DANGEROUS_PERMISSIONS.has(permName)) {
+                        return makeViolation(
+                          this.ruleKey, node, filePath, 'medium',
+                          'Intrusive permissions request',
+                          `Querying "${permName}" permission. Ensure the user is informed before requesting.`,
+                          sourceCode,
+                          'Request permissions only when necessary and explain the purpose to the user.',
+                        )
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// session-not-regenerated (JS)
+// ---------------------------------------------------------------------------
+
+export const sessionNotRegeneratedVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/session-not-regenerated',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Look for login-like functions that don't call req.session.regenerate()
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (!prop || !obj) return null
+
+      // req.session.save() or req.session.destroy() in a login handler
+      // without regenerate() being called — detect direct session assignment after auth
+      // Pattern: req.session.userId = ... or req.session.user = ... without regenerate
+      if (prop.text === 'save' && obj.type === 'member_expression') {
+        const sessionProp = obj.childForFieldName('property')
+        if (sessionProp?.text === 'session') {
+          // Walk up to the nearest route handler function body and check for regenerate
+          let parent = node.parent
+          let routeText = ''
+          while (parent) {
+            // Collect all ancestor blocks until we reach a function that looks like a route handler
+            if (parent.type === 'arrow_function' || parent.type === 'function_expression' ||
+                parent.type === 'function_declaration') {
+              // Keep walking up to find enclosing route-level function
+              routeText = parent.text
+              // If this function's parent is a call_expression argument list, it's likely a callback/route handler
+              if (parent.parent?.type === 'arguments' || parent.parent?.type === 'call_expression') {
+                // Check whether the surrounding call chain includes regenerate
+                let ancestor = parent.parent
+                while (ancestor) {
+                  if (ancestor.text.includes('regenerate')) break
+                  if (ancestor.type === 'program' || ancestor.type === 'module') {
+                    return makeViolation(
+                      this.ruleKey, node, filePath, 'high',
+                      'Session not regenerated after login',
+                      'req.session.save() called without regenerating the session ID. This risks session fixation attacks.',
+                      sourceCode,
+                      'Call req.session.regenerate() before saving session data after login.',
+                    )
+                  }
+                  ancestor = ancestor.parent!
+                }
+                return null
+              }
+            }
+            if (parent.type === 'program' || parent.type === 'module') break
+            parent = parent.parent!
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// publicly-writable-directory (JS)
+// ---------------------------------------------------------------------------
+
+const TMP_PATH_PATTERNS = ['/tmp/', '/var/tmp/', '/dev/shm/']
+
+export const publiclyWritableDirectoryVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/publicly-writable-directory',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'writeFile' && methodName !== 'writeFileSync' &&
+        methodName !== 'appendFile' && methodName !== 'appendFileSync' &&
+        methodName !== 'open' && methodName !== 'openSync') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const pathText = firstArg.text.replace(/['"]/g, '')
+    for (const tmpPath of TMP_PATH_PATTERNS) {
+      if (pathText.startsWith(tmpPath) || pathText.includes(tmpPath)) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Writing to world-writable directory',
+          `${methodName}() writes to "${pathText}" which is a world-writable directory. Race conditions may allow attackers to hijack the file.`,
+          sourceCode,
+          'Use os.tmpdir() with a uniquely named file, or use a library like tmp or tempfile for secure temp file creation.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// dynamically-constructed-template (JS)
+// ---------------------------------------------------------------------------
+
+const TEMPLATE_ENGINE_METHODS = new Set(['render', 'compile', 'template', 'renderString', 'renderFile'])
+
+export const dynamicallyConstructedTemplateVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/dynamically-constructed-template',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (!TEMPLATE_ENGINE_METHODS.has(methodName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    // Flag if the first arg is a template literal with user-input substitution
+    if (firstArg.type === 'template_string') {
+      const hasSubstitution = firstArg.namedChildren.some((c) => c.type === 'template_substitution')
+      if (hasSubstitution) {
+        const argText = firstArg.text.toLowerCase()
+        if (argText.includes('req.') || argText.includes('params') ||
+            argText.includes('query') || argText.includes('body') ||
+            argText.includes('input') || argText.includes('user')) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Dynamically constructed template',
+            `${methodName}() called with a template string containing user-controlled input. This may enable Server-Side Template Injection (SSTI).`,
+            sourceCode,
+            'Never construct template strings from user input. Pass user data as template variables instead.',
+          )
+        }
+      }
+    }
+
+    // Flag if the first arg is a binary_expression (concatenation) including req. access
+    if (firstArg.type === 'binary_expression') {
+      const argText = firstArg.text.toLowerCase()
+      if (argText.includes('req.') || argText.includes('params') ||
+          argText.includes('query') || argText.includes('body')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'Dynamically constructed template',
+          `${methodName}() called with a concatenated string containing user-controlled input. This may enable SSTI.`,
+          sourceCode,
+          'Never construct template strings from user input. Pass user data as template variables instead.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// angular-sanitization-bypass (JS/TS)
+// ---------------------------------------------------------------------------
+
+const ANGULAR_BYPASS_METHODS = new Set([
+  'bypassSecurityTrustHtml',
+  'bypassSecurityTrustStyle',
+  'bypassSecurityTrustScript',
+  'bypassSecurityTrustUrl',
+  'bypassSecurityTrustResourceUrl',
+])
+
+export const angularSanitizationBypassVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/angular-sanitization-bypass',
+  languages: ['typescript', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (ANGULAR_BYPASS_METHODS.has(methodName)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Angular sanitization bypass',
+        `${methodName}() disables Angular's built-in XSS protection. Ensure input is sanitized manually.`,
+        sourceCode,
+        'Avoid bypassSecurityTrust* methods. If required, ensure all input is thoroughly sanitized first.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// session-cookie-on-static (JS)
+// ---------------------------------------------------------------------------
+
+export const sessionCookieOnStaticVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/session-cookie-on-static',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    }
+
+    // app.use('/static', session(...), express.static(...))
+    // Detect app.use(path, session, static) pattern
+    if (methodName !== 'use') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args || args.namedChildren.length < 2) return null
+
+    const firstArg = args.namedChildren[0]
+    // First arg should be a static-like path
+    if (firstArg?.type !== 'string') return null
+    const routePath = firstArg.text.replace(/['"]/g, '').toLowerCase()
+    if (!routePath.includes('static') && !routePath.includes('assets') &&
+        !routePath.includes('public') && !routePath.includes('css') &&
+        !routePath.includes('js') && !routePath.includes('images')) return null
+
+    // Check if session middleware is also in the args
+    const middlewareText = args.namedChildren.slice(1).map((n) => n.text).join(' ')
+    if (middlewareText.includes('session(') || middlewareText.includes('cookieSession(')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Session middleware on static routes',
+        `Session middleware applied to static route "${routePath}". This creates unnecessary session overhead.`,
+        sourceCode,
+        'Remove session middleware from static file routes.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// user-id-from-request-body (JS)
+// ---------------------------------------------------------------------------
+
+export const userIdFromRequestBodyVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/user-id-from-request-body',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['member_expression'],
+  visit(node, filePath, sourceCode) {
+    // Detect req.body.userId, req.body.user_id, req.body.id patterns
+    const obj = node.childForFieldName('object')
+    const prop = node.childForFieldName('property')
+
+    if (!obj || !prop) return null
+
+    const propText = prop.text.toLowerCase()
+    if (propText !== 'userid' && propText !== 'user_id' && propText !== 'accountid' && propText !== 'account_id') return null
+
+    if (obj.type === 'member_expression') {
+      const outerObj = obj.childForFieldName('object')
+      const outerProp = obj.childForFieldName('property')
+      if (outerObj?.text === 'req' && outerProp?.text === 'body') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'User ID from request body',
+          `Using ${node.text} as user identity. Client-supplied IDs can be forged.`,
+          sourceCode,
+          'Use the authenticated user identity from req.user or the session token instead of req.body.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// mass-assignment (JS)
+// ---------------------------------------------------------------------------
+
+const ORM_CREATE_METHODS = new Set(['create', 'update', 'updateOne', 'updateMany', 'findOneAndUpdate', 'save', 'insert', 'insertOne'])
+
+export const massAssignmentVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/mass-assignment',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (!ORM_CREATE_METHODS.has(methodName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Look for req.body or spread of req.body directly as the first/second argument
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'member_expression') {
+        const obj = arg.childForFieldName('object')
+        const prop = arg.childForFieldName('property')
+        if (obj?.text === 'req' && prop?.text === 'body') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Mass assignment vulnerability',
+            `${methodName}() called directly with req.body. Attackers can set arbitrary fields.`,
+            sourceCode,
+            'Use an allowlist to pick only expected fields: const { name, email } = req.body.',
+          )
+        }
+      }
+      // Spread of req.body: { ...req.body }
+      if (arg.type === 'object') {
+        for (const child of arg.namedChildren) {
+          if (child.type === 'spread_element') {
+            const spreadText = child.text
+            if (spreadText.includes('req.body')) {
+              return makeViolation(
+                this.ruleKey, node, filePath, 'high',
+                'Mass assignment vulnerability',
+                `${methodName}() called with spread of req.body. Attackers can set arbitrary fields.`,
+                sourceCode,
+                'Use an allowlist to pick only expected fields: const { name, email } = req.body.',
+              )
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// timing-attack-comparison (JS)
+// ---------------------------------------------------------------------------
+
+const SENSITIVE_COMPARISON_PATTERNS = /(?:token|secret|hmac|signature|apikey|api_key|hash|digest|password|passwd)/i
+
+export const timingAttackComparisonVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/timing-attack-comparison',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['binary_expression'],
+  visit(node, filePath, sourceCode) {
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    const operator = node.children.find((c) => c.type === '===' || c.type === '!==')
+
+    if (!operator || !left || !right) return null
+
+    // Check if either side references a sensitive variable name
+    const leftText = left.text
+    const rightText = right.text
+
+    if (SENSITIVE_COMPARISON_PATTERNS.test(leftText) || SENSITIVE_COMPARISON_PATTERNS.test(rightText)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Timing attack via string comparison',
+        `Using ${operator.text} to compare what may be a secret/token. This is vulnerable to timing attacks.`,
+        sourceCode,
+        'Use crypto.timingSafeEqual() for comparing secrets and tokens.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// user-input-in-path (JS)
+// ---------------------------------------------------------------------------
+
+const FS_READ_WRITE_METHODS = new Set([
+  'readFile', 'readFileSync', 'writeFile', 'writeFileSync',
+  'readdir', 'readdirSync', 'unlink', 'unlinkSync',
+  'stat', 'statSync', 'access', 'accessSync',
+  'open', 'openSync', 'createReadStream', 'createWriteStream',
+])
+
+export const userInputInPathVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/user-input-in-path',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    let objectName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      const obj = fn.childForFieldName('object')
+      if (prop) methodName = prop.text
+      if (obj) objectName = obj.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (!FS_READ_WRITE_METHODS.has(methodName)) return null
+    // Skip path.join — covered by path-command-injection
+    if (objectName === 'path') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const argText = firstArg.text.toLowerCase()
+    if (argText.includes('req.') || argText.includes('req[') ||
+        argText.includes('params') || argText.includes('query') ||
+        argText.includes('body') || argText.includes('userinput') ||
+        argText.includes('user_input') || argText.includes('filename')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'User input in file path',
+        `${methodName}() called with user-controlled path. This may allow path traversal attacks.`,
+        sourceCode,
+        'Validate and sanitize file paths. Use path.resolve() and verify the result stays within the expected directory.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// user-input-in-redirect (JS)
+// ---------------------------------------------------------------------------
+
+export const userInputInRedirectVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/user-input-in-redirect',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (methodName !== 'redirect') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Check all arguments for user input
+    for (const arg of args.namedChildren) {
+      const argText = arg.text.toLowerCase()
+      if (argText.includes('req.') || argText.includes('params') ||
+          argText.includes('query') || argText.includes('body') ||
+          argText.includes('userinput') || argText.includes('user_input') ||
+          argText.includes('returnurl') || argText.includes('return_url') ||
+          argText.includes('redirecturl') || argText.includes('redirect_url')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'User input in redirect URL',
+          'res.redirect() called with user-controlled URL. This allows open redirect attacks.',
+          sourceCode,
+          'Validate redirect URLs against an allowlist of trusted domains before redirecting.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// missing-helmet-middleware (JS)
+// ---------------------------------------------------------------------------
+
+export const missingHelmetMiddlewareVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/missing-helmet-middleware',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Detect express() initialization
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    }
+
+    if (funcName !== 'express') return null
+
+    // Look at the surrounding block for app.use(helmet())
+    let parent = node.parent
+    let blockText = ''
+    while (parent) {
+      if (parent.type === 'program' || parent.type === 'module') {
+        blockText = parent.text
+        break
+      }
+      parent = parent.parent
+    }
+
+    if (blockText && !blockText.includes('helmet')) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Missing helmet middleware',
+        'Express app initialized without helmet middleware. Security headers are not set.',
+        sourceCode,
+        'Add helmet: app.use(helmet()) to set security headers.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// jwt-no-expiry (JS)
+// ---------------------------------------------------------------------------
+
+export const jwtNoExpiryVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/jwt-no-expiry',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (methodName !== 'sign') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // jwt.sign(payload, secret) — only two args, no options
+    if (args.namedChildren.length < 3) {
+      // Make sure it's likely jwt by checking for sign pattern
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'JWT signed without expiration',
+        'jwt.sign() called without options. JWTs without expiresIn never expire.',
+        sourceCode,
+        'Add an expiresIn option: jwt.sign(payload, secret, { expiresIn: "1h" }).',
+      )
+    }
+
+    // jwt.sign(payload, secret, options) — check if expiresIn is absent
+    const optionsArg = args.namedChildren[2]
+    if (optionsArg?.type === 'object') {
+      let hasExpiresIn = false
+      for (const prop of optionsArg.namedChildren) {
+        if (prop.type === 'pair') {
+          const key = prop.childForFieldName('key')
+          if (key?.text === 'expiresIn') {
+            hasExpiresIn = true
+            break
+          }
+        }
+      }
+      if (!hasExpiresIn) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'JWT signed without expiration',
+          'jwt.sign() options do not include expiresIn. JWTs without expiry never expire.',
+          sourceCode,
+          'Add expiresIn to the options: { expiresIn: "1h" }.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// sensitive-data-in-url (JS)
+// ---------------------------------------------------------------------------
+
+const SENSITIVE_URL_PARAMS = /[?&](password|passwd|secret|token|api_?key|auth|access_token|refresh_token)=/i
+
+export const sensitiveDataInUrlVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/sensitive-data-in-url',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    const stripped = text.replace(/^['"`]|['"`]$/g, '')
+
+    if (SENSITIVE_URL_PARAMS.test(stripped)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Sensitive data in URL',
+        'Password or token found in URL query parameter. URLs are logged in server logs and browser history.',
+        sourceCode,
+        'Send sensitive data in the request body or Authorization header instead of URL query parameters.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// express-trust-proxy-not-set (JS)
+// ---------------------------------------------------------------------------
+
+export const expressTrustProxyNotSetVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/express-trust-proxy-not-set',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    // Look for app.set('trust proxy', ...) calls
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    }
+
+    if (methodName !== 'set') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args || args.namedChildren.length < 2) return null
+
+    const firstArg = args.namedChildren[0]
+    if (!firstArg) return null
+
+    const settingName = firstArg.text.replace(/['"]/g, '').toLowerCase()
+    if (settingName !== 'trust proxy') return null
+
+    const valueArg = args.namedChildren[1]
+    if (!valueArg) return null
+
+    // Flag if trust proxy is set to false or 0
+    if (valueArg.text === 'false' || valueArg.text === '0') {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Express trust proxy not configured',
+        'app.set("trust proxy", false) disables proxy trust. If this app is behind a reverse proxy, IP detection will be incorrect.',
+        sourceCode,
+        'Set trust proxy to the number of proxies or a specific IP: app.set("trust proxy", 1).',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// hardcoded-password-function-arg (JS)
+// ---------------------------------------------------------------------------
+
+const PASSWORD_FUNCTION_NAMES = /(?:login|authenticate|connect|bind|createConnection|createClient|auth|verify|checkPassword|comparePassword)/i
+const PLAINTEXT_PASSWORD_PATTERN = /^[a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':",.<>?/\\|`~]{8,}$/
+
+export const hardcodedPasswordFunctionArgVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-password-function-arg',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let funcName = ''
+    if (fn.type === 'identifier') {
+      funcName = fn.text
+    } else if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) funcName = prop.text
+    }
+
+    if (!PASSWORD_FUNCTION_NAMES.test(funcName)) return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'string') {
+        const val = arg.text.replace(/['"]/g, '')
+        if (val.length >= 8 && PLAINTEXT_PASSWORD_PATTERN.test(val) &&
+            !/^https?:\/\//.test(val) && !/localhost/.test(val)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Hardcoded password as function argument',
+            `${funcName}() called with a hardcoded string that looks like a password.`,
+            sourceCode,
+            'Move credentials to environment variables and reference them via process.env.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   sqlInjectionVisitor,
   evalUsageVisitor,
@@ -1873,4 +2700,20 @@ export const SECURITY_JS_VISITORS: CodeRuleVisitor[] = [
   mixedContentVisitor,
   sslVersionUnsafeVisitor,
   unverifiedCrossOriginMessageVisitor,
+  intrusivePermissionsVisitor,
+  sessionNotRegeneratedVisitor,
+  publiclyWritableDirectoryVisitor,
+  dynamicallyConstructedTemplateVisitor,
+  angularSanitizationBypassVisitor,
+  sessionCookieOnStaticVisitor,
+  userIdFromRequestBodyVisitor,
+  massAssignmentVisitor,
+  timingAttackComparisonVisitor,
+  userInputInPathVisitor,
+  userInputInRedirectVisitor,
+  missingHelmetMiddlewareVisitor,
+  jwtNoExpiryVisitor,
+  sensitiveDataInUrlVisitor,
+  expressTrustProxyNotSetVisitor,
+  hardcodedPasswordFunctionArgVisitor,
 ]
