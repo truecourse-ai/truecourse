@@ -76,6 +76,77 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// hardcoded-ip
+// ---------------------------------------------------------------------------
+
+const IPV4_REGEX = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/
+const EXCLUDED_IPS = new Set(['127.0.0.1', '0.0.0.0', '255.255.255.255'])
+
+export const hardcodedIpVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-ip',
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+
+    const match = IPV4_REGEX.exec(stripped)
+    if (!match) return null
+
+    const ip = match[1]
+    if (EXCLUDED_IPS.has(ip)) return null
+
+    // Validate each octet is 0-255
+    const octets = ip.split('.')
+    if (octets.some((o) => parseInt(o, 10) > 255)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Hardcoded IP address',
+      `Hardcoded IP address "${ip}" found. Use configuration or DNS names instead.`,
+      sourceCode,
+      'Move IP addresses to configuration files or environment variables.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// clear-text-protocol
+// ---------------------------------------------------------------------------
+
+const CLEARTEXT_PROTOCOLS = ['http://', 'ftp://', 'telnet://']
+const LOCALHOST_PREFIXES = ['http://localhost', 'http://127.0.0.1', 'http://0.0.0.0']
+
+export const clearTextProtocolVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/clear-text-protocol',
+  nodeTypes: ['string', 'template_string'],
+  visit(node, filePath, sourceCode) {
+    const text = node.text
+    const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    const lower = stripped.toLowerCase()
+
+    for (const protocol of CLEARTEXT_PROTOCOLS) {
+      if (lower.startsWith(protocol)) {
+        // Exclude localhost/loopback for local development
+        if (LOCALHOST_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
+          return null
+        }
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'Clear-text protocol',
+          `Use of unencrypted protocol "${protocol}" detected. Data may be intercepted in transit.`,
+          sourceCode,
+          'Use encrypted protocols (https://, sftp://, ssh://) instead.',
+        )
+      }
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_UNIVERSAL_VISITORS: CodeRuleVisitor[] = [
   hardcodedSecretVisitor,
+  hardcodedIpVisitor,
+  clearTextProtocolVisitor,
 ]
