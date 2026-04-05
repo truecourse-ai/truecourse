@@ -2899,7 +2899,7 @@ Rule domains: security, bugs, architecture, code-quality, style, performance, re
 
 Pure tree-sitter node matching. 958 rules implemented across all 8 domains with 2,622 tests. File-per-rule visitor structure. 92 rules skipped (need type inference/data flow — see 30.2/30.3). 81 LLM rules need prompt text (no code).
 
-### 30.2 Local Data-Flow Tracking (Priority 2 — Medium Effort) `STATUS: TODO`
+### 30.2 Local Data-Flow Tracking `STATUS: TODO`
 
 Requires tracking variable assignments, return values, or control flow within a single function. Still single-file, tree-sitter based. 22 new rules.
 
@@ -2907,13 +2907,13 @@ Requires tracking variable assignments, return values, or control flow within a 
 
 **Code Smells (13 rules):** `no-collapsible-if`, `no-redundant-jump`, `no-redundant-boolean`, `no-duplicated-branches`, `no-identical-functions`, `no-unused-collection`, `no-extra-arguments`, `no-duplicate-string`, `require-await`, `no-loss-of-precision`, `no-nested-switch`, `no-nested-template-literals`, `no-constant-binary-expression`
 
-### 30.3 Type-Aware Rules (Priority 3 — Medium Effort) `STATUS: TODO`
+### 30.3 Type-Aware Rules `STATUS: TODO`
 
 Requires TypeScript type information. Uses existing `ts-compiler.ts` with `ts.Program` and type checker. ~20 rules, TypeScript only.
 
 `no-misused-promises`, `no-for-in-array`, `no-unsafe-assignment`, `no-unsafe-return`, `no-unsafe-call`, `no-unsafe-member-access`, `no-unsafe-argument`, `strict-boolean-expressions`, `no-unnecessary-type-assertion`, `no-unnecessary-condition`, `no-redundant-type-constituents`, `no-confusing-void-expression`, `await-thenable`, `no-base-to-string`, `restrict-plus-operands`, `restrict-template-expressions`, `unbound-method`, `no-meaningless-void-operator`, `dead-store`, `prefer-return-this-type`
 
-### 30.4 Cross-File Taint Analysis Engine (Priority 4 — High Effort) `STATUS: TODO`
+### 30.4 Cross-File Taint Analysis `STATUS: TODO`
 
 Build a taint tracking engine on top of our existing dependency graph and method-level call tracking. This is where SonarQube's real value lives — and where we can beat them by leveraging our architecture-aware dependency graph.
 
@@ -2946,17 +2946,7 @@ Taint Engine
 
 **Security rules (~30):** `cross-file-sql-injection`, `cross-file-xss`, `cross-file-command-injection`, `open-redirect`, `ssrf`, `path-traversal`, `ldap-injection`, `regex-injection`, `header-injection`, `jwt-no-verify`, `weak-crypto`, `crypto-no-salt`, `insecure-cookie`, `cors-permissive`, `hardcoded-credentials`, `weak-tls`, `math-random-security`, `no-cleartext-protocols`, `deserialization`, `log-injection`, plus ~10 Python-specific sink rules.
 
-### 30.5 Duplicate Code Detection (Priority 5 — Medium Effort) `STATUS: TODO`
-
-Token-based comparison algorithm to detect copy-pasted code blocks across the codebase.
-
-1. Tokenize each file (strip whitespace, normalize identifiers)
-2. Build token sequences using a sliding window (e.g., 50 tokens)
-3. Hash each window, compare across files
-4. Merge overlapping matches into contiguous duplicate blocks
-5. Report duplicate blocks with file locations and percentage
-
-### 30.6 Secret Scanning Overhaul `STATUS: TODO`
+### 30.5 Secret Scanning Overhaul `STATUS: TODO`
 
 Overhaul hardcoded secret detection to dramatically reduce false positives and expand coverage. Current implementation uses 6 regex patterns with basic filtering. Detailed research and implementation priorities in `docs/SECRET-DETECTION-RESEARCH.md`.
 
@@ -2970,7 +2960,7 @@ Overhaul hardcoded secret detection to dramatically reduce false positives and e
 6. **Keyword pre-filtering** — fast substring check before regex (performance)
 7. **Per-rule allowlists** — surgical FP suppression
 
-### 30.7 Smarter Circular Dependency Detection `STATUS: TODO`
+### 30.6 Smarter Circular Dependency Detection `STATUS: TODO`
 
 Improve circular dependency detection with proper graph algorithms and lazy import awareness. Current implementation uses simple bidirectional edge checking. Detailed research in `docs/MADGE-RESEARCH.md`.
 
@@ -2982,6 +2972,16 @@ Improve circular dependency detection with proper graph algorithms and lazy impo
    - Static import cycle → high severity
    - Dynamic/lazy import cycle → low severity (warning)
    - Type-only import cycle → info (harmless)
+
+### 30.7 Duplicate Code Detection `STATUS: TODO`
+
+Token-based comparison algorithm to detect copy-pasted code blocks across the codebase.
+
+1. Tokenize each file (strip whitespace, normalize identifiers)
+2. Build token sequences using a sliding window (e.g., 50 tokens)
+3. Hash each window, compare across files
+4. Merge overlapping matches into contiguous duplicate blocks
+5. Report duplicate blocks with file locations and percentage
 
 ### Fix Generation
 
