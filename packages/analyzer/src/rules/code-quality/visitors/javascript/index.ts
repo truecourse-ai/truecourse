@@ -198,6 +198,18 @@ import { regexConciseVisitor } from './regex-concise.js'
 import { missingDestructuringVisitor } from './missing-destructuring.js'
 import { preferObjectLiteralVisitor } from './prefer-object-literal.js'
 import { magicStringVisitor } from './magic-string.js'
+import { reduceTypeCastVisitor } from './reduce-type-cast.js'
+import { unnecessaryParameterPropertyAssignmentVisitor } from './unnecessary-parameter-property-assignment.js'
+import { testIncompleteAssertionVisitor } from './test-incomplete-assertion.js'
+import { testCodeAfterDoneVisitor } from './test-code-after-done.js'
+import { testMissingExceptionCheckVisitor } from './test-missing-exception-check.js'
+import { testDeterministicAssertionVisitor } from './test-deterministic-assertion.js'
+import { htmlTableAccessibilityVisitor } from './html-table-accessibility.js'
+import { jsUselessCatchVisitor } from './useless-catch.js'
+import { jsDebuggerStatementVisitor } from './debugger-statement.js'
+import { jsAlertUsageVisitor } from './alert-usage.js'
+import { jsEmptyFunctionVisitor } from './empty-function.js'
+import { jsPrimitiveWrapperVisitor } from './primitive-wrapper.js'
 
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
@@ -400,4 +412,18 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   missingDestructuringVisitor,
   preferObjectLiteralVisitor,
   magicStringVisitor,
+  // Batch 10 — second half of remaining rules
+  reduceTypeCastVisitor,
+  unnecessaryParameterPropertyAssignmentVisitor,
+  testIncompleteAssertionVisitor,
+  testCodeAfterDoneVisitor,
+  testMissingExceptionCheckVisitor,
+  testDeterministicAssertionVisitor,
+  htmlTableAccessibilityVisitor,
+  // Batch 11 — first half of remaining new rules
+  jsUselessCatchVisitor,
+  jsDebuggerStatementVisitor,
+  jsAlertUsageVisitor,
+  jsEmptyFunctionVisitor,
+  jsPrimitiveWrapperVisitor,
 ]

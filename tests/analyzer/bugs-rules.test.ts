@@ -7966,3 +7966,343 @@ describe('Python bugs/deterministic/shared-mutable-module-state', () => {
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// JS: promise-reject-non-error
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/promise-reject-non-error', () => {
+  it('detects Promise.reject with string literal', () => {
+    const violations = check(`Promise.reject("something went wrong")`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/promise-reject-non-error');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects Promise.reject with number', () => {
+    const violations = check(`Promise.reject(404)`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/promise-reject-non-error');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag Promise.reject with new Error', () => {
+    const violations = check(`Promise.reject(new Error("something went wrong"))`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/promise-reject-non-error');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag Promise.reject with variable', () => {
+    const violations = check(`Promise.reject(err)`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/promise-reject-non-error');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: named-expr-without-context
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/named-expr-without-context', () => {
+  it('detects walrus operator as standalone statement', () => {
+    const violations = check(`
+(x := compute())
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/named-expr-without-context');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag walrus in if condition', () => {
+    const violations = check(`
+if (x := compute()) is not None:
+    use(x)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/named-expr-without-context');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: post-init-default
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/post-init-default', () => {
+  it('detects __post_init__ with default parameter', () => {
+    const violations = check(`
+from dataclasses import dataclass
+@dataclass
+class Foo:
+    x: int
+    def __post_init__(self, scale: float = 1.0):
+        self.x *= scale
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/post-init-default');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag __post_init__ without defaults', () => {
+    const violations = check(`
+from dataclasses import dataclass
+@dataclass
+class Foo:
+    x: int
+    def __post_init__(self):
+        pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/post-init-default');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: confusing-implicit-concat
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/confusing-implicit-concat', () => {
+  it('detects implicit string concat inside list', () => {
+    const violations = check(`
+items = ["foo" "bar", "baz"]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/confusing-implicit-concat');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag explicit concat with +', () => {
+    const violations = check(`
+items = ["foo" + "bar", "baz"]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/confusing-implicit-concat');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: numpy-weekmask-invalid
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/numpy-weekmask-invalid', () => {
+  it('detects invalid weekmask string', () => {
+    const violations = check(`
+import numpy as np
+cal = np.busdaycalendar(weekmask="Mon-Fri")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/numpy-weekmask-invalid');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid binary weekmask', () => {
+    const violations = check(`
+import numpy as np
+cal = np.busdaycalendar(weekmask="1111100")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/numpy-weekmask-invalid');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: datetime-constructor-range
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/datetime-constructor-range', () => {
+  it('detects out-of-range month', () => {
+    const violations = check(`
+from datetime import datetime
+dt = datetime(2023, 13, 1)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/datetime-constructor-range');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects out-of-range hour keyword arg', () => {
+    const violations = check(`
+from datetime import datetime
+dt = datetime(2023, 1, 1, hour=25)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/datetime-constructor-range');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid datetime', () => {
+    const violations = check(`
+from datetime import datetime
+dt = datetime(2023, 12, 31, hour=23, minute=59)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/datetime-constructor-range');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: tf-function-side-effects
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/tf-function-side-effects', () => {
+  it('detects print inside @tf.function', () => {
+    const violations = check(`
+import tensorflow as tf
+@tf.function
+def forward(x):
+    print(x)
+    return x * 2
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/tf-function-side-effects');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag tf.print inside @tf.function', () => {
+    const violations = check(`
+import tensorflow as tf
+@tf.function
+def forward(x):
+    tf.print(x)
+    return x * 2
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/tf-function-side-effects');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: ml-reduction-axis-missing
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/ml-reduction-axis-missing', () => {
+  it('detects .sum() without axis on tensor', () => {
+    const violations = check(`
+loss = output.sum()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/ml-reduction-axis-missing');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag .sum(axis=1)', () => {
+    const violations = check(`
+loss = output.sum(axis=1)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/ml-reduction-axis-missing');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: star-assignment-error
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/star-assignment-error', () => {
+  it('detects multiple starred expressions', () => {
+    const violations = check(`
+a, *b, *c = [1, 2, 3, 4]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/star-assignment-error');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag single starred expression', () => {
+    const violations = check(`
+a, *b, c = [1, 2, 3, 4]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/star-assignment-error');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: static-key-dict-comprehension-ruff
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/static-key-dict-comprehension-ruff', () => {
+  it('detects static key in dict comprehension', () => {
+    const violations = check(`
+d = {"key": v for v in items}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/static-key-dict-comprehension-ruff');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag variable key', () => {
+    const violations = check(`
+d = {k: v for k, v in items}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/static-key-dict-comprehension-ruff');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: pytest-raises-ambiguous-pattern
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/pytest-raises-ambiguous-pattern', () => {
+  it('detects plain string match pattern without anchors', () => {
+    const violations = check(`
+import pytest
+with pytest.raises(ValueError, match="invalid value"):
+    do_something()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/pytest-raises-ambiguous-pattern');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag anchored match pattern', () => {
+    const violations = check(`
+import pytest
+with pytest.raises(ValueError, match="^invalid value$"):
+    do_something()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/pytest-raises-ambiguous-pattern');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: used-dummy-variable
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/used-dummy-variable', () => {
+  it('detects _ prefixed parameter that is used', () => {
+    const violations = check(`
+def process(_value):
+    return _value + 1
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/used-dummy-variable');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag _ prefixed param that is not used', () => {
+    const violations = check(`
+def process(_value, name):
+    return name.upper()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/used-dummy-variable');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: fastapi-cors-middleware-order
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/fastapi-cors-middleware-order', () => {
+  it('detects CORSMiddleware added before other middleware', () => {
+    const violations = check(`
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"])
+app.add_middleware(SomeOtherMiddleware)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/fastapi-cors-middleware-order');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag CORSMiddleware added last', () => {
+    const violations = check(`
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+app = FastAPI()
+app.add_middleware(SomeOtherMiddleware)
+app.add_middleware(CORSMiddleware, allow_origins=["*"])
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/fastapi-cors-middleware-order');
+    expect(matches).toHaveLength(0);
+  });
+});

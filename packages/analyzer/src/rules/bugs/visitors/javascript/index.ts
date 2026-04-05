@@ -135,6 +135,7 @@ import { asyncVoidFunctionVisitor } from './async-void-function.js'
 import { missingAwaitVisitor } from './missing-await.js'
 import { genericErrorMessageVisitor } from './generic-error-message.js'
 import { useeffectMissingDepsVisitor } from './useeffect-missing-deps.js'
+import { promiseRejectNonErrorVisitor } from './promise-reject-non-error.js'
 
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
@@ -272,4 +273,5 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   missingAwaitVisitor,
   genericErrorMessageVisitor,
   useeffectMissingDepsVisitor,
+  promiseRejectNonErrorVisitor,
 ]

@@ -190,6 +190,23 @@ import { pythonLambdaNetworkCallNoTimeoutVisitor } from './lambda-network-call-n
 import { pythonLambdaTmpNotCleanedVisitor } from './lambda-tmp-not-cleaned.js'
 import { pythonPytorchNnModuleMissingSuperVisitor } from './pytorch-nn-module-missing-super.js'
 import { pythonGenericErrorMessageVisitor } from './generic-error-message.js'
+import { pythonNamedExprWithoutContextVisitor } from './named-expr-without-context.js'
+import { pythonInvalidCharacterInSourceVisitor } from './invalid-character-in-source.js'
+import { pythonPostInitDefaultVisitor } from './post-init-default.js'
+import { pythonImplicitClassvarInDataclassVisitor } from './implicit-classvar-in-dataclass.js'
+import { pythonConfusingImplicitConcatVisitor } from './confusing-implicit-concat.js'
+import { pythonNumpyWeekmaskInvalidVisitor } from './numpy-weekmask-invalid.js'
+import { pythonDatetimeConstructorRangeVisitor } from './datetime-constructor-range.js'
+import { pythonTfFunctionSideEffectsVisitor } from './tf-function-side-effects.js'
+import { pythonMlReductionAxisMissingVisitor } from './ml-reduction-axis-missing.js'
+import { pythonPytestFixtureMisuseVisitor } from './pytest-fixture-misuse.js'
+import { pythonAirflowUsageErrorVisitor } from './airflow-usage-error.js'
+import { pythonStarAssignmentErrorVisitor } from './star-assignment-error.js'
+import { pythonStaticKeyDictComprehensionRuffVisitor } from './static-key-dict-comprehension-ruff.js'
+import { pythonPytestRaisesAmbiguousPatternVisitor } from './pytest-raises-ambiguous-pattern.js'
+import { pythonUsedDummyVariableVisitor } from './used-dummy-variable.js'
+import { pythonFastapiCorsMiddlewareOrderVisitor } from './fastapi-cors-middleware-order.js'
+import { pythonDictIndexMissingItemsVisitor } from './dict-index-missing-items.js'
 
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
@@ -382,4 +399,21 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonLambdaTmpNotCleanedVisitor,
   pythonPytorchNnModuleMissingSuperVisitor,
   pythonGenericErrorMessageVisitor,
+  pythonNamedExprWithoutContextVisitor,
+  pythonInvalidCharacterInSourceVisitor,
+  pythonPostInitDefaultVisitor,
+  pythonImplicitClassvarInDataclassVisitor,
+  pythonConfusingImplicitConcatVisitor,
+  pythonNumpyWeekmaskInvalidVisitor,
+  pythonDatetimeConstructorRangeVisitor,
+  pythonTfFunctionSideEffectsVisitor,
+  pythonMlReductionAxisMissingVisitor,
+  pythonPytestFixtureMisuseVisitor,
+  pythonAirflowUsageErrorVisitor,
+  pythonStarAssignmentErrorVisitor,
+  pythonStaticKeyDictComprehensionRuffVisitor,
+  pythonPytestRaisesAmbiguousPatternVisitor,
+  pythonUsedDummyVariableVisitor,
+  pythonFastapiCorsMiddlewareOrderVisitor,
+  pythonDictIndexMissingItemsVisitor,
 ]

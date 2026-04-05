@@ -200,6 +200,57 @@ import { pythonVerboseRaiseVisitor } from './verbose-raise.js'
 import { pythonYodaConditionVisitor } from './yoda-condition.js'
 import { pythonZipDictKeysValuesVisitor } from './zip-dict-keys-values.js'
 import { pythonZipInsteadOfPairwiseVisitor } from './zip-instead-of-pairwise.js'
+import { pythonPytestSuboptimalPatternVisitor } from './pytest-suboptimal-pattern.js'
+import { pythonIdiomSimplificationVisitor } from './python-idiom-simplification.js'
+import { pythonManualFromImportVisitor } from './manual-from-import.js'
+import { pythonFutureAnnotationsImportVisitor } from './future-annotations-import.js'
+import { pythonPyupgradeModernizationVisitor } from './pyupgrade-modernization.js'
+import { pythonPandasAccessorPreferenceVisitor } from './pandas-accessor-preference.js'
+import { pythonNonEmptyInitModuleVisitor } from './non-empty-init-module.js'
+import { pythonUnusedAnnotationVisitor } from './unused-annotation.js'
+import { pythonDuplicateUnionLiteralMemberVisitor } from './duplicate-union-literal-member.js'
+import { pythonUnnecessaryTypeUnionVisitor } from './unnecessary-type-union.js'
+import { pythonUnnecessaryCastToIntVisitor } from './unnecessary-cast-to-int.js'
+import { pythonUnnecessaryRoundVisitor } from './unnecessary-round.js'
+import { pythonAsyncSingleTaskGroupVisitor } from './async-single-task-group.js'
+import { pythonCheckAndRemoveFromSetVisitor } from './check-and-remove-from-set.js'
+import { pythonPandasMergeParametersVisitor } from './pandas-merge-parameters.js'
+import { pythonPytestDuplicateParametrizeVisitor } from './pytest-duplicate-parametrize.js'
+import { pythonUnnecessaryDictIndexLookupVisitor } from './unnecessary-dict-index-lookup.js'
+import { pythonUnnecessaryListIndexLookupVisitor } from './unnecessary-list-index-lookup.js'
+import { pythonGlobalVariableNotAssignedVisitor } from './global-variable-not-assigned.js'
+import { pythonRedeclaredAssignedNameVisitor } from './redeclared-assigned-name.js'
+import { pythonMissingMaxsplitArgVisitor } from './missing-maxsplit-arg.js'
+import { pythonAmbiguousUnicodeCharacterVisitor } from './ambiguous-unicode-character.js'
+import { pythonUnnecessaryKeyCheckVisitor } from './unnecessary-key-check.js'
+import { pythonDjangoUnorderedBodyContentVisitor } from './django-unordered-body-content.js'
+import { pythonTestNotDiscoverableVisitor } from './test-not-discoverable.js'
+import { pythonTestSkippedImplicitlyVisitor } from './test-skipped-implicitly.js'
+import { pythonRegexCharClassPreferredVisitor } from './regex-char-class-preferred.js'
+import { pythonRegexUnnecessaryNonCapturingGroupVisitor } from './regex-unnecessary-non-capturing-group.js'
+import { pythonRegexSuperfluousQuantifierVisitor } from './regex-superfluous-quantifier.js'
+import { pythonRegexOctalEscapeVisitor } from './regex-octal-escape.js'
+import { pythonLegacyGenericSyntaxVisitor } from './legacy-generic-syntax.js'
+import { pythonDeeplyNestedFstringVisitor } from './deeply-nested-fstring.js'
+import { pythonNumpyReproducibleRandomVisitor } from './numpy-reproducible-random.js'
+import { pythonPandasPipePreferredVisitor } from './pandas-pipe-preferred.js'
+import { pythonPandasDatetimeFormatVisitor } from './pandas-datetime-format.js'
+import { pythonTfFunctionRecursiveVisitor } from './tf-function-recursive.js'
+import { pythonTfFunctionGlobalVariableVisitor } from './tf-function-global-variable.js'
+import { pythonTfVariableSingletonVisitor } from './tf-variable-singleton.js'
+import { pythonTfKerasInputShapeVisitor } from './tf-keras-input-shape.js'
+import { pythonMlMissingHyperparametersVisitor } from './ml-missing-hyperparameters.js'
+import { pythonTorchModelEvalTrainVisitor } from './torch-model-eval-train.js'
+import { pythonLambdaInitResourcesVisitor } from './lambda-init-resources.js'
+import { pythonLambdaSyncInvocationVisitor } from './lambda-sync-invocation.js'
+import { pythonLambdaReservedEnvVarVisitor } from './lambda-reserved-env-var.js'
+import { pythonBoto3ClientErrorVisitor } from './boto3-client-error.js'
+import { pythonAwsCustomPollingVisitor } from './aws-custom-polling.js'
+import { pythonFastapiImportStringVisitor } from './fastapi-import-string.js'
+import { pythonFastapiTestclientContentVisitor } from './fastapi-testclient-content.js'
+import { pythonFastapiUndocumentedExceptionVisitor } from './fastapi-undocumented-exception.js'
+import { pythonDictFromkeysForConstantVisitor } from './dict-fromkeys-for-constant.js'
+import { pythonCompressionNamespaceImportVisitor } from './compression-namespace-import.js'
 
 export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonPrintVisitor,
@@ -397,4 +448,56 @@ export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonYodaConditionVisitor,
   pythonZipDictKeysValuesVisitor,
   pythonZipInsteadOfPairwiseVisitor,
+  pythonPytestSuboptimalPatternVisitor,
+  pythonIdiomSimplificationVisitor,
+  pythonManualFromImportVisitor,
+  pythonFutureAnnotationsImportVisitor,
+  pythonPyupgradeModernizationVisitor,
+  pythonPandasAccessorPreferenceVisitor,
+  pythonNonEmptyInitModuleVisitor,
+  pythonUnusedAnnotationVisitor,
+  pythonDuplicateUnionLiteralMemberVisitor,
+  pythonUnnecessaryTypeUnionVisitor,
+  pythonUnnecessaryCastToIntVisitor,
+  pythonUnnecessaryRoundVisitor,
+  // Batch — first half of remaining new rules
+  pythonAsyncSingleTaskGroupVisitor,
+  pythonCheckAndRemoveFromSetVisitor,
+  pythonPandasMergeParametersVisitor,
+  pythonPytestDuplicateParametrizeVisitor,
+  pythonUnnecessaryDictIndexLookupVisitor,
+  pythonUnnecessaryListIndexLookupVisitor,
+  pythonGlobalVariableNotAssignedVisitor,
+  pythonRedeclaredAssignedNameVisitor,
+  pythonMissingMaxsplitArgVisitor,
+  pythonAmbiguousUnicodeCharacterVisitor,
+  pythonUnnecessaryKeyCheckVisitor,
+  pythonDjangoUnorderedBodyContentVisitor,
+  pythonTestNotDiscoverableVisitor,
+  pythonTestSkippedImplicitlyVisitor,
+  pythonRegexCharClassPreferredVisitor,
+  pythonRegexUnnecessaryNonCapturingGroupVisitor,
+  pythonRegexSuperfluousQuantifierVisitor,
+  pythonRegexOctalEscapeVisitor,
+  pythonLegacyGenericSyntaxVisitor,
+  pythonDeeplyNestedFstringVisitor,
+  pythonNumpyReproducibleRandomVisitor,
+  pythonPandasPipePreferredVisitor,
+  pythonPandasDatetimeFormatVisitor,
+  pythonTfFunctionRecursiveVisitor,
+  pythonTfFunctionGlobalVariableVisitor,
+  pythonTfVariableSingletonVisitor,
+  pythonTfKerasInputShapeVisitor,
+  pythonMlMissingHyperparametersVisitor,
+  pythonTorchModelEvalTrainVisitor,
+  pythonLambdaInitResourcesVisitor,
+  pythonLambdaSyncInvocationVisitor,
+  pythonLambdaReservedEnvVarVisitor,
+  pythonBoto3ClientErrorVisitor,
+  pythonAwsCustomPollingVisitor,
+  pythonFastapiImportStringVisitor,
+  pythonFastapiTestclientContentVisitor,
+  pythonFastapiUndocumentedExceptionVisitor,
+  pythonDictFromkeysForConstantVisitor,
+  pythonCompressionNamespaceImportVisitor,
 ]
