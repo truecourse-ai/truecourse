@@ -140,6 +140,7 @@ import { invariantReturnVisitor } from './invariant-return.js'
 import { unboundMethodVisitor } from './unbound-method.js'
 import { useBeforeDefineVisitor } from './use-before-define.js'
 import { noUndefVisitor } from './no-undef.js'
+import { missingErrorBoundaryVisitor } from './missing-error-boundary.js'
 
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
@@ -283,4 +284,5 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   // Data-flow rules (Tier 1)
   useBeforeDefineVisitor,
   noUndefVisitor,
+  missingErrorBoundaryVisitor,
 ]

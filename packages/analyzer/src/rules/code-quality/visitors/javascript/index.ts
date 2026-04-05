@@ -223,6 +223,13 @@ import { unusedPrivateNestedClassVisitor } from './unused-private-nested-class.j
 import { unreadPrivateAttributeVisitor } from './unread-private-attribute.js'
 import { unusedScopeDefinitionVisitor } from './unused-scope-definition.js'
 import { deprecatedApiUsageVisitor } from './deprecated-api-usage.js'
+import { envInLibraryCodeVisitor } from './env-in-library-code.js'
+import { internalApiUsageVisitor } from './internal-api-usage.js'
+import { flakyTestVisitor } from './flaky-test.js'
+import { staticMethodCandidateVisitor } from './static-method-candidate.js'
+import { requiredTypeAnnotationsVisitor } from './required-type-annotations.js'
+import { restrictedApiUsageVisitor } from './restricted-api-usage.js'
+import { restrictedTypesVisitor } from './restricted-types.js'
 
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
@@ -453,4 +460,11 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   unreadPrivateAttributeVisitor,
   unusedScopeDefinitionVisitor,
   deprecatedApiUsageVisitor,
+  envInLibraryCodeVisitor,
+  internalApiUsageVisitor,
+  flakyTestVisitor,
+  staticMethodCandidateVisitor,
+  requiredTypeAnnotationsVisitor,
+  restrictedApiUsageVisitor,
+  restrictedTypesVisitor,
 ]

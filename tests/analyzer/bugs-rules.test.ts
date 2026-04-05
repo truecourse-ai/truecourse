@@ -8471,3 +8471,290 @@ function run() {
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// regex-alternatives-redundant (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/regex-alternatives-redundant', () => {
+  it('detects duplicate alternatives in regex', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'foo|bar|foo')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-alternatives-redundant');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag distinct alternatives', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'foo|bar|baz')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-alternatives-redundant');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// regex-lookahead-contradictory (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/regex-lookahead-contradictory', () => {
+  it('detects contradictory positive/negative lookahead', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'(?=a)(?!a)')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-lookahead-contradictory');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-contradictory lookaheads', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'(?=a)(?=a)')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-lookahead-contradictory');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// regex-boundary-unmatchable (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/regex-boundary-unmatchable', () => {
+  it('detects contradictory word boundary', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'\\b\\B')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-boundary-unmatchable');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid boundary usage', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'\\bword\\b')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-boundary-unmatchable');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// regex-possessive-always-fails (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/regex-possessive-always-fails', () => {
+  it('detects possessive quantifier followed by same char', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'a++a')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-possessive-always-fails');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-possessive quantifier', () => {
+    const violations = check(`
+import re
+pattern = re.compile(r'a+b')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/regex-possessive-always-fails');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// missing-error-boundary (JS/TS)
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/missing-error-boundary', () => {
+  it('detects missing error boundary with useQuery', () => {
+    const violations = check(`
+import React from 'react';
+import { useQuery } from 'react-query';
+
+function UserList() {
+  const { data } = useQuery('users', fetchUsers);
+  return <div>{data}</div>;
+}
+`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-error-boundary');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag when ErrorBoundary is present', () => {
+    const violations = check(`
+import React from 'react';
+import { useQuery } from 'react-query';
+import { ErrorBoundary } from 'react-error-boundary';
+
+function UserList() {
+  const { data } = useQuery('users', fetchUsers);
+  return <ErrorBoundary><div>{data}</div></ErrorBoundary>;
+}
+`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-error-boundary');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// einops-pattern-invalid (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/einops-pattern-invalid', () => {
+  it('detects missing arrow in einops pattern', () => {
+    const violations = check(`
+from einops import rearrange
+result = rearrange(tensor, 'b c h w')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/einops-pattern-invalid');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid einops pattern', () => {
+    const violations = check(`
+from einops import rearrange
+result = rearrange(tensor, 'b c h w -> b (c h) w')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/einops-pattern-invalid');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// lambda-handler-returns-non-serializable (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/lambda-handler-returns-non-serializable', () => {
+  it('detects set return from lambda handler', () => {
+    const violations = check(`
+def handler(event, context):
+    return {1, 2, 3}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/lambda-handler-returns-non-serializable');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag dict return from lambda handler', () => {
+    const violations = check(`
+def handler(event, context):
+    return {"statusCode": 200}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/lambda-handler-returns-non-serializable');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sklearn-pipeline-invalid-params (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/sklearn-pipeline-invalid-params', () => {
+  it('detects triple underscore in pipeline params', () => {
+    const violations = check(`
+pipeline.set_params(clf___alpha=0.1)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/sklearn-pipeline-invalid-params');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid double underscore params', () => {
+    const violations = check(`
+pipeline.set_params(clf__alpha=0.1)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/sklearn-pipeline-invalid-params');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forward-annotation-syntax-error (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/forward-annotation-syntax-error', () => {
+  it('detects unbalanced brackets in forward annotation', () => {
+    const violations = check(`
+x: "List[int" = []
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/forward-annotation-syntax-error');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag valid forward annotation', () => {
+    const violations = check(`
+x: "List[int]" = []
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/forward-annotation-syntax-error');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runtime-import-in-type-checking (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/runtime-import-in-type-checking', () => {
+  it('detects runtime usage of TYPE_CHECKING import', () => {
+    const violations = check(`
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mymodule import MyClass
+
+def check(x):
+    return isinstance(x, MyClass)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/runtime-import-in-type-checking');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag annotation-only usage', () => {
+    const violations = check(`
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mymodule import MyClass
+
+def check(x: "MyClass") -> None:
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/runtime-import-in-type-checking');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redefined-slots-in-subclass (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/redefined-slots-in-subclass', () => {
+  it('detects redefined slots in subclass', () => {
+    const violations = check(`
+class Base:
+    __slots__ = ('x', 'y')
+
+class Child(Base):
+    __slots__ = ('x', 'z')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/redefined-slots-in-subclass');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-overlapping slots', () => {
+    const violations = check(`
+class Base:
+    __slots__ = ('x', 'y')
+
+class Child(Base):
+    __slots__ = ('z', 'w')
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/redefined-slots-in-subclass');
+    expect(matches).toHaveLength(0);
+  });
+});

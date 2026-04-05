@@ -207,6 +207,16 @@ import { pythonPytestRaisesAmbiguousPatternVisitor } from './pytest-raises-ambig
 import { pythonUsedDummyVariableVisitor } from './used-dummy-variable.js'
 import { pythonFastapiCorsMiddlewareOrderVisitor } from './fastapi-cors-middleware-order.js'
 import { pythonDictIndexMissingItemsVisitor } from './dict-index-missing-items.js'
+import { pythonRegexAlternativesRedundantVisitor } from './regex-alternatives-redundant.js'
+import { pythonRegexLookaheadContradictoryVisitor } from './regex-lookahead-contradictory.js'
+import { pythonRegexBoundaryUnmatchableVisitor } from './regex-boundary-unmatchable.js'
+import { pythonRegexPossessiveAlwaysFailsVisitor } from './regex-possessive-always-fails.js'
+import { pythonEinopsPatternInvalidVisitor } from './einops-pattern-invalid.js'
+import { pythonLambdaHandlerReturnsNonSerializableVisitor } from './lambda-handler-returns-non-serializable.js'
+import { pythonSklearnPipelineInvalidParamsVisitor } from './sklearn-pipeline-invalid-params.js'
+import { pythonForwardAnnotationSyntaxErrorVisitor } from './forward-annotation-syntax-error.js'
+import { pythonRuntimeImportInTypeCheckingVisitor } from './runtime-import-in-type-checking.js'
+import { pythonRedefinedSlotsInSubclassVisitor } from './redefined-slots-in-subclass.js'
 
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
@@ -416,4 +426,14 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonUsedDummyVariableVisitor,
   pythonFastapiCorsMiddlewareOrderVisitor,
   pythonDictIndexMissingItemsVisitor,
+  pythonRegexAlternativesRedundantVisitor,
+  pythonRegexLookaheadContradictoryVisitor,
+  pythonRegexBoundaryUnmatchableVisitor,
+  pythonRegexPossessiveAlwaysFailsVisitor,
+  pythonEinopsPatternInvalidVisitor,
+  pythonLambdaHandlerReturnsNonSerializableVisitor,
+  pythonSklearnPipelineInvalidParamsVisitor,
+  pythonForwardAnnotationSyntaxErrorVisitor,
+  pythonRuntimeImportInTypeCheckingVisitor,
+  pythonRedefinedSlotsInSubclassVisitor,
 ]

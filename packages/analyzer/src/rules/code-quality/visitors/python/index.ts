@@ -251,6 +251,9 @@ import { pythonFastapiTestclientContentVisitor } from './fastapi-testclient-cont
 import { pythonFastapiUndocumentedExceptionVisitor } from './fastapi-undocumented-exception.js'
 import { pythonDictFromkeysForConstantVisitor } from './dict-fromkeys-for-constant.js'
 import { pythonCompressionNamespaceImportVisitor } from './compression-namespace-import.js'
+import { pythonTypingOnlyImportVisitor } from './typing-only-import.js'
+import { pythonBannedApiImportVisitor } from './banned-api-import.js'
+import { pythonAirflow3MigrationVisitor } from './airflow-3-migration.js'
 
 export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonPrintVisitor,
@@ -500,4 +503,7 @@ export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonFastapiUndocumentedExceptionVisitor,
   pythonDictFromkeysForConstantVisitor,
   pythonCompressionNamespaceImportVisitor,
+  pythonTypingOnlyImportVisitor,
+  pythonBannedApiImportVisitor,
+  pythonAirflow3MigrationVisitor,
 ]
