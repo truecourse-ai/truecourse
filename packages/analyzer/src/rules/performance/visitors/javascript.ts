@@ -514,6 +514,332 @@ export const stateUpdateInLoopVisitor: CodeRuleVisitor = {
 }
 
 // ---------------------------------------------------------------------------
+// 11. settimeout-setinterval-no-clear
+// ---------------------------------------------------------------------------
+
+export const setTimeoutNoStoreVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/settimeout-setinterval-no-clear',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['expression_statement'],
+  visit(node, filePath, sourceCode) {
+    const expr = node.namedChildren[0]
+    if (!expr || expr.type !== 'call_expression') return null
+
+    const fn = expr.childForFieldName('function')
+    if (!fn || fn.type !== 'identifier') return null
+    if (fn.text !== 'setTimeout' && fn.text !== 'setInterval') return null
+
+    // If the expression_statement directly calls setTimeout/setInterval without assignment,
+    // the return value (timer ref) is lost
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      `${fn.text}() without storing reference`,
+      `${fn.text}() called without storing the return value. The timer cannot be cleared later, which may cause memory leaks.`,
+      sourceCode,
+      `Store the return value: const timerId = ${fn.text}(...) and clear it when no longer needed.`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// 12. unbounded-array-growth
+// ---------------------------------------------------------------------------
+
+export const unboundedArrayGrowthVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/unbounded-array-growth',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (prop?.text !== 'push') return null
+
+    if (!isInsideLoop(node)) return null
+
+    // Check if there's a length/size check in the loop or a splice/shift nearby
+    const loopNode = findEnclosingLoop(node)
+    if (!loopNode) return null
+
+    const loopText = loopNode.text
+    if (loopText.includes('.length') && (loopText.includes('splice') || loopText.includes('shift') || loopText.includes('pop') || loopText.includes('slice'))) {
+      return null
+    }
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'Array.push() in loop without bounds',
+      'Array.push() inside a loop without any bounds checking or pruning can lead to unbounded memory growth.',
+      sourceCode,
+      'Add a maximum size check or use a bounded data structure (e.g., ring buffer).',
+    )
+  },
+}
+
+function findEnclosingLoop(node: SyntaxNode): SyntaxNode | null {
+  let current = node.parent
+  while (current) {
+    if (LOOP_TYPES.has(current.type)) return current
+    if (
+      current.type === 'function_declaration' ||
+      current.type === 'arrow_function' ||
+      current.type === 'method_definition' ||
+      current.type === 'function'
+    ) {
+      return null
+    }
+    current = current.parent
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// 13. missing-usememo-expensive
+// ---------------------------------------------------------------------------
+
+const EXPENSIVE_ARRAY_METHODS = new Set(['sort', 'filter', 'reduce', 'flatMap', 'flat'])
+
+export const missingUseMemoExpensiveVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/missing-usememo-expensive',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const prop = fn.childForFieldName('property')
+    if (!prop || !EXPENSIVE_ARRAY_METHODS.has(prop.text)) return null
+
+    // Check if inside a React component function (heuristic: PascalCase function containing JSX return)
+    const enclosingFn = findEnclosingFunctionNode(node)
+    if (!enclosingFn) return null
+
+    // Get function name
+    let funcName = ''
+    if (enclosingFn.type === 'function_declaration') {
+      const nameNode = enclosingFn.childForFieldName('name')
+      if (nameNode) funcName = nameNode.text
+    } else if (enclosingFn.parent?.type === 'variable_declarator') {
+      const nameNode = enclosingFn.parent.childForFieldName('name')
+      if (nameNode) funcName = nameNode.text
+    }
+
+    // Must be a PascalCase name (React component)
+    if (!funcName || !/^[A-Z]/.test(funcName)) return null
+
+    // Check if we're already inside useMemo or useCallback
+    if (isInsideHook(node)) return null
+
+    // Check if the result is already wrapped in useMemo
+    const statement = findContainingStatement(node)
+    if (statement && statement.text.includes('useMemo')) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      `Expensive .${prop.text}() in render without useMemo`,
+      `.${prop.text}() in a component body recalculates on every render. Wrap in useMemo for stable references.`,
+      sourceCode,
+      `Wrap the computation in useMemo: const result = useMemo(() => data.${prop.text}(...), [data]);`,
+    )
+  },
+}
+
+function findEnclosingFunctionNode(node: SyntaxNode): SyntaxNode | null {
+  let current = node.parent
+  while (current) {
+    if (
+      current.type === 'function_declaration' ||
+      current.type === 'arrow_function' ||
+      current.type === 'function'
+    ) {
+      return current
+    }
+    current = current.parent
+  }
+  return null
+}
+
+function isInsideHook(node: SyntaxNode): boolean {
+  let current: SyntaxNode | null = node.parent
+  while (current) {
+    if (current.type === 'call_expression') {
+      const fn = current.childForFieldName('function')
+      if (fn?.type === 'identifier' && (fn.text === 'useMemo' || fn.text === 'useCallback')) {
+        return true
+      }
+    }
+    current = current.parent
+  }
+  return false
+}
+
+function findContainingStatement(node: SyntaxNode): SyntaxNode | null {
+  let current: SyntaxNode | null = node
+  while (current) {
+    if (current.type === 'expression_statement' || current.type === 'lexical_declaration' || current.type === 'variable_declaration') {
+      return current
+    }
+    current = current.parent
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// 14. synchronous-crypto
+// ---------------------------------------------------------------------------
+
+const SYNC_CRYPTO_METHODS = new Set(['pbkdf2Sync', 'scryptSync', 'randomFillSync', 'generateKeyPairSync'])
+
+export const synchronousCryptoVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/synchronous-crypto',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn) return null
+
+    let methodName = ''
+    if (fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) methodName = prop.text
+    } else if (fn.type === 'identifier') {
+      methodName = fn.text
+    }
+
+    if (!SYNC_CRYPTO_METHODS.has(methodName)) return null
+
+    if (!isInsideAsyncFunctionOrHandler(node)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Synchronous crypto operation in async context',
+      `${methodName}() blocks the event loop. Use the async version in request handlers.`,
+      sourceCode,
+      `Replace ${methodName}() with its async counterpart (e.g., crypto.pbkdf2() with callback or util.promisify).`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// 15. missing-react-memo
+// ---------------------------------------------------------------------------
+
+export const missingReactMemoVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/missing-react-memo',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['export_statement'],
+  visit(node, filePath, sourceCode) {
+    // Look for: export default function ComponentName or export const Component =
+    // that returns JSX but is not wrapped in React.memo
+    const declaration = node.namedChildren[0]
+    if (!declaration) return null
+
+    let funcNode: SyntaxNode | null = null
+    let funcName = ''
+
+    if (declaration.type === 'function_declaration') {
+      funcNode = declaration
+      const nameNode = declaration.childForFieldName('name')
+      if (nameNode) funcName = nameNode.text
+    } else if (declaration.type === 'lexical_declaration') {
+      const declarator = declaration.namedChildren.find((c) => c.type === 'variable_declarator')
+      if (declarator) {
+        const nameNode = declarator.childForFieldName('name')
+        const valueNode = declarator.childForFieldName('value')
+        if (nameNode) funcName = nameNode.text
+        if (valueNode?.type === 'arrow_function' || valueNode?.type === 'function') {
+          funcNode = valueNode
+        }
+      }
+    }
+
+    if (!funcNode || !funcName || !/^[A-Z]/.test(funcName)) return null
+
+    // Check if component returns JSX
+    const bodyText = funcNode.text
+    if (!bodyText.includes('<') || !bodyText.includes('>')) return null
+
+    // Check if already wrapped in memo
+    if (sourceCode.includes(`memo(${funcName}`) || sourceCode.includes(`React.memo(${funcName}`)) return null
+
+    // Only flag if file seems to not use memo at all
+    if (sourceCode.includes('React.memo') || sourceCode.includes('memo(')) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      `Component ${funcName} without React.memo`,
+      `${funcName} is exported but not wrapped in React.memo(). If it receives stable props, wrapping it can prevent unnecessary re-renders.`,
+      sourceCode,
+      `Export with memo: export default React.memo(${funcName});`,
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+// 16. unnecessary-context-provider
+// ---------------------------------------------------------------------------
+
+export const unnecessaryContextProviderVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/unnecessary-context-provider',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['jsx_element'],
+  visit(node, filePath, sourceCode) {
+    const openingTag = node.namedChildren.find((c) => c.type === 'jsx_opening_element')
+    if (!openingTag) return null
+
+    const tagName = openingTag.namedChildren.find((c) => c.type === 'member_expression' || c.type === 'identifier')
+    if (!tagName) return null
+
+    // Check for .Provider suffix
+    if (!tagName.text.endsWith('.Provider')) return null
+
+    // Count JSX children (non-whitespace)
+    const children = node.namedChildren.filter((c) =>
+      c.type !== 'jsx_opening_element' &&
+      c.type !== 'jsx_closing_element' &&
+      c.type !== 'jsx_text',
+    )
+
+    if (children.length === 1) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Context provider wrapping single child',
+        `${tagName.text} wraps only a single child. Consider whether the context is necessary or if props would suffice.`,
+        sourceCode,
+        'Consider passing props directly instead of using context for a single child.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// 17. sync-require-in-handler
+// ---------------------------------------------------------------------------
+
+export const syncRequireInHandlerVisitor: CodeRuleVisitor = {
+  ruleKey: 'performance/deterministic/sync-require-in-handler',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'identifier' || fn.text !== 'require') return null
+
+    if (!isInsideAsyncFunctionOrHandler(node)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'medium',
+      'require() inside request handler',
+      'require() is synchronous and blocks the event loop on first call. Move imports to the top of the file.',
+      sourceCode,
+      'Move the require() to the top of the file, outside the request handler.',
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
 // Export all visitors
 // ---------------------------------------------------------------------------
 
@@ -528,4 +854,11 @@ export const PERFORMANCE_JS_VISITORS: CodeRuleVisitor[] = [
   largeBundleImportVisitor,
   jsonParseInLoopVisitor,
   stateUpdateInLoopVisitor,
+  setTimeoutNoStoreVisitor,
+  unboundedArrayGrowthVisitor,
+  missingUseMemoExpensiveVisitor,
+  synchronousCryptoVisitor,
+  missingReactMemoVisitor,
+  unnecessaryContextProviderVisitor,
+  syncRequireInHandlerVisitor,
 ]

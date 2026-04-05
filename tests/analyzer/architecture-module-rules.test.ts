@@ -365,3 +365,157 @@ describe('checkMethodRules', () => {
     expect(violations).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// Architecture code-level rules (AST visitors)
+// ===========================================================================
+
+import { checkCodeRules } from '../../packages/analyzer/src/rules/combined-code-checker';
+import { ALL_DEFAULT_RULES } from '../../packages/analyzer/src/rules/index';
+import { parseCode } from '../../packages/analyzer/src/parser';
+
+const allEnabledRules = ALL_DEFAULT_RULES.filter((r) => r.enabled);
+
+function checkCode(code: string, language: 'typescript' | 'javascript' | 'python' = 'typescript', filePath?: string) {
+  const ext = language === 'python' ? '.py' : '.ts';
+  const path = filePath ?? `/test/file${ext}`;
+  const tree = parseCode(code, language);
+  return checkCodeRules(tree, path, code, allEnabledRules, language);
+}
+
+function only(violations: ReturnType<typeof checkCode>, ruleKey: string) {
+  return violations.filter((v) => v.ruleKey === ruleKey);
+}
+
+describe('architecture/deterministic/duplicate-import (JS)', () => {
+  const KEY = 'architecture/deterministic/duplicate-import';
+
+  it('detects same module imported twice', () => {
+    const code = `
+import { foo } from 'lodash';
+import { bar } from 'lodash';
+`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag different modules', () => {
+    const code = `
+import { foo } from 'lodash';
+import { bar } from 'underscore';
+`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe('architecture/deterministic/unused-import', () => {
+  const KEY = 'architecture/deterministic/unused-import';
+
+  it('detects import never used', () => {
+    const code = `
+import { unusedThing } from 'some-lib';
+const x = 1;
+`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag used import', () => {
+    const code = `
+import { usedThing } from 'some-lib';
+const x = usedThing();
+`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe('architecture/deterministic/declarations-in-global-scope', () => {
+  const KEY = 'architecture/deterministic/declarations-in-global-scope';
+
+  it('detects mutable let in global scope', () => {
+    const code = `let counter = 0;`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag UPPER_CASE constants', () => {
+    const code = `const MAX_RETRIES = 3;`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe('architecture/deterministic/type-assertion-overuse', () => {
+  const KEY = 'architecture/deterministic/type-assertion-overuse';
+
+  it('detects as any', () => {
+    const code = `const val = something as any;`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag as specific type', () => {
+    const code = `const val = something as string;`;
+    const violations = only(checkCode(code), KEY);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe('architecture/deterministic/missing-error-status-code', () => {
+  const KEY = 'architecture/deterministic/missing-error-status-code';
+
+  it('detects catch sending response without status', () => {
+    const code = `
+try {
+  await doSomething();
+} catch (e) {
+  res.json({ error: 'failed' });
+}
+`;
+    const violations = only(checkCode(code, 'typescript', '/src/routes/api.ts'), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag catch with status code', () => {
+    const code = `
+try {
+  await doSomething();
+} catch (e) {
+  res.status(500).json({ error: 'failed' });
+}
+`;
+    const violations = only(checkCode(code, 'typescript', '/src/routes/api.ts'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+});
+
+describe('architecture/deterministic/raw-error-in-response', () => {
+  const KEY = 'architecture/deterministic/raw-error-in-response';
+
+  it('detects error stack in response', () => {
+    const code = `
+try {
+  await doSomething();
+} catch (err) {
+  res.json({ stack: err.stack });
+}
+`;
+    const violations = only(checkCode(code, 'typescript', '/src/routes/api.ts'), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag generic error message', () => {
+    const code = `
+try {
+  await doSomething();
+} catch (err) {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+}
+`;
+    const violations = only(checkCode(code, 'typescript', '/src/routes/api.ts'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+});

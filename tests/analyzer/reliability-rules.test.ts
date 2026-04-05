@@ -514,3 +514,133 @@ const x = 1;
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// unchecked-optional-chain-depth
+// ===========================================================================
+
+describe('reliability/deterministic/unchecked-optional-chain-depth', () => {
+  const ruleKey = 'reliability/deterministic/unchecked-optional-chain-depth';
+
+  it('detects deep optional chaining (>3 levels)', () => {
+    const violations = check(`const val = a?.b?.c?.d?.e;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag shallow optional chaining (<=3)', () => {
+    const violations = check(`const val = a?.b?.c;`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// catch-rethrow-no-context
+// ===========================================================================
+
+describe('reliability/deterministic/catch-rethrow-no-context', () => {
+  const ruleKey = 'reliability/deterministic/catch-rethrow-no-context';
+
+  it('detects catch that just rethrows', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e) {
+  throw e;
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag catch that wraps error', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e) {
+  throw new Error('Context', { cause: e });
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// console-error-no-context
+// ===========================================================================
+
+describe('reliability/deterministic/console-error-no-context', () => {
+  const ruleKey = 'reliability/deterministic/console-error-no-context';
+
+  it('detects console.error with only error variable', () => {
+    const violations = check(`console.error(err);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag console.error with context message', () => {
+    const violations = check(`console.error('Failed to load:', err);`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// shallow-copy-environ (Python)
+// ===========================================================================
+
+describe('reliability/deterministic/shallow-copy-environ', () => {
+  const ruleKey = 'reliability/deterministic/shallow-copy-environ';
+
+  it('detects os.environ assigned directly', () => {
+    const violations = check(`env = os.environ`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag os.environ.copy()', () => {
+    const violations = check(`env = os.environ.copy()`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// invalid-envvar-default (Python)
+// ===========================================================================
+
+describe('reliability/deterministic/invalid-envvar-default', () => {
+  const ruleKey = 'reliability/deterministic/invalid-envvar-default';
+
+  it('detects os.getenv with integer default', () => {
+    const violations = check(`port = os.getenv("PORT", 8080)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag os.getenv with string default', () => {
+    const violations = check(`port = os.getenv("PORT", "8080")`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
+// ===========================================================================
+// django-decorator-order (Python)
+// ===========================================================================
+
+describe('reliability/deterministic/django-decorator-order', () => {
+  const ruleKey = 'reliability/deterministic/django-decorator-order';
+
+  it('detects wrong decorator order (login_required above require_http_methods)', () => {
+    const violations = check(`
+@login_required
+@require_http_methods(["GET", "POST"])
+def my_view(request):
+    pass
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag correct order (login_required below require_http_methods)', () => {
+    const violations = check(`
+@require_http_methods(["GET", "POST"])
+@login_required
+def my_view(request):
+    pass
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});

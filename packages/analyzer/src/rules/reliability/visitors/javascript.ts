@@ -303,10 +303,13 @@ export const missingErrorEventHandlerVisitor: CodeRuleVisitor = {
 
     const siblings = statement.parent.namedChildren
     const stmtIndex = siblings.indexOf(statement)
+    if (stmtIndex < 0) return null
 
     // Check the next few statements for .on('error'
     for (let i = stmtIndex; i < Math.min(stmtIndex + 5, siblings.length); i++) {
-      const sibText = siblings[i].text
+      const sib = siblings[i]
+      if (!sib) continue
+      const sibText = sib.text
       if (sibText.includes(".on('error'") || sibText.includes('.on("error"') || sibText.includes('.on(`error`')) {
         return null
       }
@@ -783,6 +786,137 @@ export const unhandledRejectionNoHandlerVisitor: CodeRuleVisitor = {
 }
 
 // ---------------------------------------------------------------------------
+// unchecked-optional-chain-depth
+// ---------------------------------------------------------------------------
+
+export const uncheckedOptionalChainDepthVisitor: CodeRuleVisitor = {
+  ruleKey: 'reliability/deterministic/unchecked-optional-chain-depth',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['member_expression'],
+  visit(node, filePath, sourceCode) {
+    // Count consecutive optional chains: a?.b?.c?.d?.e
+    // Only flag the outermost one to avoid duplicate reports
+    const parent = node.parent
+    if (parent?.type === 'member_expression' && parent.text.includes('?.')) return null
+
+    let depth = 0
+    let current: SyntaxNode | null = node
+    while (current) {
+      if (current.type === 'member_expression' && current.text.includes('?.')) {
+        // Check if this specific member_expression uses ?.
+        const nodeText = current.text
+        const objChild = current.childForFieldName('object')
+        if (objChild) {
+          const after = nodeText.substring(objChild.text.length)
+          if (after.startsWith('?.')) {
+            depth++
+          }
+        }
+      }
+      // Walk down to the object (left side)
+      if (current.type === 'member_expression') {
+        current = current.childForFieldName('object')
+      } else {
+        break
+      }
+    }
+
+    if (depth > 3) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Deep optional chaining',
+        `Optional chaining ${depth} levels deep suggests missing data validation or overly nested data structures.`,
+        sourceCode,
+        'Validate the data shape upfront (e.g., with a Zod schema) instead of relying on deep optional chaining.',
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// catch-rethrow-no-context
+// ---------------------------------------------------------------------------
+
+export const catchRethrowNoContextVisitor: CodeRuleVisitor = {
+  ruleKey: 'reliability/deterministic/catch-rethrow-no-context',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['catch_clause'],
+  visit(node, filePath, sourceCode) {
+    const param = node.childForFieldName('parameter')
+    if (!param) return null
+
+    const paramName = param.text.replace(/:.+/, '').trim()
+    const body = node.childForFieldName('body')
+    if (!body) return null
+
+    // Check if the body is just "throw <param>" with no wrapping
+    const statements = body.namedChildren
+    if (statements.length !== 1) return null
+
+    const stmt = statements[0]
+    if (stmt.type !== 'throw_statement') return null
+
+    const thrown = stmt.namedChildren[0]
+    if (!thrown) return null
+
+    // If re-throwing the same error variable without wrapping
+    if (thrown.type === 'identifier' && thrown.text === paramName) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'low',
+        'Catch rethrows without adding context',
+        `Catch block rethrows '${paramName}' without adding context. Either remove the try/catch or wrap the error.`,
+        sourceCode,
+        `Wrap the error: throw new Error('Context: ...', { cause: ${paramName} });`,
+      )
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// console-error-no-context
+// ---------------------------------------------------------------------------
+
+export const consoleErrorNoContextVisitor: CodeRuleVisitor = {
+  ruleKey: 'reliability/deterministic/console-error-no-context',
+  languages: ['typescript', 'tsx', 'javascript'],
+  nodeTypes: ['call_expression'],
+  visit(node, filePath, sourceCode) {
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
+    const obj = fn.childForFieldName('object')
+    const prop = fn.childForFieldName('property')
+    if (obj?.text !== 'console' || prop?.text !== 'error') return null
+
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+
+    // Only flag if there's exactly one argument that looks like an error variable
+    if (args.namedChildren.length !== 1) return null
+
+    const arg = args.namedChildren[0]
+    if (arg.type === 'identifier') {
+      const name = arg.text.toLowerCase()
+      if (name === 'e' || name === 'err' || name === 'error' || name === 'ex') {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'console.error() without context',
+          `console.error(${arg.text}) logs only the error object. Add a descriptive message for better debugging.`,
+          sourceCode,
+          `Add context: console.error('Failed to <action>:', ${arg.text});`,
+        )
+      }
+    }
+
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
 // Export all visitors
 // ---------------------------------------------------------------------------
 
@@ -802,4 +936,7 @@ export const RELIABILITY_JS_VISITORS: CodeRuleVisitor[] = [
   uncaughtExceptionNoHandlerVisitor,
   emptyRejectVisitor,
   unhandledRejectionNoHandlerVisitor,
+  uncheckedOptionalChainDepthVisitor,
+  catchRethrowNoContextVisitor,
+  consoleErrorNoContextVisitor,
 ]

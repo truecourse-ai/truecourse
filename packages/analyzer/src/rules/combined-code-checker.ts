@@ -12,8 +12,13 @@ import { CODE_QUALITY_JS_VISITORS } from './code-quality/visitors/javascript.js'
 import { CODE_QUALITY_PYTHON_VISITORS } from './code-quality/visitors/python.js'
 import { CODE_QUALITY_UNIVERSAL_VISITORS } from './code-quality/visitors/universal.js'
 import { PERFORMANCE_JS_VISITORS } from './performance/visitors/javascript.js'
+import { PERFORMANCE_PYTHON_VISITORS } from './performance/visitors/python.js'
 import { RELIABILITY_JS_VISITORS } from './reliability/visitors/javascript.js'
 import { RELIABILITY_PYTHON_VISITORS } from './reliability/visitors/python.js'
+import { STYLE_JS_VISITORS } from './style/visitors/javascript.js'
+import { STYLE_PYTHON_VISITORS } from './style/visitors/python.js'
+import { ARCHITECTURE_JS_VISITORS } from './architecture/visitors/javascript.js'
+import { ARCHITECTURE_PYTHON_VISITORS } from './architecture/visitors/python.js'
 
 const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   ...SECURITY_JS_VISITORS,
@@ -25,8 +30,13 @@ const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
   ...CODE_QUALITY_PYTHON_VISITORS,
   ...CODE_QUALITY_UNIVERSAL_VISITORS,
   ...PERFORMANCE_JS_VISITORS,
+  ...PERFORMANCE_PYTHON_VISITORS,
   ...RELIABILITY_JS_VISITORS,
   ...RELIABILITY_PYTHON_VISITORS,
+  ...STYLE_JS_VISITORS,
+  ...STYLE_PYTHON_VISITORS,
+  ...ARCHITECTURE_JS_VISITORS,
+  ...ARCHITECTURE_PYTHON_VISITORS,
 ]
 
 /**

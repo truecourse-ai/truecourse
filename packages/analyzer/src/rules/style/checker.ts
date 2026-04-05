@@ -1,9 +1,12 @@
 import type { Tree } from 'tree-sitter'
 import type { AnalysisRule, CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { walkAstWithVisitors } from '../types.js'
+import { STYLE_JS_VISITORS } from './visitors/javascript.js'
+import { STYLE_PYTHON_VISITORS } from './visitors/python.js'
 
-const STYLE_VISITORS: import('../types.js').CodeRuleVisitor[] = [
-  // Visitors will be added as rules are implemented
+const STYLE_VISITORS = [
+  ...STYLE_JS_VISITORS,
+  ...STYLE_PYTHON_VISITORS,
 ]
 
 export function checkStyleRules(
