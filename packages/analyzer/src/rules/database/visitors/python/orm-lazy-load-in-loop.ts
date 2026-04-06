@@ -1,0 +1,30 @@
+import type { CodeRuleVisitor } from '../../../types.js'
+import { makeViolation } from '../../../types.js'
+import { getPythonMethodName, PYTHON_ORM_LAZY_METHODS, isInsideLoop } from './_helpers.js'
+
+export const pythonOrmLazyLoadInLoopVisitor: CodeRuleVisitor = {
+  ruleKey: 'database/deterministic/orm-lazy-load-in-loop',
+  languages: ['python'],
+  nodeTypes: ['call'],
+  visit(node, filePath, sourceCode) {
+    if (!isInsideLoop(node)) return null
+
+    const methodName = getPythonMethodName(node)
+    if (!PYTHON_ORM_LAZY_METHODS.has(methodName)) return null
+
+    const fn = node.childForFieldName('function')
+    if (fn?.type !== 'attribute') return null
+
+    const obj = fn.childForFieldName('object')
+    // The object should be a member access (e.g. item.related_set)
+    if (obj?.type !== 'attribute') return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'ORM lazy loading in loop (N+1)',
+      `Accessing a relationship via .${methodName}() inside a loop triggers one query per iteration. Use select_related() or prefetch_related() before the loop.`,
+      sourceCode,
+      'Use select_related() or prefetch_related() when fetching related objects to avoid N+1 queries.',
+    )
+  },
+}
