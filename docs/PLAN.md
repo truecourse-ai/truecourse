@@ -2899,7 +2899,7 @@ Rule domains: security, bugs, architecture, code-quality, style, performance, re
 
 Pure tree-sitter node matching. 958 rules implemented across all 8 domains with 2,622 tests. File-per-rule visitor structure. 92 rules skipped (need type inference/data flow — see 30.2/30.3). 81 LLM rules need prompt text (no code).
 
-### 30.2 Local Data-Flow Tracking `STATUS: TODO`
+### 30.2 Local Data-Flow Tracking `STATUS: DONE`
 
 Requires tracking variable assignments, return values, or control flow within a single function. Still single-file, tree-sitter based. 22 new rules.
 
@@ -2907,13 +2907,13 @@ Requires tracking variable assignments, return values, or control flow within a 
 
 **Code Smells (13 rules):** `no-collapsible-if`, `no-redundant-jump`, `no-redundant-boolean`, `no-duplicated-branches`, `no-identical-functions`, `no-unused-collection`, `no-extra-arguments`, `no-duplicate-string`, `require-await`, `no-loss-of-precision`, `no-nested-switch`, `no-nested-template-literals`, `no-constant-binary-expression`
 
-### 30.3 Type-Aware Rules `STATUS: TODO`
+### 30.3 Type-Aware Rules `STATUS: DONE`
 
 Requires TypeScript type information. Uses existing `ts-compiler.ts` with `ts.Program` and type checker. ~20 rules, TypeScript only.
 
 `no-misused-promises`, `no-for-in-array`, `no-unsafe-assignment`, `no-unsafe-return`, `no-unsafe-call`, `no-unsafe-member-access`, `no-unsafe-argument`, `strict-boolean-expressions`, `no-unnecessary-type-assertion`, `no-unnecessary-condition`, `no-redundant-type-constituents`, `no-confusing-void-expression`, `await-thenable`, `no-base-to-string`, `restrict-plus-operands`, `restrict-template-expressions`, `unbound-method`, `no-meaningless-void-operator`, `dead-store`, `prefer-return-this-type`
 
-### 30.4 Secret Scanning Overhaul `STATUS: TODO`
+### 30.4 Secret Scanning Overhaul `STATUS: DONE`
 
 Overhaul hardcoded secret detection to dramatically reduce false positives and expand coverage. Current implementation uses 6 regex patterns with basic filtering. Detailed research and implementation priorities in `docs/SECRET-DETECTION-RESEARCH.md`.
 
@@ -3141,3 +3141,15 @@ Taint Engine
 ```
 
 Leverages existing infrastructure: method-level call graph, flow tracer, analysis graph, single-file data-flow engine, dependency graph.
+
+---
+
+## Phase 35: Git History Secret Scanning `STATUS: TODO`
+
+Scan git commit history for secrets that were committed and later removed. Gitleaks' primary use case — catching secrets that are technically still in git history even after deletion.
+
+- `git log --all -p` to get all diffs
+- Run secret scanner on each diff hunk
+- Report: which commit, which file, which line, what secret type
+- CLI: `truecourse secrets --scan-history`
+- Performance: incremental scanning (only scan commits since last scan)
