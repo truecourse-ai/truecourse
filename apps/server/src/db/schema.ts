@@ -56,7 +56,6 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
   services: many(services),
   serviceDependencies: many(serviceDependencies),
   layers: many(layers),
-  deterministicViolations: many(deterministicViolations),
   violations: many(violations),
   databases: many(databases),
   modules: many(modules),
@@ -167,37 +166,6 @@ export const layersRelations = relations(layers, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
-// deterministic_violations (raw deterministic check results per analysis)
-// ---------------------------------------------------------------------------
-
-export const deterministicViolations = pgTable('deterministic_violations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  analysisId: uuid('analysis_id')
-    .notNull()
-    .references(() => analyses.id, { onDelete: 'cascade' }),
-  ruleKey: text('rule_key').notNull(),
-  category: text('category').notNull(), // 'service' | 'module' | 'method'
-  title: text('title').notNull(),
-  description: text('description').notNull(),
-  severity: text('severity').notNull(),
-  serviceName: text('service_name').notNull(),
-  moduleName: text('module_name'),
-  methodName: text('method_name'),
-  filePath: text('file_path'),
-  relatedModuleName: text('related_module_name'),
-  relatedServiceName: text('related_service_name'),
-  isDependencyViolation: boolean('is_dependency_violation').notNull().default(false),
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
-export const deterministicViolationsRelations = relations(deterministicViolations, ({ one }) => ({
-  analysis: one(analyses, {
-    fields: [deterministicViolations.analysisId],
-    references: [analyses.id],
-  }),
-}));
-
-// ---------------------------------------------------------------------------
 // violations
 // ---------------------------------------------------------------------------
 
@@ -227,17 +195,23 @@ export const violations = pgTable('violations', {
     onDelete: 'set null',
   }),
   targetTable: text('target_table'),
+  relatedServiceId: uuid('related_service_id').references(() => services.id, { onDelete: 'set null' }),
+  relatedModuleId: uuid('related_module_id').references(() => modules.id, { onDelete: 'set null' }),
   fixPrompt: text('fix_prompt'),
   ruleKey: text('rule_key').notNull(),
-  deterministicViolationId: uuid('deterministic_violation_id').references(() => deterministicViolations.id, {
-    onDelete: 'set null',
-  }),
   firstSeenAnalysisId: uuid('first_seen_analysis_id').references(() => analyses.id, {
     onDelete: 'set null',
   }),
   firstSeenAt: timestamp('first_seen_at', { mode: 'date', withTimezone: true }),
   previousViolationId: uuid('previous_violation_id'),
   resolvedAt: timestamp('resolved_at', { mode: 'date', withTimezone: true }),
+  /** Code violation fields (nullable — filled when type = 'code') */
+  filePath: text('file_path'),
+  lineStart: integer('line_start'),
+  lineEnd: integer('line_end'),
+  columnStart: integer('column_start'),
+  columnEnd: integer('column_end'),
+  snippet: text('snippet'),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -538,47 +512,10 @@ export const rules = pgTable('rules', {
   enabled: boolean('enabled').notNull().default(true),
   severity: text('severity').notNull(), // 'info' | 'low' | 'medium' | 'high' | 'critical'
   type: text('type').notNull(), // 'deterministic' | 'llm'
-  isDependencyViolation: boolean('is_dependency_violation').notNull().default(false),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
-// ---------------------------------------------------------------------------
-// code_violations (file/line-level code quality violations)
-// ---------------------------------------------------------------------------
-
-export const codeViolations = pgTable('code_violations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  analysisId: uuid('analysis_id')
-    .notNull()
-    .references(() => analyses.id, { onDelete: 'cascade' }),
-  filePath: text('file_path').notNull(),
-  lineStart: integer('line_start').notNull(),
-  lineEnd: integer('line_end').notNull(),
-  columnStart: integer('column_start').notNull(),
-  columnEnd: integer('column_end').notNull(),
-  ruleKey: text('rule_key').notNull(),
-  severity: text('severity').notNull(),
-  status: text('status').notNull().default('new'), // 'new' | 'unchanged' | 'resolved'
-  title: text('title').notNull(),
-  content: text('content').notNull(),
-  snippet: text('snippet').notNull(),
-  fixPrompt: text('fix_prompt'),
-  firstSeenAnalysisId: uuid('first_seen_analysis_id').references(() => analyses.id, {
-    onDelete: 'set null',
-  }),
-  firstSeenAt: timestamp('first_seen_at', { mode: 'date', withTimezone: true }),
-  previousCodeViolationId: uuid('previous_code_violation_id'),
-  resolvedAt: timestamp('resolved_at', { mode: 'date', withTimezone: true }),
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
-export const codeViolationsRelations = relations(codeViolations, ({ one }) => ({
-  analysis: one(analyses, {
-    fields: [codeViolations.analysisId],
-    references: [analyses.id],
-  }),
-}));
 
 // ---------------------------------------------------------------------------
 // flows (execution paths from entry points through call graph)

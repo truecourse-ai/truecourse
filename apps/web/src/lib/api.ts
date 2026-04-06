@@ -454,7 +454,7 @@ export function getCodeViolations(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<CodeViolationResponse[]>(
-    `/api/repos/${repoId}/code-violations${qs ? `?${qs}` : ''}`,
+    `/api/repos/${repoId}/violations${qs ? `?${qs}` : ''}`,
   );
 }
 
@@ -466,7 +466,7 @@ export function getCodeViolationSummary(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<CodeViolationSummary>(
-    `/api/repos/${repoId}/code-violations/summary${qs ? `?${qs}` : ''}`,
+    `/api/repos/${repoId}/violations/summary${qs ? `?${qs}` : ''}`,
   );
 }
 

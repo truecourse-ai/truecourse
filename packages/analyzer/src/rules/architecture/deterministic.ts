@@ -11,7 +11,6 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'high',
     type: 'deterministic',
-    isDependencyViolation: true,
   },
   {
     key: 'architecture/deterministic/god-service',
@@ -34,7 +33,6 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'high',
     type: 'deterministic',
-    isDependencyViolation: true,
   },
   {
     key: 'architecture/deterministic/external-layer-depends-on-api',

@@ -11,7 +11,6 @@ import {
   modules,
   methods,
   violations,
-  codeViolations,
 } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
 import { generateViolations } from '../services/violation.service.js';
@@ -202,7 +201,14 @@ router.get(
       }
 
       // Build query conditions
-      const queryConditions = [eq(violations.analysisId, analysis.id)];
+      const queryConditions: ReturnType<typeof eq>[] = [eq(violations.analysisId, analysis.id)];
+
+      // Optional file filter
+      const fileParam = req.query.file as string | undefined;
+      if (fileParam) {
+        const absPath = fileParam.startsWith('/') ? fileParam : `${repo.path}/${fileParam}`;
+        queryConditions.push(eq(violations.filePath, absPath));
+      }
 
       // Status filter: default to active violations only
       const statusParam = req.query.status as string | undefined;
@@ -242,6 +248,12 @@ router.get(
         firstSeenAt: violations.firstSeenAt,
         createdAt: violations.createdAt,
         ruleKey: violations.ruleKey,
+        filePath: violations.filePath,
+        lineStart: violations.lineStart,
+        lineEnd: violations.lineEnd,
+        columnStart: violations.columnStart,
+        columnEnd: violations.columnEnd,
+        snippet: violations.snippet,
       };
 
       // Pagination
@@ -282,76 +294,9 @@ router.get(
   }
 );
 
-// GET /api/repos/:id/code-violations - Get code-level violations
+// GET /api/repos/:id/violations/summary - Summary counts by severity and file
 router.get(
-  '/:id/code-violations',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      const filePath = req.query.file as string | undefined;
-      const analysisIdParam = req.query.analysisId as string | undefined;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
-
-      let analysisId: string;
-
-      if (analysisIdParam) {
-        const [specific] = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(and(eq(analyses.id, analysisIdParam), eq(analyses.repoId, id)))
-          .limit(1);
-        if (!specific) {
-          res.json([]);
-          return;
-        }
-        analysisId = specific.id;
-      } else {
-        const [latest] = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(and(eq(analyses.repoId, id), notDiffAnalysis))
-          .orderBy(desc(analyses.createdAt))
-          .limit(1);
-
-        if (!latest) {
-          res.json([]);
-          return;
-        }
-        analysisId = latest.id;
-      }
-
-      const conditions = [eq(codeViolations.analysisId, analysisId)];
-      if (filePath) {
-        // Support both absolute and relative paths
-        const absPath = filePath.startsWith('/') ? filePath : `${repo.path}/${filePath}`;
-        conditions.push(eq(codeViolations.filePath, absPath));
-      }
-
-      const results = await db
-        .select()
-        .from(codeViolations)
-        .where(and(...conditions))
-        .orderBy(codeViolations.filePath, codeViolations.lineStart);
-
-      res.json(results);
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// GET /api/repos/:id/code-violations/summary - Summary counts by file and severity
-router.get(
-  '/:id/code-violations/summary',
+  '/:id/violations/summary',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -397,13 +342,16 @@ router.get(
 
       const rows = await db
         .select({
-          filePath: codeViolations.filePath,
-          severity: codeViolations.severity,
+          filePath: violations.filePath,
+          severity: violations.severity,
           count: count(),
         })
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, analysisId))
-        .groupBy(codeViolations.filePath, codeViolations.severity);
+        .from(violations)
+        .where(and(
+          eq(violations.analysisId, analysisId),
+          sql`${violations.status} IN ('new', 'unchanged')`,
+        ))
+        .groupBy(violations.filePath, violations.severity);
 
       const byFile: Record<string, number> = {};
       const bySeverity: Record<string, number> = {};
@@ -414,12 +362,14 @@ router.get(
       for (const row of rows) {
         const c = Number(row.count);
         total += c;
-        byFile[row.filePath] = (byFile[row.filePath] || 0) + c;
         bySeverity[row.severity] = (bySeverity[row.severity] || 0) + c;
 
-        const current = highestSeverityByFile[row.filePath];
-        if (!current || severityOrder.indexOf(row.severity) < severityOrder.indexOf(current)) {
-          highestSeverityByFile[row.filePath] = row.severity;
+        if (row.filePath) {
+          byFile[row.filePath] = (byFile[row.filePath] || 0) + c;
+          const current = highestSeverityByFile[row.filePath];
+          if (!current || severityOrder.indexOf(row.severity) < severityOrder.indexOf(current)) {
+            highestSeverityByFile[row.filePath] = row.severity;
+          }
         }
       }
 

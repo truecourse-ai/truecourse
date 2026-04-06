@@ -1,9 +1,8 @@
-import { eq, and, inArray, desc, sql } from 'drizzle-orm';
+import { eq, and, inArray, desc, sql, isNotNull } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../config/database.js';
 import {
   violations,
-  codeViolations,
   analyses,
   services,
   modules,
@@ -36,27 +35,19 @@ export interface ActiveViolation {
   targetTable: string | null;
   fixPrompt: string | null;
   ruleKey: string;
-  deterministicViolationId: string | null;
   firstSeenAnalysisId: string | null;
   firstSeenAt: Date | null;
+  /** Code violation fields (filled when type = 'code') */
+  filePath: string | null;
+  lineStart: number | null;
+  lineEnd: number | null;
+  columnStart: number | null;
+  columnEnd: number | null;
+  snippet: string | null;
 }
 
-export interface ActiveCodeViolation {
-  id: string;
-  filePath: string;
-  lineStart: number;
-  lineEnd: number;
-  columnStart: number;
-  columnEnd: number;
-  ruleKey: string;
-  severity: string;
-  title: string;
-  content: string;
-  snippet: string;
-  fixPrompt: string | null;
-  firstSeenAnalysisId: string | null;
-  firstSeenAt: Date | null;
-}
+/** @deprecated Use ActiveViolation with filePath fields instead */
+export type ActiveCodeViolation = ActiveViolation;
 
 // ---------------------------------------------------------------------------
 // Load active violations from latest non-diff analysis
@@ -97,9 +88,14 @@ export async function loadActiveViolations(
       targetTable: violations.targetTable,
       fixPrompt: violations.fixPrompt,
       ruleKey: violations.ruleKey,
-      deterministicViolationId: violations.deterministicViolationId,
       firstSeenAnalysisId: violations.firstSeenAnalysisId,
       firstSeenAt: violations.firstSeenAt,
+      filePath: violations.filePath,
+      lineStart: violations.lineStart,
+      lineEnd: violations.lineEnd,
+      columnStart: violations.columnStart,
+      columnEnd: violations.columnEnd,
+      snippet: violations.snippet,
     })
     .from(violations)
     .leftJoin(services, eq(violations.targetServiceId, services.id))
@@ -118,7 +114,7 @@ export async function loadActiveViolations(
 export async function loadActiveCodeViolations(
   repoId: string,
   branch?: string | null,
-): Promise<ActiveCodeViolation[]> {
+): Promise<ActiveViolation[]> {
   const conditions = [eq(analyses.repoId, repoId), notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
@@ -132,31 +128,45 @@ export async function loadActiveCodeViolations(
   if (!latestAnalysis) return [];
 
   const rows = await db
-    .select()
-    .from(codeViolations)
+    .select({
+      id: violations.id,
+      type: violations.type,
+      title: violations.title,
+      content: violations.content,
+      severity: violations.severity,
+      status: violations.status,
+      targetServiceId: violations.targetServiceId,
+      targetServiceName: services.name,
+      targetDatabaseId: violations.targetDatabaseId,
+      targetModuleId: violations.targetModuleId,
+      targetModuleName: modules.name,
+      targetMethodId: violations.targetMethodId,
+      targetMethodName: methods.name,
+      targetTable: violations.targetTable,
+      fixPrompt: violations.fixPrompt,
+      ruleKey: violations.ruleKey,
+      firstSeenAnalysisId: violations.firstSeenAnalysisId,
+      firstSeenAt: violations.firstSeenAt,
+      filePath: violations.filePath,
+      lineStart: violations.lineStart,
+      lineEnd: violations.lineEnd,
+      columnStart: violations.columnStart,
+      columnEnd: violations.columnEnd,
+      snippet: violations.snippet,
+    })
+    .from(violations)
+    .leftJoin(services, eq(violations.targetServiceId, services.id))
+    .leftJoin(modules, eq(violations.targetModuleId, modules.id))
+    .leftJoin(methods, eq(violations.targetMethodId, methods.id))
     .where(
       and(
-        eq(codeViolations.analysisId, latestAnalysis.id),
-        inArray(codeViolations.status, ['new', 'unchanged']),
+        eq(violations.analysisId, latestAnalysis.id),
+        inArray(violations.status, ['new', 'unchanged']),
+        isNotNull(violations.filePath),
       ),
     );
 
-  return rows.map((r) => ({
-    id: r.id,
-    filePath: r.filePath,
-    lineStart: r.lineStart,
-    lineEnd: r.lineEnd,
-    columnStart: r.columnStart,
-    columnEnd: r.columnEnd,
-    ruleKey: r.ruleKey,
-    severity: r.severity,
-    title: r.title,
-    content: r.content,
-    snippet: r.snippet,
-    fixPrompt: r.fixPrompt,
-    firstSeenAnalysisId: r.firstSeenAnalysisId,
-    firstSeenAt: r.firstSeenAt,
-  }));
+  return rows;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +319,7 @@ export async function persistViolationsWithLifecycle(
 
 export interface PersistCodeViolationsParams {
   analysisId: string;
+  repoId: string;
   currentCodeViolations: {
     filePath: string;
     lineStart: number;
@@ -322,46 +333,51 @@ export interface PersistCodeViolationsParams {
     snippet: string;
     fixPrompt?: string;
   }[];
-  previousActiveCodeViolations: ActiveCodeViolation[];
+  previousActiveCodeViolations: ActiveViolation[];
 }
 
 export async function persistCodeViolationsWithLifecycle(
   params: PersistCodeViolationsParams,
 ): Promise<void> {
-  const { analysisId, currentCodeViolations, previousActiveCodeViolations } = params;
+  const { analysisId, repoId, currentCodeViolations, previousActiveCodeViolations } = params;
   const now = new Date();
 
   // Build lookup key: ruleKey + filePath
   const currentKeys = new Set(
     currentCodeViolations.map((v) => `${v.ruleKey}::${v.filePath}`),
   );
-  const previousByKey = new Map<string, ActiveCodeViolation>();
+  const previousByKey = new Map<string, ActiveViolation>();
   for (const prev of previousActiveCodeViolations) {
-    previousByKey.set(`${prev.ruleKey}::${prev.filePath}`, prev);
+    if (prev.filePath) {
+      previousByKey.set(`${prev.ruleKey}::${prev.filePath}`, prev);
+    }
   }
 
   // Previous code violations not in current → resolved
   for (const prev of previousActiveCodeViolations) {
+    if (!prev.filePath) continue;
     const key = `${prev.ruleKey}::${prev.filePath}`;
     if (!currentKeys.has(key)) {
-      await db.insert(codeViolations).values({
+      await db.insert(violations).values({
         id: uuidv4(),
+        repoId,
         analysisId,
+        type: 'code',
+        title: prev.title,
+        content: prev.content,
+        severity: prev.severity,
+        status: 'resolved',
+        ruleKey: prev.ruleKey,
         filePath: prev.filePath,
         lineStart: prev.lineStart,
         lineEnd: prev.lineEnd,
         columnStart: prev.columnStart,
         columnEnd: prev.columnEnd,
-        ruleKey: prev.ruleKey,
-        severity: prev.severity,
-        status: 'resolved',
-        title: prev.title,
-        content: prev.content,
         snippet: prev.snippet,
         fixPrompt: prev.fixPrompt,
         firstSeenAnalysisId: prev.firstSeenAnalysisId,
         firstSeenAt: prev.firstSeenAt,
-        previousCodeViolationId: prev.id,
+        previousViolationId: prev.id,
         resolvedAt: now,
       });
     }
@@ -374,40 +390,44 @@ export async function persistCodeViolationsWithLifecycle(
 
     if (prev) {
       // Unchanged — carry lineage
-      await db.insert(codeViolations).values({
+      await db.insert(violations).values({
         id: uuidv4(),
+        repoId,
         analysisId,
+        type: 'code',
+        title: cv.title,
+        content: cv.content,
+        severity: cv.severity,
+        status: 'unchanged',
+        ruleKey: cv.ruleKey,
         filePath: cv.filePath,
         lineStart: cv.lineStart,
         lineEnd: cv.lineEnd,
         columnStart: cv.columnStart,
         columnEnd: cv.columnEnd,
-        ruleKey: cv.ruleKey,
-        severity: cv.severity,
-        status: 'unchanged',
-        title: cv.title,
-        content: cv.content,
         snippet: cv.snippet,
         fixPrompt: cv.fixPrompt || null,
         firstSeenAnalysisId: prev.firstSeenAnalysisId,
         firstSeenAt: prev.firstSeenAt,
-        previousCodeViolationId: prev.id,
+        previousViolationId: prev.id,
       });
     } else {
       // New
-      await db.insert(codeViolations).values({
+      await db.insert(violations).values({
         id: uuidv4(),
+        repoId,
         analysisId,
+        type: 'code',
+        title: cv.title,
+        content: cv.content,
+        severity: cv.severity,
+        status: 'new',
+        ruleKey: cv.ruleKey,
         filePath: cv.filePath,
         lineStart: cv.lineStart,
         lineEnd: cv.lineEnd,
         columnStart: cv.columnStart,
         columnEnd: cv.columnEnd,
-        ruleKey: cv.ruleKey,
-        severity: cv.severity,
-        status: 'new',
-        title: cv.title,
-        content: cv.content,
         snippet: cv.snippet,
         fixPrompt: cv.fixPrompt || null,
         firstSeenAnalysisId: analysisId,
