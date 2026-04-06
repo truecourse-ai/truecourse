@@ -8758,3 +8758,147 @@ class Child(Base):
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Python — method-override-contract-change
+// ---------------------------------------------------------------------------
+describe('bugs/deterministic/method-override-contract-change', () => {
+  it('detects parameter count change in override', () => {
+    const violations = check(`
+class Base:
+    def process(self, x, y):
+        pass
+
+class Child(Base):
+    def process(self, x):
+        pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/method-override-contract-change');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag matching parameter counts', () => {
+    const violations = check(`
+class Base:
+    def process(self, x, y):
+        pass
+
+class Child(Base):
+    def process(self, x, y):
+        pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/method-override-contract-change');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python — argument-type-mismatch-python
+// ---------------------------------------------------------------------------
+describe('bugs/deterministic/argument-type-mismatch-python', () => {
+  it('detects too few arguments', () => {
+    const violations = check(`
+def greet(name, greeting):
+    print(greeting, name)
+
+greet("Alice")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/argument-type-mismatch-python');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects too many arguments', () => {
+    const violations = check(`
+def add(a, b):
+    return a + b
+
+add(1, 2, 3)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/argument-type-mismatch-python');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag correct argument count', () => {
+    const violations = check(`
+def add(a, b):
+    return a + b
+
+add(1, 2)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/argument-type-mismatch-python');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python — scikit-pipeline-cache-direct-access
+// ---------------------------------------------------------------------------
+describe('bugs/deterministic/scikit-pipeline-cache-direct-access', () => {
+  it('detects pipeline.steps[0] access', () => {
+    const violations = check(`
+pipeline.steps[0].transform(X)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/scikit-pipeline-cache-direct-access');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects pipeline.named_steps["scaler"] access', () => {
+    const violations = check(`
+pipeline.named_steps["scaler"]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/scikit-pipeline-cache-direct-access');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag non-pipeline subscript', () => {
+    const violations = check(`
+data.items[0]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/scikit-pipeline-cache-direct-access');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python — type-stub-version-check-error
+// ---------------------------------------------------------------------------
+describe('bugs/deterministic/type-stub-version-check-error', () => {
+  it('detects > instead of >= in .pyi version check', () => {
+    const tree = parseCode(`if sys.version_info > (3, 8):\n    x: int`, 'python');
+    const violations = checkCodeRules(tree, '/test/file.pyi', `if sys.version_info > (3, 8):\n    x: int`, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/type-stub-version-check-error');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag >= in .pyi', () => {
+    const tree = parseCode(`if sys.version_info >= (3, 8):\n    x: int`, 'python');
+    const violations = checkCodeRules(tree, '/test/file.pyi', `if sys.version_info >= (3, 8):\n    x: int`, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/type-stub-version-check-error');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag in non-.pyi files', () => {
+    const violations = check(`if sys.version_info > (3, 8):\n    x = 1`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/type-stub-version-check-error');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python — type-stub-annotation-error
+// ---------------------------------------------------------------------------
+describe('bugs/deterministic/type-stub-annotation-error', () => {
+  it('detects __str__ returning Never in .pyi', () => {
+    const code = `class Foo:\n    def __str__(self) -> Never: ...`;
+    const tree = parseCode(code, 'python');
+    const violations = checkCodeRules(tree, '/test/file.pyi', code, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/type-stub-annotation-error');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag in non-.pyi files', () => {
+    const violations = check(`class Foo:\n    def __str__(self) -> Never: ...`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/type-stub-annotation-error');
+    expect(matches).toHaveLength(0);
+  });
+});

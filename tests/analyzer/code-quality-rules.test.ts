@@ -7433,3 +7433,107 @@ describe('code-quality/deterministic/required-type-annotations', () => {
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// complex-type-alias (JS/TS)
+// ---------------------------------------------------------------------------
+describe('code-quality/deterministic/complex-type-alias', () => {
+  it('detects deeply nested type alias', () => {
+    const violations = check(`type Deep = Map<string, Map<string, Map<string, Map<string, number>>>>;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects type alias with many union members', () => {
+    const violations = check(`type Many = A | B | C | D | E | F | G;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag simple type alias', () => {
+    const violations = check(`type Simple = Map<string, number>;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/complex-type-alias');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// template-string-pattern-matching (Python)
+// ---------------------------------------------------------------------------
+describe('code-quality/deterministic/template-string-pattern-matching', () => {
+  it('detects long if/elif chain checking Template types', () => {
+    const violations = check(`
+if isinstance(node, Template):
+    handle_template()
+elif isinstance(node, Template):
+    handle_other()
+elif isinstance(node, Template):
+    handle_third()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/template-string-pattern-matching');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag short if/elif chains', () => {
+    const violations = check(`
+if isinstance(node, Template):
+    handle_template()
+elif isinstance(node, str):
+    handle_str()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/template-string-pattern-matching');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// type-stub-style (Python .pyi)
+// ---------------------------------------------------------------------------
+describe('code-quality/deterministic/type-stub-style', () => {
+  it('detects pass in .pyi function body', () => {
+    const code = `def foo(x: int) -> None:\n    pass`;
+    const tree = parseCode(code, 'python');
+    const violations = checkCodeRules(tree, '/test/file.pyi', code, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-stub-style');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag ellipsis in .pyi function body', () => {
+    const code = `def foo(x: int) -> None:\n    ...`;
+    const tree = parseCode(code, 'python');
+    const violations = checkCodeRules(tree, '/test/file.pyi', code, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-stub-style');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag pass in non-.pyi files', () => {
+    const violations = check(`def foo(x):\n    pass`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-stub-style');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// type-checking-alias-annotation (Python)
+// ---------------------------------------------------------------------------
+describe('code-quality/deterministic/type-checking-alias-annotation', () => {
+  it('detects type alias inside TYPE_CHECKING block', () => {
+    const violations = check(`
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    MyType = Union[str, int]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-checking-alias-annotation');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag imports inside TYPE_CHECKING', () => {
+    const violations = check(`
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from module import something
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-checking-alias-annotation');
+    expect(matches).toHaveLength(0);
+  });
+});

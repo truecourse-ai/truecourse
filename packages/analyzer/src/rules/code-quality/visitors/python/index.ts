@@ -256,6 +256,9 @@ import { pythonBannedApiImportVisitor } from './banned-api-import.js'
 import { pythonAirflow3MigrationVisitor } from './airflow-3-migration.js'
 import { pythonReturnTypeInconsistentWithHintVisitor } from './return-type-inconsistent-with-hint.js'
 import { pythonAssignmentInconsistentWithHintVisitor } from './assignment-inconsistent-with-hint.js'
+import { pythonTemplateStringPatternMatchingVisitor } from './template-string-pattern-matching.js'
+import { pythonTypeStubStyleVisitor } from './type-stub-style.js'
+import { pythonTypeCheckingAliasAnnotationVisitor } from './type-checking-alias-annotation.js'
 
 export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonPrintVisitor,
@@ -511,4 +514,8 @@ export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   // Python type-aware rules (heuristic-based)
   pythonReturnTypeInconsistentWithHintVisitor,
   pythonAssignmentInconsistentWithHintVisitor,
+  // Formerly-skipped rules
+  pythonTemplateStringPatternMatchingVisitor,
+  pythonTypeStubStyleVisitor,
+  pythonTypeCheckingAliasAnnotationVisitor,
 ]

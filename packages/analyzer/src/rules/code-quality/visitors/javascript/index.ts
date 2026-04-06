@@ -241,6 +241,7 @@ import { unnecessaryTypeParameterVisitor } from './unnecessary-type-parameter.js
 import { preferThisReturnTypeVisitor } from './prefer-this-return-type.js'
 import { unnecessaryNamespaceQualifierVisitor } from './unnecessary-namespace-qualifier.js'
 import { readonlyParameterTypesVisitor } from './readonly-parameter-types.js'
+import { complexTypeAliasVisitor } from './complex-type-alias.js'
 
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
@@ -489,4 +490,6 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   preferThisReturnTypeVisitor,
   unnecessaryNamespaceQualifierVisitor,
   readonlyParameterTypesVisitor,
+  // Formerly-skipped rules
+  complexTypeAliasVisitor,
 ]

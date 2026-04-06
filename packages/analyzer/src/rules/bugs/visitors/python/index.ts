@@ -227,6 +227,11 @@ import { pythonNotInOperatorIncompatibleVisitor } from './not-in-operator-incomp
 import { pythonItemOperationUnsupportedVisitor } from './item-operation-unsupported.js'
 import { pythonClassMixedTypevarsVisitor } from './class-mixed-typevars.js'
 import { pythonAssertionIncompatibleTypesVisitor } from './assertion-incompatible-types.js'
+import { pythonMethodOverrideContractChangeVisitor } from './method-override-contract-change.js'
+import { pythonArgumentTypeMismatchVisitor } from './argument-type-mismatch-python.js'
+import { pythonScikitPipelineCacheDirectAccessVisitor } from './scikit-pipeline-cache-direct-access.js'
+import { pythonTypeStubVersionCheckErrorVisitor } from './type-stub-version-check-error.js'
+import { pythonTypeStubAnnotationErrorVisitor } from './type-stub-annotation-error.js'
 
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
@@ -457,4 +462,10 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonItemOperationUnsupportedVisitor,
   pythonClassMixedTypevarsVisitor,
   pythonAssertionIncompatibleTypesVisitor,
+  // Formerly-skipped rules
+  pythonMethodOverrideContractChangeVisitor,
+  pythonArgumentTypeMismatchVisitor,
+  pythonScikitPipelineCacheDirectAccessVisitor,
+  pythonTypeStubVersionCheckErrorVisitor,
+  pythonTypeStubAnnotationErrorVisitor,
 ]
