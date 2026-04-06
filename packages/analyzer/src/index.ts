@@ -68,6 +68,9 @@ export { extractModulesAndMethods, type ModuleExtractionResult } from './module-
 export { traceFlows, type TracedFlow, type TracedFlowStep, type CrossServiceCall, type RouteHandler } from './flow-tracer.js'
 export { AnalysisGraph, type AnalysisGraphInput } from './analysis-graph.js'
 
+// Cycle detection
+export { findCycles, type CycleResult, type CycleInfo, type EdgeMetadata } from './rules/architecture/tarjan.js'
+
 // Rules — domain-based structure
 export {
   // Rule arrays

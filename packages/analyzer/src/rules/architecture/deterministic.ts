@@ -70,6 +70,17 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     isDependencyViolation: true,
   },
   {
+    key: 'architecture/deterministic/circular-module-dependency',
+    category: 'module',
+    domain: 'architecture',
+    name: 'Circular module dependency',
+    description: 'Circular import chains between modules, including transitive cycles.',
+    enabled: true,
+    severity: 'high',
+    type: 'deterministic',
+    isDependencyViolation: true,
+  },
+  {
     key: 'architecture/deterministic/god-module',
     category: 'module',
     domain: 'architecture',

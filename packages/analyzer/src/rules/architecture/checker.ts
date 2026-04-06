@@ -1,5 +1,6 @@
 import type { ServiceInfo, ServiceDependencyInfo, ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
 import { getMaxParameters } from '../../language-config.js'
+import { findCycles, type EdgeMetadata } from './tarjan.js'
 
 // ---------------------------------------------------------------------------
 // Violation types
@@ -46,29 +47,33 @@ export function checkServiceRules(
   const violations: ServiceViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
 
-  // Circular service dependency
+  // Circular service dependency — Tarjan's SCC detects all cycles including transitive
   if (ruleKeys.has('architecture/deterministic/circular-service-dependency')) {
-    const depSet = new Map<string, Set<string>>()
+    const adjacency = new Map<string, Set<string>>()
     for (const dep of dependencies) {
-      if (!depSet.has(dep.source)) depSet.set(dep.source, new Set())
-      depSet.get(dep.source)!.add(dep.target)
+      if (!adjacency.has(dep.source)) adjacency.set(dep.source, new Set())
+      adjacency.get(dep.source)!.add(dep.target)
     }
 
-    const reported = new Set<string>()
-    for (const [source, targets] of depSet) {
-      for (const target of targets) {
-        if (depSet.get(target)?.has(source) && !reported.has(`${target}::${source}`)) {
-          reported.add(`${source}::${target}`)
-          violations.push({
-            ruleKey: 'architecture/deterministic/circular-service-dependency',
-            title: `Circular dependency: ${source} ↔ ${target}`,
-            description: `${source} and ${target} depend on each other, creating a circular dependency. Consider extracting shared logic into a separate service or reversing one direction.`,
-            severity: 'high',
-            serviceName: source,
-            relatedServiceName: target,
-          })
-        }
-      }
+    const { cycles } = findCycles(adjacency)
+
+    for (const cycle of cycles) {
+      const severity = cycle.isTypeOnly ? 'info' : cycle.isDynamic ? 'low' : 'high'
+      const chainDisplay = cycle.chain.join(' \u2192 ')
+      const qualifier = cycle.isTypeOnly
+        ? ' (type-only imports \u2014 no runtime impact)'
+        : cycle.isDynamic
+          ? ' (dynamic imports \u2014 lower risk)'
+          : ''
+
+      violations.push({
+        ruleKey: 'architecture/deterministic/circular-service-dependency',
+        title: `Circular dependency: ${chainDisplay}`,
+        description: `Circular dependency chain: ${chainDisplay}${qualifier}. Consider extracting shared logic into a separate service or reversing one direction.`,
+        severity,
+        serviceName: cycle.chain[0],
+        relatedServiceName: cycle.chain[1],
+      })
     }
   }
 
@@ -151,6 +156,105 @@ export function checkModuleRules(
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
+
+  // Circular module dependency — Tarjan's SCC on module-level dependency graph
+  if (ruleKeys.has('architecture/deterministic/circular-module-dependency') && moduleLevelDeps) {
+    const modAdjacency = new Map<string, Set<string>>()
+    const modEdgeMeta = new Map<string, EdgeMetadata>()
+
+    // Build module-level adjacency from moduleLevelDeps
+    for (const dep of moduleLevelDeps) {
+      const srcKey = `${dep.sourceService}::${dep.sourceModule}`
+      const tgtKey = `${dep.targetService}::${dep.targetModule}`
+      if (srcKey === tgtKey) continue // skip self-imports
+
+      if (!modAdjacency.has(srcKey)) modAdjacency.set(srcKey, new Set())
+      modAdjacency.get(srcKey)!.add(tgtKey)
+    }
+
+    // Classify edges using file-level import data when available
+    if (fileAnalyses) {
+      // Build module → filePath lookup
+      const modFileMap = new Map<string, string>()
+      for (const mod of modules) {
+        modFileMap.set(`${mod.serviceName}::${mod.name}`, mod.filePath)
+      }
+
+      // Build file → imports lookup
+      const fileImports = new Map<string, FileAnalysis['imports']>()
+      for (const fa of fileAnalyses) {
+        fileImports.set(fa.filePath, fa.imports)
+      }
+
+      // Build file → dynamic import targets (from calls with callee === 'import')
+      const fileDynamicTargets = new Set<string>()
+      for (const fa of fileAnalyses) {
+        if (fa.calls) {
+          for (const call of fa.calls) {
+            if (call.callee === 'import') {
+              fileDynamicTargets.add(fa.filePath)
+            }
+          }
+        }
+      }
+
+      for (const dep of moduleLevelDeps) {
+        const srcKey = `${dep.sourceService}::${dep.sourceModule}`
+        const tgtKey = `${dep.targetService}::${dep.targetModule}`
+        if (srcKey === tgtKey) continue
+
+        const edgeKey = `${srcKey}::${tgtKey}`
+        const srcFile = modFileMap.get(srcKey)
+        if (!srcFile) continue
+
+        const imports = fileImports.get(srcFile)
+        if (imports) {
+          // Check if this particular dependency is type-only
+          const relevantImport = imports.find(imp =>
+            dep.importedNames.some(name => imp.specifiers.some(s => s.name === name))
+          )
+          const isTypeOnly = relevantImport?.isTypeOnly ?? false
+          const isDynamic = fileDynamicTargets.has(srcFile) && !relevantImport
+
+          modEdgeMeta.set(edgeKey, { isDynamic, isTypeOnly })
+        }
+      }
+    }
+
+    const { cycles } = findCycles(modAdjacency, modEdgeMeta.size > 0 ? modEdgeMeta : undefined)
+
+    for (const cycle of cycles) {
+      const severity = cycle.isTypeOnly ? 'info' : cycle.isDynamic ? 'low' : 'high'
+      // Extract readable module names from "service::module" keys
+      const readableChain = cycle.chain.map(key => {
+        const parts = key.split('::')
+        return parts.length > 1 ? parts[1] : key
+      })
+      const chainDisplay = readableChain.join(' \u2192 ')
+      const qualifier = cycle.isTypeOnly
+        ? ' (type-only imports \u2014 no runtime impact)'
+        : cycle.isDynamic
+          ? ' (dynamic imports \u2014 lower risk)'
+          : ''
+
+      // Get service name and file path from first node
+      const firstKey = cycle.chain[0]
+      const firstMod = modules.find(m => `${m.serviceName}::${m.name}` === firstKey)
+      const secondKey = cycle.chain.length > 1 ? cycle.chain[1] : cycle.chain[0]
+      const secondMod = modules.find(m => `${m.serviceName}::${m.name}` === secondKey)
+
+      violations.push({
+        ruleKey: 'architecture/deterministic/circular-module-dependency',
+        title: `Circular module dependency: ${chainDisplay}`,
+        description: `Circular import chain: ${chainDisplay}${qualifier}. Circular dependencies make refactoring difficult and indicate unclear module boundaries.`,
+        severity,
+        serviceName: firstMod?.serviceName || 'unknown',
+        moduleName: firstMod?.name,
+        filePath: firstMod?.filePath || '',
+        relatedModuleName: secondMod?.name,
+      })
+    }
+  }
 
   // God module
   if (ruleKeys.has('architecture/deterministic/god-module')) {

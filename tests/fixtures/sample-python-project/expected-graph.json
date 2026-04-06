@@ -309,6 +309,11 @@
   ],
   "deterministicViolations": [
     {
+      "ruleKey": "architecture/deterministic/circular-module-dependency",
+      "title": "Circular module dependency: UserRepository → user_handler → UserService → UserRepository",
+      "severity": "high"
+    },
+    {
       "ruleKey": "architecture/deterministic/cross-service-internal-import",
       "title": "Cross-service internal import: user_handler → validators",
       "severity": "high"
