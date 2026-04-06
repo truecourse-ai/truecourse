@@ -2927,7 +2927,7 @@ Overhaul hardcoded secret detection to dramatically reduce false positives and e
 6. **Keyword pre-filtering** — fast substring check before regex (performance)
 7. **Per-rule allowlists** — surgical FP suppression
 
-### 30.5 Smarter Circular Dependency Detection `STATUS: TODO`
+### 30.5 Smarter Circular Dependency Detection `STATUS: DONE`
 
 Improve circular dependency detection with proper graph algorithms and lazy import awareness. Current implementation uses simple bidirectional edge checking. Detailed research in `docs/MADGE-RESEARCH.md`.
 
@@ -2939,6 +2939,26 @@ Improve circular dependency detection with proper graph algorithms and lazy impo
    - Static import cycle → high severity
    - Dynamic/lazy import cycle → low severity (warning)
    - Type-only import cycle → info (harmless)
+
+### 30.6 LLM Rule Prompts `STATUS: TODO`
+
+Write prompt text for 81 LLM rules across all domains. These rules already have definitions (key, name, description) but no `prompt` field — the text that guides the LLM during analysis.
+
+Domains with LLM rules: architecture (7), security (1), bugs (4), code-quality (3), database (5), plus ~61 engineering/custom rules.
+
+No code changes needed — just write the prompt string for each rule definition.
+
+### 30.7 Rule Recategorization `STATUS: TODO`
+
+~104 rules are in the wrong domain based on the categorization audit at `docs/research/RULE-CATEGORIZATION-AUDIT.md`. Move them to the correct domain:
+
+- code-quality → style (~35 rules): pure syntax preferences
+- code-quality → bugs (~25 rules): actual runtime failures
+- bugs → reliability (~13 rules): error handling patterns
+- architecture → security (5 rules): real vulnerabilities
+- Plus ~26 smaller moves across other domains
+
+Requires: rename rule keys, update DB migration, update visitors, update tests, update ALL-RULES.md.
 
 ### Fix Generation
 
