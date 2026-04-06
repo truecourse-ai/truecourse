@@ -9,7 +9,7 @@ import {
   violations,
   codeViolations,
 } from '../db/schema.js';
-import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer';
+import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, type TypeQueryService } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -291,6 +291,21 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
     onProgress?.({ step: 'analyzing', percent: 82, detail: 'Running code checks...' });
 
+    // Build TypeQueryService once if any enabled visitors need type information
+    let typeQuery: TypeQueryService | undefined;
+    const enabledCodeKeys = new Set(enabledCodeRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key));
+    if (hasTypeAwareVisitors(enabledCodeKeys)) {
+      const tsFiles = filesToScan
+        .filter(({ filePath: fp }) => /\.(ts|tsx|js|jsx)$/.test(fp))
+        .map(({ filePath: fp, resolve: res }) =>
+          res ? path.resolve(repoPath, fp) : (path.isAbsolute(fp) ? fp : path.join(repoPath, fp)),
+        );
+      if (tsFiles.length > 0) {
+        const scoped = buildScopedCompilerOptions(repoPath);
+        typeQuery = createTypeQueryService(tsFiles, scoped);
+      }
+    }
+
     for (const { filePath, resolve } of filesToScan) {
       try {
         const lang = detectLanguage(filePath);
@@ -304,7 +319,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         if (enabledCodeRules.length > 0) {
           const scanPath = changedFileSet ? filePath : filePath;
           const tree = parseFile(scanPath, content, lang);
-          const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, content, enabledCodeRules, lang);
+          const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, content, enabledCodeRules, lang, typeQuery);
           allCodeViolations.push(...codeRuleViolations);
         }
       } catch {

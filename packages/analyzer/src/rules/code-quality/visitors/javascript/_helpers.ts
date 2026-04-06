@@ -7,6 +7,8 @@ import type { SupportedLanguage } from '@truecourse/shared'
 
 export const JS_LANGUAGES: SupportedLanguage[] = ['typescript', 'tsx', 'javascript']
 
+export const TS_LANGUAGES: SupportedLanguage[] = ['typescript', 'tsx']
+
 export type { SyntaxNode }
 
 export const JS_FUNCTION_TYPES = ['function_declaration', 'function_expression', 'arrow_function', 'method_definition']

@@ -2,6 +2,8 @@ import type { SyntaxNode } from 'tree-sitter'
 
 export const JS_LANGUAGES: ('typescript' | 'tsx' | 'javascript')[] = ['typescript', 'tsx', 'javascript']
 
+export const TS_LANGUAGES: ('typescript' | 'tsx')[] = ['typescript', 'tsx']
+
 export const COMPARISON_OPERATORS = new Set(['===', '==', '!==', '!=', '>', '<', '>=', '<='])
 
 export const CONSTANT_LITERALS = new Set(['true', 'false', 'null', 'undefined'])

@@ -254,6 +254,8 @@ import { pythonCompressionNamespaceImportVisitor } from './compression-namespace
 import { pythonTypingOnlyImportVisitor } from './typing-only-import.js'
 import { pythonBannedApiImportVisitor } from './banned-api-import.js'
 import { pythonAirflow3MigrationVisitor } from './airflow-3-migration.js'
+import { pythonReturnTypeInconsistentWithHintVisitor } from './return-type-inconsistent-with-hint.js'
+import { pythonAssignmentInconsistentWithHintVisitor } from './assignment-inconsistent-with-hint.js'
 
 export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonPrintVisitor,
@@ -506,4 +508,7 @@ export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonTypingOnlyImportVisitor,
   pythonBannedApiImportVisitor,
   pythonAirflow3MigrationVisitor,
+  // Python type-aware rules (heuristic-based)
+  pythonReturnTypeInconsistentWithHintVisitor,
+  pythonAssignmentInconsistentWithHintVisitor,
 ]

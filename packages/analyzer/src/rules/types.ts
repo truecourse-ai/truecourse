@@ -3,13 +3,15 @@ import type { Tree } from 'tree-sitter'
 import type { CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { buildDataFlowContext } from '../data-flow/index.js'
 import type { DataFlowContext } from '../data-flow/index.js'
+import type { TypeQueryService } from '../ts-compiler.js'
 
 export interface CodeRuleVisitor {
   ruleKey: string
   nodeTypes: string[]
   languages?: SupportedLanguage[]
   needsDataFlow?: boolean
-  visit(node: SyntaxNode, filePath: string, sourceCode: string, dataFlow?: DataFlowContext): CodeViolation | null
+  needsTypeQuery?: boolean
+  visit(node: SyntaxNode, filePath: string, sourceCode: string, dataFlow?: DataFlowContext, typeQuery?: TypeQueryService): CodeViolation | null
 }
 
 export function makeViolation(
@@ -54,6 +56,7 @@ export function walkAstWithVisitors(
   visitors: CodeRuleVisitor[],
   enabledRuleKeys: Set<string>,
   language?: SupportedLanguage,
+  typeQuery?: TypeQueryService,
 ): CodeViolation[] {
   // Filter visitors by enabled rules and language
   const activeVisitors = visitors.filter((v) => {
@@ -88,7 +91,7 @@ export function walkAstWithVisitors(
     const visitors = visitorsByNodeType.get(node.type)
     if (visitors) {
       for (const visitor of visitors) {
-        const violation = visitor.visit(node, filePath, sourceCode, visitor.needsDataFlow ? dataFlow : undefined)
+        const violation = visitor.visit(node, filePath, sourceCode, visitor.needsDataFlow ? dataFlow : undefined, visitor.needsTypeQuery ? typeQuery : undefined)
         if (violation) {
           violations.push(violation)
         }

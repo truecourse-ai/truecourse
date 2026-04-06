@@ -230,6 +230,17 @@ import { staticMethodCandidateVisitor } from './static-method-candidate.js'
 import { requiredTypeAnnotationsVisitor } from './required-type-annotations.js'
 import { restrictedApiUsageVisitor } from './restricted-api-usage.js'
 import { restrictedTypesVisitor } from './restricted-types.js'
+// Type-aware rules (TypeQueryService)
+import { unsafeAnyUsageVisitor } from './unsafe-any-usage.js'
+import { unnecessaryTypeAssertionVisitor } from './unnecessary-type-assertion.js'
+import { unnecessaryConditionVisitor } from './unnecessary-condition.js'
+import { confusingVoidExpressionVisitor } from './confusing-void-expression.js'
+import { redundantTypeArgumentVisitor } from './redundant-type-argument.js'
+import { unnecessaryTypeConversionVisitor } from './unnecessary-type-conversion.js'
+import { unnecessaryTypeParameterVisitor } from './unnecessary-type-parameter.js'
+import { preferThisReturnTypeVisitor } from './prefer-this-return-type.js'
+import { unnecessaryNamespaceQualifierVisitor } from './unnecessary-namespace-qualifier.js'
+import { readonlyParameterTypesVisitor } from './readonly-parameter-types.js'
 
 export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   consoleLogVisitor,
@@ -467,4 +478,15 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   requiredTypeAnnotationsVisitor,
   restrictedApiUsageVisitor,
   restrictedTypesVisitor,
+  // Type-aware rules (TypeQueryService)
+  unsafeAnyUsageVisitor,
+  unnecessaryTypeAssertionVisitor,
+  unnecessaryConditionVisitor,
+  confusingVoidExpressionVisitor,
+  redundantTypeArgumentVisitor,
+  unnecessaryTypeConversionVisitor,
+  unnecessaryTypeParameterVisitor,
+  preferThisReturnTypeVisitor,
+  unnecessaryNamespaceQualifierVisitor,
+  readonlyParameterTypesVisitor,
 ]

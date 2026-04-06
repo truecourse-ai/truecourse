@@ -1,6 +1,7 @@
 import type { Tree } from 'tree-sitter'
 import type { AnalysisRule, CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { walkAstWithVisitors, type CodeRuleVisitor } from './types.js'
+import type { TypeQueryService } from '../ts-compiler.js'
 
 // Import all domain visitors
 import { SECURITY_JS_VISITORS } from './security/visitors/javascript/index.js'
@@ -44,6 +45,16 @@ const ALL_CODE_VISITORS: CodeRuleVisitor[] = [
 ]
 
 /**
+ * Returns true if any registered code visitor requires a TypeQueryService.
+ * Used by the pipeline to decide whether to create the TypeScript program.
+ */
+export function hasTypeAwareVisitors(enabledRuleKeys: Set<string>): boolean {
+  return ALL_CODE_VISITORS.some(
+    (v) => v.needsTypeQuery && enabledRuleKeys.has(v.ruleKey),
+  )
+}
+
+/**
  * Check all code-level rules by walking the AST and firing matching visitors.
  * This is a combined checker that runs security, bugs, and code-quality domain
  * visitors in a single AST pass for efficiency.
@@ -56,6 +67,7 @@ export function checkCodeRules(
   sourceCode: string,
   enabledRules: AnalysisRule[],
   language?: SupportedLanguage,
+  typeQuery?: TypeQueryService,
 ): CodeViolation[] {
   const enabledKeys = new Set(
     enabledRules
@@ -65,5 +77,5 @@ export function checkCodeRules(
 
   if (enabledKeys.size === 0) return []
 
-  return walkAstWithVisitors(tree, filePath, sourceCode, ALL_CODE_VISITORS, enabledKeys, language)
+  return walkAstWithVisitors(tree, filePath, sourceCode, ALL_CODE_VISITORS, enabledKeys, language, typeQuery)
 }

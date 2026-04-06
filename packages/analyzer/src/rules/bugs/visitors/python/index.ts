@@ -217,6 +217,16 @@ import { pythonSklearnPipelineInvalidParamsVisitor } from './sklearn-pipeline-in
 import { pythonForwardAnnotationSyntaxErrorVisitor } from './forward-annotation-syntax-error.js'
 import { pythonRuntimeImportInTypeCheckingVisitor } from './runtime-import-in-type-checking.js'
 import { pythonRedefinedSlotsInSubclassVisitor } from './redefined-slots-in-subclass.js'
+import { pythonUndefinedNameVisitor } from './undefined-name.js'
+import { pythonUndefinedLocalVariableVisitor } from './undefined-local-variable.js'
+import { pythonNonCallableCalledVisitor } from './non-callable-called.js'
+import { pythonIncompatibleOperatorTypesVisitor } from './incompatible-operator-types.js'
+import { pythonUnnecessaryEqualityCheckVisitor } from './unnecessary-equality-check.js'
+import { pythonIdentityWithDissimilarTypesVisitor } from './identity-with-dissimilar-types.js'
+import { pythonNotInOperatorIncompatibleVisitor } from './not-in-operator-incompatible.js'
+import { pythonItemOperationUnsupportedVisitor } from './item-operation-unsupported.js'
+import { pythonClassMixedTypevarsVisitor } from './class-mixed-typevars.js'
+import { pythonAssertionIncompatibleTypesVisitor } from './assertion-incompatible-types.js'
 
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
@@ -436,4 +446,15 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonForwardAnnotationSyntaxErrorVisitor,
   pythonRuntimeImportInTypeCheckingVisitor,
   pythonRedefinedSlotsInSubclassVisitor,
+  // Python type-aware rules (heuristic-based)
+  pythonUndefinedNameVisitor,
+  pythonUndefinedLocalVariableVisitor,
+  pythonNonCallableCalledVisitor,
+  pythonIncompatibleOperatorTypesVisitor,
+  pythonUnnecessaryEqualityCheckVisitor,
+  pythonIdentityWithDissimilarTypesVisitor,
+  pythonNotInOperatorIncompatibleVisitor,
+  pythonItemOperationUnsupportedVisitor,
+  pythonClassMixedTypevarsVisitor,
+  pythonAssertionIncompatibleTypesVisitor,
 ]

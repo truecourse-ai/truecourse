@@ -20,7 +20,7 @@ export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, 
 export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG } from './language-config.js'
 
 // TypeScript Compiler API utilities
-export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsxReferences, type ScopedCompilerOptions, type SemanticAnalysisResult, type JsxReference } from './ts-compiler.js'
+export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsxReferences, createTypeQueryService, type ScopedCompilerOptions, type SemanticAnalysisResult, type JsxReference, type TypeQueryService } from './ts-compiler.js'
 
 // Extractors
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
@@ -110,7 +110,7 @@ export { getAllDefaultRules } from './rule-engine.js'
  * Combined code-rule checker that runs all AST-based domain checkers.
  * Drop-in replacement for the old checkCodeRules function.
  */
-export { checkCodeRules } from './rules/combined-code-checker.js'
+export { checkCodeRules, hasTypeAwareVisitors } from './rules/combined-code-checker.js'
 
 /**
  * High-level function to analyze an entire repository

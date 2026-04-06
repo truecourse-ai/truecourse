@@ -217,6 +217,173 @@ export function analyzeSemantics(
 }
 
 // ---------------------------------------------------------------------------
+// Layer 4: Type query service (kept alive for rule visitors)
+// ---------------------------------------------------------------------------
+
+export interface TypeQueryService {
+  /** Get the type of an expression at a position */
+  getTypeAtPosition(filePath: string, line: number, column: number): string | null
+  /** Check if a type is assignable to Promise */
+  isPromiseLike(filePath: string, line: number, column: number): boolean
+  /** Get return type of a function */
+  getReturnType(filePath: string, line: number, column: number): string | null
+  /** Get the type string for display */
+  getTypeString(filePath: string, line: number, column: number): string | null
+  /** Check if type is 'any' */
+  isAnyType(filePath: string, line: number, column: number): boolean
+  /** Check if type is void/undefined */
+  isVoidType(filePath: string, line: number, column: number): boolean
+  /** Check if type is boolean */
+  isBooleanType(filePath: string, line: number, column: number): boolean
+  /** Get parameter types of a function/method */
+  getParameterTypes(filePath: string, line: number, column: number): Array<{ name: string; type: string }> | null
+  /** Check if two positions have compatible types */
+  areTypesCompatible(filePath: string, line1: number, col1: number, line2: number, col2: number): boolean
+}
+
+/**
+ * Find the smallest AST node at the given 0-based line and column in a
+ * TypeScript source file.
+ */
+function getNodeAtPosition(sourceFile: ts.SourceFile, line: number, column: number): ts.Node | undefined {
+  let pos: number
+  try {
+    pos = ts.getPositionOfLineAndCharacter(sourceFile, line, column)
+  } catch {
+    return undefined
+  }
+
+  let candidate: ts.Node | undefined
+
+  function visit(node: ts.Node) {
+    if (node.getStart(sourceFile) <= pos && pos < node.getEnd()) {
+      candidate = node
+      ts.forEachChild(node, visit)
+    }
+  }
+
+  visit(sourceFile)
+  return candidate
+}
+
+/**
+ * Create a TypeQueryService backed by a ts.Program and ts.TypeChecker.
+ * The program is created once and kept alive so rule visitors can query types
+ * during the AST walk.
+ *
+ * @param filePaths  Absolute paths to all TS/JS files to include
+ * @param scopedOptions  Compiler options from buildScopedCompilerOptions()
+ */
+export function createTypeQueryService(
+  filePaths: string[],
+  scopedOptions: ScopedCompilerOptions[],
+): TypeQueryService {
+  const baseOptions = scopedOptions[scopedOptions.length - 1]?.options ?? {}
+  const options: ts.CompilerOptions = {
+    ...baseOptions,
+    skipLibCheck: true,
+    noEmit: true,
+  }
+
+  const program = ts.createProgram(filePaths, options)
+  const checker = program.getTypeChecker()
+
+  function getTypeAtNode(filePath: string, line: number, column: number): ts.Type | null {
+    const sf = program.getSourceFile(filePath)
+    if (!sf) return null
+    const node = getNodeAtPosition(sf, line, column)
+    if (!node) return null
+    try {
+      return checker.getTypeAtLocation(node)
+    } catch {
+      return null
+    }
+  }
+
+  function typeToString(type: ts.Type): string {
+    return checker.typeToString(type)
+  }
+
+  return {
+    getTypeAtPosition(filePath, line, column) {
+      const type = getTypeAtNode(filePath, line, column)
+      return type ? typeToString(type) : null
+    },
+
+    isPromiseLike(filePath, line, column) {
+      const type = getTypeAtNode(filePath, line, column)
+      if (!type) return false
+      const str = typeToString(type)
+      return str.startsWith('Promise<') || str.includes('PromiseLike<')
+    },
+
+    getReturnType(filePath, line, column) {
+      const sf = program.getSourceFile(filePath)
+      if (!sf) return null
+      const node = getNodeAtPosition(sf, line, column)
+      if (!node) return null
+      try {
+        const type = checker.getTypeAtLocation(node)
+        const signatures = type.getCallSignatures()
+        if (signatures.length === 0) return null
+        const returnType = signatures[0].getReturnType()
+        return typeToString(returnType)
+      } catch {
+        return null
+      }
+    },
+
+    getTypeString(filePath, line, column) {
+      const type = getTypeAtNode(filePath, line, column)
+      return type ? typeToString(type) : null
+    },
+
+    isAnyType(filePath, line, column) {
+      const type = getTypeAtNode(filePath, line, column)
+      if (!type) return false
+      return (type.flags & ts.TypeFlags.Any) !== 0
+    },
+
+    isVoidType(filePath, line, column) {
+      const type = getTypeAtNode(filePath, line, column)
+      if (!type) return false
+      return (type.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) !== 0
+    },
+
+    isBooleanType(filePath, line, column) {
+      const type = getTypeAtNode(filePath, line, column)
+      if (!type) return false
+      return (type.flags & (ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral)) !== 0
+    },
+
+    getParameterTypes(filePath, line, column) {
+      const sf = program.getSourceFile(filePath)
+      if (!sf) return null
+      const node = getNodeAtPosition(sf, line, column)
+      if (!node) return null
+      try {
+        const type = checker.getTypeAtLocation(node)
+        const signatures = type.getCallSignatures()
+        if (signatures.length === 0) return null
+        return signatures[0].getParameters().map((param) => ({
+          name: param.getName(),
+          type: typeToString(checker.getTypeOfSymbolAtLocation(param, node)),
+        }))
+      } catch {
+        return null
+      }
+    },
+
+    areTypesCompatible(filePath, line1, col1, line2, col2) {
+      const type1 = getTypeAtNode(filePath, line1, col1)
+      const type2 = getTypeAtNode(filePath, line2, col2)
+      if (!type1 || !type2) return false
+      return checker.isTypeAssignableTo(type1, type2) || checker.isTypeAssignableTo(type2, type1)
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // JSX reference extraction
 // ---------------------------------------------------------------------------
 

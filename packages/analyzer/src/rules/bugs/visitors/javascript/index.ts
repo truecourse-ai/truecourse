@@ -141,6 +141,24 @@ import { unboundMethodVisitor } from './unbound-method.js'
 import { useBeforeDefineVisitor } from './use-before-define.js'
 import { noUndefVisitor } from './no-undef.js'
 import { missingErrorBoundaryVisitor } from './missing-error-boundary.js'
+// Type-aware rules (TypeQueryService)
+import { awaitNonThenableVisitor } from './await-non-thenable.js'
+import { unhandledPromiseVisitor } from './unhandled-promise.js'
+import { misusedPromiseVisitor } from './misused-promise.js'
+import { misusedSpreadVisitor } from './misused-spread.js'
+import { restrictPlusOperandsVisitor } from './restrict-plus-operands.js'
+import { restrictTemplateExpressionsVisitor } from './restrict-template-expressions.js'
+import { baseToStringVisitor } from './base-to-string.js'
+import { unsafeEnumComparisonVisitor } from './unsafe-enum-comparison.js'
+import { unsafeUnaryMinusVisitor } from './unsafe-unary-minus.js'
+import { switchExhaustivenessVisitor } from './switch-exhaustiveness.js'
+import { nonNumberArithmeticVisitor } from './non-number-arithmetic.js'
+import { valuesNotConvertibleToNumberVisitor } from './values-not-convertible-to-number.js'
+import { argumentTypeMismatchVisitor } from './argument-type-mismatch.js'
+import { functionReturnTypeVariesVisitor } from './function-return-type-varies.js'
+import { looseBooleanExpressionVisitor } from './loose-boolean-expression.js'
+import { unsafeTypeAssertionVisitor } from './unsafe-type-assertion.js'
+import { tsVoidReturnValueVisitor } from './ts-void-return-value.js'
 
 export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   emptyCatchVisitor,
@@ -285,4 +303,22 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   useBeforeDefineVisitor,
   noUndefVisitor,
   missingErrorBoundaryVisitor,
+  // Type-aware rules (TypeQueryService)
+  awaitNonThenableVisitor,
+  unhandledPromiseVisitor,
+  misusedPromiseVisitor,
+  misusedSpreadVisitor,
+  restrictPlusOperandsVisitor,
+  restrictTemplateExpressionsVisitor,
+  baseToStringVisitor,
+  unsafeEnumComparisonVisitor,
+  unsafeUnaryMinusVisitor,
+  switchExhaustivenessVisitor,
+  nonNumberArithmeticVisitor,
+  valuesNotConvertibleToNumberVisitor,
+  argumentTypeMismatchVisitor,
+  functionReturnTypeVariesVisitor,
+  looseBooleanExpressionVisitor,
+  unsafeTypeAssertionVisitor,
+  tsVoidReturnValueVisitor,
 ]
