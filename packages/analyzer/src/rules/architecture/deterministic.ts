@@ -43,7 +43,6 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'medium',
     type: 'deterministic',
-    isDependencyViolation: true,
   },
   {
     key: 'architecture/deterministic/data-layer-depends-on-external',
@@ -54,7 +53,6 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'medium',
     type: 'deterministic',
-    isDependencyViolation: true,
   },
   {
     key: 'architecture/deterministic/cross-service-internal-import',
@@ -65,7 +63,6 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'high',
     type: 'deterministic',
-    isDependencyViolation: true,
   },
   {
     key: 'architecture/deterministic/circular-module-dependency',
@@ -76,7 +73,6 @@ export const ARCHITECTURE_DETERMINISTIC_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'high',
     type: 'deterministic',
-    isDependencyViolation: true,
   },
   {
     key: 'architecture/deterministic/god-module',
