@@ -11,7 +11,7 @@ import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, 
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
-import { DOMAIN_ORDER, DOMAIN_LABELS, LLM_DOMAINS } from '../socket/handlers.js';
+import { DOMAIN_ORDER, DOMAIN_LABELS, LLM_DOMAINS, CODE_DOMAINS } from '../socket/handlers.js';
 import { getEnabledRules } from './rules.service.js';
 import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
 import { routeContext, estimateContext } from './llm/context-router.js';
@@ -209,7 +209,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   // 3. Run code-level rules and collect file contents for LLM code rules
-  const codeDomains = new Set(['security', 'bugs', 'code-quality', 'style', 'performance', 'reliability', 'database'])
+  const codeDomains = new Set<string>(CODE_DOMAINS)
   // Include security/bugs/code-quality rules, plus architecture rules that operate at the
   // code/file level (category === 'code') — those are AST-visitor rules that produce
   // CodeViolation objects and will be converted to ModuleViolations below.

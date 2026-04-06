@@ -15,8 +15,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@truecourse/analyzer": "workspace:*",
     "@clack/prompts": "^1.2.0",
+    "@truecourse/analyzer": "workspace:*",
+    "@truecourse/shared": "workspace:^",
     "commander": "^12.1.0",
     "dotenv": "^16.4.0",
     "js-yaml": "^4.1.0",

@@ -2,7 +2,7 @@ import { eq, notInArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { rules } from '../db/schema.js';
 import { getAllDefaultRules } from '@truecourse/analyzer';
-import type { AnalysisRule } from '@truecourse/shared';
+import { type AnalysisRule, DOMAIN_ORDER } from '@truecourse/shared';
 
 /**
  * Seed default rules into the database.
@@ -53,7 +53,7 @@ function deriveDomain(key: string): AnalysisRule['domain'] {
   const firstSlash = key.indexOf('/');
   if (firstSlash === -1) return undefined;
   const prefix = key.slice(0, firstSlash);
-  const validDomains = new Set(['architecture', 'security', 'bugs', 'code-quality', 'style', 'database', 'performance', 'reliability']);
+  const validDomains = new Set<string>(DOMAIN_ORDER);
   return validDomains.has(prefix) ? (prefix as AnalysisRule['domain']) : undefined;
 }
 

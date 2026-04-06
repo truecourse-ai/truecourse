@@ -219,7 +219,8 @@ export async function runSetup(): Promise<void> {
   // Rule category selection — use saved config if available
   const { readConfig: readExistingConfig } = await import("./helpers.js");
   const existingConfig = readExistingConfig();
-  const defaultCategories = ["security", "bugs", "architecture", "performance", "reliability", "code-quality", "database"];
+  const { DEFAULT_DOMAINS } = await import("@truecourse/shared");
+  const defaultCategories = [...DEFAULT_DOMAINS] as string[];
   const savedCategories = existingConfig.enabledCategories?.length ? existingConfig.enabledCategories : defaultCategories;
 
   const categories = await p.multiselect({

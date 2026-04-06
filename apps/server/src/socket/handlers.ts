@@ -1,11 +1,11 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { getIO } from './index.js';
+import { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS } from '@truecourse/shared';
 
-// Domain priority order
-export const DOMAIN_ORDER = ['security', 'bugs', 'architecture', 'performance', 'reliability', 'code-quality', 'database', 'style'] as const;
+export { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS };
 
 // Domains that have LLM rules
-export const LLM_DOMAINS = ['security', 'bugs', 'architecture', 'code-quality', 'database'] as const;
+export const LLM_DOMAINS = DOMAIN_ORDER.filter((d: string) => ['security', 'bugs', 'architecture', 'code-quality', 'database'].includes(d));
 
 // Human-readable domain labels
 export const DOMAIN_LABELS: Record<string, string> = {

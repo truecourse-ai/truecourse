@@ -309,6 +309,9 @@ importers:
       '@truecourse/analyzer':
         specifier: workspace:*
         version: link:../../packages/analyzer
+      '@truecourse/shared':
+        specifier: workspace:^
+        version: link:../../packages/shared
       commander:
         specifier: ^12.1.0
         version: 12.1.0
