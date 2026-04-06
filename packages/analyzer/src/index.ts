@@ -167,3 +167,6 @@ export async function analyzeRepository(rootPath: string): Promise<{
     splitResult,
   }
 }
+
+// Config file checkers
+export { checkPyprojectToml } from './rules/bugs/pyproject-checker.js'

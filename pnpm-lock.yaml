@@ -268,6 +268,9 @@ importers:
       pyright:
         specifier: ^1.1.408
         version: 1.1.408
+      smol-toml:
+        specifier: ^1.6.1
+        version: 1.6.1
       tree-sitter:
         specifier: ^0.25.0
         version: 0.25.0
@@ -4098,6 +4101,10 @@ packages:
 
   sisteransi@1.0.5:
     resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
+
+  smol-toml@1.6.1:
+    resolution: {integrity: sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg==}
+    engines: {node: '>= 18'}
 
   socket.io-adapter@2.5.6:
     resolution: {integrity: sha512-DkkO/dz7MGln0dHn5bmN3pPy+JmywNICWrJqVWiVOyvXjWQFIv9c2h24JrQLLFJ2aQVQf/Cvl1vblnd4r2apLQ==}
@@ -8447,6 +8454,8 @@ snapshots:
       - supports-color
 
   sisteransi@1.0.5: {}
+
+  smol-toml@1.6.1: {}
 
   socket.io-adapter@2.5.6:
     dependencies:

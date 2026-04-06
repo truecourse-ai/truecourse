@@ -328,6 +328,21 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  // Check pyproject.toml if the rule is enabled
+  if (enabledCodeRules.some(r => r.key === 'bugs/deterministic/invalid-pyproject-toml')) {
+    const pyprojectPath = path.join(repoPath, 'pyproject.toml');
+    if (fs.existsSync(pyprojectPath)) {
+      try {
+        const { checkPyprojectToml } = await import('@truecourse/analyzer');
+        const content = fs.readFileSync(pyprojectPath, 'utf-8');
+        const tomlViolations = checkPyprojectToml(pyprojectPath, content);
+        allCodeViolations.push(...tomlViolations);
+      } catch {
+        // smol-toml not available or import failed — skip
+      }
+    }
+  }
+
   throwIfAborted(signal);
 
   // Convert architecture-domain code violations into ModuleViolation format so they
