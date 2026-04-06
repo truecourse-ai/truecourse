@@ -66,7 +66,6 @@ export const AnalysisRuleSchema = z.object({
   enabled: z.boolean(),
   severity: RuleSeveritySchema,
   type: RuleTypeSchema,
-  isDependencyViolation: z.boolean().optional(),
   contextRequirement: ContextRequirementSchema.optional(),
 })
 

@@ -732,14 +732,12 @@ class AISDKProvider implements LLMProvider {
 
     // Select prompt template based on tier and lifecycle mode
     let promptName: Parameters<typeof getPrompt>[0];
-    if (hasExisting) {
-      promptName = 'violations-code-lifecycle';
-    } else if (context.tier === 'metadata') {
-      promptName = 'violations-code-metadata';
+    if (context.tier === 'metadata') {
+      promptName = hasExisting ? 'violations-code-metadata-lifecycle' : 'violations-code-metadata';
     } else if (context.tier === 'targeted') {
-      promptName = 'violations-code-targeted';
+      promptName = hasExisting ? 'violations-code-targeted-lifecycle' : 'violations-code-targeted';
     } else {
-      promptName = 'violations-code';
+      promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
     }
 
     const { vars, idMap } = buildCodeTemplateVars(context);

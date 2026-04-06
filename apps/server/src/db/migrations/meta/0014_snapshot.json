@@ -1,6 +1,6 @@
 {
-  "id": "012083c8-ac4c-4853-aaa2-987ec7290fc4",
-  "prevId": "c072522d-452a-44a2-8987-4f3d6b44740d",
+  "id": "8cca8c8a-f720-4803-b62e-5ad3fd62702d",
+  "prevId": "012083c8-ac4c-4853-aaa2-987ec7290fc4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -186,163 +186,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.code_violations": {
-      "name": "code_violations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "analysis_id": {
-          "name": "analysis_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "file_path": {
-          "name": "file_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "line_start": {
-          "name": "line_start",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "line_end": {
-          "name": "line_end",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "column_start": {
-          "name": "column_start",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "column_end": {
-          "name": "column_end",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rule_key": {
-          "name": "rule_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "severity": {
-          "name": "severity",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'new'"
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content": {
-          "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "snippet": {
-          "name": "snippet",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fix_prompt": {
-          "name": "fix_prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "first_seen_analysis_id": {
-          "name": "first_seen_analysis_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "first_seen_at": {
-          "name": "first_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_code_violation_id": {
-          "name": "previous_code_violation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "code_violations_analysis_id_analyses_id_fk": {
-          "name": "code_violations_analysis_id_analyses_id_fk",
-          "tableFrom": "code_violations",
-          "tableTo": "analyses",
-          "columnsFrom": [
-            "analysis_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "code_violations_first_seen_analysis_id_analyses_id_fk": {
-          "name": "code_violations_first_seen_analysis_id_analyses_id_fk",
-          "tableFrom": "code_violations",
-          "tableTo": "analyses",
-          "columnsFrom": [
-            "first_seen_analysis_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -568,126 +411,6 @@
         "databases_analysis_id_analyses_id_fk": {
           "name": "databases_analysis_id_analyses_id_fk",
           "tableFrom": "databases",
-          "tableTo": "analyses",
-          "columnsFrom": [
-            "analysis_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.deterministic_violations": {
-      "name": "deterministic_violations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "analysis_id": {
-          "name": "analysis_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "rule_key": {
-          "name": "rule_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "severity": {
-          "name": "severity",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "service_name": {
-          "name": "service_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "module_name": {
-          "name": "module_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "method_name": {
-          "name": "method_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "file_path": {
-          "name": "file_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "related_module_name": {
-          "name": "related_module_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "related_service_name": {
-          "name": "related_service_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_dependency_violation": {
-          "name": "is_dependency_violation",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "deterministic_violations_analysis_id_analyses_id_fk": {
-          "name": "deterministic_violations_analysis_id_analyses_id_fk",
-          "tableFrom": "deterministic_violations",
           "tableTo": "analyses",
           "columnsFrom": [
             "analysis_id"
@@ -1610,13 +1333,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "is_dependency_violation": {
-          "name": "is_dependency_violation",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1903,6 +1619,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "related_service_id": {
+          "name": "related_service_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "related_module_id": {
+          "name": "related_module_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "fix_prompt": {
           "name": "fix_prompt",
           "type": "text",
@@ -1914,12 +1642,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "deterministic_violation_id": {
-          "name": "deterministic_violation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "first_seen_analysis_id": {
           "name": "first_seen_analysis_id",
@@ -1942,6 +1664,42 @@
         "resolved_at": {
           "name": "resolved_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "file_path": {
+          "name": "file_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "line_start": {
+          "name": "line_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "line_end": {
+          "name": "line_end",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "column_start": {
+          "name": "column_start",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "column_end": {
+          "name": "column_end",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "snippet": {
+          "name": "snippet",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2033,12 +1791,25 @@
           "onDelete": "set null",
           "onUpdate": "no action"
         },
-        "violations_deterministic_violation_id_deterministic_violations_id_fk": {
-          "name": "violations_deterministic_violation_id_deterministic_violations_id_fk",
+        "violations_related_service_id_services_id_fk": {
+          "name": "violations_related_service_id_services_id_fk",
           "tableFrom": "violations",
-          "tableTo": "deterministic_violations",
+          "tableTo": "services",
           "columnsFrom": [
-            "deterministic_violation_id"
+            "related_service_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "violations_related_module_id_modules_id_fk": {
+          "name": "violations_related_module_id_modules_id_fk",
+          "tableFrom": "violations",
+          "tableTo": "modules",
+          "columnsFrom": [
+            "related_module_id"
           ],
           "columnsTo": [
             "id"

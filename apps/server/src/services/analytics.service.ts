@@ -2,7 +2,6 @@ import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import {
   violations,
-  codeViolations,
   analyses,
   services,
   modules,
@@ -64,8 +63,8 @@ export async function getTrend(
 
   const analysisIds = recentAnalyses.map((a) => a.id);
 
-  // Count architecture violations per analysis, grouped by status and severity
-  const archRows = await db
+  // Count all violations per analysis, grouped by status and severity
+  const allRows = await db
     .select({
       analysisId: violations.analysisId,
       status: violations.status,
@@ -76,21 +75,9 @@ export async function getTrend(
     .where(inArray(violations.analysisId, analysisIds))
     .groupBy(violations.analysisId, violations.status, violations.severity);
 
-  // Count code violations per analysis, grouped by status and severity
-  const codeRows = await db
-    .select({
-      analysisId: codeViolations.analysisId,
-      status: codeViolations.status,
-      severity: codeViolations.severity,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(codeViolations)
-    .where(inArray(codeViolations.analysisId, analysisIds))
-    .groupBy(codeViolations.analysisId, codeViolations.status, codeViolations.severity);
-
-  // Merge arch + code rows into a single map
+  // Build counts map
   const countMap = new Map<string, Map<string, number>>();
-  for (const row of [...archRows, ...codeRows]) {
+  for (const row of allRows) {
     const key = row.analysisId;
     if (!countMap.has(key)) countMap.set(key, new Map());
     const m = countMap.get(key)!;
@@ -138,8 +125,8 @@ export async function getBreakdown(
   const analysisId = specificAnalysisId ?? await findLatestAnalysisId(repoId, branch);
   if (!analysisId) return { byType: {}, bySeverity: {}, total: 0 };
 
-  // Architecture violations: group by type and severity (only active)
-  const archByType = await db
+  // All violations: group by type and severity (only active)
+  const allByType = await db
     .select({
       type: violations.type,
       count: sql<number>`count(*)::int`,
@@ -153,7 +140,7 @@ export async function getBreakdown(
     )
     .groupBy(violations.type);
 
-  const archBySeverity = await db
+  const allBySeverity = await db
     .select({
       severity: violations.severity,
       count: sql<number>`count(*)::int`,
@@ -167,42 +154,13 @@ export async function getBreakdown(
     )
     .groupBy(violations.severity);
 
-  // Code violations: all count as type "code"
-  const [codeCount] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(codeViolations)
-    .where(
-      and(
-        eq(codeViolations.analysisId, analysisId),
-        inArray(codeViolations.status, ['new', 'unchanged']),
-      ),
-    );
-
-  const codeBySeverity = await db
-    .select({
-      severity: codeViolations.severity,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(codeViolations)
-    .where(
-      and(
-        eq(codeViolations.analysisId, analysisId),
-        inArray(codeViolations.status, ['new', 'unchanged']),
-      ),
-    )
-    .groupBy(codeViolations.severity);
-
-  // Merge results
   const byType: Record<string, number> = {};
-  for (const row of archByType) {
+  for (const row of allByType) {
     byType[row.type] = (byType[row.type] ?? 0) + row.count;
-  }
-  if (codeCount && codeCount.count > 0) {
-    byType['code'] = (byType['code'] ?? 0) + codeCount.count;
   }
 
   const bySeverity: Record<string, number> = {};
-  for (const row of [...archBySeverity, ...codeBySeverity]) {
+  for (const row of allBySeverity) {
     bySeverity[row.severity] = (bySeverity[row.severity] ?? 0) + row.count;
   }
 
@@ -335,8 +293,8 @@ export async function getResolution(
 
   const analysisIds = repoAnalyses.map((a) => a.id);
 
-  // Average resolution time for resolved violations (architecture + code)
-  const [archResolution] = await db
+  // Average resolution time for all resolved violations
+  const [resolution] = await db
     .select({
       avgMs: sql<number>`avg(extract(epoch from (${violations.resolvedAt} - ${violations.firstSeenAt})) * 1000)::float`,
       totalResolved: sql<number>`count(*) filter (where ${violations.status} = 'resolved')::int`,
@@ -351,23 +309,8 @@ export async function getResolution(
       ),
     );
 
-  const [codeResolution] = await db
-    .select({
-      avgMs: sql<number>`avg(extract(epoch from (${codeViolations.resolvedAt} - ${codeViolations.firstSeenAt})) * 1000)::float`,
-      totalResolved: sql<number>`count(*) filter (where ${codeViolations.status} = 'resolved')::int`,
-    })
-    .from(codeViolations)
-    .where(
-      and(
-        inArray(codeViolations.analysisId, analysisIds),
-        eq(codeViolations.status, 'resolved'),
-        sql`${codeViolations.firstSeenAt} is not null`,
-        sql`${codeViolations.resolvedAt} is not null`,
-      ),
-    );
-
   // Active violations in latest analysis
-  const [archActive] = await db
+  const [activeResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(violations)
     .where(
@@ -377,21 +320,11 @@ export async function getResolution(
       ),
     );
 
-  const [codeActive] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(codeViolations)
-    .where(
-      and(
-        eq(codeViolations.analysisId, latestAnalysisId),
-        inArray(codeViolations.status, ['new', 'unchanged']),
-      ),
-    );
-
   // Stale violations: active in latest analysis with firstSeenAt > 7 days ago
   const staleDays = 7;
   const staleThreshold = sql`now() - interval '${sql.raw(String(staleDays))} days'`;
 
-  const [archStale] = await db
+  const [staleResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(violations)
     .where(
@@ -402,31 +335,10 @@ export async function getResolution(
       ),
     );
 
-  const [codeStale] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(codeViolations)
-    .where(
-      and(
-        eq(codeViolations.analysisId, latestAnalysisId),
-        inArray(codeViolations.status, ['new', 'unchanged']),
-        sql`${codeViolations.firstSeenAt} < ${staleThreshold}`,
-      ),
-    );
-
-  // Combine
-  const totalResolved = (archResolution?.totalResolved ?? 0) + (codeResolution?.totalResolved ?? 0);
-  const totalActive = (archActive?.count ?? 0) + (codeActive?.count ?? 0);
-  const staleCount = (archStale?.count ?? 0) + (codeStale?.count ?? 0);
-
-  // Weighted average of resolution times
-  let avgTimeToResolveMs: number | null = null;
-  const archResCount = archResolution?.totalResolved ?? 0;
-  const codeResCount = codeResolution?.totalResolved ?? 0;
-  if (archResCount + codeResCount > 0) {
-    const archTotal = (archResolution?.avgMs ?? 0) * archResCount;
-    const codeTotal = (codeResolution?.avgMs ?? 0) * codeResCount;
-    avgTimeToResolveMs = (archTotal + codeTotal) / (archResCount + codeResCount);
-  }
+  const totalResolved = resolution?.totalResolved ?? 0;
+  const totalActive = activeResult?.count ?? 0;
+  const staleCount = staleResult?.count ?? 0;
+  const avgTimeToResolveMs = totalResolved > 0 ? (resolution?.avgMs ?? null) : null;
 
   const totalEver = totalResolved + totalActive;
   const resolutionRate = totalEver > 0 ? totalResolved / totalEver : 0;

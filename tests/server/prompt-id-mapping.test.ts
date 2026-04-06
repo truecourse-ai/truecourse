@@ -5,7 +5,6 @@ import {
   buildServiceTemplateVars,
   buildDatabaseTemplateVars,
   buildModuleTemplateVars,
-  buildEnrichmentTemplateVars,
   buildCodeTemplateVars,
 } from '../../apps/server/src/services/llm/prompts.js';
 
@@ -123,24 +122,6 @@ describe('buildModuleTemplateVars', () => {
 
     // Method without id should not get a short ID
     expect(vars.methodList).not.toContain('mth-1');
-  });
-});
-
-describe('buildEnrichmentTemplateVars', () => {
-  it('assigns short IDs to detections', () => {
-    const { vars, idMap } = buildEnrichmentTemplateVars(
-      [
-        { id: 'uuid-det-1', ruleKey: 'architecture/deterministic/god-service', title: 'God service', description: 'too big', severity: 'medium', category: 'service', serviceName: 'api' },
-        { id: 'uuid-det-2', ruleKey: 'architecture/deterministic/dead-method', title: 'Dead method', description: 'unused', severity: 'low', category: 'method', serviceName: 'api', methodName: 'foo' },
-      ],
-      'Architecture: microservices',
-    );
-
-    expect(vars.detections).toContain('[id: det-0]');
-    expect(vars.detections).toContain('[id: det-1]');
-    expect(vars.detections).not.toContain('uuid-det-1');
-    expect(idMap.get('det-0')).toBe('uuid-det-1');
-    expect(idMap.get('det-1')).toBe('uuid-det-2');
   });
 });
 

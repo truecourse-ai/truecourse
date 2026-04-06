@@ -656,7 +656,14 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
     const hasExisting = context.existingViolations && context.existingViolations.length > 0;
-    const promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
+    let promptName: Parameters<typeof getPrompt>[0];
+    if (context.tier === 'metadata') {
+      promptName = hasExisting ? 'violations-code-metadata-lifecycle' : 'violations-code-metadata';
+    } else if (context.tier === 'targeted') {
+      promptName = hasExisting ? 'violations-code-targeted-lifecycle' : 'violations-code-targeted';
+    } else {
+      promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
+    }
     const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: true });
     const { text: prompt } = await getPrompt(promptName, vars);
 

@@ -7,7 +7,6 @@ import {
   services,
   serviceDependencies,
   layers,
-  deterministicViolations,
   violations,
   databases,
   databaseConnections,
@@ -15,7 +14,6 @@ import {
   methods,
   moduleDeps,
   methodDeps,
-  codeViolations,
   analysisUsage,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
@@ -42,7 +40,6 @@ import {
 import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
 import {
   loadActiveViolations,
-  loadActiveCodeViolations,
 } from '../services/violation-lifecycle.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider } from '../services/llm/provider.js';
@@ -186,8 +183,6 @@ router.post(
         const previousAnalysisId = prevAnalysesForLifecycle.length > 1 ? prevAnalysesForLifecycle[1].id : null;
 
         let previousActiveViolations: Awaited<ReturnType<typeof loadActiveViolations>> = [];
-        let previousActiveCodeViolations: Awaited<ReturnType<typeof loadActiveCodeViolations>> = [];
-        let previousDeterministicViolations: { id: string; ruleKey: string; category: string; title: string; description: string; severity: string; serviceName: string; moduleName: string | null; methodName: string | null }[] = [];
 
         if (previousAnalysisId) {
           // Load violations from previous analysis directly
@@ -209,9 +204,14 @@ router.post(
               targetTable: violations.targetTable,
               fixPrompt: violations.fixPrompt,
               ruleKey: violations.ruleKey,
-              deterministicViolationId: violations.deterministicViolationId,
               firstSeenAnalysisId: violations.firstSeenAnalysisId,
               firstSeenAt: violations.firstSeenAt,
+              filePath: violations.filePath,
+              lineStart: violations.lineStart,
+              lineEnd: violations.lineEnd,
+              columnStart: violations.columnStart,
+              columnEnd: violations.columnEnd,
+              snippet: violations.snippet,
             })
             .from(violations)
             .leftJoin(services, eq(violations.targetServiceId, services.id))
@@ -223,45 +223,6 @@ router.post(
             (v) => v.status === 'new' || v.status === 'unchanged'
           );
 
-          const prevCodeViolationRows = await db
-            .select()
-            .from(codeViolations)
-            .where(eq(codeViolations.analysisId, previousAnalysisId));
-
-          previousActiveCodeViolations = prevCodeViolationRows
-            .filter((v) => v.status === 'new' || v.status === 'unchanged')
-            .map((r) => ({
-              id: r.id,
-              filePath: r.filePath,
-              lineStart: r.lineStart,
-              lineEnd: r.lineEnd,
-              columnStart: r.columnStart,
-              columnEnd: r.columnEnd,
-              ruleKey: r.ruleKey,
-              severity: r.severity,
-              title: r.title,
-              content: r.content,
-              snippet: r.snippet,
-              fixPrompt: r.fixPrompt,
-              firstSeenAnalysisId: r.firstSeenAnalysisId,
-              firstSeenAt: r.firstSeenAt,
-            }));
-
-          // Load previous deterministic violations
-          previousDeterministicViolations = await db
-            .select({
-              id: deterministicViolations.id,
-              ruleKey: deterministicViolations.ruleKey,
-              category: deterministicViolations.category,
-              title: deterministicViolations.title,
-              description: deterministicViolations.description,
-              severity: deterministicViolations.severity,
-              serviceName: deterministicViolations.serviceName,
-              moduleName: deterministicViolations.moduleName,
-              methodName: deterministicViolations.methodName,
-            })
-            .from(deterministicViolations)
-            .where(eq(deterministicViolations.analysisId, previousAnalysisId));
         }
 
         // Detect and persist flows
@@ -358,8 +319,6 @@ router.post(
             methodIdMap,
             dbIdMap,
             previousActiveViolations,
-            previousActiveCodeViolations,
-            previousDeterministicViolations,
             changedFileSet,
             tracker,
             enabledCategories: effectiveCategories,
@@ -487,11 +446,11 @@ router.get(
             db.select({
               severity: violations.severity,
               count: sql<number>`count(*)::int`,
-            }).from(violations).where(eq(violations.analysisId, a.id)).groupBy(violations.severity),
+            }).from(violations).where(and(eq(violations.analysisId, a.id), sql`${violations.filePath} IS NULL`)).groupBy(violations.severity),
             db.select({
-              severity: codeViolations.severity,
+              severity: violations.severity,
               count: sql<number>`count(*)::int`,
-            }).from(codeViolations).where(eq(codeViolations.analysisId, a.id)).groupBy(codeViolations.severity),
+            }).from(violations).where(and(eq(violations.analysisId, a.id), sql`${violations.filePath} IS NOT NULL`)).groupBy(violations.severity),
             db.select({
               totalDurationMs: sql<number>`coalesce(sum(${analysisUsage.durationMs}), 0)::int`,
               totalTokens: sql<number>`coalesce(sum(${analysisUsage.totalTokens}), 0)::int`,
@@ -619,7 +578,7 @@ router.get(
         analysisModuleDeps,
         analysisMethods,
         analysisMethodDeps,
-        analysisDetViolations,
+        analysisViolationRows,
       ] = await Promise.all([
         db.select().from(services).where(eq(services.analysisId, analysis.id)),
         db.select().from(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id)),
@@ -630,8 +589,37 @@ router.get(
         db.select().from(moduleDeps).where(eq(moduleDeps.analysisId, analysis.id)),
         db.select().from(methods).where(eq(methods.analysisId, analysis.id)),
         db.select().from(methodDeps).where(eq(methodDeps.analysisId, analysis.id)),
-        db.select().from(deterministicViolations).where(eq(deterministicViolations.analysisId, analysis.id)),
+        db.select({
+          id: violations.id,
+          ruleKey: violations.ruleKey,
+          type: violations.type,
+          title: violations.title,
+          severity: violations.severity,
+          targetServiceId: violations.targetServiceId,
+          targetModuleId: violations.targetModuleId,
+          relatedServiceId: violations.relatedServiceId,
+          relatedModuleId: violations.relatedModuleId,
+        }).from(violations).where(eq(violations.analysisId, analysis.id)),
       ]);
+
+      const serviceIdToName = new Map(analysisServices.map((s) => [s.id, s.name]));
+      const moduleIdToName = new Map(analysisModules.map((m) => [m.id, m.name]));
+
+      const dependencyViolations = analysisViolationRows
+        .filter((v) => !!(v.relatedServiceId || v.relatedModuleId))
+        .map((v) => ({
+          id: v.id,
+          ruleKey: v.ruleKey,
+          category: v.type === 'service' ? 'service' : (v.type === 'function' ? 'method' : 'module'),
+          title: v.title,
+          severity: v.severity,
+          serviceName: v.targetServiceId ? (serviceIdToName.get(v.targetServiceId) ?? '') : '',
+          moduleName: v.targetModuleId ? (moduleIdToName.get(v.targetModuleId) ?? null) : null,
+          targetModuleId: v.targetModuleId || null,
+          relatedServiceId: v.relatedServiceId || null,
+          relatedModuleId: v.relatedModuleId || null,
+          isDependencyViolation: !!(v.relatedServiceId || v.relatedModuleId),
+        }));
 
       const layerData = analysisLayers.map((l) => ({
         id: l.id,
@@ -654,7 +642,7 @@ router.get(
         methodDeps: analysisMethodDeps,
         databases: analysisDatabases,
         dbConnections: analysisDbConnections,
-        deterministicViolations: analysisDetViolations,
+        dependencyViolations: dependencyViolations,
       };
 
       const graphLevel = level.replace(/s$/, '') as GraphLevel;
@@ -982,7 +970,7 @@ router.post(
         return;
       }
 
-      // Load previous active violations for lifecycle tracking
+      // Load previous active violations for lifecycle tracking (unified — includes code violations)
       const prevViolationRows = await db
         .select({
           id: violations.id,
@@ -1001,9 +989,14 @@ router.post(
           targetTable: violations.targetTable,
           fixPrompt: violations.fixPrompt,
           ruleKey: violations.ruleKey,
-          deterministicViolationId: violations.deterministicViolationId,
           firstSeenAnalysisId: violations.firstSeenAnalysisId,
           firstSeenAt: violations.firstSeenAt,
+          filePath: violations.filePath,
+          lineStart: violations.lineStart,
+          lineEnd: violations.lineEnd,
+          columnStart: violations.columnStart,
+          columnEnd: violations.columnEnd,
+          snippet: violations.snippet,
         })
         .from(violations)
         .leftJoin(services, eq(violations.targetServiceId, services.id))
@@ -1014,31 +1007,6 @@ router.post(
       const previousActiveViolations = prevViolationRows.filter(
         (v) => v.status === 'new' || v.status === 'unchanged'
       );
-
-      // Load previous active code violations
-      const prevCodeViolationRows = await db
-        .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, latestAnalysis.id));
-
-      const previousActiveCodeViolations = prevCodeViolationRows
-        .filter((v) => v.status === 'new' || v.status === 'unchanged')
-        .map((r) => ({
-          id: r.id,
-          filePath: r.filePath,
-          lineStart: r.lineStart,
-          lineEnd: r.lineEnd,
-          columnStart: r.columnStart,
-          columnEnd: r.columnEnd,
-          ruleKey: r.ruleKey,
-          severity: r.severity,
-          title: r.title,
-          content: r.content,
-          snippet: r.snippet,
-          fixPrompt: r.fixPrompt,
-          firstSeenAnalysisId: r.firstSeenAnalysisId,
-          firstSeenAt: r.firstSeenAt,
-        }));
 
       const git = await getGit(repo.path);
       const branch = (await git.branch()).current || undefined;
@@ -1086,22 +1054,6 @@ router.post(
           metadata: { isDiffAnalysis: true },
         });
 
-      // Load previous deterministic violations for lifecycle
-      const prevDetViolations = await db
-        .select({
-          id: deterministicViolations.id,
-          ruleKey: deterministicViolations.ruleKey,
-          category: deterministicViolations.category,
-          title: deterministicViolations.title,
-          description: deterministicViolations.description,
-          severity: deterministicViolations.severity,
-          serviceName: deterministicViolations.serviceName,
-          moduleName: deterministicViolations.moduleName,
-          methodName: deterministicViolations.methodName,
-        })
-        .from(deterministicViolations)
-        .where(eq(deterministicViolations.analysisId, latestAnalysis.id));
-
       const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
 
       // Run violation pipeline
@@ -1118,8 +1070,6 @@ router.post(
         methodIdMap,
         dbIdMap,
         previousActiveViolations,
-        previousActiveCodeViolations,
-        previousDeterministicViolations: prevDetViolations,
         changedFileSet,
         tracker: diffTracker,
         provider: diffProvider,
@@ -1178,11 +1128,11 @@ router.post(
           createdAt: v.firstSeenAt?.toISOString() ?? new Date().toISOString(),
         }));
 
-      // Load code violations from DB (pipeline persisted them with lifecycle status)
+      // Load code violations from DB (pipeline persisted them to the unified violations table)
       const diffCodeViolationRows = await db
         .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, diffAnalysisId));
+        .from(violations)
+        .where(and(eq(violations.analysisId, diffAnalysisId), sql`${violations.filePath} IS NOT NULL`));
 
       const newCodeViolationItems = diffCodeViolationRows
         .filter((cv) => cv.status === 'new')
@@ -1384,11 +1334,11 @@ router.get(
           createdAt: v.createdAt.toISOString(),
         }));
 
-      // Load new code violations for this diff analysis
+      // Load new code violations for this diff analysis (from unified violations table)
       const diffCodeViolationRows = await db
         .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, diffAnalysis.id));
+        .from(violations)
+        .where(and(eq(violations.analysisId, diffAnalysis.id), sql`${violations.filePath} IS NOT NULL`));
 
       const newCodeViolations = diffCodeViolationRows
         .filter((v) => v.status === 'new')

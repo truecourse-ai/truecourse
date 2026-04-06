@@ -131,7 +131,7 @@ export interface DbConnRow {
   driver: string;
 }
 
-export interface DetViolationRow {
+export interface DependencyViolationRow {
   id: string;
   ruleKey: string;
   category: string;
@@ -139,8 +139,9 @@ export interface DetViolationRow {
   severity: string;
   serviceName: string;
   moduleName: string | null;
-  relatedModuleName: string | null;
-  relatedServiceName: string | null;
+  targetModuleId: string | null;
+  relatedServiceId: string | null;
+  relatedModuleId: string | null;
   isDependencyViolation: boolean;
 }
 
@@ -154,7 +155,7 @@ export interface UnifiedInput {
   methodDeps: MethodDepRow[];
   databases: DbRow[];
   dbConnections: DbConnRow[];
-  deterministicViolations?: DetViolationRow[];
+  dependencyViolations?: DependencyViolationRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -426,14 +427,12 @@ export function buildUnifiedGraph(level: GraphLevel, input: UnifiedInput): Graph
   }
 
   // ── Violation marking on edges ───────────────────────────────────────
-  if (input.deterministicViolations && input.deterministicViolations.length > 0) {
-    markDependencyViolations(edges, modules, input.deterministicViolations);
+  if (input.dependencyViolations && input.dependencyViolations.length > 0) {
+    markDependencyViolations(edges, input.dependencyViolations);
   }
 
   return { nodes, edges };
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -891,31 +890,21 @@ function markDeadMethods(nodes: GraphNode[], methodDeps: MethodDepRow[]) {
 
 function markDependencyViolations(
   edges: GraphEdge[],
-  modules: ModuleRow[],
-  detViolations: DetViolationRow[],
+  detViolations: DependencyViolationRow[],
 ) {
   const depViolations = detViolations.filter((v) => v.isDependencyViolation);
   if (depViolations.length === 0) return;
 
-  // Build module name → id lookup
-  const moduleNameToId = new Map<string, string>();
-  for (const mod of modules) {
-    moduleNameToId.set(mod.name, mod.id);
-  }
-
   for (const v of depViolations) {
-    const sourceId = v.moduleName ? moduleNameToId.get(v.moduleName) : null;
-    const targetId = v.relatedModuleName ? moduleNameToId.get(v.relatedModuleName) : null;
-
-    if (!sourceId || !targetId) continue;
-
-    // Find edges between source and target module (in either direction)
-    for (const edge of edges) {
-      if ((edge.source === sourceId && edge.target === targetId) ||
-          (edge.source === targetId && edge.target === sourceId)) {
-        const data = edge.data as Record<string, unknown>;
-        data.isViolation = true;
-        data.violationReason = v.title;
+    // For module-level dependency violations, mark the edge between source and related module
+    if (v.relatedModuleId && v.targetModuleId) {
+      for (const edge of edges) {
+        if ((edge.source === v.targetModuleId && edge.target === v.relatedModuleId) ||
+            (edge.source === v.relatedModuleId && edge.target === v.targetModuleId)) {
+          const data = edge.data as Record<string, unknown>;
+          data.isViolation = true;
+          data.violationReason = v.title;
+        }
       }
     }
   }
