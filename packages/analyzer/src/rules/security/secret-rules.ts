@@ -15,6 +15,10 @@ export interface SecretPattern {
   secretGroup?: number
   useStopwords?: boolean
   allowlist?: RegExp[]
+  requireNearby?: {
+    pattern: RegExp
+    withinLines?: number  // default 5
+  }
 }
 
 export const SECRET_PATTERNS: SecretPattern[] = [

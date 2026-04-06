@@ -4,7 +4,7 @@
 
 import type { CodeRuleVisitor } from '../../types.js'
 import { makeViolation } from '../../types.js'
-import { scanForSecrets } from '../secret-scanner.js'
+import { scanForSecrets, isSensitiveFile } from '../secret-scanner.js'
 
 export const hardcodedSecretVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-secret',
@@ -421,8 +421,92 @@ export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// sensitive-file (path-only rule) — Gap 1
+// ---------------------------------------------------------------------------
+
+export const sensitiveFileVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-secret',
+  nodeTypes: ['program', 'module'],
+  visit(node, filePath, sourceCode) {
+    const result = isSensitiveFile(filePath)
+    if (result?.isSensitive) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'Sensitive file detected',
+        result.description + ' Ensure this file is not committed to source control.',
+        sourceCode,
+        'Add this file to .gitignore and move secrets to a vault or environment variables.',
+      )
+    }
+    return null
+  },
+}
+
+// ---------------------------------------------------------------------------
+// hardcoded-secret-in-comment — Gap 3
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip comment markers from a comment node's text.
+ */
+function stripCommentMarkers(text: string): string {
+  return text
+    .replace(/^\/\/\s?/, '')        // single-line JS/TS
+    .replace(/^\/\*\s?/, '')        // block comment start
+    .replace(/\s?\*\/$/, '')        // block comment end
+    .replace(/^\s*\*\s?/gm, '')    // middle lines of block comment
+    .replace(/^#\s?/gm, '')        // Python / shell comments
+    .trim()
+}
+
+export const hardcodedSecretInCommentVisitor: CodeRuleVisitor = {
+  ruleKey: 'security/deterministic/hardcoded-secret',
+  nodeTypes: ['comment'],
+  visit(node, filePath, sourceCode) {
+    const raw = node.text
+    const stripped = stripCommentMarkers(raw)
+    if (stripped.length < 8) return null
+
+    // Scan the whole stripped comment text
+    const match = scanForSecrets(stripped)
+    if (match) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        `Hardcoded secret detected in comment (${match.patternId})`,
+        `A comment contains a value matching a known secret pattern: ${match.description}. Remove the secret from source code.`,
+        sourceCode,
+        'Remove the secret from this comment and rotate the credential.',
+      )
+    }
+
+    // Also scan line-by-line for multi-line block comments
+    const lines = stripped.split('\n')
+    if (lines.length > 1) {
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (trimmed.length < 8) continue
+        const lineMatch = scanForSecrets(trimmed)
+        if (lineMatch) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'critical',
+            `Hardcoded secret detected in comment (${lineMatch.patternId})`,
+            `A comment contains a value matching a known secret pattern: ${lineMatch.description}. Remove the secret from source code.`,
+            sourceCode,
+            'Remove the secret from this comment and rotate the credential.',
+          )
+        }
+      }
+    }
+
+    return null
+  },
+}
+
 export const SECURITY_UNIVERSAL_VISITORS: CodeRuleVisitor[] = [
+  sensitiveFileVisitor,
   hardcodedSecretVisitor,
+  hardcodedSecretInCommentVisitor,
   hardcodedIpVisitor,
   clearTextProtocolVisitor,
   hardcodedBlockchainMnemonicVisitor,
