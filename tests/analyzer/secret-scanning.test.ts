@@ -84,7 +84,7 @@ describe('GLOBAL_ALLOWLIST', () => {
 
 describe('prefix-based secret detection', () => {
   it('detects Stripe live key', () => {
-    const match = scanForSecrets('sk_live_4eC39HqLyjWDarjtT1zdp7dc')
+    const match = scanForSecrets('sk_live_FAKETESTFAKETESTFAKE')
     expect(match).not.toBeNull()
     expect(match!.patternId).toBe('stripe-key')
   })
@@ -121,7 +121,7 @@ describe('prefix-based secret detection', () => {
   })
 
   it('detects Slack bot token', () => {
-    const match = scanForSecrets('xoxb-1234567890-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx')
+    const match = scanForSecrets('xoxb-1234567890-1234567890123-FAKETESTFAKETESTFAKETEST')
     expect(match).not.toBeNull()
     expect(match!.patternId).toBe('slack-bot-token')
   })
@@ -139,7 +139,7 @@ describe('prefix-based secret detection', () => {
   })
 
   it('detects SendGrid token', () => {
-    const match = scanForSecrets('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')
+    const match = scanForSecrets('SG.FAKETESTfaketestfakete.FAKETESTfaketestfaketestfaketestfaketestfak')
     expect(match).not.toBeNull()
     expect(match!.patternId).toBe('sendgrid-token')
   })
@@ -157,13 +157,13 @@ describe('prefix-based secret detection', () => {
   })
 
   it('detects Shopify access token', () => {
-    const match = scanForSecrets('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')
+    const match = scanForSecrets('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')
     expect(match).not.toBeNull()
     expect(match!.patternId).toBe('shopify-token')
   })
 
   it('detects PlanetScale token', () => {
-    const match = scanForSecrets('pscale_tkn_abcdefghijklmnopqrstuvwxyz012345')
+    const match = scanForSecrets('pscale_tkn_FAKETESTFAKETESTFAKETESTFAKETEST')
     expect(match).not.toBeNull()
     expect(match!.patternId).toBe('planetscale-token')
   })
@@ -299,7 +299,7 @@ describe('hardcoded-secret visitor integration', () => {
   })
 
   it('detects Stripe key in TS assignment', () => {
-    const matches = secretMatches(`const key = "sk_live_4eC39HqLyjWDarjtT1zdp7dc";`)
+    const matches = secretMatches(`const key = "sk_live_FAKETESTFAKETESTFAKE";`)
     expect(matches.length).toBeGreaterThanOrEqual(1)
     expect(matches[0].title).toContain('stripe-key')
   })
@@ -311,7 +311,7 @@ describe('hardcoded-secret visitor integration', () => {
   })
 
   it('reports pattern ID in violation title', () => {
-    const matches = secretMatches(`const k = "sk_live_4eC39HqLyjWDarjtT1zdp7dc";`)
+    const matches = secretMatches(`const k = "sk_live_FAKETESTFAKETESTFAKE";`)
     expect(matches.length).toBeGreaterThanOrEqual(1)
     expect(matches[0].title).toMatch(/\(stripe-key\)/)
   })
@@ -426,12 +426,12 @@ describe('composite rules (requireNearby)', () => {
     const sourceCode = [
       'const config = {',
       '  url: "https://api.stripe.com",',
-      '  key: "sk_live_4eC39HqLyjWDarjtT1zdp7dc",',
+      '  key: "sk_live_FAKETESTFAKETESTFAKE",',
       '}',
     ].join('\n')
 
     // scanForSecrets with context should still match (Stripe key matches without nearby requirement)
-    const match = scanForSecrets('sk_live_4eC39HqLyjWDarjtT1zdp7dc', {
+    const match = scanForSecrets('sk_live_FAKETESTFAKETESTFAKE', {
       sourceCode,
       lineNumber: 3,
     })
@@ -452,15 +452,15 @@ describe('composite rules (requireNearby)', () => {
   })
 
   it('scanForSecrets accepts context parameter without breaking', () => {
-    const match = scanForSecrets('sk_live_4eC39HqLyjWDarjtT1zdp7dc', {
-      sourceCode: 'const key = "sk_live_4eC39HqLyjWDarjtT1zdp7dc"',
+    const match = scanForSecrets('sk_live_FAKETESTFAKETESTFAKE', {
+      sourceCode: 'const key = "sk_live_FAKETESTFAKETESTFAKE"',
       lineNumber: 1,
     })
     expect(match).not.toBeNull()
   })
 
   it('scanForSecrets works without context (backward compatible)', () => {
-    const match = scanForSecrets('sk_live_4eC39HqLyjWDarjtT1zdp7dc')
+    const match = scanForSecrets('sk_live_FAKETESTFAKETESTFAKE')
     expect(match).not.toBeNull()
   })
 })
@@ -481,7 +481,7 @@ describe('secrets in comments', () => {
   })
 
   it('detects Stripe key in block comment', () => {
-    const code = '/* key = sk_live_4eC39HqLyjWDarjtT1zdp7dc */'
+    const code = '/* key = sk_live_FAKETESTFAKETESTFAKE */'
     const violations = check(code)
     const commentSecrets = violations.filter(
       v => v.ruleKey === 'security/deterministic/hardcoded-secret' && v.title.includes('comment')
