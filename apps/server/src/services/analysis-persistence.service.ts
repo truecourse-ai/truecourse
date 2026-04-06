@@ -251,7 +251,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
 /**
  * Persist code-level violations (file/line-level) into the unified violations table.
  */
-export async function persistCodeViolations(
+export async function persistFileViolations(
   analysisId: string,
   repoId: string,
   codeViolations: CodeViolation[],

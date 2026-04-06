@@ -18,7 +18,7 @@ import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
   persistViolationsWithLifecycle,
-  persistCodeViolationsWithLifecycle,
+  persistFileViolationsWithLifecycle,
 } from './violation-lifecycle.service.js';
 
 // Clear spinner line before logging so messages don't collide with clack spinner
@@ -892,11 +892,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   );
 
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
-    await persistCodeViolationsWithLifecycle({
+    await persistFileViolationsWithLifecycle({
       analysisId,
       repoId,
-      currentCodeViolations: allCodeViolations,
-      previousActiveCodeViolations: prevForDeterministicMatching,
+      currentViolations: allCodeViolations,
+      previousViolations: prevForDeterministicMatching,
     });
 
     const currentKeys = new Set(allCodeViolations.map((cv) =>
@@ -1014,11 +1014,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     );
 
     if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-      await persistCodeViolationsWithLifecycle({
+      await persistFileViolationsWithLifecycle({
         analysisId,
         repoId,
-        currentCodeViolations: llmCodeViolations,
-        previousActiveCodeViolations: llmPrevForMatching,
+        currentViolations: llmCodeViolations,
+        previousViolations: llmPrevForMatching,
       });
     }
 
