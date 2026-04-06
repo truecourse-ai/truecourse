@@ -16,6 +16,7 @@ import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDetermin
 import { DOMAIN_ORDER, DOMAIN_LABELS, LLM_DOMAINS } from '../socket/handlers.js';
 import { getEnabledRules } from './rules.service.js';
 import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
+import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
   persistViolationsWithLifecycle,
@@ -408,16 +409,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const totalDetections = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 
-  // 5. Build LLM code violation batches
-  const MAX_CHARS_PER_BATCH = 100_000;
-  const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
+  // 5. Build LLM code violation batches using context-routed approach
   const llmCodeBatches: CodeViolationContext[] = [];
-  const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
-    key: r.key,
-    name: r.name,
-    severity: r.severity,
-    prompt: r.prompt!,
-  }));
 
   // Build a lookup of previous LLM code violations by file path
   const prevLlmCodeByFile = new Map<string, typeof previousActiveCodeViolations>();
@@ -429,43 +422,32 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   if (enabledLlmCodeRules.length > 0 && fileContents.size > 0) {
-    let currentBatch: { path: string; content: string }[] = [];
-    let currentChars = 0;
+    // Pre-flight estimation
+    const estimate = estimateContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents);
+    log(`[LLM] Pre-flight: ${estimate.totalEstimatedTokens} estimated tokens across ${estimate.tiers.length} tiers`);
+    for (const t of estimate.tiers) {
+      log(`[LLM]   ${t.tier}: ${t.ruleCount} rules × ${t.fileCount} files${t.functionCount ? ` (${t.functionCount} functions)` : ''} → ~${t.estimatedTokens} tokens`);
+    }
 
-    const addBatch = (files: { path: string; content: string }[]) => {
-      const batchFilePaths = new Set(files.map((f) => f.path));
+    // Build context-routed batches
+    const contextBatches = routeContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents);
+
+    // Convert ContextBatch format to CodeViolationContext format for the provider
+    for (const batch of contextBatches) {
+      // Collect previous violations for all files referenced in this batch content
       const existing = [...prevLlmCodeByFile.entries()]
-        .filter(([fp]) => batchFilePaths.has(fp))
+        .filter(([fp]) => batch.content.includes(fp))
         .flatMap(([, violations]) => violations);
+
       llmCodeBatches.push({
-        files,
-        llmRules: llmCodeRulesDtos,
+        files: [{ path: 'context', content: batch.content }],
+        llmRules: batch.rules,
+        tier: batch.tier,
         existingViolations: existing.length > 0 ? existing : undefined,
       });
-    };
+    }
 
-    for (const [filePath, { content }] of fileContents) {
-      const fileChars = content.length;
-      if (fileChars > HALF_BATCH) {
-        if (currentBatch.length > 0) {
-          addBatch(currentBatch);
-          currentBatch = [];
-          currentChars = 0;
-        }
-        addBatch([{ path: filePath, content }]);
-        continue;
-      }
-      if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
-        addBatch(currentBatch);
-        currentBatch = [];
-        currentChars = 0;
-      }
-      currentBatch.push({ path: filePath, content });
-      currentChars += fileChars;
-    }
-    if (currentBatch.length > 0) {
-      addBatch(currentBatch);
-    }
+    log(`[LLM] Context router produced ${llmCodeBatches.length} batch(es) from ${contextBatches.length} context group(s)`);
   }
 
   const validFilePaths = new Set(fileContents.keys());

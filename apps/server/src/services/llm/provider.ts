@@ -143,6 +143,8 @@ export interface ExistingViolation {
 export interface CodeViolationContext {
   files: { path: string; content: string }[];
   llmRules: { key: string; name: string; severity: string; prompt: string }[];
+  /** Context tier — determines which prompt template to use */
+  tier?: 'metadata' | 'targeted' | 'full-file';
   /** Previous code violations for lifecycle comparison */
   existingViolations?: {
     id: string;
@@ -727,7 +729,19 @@ class AISDKProvider implements LLMProvider {
   async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
     const model = getModel();
     const hasExisting = context.existingViolations && context.existingViolations.length > 0;
-    const promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
+
+    // Select prompt template based on tier and lifecycle mode
+    let promptName: Parameters<typeof getPrompt>[0];
+    if (hasExisting) {
+      promptName = 'violations-code-lifecycle';
+    } else if (context.tier === 'metadata') {
+      promptName = 'violations-code-metadata';
+    } else if (context.tier === 'targeted') {
+      promptName = 'violations-code-targeted';
+    } else {
+      promptName = 'violations-code';
+    }
+
     const { vars, idMap } = buildCodeTemplateVars(context);
     const { text: prompt, langfusePrompt } = await getPrompt(promptName, vars);
 

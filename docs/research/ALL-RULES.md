@@ -59,29 +59,29 @@ Rules about service boundaries, layers, dependencies, coupling, dead code at mod
 | architecture/llm/excessive-fan-out | Excessive fan-out | Module importing too many other modules (>8-10) | medium | truecourse-existing | llm/arch-excessive-fan-out | existing | all |
 | architecture/llm/excessive-fan-in | Excessive fan-in | Module imported by disproportionately many others (bottleneck) | medium | truecourse-existing | llm/arch-excessive-fan-in | existing | all |
 | architecture/llm/mixed-abstraction-levels | Mixed abstraction levels | Method mixing high-level orchestration with low-level details | low | truecourse-existing | llm/arch-mixed-abstraction-levels | existing | all |
-| architecture/llm/inconsistent-response-format | Inconsistent API response format | Endpoints return data in different shapes (some wrapped, some not, different error formats) | medium | truecourse | - | new | all |
-| architecture/llm/breaking-api-change | Breaking API contract change | Endpoint removes or renames fields, changes types, or alters behavior without versioning | high | truecourse | - | new | all |
-| architecture/llm/missing-api-versioning | Missing API versioning | Public API without version prefix (/v1/) — no path for backward-compatible evolution | medium | truecourse | - | new | all |
-| architecture/llm/over-exposed-internal-model | Internal data model exposed in API | Database schema or internal object structure leaked directly in API response — coupling clients to internals | medium | truecourse | - | new | all |
-| architecture/llm/chatty-api | Chatty API requiring many round trips | Client needs multiple sequential API calls to accomplish single logical operation — should be combined | medium | truecourse | - | new | all |
-| architecture/llm/wrong-http-method | Incorrect HTTP method for operation | Using GET for mutations or POST for idempotent reads — violates REST semantics | low | truecourse | - | new | all |
-| architecture/llm/missing-api-error-documentation | Undocumented error responses | API endpoint can return error codes not documented or not typed — clients cannot handle them | low | truecourse | - | new | all |
-| architecture/llm/feature-envy | Feature envy | Method primarily uses data from another class/module — logic should move to where the data lives | medium | truecourse | - | new | all |
-| architecture/llm/shotgun-surgery | Shotgun surgery | Single logical change requires modifying many files across the codebase — poor encapsulation | medium | truecourse | - | new | all |
-| architecture/llm/divergent-change | Divergent change | Single file/class modified for many unrelated reasons — violates single responsibility | medium | truecourse | - | new | all |
-| architecture/llm/inappropriate-intimacy | Inappropriate intimacy between modules | Two modules accessing each other's internals instead of public interfaces — high coupling | medium | truecourse | - | new | all |
-| architecture/llm/middleman-class | Middleman class | Class that only delegates to another class without adding value — unnecessary indirection | low | truecourse | - | new | all |
-| architecture/llm/god-function | God function orchestrating everything | Single function handling validation, business logic, persistence, and notification — common in route handlers | high | truecourse | - | new | all |
-| architecture/llm/primitive-obsession | Primitive obsession | Using primitive types (string, number) for domain concepts (email, money, userId) — no validation or behavior | low | truecourse | - | new | all |
-| architecture/llm/leaky-abstraction | Leaky abstraction | Abstraction layer that exposes implementation details — callers depend on internal behavior | medium | truecourse | - | new | all |
-| architecture/llm/missing-abstraction | Missing abstraction layer | Business logic directly calling infrastructure (DB, HTTP, file system) without service/repository layer | medium | truecourse | - | new | all |
-| architecture/llm/temporal-coupling | Temporal coupling | Functions that must be called in specific order without the code enforcing that order | medium | truecourse | - | new | all |
-| architecture/llm/hardcoded-business-rule | Hardcoded business rule | Business rule embedded in code instead of being configurable or data-driven | low | truecourse | - | new | all |
-| architecture/llm/component-too-many-responsibilities | Component with too many responsibilities | Single React component handling data fetching, business logic, and complex UI — should be split | medium | truecourse | - | new | js/ts |
-| architecture/llm/prop-drilling-deep | Deep prop drilling | Prop passed through 3+ intermediate components that don't use it — use context or composition | medium | truecourse | - | new | js/ts |
-| architecture/llm/business-logic-in-component | Business logic in React component | Complex business rules in component instead of custom hook or service — not reusable or testable | medium | truecourse | - | new | js/ts |
-| architecture/llm/mixed-data-fetching-patterns | Inconsistent data fetching patterns | Mix of useEffect+fetch, React Query, SWR, and direct axios in same app — should standardize | low | truecourse | - | new | js/ts |
-| architecture/llm/middleware-order-incorrect | Incorrect Express middleware ordering | Auth middleware after route handlers, body parser after routes, or CORS after routes — middleware not applied | high | truecourse | - | new | js/ts |
+| architecture/llm/inconsistent-response-format | Inconsistent API response format | Endpoints return data in different shapes (some wrapped, some not, different error formats) | medium | truecourse | - | implemented | all |
+| architecture/llm/breaking-api-change | Breaking API contract change | Endpoint removes or renames fields, changes types, or alters behavior without versioning | high | truecourse | - | implemented | all |
+| architecture/llm/missing-api-versioning | Missing API versioning | Public API without version prefix (/v1/) — no path for backward-compatible evolution | medium | truecourse | - | implemented | all |
+| architecture/llm/over-exposed-internal-model | Internal data model exposed in API | Database schema or internal object structure leaked directly in API response — coupling clients to internals | medium | truecourse | - | implemented | all |
+| architecture/llm/chatty-api | Chatty API requiring many round trips | Client needs multiple sequential API calls to accomplish single logical operation — should be combined | medium | truecourse | - | implemented | all |
+| architecture/llm/wrong-http-method | Incorrect HTTP method for operation | Using GET for mutations or POST for idempotent reads — violates REST semantics | low | truecourse | - | implemented | all |
+| architecture/llm/missing-api-error-documentation | Undocumented error responses | API endpoint can return error codes not documented or not typed — clients cannot handle them | low | truecourse | - | implemented | all |
+| architecture/llm/feature-envy | Feature envy | Method primarily uses data from another class/module — logic should move to where the data lives | medium | truecourse | - | implemented | all |
+| architecture/llm/shotgun-surgery | Shotgun surgery | Single logical change requires modifying many files across the codebase — poor encapsulation | medium | truecourse | - | implemented | all |
+| architecture/llm/divergent-change | Divergent change | Single file/class modified for many unrelated reasons — violates single responsibility | medium | truecourse | - | implemented | all |
+| architecture/llm/inappropriate-intimacy | Inappropriate intimacy between modules | Two modules accessing each other's internals instead of public interfaces — high coupling | medium | truecourse | - | implemented | all |
+| architecture/llm/middleman-class | Middleman class | Class that only delegates to another class without adding value — unnecessary indirection | low | truecourse | - | implemented | all |
+| architecture/llm/god-function | God function orchestrating everything | Single function handling validation, business logic, persistence, and notification — common in route handlers | high | truecourse | - | implemented | all |
+| architecture/llm/primitive-obsession | Primitive obsession | Using primitive types (string, number) for domain concepts (email, money, userId) — no validation or behavior | low | truecourse | - | implemented | all |
+| architecture/llm/leaky-abstraction | Leaky abstraction | Abstraction layer that exposes implementation details — callers depend on internal behavior | medium | truecourse | - | implemented | all |
+| architecture/llm/missing-abstraction | Missing abstraction layer | Business logic directly calling infrastructure (DB, HTTP, file system) without service/repository layer | medium | truecourse | - | implemented | all |
+| architecture/llm/temporal-coupling | Temporal coupling | Functions that must be called in specific order without the code enforcing that order | medium | truecourse | - | implemented | all |
+| architecture/llm/hardcoded-business-rule | Hardcoded business rule | Business rule embedded in code instead of being configurable or data-driven | low | truecourse | - | implemented | all |
+| architecture/llm/component-too-many-responsibilities | Component with too many responsibilities | Single React component handling data fetching, business logic, and complex UI — should be split | medium | truecourse | - | implemented | js/ts |
+| architecture/llm/prop-drilling-deep | Deep prop drilling | Prop passed through 3+ intermediate components that don't use it — use context or composition | medium | truecourse | - | implemented | js/ts |
+| architecture/llm/business-logic-in-component | Business logic in React component | Complex business rules in component instead of custom hook or service — not reusable or testable | medium | truecourse | - | implemented | js/ts |
+| architecture/llm/mixed-data-fetching-patterns | Inconsistent data fetching patterns | Mix of useEffect+fetch, React Query, SWR, and direct axios in same app — should standardize | low | truecourse | - | implemented | js/ts |
+| architecture/llm/middleware-order-incorrect | Incorrect Express middleware ordering | Auth middleware after route handlers, body parser after routes, or CORS after routes — middleware not applied | high | truecourse | - | implemented | js/ts |
 
 ---
 
@@ -211,13 +211,13 @@ Rules about secrets, injection, XSS, CSRF, crypto, authentication, permissions.
 
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
-| security/llm/missing-authorization-check | Missing authorization check | Endpoint verifies authentication but not authorization — any authenticated user can access any resource | critical | truecourse | - | new | all |
-| security/llm/insecure-direct-object-reference | Insecure direct object reference (IDOR) | Resource accessed by sequential/guessable ID without ownership verification | critical | truecourse | - | new | all |
-| security/llm/privilege-escalation-path | Privilege escalation path | User can modify their own role, permissions, or access level through an API endpoint | critical | truecourse | - | new | all |
-| security/llm/missing-data-sanitization | Output not sanitized for context | Data rendered in HTML/SQL/shell without context-appropriate sanitization | high | truecourse | - | new | all |
-| security/llm/sensitive-data-in-client-state | Sensitive data stored in client-side state | Secrets, tokens, or PII stored in localStorage, sessionStorage, or Redux state — accessible to XSS | high | truecourse | - | new | js/ts |
-| security/llm/missing-account-lockout | Missing account lockout on auth endpoint | Login endpoint without rate limiting or lockout after failed attempts — brute force vulnerable | medium | truecourse | - | new | all |
-| security/llm/excessive-data-exposure | Excessive data in API response | API returns more fields than client needs, including internal or sensitive fields | medium | truecourse | - | new | all |
+| security/llm/missing-authorization-check | Missing authorization check | Endpoint verifies authentication but not authorization — any authenticated user can access any resource | critical | truecourse | - | implemented | all |
+| security/llm/insecure-direct-object-reference | Insecure direct object reference (IDOR) | Resource accessed by sequential/guessable ID without ownership verification | critical | truecourse | - | implemented | all |
+| security/llm/privilege-escalation-path | Privilege escalation path | User can modify their own role, permissions, or access level through an API endpoint | critical | truecourse | - | implemented | all |
+| security/llm/missing-data-sanitization | Output not sanitized for context | Data rendered in HTML/SQL/shell without context-appropriate sanitization | high | truecourse | - | implemented | all |
+| security/llm/sensitive-data-in-client-state | Sensitive data stored in client-side state | Secrets, tokens, or PII stored in localStorage, sessionStorage, or Redux state — accessible to XSS | high | truecourse | - | implemented | js/ts |
+| security/llm/missing-account-lockout | Missing account lockout on auth endpoint | Login endpoint without rate limiting or lockout after failed attempts — brute force vulnerable | medium | truecourse | - | implemented | all |
+| security/llm/excessive-data-exposure | Excessive data in API response | API returns more fields than client needs, including internal or sensitive fields | medium | truecourse | - | implemented | all |
 
 ### Security / Deterministic (AWS/Cloud IaC)
 
@@ -588,14 +588,14 @@ Rules about actual runtime bugs: null deref, infinite loops, unreachable code, t
 
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
-| bugs/llm/race-condition-check-then-act | Check-then-act race condition | Checking a condition then acting on it without atomicity — state may change between check and act | high | truecourse | - | new | all |
-| bugs/llm/concurrent-file-access | Concurrent file system access | Multiple async operations reading/writing same file without coordination — data corruption risk | medium | truecourse | - | new | all |
-| bugs/llm/missing-lock-distributed | Missing distributed lock | Multiple service instances operating on shared resource without distributed locking | high | truecourse | - | new | all |
-| bugs/llm/event-ordering-assumption | Assumption about event ordering | Code assumes events arrive in specific order without guarantees — breaks under load or redelivery | medium | truecourse | - | new | all |
-| bugs/llm/race-condition-shared-state | Race condition on shared mutable state | Multiple async operations reading/writing same state without synchronization | high | truecourse | - | new | all |
-| bugs/llm/missing-error-recovery | Missing error recovery strategy | System component fails without fallback, retry, or degraded mode — single point of failure | medium | truecourse | - | new | all |
-| bugs/llm/misleading-error-message | Error message does not match actual error | Catch block returns misleading error text — confuses debugging ("user not found" when actually DB timeout) | medium | truecourse | - | new | all |
-| bugs/llm/error-lost-in-transformation | Error information lost during transformation | Original error discarded when creating new error — stack trace and original cause lost | medium | truecourse | - | new | all |
+| bugs/llm/race-condition-check-then-act | Check-then-act race condition | Checking a condition then acting on it without atomicity — state may change between check and act | high | truecourse | - | implemented | all |
+| bugs/llm/concurrent-file-access | Concurrent file system access | Multiple async operations reading/writing same file without coordination — data corruption risk | medium | truecourse | - | implemented | all |
+| bugs/llm/missing-lock-distributed | Missing distributed lock | Multiple service instances operating on shared resource without distributed locking | high | truecourse | - | implemented | all |
+| bugs/llm/event-ordering-assumption | Assumption about event ordering | Code assumes events arrive in specific order without guarantees — breaks under load or redelivery | medium | truecourse | - | implemented | all |
+| bugs/llm/race-condition-shared-state | Race condition on shared mutable state | Multiple async operations reading/writing same state without synchronization | high | truecourse | - | implemented | all |
+| bugs/llm/missing-error-recovery | Missing error recovery strategy | System component fails without fallback, retry, or degraded mode — single point of failure | medium | truecourse | - | implemented | all |
+| bugs/llm/misleading-error-message | Error message does not match actual error | Catch block returns misleading error text — confuses debugging ("user not found" when actually DB timeout) | medium | truecourse | - | implemented | all |
+| bugs/llm/error-lost-in-transformation | Error information lost during transformation | Original error discarded when creating new error — stack trace and original cause lost | medium | truecourse | - | implemented | all |
 
 ### Bugs / Deterministic (TypeScript-specific)
 
@@ -1093,18 +1093,18 @@ Rules about complexity, code smells, maintainability, naming, duplication.
 
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
-| code-quality/llm/environment-specific-branch | Environment-specific conditional logic | Code branching on environment name (if prod/staging/dev) in application logic — use configuration instead | medium | truecourse | - | new | all |
-| code-quality/llm/missing-feature-flag | Feature deployed without feature flag | New feature shipped without feature flag — no way to disable without rollback | low | truecourse | - | new | all |
-| code-quality/llm/inconsistent-config-pattern | Inconsistent configuration patterns | Some config via env vars, some via config files, some hardcoded — should be unified | low | truecourse | - | new | all |
-| code-quality/llm/tautological-test | Tautological test (always passes) | Test asserts on mocked return value or static data — tests the mock, not the code | medium | truecourse | - | new | all |
-| code-quality/llm/excessive-mocking | Test with excessive mocking | Test mocks so many dependencies that it tests nothing real — change in implementation won't break test | medium | truecourse | - | new | all |
-| code-quality/llm/missing-edge-case-tests | Missing edge case test coverage | Tests only cover happy path — no tests for empty input, null, boundary values, error cases | medium | truecourse | - | new | all |
-| code-quality/llm/test-implementation-coupling | Test coupled to implementation details | Test asserts on internal implementation (private methods, internal state) rather than behavior — breaks on refactor | medium | truecourse | - | new | all |
-| code-quality/llm/missing-integration-test | Missing integration test for critical path | Critical user-facing flow only tested with unit tests, no integration/e2e test | medium | truecourse | - | new | all |
-| code-quality/llm/non-deterministic-test | Non-deterministic test | Test depends on current time, random values, or external service without mocking — intermittent failure | high | truecourse | - | new | all |
-| code-quality/llm/unnecessary-dependency | Unnecessary third-party dependency | Package used for trivial functionality easily implemented in a few lines — unnecessary supply chain risk | low | truecourse | - | new | all |
-| code-quality/llm/abandoned-dependency | Dependency appears unmaintained | Package with no updates in 2+ years, many open issues, or deprecated notices — should find alternative | medium | truecourse | - | new | all |
-| code-quality/llm/overlapping-dependencies | Multiple packages for same purpose | Two or more packages providing same functionality (moment + dayjs, lodash + ramda) — pick one | low | truecourse | - | new | all |
+| code-quality/llm/environment-specific-branch | Environment-specific conditional logic | Code branching on environment name (if prod/staging/dev) in application logic — use configuration instead | medium | truecourse | - | implemented | all |
+| code-quality/llm/missing-feature-flag | Feature deployed without feature flag | New feature shipped without feature flag — no way to disable without rollback | low | truecourse | - | implemented | all |
+| code-quality/llm/inconsistent-config-pattern | Inconsistent configuration patterns | Some config via env vars, some via config files, some hardcoded — should be unified | low | truecourse | - | implemented | all |
+| code-quality/llm/tautological-test | Tautological test (always passes) | Test asserts on mocked return value or static data — tests the mock, not the code | medium | truecourse | - | implemented | all |
+| code-quality/llm/excessive-mocking | Test with excessive mocking | Test mocks so many dependencies that it tests nothing real — change in implementation won't break test | medium | truecourse | - | implemented | all |
+| code-quality/llm/missing-edge-case-tests | Missing edge case test coverage | Tests only cover happy path — no tests for empty input, null, boundary values, error cases | medium | truecourse | - | implemented | all |
+| code-quality/llm/test-implementation-coupling | Test coupled to implementation details | Test asserts on internal implementation (private methods, internal state) rather than behavior — breaks on refactor | medium | truecourse | - | implemented | all |
+| code-quality/llm/missing-integration-test | Missing integration test for critical path | Critical user-facing flow only tested with unit tests, no integration/e2e test | medium | truecourse | - | implemented | all |
+| code-quality/llm/non-deterministic-test | Non-deterministic test | Test depends on current time, random values, or external service without mocking — intermittent failure | high | truecourse | - | implemented | all |
+| code-quality/llm/unnecessary-dependency | Unnecessary third-party dependency | Package used for trivial functionality easily implemented in a few lines — unnecessary supply chain risk | low | truecourse | - | implemented | all |
+| code-quality/llm/abandoned-dependency | Dependency appears unmaintained | Package with no updates in 2+ years, many open issues, or deprecated notices — should find alternative | medium | truecourse | - | implemented | all |
+| code-quality/llm/overlapping-dependencies | Multiple packages for same purpose | Two or more packages providing same functionality (moment + dayjs, lodash + ramda) — pick one | low | truecourse | - | implemented | all |
 
 ### Code Quality / Deterministic (TypeScript-specific)
 
@@ -1207,13 +1207,13 @@ Rules about schema issues, missing indexes, FK constraints, transactions, integr
 | database/llm/naming-inconsistency | Inconsistent naming conventions | Mixed snake_case/camelCase or singular/plural table names | low | truecourse-existing | llm/db-naming-inconsistency | existing | all |
 | database/llm/missing-timestamps | Missing timestamp columns | Tables missing created_at/updated_at for audit trails | low | truecourse-existing | llm/db-missing-timestamps | existing | all |
 | database/llm/overly-nullable-schema | Too many nullable columns | Table with majority of non-PK columns nullable, poor normalization | medium | truecourse-existing | llm/db-overly-nullable | existing | all |
-| database/llm/inconsistent-data-validation | Validation in some paths but not others | Same data type validated in one endpoint but not another — inconsistent enforcement | high | truecourse | - | new | all |
-| database/llm/missing-cascade-logic | Missing cascade on delete | Parent record deleted without handling child records — orphaned data or foreign key violation | medium | truecourse | - | new | all |
-| database/llm/stale-read-after-write | Read-after-write without consistency guarantee | Writing to database then immediately reading — may get stale data with replicas or eventual consistency | medium | truecourse | - | new | all |
-| database/llm/sensitive-data-unencrypted | Sensitive data stored unencrypted | PII, passwords, or secrets stored in database as plain text instead of encrypted/hashed | critical | truecourse | - | new | all |
-| database/llm/missing-soft-delete | Hard delete on auditable entity | Business entity deleted permanently when soft delete (is_deleted flag) would be required for audit trail | medium | truecourse | - | new | all |
-| database/llm/denormalization-without-sync | Denormalized data without sync mechanism | Data duplicated across tables without triggers, events, or application logic to keep in sync | medium | truecourse | - | new | all |
-| database/llm/query-in-transaction-too-long | Long-running transaction | Transaction holding locks while doing external calls or heavy processing — blocks other operations | high | truecourse | - | new | all |
+| database/llm/inconsistent-data-validation | Validation in some paths but not others | Same data type validated in one endpoint but not another — inconsistent enforcement | high | truecourse | - | implemented | all |
+| database/llm/missing-cascade-logic | Missing cascade on delete | Parent record deleted without handling child records — orphaned data or foreign key violation | medium | truecourse | - | implemented | all |
+| database/llm/stale-read-after-write | Read-after-write without consistency guarantee | Writing to database then immediately reading — may get stale data with replicas or eventual consistency | medium | truecourse | - | implemented | all |
+| database/llm/sensitive-data-unencrypted | Sensitive data stored unencrypted | PII, passwords, or secrets stored in database as plain text instead of encrypted/hashed | critical | truecourse | - | implemented | all |
+| database/llm/missing-soft-delete | Hard delete on auditable entity | Business entity deleted permanently when soft delete (is_deleted flag) would be required for audit trail | medium | truecourse | - | implemented | all |
+| database/llm/denormalization-without-sync | Denormalized data without sync mechanism | Data duplicated across tables without triggers, events, or application logic to keep in sync | medium | truecourse | - | implemented | all |
+| database/llm/query-in-transaction-too-long | Long-running transaction | Transaction holding locks while doing external calls or heavy processing — blocks other operations | high | truecourse | - | implemented | all |
 
 ---
 
@@ -1262,14 +1262,14 @@ Rules about runtime efficiency, memory usage, rendering, caching, and data acces
 
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
-| performance/llm/n-plus-one-query | N+1 query pattern | Loop fetching related data one record at a time (excluding ORM lazy-load patterns caught deterministically) | high | truecourse | - | new | all |
-| performance/llm/missing-caching-opportunity | Cacheable data fetched repeatedly | Expensive or slow data fetched on every request when it changes infrequently | medium | truecourse | - | new | all |
-| performance/llm/unnecessary-rerender-prop-drilling | Unnecessary re-renders from prop drilling | State passed through many component layers causing subtree re-renders when only leaf needs the data | medium | truecourse | - | new | js/ts |
-| performance/llm/blocking-main-thread | CPU-intensive work on main thread | Complex computation, large data processing, or image manipulation without Web Worker or worker thread | medium | truecourse | - | new | js/ts |
-| performance/llm/redundant-api-calls | Redundant API calls | Same API endpoint called multiple times in quick succession when result could be shared | medium | truecourse | - | new | all |
-| performance/llm/inefficient-data-structure | Inefficient data structure choice | Using array for frequent lookups (O(n)) when Map/Set would be O(1), or vice versa | medium | truecourse | - | new | all |
-| performance/llm/unoptimized-database-query | Unoptimized database query | Query using patterns known to prevent index usage (e.g., function on indexed column, OR conditions, leading wildcards) | medium | truecourse | - | new | all |
-| performance/llm/missing-pagination | Missing pagination on large dataset query | Database query without LIMIT/OFFSET on potentially large table (excluding API endpoints caught by architecture rules) | high | truecourse | - | new | all |
+| performance/llm/n-plus-one-query | N+1 query pattern | Loop fetching related data one record at a time (excluding ORM lazy-load patterns caught deterministically) | high | truecourse | - | implemented | all |
+| performance/llm/missing-caching-opportunity | Cacheable data fetched repeatedly | Expensive or slow data fetched on every request when it changes infrequently | medium | truecourse | - | implemented | all |
+| performance/llm/unnecessary-rerender-prop-drilling | Unnecessary re-renders from prop drilling | State passed through many component layers causing subtree re-renders when only leaf needs the data | medium | truecourse | - | implemented | js/ts |
+| performance/llm/blocking-main-thread | CPU-intensive work on main thread | Complex computation, large data processing, or image manipulation without Web Worker or worker thread | medium | truecourse | - | implemented | js/ts |
+| performance/llm/redundant-api-calls | Redundant API calls | Same API endpoint called multiple times in quick succession when result could be shared | medium | truecourse | - | implemented | all |
+| performance/llm/inefficient-data-structure | Inefficient data structure choice | Using array for frequent lookups (O(n)) when Map/Set would be O(1), or vice versa | medium | truecourse | - | implemented | all |
+| performance/llm/unoptimized-database-query | Unoptimized database query | Query using patterns known to prevent index usage (e.g., function on indexed column, OR conditions, leading wildcards) | medium | truecourse | - | implemented | all |
+| performance/llm/missing-pagination | Missing pagination on large dataset query | Database query without LIMIT/OFFSET on potentially large table (excluding API endpoints caught by architecture rules) | high | truecourse | - | implemented | all |
 
 ---
 
@@ -1307,22 +1307,22 @@ Rules about error handling, resilience, fault tolerance, and system stability.
 
 | Our Key | Name | Description | Severity | Source | Source ID | Status | Language |
 |---------|------|-------------|----------|--------|-----------|--------|----------|
-| reliability/llm/missing-retry-logic | Missing retry logic on network calls | External API/service call without retry mechanism — transient failures cause permanent failure | medium | truecourse | - | new | all |
-| reliability/llm/missing-circuit-breaker | Missing circuit breaker on external dependency | Repeated calls to failing external service without circuit breaker — cascading failure risk | medium | truecourse | - | new | all |
-| reliability/llm/missing-graceful-shutdown | Missing graceful shutdown handler | Server does not handle SIGTERM/SIGINT for clean connection drain and resource cleanup | medium | truecourse | - | new | js/ts |
-| reliability/llm/unbounded-queue | Unbounded queue or buffer | Queue/buffer that grows without backpressure — memory exhaustion under load | high | truecourse | - | new | all |
-| reliability/llm/missing-idempotency | Non-idempotent mutation endpoint | POST/PUT endpoint that creates side effects without idempotency key — unsafe to retry | medium | truecourse | - | new | all |
-| reliability/llm/missing-dead-letter-handling | Missing dead letter handling | Message queue consumer without dead letter queue — poison messages block processing forever | medium | truecourse | - | new | all |
-| reliability/llm/partial-failure-not-handled | Partial failure in batch operation | Batch operation that fails entirely if one item fails — should handle partial success | medium | truecourse | - | new | all |
-| reliability/llm/missing-health-check | Missing health check endpoint | Service without /health or /ready endpoint — orchestrator cannot determine service health | medium | truecourse | - | new | all |
-| reliability/llm/stale-cache-no-invalidation | Cache without invalidation strategy | Data cached without TTL, versioning, or invalidation — serves stale data indefinitely | medium | truecourse | - | new | all |
-| reliability/llm/missing-correlation-id | Missing request correlation/trace ID | Request handling without propagating correlation ID — cannot trace request across services | medium | truecourse | - | new | all |
-| reliability/llm/inconsistent-logging | Inconsistent logging patterns | Mix of console.log, custom logger, and third-party logger in same codebase — hard to configure and filter | low | truecourse | - | new | all |
-| reliability/llm/missing-structured-logging | Unstructured log messages | Using string interpolation for logs instead of structured key-value logging — hard to parse and query | low | truecourse | - | new | all |
-| reliability/llm/missing-error-monitoring | No error monitoring integration | Application without error tracking service (Sentry, Bugsnag, etc.) — errors only visible in logs | low | truecourse | - | new | all |
-| reliability/llm/silent-background-failure | Silent background job failure | Background job/cron/worker that catches errors without alerting or recording failure state | high | truecourse | - | new | all |
-| reliability/llm/missing-metrics | Missing performance metrics | No instrumentation for response times, queue depths, or resource utilization — blind to degradation | low | truecourse | - | new | all |
-| reliability/llm/missing-request-timeout | Missing server-level request timeout | HTTP server without request timeout — slow clients can hold connections open indefinitely | medium | truecourse | - | new | all |
+| reliability/llm/missing-retry-logic | Missing retry logic on network calls | External API/service call without retry mechanism — transient failures cause permanent failure | medium | truecourse | - | implemented | all |
+| reliability/llm/missing-circuit-breaker | Missing circuit breaker on external dependency | Repeated calls to failing external service without circuit breaker — cascading failure risk | medium | truecourse | - | implemented | all |
+| reliability/llm/missing-graceful-shutdown | Missing graceful shutdown handler | Server does not handle SIGTERM/SIGINT for clean connection drain and resource cleanup | medium | truecourse | - | implemented | js/ts |
+| reliability/llm/unbounded-queue | Unbounded queue or buffer | Queue/buffer that grows without backpressure — memory exhaustion under load | high | truecourse | - | implemented | all |
+| reliability/llm/missing-idempotency | Non-idempotent mutation endpoint | POST/PUT endpoint that creates side effects without idempotency key — unsafe to retry | medium | truecourse | - | implemented | all |
+| reliability/llm/missing-dead-letter-handling | Missing dead letter handling | Message queue consumer without dead letter queue — poison messages block processing forever | medium | truecourse | - | implemented | all |
+| reliability/llm/partial-failure-not-handled | Partial failure in batch operation | Batch operation that fails entirely if one item fails — should handle partial success | medium | truecourse | - | implemented | all |
+| reliability/llm/missing-health-check | Missing health check endpoint | Service without /health or /ready endpoint — orchestrator cannot determine service health | medium | truecourse | - | implemented | all |
+| reliability/llm/stale-cache-no-invalidation | Cache without invalidation strategy | Data cached without TTL, versioning, or invalidation — serves stale data indefinitely | medium | truecourse | - | implemented | all |
+| reliability/llm/missing-correlation-id | Missing request correlation/trace ID | Request handling without propagating correlation ID — cannot trace request across services | medium | truecourse | - | implemented | all |
+| reliability/llm/inconsistent-logging | Inconsistent logging patterns | Mix of console.log, custom logger, and third-party logger in same codebase — hard to configure and filter | low | truecourse | - | implemented | all |
+| reliability/llm/missing-structured-logging | Unstructured log messages | Using string interpolation for logs instead of structured key-value logging — hard to parse and query | low | truecourse | - | implemented | all |
+| reliability/llm/missing-error-monitoring | No error monitoring integration | Application without error tracking service (Sentry, Bugsnag, etc.) — errors only visible in logs | low | truecourse | - | implemented | all |
+| reliability/llm/silent-background-failure | Silent background job failure | Background job/cron/worker that catches errors without alerting or recording failure state | high | truecourse | - | implemented | all |
+| reliability/llm/missing-metrics | Missing performance metrics | No instrumentation for response times, queue depths, or resource utilization — blind to degradation | low | truecourse | - | implemented | all |
+| reliability/llm/missing-request-timeout | Missing server-level request timeout | HTTP server without request timeout — slow clients can hold connections open indefinitely | medium | truecourse | - | implemented | all |
 
 ---
 

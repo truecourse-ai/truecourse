@@ -14,7 +14,9 @@ import { DATABASE_LLM_RULES } from './database/llm.js'
 import { DATABASE_DETERMINISTIC_RULES } from './database/deterministic.js'
 import { STYLE_DETERMINISTIC_RULES } from './style/deterministic.js'
 import { PERFORMANCE_DETERMINISTIC_RULES } from './performance/deterministic.js'
+import { PERFORMANCE_LLM_RULES } from './performance/llm.js'
 import { RELIABILITY_DETERMINISTIC_RULES } from './reliability/deterministic.js'
+import { RELIABILITY_LLM_RULES } from './reliability/llm.js'
 
 // --- Re-export rule arrays by domain ---
 
@@ -30,7 +32,9 @@ export { STYLE_DETERMINISTIC_RULES } from './style/deterministic.js'
 export { DATABASE_LLM_RULES } from './database/llm.js'
 export { DATABASE_DETERMINISTIC_RULES } from './database/deterministic.js'
 export { PERFORMANCE_DETERMINISTIC_RULES } from './performance/deterministic.js'
+export { PERFORMANCE_LLM_RULES } from './performance/llm.js'
 export { RELIABILITY_DETERMINISTIC_RULES } from './reliability/deterministic.js'
+export { RELIABILITY_LLM_RULES } from './reliability/llm.js'
 
 // --- Re-export checkers ---
 
@@ -68,11 +72,13 @@ export const LLM_DATABASE_RULES: AnalysisRule[] = DATABASE_LLM_RULES
 /** LLM module rules (architecture domain, module category). */
 export const LLM_MODULE_RULES: AnalysisRule[] = ARCHITECTURE_LLM_RULES.filter((r) => r.category === 'module')
 
-/** LLM code rules (security, bugs, code-quality domains with category=code). */
+/** LLM code rules (security, bugs, code-quality, performance, reliability domains with category=code). */
 export const LLM_CODE_RULES: AnalysisRule[] = [
   ...SECURITY_LLM_RULES,
   ...BUGS_LLM_RULES,
   ...CODE_QUALITY_LLM_RULES,
+  ...PERFORMANCE_LLM_RULES,
+  ...RELIABILITY_LLM_RULES,
 ]
 
 /** All code-level deterministic rules (security, bugs, code-quality). */
@@ -90,4 +96,6 @@ export const ALL_DEFAULT_RULES: AnalysisRule[] = [
   ...SECURITY_LLM_RULES,
   ...BUGS_LLM_RULES,
   ...CODE_QUALITY_LLM_RULES,
+  ...PERFORMANCE_LLM_RULES,
+  ...RELIABILITY_LLM_RULES,
 ]

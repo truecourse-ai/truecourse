@@ -12,6 +12,11 @@ export const BUGS_LLM_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'high',
     type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasCatchBlocks: true },
+      functionFilter: { containsCatchBlock: true },
+    },
   },
   {
     key: 'bugs/llm/race-condition',
@@ -24,6 +29,11 @@ export const BUGS_LLM_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'high',
     type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasAsyncFunctions: true },
+      functionFilter: { isAsync: true },
+    },
   },
   {
     key: 'bugs/llm/resource-leak',
@@ -36,6 +46,11 @@ export const BUGS_LLM_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'medium',
     type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasCallsTo: ['createReadStream', 'createWriteStream', 'open', 'connect', 'useEffect', 'addEventListener', 'setInterval'] },
+      functionFilter: { callsAny: ['createReadStream', 'createWriteStream', 'open', 'connect', 'useEffect', 'addEventListener', 'setInterval'] },
+    },
   },
   {
     key: 'bugs/llm/inconsistent-return',
@@ -48,5 +63,145 @@ export const BUGS_LLM_RULES: AnalysisRule[] = [
     enabled: true,
     severity: 'low',
     type: 'llm',
+    contextRequirement: {
+      tier: 'full-file',
+      fileFilter: { isTestFile: false },
+    },
+  },
+  {
+    key: 'bugs/llm/race-condition-check-then-act',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Check-then-act race condition',
+    description: 'Checking a condition then acting on it without atomicity — state may change between check and act.',
+    prompt:
+      'Find check-then-act race conditions where code checks a condition and then acts on it without ensuring atomicity. Look for: checking if a file exists then creating it, checking if a record exists then inserting, reading a counter then incrementing it in separate operations, and checking availability then reserving — all with async operations or database calls between the check and the act.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasAsyncFunctions: true },
+      functionFilter: { isAsync: true },
+    },
+  },
+  {
+    key: 'bugs/llm/concurrent-file-access',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Concurrent file system access',
+    description: 'Multiple async operations reading/writing same file without coordination — data corruption risk.',
+    prompt:
+      'Find code where multiple async operations may read from or write to the same file without coordination. Look for: concurrent fs.writeFile calls to the same path, reading a file then writing back without locking, request handlers that write to a shared log or data file, and worker threads accessing the same file system path. Without file locking or atomic writes, data can be corrupted or lost.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasCallsTo: ['writeFile', 'readFile', 'writeFileSync', 'readFileSync', 'appendFile'] },
+      functionFilter: { callsAny: ['writeFile', 'readFile', 'writeFileSync', 'readFileSync', 'appendFile'] },
+    },
+  },
+  {
+    key: 'bugs/llm/missing-lock-distributed',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Missing distributed lock',
+    description: 'Multiple service instances operating on shared resource without distributed locking.',
+    prompt:
+      'Find operations on shared resources that would break when multiple service instances run concurrently. Look for: cron jobs or scheduled tasks that process a shared queue without claiming/locking items, operations that read-modify-write a shared database record without optimistic or pessimistic locking, and singleton-like operations (generating sequential IDs, processing payments) without distributed coordination.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasDbCalls: true, hasAsyncFunctions: true },
+      functionFilter: { isAsync: true },
+    },
+  },
+  {
+    key: 'bugs/llm/event-ordering-assumption',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Assumption about event ordering',
+    description: 'Code assumes events arrive in specific order without guarantees — breaks under load or redelivery.',
+    prompt:
+      'Find code that assumes events or messages arrive in a specific order without the infrastructure guaranteeing it. Look for: event handlers that assume a "created" event arrives before an "updated" event, message consumers that depend on sequential processing without sequence numbers, and webhook handlers that assume chronological delivery. Under load, redelivery, or partitioning, ordering is not guaranteed.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasCallsTo: ['on', 'emit', 'subscribe', 'publish', 'consume', 'addEventListener'] },
+      functionFilter: { callsAny: ['on', 'emit', 'subscribe', 'publish', 'consume'] },
+    },
+  },
+  {
+    key: 'bugs/llm/race-condition-shared-state',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Race condition on shared mutable state',
+    description: 'Multiple async operations reading/writing same state without synchronization.',
+    prompt:
+      'Find shared mutable state accessed by multiple async operations without synchronization. Look for: module-level variables or singleton objects modified by concurrent request handlers, caches updated by multiple async operations without atomic operations, class instance properties modified across awaited calls, and global counters or accumulators incremented without locks in a multi-request environment.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasAsyncFunctions: true },
+      functionFilter: { isAsync: true },
+    },
+  },
+  {
+    key: 'bugs/llm/missing-error-recovery',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Missing error recovery strategy',
+    description: 'System component fails without fallback, retry, or degraded mode — single point of failure.',
+    prompt:
+      'Find system components that fail completely without any recovery strategy. Look for: external service calls that crash the entire request on failure instead of returning a degraded response, single database query failures that bring down unrelated features, and critical initialization that fails without a retry mechanism. Systems should degrade gracefully, not fail catastrophically.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasAsyncFunctions: true },
+      functionFilter: { isAsync: true },
+    },
+  },
+  {
+    key: 'bugs/llm/misleading-error-message',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Error message does not match actual error',
+    description: 'Catch block returns misleading error text — confuses debugging ("user not found" when actually DB timeout).',
+    prompt:
+      'Find catch blocks that return or throw error messages that do not match the actual error. Look for: generic catch blocks that always return the same error message regardless of the cause, error messages that describe a different failure mode than what was caught (e.g., "User not found" when the actual error is a database connection failure), and catch blocks that silently transform errors into misleading status codes.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasCatchBlocks: true },
+      functionFilter: { containsCatchBlock: true },
+    },
+  },
+  {
+    key: 'bugs/llm/error-lost-in-transformation',
+    category: 'code',
+    domain: 'bugs',
+    name: 'Error information lost during transformation',
+    description: 'Original error discarded when creating new error — stack trace and original cause lost.',
+    prompt:
+      'Find places where error information is lost during transformation. Look for: catch blocks that create a new Error() without passing the original error as the cause, error handlers that log only the message but discard the stack trace, throw new Error(err.message) patterns that lose the original stack and type, and error mapping functions that drop context from the original error.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+    contextRequirement: {
+      tier: 'targeted',
+      fileFilter: { hasCatchBlocks: true },
+      functionFilter: { containsCatchBlock: true },
+    },
   },
 ]
