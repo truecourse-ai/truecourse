@@ -3,6 +3,15 @@ import { z } from 'zod'
 export const RuleDomainSchema = z.enum(['architecture', 'security', 'bugs', 'code-quality', 'style', 'database', 'performance', 'reliability'])
 export type RuleDomain = z.infer<typeof RuleDomainSchema>
 
+/** All domains ordered by importance (security first, style last) */
+export const DOMAIN_ORDER: readonly RuleDomain[] = ['security', 'bugs', 'architecture', 'performance', 'reliability', 'code-quality', 'database', 'style']
+
+/** Domains that use AST code scanning (everything except architecture) */
+export const CODE_DOMAINS: readonly RuleDomain[] = DOMAIN_ORDER.filter(d => d !== 'architecture')
+
+/** Domains enabled by default (everything except style which is opt-in) */
+export const DEFAULT_DOMAINS: readonly RuleDomain[] = DOMAIN_ORDER.filter(d => d !== 'style')
+
 export const RuleCategorySchema = z.enum(['service', 'database', 'module', 'method', 'code'])
 export type RuleCategory = z.infer<typeof RuleCategorySchema>
 

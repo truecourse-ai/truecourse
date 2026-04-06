@@ -107,7 +107,8 @@ rulesCmd
     const repo = await ensureRepo();
     const serverUrl = getServerUrl();
 
-    const allCategories = ["architecture", "security", "bugs", "code-quality", "style", "performance", "reliability", "database"];
+    const { DOMAIN_ORDER } = await import("@truecourse/shared");
+    const allCategories = [...DOMAIN_ORDER] as string[];
 
     if (options.reset) {
       await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
