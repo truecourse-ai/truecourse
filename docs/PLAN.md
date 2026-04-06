@@ -2887,7 +2887,7 @@ Architecture-level violations (service-level, no line number) appear in a dedica
 
 ---
 
-## Phase 30: Comprehensive Code Rules `STATUS: IN PROGRESS`
+## Phase 30: Comprehensive Code Rules `STATUS: DONE`
 
 Build all valuable ESLint, @typescript-eslint, eslint-plugin-security, eslint-plugin-sonarjs, Ruff, and SonarQube rules into TrueCourse's tree-sitter analysis engine. The goal is not to match these tools — it's to **beat them**: better detection, fewer false positives, one tool instead of four.
 
@@ -2939,16 +2939,6 @@ Improve circular dependency detection with proper graph algorithms and lazy impo
    - Static import cycle → high severity
    - Dynamic/lazy import cycle → low severity (warning)
    - Type-only import cycle → info (harmless)
-
-### 30.6 Duplicate Code Detection `STATUS: TODO`
-
-Token-based comparison algorithm to detect copy-pasted code blocks across the codebase.
-
-1. Tokenize each file (strip whitespace, normalize identifiers)
-2. Build token sequences using a sliding window (e.g., 50 tokens)
-3. Hash each window, compare across files
-4. Merge overlapping matches into contiguous duplicate blocks
-5. Report duplicate blocks with file locations and percentage
 
 ### Fix Generation
 
@@ -3153,3 +3143,15 @@ Scan git commit history for secrets that were committed and later removed. Gitle
 - Report: which commit, which file, which line, what secret type
 - CLI: `truecourse secrets --scan-history`
 - Performance: incremental scanning (only scan commits since last scan)
+
+---
+
+## Phase 36: Duplicate Code Detection `STATUS: TODO`
+
+Token-based comparison algorithm to detect copy-pasted code blocks across the codebase.
+
+1. Tokenize each file (strip whitespace, normalize identifiers)
+2. Build token sequences using a sliding window (e.g., 50 tokens)
+3. Hash each window, compare across files
+4. Merge overlapping matches into contiguous duplicate blocks
+5. Report duplicate blocks with file locations and percentage
