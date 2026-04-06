@@ -7,10 +7,8 @@ import {
   services,
   modules,
   methods,
-  databases,
 } from '../db/schema.js';
 import type { DiffViolationItem } from './llm/provider.js';
-import type { Violation } from '@truecourse/shared';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -314,13 +312,13 @@ export async function persistViolationsWithLifecycle(
 }
 
 // ---------------------------------------------------------------------------
-// Persist code violations with lifecycle (deterministic matching by ruleKey + filePath)
+// Persist file-level violations with lifecycle (deterministic matching by ruleKey + filePath)
 // ---------------------------------------------------------------------------
 
-export interface PersistCodeViolationsParams {
+export interface PersistFileViolationsParams {
   analysisId: string;
   repoId: string;
-  currentCodeViolations: {
+  currentViolations: {
     filePath: string;
     lineStart: number;
     lineEnd: number;
@@ -333,28 +331,28 @@ export interface PersistCodeViolationsParams {
     snippet: string;
     fixPrompt?: string;
   }[];
-  previousActiveCodeViolations: ActiveViolation[];
+  previousViolations: ActiveViolation[];
 }
 
-export async function persistCodeViolationsWithLifecycle(
-  params: PersistCodeViolationsParams,
+export async function persistFileViolationsWithLifecycle(
+  params: PersistFileViolationsParams,
 ): Promise<void> {
-  const { analysisId, repoId, currentCodeViolations, previousActiveCodeViolations } = params;
+  const { analysisId, repoId, currentViolations, previousViolations } = params;
   const now = new Date();
 
   // Build lookup key: ruleKey + filePath
   const currentKeys = new Set(
-    currentCodeViolations.map((v) => `${v.ruleKey}::${v.filePath}`),
+    currentViolations.map((v) => `${v.ruleKey}::${v.filePath}`),
   );
   const previousByKey = new Map<string, ActiveViolation>();
-  for (const prev of previousActiveCodeViolations) {
+  for (const prev of previousViolations) {
     if (prev.filePath) {
       previousByKey.set(`${prev.ruleKey}::${prev.filePath}`, prev);
     }
   }
 
-  // Previous code violations not in current → resolved
-  for (const prev of previousActiveCodeViolations) {
+  // Previous file-level violations not in current → resolved
+  for (const prev of previousViolations) {
     if (!prev.filePath) continue;
     const key = `${prev.ruleKey}::${prev.filePath}`;
     if (!currentKeys.has(key)) {
@@ -383,8 +381,8 @@ export async function persistCodeViolationsWithLifecycle(
     }
   }
 
-  // Current code violations
-  for (const cv of currentCodeViolations) {
+  // Current file-level violations
+  for (const cv of currentViolations) {
     const key = `${cv.ruleKey}::${cv.filePath}`;
     const prev = previousByKey.get(key);
 
