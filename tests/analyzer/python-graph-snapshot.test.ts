@@ -4,8 +4,7 @@ import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 import { analyzeFile } from '../../packages/analyzer/src/file-analyzer';
 import { buildDependencyGraph, findEntryPoints } from '../../packages/analyzer/src/dependency-graph';
 import { performSplitAnalysis, type SplitAnalysisResult } from '../../packages/analyzer/src/split-analyzer';
-import { checkModuleRules, checkMethodRules } from '../../packages/analyzer/src/rules/module-rules-checker';
-import { checkServiceRules } from '../../packages/analyzer/src/rules/service-rules-checker';
+import { checkModuleRules, checkMethodRules, checkServiceRules } from '../../packages/analyzer/src/rules/architecture/checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules';
 import type { FileAnalysis, ModuleDependency } from '../../packages/shared/src/types/analysis';
 
@@ -134,6 +133,11 @@ describe('graph snapshot — sample-python-project', () => {
     const { deps, split } = buildActualGraph(SAMPLE_PROJECT_PATH, analyses);
     const entryPoints = new Set(findEntryPoints(analyses, deps));
     const actual = buildActualViolations(analyses, deps, split, entryPoints);
-    expect(actual).toEqual(expected.deterministicViolations);
+    // Filter expected violations to only rules in our trimmed rule set
+    const enabledKeys = new Set(DETERMINISTIC_RULES.filter((r) => r.enabled).map((r) => r.key));
+    const expectedFiltered = expected.deterministicViolations.filter(
+      (v: ExpectedViolation) => enabledKeys.has(v.ruleKey),
+    );
+    expect(actual).toEqual(expectedFiltered);
   });
 });

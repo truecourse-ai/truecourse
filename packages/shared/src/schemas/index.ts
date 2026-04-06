@@ -12,8 +12,8 @@ export type CreateRepoInput = z.infer<typeof CreateRepoSchema>
 
 export const AnalyzeRepoSchema = z.object({
   branch: z.string().optional(),
-  codeReview: z.boolean().optional().default(false),
-  deterministicOnly: z.boolean().optional().default(false),
+  enabledCategories: z.array(z.string()).optional().default([]),
+  enableLlmRules: z.boolean().optional().default(true),
 })
 
 export type AnalyzeRepoInput = z.infer<typeof AnalyzeRepoSchema>

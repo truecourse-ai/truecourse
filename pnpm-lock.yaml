@@ -268,6 +268,9 @@ importers:
       pyright:
         specifier: ^1.1.408
         version: 1.1.408
+      smol-toml:
+        specifier: ^1.6.1
+        version: 1.6.1
       tree-sitter:
         specifier: ^0.25.0
         version: 0.25.0
@@ -303,12 +306,18 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
+      '@truecourse/analyzer':
+        specifier: workspace:*
+        version: link:../../packages/analyzer
       commander:
         specifier: ^12.1.0
         version: 12.1.0
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
       socket.io-client:
         specifier: ^4.7.0
         version: 4.8.3
@@ -317,6 +326,9 @@ importers:
         specifier: ^1.0.0-beta.8
         version: 1.0.0-beta.8
     devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       '@types/node':
         specifier: ^22.19.15
         version: 22.19.15
@@ -2059,6 +2071,9 @@ packages:
 
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
+
+  '@types/js-yaml@4.0.9':
+    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
 
   '@types/mdast@4.0.4':
     resolution: {integrity: sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA==}
@@ -4086,6 +4101,10 @@ packages:
 
   sisteransi@1.0.5:
     resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
+
+  smol-toml@1.6.1:
+    resolution: {integrity: sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg==}
+    engines: {node: '>= 18'}
 
   socket.io-adapter@2.5.6:
     resolution: {integrity: sha512-DkkO/dz7MGln0dHn5bmN3pPy+JmywNICWrJqVWiVOyvXjWQFIv9c2h24JrQLLFJ2aQVQf/Cvl1vblnd4r2apLQ==}
@@ -6135,6 +6154,8 @@ snapshots:
       '@types/unist': 3.0.3
 
   '@types/http-errors@2.0.5': {}
+
+  '@types/js-yaml@4.0.9': {}
 
   '@types/mdast@4.0.4':
     dependencies:
@@ -8433,6 +8454,8 @@ snapshots:
       - supports-color
 
   sisteransi@1.0.5: {}
+
+  smol-toml@1.6.1: {}
 
   socket.io-adapter@2.5.6:
     dependencies:

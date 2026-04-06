@@ -31,9 +31,8 @@ import {
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
-  emitCodeReviewProgress,
-  emitCodeReviewReady,
   StepTracker,
+  buildAnalysisSteps,
 } from '../socket/handlers.js';
 import {
   registerAnalysis,
@@ -45,7 +44,7 @@ import {
   loadActiveViolations,
   loadActiveCodeViolations,
 } from '../services/violation-lifecycle.service.js';
-import { runViolationPipeline, runCodeReview } from '../services/violation-pipeline.service.js';
+import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider } from '../services/llm/provider.js';
 import { trackEvent, detectLanguages, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
 
@@ -65,7 +64,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
-      const { codeReview: includeCodeReview, deterministicOnly } = parsed.data;
+      const { enabledCategories: globalEnabledCategories, enableLlmRules } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -102,16 +101,12 @@ router.post(
 
       // Run analysis in the background
       try {
-        const trackerSteps = [
-          { key: 'parse', label: 'Parsing repository' },
-          { key: 'detect', label: 'Deterministic checks' },
-          ...(!deterministicOnly ? [
-            { key: 'enrich', label: 'Enriching detections' },
-            { key: 'architecture', label: 'Architecture analysis' },
-          ] : []),
-          { key: 'persist', label: 'Saving results' },
-          ...(!deterministicOnly && includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
-        ];
+        // Resolve effective enabled categories
+        const effectiveCategories = globalEnabledCategories?.length
+          ? globalEnabledCategories
+          : (repo.enabledCategories ?? undefined);
+
+        const trackerSteps = buildAnalysisSteps(effectiveCategories);
         const tracker = new StepTracker(id, trackerSteps);
 
         const analysisStartTime = Date.now();
@@ -172,7 +167,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview, deterministicOnly }, existingAnalysisId: runningAnalysis.id });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: {}, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
@@ -346,15 +341,14 @@ router.post(
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
         tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
 
-        const provider = deterministicOnly ? undefined : createLLMProvider();
+        const provider = enableLlmRules ? createLLMProvider() : undefined;
         if (provider) {
           provider.setAnalysisId(newAnalysisId);
           provider.setRepoId(id);
           provider.setAbortSignal(abortController.signal);
         }
-        let codeReviewPromise: Promise<void> | null = null;
         try {
-          const pipelineResult = await runViolationPipeline({
+          await runViolationPipeline({
             repoId: id,
             repoPath: repo.path,
             analysisId: newAnalysisId,
@@ -368,14 +362,13 @@ router.post(
             previousDeterministicViolations,
             changedFileSet,
             tracker,
-            includeCodeReview: deterministicOnly ? false : includeCodeReview,
-            deterministicOnly,
+            enabledCategories: effectiveCategories,
+            enableLlmRules,
             provider,
             signal: abortController.signal,
           });
 
           emitViolationsReady(id, analysis.id);
-          codeReviewPromise = pipelineResult.codeReviewPromise;
         } catch (violationError) {
           // Don't log AbortError as a failure — it's expected on cancel
           if (violationError instanceof DOMException && violationError.name === 'AbortError') {
@@ -397,13 +390,6 @@ router.post(
           console.error('[Usage] Failed to record usage:', usageError instanceof Error ? usageError.message : String(usageError));
         }
 
-        // Mark code review as triggered before completing so it appears in the final checklist state
-        if (codeReviewPromise) {
-          tracker.start('code-review', 'Running in background...');
-        } else if (includeCodeReview) {
-          tracker.done('code-review', 'Skipped');
-        }
-
         emitAnalysisComplete(id, analysis.id);
 
         // Anonymous usage telemetry
@@ -415,29 +401,7 @@ router.post(
           durationRange: bucketDuration(Date.now() - analysisStartTime),
         });
 
-        // Fire-and-forget: background code review with deferred cleanup
-        if (codeReviewPromise) {
-          console.log(`[CodeReview] Started background code review for repo ${id}`);
-          emitCodeReviewProgress(id, analysis.id);
-          codeReviewPromise
-            .then(() => provider?.flushUsage())
-            .then(() => {
-              console.log(`[CodeReview] Completed for repo ${id}`);
-              emitCodeReviewReady(id, analysis.id);
-            })
-            .catch((err) => {
-              if (err instanceof DOMException && err.name === 'AbortError') {
-                console.log(`[CodeReview] Cancelled for repo ${id}`);
-              } else {
-                console.error(`[CodeReview] Failed for repo ${id}:`, err instanceof Error ? err.message : String(err));
-              }
-              // Always emit so UI doesn't hang
-              emitCodeReviewReady(id, analysis.id);
-            })
-            .finally(() => unregisterAnalysis(id));
-        } else {
-          unregisterAnalysis(id);
-        }
+        unregisterAnalysis(id);
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           console.log(`[Analysis] Cancelled for repo ${id}`);
@@ -477,88 +441,6 @@ router.post(
           .where(and(eq(analyses.repoId, id), eq(analyses.status, 'running')));
       }
       res.json({ message: canceled ? 'Analysis cancelling' : 'No active analysis' });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// POST /api/repos/:id/analyses/:analysisId/code-review - Run code review on existing analysis
-router.post(
-  '/:id/analyses/:analysisId/code-review',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repoId = req.params.id as string;
-      const analysisId = req.params.analysisId as string;
-
-      const [repo] = await db.select().from(repos).where(eq(repos.id, repoId)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
-      const [analysis] = await db.select().from(analyses).where(eq(analyses.id, analysisId)).limit(1);
-      if (!analysis) throw createAppError('Analysis not found', 404);
-
-      // Get file paths from the analysis modules
-      const analysisModules = await db.select({ filePath: modules.filePath }).from(modules).where(eq(modules.analysisId, analysisId));
-      const filePaths = [...new Set(analysisModules.map((m) => m.filePath))];
-
-      if (filePaths.length === 0) throw createAppError('No files found in analysis', 400);
-
-      // Load previous active LLM code violations for lifecycle tracking
-      const prevCodeViolationRows = await db
-        .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, analysisId));
-
-      const previousCodeViolations = prevCodeViolationRows
-        .filter((v) => (v.status === 'new' || v.status === 'unchanged') && v.ruleKey.startsWith('llm/'))
-        .map((r) => ({
-          id: r.id,
-          filePath: r.filePath,
-          lineStart: r.lineStart,
-          lineEnd: r.lineEnd,
-          columnStart: r.columnStart,
-          columnEnd: r.columnEnd,
-          ruleKey: r.ruleKey,
-          severity: r.severity,
-          title: r.title,
-          content: r.content,
-          snippet: r.snippet,
-          fixPrompt: r.fixPrompt,
-          firstSeenAnalysisId: r.firstSeenAnalysisId,
-          firstSeenAt: r.firstSeenAt,
-        }));
-
-      // Mark analysis as having code review
-      await db.update(analyses).set({
-        metadata: sql`coalesce(${analyses.metadata}, '{}'::jsonb) || '{"codeReview": true}'::jsonb`,
-      }).where(eq(analyses.id, analysisId));
-
-      res.status(202).json({ message: 'Code review started', analysisId });
-
-      // Run in background
-      const provider = createLLMProvider();
-      provider.setAnalysisId(analysisId);
-      provider.setRepoId(repoId);
-
-      emitCodeReviewProgress(repoId, analysisId);
-
-      runCodeReview({
-        repoId,
-        repoPath: repo.path,
-        analysisId,
-        filePaths,
-        previousCodeViolations,
-        provider,
-      })
-        .then(() => provider.flushUsage())
-        .then(() => {
-          console.log(`[CodeReview] Completed for repo ${repoId}`);
-          emitCodeReviewReady(repoId, analysisId);
-        })
-        .catch((err) => {
-          console.error(`[CodeReview] Failed for repo ${repoId}:`, err instanceof Error ? err.message : String(err));
-          emitCodeReviewReady(repoId, analysisId);
-        });
     } catch (error) {
       next(error);
     }
@@ -633,7 +515,6 @@ router.get(
           return {
             ...a,
             metadata: undefined, // don't send raw metadata to client
-            codeReview: meta?.codeReview === true,
             serviceCount,
             violationsBySeverity,
             codeViolationsBySeverity,
@@ -726,7 +607,6 @@ router.get(
       }
 
       const level = (req.query.level as string) || 'services';
-      const graphLevel = level.replace(/s$/, '') as GraphLevel;
 
       // Fetch all data in parallel
       const [
@@ -764,7 +644,7 @@ router.get(
         evidence: l.evidence as string[],
       }));
 
-      const graphData = buildUnifiedGraph(graphLevel, {
+      const unifiedInput = {
         services: analysisServices,
         serviceDeps: analysisDeps,
         layers: layerData,
@@ -775,7 +655,10 @@ router.get(
         databases: analysisDatabases,
         dbConnections: analysisDbConnections,
         deterministicViolations: analysisDetViolations,
-      });
+      };
+
+      const graphLevel = level.replace(/s$/, '') as GraphLevel;
+      const graphData = buildUnifiedGraph(graphLevel, unifiedInput);
 
       // Include saved node positions if any (namespaced by level)
       const allPositions = analysis.nodePositions as Record<string, unknown> | null;
@@ -1368,10 +1251,6 @@ router.post(
       // Clear progress bar
       emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
 
-      // Check if code review was run on this diff analysis
-      const diffMeta = await db.select({ metadata: analyses.metadata }).from(analyses).where(eq(analyses.id, diffAnalysisId)).limit(1);
-      const diffCodeReview = (diffMeta[0]?.metadata as Record<string, unknown> | null)?.codeReview === true;
-
       // Anonymous usage telemetry
       trackEvent('diff-check', {
         changedFileCount: changedFiles.length,
@@ -1388,7 +1267,6 @@ router.post(
         summary,
         isStale: false,
         diffAnalysisId,
-        codeReview: diffCodeReview,
       });
     } catch (error) {
       const repoId = req.params.id as string;
@@ -1564,7 +1442,6 @@ router.get(
         changedFiles: metadata?.changedFiles || [],
         isStale,
         diffAnalysisId: diffAnalysis.id,
-        codeReview: metadata?.codeReview === true,
       });
     } catch (error) {
       next(error);

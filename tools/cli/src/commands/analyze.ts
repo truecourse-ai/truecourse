@@ -5,15 +5,15 @@ import {
   ensureRepo,
   getServerUrl,
   connectSocket,
+  readConfig,
   renderViolationsSummary,
   renderDiffResultsSummary,
-  openInBrowser,
 } from "./helpers.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-export async function runAnalyze({ noAutostart = false, codeReview = false, deterministicOnly = false } = {}): Promise<void> {
+export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
   showFirstRunNotice();
 
@@ -29,7 +29,7 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
     }
   }
 
-  const firstRun = noAutostart ? false : await ensureServer();
+  if (!noAutostart) await ensureServer();
   const repo = await ensureRepo();
   p.log.step(`Repository: ${repo.name}`);
 
@@ -92,10 +92,11 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
       });
 
       // Trigger analysis
+      const config = readConfig();
       fetch(`${serverUrl}/api/repos/${repo.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codeReview, deterministicOnly }),
+        body: JSON.stringify({ enabledCategories: config.enabledCategories ?? [], enableLlmRules: config.enableLlmRules ?? true }),
       }).then((res) => {
         if (!res.ok) {
           clearTimeout(timeout);
@@ -135,17 +136,7 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
       : undefined;
     renderViolationsSummary(violations, codeSummary);
 
-    if (!deterministicOnly) {
-      p.log.info("Code review running in background — results will appear in the dashboard");
-    }
-
-    const repoUrl = `${serverUrl}/repos/${repo.id}`;
-    if (firstRun) {
-      openInBrowser(repoUrl);
-      p.outro("Analysis complete — opened in browser");
-    } else {
-      p.outro(`Analysis complete — open ${repoUrl}`);
-    }
+    p.outro("Analysis complete — view results with: truecourse dashboard");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "CANCELED") {

@@ -18,6 +18,8 @@ export const repos = pgTable('repos', {
   name: text('name').notNull(),
   path: text('path').notNull().unique(),
   lastAnalyzedAt: timestamp('last_analyzed_at', { mode: 'date', withTimezone: true }),
+  /** Per-repo enabled rule categories (null = use global default) */
+  enabledCategories: jsonb('enabled_categories').$type<string[] | null>(),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });

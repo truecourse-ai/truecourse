@@ -233,7 +233,50 @@ Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  // --- Code prompts ---
+  // --- Code prompts (context-routed) ---
+  'violations-code-metadata': {
+    prompt: `You are a senior code reviewer analyzing codebase metadata summaries. You can see function signatures, imports, call patterns, and route registrations — but NOT full source code. Identify structural issues detectable from this metadata.
+
+Rules to evaluate:
+{{llmRules}}
+
+Metadata summaries:
+{{fileList}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Since you only see metadata (signatures, imports, calls), focus on structural patterns — missing capabilities, dependency issues, and configuration problems detectable without reading function bodies.
+- Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-code-targeted': {
+    prompt: `You are a senior code reviewer analyzing specific function implementations extracted from the codebase. Each function was selected because it matches criteria relevant to the rules below. Analyze the function bodies for the specified issues.
+
+Rules to evaluate:
+{{llmRules}}
+
+Extracted functions:
+{{fileList}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Each line in the source is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
+- Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  // --- Code prompts (full-file) ---
   'violations-code': {
     prompt: `You are a senior code reviewer. Analyze the following source files and identify semantic code quality issues that AST-based linting cannot detect.
 

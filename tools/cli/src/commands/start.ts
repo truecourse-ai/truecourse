@@ -59,7 +59,11 @@ async function startServiceMode(openBrowser: boolean): Promise<void> {
   const healthy = await healthcheck();
   if (healthy) {
     p.log.success(`TrueCourse is running at ${url}`);
-    if (openBrowser) openInBrowser(url);
+    if (openBrowser) {
+      openInBrowser(url);
+    } else {
+      p.log.info("Open the dashboard with: truecourse dashboard");
+    }
   } else {
     p.log.warn("Service started but server hasn't responded yet.");
     p.log.info("Check logs with: truecourse service logs");
@@ -117,14 +121,18 @@ function startConsoleMode(openBrowser: boolean): void {
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
 
-  if (openBrowser) {
-    healthcheck().then((healthy) => {
-      if (healthy) openInBrowser(url);
-    });
-  }
+  healthcheck().then((healthy) => {
+    if (healthy) {
+      if (openBrowser) {
+        openInBrowser(url);
+      } else {
+        p.log.info("Open the dashboard with: truecourse dashboard");
+      }
+    }
+  });
 }
 
-export async function runStart({ openBrowser = true } = {}): Promise<void> {
+export async function runStart({ openBrowser = false } = {}): Promise<void> {
   p.intro("Starting TrueCourse");
 
   const config = readConfig();

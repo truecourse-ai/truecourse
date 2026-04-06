@@ -309,97 +309,102 @@
   ],
   "deterministicViolations": [
     {
-      "ruleKey": "arch/cross-service-internal-import",
+      "ruleKey": "architecture/deterministic/circular-module-dependency",
+      "title": "Circular module dependency: UserRepository → user_handler → UserService → UserRepository",
+      "severity": "high"
+    },
+    {
+      "ruleKey": "architecture/deterministic/cross-service-internal-import",
       "title": "Cross-service internal import: user_handler → validators",
       "severity": "high"
     },
     {
-      "ruleKey": "arch/cross-service-internal-import",
+      "ruleKey": "architecture/deterministic/cross-service-internal-import",
       "title": "Cross-service internal import: UserService → formatters",
       "severity": "high"
     },
     {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: connection.disconnect_database",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: formatters.format_date",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: Logger.error",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: Logger.info",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: Logger.warn",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: validators.validate_name",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
-      "title": "Dead module: Comment",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
-      "title": "Dead module: Post",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
-      "title": "Dead module: PostTag",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/god-service",
-      "title": "God service: api_gateway",
-      "severity": "medium"
-    },
-    {
-      "ruleKey": "arch/module-layer-data-api",
+      "ruleKey": "architecture/deterministic/data-layer-depends-on-api",
       "title": "Layer violation: UserRepository → user_handler",
       "severity": "high"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: connection.disconnect_database",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: formatters.format_date",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: Logger.error",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: Logger.info",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: Logger.warn",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: validators.validate_name",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-module",
+      "title": "Dead module: Comment",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-module",
+      "title": "Dead module: Post",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-module",
+      "title": "Dead module: PostTag",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/god-service",
+      "title": "God service: api_gateway",
+      "severity": "medium"
+    },
+    {
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: Comment",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: disconnect_database",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: format_date",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: Logger",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: Post",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: PostTag",
       "severity": "low"
     }

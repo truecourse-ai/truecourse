@@ -201,82 +201,87 @@
   ],
   "deterministicViolations": [
     {
-      "ruleKey": "arch/cross-service-internal-import",
+      "ruleKey": "architecture/deterministic/circular-module-dependency",
+      "title": "Circular module dependency: UserRepository → user.handler → UserService → UserRepository",
+      "severity": "high"
+    },
+    {
+      "ruleKey": "architecture/deterministic/cross-service-internal-import",
       "title": "Cross-service internal import: user.handler → validators",
       "severity": "high"
     },
     {
-      "ruleKey": "arch/cross-service-internal-import",
+      "ruleKey": "architecture/deterministic/cross-service-internal-import",
       "title": "Cross-service internal import: UserService → formatters",
       "severity": "high"
     },
     {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: connection.disconnectDatabase",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: formatters.formatDate",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: HealthService.check",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: logger.error",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: logger.info",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: logger.warn",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-method",
-      "title": "Dead method: validators.validateName",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
-      "title": "Dead module: HealthService",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/dead-module",
-      "title": "Dead module: logger",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "arch/god-service",
-      "title": "God service: api-gateway",
-      "severity": "medium"
-    },
-    {
-      "ruleKey": "arch/module-layer-data-api",
+      "ruleKey": "architecture/deterministic/data-layer-depends-on-api",
       "title": "Layer violation: UserRepository → user.handler",
       "severity": "high"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: connection.disconnectDatabase",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: formatters.formatDate",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: HealthService.check",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: logger.error",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: logger.info",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: logger.warn",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-method",
+      "title": "Dead method: validators.validateName",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-module",
+      "title": "Dead module: HealthService",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/dead-module",
+      "title": "Dead module: logger",
+      "severity": "low"
+    },
+    {
+      "ruleKey": "architecture/deterministic/god-service",
+      "title": "God service: api-gateway",
+      "severity": "medium"
+    },
+    {
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: disconnectDatabase",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: formatDate",
       "severity": "low"
     },
     {
-      "ruleKey": "arch/unused-export",
+      "ruleKey": "architecture/deterministic/unused-export",
       "title": "Unused export: validateName",
       "severity": "low"
     }

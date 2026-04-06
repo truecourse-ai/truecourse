@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { getGit } from '../lib/git.js';
 import type {
   FileAnalysis,
@@ -131,7 +132,13 @@ export async function runAnalysis(
   const statusResult = await git.status();
   const hasChanges = !statusResult.isClean();
 
-  if (hasChanges && !options?.skipStash) {
+  // Skip stashing when the repo path is a subdirectory of a larger repo
+  // (e.g., test fixtures inside the main repo). Stashing there would affect
+  // unrelated files and cause ENOENT errors in concurrent operations.
+  const gitRoot = (await git.revparse(['--show-toplevel'])).trim();
+  const isSubdirectory = path.resolve(repoPath) !== path.resolve(gitRoot);
+
+  if (hasChanges && !options?.skipStash && !isSubdirectory) {
     onProgress({ step: 'stash', percent: 2, detail: 'Stashing pending changes to analyze committed state...' });
     try {
       const stashResult = await git.stash(['push', '--include-untracked', '-m', 'truecourse-analysis-stash']);

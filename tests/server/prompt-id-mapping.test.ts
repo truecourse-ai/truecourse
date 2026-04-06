@@ -130,8 +130,8 @@ describe('buildEnrichmentTemplateVars', () => {
   it('assigns short IDs to detections', () => {
     const { vars, idMap } = buildEnrichmentTemplateVars(
       [
-        { id: 'uuid-det-1', ruleKey: 'arch/god-service', title: 'God service', description: 'too big', severity: 'medium', category: 'service', serviceName: 'api' },
-        { id: 'uuid-det-2', ruleKey: 'arch/dead-method', title: 'Dead method', description: 'unused', severity: 'low', category: 'method', serviceName: 'api', methodName: 'foo' },
+        { id: 'uuid-det-1', ruleKey: 'architecture/deterministic/god-service', title: 'God service', description: 'too big', severity: 'medium', category: 'service', serviceName: 'api' },
+        { id: 'uuid-det-2', ruleKey: 'architecture/deterministic/dead-method', title: 'Dead method', description: 'unused', severity: 'low', category: 'method', serviceName: 'api', methodName: 'foo' },
       ],
       'Architecture: microservices',
     );

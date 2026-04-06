@@ -9,12 +9,14 @@ import {
   violations,
   codeViolations,
 } from '../db/schema.js';
-import { checkCodeRules, parseFile, detectLanguage } from '@truecourse/analyzer';
+import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, type TypeQueryService } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
+import { DOMAIN_ORDER, DOMAIN_LABELS, LLM_DOMAINS } from '../socket/handlers.js';
 import { getEnabledRules } from './rules.service.js';
 import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
+import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
   persistViolationsWithLifecycle,
@@ -100,10 +102,10 @@ export interface ViolationPipelineInput {
   onProgress?: (progress: { step: string; percent: number; detail?: string }) => void;
   /** Step tracker for checklist UI */
   tracker?: import('../socket/handlers.js').StepTracker;
-  /** Include LLM code review (default false) */
-  includeCodeReview?: boolean;
-  /** Skip all LLM calls — only run deterministic checks (default false) */
-  deterministicOnly?: boolean;
+  /** Rule categories to include (undefined = all) */
+  enabledCategories?: string[];
+  /** Enable LLM-powered rules (default true) */
+  enableLlmRules?: boolean;
   /** Optional pre-created provider (for usage tracking) */
   provider?: LLMProvider;
   /** Abort signal for cancellation */
@@ -120,8 +122,6 @@ export interface ViolationPipelineResult {
   codeViolations: CodeViolation[];
   /** Number of resolved code violations (for badge counts) */
   codeResolvedCount: number;
-  /** Background LLM code review promise (null if no LLM code batches) */
-  codeReviewPromise: Promise<void> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,23 +188,46 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     previousActiveViolations, previousActiveCodeViolations, previousDeterministicViolations,
     changedFileSet, onProgress, tracker,
     provider: externalProvider,
-    includeCodeReview,
-    deterministicOnly,
+    enabledCategories,
+    enableLlmRules,
     signal,
   } = input;
 
-  // 1. Load rules
-  const allRules = await getEnabledRules();
+  // 1. Load rules (filter to enabled categories/domains, and filter out LLM rules if disabled)
+  const allRules = (await getEnabledRules())
+    .filter((r) => !enabledCategories || enabledCategories.includes(r.domain ?? r.category))
+    .filter((r) => enableLlmRules !== false || r.type !== 'llm');
 
   throwIfAborted(signal);
-  tracker?.start('detect', 'Running deterministic checks...');
   onProgress?.({ step: 'analyzing', percent: 80, detail: 'Running deterministic checks...' });
 
-  // 2. Run all deterministic checks (service, module, method)
+  // 2. Run deterministic checks per domain with individual tracker steps
   const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
-  const serviceViolationResults: ServiceViolation[] = runDeterministicServiceChecks(result, enabledDeterministic);
-  const moduleViolationResults: ModuleViolation[] = runDeterministicModuleChecks(result, enabledDeterministic);
-  const methodViolationResults: ModuleViolation[] = runDeterministicMethodChecks(result, enabledDeterministic);
+  const serviceViolationResults: ServiceViolation[] = [];
+  const moduleViolationResults: ModuleViolation[] = [];
+  const methodViolationResults: ModuleViolation[] = [];
+
+  for (const domain of DOMAIN_ORDER) {
+    const stepKey = `${domain}`;
+    const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
+    if (domainRules.length === 0) {
+      tracker?.done(stepKey); // skip silently
+      continue;
+    }
+
+    tracker?.start(stepKey);
+
+    if (domain === 'architecture') {
+      serviceViolationResults.push(...runDeterministicServiceChecks(result, domainRules));
+      moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
+      methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
+      const archCount = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
+      tracker?.done(stepKey, archCount > 0 ? `${archCount} violations` : 'Clean');
+    } else {
+      // Non-architecture domains: their code-level checks run in the file scanning loop below.
+      // We'll mark them done after the scan completes.
+    }
+  }
 
   // 3. Persist deterministic violations to deterministic_violations table
   const detViolationIdMap = new Map<string, string>();
@@ -242,11 +265,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   // 4. Run code-level rules and collect file contents for LLM code rules
-  const enabledCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'deterministic');
-  const enabledLlmCodeRules = (includeCodeReview && !deterministicOnly)
-    ? allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt)
+  const codeDomains = new Set(['security', 'bugs', 'code-quality'])
+  // Include security/bugs/code-quality rules, plus architecture rules that operate at the
+  // code/file level (category === 'code') — those are AST-visitor rules that produce
+  // CodeViolation objects and will be converted to ModuleViolations below.
+  const enabledCodeRules = allRules.filter((r) => (r.domain ? (codeDomains.has(r.domain) || (r.domain === 'architecture' && r.category === 'code')) : r.category === 'code') && r.type === 'deterministic');
+  const enabledLlmCodeRules = enableLlmRules !== false
+    ? allRules.filter((r) => (r.domain ? codeDomains.has(r.domain) : r.category === 'code') && r.type === 'llm' && r.prompt)
     : [];
-  const allCodeViolations: CodeViolation[] = [];
+  let allCodeViolations: CodeViolation[] = [];
   const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
 
   // Determine which files to scan
@@ -255,8 +282,30 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     : (result.fileAnalyses || []).map((fa) => ({ filePath: fa.filePath, resolve: !path.isAbsolute(fa.filePath) }));
 
   if ((enabledCodeRules.length > 0 || enabledLlmCodeRules.length > 0) && filesToScan.length > 0) {
-    tracker?.detail('detect', 'Running code checks...');
+    // Start code-level domain steps (they'll be completed after the scan loop)
+    for (const domain of DOMAIN_ORDER) {
+      if (domain === 'architecture') continue;
+      const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
+      if (domainRules.length > 0) {
+        tracker?.start(`${domain}`);
+      }
+    }
     onProgress?.({ step: 'analyzing', percent: 82, detail: 'Running code checks...' });
+
+    // Build TypeQueryService once if any enabled visitors need type information
+    let typeQuery: TypeQueryService | undefined;
+    const enabledCodeKeys = new Set(enabledCodeRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key));
+    if (hasTypeAwareVisitors(enabledCodeKeys)) {
+      const tsFiles = filesToScan
+        .filter(({ filePath: fp }) => /\.(ts|tsx|js|jsx)$/.test(fp))
+        .map(({ filePath: fp, resolve: res }) =>
+          res ? path.resolve(repoPath, fp) : (path.isAbsolute(fp) ? fp : path.join(repoPath, fp)),
+        );
+      if (tsFiles.length > 0) {
+        const scoped = buildScopedCompilerOptions(repoPath);
+        typeQuery = createTypeQueryService(tsFiles, scoped);
+      }
+    }
 
     for (const { filePath, resolve } of filesToScan) {
       try {
@@ -271,7 +320,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         if (enabledCodeRules.length > 0) {
           const scanPath = changedFileSet ? filePath : filePath;
           const tree = parseFile(scanPath, content, lang);
-          const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, content, enabledCodeRules, lang);
+          const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, content, enabledCodeRules, lang, typeQuery);
           allCodeViolations.push(...codeRuleViolations);
         }
       } catch {
@@ -280,69 +329,125 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  // Check pyproject.toml if the rule is enabled
+  if (enabledCodeRules.some(r => r.key === 'bugs/deterministic/invalid-pyproject-toml')) {
+    const pyprojectPath = path.join(repoPath, 'pyproject.toml');
+    if (fs.existsSync(pyprojectPath)) {
+      try {
+        const { checkPyprojectToml } = await import('@truecourse/analyzer');
+        const content = fs.readFileSync(pyprojectPath, 'utf-8');
+        const tomlViolations = checkPyprojectToml(pyprojectPath, content);
+        allCodeViolations.push(...tomlViolations);
+      } catch {
+        // smol-toml not available or import failed — skip
+      }
+    }
+  }
+
   throwIfAborted(signal);
+
+  // Convert architecture-domain code violations into ModuleViolation format so they
+  // get persisted to the violations table with targetServiceId/targetModuleId context.
+  const archCodeViolations = allCodeViolations.filter((v) => v.ruleKey.startsWith('architecture/'));
+  if (archCodeViolations.length > 0) {
+    const convertedArchViolations: ModuleViolation[] = [];
+    for (const cv of archCodeViolations) {
+      const module = result.modules?.find(
+        (m) => cv.filePath.endsWith(m.filePath) || m.filePath.endsWith(cv.filePath),
+      );
+      if (module) {
+        convertedArchViolations.push({
+          ruleKey: cv.ruleKey,
+          title: cv.title,
+          description: cv.content,
+          severity: cv.severity,
+          serviceName: module.serviceName,
+          moduleName: module.name,
+          filePath: cv.filePath,
+        });
+      }
+    }
+
+    // Persist converted arch violations to deterministic_violations (step 3 ran before the scan).
+    for (const v of convertedArchViolations) {
+      const [row] = await db.insert(deterministicViolations).values({
+        analysisId,
+        ruleKey: v.ruleKey,
+        category: 'module',
+        title: v.title,
+        description: v.description,
+        severity: v.severity,
+        serviceName: v.serviceName,
+        moduleName: v.moduleName || null,
+        filePath: v.filePath || null,
+      }).returning({ id: deterministicViolations.id });
+      detViolationIdMap.set(`module::${v.ruleKey}::${v.serviceName}::${v.title}`, row.id);
+    }
+
+    // Add to moduleViolationResults so they flow into allDetEntries with proper target IDs.
+    moduleViolationResults.push(...convertedArchViolations);
+
+    // Remove arch violations from code violations — they now flow through the
+    // deterministic_violations → violations path with proper target IDs.
+    allCodeViolations = allCodeViolations.filter((v) => !v.ruleKey.startsWith('architecture/'));
+  }
+
+  // Mark non-architecture domain steps done with per-domain violation counts
+  const codeViolationsByDomain = new Map<string, number>();
+  for (const v of allCodeViolations) {
+    const domain = v.ruleKey.split('/')[0];
+    codeViolationsByDomain.set(domain, (codeViolationsByDomain.get(domain) ?? 0) + 1);
+  }
+
+  for (const domain of DOMAIN_ORDER) {
+    if (domain === 'architecture') continue; // already done above
+    const stepKey = `${domain}`;
+    const count = codeViolationsByDomain.get(domain) ?? 0;
+    tracker?.done(stepKey, count > 0 ? `${count} violations` : 'Clean');
+  }
+
   const totalDetections = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
-  tracker?.done('detect', `${totalDetections} detections found`);
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 
-  // 5. Build LLM code violation batches
-  const MAX_CHARS_PER_BATCH = 100_000;
-  const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
+  // 5. Build LLM code violation batches using context-routed approach
   const llmCodeBatches: CodeViolationContext[] = [];
-  const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
-    key: r.key,
-    name: r.name,
-    severity: r.severity,
-    prompt: r.prompt!,
-  }));
 
   // Build a lookup of previous LLM code violations by file path
   const prevLlmCodeByFile = new Map<string, typeof previousActiveCodeViolations>();
   for (const cv of previousActiveCodeViolations) {
     // Only include LLM-generated code violations (not deterministic ones)
-    if (!cv.ruleKey.startsWith('llm/')) continue;
+    if (!cv.ruleKey.includes('/llm/')) continue;
     if (!prevLlmCodeByFile.has(cv.filePath)) prevLlmCodeByFile.set(cv.filePath, []);
     prevLlmCodeByFile.get(cv.filePath)!.push(cv);
   }
 
   if (enabledLlmCodeRules.length > 0 && fileContents.size > 0) {
-    let currentBatch: { path: string; content: string }[] = [];
-    let currentChars = 0;
+    // Pre-flight estimation
+    const estimate = estimateContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents);
+    log(`[LLM] Pre-flight: ${estimate.totalEstimatedTokens} estimated tokens across ${estimate.tiers.length} tiers`);
+    for (const t of estimate.tiers) {
+      log(`[LLM]   ${t.tier}: ${t.ruleCount} rules × ${t.fileCount} files${t.functionCount ? ` (${t.functionCount} functions)` : ''} → ~${t.estimatedTokens} tokens`);
+    }
 
-    const addBatch = (files: { path: string; content: string }[]) => {
-      const batchFilePaths = new Set(files.map((f) => f.path));
+    // Build context-routed batches
+    const contextBatches = routeContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents);
+
+    // Convert ContextBatch format to CodeViolationContext format for the provider
+    for (const batch of contextBatches) {
+      // Collect previous violations for all files referenced in this batch content
       const existing = [...prevLlmCodeByFile.entries()]
-        .filter(([fp]) => batchFilePaths.has(fp))
+        .filter(([fp]) => batch.content.includes(fp))
         .flatMap(([, violations]) => violations);
+
       llmCodeBatches.push({
-        files,
-        llmRules: llmCodeRulesDtos,
+        files: [{ path: 'context', content: batch.content }],
+        llmRules: batch.rules,
+        tier: batch.tier,
         existingViolations: existing.length > 0 ? existing : undefined,
       });
-    };
+    }
 
-    for (const [filePath, { content }] of fileContents) {
-      const fileChars = content.length;
-      if (fileChars > HALF_BATCH) {
-        if (currentBatch.length > 0) {
-          addBatch(currentBatch);
-          currentBatch = [];
-          currentChars = 0;
-        }
-        addBatch([{ path: filePath, content }]);
-        continue;
-      }
-      if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
-        addBatch(currentBatch);
-        currentBatch = [];
-        currentChars = 0;
-      }
-      currentBatch.push({ path: filePath, content });
-      currentChars += fileChars;
-    }
-    if (currentBatch.length > 0) {
-      addBatch(currentBatch);
-    }
+    log(`[LLM] Context router produced ${llmCodeBatches.length} batch(es) from ${contextBatches.length} context group(s)`);
   }
 
   const validFilePaths = new Set(fileContents.keys());
@@ -419,17 +524,19 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  // Architecture context for enrichment
-  const architectureContext = `Architecture: ${result.architecture}\nServices: ${result.services.map((s) => `${s.name} (${s.type})`).join(', ')}`;
-
-  const provider = deterministicOnly ? undefined : (externalProvider ?? createLLMProvider());
+  const provider = externalProvider ?? createLLMProvider();
   const now = new Date();
   const allNewViolations: DiffViolationItem[] = [];
   const allResolvedViolationIds: string[] = [];
 
-  if (!deterministicOnly) {
-    tracker?.start('enrich', `Enriching ${allDetEntries.length} detections...`);
-    tracker?.start('architecture');
+  // Re-activate domain steps for LLM phase (same step, updated detail)
+  if (enableLlmRules !== false) {
+    const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories || enabledCategories.includes(d));
+    for (const domain of LLM_DOMAINS) {
+      if (activeDomains.includes(domain)) {
+        tracker?.start(domain, 'Running LLM analysis...');
+      }
+    }
   }
 
   // Deterministic enrichment promise
@@ -506,105 +613,46 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       detectionsToEnrich = allDetEntries;
     }
 
-    // Enrich new/all detections via LLM (or persist raw when deterministicOnly)
+    // Enrich new/all detections via LLM (or persist raw when enrichment disabled)
+    // Persist violations using raw detection data
+    for (const det of detectionsToEnrich) {
+      const violationId = uuidv4();
+      await db.insert(violations).values({
+        id: violationId,
+        repoId,
+        analysisId,
+        type: det.violationType,
+        title: det.title,
+        content: det.description,
+        severity: det.severity,
+        status: 'new',
+        targetServiceId: det.targetServiceId,
+        targetModuleId: det.targetModuleId,
+        targetMethodId: det.targetMethodId,
+        fixPrompt: null,
+        ruleKey: det.ruleKey,
+        deterministicViolationId: det.detViolationId,
+        firstSeenAnalysisId: analysisId,
+        firstSeenAt: now,
+      });
+
+      allNewViolations.push({
+        type: det.violationType,
+        title: det.title,
+        content: det.description,
+        severity: det.severity,
+        targetServiceId: det.targetServiceId,
+        targetModuleId: det.targetModuleId,
+        targetMethodId: det.targetMethodId,
+        targetServiceName: det.serviceName || null,
+        targetModuleName: det.moduleName || null,
+        targetMethodName: det.methodName || null,
+        fixPrompt: null,
+        ruleKey: det.ruleKey,
+      });
+    }
     if (detectionsToEnrich.length > 0) {
-      if (deterministicOnly) {
-        // Persist violations directly using raw detection data — no LLM enrichment
-        for (const det of detectionsToEnrich) {
-          const violationId = uuidv4();
-          await db.insert(violations).values({
-            id: violationId,
-            repoId,
-            analysisId,
-            type: det.violationType,
-            title: det.title,
-            content: det.description,
-            severity: det.severity,
-            status: 'new',
-            targetServiceId: det.targetServiceId,
-            targetModuleId: det.targetModuleId,
-            targetMethodId: det.targetMethodId,
-            fixPrompt: null,
-            ruleKey: det.ruleKey,
-            deterministicViolationId: det.detViolationId,
-            firstSeenAnalysisId: analysisId,
-            firstSeenAt: now,
-          });
-
-          allNewViolations.push({
-            type: det.violationType,
-            title: det.title,
-            content: det.description,
-            severity: det.severity,
-            targetServiceId: det.targetServiceId,
-            targetModuleId: det.targetModuleId,
-            targetMethodId: det.targetMethodId,
-            targetServiceName: det.serviceName || null,
-            targetModuleName: det.moduleName || null,
-            targetMethodName: det.methodName || null,
-            fixPrompt: null,
-            ruleKey: det.ruleKey,
-          });
-        }
-        emitProgress(88, 'Deterministic violations persisted');
-      } else {
-        // Build lookup by detViolationId for matching enrichment results
-        const detByViolationId = new Map(detectionsToEnrich.map((d) => [d.detViolationId, d]));
-
-        const enrichmentResult = await provider!.enrichDeterministicViolations(
-          detectionsToEnrich.map((d) => ({
-            id: d.detViolationId, ruleKey: d.ruleKey, title: d.title, description: d.description,
-            severity: d.severity, category: d.category,
-            serviceName: d.serviceName, moduleName: d.moduleName, methodName: d.methodName,
-          })),
-          architectureContext,
-        );
-
-        // Persist enriched violations — match by ID echoed back from LLM
-        for (const enriched of enrichmentResult.enrichedViolations) {
-          const det = detByViolationId.get(enriched.id);
-          if (!det) continue;
-
-          const violationId = uuidv4();
-          await db.insert(violations).values({
-            id: violationId,
-            repoId,
-            analysisId,
-            type: det.violationType,
-            title: enriched.title,
-            content: enriched.content,
-            severity: det.severity,
-            status: 'new',
-            targetServiceId: det.targetServiceId,
-            targetModuleId: det.targetModuleId,
-            targetMethodId: det.targetMethodId,
-            fixPrompt: enriched.fixPrompt,
-            ruleKey: det.ruleKey,
-            deterministicViolationId: det.detViolationId,
-            firstSeenAnalysisId: analysisId,
-            firstSeenAt: now,
-          });
-
-          allNewViolations.push({
-            type: det.violationType,
-            title: enriched.title,
-            content: enriched.content,
-            severity: det.severity,
-            targetServiceId: det.targetServiceId,
-            targetModuleId: det.targetModuleId,
-            targetMethodId: det.targetMethodId,
-            targetServiceName: det.serviceName || null,
-            targetModuleName: det.moduleName || null,
-            targetMethodName: det.methodName || null,
-            fixPrompt: enriched.fixPrompt,
-            ruleKey: det.ruleKey,
-          });
-        }
-        tracker?.done('enrich', `${enrichmentResult.enrichedViolations.length} violations enriched`);
-        emitProgress(88, 'Deterministic violations enriched');
-      }
-    } else {
-      if (!deterministicOnly) tracker?.done('enrich', 'No detections to enrich');
+      emitProgress(88, 'Deterministic violations persisted');
     }
   })();
 
@@ -612,8 +660,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // 7. FLOW 2: LLM rule analysis (LLM-handled lifecycle)
   // =========================================================================
 
+  const archAndDbDomains = new Set(['architecture', 'database'])
   const enabledLlmRules = allRules
-    .filter((r) => r.type === 'llm' && r.prompt && r.category !== 'code')
+    .filter((r) => r.type === 'llm' && r.prompt && (r.domain ? archAndDbDomains.has(r.domain) : r.category !== 'code'))
     .map((r) => ({ key: r.key, name: r.name, severity: r.severity, prompt: r.prompt!, category: r.category }));
 
   const analysisServices = result.services.map((s) => ({
@@ -730,19 +779,19 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   };
 
   // LLM code violations promise
-  const llmCodePromise = (llmCodeBatches.length > 0 && !deterministicOnly)
-    ? provider!.generateAllCodeViolations(llmCodeBatches)
+  const llmCodePromise = (llmCodeBatches.length > 0)
+    ? provider.generateAllCodeViolations(llmCodeBatches)
     : Promise.resolve({ violations: [] } as CodeViolationsResult);
 
   let serviceDescriptions: { id: string; description: string }[] = [];
   let llmCodeResolvedIds: string[] = [];
   let llmCodeUnchangedIds: string[] = [];
 
-  if (!deterministicOnly) emitProgress(86, 'Analyzing architecture & modules...');
+  emitProgress(86, 'Analyzing architecture & modules...');
 
   // LLM rule analysis promise (runs in parallel with deterministic enrichment)
   let llmStepCount = 0;
-  const llmRulePromise = deterministicOnly ? Promise.resolve() : (async () => {
+  const llmRulePromise = (async () => {
     if (hasLlmOnlyExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
         llmStepCount++;
@@ -820,7 +869,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       }
     }
 
-    tracker?.done('architecture');
+    // Mark all LLM domain steps done
+    for (const domain of LLM_DOMAINS) {
+      tracker?.done(domain);
+    }
   })();
 
   // codePromise runs in background — no progress emit here to avoid
@@ -837,9 +889,12 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (llmResult.status === 'rejected') {
     const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
     log(`[Violations] LLM rule analysis failed: ${msg}`);
-    tracker?.error('architecture', `Failed: ${msg.slice(0, 80)}`);
+    // Mark all LLM domain steps as errored
+    for (const domain of LLM_DOMAINS) {
+      tracker?.error(domain, `LLM failed: ${msg.slice(0, 80)}`);
+    }
   }
-  // Architecture step is marked done inside the llmRulePromise itself
+  // LLM steps are marked done inside the llmRulePromise itself
 
   throwIfAborted(signal);
   tracker?.start('persist', 'Saving results...');
@@ -859,7 +914,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // 9. Persist code violations with lifecycle tracking
   // Deterministic code violations are persisted now (groups b + c).
-  // LLM code violations (group a) are deferred to codeReviewPromise.
+  // LLM code violations (group a) are processed after deterministic ones.
 
   const scannedFilePaths = new Set(fileContents.keys());
   let codeResolvedCount = 0;
@@ -867,7 +922,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // b) Deterministic matching for code violations in scanned files
   // (No LLM lifecycle IDs yet — those will be handled in the background)
   const prevForDeterministicMatching = previousActiveCodeViolations.filter(
-    (v) => scannedFilePaths.has(v.filePath) && !v.ruleKey.startsWith('llm/'),
+    (v) => scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
   );
 
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
@@ -888,7 +943,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // c) Auto carry forward violations for unchanged files (non-LLM only now)
   const prevInUnchangedFiles = previousActiveCodeViolations.filter(
-    (v) => !scannedFilePaths.has(v.filePath) && !v.ruleKey.startsWith('llm/'),
+    (v) => !scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
   );
 
   for (const prev of prevInUnchangedFiles) {
@@ -912,116 +967,113 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     });
   }
 
-  // Build the background code review promise for LLM code violations (group a)
-  const hasLlmCodeWork = llmCodeBatches.length > 0;
-  const codeReviewPromise: Promise<void> | null = hasLlmCodeWork
-    ? (async () => {
-        const codeSettled = await codePromise.then(
-          (r) => ({ status: 'fulfilled' as const, value: r }),
-          (err) => ({ status: 'rejected' as const, reason: err }),
-        );
+  // Process LLM code violations inline (group a)
+  if (llmCodeBatches.length > 0) {
+    const codeSettled = await codePromise.then(
+      (r) => ({ status: 'fulfilled' as const, value: r }),
+      (err) => ({ status: 'rejected' as const, reason: err }),
+    );
 
-        if (codeSettled.status === 'rejected') {
-          log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
-        }
+    if (codeSettled.status === 'rejected') {
+      log(`[Violations] Code analysis failed: ${codeSettled.reason instanceof Error ? codeSettled.reason.message : String(codeSettled.reason)}`);
+    }
 
-        throwIfAborted(signal);
+    throwIfAborted(signal);
 
-        const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
-        const llmCodeViolations: CodeViolation[] = [];
-        processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
-        llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
-        llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
+    const codeResult = codeSettled.status === 'fulfilled' ? codeSettled.value : { violations: [] as CodeViolationRaw[] };
+    const llmCodeViolations: CodeViolation[] = [];
+    processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
+    llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
+    llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
 
-        // a) LLM lifecycle: carry forward unchanged, mark resolved
-        for (const prevId of llmCodeUnchangedIds) {
-          const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
-          if (!prev) continue;
-          await db.insert(codeViolations).values({
-            analysisId,
-            filePath: prev.filePath,
-            lineStart: prev.lineStart,
-            lineEnd: prev.lineEnd,
-            columnStart: prev.columnStart,
-            columnEnd: prev.columnEnd,
-            ruleKey: prev.ruleKey,
-            severity: prev.severity,
-            status: 'unchanged',
-            title: prev.title,
-            content: prev.content,
-            snippet: prev.snippet,
-            fixPrompt: prev.fixPrompt,
-            firstSeenAnalysisId: prev.firstSeenAnalysisId,
-            firstSeenAt: prev.firstSeenAt,
-            previousCodeViolationId: prev.id,
-          });
-        }
+    // a) LLM lifecycle: carry forward unchanged, mark resolved
+    for (const prevId of llmCodeUnchangedIds) {
+      const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
+      if (!prev) continue;
+      await db.insert(codeViolations).values({
+        analysisId,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        ruleKey: prev.ruleKey,
+        severity: prev.severity,
+        status: 'unchanged',
+        title: prev.title,
+        content: prev.content,
+        snippet: prev.snippet,
+        fixPrompt: prev.fixPrompt,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousCodeViolationId: prev.id,
+      });
+    }
 
-        for (const prevId of llmCodeResolvedIds) {
-          const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
-          if (!prev) continue;
-          await db.insert(codeViolations).values({
-            analysisId,
-            filePath: prev.filePath,
-            lineStart: prev.lineStart,
-            lineEnd: prev.lineEnd,
-            columnStart: prev.columnStart,
-            columnEnd: prev.columnEnd,
-            ruleKey: prev.ruleKey,
-            severity: prev.severity,
-            status: 'resolved',
-            title: prev.title,
-            content: prev.content,
-            snippet: prev.snippet,
-            fixPrompt: prev.fixPrompt,
-            firstSeenAnalysisId: prev.firstSeenAnalysisId,
-            firstSeenAt: prev.firstSeenAt,
-            previousCodeViolationId: prev.id,
-            resolvedAt: now,
-          });
-        }
+    for (const prevId of llmCodeResolvedIds) {
+      const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
+      if (!prev) continue;
+      await db.insert(codeViolations).values({
+        analysisId,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        ruleKey: prev.ruleKey,
+        severity: prev.severity,
+        status: 'resolved',
+        title: prev.title,
+        content: prev.content,
+        snippet: prev.snippet,
+        fixPrompt: prev.fixPrompt,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousCodeViolationId: prev.id,
+        resolvedAt: now,
+      });
+    }
 
-        // Persist new LLM code violations via deterministic matching
-        const llmPrevForMatching = previousActiveCodeViolations.filter(
-          (v) => v.ruleKey.startsWith('llm/') && scannedFilePaths.has(v.filePath)
-            && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
-        );
+    // Persist new LLM code violations via deterministic matching
+    const llmPrevForMatching = previousActiveCodeViolations.filter(
+      (v) => v.ruleKey.includes('/llm/') && scannedFilePaths.has(v.filePath)
+        && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
+    );
 
-        if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-          await persistCodeViolationsWithLifecycle({
-            analysisId,
-            currentCodeViolations: llmCodeViolations,
-            previousActiveCodeViolations: llmPrevForMatching,
-          });
-        }
+    if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
+      await persistCodeViolationsWithLifecycle({
+        analysisId,
+        currentCodeViolations: llmCodeViolations,
+        previousActiveCodeViolations: llmPrevForMatching,
+      });
+    }
 
-        // Carry forward LLM violations for unchanged files
-        const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
-          (v) => v.ruleKey.startsWith('llm/') && !scannedFilePaths.has(v.filePath),
-        );
+    // Carry forward LLM violations for unchanged files
+    const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
+      (v) => v.ruleKey.includes('/llm/') && !scannedFilePaths.has(v.filePath),
+    );
 
-        for (const prev of llmPrevUnchangedFiles) {
-          await db.insert(codeViolations).values({
-            analysisId,
-            filePath: prev.filePath,
-            lineStart: prev.lineStart,
-            lineEnd: prev.lineEnd,
-            columnStart: prev.columnStart,
-            columnEnd: prev.columnEnd,
-            ruleKey: prev.ruleKey,
-            severity: prev.severity,
-            status: 'unchanged',
-            title: prev.title,
-            content: prev.content,
-            snippet: prev.snippet,
-            fixPrompt: prev.fixPrompt,
-            firstSeenAnalysisId: prev.firstSeenAnalysisId,
-            firstSeenAt: prev.firstSeenAt,
-            previousCodeViolationId: prev.id,
-          });
-        }
-      })()
-    : null;
+    for (const prev of llmPrevUnchangedFiles) {
+      await db.insert(codeViolations).values({
+        analysisId,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        ruleKey: prev.ruleKey,
+        severity: prev.severity,
+        status: 'unchanged',
+        title: prev.title,
+        content: prev.content,
+        snippet: prev.snippet,
+        fixPrompt: prev.fixPrompt,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousCodeViolationId: prev.id,
+      });
+    }
+  }
 
   tracker?.done('persist', 'Done');
 
@@ -1031,7 +1083,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     resolvedViolationIds: allResolvedViolationIds,
     codeViolations: allCodeViolations,
     codeResolvedCount,
-    codeReviewPromise,
   };
 }
 
@@ -1072,181 +1123,4 @@ function processLlmCodeViolations(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Standalone code review — runs LLM code review on an existing analysis
-// ---------------------------------------------------------------------------
 
-export interface RunCodeReviewInput {
-  repoId: string;
-  repoPath: string;
-  analysisId: string;
-  /** File paths from the analysis to review */
-  filePaths: string[];
-  /** Previous active LLM code violations for lifecycle tracking */
-  previousCodeViolations: {
-    id: string;
-    filePath: string;
-    lineStart: number;
-    lineEnd: number;
-    columnStart: number;
-    columnEnd: number;
-    ruleKey: string;
-    severity: string;
-    title: string;
-    content: string;
-    snippet: string;
-    fixPrompt: string | null;
-    firstSeenAnalysisId: string | null;
-    firstSeenAt: Date | null;
-  }[];
-  provider?: LLMProvider;
-  signal?: AbortSignal;
-}
-
-/**
- * Run LLM code review on an existing analysis.
- * Reads file contents from disk, builds LLM batches, runs review, and persists results.
- */
-export async function runCodeReview(input: RunCodeReviewInput): Promise<void> {
-  const { repoId, repoPath, analysisId, filePaths, previousCodeViolations, signal } = input;
-
-  const provider = input.provider ?? createLLMProvider();
-  const allRules = await getEnabledRules();
-  const enabledLlmCodeRules = allRules.filter((r) => r.category === 'code' && r.type === 'llm' && r.prompt);
-
-  if (enabledLlmCodeRules.length === 0) {
-    log('[CodeReview] No LLM code rules enabled — skipping');
-    return;
-  }
-
-  // Read file contents from disk
-  const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
-  for (const filePath of filePaths) {
-    try {
-      const lang = detectLanguage(filePath);
-      if (!lang) continue;
-      const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(repoPath, filePath);
-      if (!fs.existsSync(absPath)) continue;
-      const content = fs.readFileSync(absPath, 'utf-8');
-      fileContents.set(filePath, { content, lineCount: content.split('\n').length });
-    } catch {
-      // Skip files that can't be read
-    }
-  }
-
-  if (fileContents.size === 0) {
-    log('[CodeReview] No files to review');
-    return;
-  }
-
-  // Build LLM code batches
-  const MAX_CHARS_PER_BATCH = 100_000;
-  const HALF_BATCH = MAX_CHARS_PER_BATCH / 2;
-  const llmCodeBatches: CodeViolationContext[] = [];
-  const llmCodeRulesDtos = enabledLlmCodeRules.map((r) => ({
-    key: r.key, name: r.name, severity: r.severity, prompt: r.prompt!,
-  }));
-
-  const prevLlmCodeByFile = new Map<string, typeof previousCodeViolations>();
-  for (const cv of previousCodeViolations) {
-    if (!cv.ruleKey.startsWith('llm/')) continue;
-    if (!prevLlmCodeByFile.has(cv.filePath)) prevLlmCodeByFile.set(cv.filePath, []);
-    prevLlmCodeByFile.get(cv.filePath)!.push(cv);
-  }
-
-  let currentBatch: { path: string; content: string }[] = [];
-  let currentChars = 0;
-
-  const addBatch = (files: { path: string; content: string }[]) => {
-    const batchFilePaths = new Set(files.map((f) => f.path));
-    const existing = [...prevLlmCodeByFile.entries()]
-      .filter(([fp]) => batchFilePaths.has(fp))
-      .flatMap(([, violations]) => violations);
-    llmCodeBatches.push({
-      files,
-      llmRules: llmCodeRulesDtos,
-      existingViolations: existing.length > 0 ? existing : undefined,
-    });
-  };
-
-  for (const [filePath, { content }] of fileContents) {
-    const fileChars = content.length;
-    if (fileChars > HALF_BATCH) {
-      if (currentBatch.length > 0) { addBatch(currentBatch); currentBatch = []; currentChars = 0; }
-      addBatch([{ path: filePath, content }]);
-      continue;
-    }
-    if (currentChars + fileChars > MAX_CHARS_PER_BATCH && currentBatch.length > 0) {
-      addBatch(currentBatch); currentBatch = []; currentChars = 0;
-    }
-    currentBatch.push({ path: filePath, content });
-    currentChars += fileChars;
-  }
-  if (currentBatch.length > 0) addBatch(currentBatch);
-
-  if (llmCodeBatches.length === 0) return;
-
-  log(`[CodeReview] Starting: ${llmCodeBatches.length} batch(es), ${fileContents.size} files`);
-
-  // Run LLM code review
-  throwIfAborted(signal);
-  const codeResult = await provider.generateAllCodeViolations(llmCodeBatches);
-
-  throwIfAborted(signal);
-
-  // Process results
-  const validFilePaths = new Set(fileContents.keys());
-  const llmCodeViolations: CodeViolation[] = [];
-  processLlmCodeViolations(codeResult, validFilePaths, fileContents, llmCodeViolations);
-
-  const llmCodeResolvedIds = codeResult.resolvedViolationIds || [];
-  const llmCodeUnchangedIds = codeResult.unchangedViolationIds || [];
-  const now = new Date();
-
-  // Persist unchanged
-  for (const prevId of llmCodeUnchangedIds) {
-    const prev = previousCodeViolations.find((v) => v.id === prevId);
-    if (!prev) continue;
-    await db.insert(codeViolations).values({
-      analysisId, filePath: prev.filePath,
-      lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey, severity: prev.severity, status: 'unchanged',
-      title: prev.title, content: prev.content, snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt, previousCodeViolationId: prev.id,
-    });
-  }
-
-  // Persist resolved
-  for (const prevId of llmCodeResolvedIds) {
-    const prev = previousCodeViolations.find((v) => v.id === prevId);
-    if (!prev) continue;
-    await db.insert(codeViolations).values({
-      analysisId, filePath: prev.filePath,
-      lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey, severity: prev.severity, status: 'resolved',
-      title: prev.title, content: prev.content, snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt, previousCodeViolationId: prev.id,
-      resolvedAt: now,
-    });
-  }
-
-  // Persist new via lifecycle matching
-  const llmPrevForMatching = previousCodeViolations.filter(
-    (v) => v.ruleKey.startsWith('llm/') && validFilePaths.has(v.filePath)
-      && !llmCodeUnchangedIds.includes(v.id) && !llmCodeResolvedIds.includes(v.id),
-  );
-
-  if (llmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-    await persistCodeViolationsWithLifecycle({
-      analysisId,
-      currentCodeViolations: llmCodeViolations,
-      previousActiveCodeViolations: llmPrevForMatching,
-    });
-  }
-
-  log(`[CodeReview] Done: ${llmCodeViolations.length} new, ${llmCodeUnchangedIds.length} unchanged, ${llmCodeResolvedIds.length} resolved`);
-}

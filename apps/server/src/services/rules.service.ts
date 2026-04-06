@@ -50,6 +50,15 @@ export async function seedRules(): Promise<void> {
   }
 }
 
+/** Derive domain from rule key (e.g., 'architecture/deterministic/foo' → 'architecture'). */
+function deriveDomain(key: string): AnalysisRule['domain'] {
+  const firstSlash = key.indexOf('/');
+  if (firstSlash === -1) return undefined;
+  const prefix = key.slice(0, firstSlash);
+  const validDomains = new Set(['architecture', 'security', 'bugs', 'code-quality', 'style', 'database', 'performance', 'reliability']);
+  return validDomains.has(prefix) ? (prefix as AnalysisRule['domain']) : undefined;
+}
+
 /**
  * Get all rules from the database.
  */
@@ -58,6 +67,7 @@ export async function getRulesFromDb(): Promise<AnalysisRule[]> {
   return rows.map((r) => ({
     key: r.key,
     category: r.category as AnalysisRule['category'],
+    domain: deriveDomain(r.key),
     name: r.name,
     description: r.description,
     prompt: r.prompt ?? undefined,
@@ -75,6 +85,7 @@ export async function getEnabledRules(): Promise<AnalysisRule[]> {
   return rows.map((r) => ({
     key: r.key,
     category: r.category as AnalysisRule['category'],
+    domain: deriveDomain(r.key),
     name: r.name,
     description: r.description,
     prompt: r.prompt ?? undefined,

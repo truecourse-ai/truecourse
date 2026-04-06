@@ -20,7 +20,7 @@ export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, 
 export { TYPESCRIPT_CONFIG, TSX_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG } from './language-config.js'
 
 // TypeScript Compiler API utilities
-export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsxReferences, type ScopedCompilerOptions, type SemanticAnalysisResult, type JsxReference } from './ts-compiler.js'
+export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsxReferences, createTypeQueryService, type ScopedCompilerOptions, type SemanticAnalysisResult, type JsxReference, type TypeQueryService } from './ts-compiler.js'
 
 // Extractors
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
@@ -68,12 +68,54 @@ export { extractModulesAndMethods, type ModuleExtractionResult } from './module-
 export { traceFlows, type TracedFlow, type TracedFlowStep, type CrossServiceCall, type RouteHandler } from './flow-tracer.js'
 export { AnalysisGraph, type AnalysisGraphInput } from './analysis-graph.js'
 
-// Rules
-export { DETERMINISTIC_RULES, LLM_ARCHITECTURE_RULES, LLM_DATABASE_RULES, LLM_MODULE_RULES, LLM_CODE_RULES, CODE_RULES } from './rules/index.js'
+// Cycle detection
+export { findCycles, type CycleResult, type CycleInfo, type EdgeMetadata } from './rules/architecture/tarjan.js'
+
+// Rules — domain-based structure
+export {
+  // Rule arrays
+  DETERMINISTIC_RULES,
+  LLM_ARCHITECTURE_RULES,
+  LLM_DATABASE_RULES,
+  LLM_MODULE_RULES,
+  LLM_CODE_RULES,
+  CODE_RULES,
+  ALL_DEFAULT_RULES,
+  // Domain-specific rule arrays
+  ARCHITECTURE_DETERMINISTIC_RULES,
+  ARCHITECTURE_LLM_RULES,
+  SECURITY_DETERMINISTIC_RULES,
+  SECURITY_LLM_RULES,
+  BUGS_DETERMINISTIC_RULES,
+  BUGS_LLM_RULES,
+  CODE_QUALITY_DETERMINISTIC_RULES,
+  CODE_QUALITY_LLM_RULES,
+  DATABASE_LLM_RULES,
+  PERFORMANCE_DETERMINISTIC_RULES,
+  PERFORMANCE_LLM_RULES,
+  RELIABILITY_DETERMINISTIC_RULES,
+  RELIABILITY_LLM_RULES,
+  // Checkers
+  checkServiceRules,
+  checkModuleRules,
+  checkMethodRules,
+  checkSecurityRules,
+  checkBugsRules,
+  checkCodeQualityRules,
+  // Types
+  type ServiceViolation,
+  type ModuleViolation,
+  type CodeRuleVisitor,
+  makeViolation,
+  walkAstWithVisitors,
+} from './rules/index.js'
 export { getAllDefaultRules } from './rule-engine.js'
-export { checkModuleRules, checkMethodRules, type ModuleViolation } from './rules/module-rules-checker.js'
-export { checkServiceRules, type ServiceViolation } from './rules/service-rules-checker.js'
-export { checkCodeRules } from './rules/code-rules-checker.js'
+
+/**
+ * Combined code-rule checker that runs all AST-based domain checkers.
+ * Drop-in replacement for the old checkCodeRules function.
+ */
+export { checkCodeRules, hasTypeAwareVisitors } from './rules/combined-code-checker.js'
 
 /**
  * High-level function to analyze an entire repository
@@ -130,3 +172,6 @@ export async function analyzeRepository(rootPath: string): Promise<{
     splitResult,
   }
 }
+
+// Config file checkers
+export { checkPyprojectToml } from './rules/bugs/pyproject-checker.js'
