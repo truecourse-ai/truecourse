@@ -2913,40 +2913,7 @@ Requires TypeScript type information. Uses existing `ts-compiler.ts` with `ts.Pr
 
 `no-misused-promises`, `no-for-in-array`, `no-unsafe-assignment`, `no-unsafe-return`, `no-unsafe-call`, `no-unsafe-member-access`, `no-unsafe-argument`, `strict-boolean-expressions`, `no-unnecessary-type-assertion`, `no-unnecessary-condition`, `no-redundant-type-constituents`, `no-confusing-void-expression`, `await-thenable`, `no-base-to-string`, `restrict-plus-operands`, `restrict-template-expressions`, `unbound-method`, `no-meaningless-void-operator`, `dead-store`, `prefer-return-this-type`
 
-### 30.4 Cross-File Taint Analysis `STATUS: TODO`
-
-Build a taint tracking engine on top of our existing dependency graph and method-level call tracking. This is where SonarQube's real value lives — and where we can beat them by leveraging our architecture-aware dependency graph.
-
-**Architecture:**
-
-```
-Taint Engine
-├── Source definitions (where tainted data enters)
-│   ├── req.body, req.query, req.params, req.headers
-│   ├── window.location, document.cookie
-│   ├── user input (readline, prompt)
-│   └── database query results (configurable)
-├── Sink definitions (where tainted data is dangerous)
-│   ├── eval(), Function(), child_process.exec()
-│   ├── SQL query strings, ORM raw queries
-│   ├── innerHTML, document.write()
-│   ├── res.redirect(), window.location.href
-│   ├── fs.readFile/writeFile (path traversal)
-│   └── HTTP response headers (header injection)
-├── Sanitizer definitions (transforms that make data safe)
-│   ├── Input validation (Zod, Joi, validator.js)
-│   ├── Parameterized queries (prepared statements)
-│   ├── DOMPurify, escape functions
-│   └── URL validation libraries
-└── Propagation rules
-    ├── Assignments, string operations, object spread
-    ├── Function calls (arguments → return values)
-    └── Cross-file: follow import/export + dependency graph
-```
-
-**Security rules (~30):** `cross-file-sql-injection`, `cross-file-xss`, `cross-file-command-injection`, `open-redirect`, `ssrf`, `path-traversal`, `ldap-injection`, `regex-injection`, `header-injection`, `jwt-no-verify`, `weak-crypto`, `crypto-no-salt`, `insecure-cookie`, `cors-permissive`, `hardcoded-credentials`, `weak-tls`, `math-random-security`, `no-cleartext-protocols`, `deserialization`, `log-injection`, plus ~10 Python-specific sink rules.
-
-### 30.5 Secret Scanning Overhaul `STATUS: TODO`
+### 30.4 Secret Scanning Overhaul `STATUS: TODO`
 
 Overhaul hardcoded secret detection to dramatically reduce false positives and expand coverage. Current implementation uses 6 regex patterns with basic filtering. Detailed research and implementation priorities in `docs/SECRET-DETECTION-RESEARCH.md`.
 
@@ -2960,7 +2927,7 @@ Overhaul hardcoded secret detection to dramatically reduce false positives and e
 6. **Keyword pre-filtering** — fast substring check before regex (performance)
 7. **Per-rule allowlists** — surgical FP suppression
 
-### 30.6 Smarter Circular Dependency Detection `STATUS: TODO`
+### 30.5 Smarter Circular Dependency Detection `STATUS: TODO`
 
 Improve circular dependency detection with proper graph algorithms and lazy import awareness. Current implementation uses simple bidirectional edge checking. Detailed research in `docs/MADGE-RESEARCH.md`.
 
@@ -2973,7 +2940,7 @@ Improve circular dependency detection with proper graph algorithms and lazy impo
    - Dynamic/lazy import cycle → low severity (warning)
    - Type-only import cycle → info (harmless)
 
-### 30.7 Duplicate Code Detection `STATUS: TODO`
+### 30.6 Duplicate Code Detection `STATUS: TODO`
 
 Token-based comparison algorithm to detect copy-pasted code blocks across the codebase.
 
@@ -3001,8 +2968,7 @@ The fix prompt is part of the rule definition, not an LLM call.
 3. Head-to-head: FP rate lower than ESLint on same code
 4. Head-to-head: FP rate lower than SonarQube on same code
 5. `BEARER_TOKEN` in a type map → not flagged (the tester's original complaint)
-6. Taint analysis: user input reaching `eval()` across 3 files → flagged
-7. Duplicate code: 15-line copy-paste across files → flagged
+6. Duplicate code: 15-line copy-paste across files → flagged
 8. Cognitive complexity > 15 → flagged with specific refactoring suggestion
 9. All fix suggestions generated deterministically (no LLM calls)
 10. Full analysis on 10K file repo completes in < 2x ESLint time
@@ -3138,3 +3104,40 @@ Imported ESLint config (.eslintrc.json):
 
 You can safely remove ESLint.
 ```
+
+---
+
+## Phase 34: Cross-File Taint Analysis `STATUS: TODO`
+
+Build a taint tracking engine that follows untrusted data from where it enters the system (HTTP requests, user input) through function calls across files to where it's used dangerously (SQL queries, eval, file system, redirects). Upgrades existing security rules with deeper detection — same rule keys, no new rules.
+
+This is TrueCourse's competitive differentiator against SonarQube. Requires symbolic execution engine, inter-procedural analysis, object sensitivity, path sensitivity, and framework-specific models.
+
+**Architecture:**
+
+```
+Taint Engine
+├── Source definitions (where tainted data enters)
+│   ├── req.body, req.query, req.params, req.headers
+│   ├── window.location, document.cookie
+│   ├── user input (readline, prompt)
+│   └── database query results (configurable)
+├── Sink definitions (where tainted data is dangerous)
+│   ├── eval(), Function(), child_process.exec()
+│   ├── SQL query strings, ORM raw queries
+│   ├── innerHTML, document.write()
+│   ├── res.redirect(), window.location.href
+│   ├── fs.readFile/writeFile (path traversal)
+│   └── HTTP response headers (header injection)
+├── Sanitizer definitions (transforms that make data safe)
+│   ├── Input validation (Zod, Joi, validator.js)
+│   ├── Parameterized queries (prepared statements)
+│   ├── DOMPurify, escape functions
+│   └── URL validation libraries
+└── Propagation rules
+    ├── Assignments, string operations, object spread
+    ├── Function calls (arguments → return values)
+    └── Cross-file: follow import/export + dependency graph
+```
+
+Leverages existing infrastructure: method-level call graph, flow tracer, analysis graph, single-file data-flow engine, dependency graph.
