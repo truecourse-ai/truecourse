@@ -1,0 +1,10 @@
+{
+  "name": "@sample/api-gateway",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "axios": "^1.7.0"
+  }
+}
