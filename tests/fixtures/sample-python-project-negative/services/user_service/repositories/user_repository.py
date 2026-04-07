@@ -12,7 +12,7 @@ class UserRepository:
     # VIOLATION: style/deterministic/docstring-completeness
     # VIOLATION: code-quality/deterministic/missing-type-hints
     def find_all(self) -> list:
-        # VIOLATION: data layer should not call API layer
+        # ARCH-VIOLATION: architecture/deterministic/data-layer-depends-on-api
         # VIOLATION: code-quality/deterministic/console-log
         print(get_users)
         with Session(engine) as session:

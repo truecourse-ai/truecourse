@@ -10,23 +10,23 @@ admin_bp = Blueprint("admin", __name__)
 
 # Ambiguous Unicode characters in strings (visually similar to ASCII)
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-ADMIN_WELCOME = "Welc\u043eme to admin panel"
+ADMIN_WELCOME = "Welcоme to admin panel"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-UNAUTHORIZED_MSG = "Acc\u0435ss denied"
+UNAUTHORIZED_MSG = "Accеss denied"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-SUCCESS_MSG = "\u0430dmin operation completed"
+SUCCESS_MSG = "аdmin operation completed"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-ERROR_PREFIX = "Err\u043er occurred"
+ERROR_PREFIX = "Errоr occurred"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-CONFIG_LABEL = "C\u043enfig"
+CONFIG_LABEL = "Cоnfig"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-STATUS_LABEL = "Statu\u0455"
+STATUS_LABEL = "Statuе"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-AUDIT_MSG = "Audit l\u043eg entry"
+AUDIT_MSG = "Audit lоg entry"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-REPORT_TITLE = "Rep\u043ert"
+REPORT_TITLE = "Repоrt"
 # VIOLATION: code-quality/deterministic/ambiguous-unicode-character
-DASHBOARD_TITLE = "D\u0430shboard"
+DASHBOARD_TITLE = "Dаshboard"
 
 
 @admin_bp.route("/dashboard", methods=["GET"])

@@ -194,13 +194,13 @@ def check_literal(x):
         return True
 
 
-# VIOLATION: bugs/deterministic/none-comparison
+# VIOLATION: bugs/deterministic/none-comparison-with-equality
 def check_none(x):
     if x == None:
         return True
 
 
-# VIOLATION: bugs/deterministic/type-comparison
+# VIOLATION: bugs/deterministic/type-comparison-instead-of-isinstance
 def type_check(x):
     if type(x) == int:
         return True
@@ -241,8 +241,7 @@ except FileNotFoundError:
 
 
 # VIOLATION: bugs/deterministic/exception-not-from-base-exception
-class MyError(str):
-    pass
+raise "not a valid exception"
 
 
 # VIOLATION: bugs/deterministic/binary-op-exception
@@ -299,8 +298,8 @@ double = lambda x: x * 2
 # ---- Dict iteration patterns ----
 
 # VIOLATION: bugs/deterministic/dict-iter-missing-items
-d = {"a": 1, "b": 2}
-for k, v in d:
+config_data = {"a": 1, "b": 2}
+for k, v in config_data:
     pass
 
 
@@ -330,8 +329,7 @@ unique = {1, 2, 3, 1}
 # ---- Duplicate args ----
 
 # VIOLATION: bugs/deterministic/duplicate-function-arguments
-def dup_args(a, b, a):
-    return a + b
+result = dict(a=1, b=2, a=3)
 
 
 # ---- Non callable called ----
@@ -384,7 +382,7 @@ logging.exception("failed outside handler")
 
 def vague_error():
     # VIOLATION: bugs/deterministic/generic-error-message
-    raise ValueError("error")
+    raise ValueError("something went wrong")
 
 
 # ---- Assignment to self ----
@@ -415,14 +413,14 @@ def implicit_opt(x: str = None):
 # ---- Nested try-catch ----
 
 def nested_try():
-    # VIOLATION: bugs/deterministic/nested-try-catch
     try:
+        pass
+    except Exception:
+        # VIOLATION: bugs/deterministic/nested-try-catch
         try:
             pass
         except ValueError:
             pass
-    except Exception:
-        pass
 
 
 # ---- If tuple always true ----

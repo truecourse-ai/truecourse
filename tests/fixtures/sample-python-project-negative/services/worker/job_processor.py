@@ -80,8 +80,9 @@ class JobProcessor:
     # VIOLATION: style/deterministic/docstring-completeness
     # VIOLATION: code-quality/deterministic/missing-type-hints
     def _handle_cleanup_job(self, job):
+        cmd = job.get("command", "echo done")
         # VIOLATION: security/deterministic/subprocess-without-shell
-        subprocess.run(job.get("command", "echo done"), shell=True)
+        subprocess.run(cmd)
 
     # VIOLATION: style/deterministic/docstring-completeness
     def mark_complete(self, job_id: int) -> None:

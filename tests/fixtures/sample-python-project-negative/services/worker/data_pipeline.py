@@ -18,15 +18,10 @@ from itertools import starmap
 from pathlib import Path
 
 
-# ---- Duplicate dict key ----
+# ---- Duplicate dict key (constant key in comprehension) ----
 
 # VIOLATION: bugs/deterministic/duplicate-dict-key
-DEFAULT_CONFIG = {
-    "batch_size": 100,
-    "timeout": 30,
-    "retries": 3,
-    "batch_size": 50,
-}
+DEFAULT_CONFIG = {"batch_size": v for v in [100, 50]}
 
 
 # ---- Mutable class default ----

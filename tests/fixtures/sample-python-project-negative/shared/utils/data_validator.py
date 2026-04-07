@@ -116,8 +116,9 @@ def validate_config(config):
 # VIOLATION: code-quality/deterministic/missing-type-hints
 def run_external_validator(filepath):
     """Run an external validation script on a file."""
+    cmd = filepath
     # VIOLATION: security/deterministic/subprocess-without-shell
-    subprocess.run(f"python validate.py {filepath}", shell=True)
+    subprocess.run(cmd)
 
 
 # VIOLATION: style/deterministic/docstring-completeness

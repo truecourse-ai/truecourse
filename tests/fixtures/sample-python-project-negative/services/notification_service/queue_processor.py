@@ -28,9 +28,9 @@ class NotificationQueue:
         self._processed = 0
 
     # VIOLATION: style/deterministic/docstring-completeness
-    def enqueue(self, notification: dict) -> None:
+    def enqueue(self, payload: dict) -> None:
         # VIOLATION: database/deterministic/unvalidated-external-data
-        self._queue.append(notification)
+        self._queue.save(payload)
 
     # VIOLATION: style/deterministic/docstring-completeness
     # VIOLATION: code-quality/deterministic/missing-type-hints

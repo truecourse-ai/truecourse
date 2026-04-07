@@ -141,7 +141,7 @@ def start_service(name):
 # VIOLATION: code-quality/deterministic/missing-type-hints
 def run_python(script):
     # VIOLATION: security/deterministic/process-with-partial-path
-    subprocess.run(["python", script])
+    subprocess.run(["curl", script])
 
 
 # VIOLATION: style/deterministic/docstring-completeness

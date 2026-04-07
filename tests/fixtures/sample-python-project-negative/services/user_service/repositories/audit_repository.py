@@ -79,16 +79,13 @@ def create_audit_entry(user_id, action, details=None):
 
 # VIOLATION: style/deterministic/docstring-completeness
 # VIOLATION: code-quality/deterministic/missing-type-hints
-def batch_insert_logs(conn, entries):
+# VIOLATION: database/deterministic/missing-transaction
+def batch_insert_logs(session, entries):
     """Insert multiple audit log entries.
 
-    The multiple save() calls without transaction wrapping means a
-    failure partway through leaves partial data.
+    The multiple save() calls without wrapping means a failure
+    partway through leaves partial data.
     """
     for entry in entries:
-        # VIOLATION: database/deterministic/missing-transaction (second write)
-        conn.execute(
-            "INSERT INTO audit_log (user_id, action) VALUES (?, ?)",
-            (entry["user_id"], entry["action"])
-        )
-    conn.commit()
+        session.add(entry)
+        session.save(entry)

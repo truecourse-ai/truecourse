@@ -16,7 +16,7 @@ SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.example.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER", "noreply@example.com")
 # VIOLATION: security/deterministic/hardcoded-database-password
-SMTP_PASS = "password=MySmtpP@ss123"
+SMTP_PASS = "postgresql://app:secret@smtp.example.com:5432/mail"
 
 MAX_RETRIES = 3
 BATCH_SIZE = 50
