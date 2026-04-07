@@ -4640,7 +4640,16 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'medium',
     type: 'deterministic',
   },
-  // missing-return-type deleted — too broad (flags all functions). missing-boundary-types covers exported functions.
+  {
+    key: 'code-quality/deterministic/missing-return-type',
+    category: 'code',
+    domain: 'code-quality',
+    name: 'Missing return type',
+    description: 'Function declaration missing explicit return type annotation.',
+    enabled: true,
+    severity: 'low',
+    type: 'deterministic',
+  },
   {
     key: 'code-quality/deterministic/undefined-as-identifier',
     category: 'code',

@@ -176,6 +176,7 @@ import { requireUnicodeRegexpVisitor } from './require-unicode-regexp.js'
 import { inferrableTypesVisitor } from './inferrable-types.js'
 import { mixedTypeImportsVisitor } from './mixed-type-imports.js'
 import { mixedTypeExportsVisitor } from './mixed-type-exports.js'
+import { missingReturnTypeVisitor } from './missing-return-type.js'
 import { missingBoundaryTypesVisitor } from './missing-boundary-types.js'
 import { uselessDefaultAssignmentVisitor } from './useless-default-assignment.js'
 import { typeImportSideEffectsVisitor } from './type-import-side-effects.js'
@@ -419,6 +420,7 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   inferrableTypesVisitor,
   mixedTypeImportsVisitor,
   mixedTypeExportsVisitor,
+  missingReturnTypeVisitor,
   missingBoundaryTypesVisitor,
   uselessDefaultAssignmentVisitor,
   typeImportSideEffectsVisitor,
