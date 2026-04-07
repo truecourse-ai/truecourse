@@ -1,0 +1,7 @@
+[project]
+name = "sample-python-project-negative"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["shared.*", "services.*", "src.*"]

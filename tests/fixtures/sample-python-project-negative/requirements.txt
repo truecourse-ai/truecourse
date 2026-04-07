@@ -1,0 +1,15 @@
+flask>=3.0.0
+fastapi>=0.100.0
+requests>=2.31.0
+redis>=5.0.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+django>=4.0.0
+pydantic>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+torch>=2.0.0
+pyyaml>=6.0.0
+cryptography>=41.0.0
+paramiko>=3.0.0
+boto3>=1.28.0
