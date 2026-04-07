@@ -139,19 +139,48 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
       }, TIMEOUT_MS);
 
       let stepsRendered = false;
-      let stepsPaused = false; // will be set true if LLM is detected
+      let llmMode = false; // true when LLM is enabled (steps include 'scan')
+      let llmPromptAnswered = false;
+
+      let lastSteps: AnalysisStep[] | null = null;
+      const prePromptKeys = new Set(['parse', 'scan']);
 
       socket.on("analysis:progress", (data: { step: string; percent: number; detail?: string; steps?: AnalysisStep[] }) => {
         if (data.steps && data.steps.length > 0) {
-          // If steps include 'scan', LLM is enabled — pause until prompt is answered
-          if (!stepsRendered && data.steps.some((s) => s.key === "scan")) {
-            stepsPaused = true;
+          lastSteps = data.steps;
+
+          // Detect LLM mode on first event
+          if (!llmMode && !stepsRendered && data.steps.some((s) => s.key === "scan")) {
+            llmMode = true;
           }
-          if (!stepsPaused && !stepsRendered) {
+
+          if (llmMode && !llmPromptAnswered) {
+            // Before LLM prompt: show parse/scan as spinner messages
+            const parseStep = data.steps.find((s) => s.key === 'parse');
+            const scanStep = data.steps.find((s) => s.key === 'scan');
+            if (scanStep?.status === 'done') {
+              spinner.message(`Scanning files — ${scanStep.detail ?? 'done'}`);
+            } else if (scanStep?.status === 'active') {
+              spinner.message(`Scanning files${scanStep.detail ? ` — ${scanStep.detail}` : '...'}`);
+            } else if (parseStep?.status === 'done') {
+              spinner.message(`Parsing repository — ${parseStep.detail ?? 'done'}`);
+            } else if (parseStep?.status === 'active') {
+              spinner.message(`Parsing repository${parseStep.detail ? ` — ${parseStep.detail}` : '...'}`);
+            }
+            return;
+          }
+
+          // No-LLM mode or after LLM prompt: render step checklist
+          if (!stepsRendered) {
             spinner.stop("Analyzing...");
             stepsRendered = true;
           }
-          if (stepsRendered && !stepsPaused) renderSteps(data.steps);
+
+          // In LLM mode, filter out parse/scan since they were already shown as spinners
+          const stepsToRender = llmMode
+            ? data.steps.filter((s) => !prePromptKeys.has(s.key))
+            : data.steps;
+          renderSteps(stepsToRender);
         }
       });
 
@@ -185,13 +214,24 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
         analysisId: string;
         estimate: { totalEstimatedTokens: number; uniqueFileCount?: number; uniqueRuleCount?: number; tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }> };
       }) => {
-        // Stop spinner, show prompt
+        // Stop spinner, show parse/scan as completed log lines
         stopSpinner();
-        spinner.stop("Analyzing...");
+        if (lastSteps) {
+          const parseStep = lastSteps.find((s) => s.key === 'parse');
+          const scanStep = lastSteps.find((s) => s.key === 'scan');
+          if (parseStep) spinner.stop(`Parsing repository${parseStep.detail ? ` — ${parseStep.detail}` : ''}`);
+          if (scanStep) p.log.step(`Scanning files${scanStep.detail ? ` — ${scanStep.detail}` : ''}`);
+        } else {
+          spinner.stop("Analyzing...");
+        }
 
         const totalRules = data.estimate.uniqueRuleCount ?? data.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
         const totalFiles = data.estimate.uniqueFileCount ?? data.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-        p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (~${Math.round(data.estimate.totalEstimatedTokens / 1000)}k tokens)`);
+        const tokens = data.estimate.totalEstimatedTokens;
+        const tokenStr = tokens >= 1_000_000
+          ? `~${(tokens / 1_000_000).toFixed(1)}M tokens`
+          : `~${Math.round(tokens / 1000)}k tokens`;
+        p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (${tokenStr})`);
 
         const proceed = await p.confirm({
           message: "Run LLM-powered rules?",
@@ -203,10 +243,14 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
           p.log.info("Skipping LLM rules.");
         }
 
-        // Now show step checklist
-        stepsPaused = false;
+        // Now show domain checklist — render cached state (without parse/scan)
+        llmPromptAnswered = true;
         stepsRendered = true;
         renderedLineCount = 0;
+        if (lastSteps) {
+          const domainSteps = lastSteps.filter((s) => !prePromptKeys.has(s.key));
+          renderSteps(domainSteps);
+        }
 
         socket.emit("analysis:llm-proceed", {
           analysisId: data.analysisId,

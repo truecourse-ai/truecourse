@@ -330,6 +330,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       }
     }
 
+    // Yield so socket events (domain step starts) flush before the sync scanning loop
+    await new Promise((r) => setImmediate(r));
+
     for (const { filePath, resolve } of filesToScan) {
       try {
         const lang = detectLanguage(filePath);
@@ -887,7 +890,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   // Database schema LLM — runs as part of the database domain (separate from code batches)
-  if (dbSchemaContext) {
+  if (dbSchemaContext && !llmSkipped) {
     // If database domain wasn't already activated by code batches, activate it now
     if (!domainCodeBatches.has('database')) {
       const detCount = codeViolationsByDomain.get('database') ?? 0;
