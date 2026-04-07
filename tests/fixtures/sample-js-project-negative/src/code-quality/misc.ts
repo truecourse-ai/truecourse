@@ -152,7 +152,7 @@ export function missingEnvValidationViolation() {
   return dbUrl;
 }
 
-// VIOLATION: code-quality/deterministic/missing-return-type
+// missing-return-type rule deleted — missing-boundary-types covers exported functions
 export function missingReturnTypeViolation(x: number) {
   return x * 2;
 }

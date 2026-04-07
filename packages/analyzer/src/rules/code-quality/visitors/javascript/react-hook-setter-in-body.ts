@@ -19,22 +19,21 @@ function isInsideEventHandlerOrEffect(node: SyntaxNode): boolean {
       current.type === 'function' ||
       current.type === 'function_declaration'
     ) {
-      // If we're inside another function, check if it's a hook-like call
+      // Any nested function inside the component is safe — it's an event handler,
+      // callback, or helper function, not the component body itself.
+      // The only dangerous case is calling a setter directly in the component's
+      // own function body, not inside a nested function.
       const parent = current.parent
-      if (parent?.type === 'arguments') {
-        const callExpr = parent.parent
-        if (callExpr?.type === 'call_expression') {
-          const fn = callExpr.childForFieldName('function')
-          const fnName = fn?.text ?? ''
-          if (
-            fnName.startsWith('use') ||
-            fnName === 'useEffect' ||
-            fnName === 'useCallback'
-          ) return true
-        }
+      // Skip the component function itself (the outermost function)
+      // by checking if this function is the component — if its name starts with uppercase
+      const nameNode = current.childForFieldName('name')
+      if (nameNode && /^[A-Z]/.test(nameNode.text)) {
+        // This IS the component function — don't count it as safe, keep walking
+        current = current.parent
+        continue
       }
-      // Event handler prop: onClick={...}
-      if (parent?.type === 'jsx_expression') return true
+      // Any other nested function/arrow = safe (event handler, helper, callback)
+      return true
     }
     current = current.parent
   }
