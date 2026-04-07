@@ -277,6 +277,7 @@ export interface LLMProvider {
   chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
   setAnalysisId(id: string): void;
   setRepoId(repoId: string): void;
+  setRepoPath(path: string): void;
   setAbortSignal(signal: AbortSignal): void;
   flushUsage(): Promise<void>;
 }
@@ -330,6 +331,10 @@ class AISDKProvider implements LLMProvider {
 
   setRepoId(_repoId: string): void {
     // No-op for API provider — child process tracking is CLI-only
+  }
+
+  setRepoPath(_path: string): void {
+    // No-op for API provider — cwd is CLI-only
   }
 
   setAbortSignal(signal: AbortSignal): void {

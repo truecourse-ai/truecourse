@@ -264,27 +264,26 @@ export function renderViolations(violations: Violation[], { total = violations.l
 
 export function renderViolationsSummary(
   violations: Violation[],
-  codeSummary?: { total: number; bySeverity: Record<string, number> },
+  summary?: { total: number; bySeverity: Record<string, number> },
 ): void {
-  const codeTotal = codeSummary?.total ?? 0;
-  const totalCount = violations.length + codeTotal;
+  const counts: Record<string, number> = {};
+
+  if (summary) {
+    for (const [sev, c] of Object.entries(summary.bySeverity)) {
+      counts[sev.toLowerCase()] = (counts[sev.toLowerCase()] || 0) + c;
+    }
+  } else {
+    for (const v of violations) {
+      const sev = v.severity.toLowerCase();
+      counts[sev] = (counts[sev] || 0) + 1;
+    }
+  }
+
+  const totalCount = summary?.total ?? violations.length;
 
   if (totalCount === 0) {
     p.log.info("No violations found.");
     return;
-  }
-
-  // Merge severity counts from both architecture and code violations
-  const counts: Record<string, number> = {};
-  for (const v of violations) {
-    const sev = v.severity.toLowerCase();
-    counts[sev] = (counts[sev] || 0) + 1;
-  }
-  if (codeSummary) {
-    for (const [sev, c] of Object.entries(codeSummary.bySeverity)) {
-      const key = sev.toLowerCase();
-      counts[key] = (counts[key] || 0) + c;
-    }
   }
 
   const parts: string[] = [];
@@ -297,9 +296,6 @@ export function renderViolationsSummary(
 
   console.log("");
   console.log(`  ${totalCount} violations (${parts.join(", ")})`);
-  if (codeTotal > 0) {
-    console.log(`  ├ ${violations.length} architecture · ${codeTotal} code`);
-  }
   console.log("");
   p.log.info("Run `truecourse list` to see full details.");
 }

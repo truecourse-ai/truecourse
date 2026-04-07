@@ -1,10 +1,11 @@
 
 import { useEffect, useState, useMemo } from 'react';
-import { Shield, Network, Database, Box, FileCode, Loader2, Search } from 'lucide-react';
+import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search } from 'lucide-react';
 import { getRules, type RuleResponse } from '@/lib/api';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 
-type CategoryFilter = 'all' | 'service' | 'module' | 'database' | 'code';
+type DomainFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
+
 const severityColors: Record<string, string> = {
   critical: 'bg-red-600/20 text-red-400 border-red-600/30',
   high: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -18,25 +19,52 @@ const typeColors: Record<string, string> = {
   llm: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
 };
 
-const categoryColors: Record<string, string> = {
-  service: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
-  module: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
+const domainColors: Record<string, string> = {
+  security: 'bg-red-500/20 text-red-400 border-red-500/30',
+  bugs: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  architecture: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
+  performance: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  reliability: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+  'code-quality': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   database: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  code: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  style: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
 };
 
-const categoryLabels: Record<string, string> = {
-  service: 'Service',
-  module: 'Module',
+const domainLabels: Record<string, string> = {
+  security: 'Security',
+  bugs: 'Bugs',
+  architecture: 'Architecture',
+  performance: 'Performance',
+  reliability: 'Reliability',
+  'code-quality': 'Code Quality',
   database: 'Database',
-  code: 'Code',
+  style: 'Style',
 };
+
+function getDomain(rule: RuleResponse): string {
+  const key = rule.key || '';
+  const slash = key.indexOf('/');
+  return slash > 0 ? key.slice(0, slash) : rule.category;
+}
+
+const domainTabs: { value: DomainFilter; label: string; icon: React.ReactNode }[] = [
+  { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
+  { value: 'security', label: 'Security', icon: <Shield className="h-3.5 w-3.5" /> },
+  { value: 'bugs', label: 'Bugs', icon: <Bug className="h-3.5 w-3.5" /> },
+  { value: 'architecture', label: 'Architecture', icon: <Network className="h-3.5 w-3.5" /> },
+  { value: 'performance', label: 'Performance', icon: <Zap className="h-3.5 w-3.5" /> },
+  { value: 'reliability', label: 'Reliability', icon: <HeartPulse className="h-3.5 w-3.5" /> },
+  { value: 'code-quality', label: 'Code Quality', icon: <Code2 className="h-3.5 w-3.5" /> },
+  { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
+  { value: 'style', label: 'Style', icon: <Paintbrush className="h-3.5 w-3.5" /> },
+];
 
 export function RulesPanel() {
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<CategoryFilter>('all');
+  const [filter, setFilter] = useState<DomainFilter>('all');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'deterministic' | 'llm'>('all');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -47,13 +75,12 @@ export function RulesPanel() {
   }, []);
 
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  const categoryOrder: Record<string, number> = { service: 0, module: 1, database: 2, code: 3 };
-  const typeOrder: Record<string, number> = { deterministic: 0, llm: 1 };
 
-  // Pre-category: search + severity filtered
+  // Pre-category: search + severity + type filtered
   const preCategoryFiltered = useMemo(() => {
     let result = rules;
     if (severityFilter !== 'all') result = result.filter((r) => r.severity === severityFilter);
+    if (typeFilter !== 'all') result = result.filter((r) => r.type === typeFilter);
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((r) =>
@@ -63,21 +90,19 @@ export function RulesPanel() {
       );
     }
     return result;
-  }, [rules, severityFilter, search]);
+  }, [rules, severityFilter, typeFilter, search]);
 
   const filtered = useMemo(() => {
-    const result = filter === 'all' ? preCategoryFiltered : preCategoryFiltered.filter((r) => r.category === filter);
+    const result = filter === 'all' ? preCategoryFiltered : preCategoryFiltered.filter((r) => getDomain(r) === filter);
     return result.slice().sort((a, b) =>
       (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5)
-      || (categoryOrder[a.category] ?? 9) - (categoryOrder[b.category] ?? 9)
-      || (typeOrder[a.type] ?? 9) - (typeOrder[b.type] ?? 9)
     );
   }, [preCategoryFiltered, filter]);
 
-  // Category counts reflect search + severity
-  const categoryCounts = useMemo(() => {
+  // Domain counts reflect search + severity
+  const domainCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const r of preCategoryFiltered) counts[r.category] = (counts[r.category] || 0) + 1;
+    for (const r of preCategoryFiltered) counts[getDomain(r)] = (counts[getDomain(r)] || 0) + 1;
     return counts;
   }, [preCategoryFiltered]);
 
@@ -96,14 +121,6 @@ export function RulesPanel() {
     for (const r of result) counts[r.severity] = (counts[r.severity] || 0) + 1;
     return counts;
   }, [rules, search]);
-
-  const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
-    { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
-    { value: 'service', label: 'Service', icon: <Network className="h-3.5 w-3.5" /> },
-    { value: 'module', label: 'Module', icon: <Box className="h-3.5 w-3.5" /> },
-    { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
-    { value: 'code', label: 'Code', icon: <FileCode className="h-3.5 w-3.5" /> },
-  ];
 
   if (loading) {
     return (
@@ -129,26 +146,41 @@ export function RulesPanel() {
             />
           </div>
           <SeverityDropdown value={severityFilter} onChange={setSeverityFilter} counts={severityCounts} />
+          <div className="flex rounded-md border border-border">
+            {(['all', 'deterministic', 'llm'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTypeFilter(t)}
+                className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
+                  typeFilter === t
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                {t === 'all' ? 'All' : t === 'deterministic' ? 'Det' : 'LLM'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Category tabs */}
+      {/* Domain tabs */}
       <div className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-thin">
-          {categories.map((cat) => {
-            const count = cat.value === 'all' ? preCategoryFiltered.length : categoryCounts[cat.value] || 0;
+          {domainTabs.map((tab) => {
+            const count = tab.value === 'all' ? preCategoryFiltered.length : domainCounts[tab.value] || 0;
             return (
               <button
-                key={cat.value}
-                onClick={() => setFilter(cat.value)}
+                key={tab.value}
+                onClick={() => setFilter(tab.value)}
                 className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                  filter === cat.value
+                  filter === tab.value
                     ? 'bg-accent text-accent-foreground'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
-                {cat.icon}
-                {cat.label}
+                {tab.icon}
+                {tab.label}
                 {count > 0 && (
                   <span className="ml-0.5 text-[10px] opacity-70">{count}</span>
                 )}
@@ -168,36 +200,39 @@ export function RulesPanel() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((rule) => (
-            <div
-              key={rule.key}
-              className="rounded-lg border border-border bg-card p-3"
-            >
-              <div className="mb-1.5 flex items-start justify-between gap-2">
-                <h4 className="text-sm font-medium text-foreground">{rule.name}</h4>
-                <div className="flex shrink-0 gap-1.5">
+          {filtered.map((rule) => {
+            const domain = getDomain(rule);
+            return (
+              <div
+                key={rule.key}
+                className="rounded-lg border border-border bg-card p-3"
+              >
+                <div className="mb-1.5 flex items-start justify-between gap-2">
+                  <h4 className="text-sm font-medium text-foreground">{rule.name}</h4>
+                  <div className="flex shrink-0 gap-1.5">
+                    <span
+                      className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${severityColors[rule.severity] || ''}`}
+                    >
+                      {rule.severity}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">{rule.description}</p>
+                <div className="mt-2 flex items-center gap-1.5">
                   <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${severityColors[rule.severity] || ''}`}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${domainColors[domain] || ''}`}
                   >
-                    {rule.severity}
+                    {domainLabels[domain] || domain}
+                  </span>
+                  <span
+                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${typeColors[rule.type] || ''}`}
+                  >
+                    {rule.type === 'deterministic' ? 'Deterministic' : 'LLM'}
                   </span>
                 </div>
               </div>
-              <p className="text-xs leading-relaxed text-muted-foreground">{rule.description}</p>
-              <div className="mt-2 flex items-center gap-1.5">
-                <span
-                  className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${categoryColors[rule.category] || ''}`}
-                >
-                  {categoryLabels[rule.category] || rule.category}
-                </span>
-                <span
-                  className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${typeColors[rule.type] || ''}`}
-                >
-                  {rule.type === 'deterministic' ? 'Deterministic' : 'LLM'}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       </div>

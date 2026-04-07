@@ -25,6 +25,7 @@ import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { useAnalysisList } from '@/hooks/useAnalysisList';
 import { useCodeViolationSummary } from '@/hooks/useCodeViolationSummary';
 import { useFlows } from '@/hooks/useFlows';
+import { getRules } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
@@ -290,9 +291,11 @@ export default function RepoGraphPage() {
   }, [openDatabases, activeDbId, setActiveDbId]);
 
   const currentBranch = repo?.defaultBranch;
-  const { isConnected, analysisProgress, clearProgress, onEvent } = useSocket(repoId);
+  const { isConnected, analysisProgress, clearProgress, onEvent, llmEstimate, respondToLlmEstimate } = useSocket(repoId);
   const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
+  const [rulesCount, setRulesCount] = useState(0);
+  useEffect(() => { getRules().then((r) => setRulesCount(r.length)).catch(() => {}); }, []);
 
   // In diff mode with no diff result yet, show no violations
   const emptyViolations = isDiffMode && !diffResult;
@@ -925,6 +928,7 @@ export default function RepoGraphPage() {
           violations: isDiffMode && diffResult
             ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
             : allViolations.length,
+          rules: rulesCount,
           flows: flowList.length,
           databases: nodes.filter((n) => n.type === 'database').length,
           analyses: analyses.length,
@@ -1163,6 +1167,35 @@ export default function RepoGraphPage() {
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
                 <span className="text-[11px] text-muted-foreground">{analysisError}</span>
+              </div>
+            </div>
+          )}
+          {/* LLM estimate confirmation */}
+          {llmEstimate && (
+            <div className="absolute bottom-4 left-1/2 z-30 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-4 shadow-lg">
+              <div className="mb-3">
+                <span className="text-xs font-medium text-foreground">LLM Analysis</span>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  {(() => {
+                    const totalRules = llmEstimate.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
+                    const totalFiles = llmEstimate.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
+                    return `${totalFiles} files, ${totalRules} rules (~${Math.round(llmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens)`;
+                  })()}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="flex-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                  onClick={() => respondToLlmEstimate(llmEstimate.analysisId, true)}
+                >
+                  Run LLM rules
+                </button>
+                <button
+                  className="flex-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                  onClick={() => respondToLlmEstimate(llmEstimate.analysisId, false)}
+                >
+                  Skip
+                </button>
               </div>
             </div>
           )}

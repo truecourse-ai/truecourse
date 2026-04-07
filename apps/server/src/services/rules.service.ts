@@ -25,6 +25,7 @@ export async function seedRules(): Promise<void> {
         enabled: rule.enabled,
         severity: rule.severity,
         type: rule.type,
+        contextRequirement: rule.contextRequirement ?? null,
       })
       .onConflictDoUpdate({
         target: rules.key,
@@ -35,6 +36,7 @@ export async function seedRules(): Promise<void> {
           prompt: rule.prompt ?? null,
           severity: rule.severity,
           type: rule.type,
+          contextRequirement: rule.contextRequirement ?? null,
           updatedAt: new Date(),
         },
       });
@@ -72,6 +74,7 @@ export async function getRulesFromDb(): Promise<AnalysisRule[]> {
     enabled: r.enabled,
     severity: r.severity as AnalysisRule['severity'],
     type: r.type as AnalysisRule['type'],
+    contextRequirement: r.contextRequirement as AnalysisRule['contextRequirement'],
   }));
 }
 
@@ -90,5 +93,6 @@ export async function getEnabledRules(): Promise<AnalysisRule[]> {
     enabled: r.enabled,
     severity: r.severity as AnalysisRule['severity'],
     type: r.type as AnalysisRule['type'],
+    contextRequirement: r.contextRequirement as AnalysisRule['contextRequirement'],
   }));
 }

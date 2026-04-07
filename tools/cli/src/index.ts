@@ -175,6 +175,54 @@ rulesCmd
     }
   });
 
+rulesCmd
+  .command("llm")
+  .description("Enable or disable LLM-powered rules for this repository")
+  .option("--enable", "Enable LLM rules")
+  .option("--disable", "Disable LLM rules")
+  .option("--reset", "Reset to global default")
+  .action(async (options) => {
+    const { getServerUrl, ensureServer, ensureRepo } = await import("./commands/helpers.js");
+    await ensureServer();
+    const repo = await ensureRepo();
+    const serverUrl = getServerUrl();
+
+    if (options.reset) {
+      await fetch(`${serverUrl}/api/repos/${repo.id}/llm`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enableLlmRules: null }),
+      });
+      p.log.success("Reset LLM rules to global default.");
+      return;
+    }
+
+    if (options.enable || options.disable) {
+      const enabled = !!options.enable;
+      await fetch(`${serverUrl}/api/repos/${repo.id}/llm`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enableLlmRules: enabled }),
+      });
+      p.log.success(`LLM rules ${enabled ? "enabled" : "disabled"} for ${repo.name}.`);
+      return;
+    }
+
+    // Show current state
+    const { readConfig: readExistingConfig } = await import("./commands/helpers.js");
+    const globalConfig = readExistingConfig();
+    const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
+    const repoData = (await repoRes.json()) as { enableLlmRules?: boolean | null };
+    const isOverride = repoData.enableLlmRules !== null && repoData.enableLlmRules !== undefined;
+    const effective = isOverride ? repoData.enableLlmRules! : (globalConfig.enableLlmRules ?? true);
+
+    const status = effective ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
+    p.log.info(`LLM rules for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}: ${status}`);
+    if (!isOverride) {
+      p.log.info("Override with: truecourse rules llm --enable/--disable");
+    }
+  });
+
 // Register service subcommands
 registerServiceCommand(program);
 
@@ -270,7 +318,14 @@ hooksCmd
   });
 
 program
-  .action(async () => {
+  .action(async (_, cmd) => {
+    // If user passed unknown arguments (e.g. `tc foo`), show help
+    if (cmd.args.length > 0) {
+      console.error(`Unknown command: ${cmd.args.join(" ")}\n`);
+      program.outputHelp();
+      process.exit(1);
+    }
+
     const configDir = path.join(os.homedir(), ".truecourse");
     const envPath = path.join(configDir, ".env");
     const isFirstRun = !fs.existsSync(envPath);

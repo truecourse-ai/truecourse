@@ -91,6 +91,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   private callCounter = 0;
   private _analysisId: string | null = null;
   private _repoId: string | null = null;
+  private _repoPath: string | null = null;
   private _abortSignal: AbortSignal | null = null;
   private _usageRecords: UsageRecord[] = [];
 
@@ -106,6 +107,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
   /** Set repoId for child process tracking in the analysis registry. */
   setRepoId(repoId: string): void {
     this._repoId = repoId;
+  }
+
+  /** Set target repo path — used as cwd when spawning CLI so Read tool accesses the right files. */
+  setRepoPath(path: string): void {
+    this._repoPath = path;
   }
 
   async flushUsage(): Promise<void> {
@@ -188,6 +194,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       const child: ChildProcess = spawn(this.binaryName, args, {
         env: this.getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...(this._repoPath ? { cwd: this._repoPath } : {}),
       });
 
       // Register child process for cancellation tracking
@@ -311,6 +318,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         return this.parseAndValidate(raw, schema);
       } catch (err) {
         lastError = err as Error;
+        if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
         if (attempt < this.maxRetries) {
           log(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
         }
@@ -664,14 +672,18 @@ export abstract class BaseCLIProvider implements LLMProvider {
     } else {
       promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
     }
-    const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: true });
+
+    // Only use file-path mode (Read tool) when files have real paths, not pre-built content
+    // from the context router (which uses synthetic path 'context' for metadata/targeted tiers)
+    const hasRealPaths = context.files.length > 0 && context.files.every((f) => f.path !== 'context');
+    const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: hasRealPaths });
     const { text: prompt } = await getPrompt(promptName, vars);
 
     log(`[CLI] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
     const t0 = Date.now();
 
-    // Code violations use Read tool access — longer timeout since Claude reads files via tools
-    const codeExtraArgs = ['--allowedTools', 'Read'];
+    // Only give Read tool access when files have real paths to read
+    const codeExtraArgs = hasRealPaths ? ['--allowedTools', 'Read'] : ['--tools', ''];
     const codeTimeoutMs = 300_000; // 5 minutes — code review uses Read tool, takes many turns
 
     if (hasExisting) {
@@ -788,6 +800,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const child = spawn(this.binaryName, args, {
       env: this.getCleanEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(this._repoPath ? { cwd: this._repoPath } : {}),
     });
 
     child.stdin!.write(prompt);

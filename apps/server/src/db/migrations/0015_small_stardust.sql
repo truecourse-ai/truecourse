@@ -1,0 +1,1 @@
+ALTER TABLE "repos" ADD COLUMN "enable_llm_rules" boolean;

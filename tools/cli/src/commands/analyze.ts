@@ -13,12 +13,87 @@ import { showFirstRunNotice } from "../telemetry.js";
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
+interface AnalysisStep {
+  key: string;
+  label: string;
+  status: "pending" | "active" | "done" | "error";
+  detail?: string;
+}
+
+// Spinner frames for active steps
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let spinnerFrame = 0;
+let spinnerInterval: ReturnType<typeof setInterval> | null = null;
+let latestSteps: AnalysisStep[] | null = null;
+let renderedLineCount = 0;
+
+function renderSteps(steps: AnalysisStep[]): void {
+  // Move cursor up to overwrite previous render
+  if (renderedLineCount > 0) {
+    process.stderr.write(`\x1b[${renderedLineCount}A`);
+  }
+  for (const step of steps) {
+    const detail = step.detail ? ` — ${step.detail}` : "";
+
+    let icon: string;
+    let color: string;
+    const reset = "\x1b[0m";
+
+    switch (step.status) {
+      case "pending":
+        icon = "○";
+        color = "\x1b[2m";
+        break;
+      case "active":
+        icon = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
+        color = "\x1b[36m"; // cyan
+        break;
+      case "done":
+        icon = "●";
+        color = "\x1b[32m"; // green
+        break;
+      case "error":
+        icon = "✕";
+        color = "\x1b[31m"; // red
+        break;
+      default:
+        icon = "○";
+        color = "";
+    }
+
+    process.stderr.write(`\x1b[2K${color}  ${icon} ${step.label}${detail}${reset}\n`);
+  }
+  renderedLineCount = steps.length;
+
+  // Start spinner animation if there are active steps
+  const hasActive = steps.some((s) => s.status === "active");
+  if (hasActive && !spinnerInterval) {
+    latestSteps = steps;
+    spinnerInterval = setInterval(() => {
+      spinnerFrame++;
+      if (latestSteps) renderSteps(latestSteps);
+    }, 80);
+  } else if (hasActive) {
+    latestSteps = steps;
+  } else if (!hasActive && spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+    latestSteps = null;
+  }
+}
+
+function stopSpinner(): void {
+  if (spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+  }
+}
+
 export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
   showFirstRunNotice();
 
   if (noAutostart) {
-    // Check if server is running without auto-starting
     const url = getServerUrl();
     try {
       const res = await fetch(`${url}/api/health`);
@@ -33,6 +108,8 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   const repo = await ensureRepo();
   p.log.step(`Repository: ${repo.name}`);
 
+  const config = readConfig();
+
   const serverUrl = getServerUrl();
   const socket = connectSocket(repo.id);
 
@@ -42,11 +119,12 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   // Handle Ctrl+C — cancel the analysis on the server
   let canceled = false;
   const onSigint = () => {
-    if (canceled) return; // second Ctrl+C — let it force exit
+    if (canceled) return;
     canceled = true;
+    stopSpinner();
     spinner.stop("Cancelling analysis...");
     fetch(`${serverUrl}/api/repos/${repo.id}/analyze/cancel`, { method: "POST" })
-      .catch(() => {}) // ignore errors
+      .catch(() => {})
       .finally(() => {
         socket.disconnect();
         process.exit(130);
@@ -60,9 +138,21 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
         reject(new Error("Analysis timed out after 15 minutes"));
       }, TIMEOUT_MS);
 
-      socket.on("analysis:progress", (data: { step: string; percent: number; detail?: string }) => {
-        const detail = data.detail ? ` — ${data.detail}` : "";
-        spinner.message(`${data.step} (${data.percent}%)${detail}`);
+      let stepsRendered = false;
+      let stepsPaused = false; // will be set true if LLM is detected
+
+      socket.on("analysis:progress", (data: { step: string; percent: number; detail?: string; steps?: AnalysisStep[] }) => {
+        if (data.steps && data.steps.length > 0) {
+          // If steps include 'scan', LLM is enabled — pause until prompt is answered
+          if (!stepsRendered && data.steps.some((s) => s.key === "scan")) {
+            stepsPaused = true;
+          }
+          if (!stepsPaused && !stepsRendered) {
+            spinner.stop("Analyzing...");
+            stepsRendered = true;
+          }
+          if (stepsRendered && !stepsPaused) renderSteps(data.steps);
+        }
       });
 
       let analysisComplete = false;
@@ -77,7 +167,6 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
 
       socket.on("analysis:complete", () => {
         analysisComplete = true;
-        spinner.message("Generating violations...");
         checkDone();
       });
 
@@ -91,8 +180,41 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
         reject(new Error("CANCELED"));
       });
 
+      // Handle LLM estimate confirmation
+      socket.on("analysis:llm-estimate", async (data: {
+        analysisId: string;
+        estimate: { totalEstimatedTokens: number; uniqueFileCount?: number; uniqueRuleCount?: number; tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }> };
+      }) => {
+        // Stop spinner, show prompt
+        stopSpinner();
+        spinner.stop("Analyzing...");
+
+        const totalRules = data.estimate.uniqueRuleCount ?? data.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
+        const totalFiles = data.estimate.uniqueFileCount ?? data.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
+        p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (~${Math.round(data.estimate.totalEstimatedTokens / 1000)}k tokens)`);
+
+        const proceed = await p.confirm({
+          message: "Run LLM-powered rules?",
+          initialValue: true,
+        });
+
+        const shouldProceed = !p.isCancel(proceed) && proceed;
+        if (!shouldProceed) {
+          p.log.info("Skipping LLM rules.");
+        }
+
+        // Now show step checklist
+        stepsPaused = false;
+        stepsRendered = true;
+        renderedLineCount = 0;
+
+        socket.emit("analysis:llm-proceed", {
+          analysisId: data.analysisId,
+          proceed: shouldProceed,
+        });
+      });
+
       // Trigger analysis
-      const config = readConfig();
       fetch(`${serverUrl}/api/repos/${repo.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -117,33 +239,30 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
       });
     });
 
-    spinner.stop("Analysis complete");
+    stopSpinner();
+    p.log.success("Analysis complete");
 
-    // Fetch architecture violations and code-level violations in parallel
-    const [archRes, codeRes] = await Promise.all([
-      fetch(`${serverUrl}/api/repos/${repo.id}/violations`),
-      fetch(`${serverUrl}/api/repos/${repo.id}/code-violations/summary`),
-    ]);
+    // Fetch violations summary
+    const res = await fetch(`${serverUrl}/api/repos/${repo.id}/violations/summary`);
 
-    if (!archRes.ok) {
-      p.log.error(`Failed to fetch violations: ${archRes.status}`);
-      process.exit(1);
+    if (res.ok) {
+      const summary = (await res.json()) as { total: number; bySeverity: Record<string, number> };
+      renderViolationsSummary([], summary);
+    } else {
+      // Fallback: fetch full violations list
+      const fallbackRes = await fetch(`${serverUrl}/api/repos/${repo.id}/violations`);
+      if (fallbackRes.ok) {
+        const violations = (await fallbackRes.json()) as Violation[];
+        renderViolationsSummary(violations);
+      }
     }
-
-    const violations = (await archRes.json()) as Violation[];
-    const codeSummary = codeRes.ok
-      ? (await codeRes.json()) as { total: number; bySeverity: Record<string, number> }
-      : undefined;
-    renderViolationsSummary(violations, codeSummary);
 
     p.outro("Analysis complete — view results with: truecourse dashboard");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "CANCELED") {
-      spinner.stop("Analysis cancelled");
       p.outro("Analysis cancelled");
     } else {
-      spinner.stop("Analysis failed");
       p.log.error(message);
       process.exit(1);
     }

@@ -32,6 +32,7 @@ import {
   StepTracker,
   buildAnalysisSteps,
 } from '../socket/handlers.js';
+import { getIO } from '../socket/index.js';
 import {
   registerAnalysis,
   unregisterAnalysis,
@@ -103,7 +104,10 @@ router.post(
           ? globalEnabledCategories
           : (repo.enabledCategories ?? undefined);
 
-        const trackerSteps = buildAnalysisSteps(effectiveCategories);
+        // Resolve effective LLM toggle: per-repo override > request param
+        const effectiveLlmRules = repo.enableLlmRules ?? enableLlmRules;
+
+        const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
         const tracker = new StepTracker(id, trackerSteps);
 
         const analysisStartTime = Date.now();
@@ -322,9 +326,54 @@ router.post(
             changedFileSet,
             tracker,
             enabledCategories: effectiveCategories,
-            enableLlmRules,
+            enableLlmRules: effectiveLlmRules,
             provider,
             signal: abortController.signal,
+            onLlmEstimate: effectiveLlmRules ? (estimate) => {
+              return new Promise<boolean>((resolve) => {
+                const io = getIO();
+                const room = `repo:${id}`;
+
+                // Emit estimate to all clients in the room
+                io.to(room).emit('analysis:llm-estimate', {
+                  repoId: id,
+                  analysisId: newAnalysisId,
+                  estimate: {
+                    totalEstimatedTokens: estimate.totalEstimatedTokens,
+                    tiers: estimate.tiers,
+                    uniqueFileCount: estimate.uniqueFileCount,
+                    uniqueRuleCount: estimate.uniqueRuleCount,
+                  },
+                });
+
+                // Listen for response from any client in the room
+                const timeout = setTimeout(() => {
+                  // Auto-proceed after 60s if no response (e.g. no UI connected)
+                  cleanup();
+                  resolve(true);
+                }, 60_000);
+
+                function onProceed(data: { analysisId: string; proceed: boolean }) {
+                  if (data.analysisId !== newAnalysisId) return;
+                  cleanup();
+                  // Notify all clients to dismiss their confirmation UI
+                  io.to(room).emit('analysis:llm-resolved', { analysisId: newAnalysisId, proceed: data.proceed });
+                  resolve(data.proceed);
+                }
+
+                function cleanup() {
+                  clearTimeout(timeout);
+                  for (const [, socket] of io.sockets.sockets) {
+                    socket.removeListener('analysis:llm-proceed', onProceed);
+                  }
+                }
+
+                // Attach listener to all connected sockets
+                for (const [, socket] of io.sockets.sockets) {
+                  socket.on('analysis:llm-proceed', onProceed);
+                }
+              });
+            } : undefined,
           });
 
           emitViolationsReady(id, analysis.id);
@@ -441,16 +490,12 @@ router.get(
       // Enrich with counts per analysis
       const enriched = await Promise.all(
         analysisList.map(async (a) => {
-          const [serviceCount, violationCounts, codeViolationCounts, usageSummary] = await Promise.all([
+          const [serviceCount, violationCounts, usageSummary] = await Promise.all([
             db.select({ count: sql<number>`count(*)::int` }).from(services).where(eq(services.analysisId, a.id)).then(([r]) => r.count),
             db.select({
               severity: violations.severity,
               count: sql<number>`count(*)::int`,
-            }).from(violations).where(and(eq(violations.analysisId, a.id), sql`${violations.filePath} IS NULL`)).groupBy(violations.severity),
-            db.select({
-              severity: violations.severity,
-              count: sql<number>`count(*)::int`,
-            }).from(violations).where(and(eq(violations.analysisId, a.id), sql`${violations.filePath} IS NOT NULL`)).groupBy(violations.severity),
+            }).from(violations).where(eq(violations.analysisId, a.id)).groupBy(violations.severity),
             db.select({
               totalDurationMs: sql<number>`coalesce(sum(${analysisUsage.durationMs}), 0)::int`,
               totalTokens: sql<number>`coalesce(sum(${analysisUsage.totalTokens}), 0)::int`,
@@ -465,18 +510,12 @@ router.get(
             violationsBySeverity[severity] = count;
           }
 
-          const codeViolationsBySeverity: Record<string, number> = {};
-          for (const { severity, count } of codeViolationCounts) {
-            codeViolationsBySeverity[severity] = count;
-          }
-
           const meta = a.metadata as Record<string, unknown> | null;
           return {
             ...a,
             metadata: undefined, // don't send raw metadata to client
             serviceCount,
             violationsBySeverity,
-            codeViolationsBySeverity,
             durationMs: usageSummary.totalDurationMs,
             totalTokens: usageSummary.totalTokens,
             totalCost: usageSummary.totalCost,

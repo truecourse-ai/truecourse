@@ -20,6 +20,8 @@ export const repos = pgTable('repos', {
   lastAnalyzedAt: timestamp('last_analyzed_at', { mode: 'date', withTimezone: true }),
   /** Per-repo enabled rule categories (null = use global default) */
   enabledCategories: jsonb('enabled_categories').$type<string[] | null>(),
+  /** Per-repo LLM rules toggle (null = use global default) */
+  enableLlmRules: boolean('enable_llm_rules'),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
@@ -512,6 +514,7 @@ export const rules = pgTable('rules', {
   enabled: boolean('enabled').notNull().default(true),
   severity: text('severity').notNull(), // 'info' | 'low' | 'medium' | 'high' | 'critical'
   type: text('type').notNull(), // 'deterministic' | 'llm'
+  contextRequirement: jsonb('context_requirement'),
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });

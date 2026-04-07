@@ -12,6 +12,8 @@ export interface ContextBatch {
   fileCount: number;
   functionCount?: number;
   estimatedTokens: number;
+  /** Real file paths included in this batch (full-file/legacy tiers only). */
+  filePaths?: string[];
 }
 
 export interface PreFlightEstimate {
@@ -23,6 +25,8 @@ export interface PreFlightEstimate {
     estimatedTokens: number;
   }>;
   totalEstimatedTokens: number;
+  uniqueFileCount: number;
+  uniqueRuleCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +38,9 @@ const DB_PACKAGES = new Set(Object.keys(DATABASE_IMPORT_MAP));
 const TEST_PATTERNS = getAllTestPatterns();
 
 const CHARS_PER_TOKEN = 4; // rough estimate for token counting
+const PROMPT_OVERHEAD_TOKENS = 500; // prompt template + instructions per LLM call
+const TOKENS_PER_RULE = 50; // rule key + name + prompt line in the system message
+const TOKENS_PER_FILE_PATH = 25; // "=== /path/to/file.ts ===\nRead this file..." per file in CLI mode
 const MAX_CHARS_PER_BATCH = 100_000;
 
 // ---------------------------------------------------------------------------
@@ -252,7 +259,6 @@ interface GroupedRules {
   metadata: { rules: RuleDto[]; requirement: ContextRequirement }[];
   targeted: { rules: RuleDto[]; requirement: ContextRequirement }[];
   fullFile: { rules: RuleDto[]; requirement: ContextRequirement }[];
-  noContext: RuleDto[];  // rules without contextRequirement — use legacy batching
 }
 
 function contextKey(req: ContextRequirement): string {
@@ -265,17 +271,13 @@ function contextKey(req: ContextRequirement): string {
 }
 
 function groupRulesByContext(rules: AnalysisRule[]): GroupedRules {
-  const result: GroupedRules = { metadata: [], targeted: [], fullFile: [], noContext: [] };
+  const result: GroupedRules = { metadata: [], targeted: [], fullFile: [] };
   const groups = new Map<string, { rules: RuleDto[]; requirement: ContextRequirement }>();
 
   for (const rule of rules) {
+    if (!rule.contextRequirement) continue;
+
     const dto: RuleDto = { key: rule.key, name: rule.name, severity: rule.severity, prompt: rule.prompt! };
-
-    if (!rule.contextRequirement) {
-      result.noContext.push(dto);
-      continue;
-    }
-
     const key = contextKey(rule.contextRequirement);
     let group = groups.get(key);
     if (!group) {
@@ -362,8 +364,9 @@ function buildFullFileContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number } {
+): { content: string; fileCount: number; filePaths: string[] } {
   const parts: string[] = [];
+  const filePaths: string[] = [];
 
   for (const fa of fileAnalyses) {
     const fc = fileContents.get(fa.filePath);
@@ -378,9 +381,10 @@ function buildFullFileContent(
       .map((line, i) => `${i + 1}: ${line}`)
       .join('\n');
     parts.push(`=== ${fa.filePath} ===\n${numbered}`);
+    filePaths.push(fa.filePath);
   }
 
-  return { content: parts.join('\n\n'), fileCount: parts.length };
+  return { content: parts.join('\n\n'), fileCount: parts.length, filePaths };
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +397,7 @@ function splitIntoBatches(
   content: string,
   fileCount: number,
   functionCount?: number,
+  filePaths?: string[],
 ): ContextBatch[] {
   if (content.length === 0) return [];
 
@@ -406,6 +411,7 @@ function splitIntoBatches(
       fileCount,
       functionCount,
       estimatedTokens,
+      filePaths,
     }];
   }
 
@@ -414,8 +420,10 @@ function splitIntoBatches(
   const batches: ContextBatch[] = [];
   let currentContent = '';
   let currentFileCount = 0;
+  let currentFilePaths: string[] = [];
 
-  for (const section of sections) {
+  for (let si = 0; si < sections.length; si++) {
+    const section = sections[si];
     if (currentContent.length + section.length > MAX_CHARS_PER_BATCH && currentContent.length > 0) {
       batches.push({
         tier,
@@ -423,12 +431,15 @@ function splitIntoBatches(
         content: currentContent,
         fileCount: currentFileCount,
         estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
+        filePaths: currentFilePaths.length > 0 ? currentFilePaths : undefined,
       });
       currentContent = '';
       currentFileCount = 0;
+      currentFilePaths = [];
     }
     currentContent += (currentContent ? '\n\n' : '') + section;
     currentFileCount++;
+    if (filePaths && filePaths[si]) currentFilePaths.push(filePaths[si]);
   }
 
   if (currentContent.length > 0) {
@@ -438,6 +449,7 @@ function splitIntoBatches(
       content: currentContent,
       fileCount: currentFileCount,
       estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
+      filePaths: currentFilePaths.length > 0 ? currentFilePaths : undefined,
     });
   }
 
@@ -452,67 +464,77 @@ export function estimateContext(
   rules: AnalysisRule[],
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
+  options?: { useFilePaths?: boolean },
 ): PreFlightEstimate {
   const grouped = groupRulesByContext(rules);
   const tiers: PreFlightEstimate['tiers'] = [];
+  const useFilePaths = options?.useFilePaths ?? false;
 
-  // Metadata tiers
+  // Helper: each context group's rules may span N domains.
+  // The pipeline splits each group into N separate LLM calls (one per domain),
+  // each getting the same content but only that domain's rules.
+  // So overhead = domainCount × PROMPT_OVERHEAD, content is shared but sent N times.
+  function estimateGroupTokens(contentTokens: number, rulesList: RuleDto[]): number {
+    const domains = new Set(rulesList.map((r) => r.key.split('/')[0]));
+    const domainCount = domains.size;
+    return (contentTokens + PROMPT_OVERHEAD_TOKENS) * domainCount + (rulesList.length * TOKENS_PER_RULE);
+  }
+
+  // Metadata tiers — always inline content (summaries)
   for (const group of grouped.metadata) {
     const { content, fileCount } = buildMetadataContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
+      const contentTokens = Math.ceil(content.length / CHARS_PER_TOKEN);
       tiers.push({
         tier: 'metadata',
         ruleCount: group.rules.length,
         fileCount,
-        estimatedTokens: Math.ceil(content.length / CHARS_PER_TOKEN),
+        estimatedTokens: estimateGroupTokens(contentTokens, group.rules),
       });
     }
   }
 
-  // Targeted tiers
+  // Targeted tiers — always inline content (function extracts)
   for (const group of grouped.targeted) {
     const { content, fileCount, functionCount } = buildTargetedContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
+      const contentTokens = Math.ceil(content.length / CHARS_PER_TOKEN);
       tiers.push({
         tier: 'targeted',
         ruleCount: group.rules.length,
         fileCount,
         functionCount,
-        estimatedTokens: Math.ceil(content.length / CHARS_PER_TOKEN),
+        estimatedTokens: estimateGroupTokens(contentTokens, group.rules),
       });
     }
   }
 
-  // Full-file tiers
+  // Full-file tiers — CLI mode sends file paths only, API mode inlines content
   for (const group of grouped.fullFile) {
     const { content, fileCount } = buildFullFileContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
+      const contentTokens = useFilePaths
+        ? fileCount * TOKENS_PER_FILE_PATH
+        : Math.ceil(content.length / CHARS_PER_TOKEN);
       tiers.push({
         tier: 'full-file',
         ruleCount: group.rules.length,
         fileCount,
-        estimatedTokens: Math.ceil(content.length / CHARS_PER_TOKEN),
+        estimatedTokens: estimateGroupTokens(contentTokens, group.rules),
       });
     }
   }
 
-  // Rules without contextRequirement — estimate using all file contents
-  if (grouped.noContext.length > 0 && fileContents.size > 0) {
-    let totalChars = 0;
-    for (const { content } of fileContents.values()) {
-      totalChars += content.length;
-    }
-    tiers.push({
-      tier: 'full-file (legacy)',
-      ruleCount: grouped.noContext.length,
-      fileCount: fileContents.size,
-      estimatedTokens: Math.ceil(totalChars / CHARS_PER_TOKEN),
-    });
+  const uniqueRules = new Set<string>();
+  for (const group of [...grouped.metadata, ...grouped.targeted, ...grouped.fullFile]) {
+    for (const r of group.rules) uniqueRules.add(r.key);
   }
 
   return {
     tiers,
     totalEstimatedTokens: tiers.reduce((sum, t) => sum + t.estimatedTokens, 0),
+    uniqueFileCount: fileContents.size,
+    uniqueRuleCount: uniqueRules.size,
   };
 }
 
@@ -548,48 +570,9 @@ export function routeContext(
 
   // Full-file batches
   for (const group of grouped.fullFile) {
-    const { content, fileCount } = buildFullFileContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, filePaths } = buildFullFileContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('full-file', group.rules, content, fileCount));
-    }
-  }
-
-  // Legacy batches for rules without contextRequirement
-  if (grouped.noContext.length > 0 && fileContents.size > 0) {
-    let currentContent = '';
-    let currentFileCount = 0;
-
-    for (const [filePath, { content }] of fileContents) {
-      const numbered = content
-        .split('\n')
-        .map((line, i) => `${i + 1}: ${line}`)
-        .join('\n');
-      const section = `=== ${filePath} ===\n${numbered}`;
-
-      if (currentContent.length + section.length > MAX_CHARS_PER_BATCH && currentContent.length > 0) {
-        batches.push({
-          tier: 'full-file',
-          rules: grouped.noContext,
-          content: currentContent,
-          fileCount: currentFileCount,
-          estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
-        });
-        currentContent = '';
-        currentFileCount = 0;
-      }
-
-      currentContent += (currentContent ? '\n\n' : '') + section;
-      currentFileCount++;
-    }
-
-    if (currentContent.length > 0) {
-      batches.push({
-        tier: 'full-file',
-        rules: grouped.noContext,
-        content: currentContent,
-        fileCount: currentFileCount,
-        estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
-      });
+      batches.push(...splitIntoBatches('full-file', group.rules, content, fileCount, undefined, filePaths));
     }
   }
 

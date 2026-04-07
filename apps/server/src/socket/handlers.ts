@@ -21,10 +21,16 @@ export const DOMAIN_LABELS: Record<string, string> = {
 
 export function buildAnalysisSteps(
   enabledCategories?: string[],
+  enableLlmRules?: boolean,
 ): { key: string; label: string }[] {
   const steps: { key: string; label: string }[] = [
     { key: 'parse', label: 'Parsing repository' },
   ];
+
+
+  if (enableLlmRules) {
+    steps.push({ key: 'scan', label: 'Scanning files' });
+  }
 
   const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories?.length || enabledCategories.includes(d));
 
