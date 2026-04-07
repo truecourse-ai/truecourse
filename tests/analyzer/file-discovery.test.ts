@@ -4,7 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 
-const FIXTURE_PATH = new URL('../fixtures/sample-project', import.meta.url).pathname;
+const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.meta.url).pathname;
 
 describe('discoverFiles', () => {
   it('discovers .ts files in the fixture project', () => {

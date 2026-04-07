@@ -5,7 +5,7 @@ import { extractJsxReferences } from '../../packages/analyzer/src/ts-compiler';
 import { analyzeFile } from '../../packages/analyzer/src/file-analyzer';
 import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 
-const FIXTURE_PATH = new URL('../fixtures/sample-project', import.meta.url).pathname;
+const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.meta.url).pathname;
 
 function makeFileAnalysis(
   filePath: string,

@@ -15,7 +15,7 @@ import {
 } from '../../apps/server/src/services/flow.service';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||

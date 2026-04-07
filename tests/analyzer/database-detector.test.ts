@@ -7,7 +7,7 @@ import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 import { detectServices } from '../../packages/analyzer/src/service-detector';
 import type { FileAnalysis } from '@truecourse/shared';
 
-const FIXTURE_PATH = new URL('../fixtures/sample-project', import.meta.url).pathname;
+const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.meta.url).pathname;
 
 describe('parseDockerCompose', () => {
   it('detects postgres and redis from the fixture docker-compose.yml', () => {

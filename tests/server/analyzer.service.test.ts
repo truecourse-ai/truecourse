@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 describe('runAnalysis (integration)', () => {
   let result: AnalysisResult;

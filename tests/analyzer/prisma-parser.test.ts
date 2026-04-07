@@ -211,7 +211,7 @@ model User {
   it('parses the sample-project fixture schema correctly', () => {
     const { readFileSync } = require('fs');
     const fixturePath = new URL(
-      '../fixtures/sample-project/services/user-service/prisma/schema.prisma',
+      '../fixtures/sample-js-project-negative/services/user-service/prisma/schema.prisma',
       import.meta.url
     ).pathname;
     const content = readFileSync(fixturePath, 'utf-8');

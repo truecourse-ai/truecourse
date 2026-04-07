@@ -47,7 +47,7 @@ import flowsRouter from '../../apps/server/src/routes/flows';
 // ---------------------------------------------------------------------------
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 // ---------------------------------------------------------------------------
 // Database setup (same connection as the real server)
@@ -187,7 +187,7 @@ describe('API routes (integration)', () => {
       .expect(201);
 
     expect(res.body).toHaveProperty('id');
-    expect(res.body.name).toBe('sample-project');
+    expect(res.body.name).toBe('sample-js-project-negative');
     expect(res.body.path).toBe(FIXTURE_PATH);
     createdRepoId = res.body.id;
   });
@@ -240,7 +240,7 @@ describe('API routes (integration)', () => {
       (r: { id: string }) => r.id === createdRepoId
     );
     expect(found).toBeDefined();
-    expect(found.name).toBe('sample-project');
+    expect(found.name).toBe('sample-js-project-negative');
   });
 
   // -----------------------------------------------------------------------
@@ -253,7 +253,7 @@ describe('API routes (integration)', () => {
       .expect(200);
 
     expect(res.body.id).toBe(createdRepoId);
-    expect(res.body.name).toBe('sample-project');
+    expect(res.body.name).toBe('sample-js-project-negative');
     expect(res.body).toHaveProperty('branches');
     expect(res.body).toHaveProperty('defaultBranch');
     expect(res.body.latestAnalysis).toBeNull();
