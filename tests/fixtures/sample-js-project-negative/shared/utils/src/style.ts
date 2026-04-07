@@ -5,33 +5,33 @@
 // VIOLATION: style/deterministic/sorting-style
 import { writeFileSync, readFileSync } from 'fs';
 
+const earlyConst = 42;
+
 // VIOLATION: style/deterministic/import-formatting
-import {createServer} from 'http';
+import { createServer } from 'http';
 
 // VIOLATION: style/deterministic/js-naming-convention
-export const my_variable = 42;
-export function My_Function() {
-  return my_variable;
+export function my_snake_function() {
+  return earlyConst;
 }
 
 // VIOLATION: style/deterministic/whitespace-formatting
-export function   badSpacing  (  x: number  ) {
-  return x;
+export function mixedIndent() {
+  const a = 1;
+	const b = 2;
+  return a + b;
 }
 
 // VIOLATION: style/deterministic/comment-tag-formatting
-// todo: fix this later
+// TODO fix this later
 export function placeholder() {
   return null;
 }
 
 // VIOLATION: style/deterministic/ts-declaration-style
-export type UserID = string;
+export interface EmptyInterface {}
 
 // VIOLATION: style/deterministic/js-style-preference
-export function noSemicolon() {
-  const x = 42
-  return x
-}
+var legacyVar = 42;
 
-export { writeFileSync, readFileSync, createServer };
+export { writeFileSync, readFileSync, createServer, legacyVar };

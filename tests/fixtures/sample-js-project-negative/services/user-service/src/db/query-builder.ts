@@ -50,6 +50,7 @@ export class QueryBuilder {
   // VIOLATION: code-quality/deterministic/missing-return-type
   toSQL() {
     // VIOLATION: database/deterministic/select-star
+    pool.query('SELECT * FROM users');
     let sql = `SELECT * FROM ${this.table}`;
 
     if (this.conditions.length > 0) {
@@ -93,12 +94,15 @@ export function buildInsertQuery(table: string, data: Record<string, unknown>) {
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: database/deterministic/unsafe-delete-without-where
 export async function truncateTable(table: string) {
-  return pool.query(`DELETE FROM ${table}`);
+  return pool.query('DELETE FROM users');
 }
+
+// VIOLATION: database/deterministic/missing-migration
+pool.query('ALTER TABLE users ADD COLUMN avatar VARCHAR(255)');
 
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
-export async function runMigration(sql: string) {
+export async function addIndex() {
   // VIOLATION: database/deterministic/missing-migration
-  return pool.query(sql);
+  return pool.query('CREATE INDEX idx_users_email ON users(email)');
 }

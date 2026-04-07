@@ -96,8 +96,8 @@ export function compareTokens(userToken: string, storedToken: string) {
 
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
-export function nonStandardHash(data: string) {
-  // VIOLATION: security/deterministic/non-standard-crypto
+// VIOLATION: security/deterministic/non-standard-crypto
+export function customEncrypt(data: string) {
   let hash = 0;
   for (let i = 0; i < data.length; i++) {
     hash = ((hash << 5) - hash) + data.charCodeAt(i);

@@ -13,20 +13,25 @@ interface Migration {
   down: string;
 }
 
+declare function format(query: string, ...args: any[]): string;
+
+// VIOLATION: security/deterministic/hardcoded-sql-expression
+const insertUserSQL = format("INSERT INTO users (name, email) VALUES ('%s', '%s')");
+
 const migrations: Migration[] = [
   {
     name: '001_create_users',
-    // VIOLATION: security/deterministic/hardcoded-sql-expression
-    up: "CREATE TABLE users (id SERIAL PRIMARY KEY, name VARCHAR(255), email VARCHAR(255))",
+    up: createUsersSQL,
     down: 'DROP TABLE users',
   },
   {
     name: '002_add_role',
-    // VIOLATION: database/deterministic/missing-migration
     up: 'ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT \'user\'',
     down: 'ALTER TABLE users DROP COLUMN role',
   },
 ];
+
+// NOTE: missing-migration can't fire here because the filename matches /migrat/i — see query-builder.ts
 
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
@@ -50,6 +55,12 @@ export async function rollbackMigration(name: string) {
   await db.execute(migration.down);
 }
 
+const orm = {
+  create: (data: any) => data,
+  insert: (data: any) => data,
+  update: (data: any) => data,
+};
+
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: database/deterministic/missing-transaction
@@ -62,4 +73,6 @@ export async function seedDatabase(
     // VIOLATION: security/deterministic/sql-injection
     await db.query(`INSERT INTO users (name, email) VALUES ('${user.name}', '${user.email}')`);
   }
+  await orm.create({ name: 'admin' });
+  await orm.insert({ name: 'user' });
 }

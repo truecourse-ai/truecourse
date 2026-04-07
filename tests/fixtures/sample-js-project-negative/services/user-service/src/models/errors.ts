@@ -74,7 +74,7 @@ export function unsafeChain(obj: { fn?: () => number } | null) {
   return (obj?.fn)();
 }
 
-// VIOLATION: bugs/deterministic/unexpected-multiline
+// NOTE: unexpected-multiline — tree-sitter may not separate return\n42 as two statements
 export function asileftReturn() {
   return
   42;

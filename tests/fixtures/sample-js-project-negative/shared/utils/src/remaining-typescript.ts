@@ -3,15 +3,14 @@
  */
 
 // VIOLATION: bugs/deterministic/argument-type-mismatch
+function acceptString(s: string): string { return s; }
 export function typeMismatch() {
   const num: number = 42;
-  // @ts-ignore
-  const str: string = num;
-  return str;
+  return acceptString(num);
 }
 
 // VIOLATION: code-quality/deterministic/filename-class-mismatch
-export class WrongNameClass {
+export default class WrongNameClass {
   value = 42;
 }
 
@@ -54,7 +53,7 @@ function unusedScopeDef() {
 }
 export { unusedScopeDef };
 
-// VIOLATION: architecture/deterministic/missing-error-status-code
+// ARCH-VIOLATION: architecture/deterministic/missing-error-status-code
 export function badErrorResponse(req: any, res: any) {
   res.json({ error: 'Something failed' });
 }

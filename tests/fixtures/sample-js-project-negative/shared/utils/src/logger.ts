@@ -1,15 +1,22 @@
+// VIOLATION: code-quality/deterministic/unsafe-any-usage
+const config: any = {};
+config.level;
+
 export const logger = {
   // VIOLATION: code-quality/deterministic/unsafe-any-usage
-  info: (message: string, ...args: any[]) => {
+  info: (message: string) => {
+    const meta: any = {};
+    meta.timestamp;
     // VIOLATION: code-quality/deterministic/console-log
-    console.log(`[INFO] ${message}`, ...args);
+    console.log(`[INFO] ${message}`);
   },
   // VIOLATION: code-quality/deterministic/unsafe-any-usage
-  error: (message: string, ...args: any[]) => {
-    console.error(`[ERROR] ${message}`, ...args);
+  error: (message: string) => {
+    const ctx: any = {};
+    ctx.stack;
+    console.error(`[ERROR] ${message}`);
   },
-  // VIOLATION: code-quality/deterministic/unsafe-any-usage
-  warn: (message: string, ...args: any[]) => {
-    console.warn(`[WARN] ${message}`, ...args);
+  warn: (message: string) => {
+    console.warn(`[WARN] ${message}`);
   },
 };

@@ -63,6 +63,6 @@ export function renderDynamicTemplate(req: any) {
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
 export function disableResourceIntegrity() {
-  // VIOLATION: security/deterministic/disabled-resource-integrity
+  // NOTE: disabled-resource-integrity requires TSX (JSX elements), see ReactBugs.tsx
   return { integrity: false, crossorigin: 'anonymous' };
 }

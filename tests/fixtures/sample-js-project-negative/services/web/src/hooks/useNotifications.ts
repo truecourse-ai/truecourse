@@ -21,7 +21,7 @@ export function useNotifications(userId: string) {
     setLoading(true);
     try {
       // VIOLATION: reliability/deterministic/http-call-no-timeout
-      const res = await fetch(`/api/notifications/${userId}`);
+      const res = await fetch(`https://api.example.com/notifications/${userId}`);
       const data = await res.json();
       setNotifications(data);
     } catch (err) {

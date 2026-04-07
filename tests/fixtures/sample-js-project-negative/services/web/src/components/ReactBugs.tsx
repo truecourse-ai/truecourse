@@ -49,16 +49,29 @@ export function UselessSetState() {
   const [value, setValue] = useState('initial');
 
   useEffect(() => {
-    setValue('initial');
+    setValue(value);
   }, []);
 
   return <div>{value}</div>;
 }
 
 // VIOLATION: code-quality/deterministic/react-readonly-props
-export function MutatingProps(props: { items: string[] }) {
+interface MutatingComponentProps {
+  items: string[];
+}
+export function MutatingProps(props: MutatingComponentProps) {
   props.items.push('new item');
   return <ul>{props.items.map((item) => <li key={item}>{item}</li>)}</ul>;
+}
+
+// VIOLATION: security/deterministic/disabled-resource-integrity
+export function ExternalScriptNoIntegrity() {
+  return <script src="https://cdn.example.com/lib.js" />;
+}
+
+// VIOLATION: security/deterministic/mixed-content
+export function MixedContentImage() {
+  return <img src="http://cdn.example.com/logo.png" />;
 }
 
 // VIOLATION: bugs/deterministic/missing-error-boundary
@@ -76,5 +89,31 @@ export function TopLevelFetch() {
       <h1>{data?.title}</h1>
       <p>{data?.description}</p>
     </div>
+  );
+}
+
+function ChildComponent({ onClick }: { onClick: () => void }) {
+  return <button onClick={onClick}>Click</button>;
+}
+
+// VIOLATION: code-quality/deterministic/react-unstable-key
+export function ListWithIndexKey({ items }: { items: string[] }) {
+  return <div>{items.map((item, index) => <ChildComponent key={index} onClick={() => {}} />)}</div>;
+}
+
+// VIOLATION: performance/deterministic/inline-function-in-jsx-prop
+export function InlineCallback() {
+  return <ChildComponent onClick={() => console.log('click')} />;
+}
+
+// VIOLATION: code-quality/deterministic/html-table-accessibility
+export function DataTable() {
+  return (
+    <table>
+      <tbody>
+        <tr><td>Row 1</td></tr>
+        <tr><td>Row 2</td></tr>
+      </tbody>
+    </table>
   );
 }

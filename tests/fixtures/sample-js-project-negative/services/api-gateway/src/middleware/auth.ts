@@ -9,6 +9,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     return;
   }
   // VIOLATION: code-quality/deterministic/unsafe-any-usage
-  (req as any).userId = 'authenticated-user';
+  const decoded: any = 'authenticated-user';
+  decoded.userId;
   next();
 }

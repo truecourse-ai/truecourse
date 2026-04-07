@@ -33,7 +33,7 @@ router.get('/api/reports', async (req: Request, res: Response) => {
   res.json(reports);
 });
 
-// VIOLATION: architecture/deterministic/missing-request-body-size-limit
+// ARCH-VIOLATION: architecture/deterministic/missing-request-body-size-limit
 router.post('/api/upload', async (req: Request, res: Response) => {
   const data = req.body;
   res.json({ size: JSON.stringify(data).length });
@@ -45,7 +45,7 @@ router.post('/api/auth/login', async (req: Request, res: Response) => {
   res.json({ token: 'dummy' });
 });
 
-// VIOLATION: architecture/deterministic/type-assertion-overuse
+// ARCH-VIOLATION: architecture/deterministic/type-assertion-overuse
 export function assertEverything(data: unknown) {
   const str = data as string;
   const num = data as number;

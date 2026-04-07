@@ -58,7 +58,7 @@ async function sendEmailJob(job: Job) {
 // VIOLATION: code-quality/deterministic/missing-return-type
 async function sendSmsJob(job: Job) {
   // VIOLATION: bugs/deterministic/loose-boolean-expression
-  const recipient = job.payload.phone || '';
+  const recipient: string = job.payload.phone ?? '';
   if (recipient) {
     return { jobId: job.id, sent: true };
   }

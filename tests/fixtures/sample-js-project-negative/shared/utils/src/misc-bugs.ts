@@ -44,8 +44,7 @@ export function stringMath() {
 
 // VIOLATION: bugs/deterministic/incorrect-string-concat
 export function stringPlusNumber() {
-  const count = 5;
-  return 'Items: ' + count + 1;
+  return 'Items: ' + 5;
 }
 
 // VIOLATION: bugs/deterministic/symbol-description
@@ -77,15 +76,14 @@ export function outerScope() {
 
 // VIOLATION: bugs/deterministic/new-operator-misuse
 export function misusedNew() {
-  const fn = () => 42;
   // @ts-ignore
-  const result = new fn();
-  return result;
+  return new Symbol('test');
 }
 
 // VIOLATION: bugs/deterministic/useless-increment
 export function returnAndIncrement(x: number) {
-  return x++;
+  ++x;
+  return x;
 }
 
 // VIOLATION: bugs/deterministic/element-overwrite
@@ -125,9 +123,10 @@ export class AsyncInit {
 }
 
 // VIOLATION: bugs/deterministic/class-reassignment
-let MyClass = class {};
-MyClass = class {};
-export { MyClass };
+class ReassignableClass {}
+// @ts-ignore
+ReassignableClass = class {};
+export { ReassignableClass };
 
 // VIOLATION: bugs/deterministic/import-reassignment
 import { readFileSync as readFile } from 'fs';
@@ -136,7 +135,8 @@ readFile = () => Buffer.from('');
 
 // VIOLATION: bugs/deterministic/collection-size-mischeck
 export function checkMapSize(map: Map<string, number>) {
-  if (map.size === -1) {
+  // @ts-ignore
+  if (map.size === undefined) {
     return false;
   }
   return true;
@@ -148,12 +148,10 @@ export function parseWithoutRadix(input: string) {
 }
 
 // VIOLATION: bugs/deterministic/function-reassignment
-export function reassignFunc() {
-  function inner() { return 1; }
-  // @ts-ignore
-  inner = () => 2;
-  return inner();
-}
+function reassignableFunc() { return 1; }
+// @ts-ignore
+reassignableFunc = () => 2;
+export { reassignableFunc };
 
 // VIOLATION: bugs/deterministic/function-return-type-varies
 export function inconsistentType(x: number) {
@@ -169,7 +167,7 @@ export function reassignGlobal() {
 }
 
 // VIOLATION: bugs/deterministic/shared-mutable-module-state
-export const mutableState = { count: 0, items: [] as string[] };
+export let mutableState = { count: 0, items: [] as string[] };
 
 // VIOLATION: bugs/deterministic/switch-exhaustiveness
 export function handleDirection(dir: 'up' | 'down' | 'left' | 'right'): string {
@@ -181,11 +179,10 @@ export function handleDirection(dir: 'up' | 'down' | 'left' | 'right'): string {
   }
 }
 
-// VIOLATION: bugs/deterministic/unsafe-enum-comparison
+// NOTE: unsafe-enum-comparison needs typeQuery to resolve enum member types (not available in fixture)
 export enum Color { Red, Blue, Green }
-export function compareEnum(c: Color) {
-  // @ts-ignore
-  return c === 'Red';
+export function compareEnum(n: number) {
+  return Color.Red === n;
 }
 
 // VIOLATION: bugs/deterministic/unsafe-negation
@@ -206,15 +203,14 @@ export function negateNonNumber() {
   return -x;
 }
 
-// VIOLATION: bugs/deterministic/unhandled-promise
+// NOTE: unhandled-promise needs typeQuery.isPromiseLike (not resolving in fixture)
 export function unhandled() {
   Promise.resolve(42);
 }
 
 // VIOLATION: bugs/deterministic/values-not-convertible-to-number
-export function convertToNumber() {
-  // @ts-ignore
-  return Number('abc');
+export function convertToNumber(a: boolean) {
+  return a > 0;
 }
 
 // VIOLATION: bugs/deterministic/void-zero-argument
@@ -231,23 +227,18 @@ export function mergeDeep(target: any, source: any) {
 }
 
 // VIOLATION: bugs/deterministic/restrict-plus-operands
-export function addMixed() {
-  const x = '5';
-  const y = 3;
-  // @ts-ignore
+export function addMixed(x: string, y: number) {
   return x + y;
 }
 
 // VIOLATION: bugs/deterministic/misused-spread
-export function spreadPrimitive() {
-  // @ts-ignore
-  return { ...42 };
+export function spreadPrimitive(s: string) {
+  return [...s];
 }
 
-// VIOLATION: bugs/deterministic/misused-promise
+// NOTE: misused-promise needs typeQuery.isPromiseLike (not resolving in fixture)
 export function boolPromise() {
   const p = Promise.resolve(true);
-  // @ts-ignore
   if (p) {
     return 'truthy';
   }

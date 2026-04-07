@@ -22,7 +22,7 @@ export function isNotSelf(x: number) {
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
 export function checkNaN(value: number) {
-  // VIOLATION: bugs/deterministic/use-is-nan
+  // VIOLATION: bugs/deterministic/use-isnan
   if (value === NaN) {
     return true;
   }

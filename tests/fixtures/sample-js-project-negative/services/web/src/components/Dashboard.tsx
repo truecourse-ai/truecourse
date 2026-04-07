@@ -34,11 +34,13 @@ export function Dashboard({ userId, refreshInterval }: DashboardProps) {
     return <div className="error">{error}</div>;
   }
 
+  const count: number = stats?.count ?? 0;
+
   // VIOLATION: code-quality/deterministic/react-leaked-render
   return (
     <div className="dashboard">
       <h1>Dashboard</h1>
-      {stats && stats.count && <span className="badge">{stats.count}</span>}
+      {count && <span className="badge">{count}</span>}
       <div className="panels">
         <NotificationList
           userId={userId}

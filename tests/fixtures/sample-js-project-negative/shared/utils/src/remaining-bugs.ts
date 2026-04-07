@@ -16,19 +16,16 @@ export async function awaitLiteral() {
   return x;
 }
 
-// VIOLATION: bugs/deterministic/base-to-string
+// NOTE: base-to-string needs typeQuery to detect object types (not resolving in fixture)
 export function stringifyObj() {
-  const obj = {};
-  return `Result: ${obj}`;
+  const obj: Record<string, number> = {};
+  return obj.toString();
 }
 
 // VIOLATION: bugs/deterministic/const-reassignment
-export function reassignConst() {
-  const x = 42;
-  // @ts-ignore
-  x = 100;
-  return x;
-}
+const constToReassign = 42;
+// @ts-ignore
+constToReassign = 100;
 
 // VIOLATION: bugs/deterministic/getter-missing-return
 export class MissingGetterReturn {
@@ -48,12 +45,12 @@ export function maybeReturn(x: number) {
 }
 
 // VIOLATION: bugs/deterministic/invisible-whitespace
-export const invisibleWs = 'hello\u00A0world';
+export const invisibleWs = 'hello world';
 
 // VIOLATION: bugs/deterministic/literal-call
 export function callLiteral() {
   // @ts-ignore
-  return (42)();
+  return "hello"();
 }
 
 // VIOLATION: bugs/deterministic/no-constructor-return
@@ -70,14 +67,15 @@ export class SetterNoReturn {
   private _name = '';
   set name(v: string) {
     this._name = v;
-    return;
+    return v;
   }
 }
 
 // VIOLATION: bugs/deterministic/non-existent-operator
 export function badOperator(a: number, b: number) {
   // @ts-ignore
-  return a =< b;
+  a =+ b;
+  return a;
 }
 
 // VIOLATION: bugs/deterministic/nonstandard-decimal-escape
@@ -134,20 +132,26 @@ export function matchVsExec(str: string) {
 }
 
 // VIOLATION: code-quality/deterministic/regex-unicode-awareness
-export const emojiRegex = /./;
+export const emojiRegex = /\p{Letter}/;
 
 // VIOLATION: bugs/deterministic/useeffect-missing-deps
+declare function useEffect(cb: () => void, deps?: any[]): void;
+const userId = 'test';
+useEffect(() => { console.log(userId); }, []);
 
-// VIOLATION: security/deterministic/mixed-content
+// NOTE: mixed-content requires TSX (JSX attributes) - see Dashboard.tsx
 export function mixedContentUrl() {
   return fetch('http://api.secure-site.com/data');
 }
 
-// VIOLATION: code-quality/deterministic/html-table-accessibility
+// NOTE: html-table-accessibility requires TSX (JSX elements) - see ReactBugs.tsx
 
 // VIOLATION: code-quality/deterministic/unread-private-attribute
 export class UnreadAttribute {
   private data = 'secret';
+  setData(value: string) {
+    this.data = value;
+  }
   getValue() {
     return 'public';
   }

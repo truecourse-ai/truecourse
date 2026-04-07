@@ -2,13 +2,15 @@
  * Test file with quality issues.
  */
 
-declare function describe(name: string, fn: () => void): void;
-declare function it(name: string, fn: (done?: () => void) => void): void;
+declare function describe(name: string, fn: () => void, timeout?: number): void;
+declare function it(name: string, fn: (done?: () => void) => void, timeout?: number): void;
 declare function expect(val: any): any;
 declare function jest: any;
 
-// VIOLATION: code-quality/deterministic/disabled-test-timeout
 describe('FlakySuite', () => {
+  // VIOLATION: code-quality/deterministic/disabled-test-timeout
+  it('should have timeout disabled', () => {}, 0);
+
   // VIOLATION: code-quality/deterministic/flaky-test
   it('should pass randomly', () => {
     const random = Math.random();
@@ -23,10 +25,6 @@ describe('FlakySuite', () => {
 
   // VIOLATION: code-quality/deterministic/test-missing-exception-check
   it('should throw error', () => {
-    try {
-      throw new Error('expected');
-    } catch (e) {
-      // no assertion on the caught error
-    }
+    expect(() => { throw new Error('expected'); }).toThrow();
   });
 });

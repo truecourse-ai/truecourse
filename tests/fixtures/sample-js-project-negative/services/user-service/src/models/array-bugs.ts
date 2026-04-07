@@ -33,8 +33,8 @@ export function deleteFromArray(arr: any[]) {
 }
 
 // VIOLATION: bugs/deterministic/for-in-array
-export function forInOnArray(arr: number[]) {
-  for (const key in arr) {
+export function forInOnArray() {
+  for (const key in [1, 2, 3]) {
     console.log(key);
   }
 }

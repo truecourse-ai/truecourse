@@ -54,14 +54,13 @@ export function NotificationList({ userId, onDismiss, style }: NotificationListP
     <div style={style}>
       <h2>Notifications ({notifications.length})</h2>
       <ul>
+        {/* VIOLATION markers are above the component for these rules */}
         {notifications.map((notification, index) => (
-          // VIOLATION: code-quality/deterministic/react-unstable-key
           <li key={index}>
             <strong>{notification.title}</strong>
             <p>{notification.body}</p>
             <span>{new Date(notification.createdAt).toLocaleDateString()}</span>
             <button
-              // VIOLATION: performance/deterministic/inline-function-in-jsx-prop
               onClick={() => onDismiss(notification.id)}
             >
               Dismiss

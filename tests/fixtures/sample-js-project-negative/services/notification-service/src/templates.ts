@@ -38,22 +38,22 @@ export class EmailTemplates {
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   renderWelcome(userName: string) {
-    return this.render('Welcome!', `
+    return `
       <p>Hello ${userName},</p>
       <p>Welcome to our platform. Your account has been created successfully.</p>
       <p>Best regards,<br>The Team</p>
-    `);
+    `;
   }
 
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   renderPasswordReset(resetLink: string) {
-    return this.render('Password Reset', `
+    return `
       <p>You requested a password reset.</p>
       <p>Click the link below to reset your password:</p>
       <a href="${resetLink}">Reset Password</a>
       <p>This link expires in 24 hours.</p>
-    `);
+    `;
   }
 
   // VIOLATION: code-quality/deterministic/missing-return-type
@@ -68,11 +68,11 @@ export class EmailTemplates {
 
     const color = colors[level] || '#333';
 
-    return this.render(`Alert: ${level.toUpperCase()}`, `
+    return `
       <div style="border-left: 4px solid ${color}; padding: 12px; margin: 16px 0;">
         <strong style="color: ${color};">${level.toUpperCase()}</strong>
         <p>${message}</p>
       </div>
-    `);
+    `;
   }
 }

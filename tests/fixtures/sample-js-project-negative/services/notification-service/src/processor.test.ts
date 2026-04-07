@@ -7,14 +7,15 @@ declare function it(name: string, fn: () => void): void;
 declare function test(name: string, fn: () => void): void;
 declare function expect(val: any): any;
 declare function beforeEach(fn: () => void): void;
+declare const assert: any;
+
+let globalConfig = { retries: 3 };
 
 // VIOLATION: code-quality/deterministic/test-exclusive
 describe.only('NotificationProcessor', () => {
-  // VIOLATION: code-quality/deterministic/test-modifying-global-state
-  let globalConfig = { retries: 3 };
-
-  beforeEach(() => {
-    globalConfig.retries = 5;
+    beforeEach(() => {
+    // VIOLATION: code-quality/deterministic/test-modifying-global-state
+    globalConfig = { retries: 5 };
   });
 
   // VIOLATION: code-quality/deterministic/test-missing-assertion
@@ -26,19 +27,19 @@ describe.only('NotificationProcessor', () => {
   // VIOLATION: code-quality/deterministic/test-inverted-arguments
   it('should return correct count', () => {
     const result = 42;
-    expect(42).toEqual(result);
+    assert.strictEqual(42, result);
   });
 
   // VIOLATION: code-quality/deterministic/test-same-argument
   it('should not match itself', () => {
     const value = 'test';
-    expect(value).toEqual(value);
+    assert.deepEqual(value, value);
   });
 
   // VIOLATION: code-quality/deterministic/test-deterministic-assertion
   it('should generate unique id', () => {
     const id = Math.random().toString(36);
-    expect(id).toBeTruthy();
+    expect(id).to.satisfy((v: string) => v.length > 0);
   });
 
   // VIOLATION: code-quality/deterministic/test-with-hardcoded-timeout
@@ -51,7 +52,7 @@ describe.only('NotificationProcessor', () => {
   // VIOLATION: code-quality/deterministic/test-incomplete-assertion
   it('should validate data', () => {
     const data = { name: 'test' };
-    expect(data);
+    expect(data).toBeTruthy;
   });
 });
 

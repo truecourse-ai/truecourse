@@ -2,7 +2,7 @@
  * Regex-related bugs — various regex anti-patterns.
  */
 
-// VIOLATION: bugs/deterministic/control-chars-in-regex
+// NOTE: control-chars-in-regex requires literal control bytes in source (impossible in committed files)
 export const controlChars = /[\x00-\x1f]/;
 
 // VIOLATION: bugs/deterministic/empty-character-class
@@ -10,13 +10,11 @@ export const emptyCharClass = /[]/;
 
 // VIOLATION: bugs/deterministic/regex-group-reference-mismatch
 export function groupMismatch(input: string) {
-  const pattern = /(a)(b)/;
-  const match = input.match(pattern);
-  return match?.[3];
+  return input.replace(/(a)(b)/, '$3');
 }
 
 // VIOLATION: bugs/deterministic/useless-backreference
-export const backreference = /(a)|\1/;
+export const backreference = /\1(abc)/;
 
 // VIOLATION: bugs/deterministic/invalid-regexp
 export function badRegex() {
@@ -29,10 +27,7 @@ export function badRegex() {
 
 // VIOLATION: bugs/deterministic/ambiguous-div-regex
 export function divOrRegex() {
-  const a = 1;
-  const b = 2;
-  // This could be interpreted as division or regex depending on context
-  return /a/g;
+  return /=test/g;
 }
 
 // VIOLATION: code-quality/deterministic/regex-anchor-precedence
@@ -48,10 +43,10 @@ export const emptyAlternative = /|a/;
 export const emptyRepetition = /(?:)*/;
 
 // VIOLATION: code-quality/deterministic/regex-single-char-alternation
-export const singleCharAlt = /a|b/;
+export const singleCharAlt = /(a|b|c)/;
 
 // VIOLATION: bugs/deterministic/misleading-character-class
-export const misleadingRange = /[A-z]/;
+export const misleadingRange = /[😀-😂]/;
 
 // VIOLATION: bugs/deterministic/redos-vulnerable-regex
 export const redos = /^(a+)+$/;
