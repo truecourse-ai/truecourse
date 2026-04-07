@@ -144,11 +144,19 @@ describe('Python negative fixture — code rules', () => {
     console.log(`\nRule coverage: ${detectedCount}/${expectedRules.size} expected rules detected`);
     console.log(`Total violations found: ${violations.length}`);
 
+    // Print all violations by rule for debugging
+    const allByRule = new Map<string, number>();
+    for (const v of violations) allByRule.set(v.ruleKey, (allByRule.get(v.ruleKey) ?? 0) + 1);
+    console.log('\nAll violations by rule:');
+    for (const [rule, count] of [...allByRule.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25)) {
+      console.log(`  ${count}x ${rule}`);
+    }
+
     expect(missing.length).toBe(0);
   });
 
   it('does not produce unexpected violations in violation source files', () => {
-    const srcViolations = violations.filter((v) => v.filePath.includes('/src/'));
+    const srcViolations = violations.filter((v) => v.filePath.includes('/src/') || v.filePath.includes('/services/') || v.filePath.includes('/shared/'));
     const expectedSet = new Set(expected.map((e) => `${e.ruleKey}::${e.filePath}`));
 
     const unexpected = srcViolations.filter(

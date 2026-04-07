@@ -1,4 +1,4 @@
-"""Token service — tests several patterns that previously caused false positives.
+"""Token service -- tests several patterns that previously caused false positives.
 
 Tests:
 - Same-file class + factory function (dead module FP)
@@ -15,18 +15,22 @@ from typing import Optional
 from flask import HTTPException
 
 
+# VIOLATION: code-quality/deterministic/missing-type-hints
 def should_retry(state) -> bool:
-    """Retry predicate passed by reference — not called directly."""
+    """Retry predicate passed by reference -- not called directly."""
     return state.attempt_number < 3
 
 
+# VIOLATION: style/deterministic/docstring-completeness
 class TokenService:
     def __init__(self):
         self._cache: dict[str, str] = {}
 
+    # VIOLATION: style/deterministic/docstring-completeness
     def get_token(self, user_id: int) -> Optional[str]:
         return self._cache.get(str(user_id))
 
+    # VIOLATION: style/deterministic/docstring-completeness
     def validate_token(self, token: str) -> bool:
         try:
             data = json.loads(token)
@@ -46,7 +50,7 @@ class TokenService:
         return new_token
 
     def build_oauth_config(self) -> dict:
-        """Dict keys with secret-like names — should NOT be flagged as hardcoded secrets."""
+        """Dict keys with secret-like names -- should NOT be flagged as hardcoded secrets."""
         return {
             "token_uri": "https://oauth2.example.com/token",
             "client_secret": self._cache.get("client_secret", ""),
@@ -55,11 +59,12 @@ class TokenService:
 
 
 def get_token_service() -> TokenService:
-    """Factory function — makes TokenService not dead (same-file usage)."""
+    """Factory function -- makes TokenService not dead (same-file usage)."""
     return TokenService()
 
 
 def call_with_retry():
     """Uses should_retry as a function reference, not a call."""
+    # VIOLATION: code-quality/deterministic/import-outside-top-level
     import tenacity
     return tenacity.retry(retry=should_retry)(lambda: None)()

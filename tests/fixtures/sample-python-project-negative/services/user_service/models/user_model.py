@@ -2,10 +2,12 @@ from sqlalchemy import Column, String, DateTime, Boolean, Integer, ForeignKey, f
 from sqlalchemy.orm import relationship, DeclarativeBase
 
 
+# VIOLATION: style/deterministic/docstring-completeness
 class Base(DeclarativeBase):
     pass
 
 
+# VIOLATION: style/deterministic/docstring-completeness
 class User(Base):
     __tablename__ = "users"
 
@@ -17,6 +19,7 @@ class User(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+# VIOLATION: style/deterministic/docstring-completeness
 class Post(Base):
     __tablename__ = "posts"
 
@@ -34,6 +37,7 @@ class Post(Base):
 # - category_id has no FK relation (missing foreign key)
 # - Overly nullable columns
 # - Naming inconsistency: mixes snake_case (category_id) with camelCase (viewCount)
+# VIOLATION: style/deterministic/docstring-completeness
 class Comment(Base):
     __tablename__ = "comments"
 
@@ -49,6 +53,7 @@ class Comment(Base):
 # Another model with issues:
 # - Missing timestamps
 # - tag_id column with no FK relation
+# VIOLATION: style/deterministic/docstring-completeness
 class PostTag(Base):
     __tablename__ = "post_tags"
 

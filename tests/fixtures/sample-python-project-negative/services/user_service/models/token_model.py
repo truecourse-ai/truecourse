@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .user_model import Base
 
 
+# VIOLATION: style/deterministic/docstring-completeness
 class Token(Base):
     __tablename__ = "tokens"
 

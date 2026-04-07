@@ -1,6 +1,7 @@
 from datetime import datetime
 
 
+# VIOLATION: style/deterministic/docstring-completeness
 def format_user(user: dict) -> dict:
     return {
         "id": user["id"],
@@ -11,5 +12,7 @@ def format_user(user: dict) -> dict:
     }
 
 
+# VIOLATION: style/deterministic/docstring-completeness
+# VIOLATION: code-quality/deterministic/missing-maxsplit-arg
 def format_date(date: datetime) -> str:
     return date.isoformat().split("T")[0]

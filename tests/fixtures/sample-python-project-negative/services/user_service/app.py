@@ -11,6 +11,8 @@ app.register_blueprint(users_bp, url_prefix="/users")
 PORT = int(os.environ.get("PORT", 3001))
 
 
+# VIOLATION: style/deterministic/docstring-completeness
+# VIOLATION: code-quality/deterministic/missing-type-hints
 def start():
     connect_database()
     app.run(port=PORT)

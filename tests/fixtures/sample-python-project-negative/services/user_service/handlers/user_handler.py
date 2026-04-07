@@ -5,11 +5,15 @@ from shared.utils.validators import validate_email
 user_service = UserService()
 
 
+# VIOLATION: style/deterministic/docstring-completeness
+# VIOLATION: code-quality/deterministic/missing-type-hints
 def get_users():
     users = user_service.get_all()
     return jsonify(users)
 
 
+# VIOLATION: style/deterministic/docstring-completeness
+# VIOLATION: code-quality/deterministic/missing-type-hints
 def get_user_by_id(user_id: str):
     user = user_service.get_by_id(user_id)
     if not user:
@@ -17,6 +21,8 @@ def get_user_by_id(user_id: str):
     return jsonify(user)
 
 
+# VIOLATION: style/deterministic/docstring-completeness
+# VIOLATION: code-quality/deterministic/missing-type-hints
 def create_user():
     data = request.get_json()
     name = data["name"]
@@ -27,6 +33,8 @@ def create_user():
     return jsonify(user), 201
 
 
+# VIOLATION: style/deterministic/docstring-completeness
+# VIOLATION: code-quality/deterministic/missing-type-hints
 def delete_user(user_id: str):
     user_service.delete(user_id)
     return "", 204

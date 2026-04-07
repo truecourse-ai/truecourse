@@ -1,4 +1,4 @@
-"""API helpers — sits in api/ directory but is NOT a route handler.
+"""API helpers -- sits in api/ directory but is NOT a route handler.
 
 Tests: files in **/api/** that only import framework utilities (HTTPException, Depends)
 should NOT be classified as API layer and should NOT generate flow entry points.
