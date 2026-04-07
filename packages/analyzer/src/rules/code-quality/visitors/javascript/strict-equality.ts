@@ -9,6 +9,11 @@ export const strictEqualityVisitor: CodeRuleVisitor = {
     const op = node.children.find((c) => c.type === '==' || c.type === '!=')
     if (!op) return null
 
+    // Skip `== null` / `!= null` — this is idiomatic JS/TS for checking both null and undefined
+    const left = node.childForFieldName('left')
+    const right = node.childForFieldName('right')
+    if (left?.type === 'null' || right?.type === 'null') return null
+
     const opText = op.text
     const strict = opText === '==' ? '===' : '!=='
 

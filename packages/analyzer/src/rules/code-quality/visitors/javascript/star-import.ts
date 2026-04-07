@@ -10,6 +10,16 @@ export const jsStarImportVisitor: CodeRuleVisitor = {
       (c) => c.type === 'import_clause' && c.namedChildren.some((cc) => cc.type === 'namespace_import')
     )
     if (hasNamespaceImport) {
+      // Skip well-known namespace imports that are idiomatic
+      const source = node.namedChildren.find((c) => c.type === 'string')
+      const sourceText = source?.text?.slice(1, -1) ?? ''
+      if (sourceText === 'react' || sourceText === 'react-dom'
+        || sourceText.startsWith('@radix-ui/') || sourceText.startsWith('@headlessui/')) {
+        return null
+      }
+      // Relative imports (./foo, ../bar) — namespace imports for local modules are a valid pattern
+      if (sourceText.startsWith('./') || sourceText.startsWith('../')) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Namespace import',

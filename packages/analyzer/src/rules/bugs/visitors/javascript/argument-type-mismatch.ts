@@ -15,51 +15,58 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     if (!typeQuery) return null
 
-    const fn = node.childForFieldName('function')
-    if (!fn) return null
-    const args = node.childForFieldName('arguments')
-    if (!args || args.namedChildCount === 0) return null
+    // Use the TS compiler's own diagnostics to detect argument type mismatches.
+    // This is the only reliable way — our own type comparison fails on generics,
+    // overloads, and complex type inference that TypeScript handles correctly.
+    const startLine = node.startPosition.row
+    const endLine = node.endPosition.row
+    const hasError = typeQuery.hasTypeErrorInRange(filePath, startLine, endLine)
+    if (!hasError) return null
 
-    // Get the function's parameter types
+    // There's a real TS type error at this call site — get details for the message
+    const fn = node.childForFieldName('function')
+    const args = node.childForFieldName('arguments')
+    if (!fn || !args || args.namedChildCount === 0) return null
+
     const paramTypes = typeQuery.getParameterTypes(
       filePath,
       fn.startPosition.row,
       fn.startPosition.column,
     )
-    if (!paramTypes || paramTypes.length === 0) return null
 
-    // Check each argument against expected parameter type
     const argNodes = args.namedChildren
-    for (let i = 0; i < Math.min(argNodes.length, paramTypes.length); i++) {
+    // Find the first mismatched argument for the message
+    for (let i = 0; i < argNodes.length; i++) {
       const argNode = argNodes[i]
-      const expectedParam = paramTypes[i]
-
       const argType = typeQuery.getTypeAtPosition(
         filePath,
         argNode.startPosition.row,
         argNode.startPosition.column,
+        argNode.endPosition.row,
+        argNode.endPosition.column,
       )
-      if (!argType) continue
+      if (!argType || argType === 'any') continue
 
-      // Check compatibility
-      const compatible = typeQuery.areTypesCompatible(
-        filePath,
-        argNode.startPosition.row, argNode.startPosition.column,
-        fn.startPosition.row, fn.startPosition.column,
-      )
-
-      // Only flag clear mismatches (e.g., passing string where number expected)
-      if (!compatible && argType !== 'any' && expectedParam.type !== 'any') {
+      const expectedType = paramTypes?.[i]?.type
+      const expectedName = paramTypes?.[i]?.name ?? `param ${i + 1}`
+      if (expectedType && expectedType !== 'any') {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Argument type mismatch',
-          `Argument ${i + 1} is \`${argType}\` but parameter \`${expectedParam.name}\` expects \`${expectedParam.type}\`.`,
+          `Argument ${i + 1} is \`${argType}\` but parameter \`${expectedName}\` expects \`${expectedType}\`.`,
           sourceCode,
-          `Convert argument to \`${expectedParam.type}\` or pass the correct type.`,
+          `Convert argument to \`${expectedType}\` or pass the correct type.`,
         )
       }
     }
 
-    return null
+    // Fallback: TS reports error but we can't pinpoint the argument
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Argument type mismatch',
+      'TypeScript reports a type error at this call expression.',
+      sourceCode,
+      'Check the argument types against the function signature.',
+    )
   },
 }

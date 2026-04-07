@@ -17,7 +17,6 @@ import { redundantBooleanVisitor } from './redundant-boolean.js'
 import { unnecessaryElseAfterReturnVisitor } from './unnecessary-else-after-return.js'
 import { jsNoEmptyFunctionVisitor } from './no-empty-function.js'
 import { noUselessCatchVisitor } from './no-useless-catch.js'
-import { preferTemplateLiteralVisitor } from './prefer-template-literal.js'
 import { noVarDeclarationVisitor } from './no-var-declaration.js'
 import { cognitiveComplexityVisitor } from './cognitive-complexity.js'
 import { cyclomaticComplexityVisitor } from './cyclomatic-complexity.js'
@@ -256,7 +255,6 @@ export const CODE_QUALITY_JS_VISITORS: CodeRuleVisitor[] = [
   unnecessaryElseAfterReturnVisitor,
   jsNoEmptyFunctionVisitor,
   noUselessCatchVisitor,
-  preferTemplateLiteralVisitor,
   noVarDeclarationVisitor,
   cognitiveComplexityVisitor,
   cyclomaticComplexityVisitor,

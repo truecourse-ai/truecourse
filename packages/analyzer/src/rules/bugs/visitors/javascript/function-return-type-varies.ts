@@ -9,6 +9,17 @@ import { TS_LANGUAGES } from './_helpers.js'
  * Uses type query to check the return type of the function.
  */
 
+/** Normalize TypeScript literal types to their base types */
+function normalizeType(typeStr: string): string {
+  // String literal types: "hello", 'world' → string
+  if (/^["']/.test(typeStr)) return 'string'
+  // Number literal types: 42, 3.14 → number
+  if (/^-?\d/.test(typeStr)) return 'number'
+  // Boolean literal types
+  if (typeStr === 'true' || typeStr === 'false') return 'boolean'
+  return typeStr
+}
+
 function collectReturnStatements(node: SyntaxNode): SyntaxNode[] {
   const returns: SyntaxNode[] = []
   function walk(n: SyntaxNode) {
@@ -56,17 +67,19 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
         filePath,
         value.startPosition.row,
         value.startPosition.column,
+        value.endPosition.row,
+        value.endPosition.column,
       )
       if (typeStr) {
-        returnTypes.add(typeStr)
+        // Normalize literal types to their base types:
+        // "hello" → string, 42 → number, true → boolean
+        returnTypes.add(normalizeType(typeStr))
       }
     }
 
     // If there are significantly different base types
     if (returnTypes.size > 1) {
       const types = [...returnTypes]
-      // Check if they're fundamentally different (not just subtypes)
-      const hasNull = types.includes('null') || types.includes('undefined')
       const baseTypes = types.filter(t => t !== 'null' && t !== 'undefined')
       // Allow nullable returns (type | null), but flag truly mixed returns (string | number)
       if (baseTypes.length > 1) {

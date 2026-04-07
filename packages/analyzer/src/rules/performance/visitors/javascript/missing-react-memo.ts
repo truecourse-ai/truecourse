@@ -33,9 +33,24 @@ export const missingReactMemoVisitor: CodeRuleVisitor = {
 
     if (!funcNode || !funcName || !/^[A-Z]/.test(funcName)) return null
 
+    // Skip all-uppercase names — these are HTTP method handlers (GET, POST, PUT, DELETE, PATCH),
+    // not React components. React components use PascalCase.
+    if (funcName === funcName.toUpperCase()) return null
+
+    // Skip Next.js/framework route files — page, layout, loading, error, route handlers
+    const routePatterns = /\/(page|layout|loading|error|not-found|template|route)\.(tsx|jsx|ts|js)$/
+    if (routePatterns.test(filePath)) return null
+
     // Check if component returns JSX
     const bodyText = funcNode.text
     if (!bodyText.includes('<') || !bodyText.includes('>')) return null
+
+    // Skip components with no props — memo provides no benefit
+    const params = funcNode.childForFieldName('parameters') || funcNode.childForFieldName('parameter')
+    if (!params || params.namedChildCount === 0) return null
+    // Skip destructured empty params like ({}) or ({}: Props)
+    const firstParam = params.namedChildren[0]
+    if (firstParam?.type === 'object_pattern' && firstParam.namedChildCount === 0) return null
 
     // Check if already wrapped in memo
     if (sourceCode.includes(`memo(${funcName}`) || sourceCode.includes(`React.memo(${funcName}`)) return null

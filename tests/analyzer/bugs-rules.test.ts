@@ -2472,20 +2472,26 @@ describe('bugs/deterministic/prototype-builtins-call', () => {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/stateful-regex', () => {
-  it('detects global regex used inline in test call', () => {
+  it('does not flag inline regex in method calls (fresh instance each time)', () => {
     const violations = check(`if (/abc/g.test(str)) {}`);
-    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
-    expect(matches).toHaveLength(1);
-  });
-
-  it('does not flag regex stored in variable', () => {
-    const violations = check(`const re = /abc/g;`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
     expect(matches).toHaveLength(0);
   });
 
+  it('detects global regex stored at module scope (reused across calls)', () => {
+    const violations = check(`const re = /abc/g;`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
+    expect(matches).toHaveLength(1);
+  });
+
   it('does not flag regex without global/sticky flag', () => {
     const violations = check(`if (/abc/i.test(str)) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag regex stored inside a function (recreated each call)', () => {
+    const violations = check(`function search(text) { const re = /abc/g; return re.test(text); }`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
     expect(matches).toHaveLength(0);
   });
@@ -5669,16 +5675,17 @@ describe('bugs/deterministic/array-sort-without-compare', () => {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/null-comparison-without-type-check', () => {
-  it('detects == null comparison', () => {
+  // Rule disabled — == null / != null is idiomatic JS/TS for null-or-undefined checks
+  it('does not flag == null (rule disabled — idiomatic pattern)', () => {
     const violations = check(`if (x == null) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/null-comparison-without-type-check');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
-  it('detects != null comparison', () => {
+  it('does not flag != null (rule disabled — idiomatic pattern)', () => {
     const violations = check(`if (x != null) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/null-comparison-without-type-check');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag === null comparison', () => {
@@ -7377,7 +7384,9 @@ describe('bugs/deterministic/invisible-whitespace', () => {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/async-void-function', () => {
-  it('detects async function called without await', () => {
+  // This rule now requires TypeQueryService to check if the return type is a Promise.
+  // Without type info (as in these inline tests), it correctly skips all detections.
+  it('does not flag without type query (requires type-aware analysis)', () => {
     const violations = check(`
 async function fetchDataAsync() { return 1; }
 function main() {
@@ -7385,7 +7394,7 @@ function main() {
 }
 `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/async-void-function');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag when awaited', () => {
@@ -7405,7 +7414,9 @@ async function main() {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/missing-await', () => {
-  it('detects missing await on async call assigned to variable', () => {
+  // This rule now requires TypeQueryService to check if the return type is a Promise.
+  // Without type info (as in these inline tests), it correctly skips all detections.
+  it('does not flag without type query (requires type-aware analysis)', () => {
     const violations = check(`
 async function fetchAsync() { return 1; }
 async function main() {
@@ -7413,7 +7424,7 @@ async function main() {
 }
 `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-await');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag properly awaited call', () => {

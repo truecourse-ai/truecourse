@@ -23,16 +23,22 @@ function only(violations: ReturnType<typeof check>, ruleKey: string) {
 describe('performance/deterministic/inline-function-in-jsx-prop', () => {
   const KEY = 'performance/deterministic/inline-function-in-jsx-prop';
 
-  it('detects arrow function in JSX prop', () => {
-    const code = `const App = () => <button onClick={() => doSomething()}>Click</button>;`;
+  it('detects arrow function in JSX prop on custom component', () => {
+    const code = `const App = () => <MyButton onClick={() => doSomething()}>Click</MyButton>;`;
     const violations = only(check(code, 'tsx'), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('detects .bind() in JSX prop', () => {
-    const code = `const App = () => <button onClick={handler.bind(this)}>Click</button>;`;
+  it('detects .bind() in JSX prop on custom component', () => {
+    const code = `const App = () => <MyButton onClick={handler.bind(this)}>Click</MyButton>;`;
     const violations = only(check(code, 'tsx'), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag arrow function on native HTML element', () => {
+    const code = `const App = () => <button onClick={() => doSomething()}>Click</button>;`;
+    const violations = only(check(code, 'tsx'), KEY);
+    expect(violations).toHaveLength(0);
   });
 
   it('does not flag variable reference in JSX prop', () => {

@@ -11,6 +11,8 @@ export const multilineBlockWithoutBracesVisitor: CodeRuleVisitor = {
       const body = node.childForFieldName(field)
       if (!body) continue
       if (body.type === 'statement_block') continue
+      // Single-line if statements are safe regardless of what follows
+      if (node.startPosition.row === body.endPosition.row) continue
       const bodyEnd = body.endPosition.row
       const nextSibling = (() => {
         const parent = node.parent

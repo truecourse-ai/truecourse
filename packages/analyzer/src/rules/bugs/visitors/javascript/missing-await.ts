@@ -24,24 +24,27 @@ export const missingAwaitVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/missing-await',
   languages: JS_LANGUAGES,
   nodeTypes: ['variable_declarator'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
+    if (!typeQuery) return null
+
     const value = node.childForFieldName('value')
     if (!value || value.type !== 'call_expression') return null
 
-    // Check it's not already awaited
-    if (node.parent?.type === 'await_expression') return null
-
-    const fn = value.childForFieldName('function')
-    if (!fn) return null
-
-    // Heuristic: calls to functions ending in Async or common async patterns
-    const fnText = fn.text
-    if (!fnText.endsWith('Async') && !fnText.match(/^(fetch|axios\.|request|readFile|writeFile|connect|query|findOne|find|save|update|delete|create|send|get|post|put)/)) {
-      return null
-    }
-
     if (!isInsideAsyncFunction(node)) return null
 
+    // Check if the call expression returns a Promise using the type system
+    const isPromise = typeQuery.isPromiseLike(
+      filePath,
+      value.startPosition.row,
+      value.startPosition.column,
+      value.endPosition.row,
+      value.endPosition.column,
+    )
+    if (!isPromise) return null
+
+    const fn = value.childForFieldName('function')
+    const fnText = fn?.text ?? 'fn'
     const nameNode = node.childForFieldName('name')
     const varName = nameNode?.text ?? 'result'
 

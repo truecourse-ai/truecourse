@@ -31,9 +31,37 @@ export const unusedFunctionParameterVisitor: CodeRuleVisitor = {
       if (!paramName) continue
       if (paramName.startsWith('_')) continue
 
-      const bodyContent = bodyText.slice(1, -1)
+      // For block bodies ({...}), strip the braces. For expression bodies, use as-is.
+      const bodyContent = body.type === 'statement_block' ? bodyText.slice(1, -1) : bodyText
       const re = new RegExp(`\\b${paramName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
       if (!re.test(bodyContent)) {
+        // If there are later parameters that ARE used, this param is a positional placeholder
+        // (e.g., Next.js route handlers: (request, { params }) where request is required)
+        let laterParamUsed = false
+        for (let j = i + 1; j < params.namedChildCount; j++) {
+          const laterParam = params.namedChild(j)
+          if (!laterParam) continue
+          // Destructured or rest params are always "used"
+          if (laterParam.type === 'object_pattern' || laterParam.type === 'array_pattern' || laterParam.type === 'rest_parameter') {
+            laterParamUsed = true
+            break
+          }
+          let laterName: string | null = null
+          if (laterParam.type === 'identifier') laterName = laterParam.text
+          else if (laterParam.type === 'required_parameter' || laterParam.type === 'optional_parameter') {
+            const nameNode = laterParam.childForFieldName('pattern') ?? laterParam.namedChildren[0]
+            if (nameNode?.type === 'identifier') laterName = nameNode.text
+          }
+          if (laterName && !laterName.startsWith('_')) {
+            const laterRe = new RegExp(`\\b${laterName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
+            if (laterRe.test(bodyContent)) {
+              laterParamUsed = true
+              break
+            }
+          }
+        }
+        if (laterParamUsed) continue
+
         return makeViolation(
           this.ruleKey, param, filePath, 'low',
           `Unused parameter \`${paramName}\``,

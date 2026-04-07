@@ -25,6 +25,16 @@ export const implicitGlobalDeclarationVisitor: CodeRuleVisitor = {
     }
 
     if (node.type === 'function_declaration') {
+      // In ES modules, top-level declarations are module-scoped, not global.
+      // Detect modules by presence of import/export statements.
+      const program = parent
+      for (let i = 0; i < program.namedChildCount; i++) {
+        const child = program.namedChild(i)
+        if (child && (child.type === 'import_statement' || child.type === 'export_statement')) {
+          return null // ES module — function is module-scoped
+        }
+      }
+
       const name = node.childForFieldName('name')
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

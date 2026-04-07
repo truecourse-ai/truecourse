@@ -10,6 +10,32 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
     let parent = node.parent
     while (parent) {
       if (parent.type === 'arrow_function' || parent.type === 'function') {
+        // Only check the direct return value of the callback, not nested children.
+        // For arrow functions: body is the implicit return, or contains return_statement.
+        // For regular functions: must be inside a return_statement.
+        const callbackBody = parent.childForFieldName('body')
+        if (callbackBody) {
+          if (callbackBody.type === 'statement_block') {
+            // Block body — node must be the argument of a return_statement at the top level
+            let isDirectReturn = false
+            for (let i = 0; i < callbackBody.namedChildCount; i++) {
+              const stmt = callbackBody.namedChild(i)
+              if (stmt?.type === 'return_statement') {
+                const retVal = stmt.namedChildren[0]
+                if (retVal && (retVal.id === node.id || (retVal.type === 'parenthesized_expression' && retVal.namedChildren[0]?.id === node.id))) {
+                  isDirectReturn = true
+                }
+              }
+            }
+            if (!isDirectReturn) return null
+          } else {
+            // Implicit return (arrow function body is expression) — node must BE the body
+            if (callbackBody.id !== node.id && !(callbackBody.type === 'parenthesized_expression' && callbackBody.namedChildren[0]?.id === node.id)) {
+              return null
+            }
+          }
+        }
+
         const grandParent = parent.parent
         if (grandParent?.type === 'arguments') {
           const callExpr = grandParent.parent
@@ -60,13 +86,17 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
                   const mapCallback = parent
                   const mapParams = mapCallback.childForFieldName('parameters') || mapCallback.childForFieldName('parameter')
                   if (mapParams) {
-                    // Get parameter names
-                    const paramText = mapParams.text
-                    // Common: (item, index) => or (_, i) =>
-                    const paramNames = paramText.replace(/[()]/g, '').split(',').map((p) => p.trim().split(':')[0].trim())
-                    const indexParam = paramNames[1]
+                    // Use tree-sitter's named children to get parameter nodes
+                    const paramNodes = mapParams.namedChildren.filter(
+                      (c) => c.type === 'identifier' || c.type === 'required_parameter' || c.type === 'object_pattern' || c.type === 'array_pattern',
+                    )
+                    const indexParamNode = paramNodes[1]
+                    const indexParam = indexParamNode?.type === 'identifier'
+                      ? indexParamNode.text
+                      : indexParamNode?.childForFieldName('pattern')?.text ?? indexParamNode?.childForFieldName('name')?.text
 
-                    if (indexParam && attrValue.text.includes(indexParam)) {
+                    // Check if the key value IS the index parameter (exact match, not substring)
+                    if (indexParam && attrValue.text === `{${indexParam}}`) {
                       return makeViolation(
                         this.ruleKey, child, filePath, 'medium',
                         'React list key uses array index',

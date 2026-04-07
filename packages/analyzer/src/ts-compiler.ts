@@ -221,48 +221,92 @@ export function analyzeSemantics(
 // ---------------------------------------------------------------------------
 
 export interface TypeQueryService {
-  /** Get the type of an expression at a position */
-  getTypeAtPosition(filePath: string, line: number, column: number): string | null
+  /** Get the type of an expression at a position (optionally span-aware with end position) */
+  getTypeAtPosition(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): string | null
   /** Check if a type is assignable to Promise */
-  isPromiseLike(filePath: string, line: number, column: number): boolean
+  isPromiseLike(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
   /** Get return type of a function */
-  getReturnType(filePath: string, line: number, column: number): string | null
+  getReturnType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): string | null
   /** Get the type string for display */
-  getTypeString(filePath: string, line: number, column: number): string | null
+  getTypeString(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): string | null
   /** Check if type is 'any' */
-  isAnyType(filePath: string, line: number, column: number): boolean
+  isAnyType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
   /** Check if type is void/undefined */
-  isVoidType(filePath: string, line: number, column: number): boolean
+  isVoidType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
   /** Check if type is boolean */
-  isBooleanType(filePath: string, line: number, column: number): boolean
+  isBooleanType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
+  /** Check if type is a number */
+  isNumberType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
   /** Get parameter types of a function/method */
-  getParameterTypes(filePath: string, line: number, column: number): Array<{ name: string; type: string }> | null
+  getParameterTypes(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): Array<{ name: string; type: string }> | null
   /** Check if two positions have compatible types */
   areTypesCompatible(filePath: string, line1: number, col1: number, line2: number, col2: number): boolean
+  /** Check if the TS compiler reports a type error in a line range */
+  hasTypeErrorInRange(filePath: string, startLine: number, endLine: number): boolean
 }
 
 /**
- * Find the smallest AST node at the given 0-based line and column in a
- * TypeScript source file.
+ * Find the best-matching AST node for a given span in a TypeScript source file.
+ *
+ * When only start position is given, returns the smallest node containing that position.
+ * When end position is also given, prefers the node whose span most closely matches
+ * [start, end]. This is critical for expressions like `obj.method()` where tree-sitter
+ * gives the span of the full call expression, but the smallest node at the start position
+ * would be just the `obj` identifier.
  */
-function getNodeAtPosition(sourceFile: ts.SourceFile, line: number, column: number): ts.Node | undefined {
-  let pos: number
+function getNodeAtPosition(
+  sourceFile: ts.SourceFile,
+  line: number,
+  column: number,
+  endLine?: number,
+  endColumn?: number,
+): ts.Node | undefined {
+  let startPos: number
+  let endPos: number | undefined
   try {
-    pos = ts.getPositionOfLineAndCharacter(sourceFile, line, column)
+    startPos = ts.getPositionOfLineAndCharacter(sourceFile, line, column)
+    if (endLine !== undefined && endColumn !== undefined) {
+      endPos = ts.getPositionOfLineAndCharacter(sourceFile, endLine, endColumn)
+    }
   } catch {
     return undefined
   }
 
   let candidate: ts.Node | undefined
 
-  function visit(node: ts.Node) {
-    if (node.getStart(sourceFile) <= pos && pos < node.getEnd()) {
-      candidate = node
-      ts.forEachChild(node, visit)
+  if (endPos !== undefined) {
+    // Span-aware mode: find the node whose [start, end] most closely matches the requested span
+    let bestScore = -Infinity
+
+    function visitSpan(node: ts.Node) {
+      const nodeStart = node.getStart(sourceFile)
+      const nodeEnd = node.getEnd()
+      if (nodeStart <= startPos && endPos! <= nodeEnd) {
+        // Score prefers nodes that tightly wrap the requested span
+        // Smaller excess span = higher score
+        const excess = (startPos - nodeStart) + (nodeEnd - endPos!)
+        const score = -excess
+        if (score >= bestScore) {
+          bestScore = score
+          candidate = node
+        }
+        ts.forEachChild(node, visitSpan)
+      }
     }
+
+    visitSpan(sourceFile)
+  } else {
+    // Legacy mode: find smallest node containing the position
+    function visit(node: ts.Node) {
+      if (node.getStart(sourceFile) <= startPos && startPos < node.getEnd()) {
+        candidate = node
+        ts.forEachChild(node, visit)
+      }
+    }
+
+    visit(sourceFile)
   }
 
-  visit(sourceFile)
   return candidate
 }
 
@@ -278,96 +322,166 @@ export function createTypeQueryService(
   filePaths: string[],
   scopedOptions: ScopedCompilerOptions[],
 ): TypeQueryService {
-  const baseOptions = scopedOptions[scopedOptions.length - 1]?.options ?? {}
-  const options: ts.CompilerOptions = {
-    ...baseOptions,
-    skipLibCheck: true,
-    noEmit: true,
+  // Create one TS program per scoped option (per package) so that each file
+  // gets its own tsconfig's paths, baseUrl, and module resolution settings.
+  // A single global program fails because path aliases like @/* resolve
+  // relative to each package's directory.
+  interface ScopedProgram {
+    program: ts.Program
+    checker: ts.TypeChecker
+    files: Set<string>
   }
 
-  const program = ts.createProgram(filePaths, options)
-  const checker = program.getTypeChecker()
+  const scopedPrograms: ScopedProgram[] = []
+  const fileToProgram = new Map<string, ScopedProgram>()
 
-  function getTypeAtNode(filePath: string, line: number, column: number): ts.Type | null {
-    const sf = program.getSourceFile(filePath)
+  // Group files by their matching scoped options
+  const filesByScope = new Map<ScopedCompilerOptions, string[]>()
+  const fallbackFiles: string[] = []
+
+  for (const fp of filePaths) {
+    const scope = scopedOptions.find((s) => fp.startsWith(s.dir + '/'))
+    if (scope) {
+      if (!filesByScope.has(scope)) filesByScope.set(scope, [])
+      filesByScope.get(scope)!.push(fp)
+    } else {
+      fallbackFiles.push(fp)
+    }
+  }
+
+  // Add fallback files to the last scope (root-level tsconfig)
+  if (fallbackFiles.length > 0 && scopedOptions.length > 0) {
+    const fallbackScope = scopedOptions[scopedOptions.length - 1]
+    if (!filesByScope.has(fallbackScope)) filesByScope.set(fallbackScope, [])
+    filesByScope.get(fallbackScope)!.push(...fallbackFiles)
+  }
+
+  for (const [scope, files] of filesByScope) {
+    const options: ts.CompilerOptions = {
+      ...scope.options,
+      skipLibCheck: true,
+      noEmit: true,
+    }
+    const program = ts.createProgram(files, options)
+    const checker = program.getTypeChecker()
+    const sp: ScopedProgram = { program, checker, files: new Set(files) }
+    scopedPrograms.push(sp)
+    for (const f of files) fileToProgram.set(f, sp)
+  }
+
+  // Fallback if no scoped options at all
+  if (scopedPrograms.length === 0) {
+    const program = ts.createProgram(filePaths, { skipLibCheck: true, noEmit: true })
+    const checker = program.getTypeChecker()
+    const sp: ScopedProgram = { program, checker, files: new Set(filePaths) }
+    scopedPrograms.push(sp)
+    for (const f of filePaths) fileToProgram.set(f, sp)
+  }
+
+  function getProgramForFile(filePath: string): ScopedProgram | undefined {
+    return fileToProgram.get(filePath)
+  }
+
+  function getTypeAtNode(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): ts.Type | null {
+    const sp = getProgramForFile(filePath)
+    if (!sp) return null
+    const sf = sp.program.getSourceFile(filePath)
     if (!sf) return null
-    const node = getNodeAtPosition(sf, line, column)
+    const node = getNodeAtPosition(sf, line, column, endLine, endColumn)
     if (!node) return null
     try {
-      return checker.getTypeAtLocation(node)
+      return sp.checker.getTypeAtLocation(node)
     } catch {
       return null
     }
   }
 
-  function typeToString(type: ts.Type): string {
-    return checker.typeToString(type)
+  function getNodeForFile(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): { node: ts.Node; checker: ts.TypeChecker } | null {
+    const sp = getProgramForFile(filePath)
+    if (!sp) return null
+    const sf = sp.program.getSourceFile(filePath)
+    if (!sf) return null
+    const node = getNodeAtPosition(sf, line, column, endLine, endColumn)
+    if (!node) return null
+    return { node, checker: sp.checker }
+  }
+
+  function typeToString(filePath: string, type: ts.Type): string {
+    const sp = getProgramForFile(filePath)
+    return sp ? sp.checker.typeToString(type) : String(type)
   }
 
   return {
-    getTypeAtPosition(filePath, line, column) {
-      const type = getTypeAtNode(filePath, line, column)
-      return type ? typeToString(type) : null
+    getTypeAtPosition(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
+      return type ? typeToString(filePath, type) : null
     },
 
-    isPromiseLike(filePath, line, column) {
-      const type = getTypeAtNode(filePath, line, column)
+    isPromiseLike(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
       if (!type) return false
-      const str = typeToString(type)
-      return str.startsWith('Promise<') || str.includes('PromiseLike<')
+      // Check string representation for Promise/PromiseLike
+      const str = typeToString(filePath, type)
+      if (str.startsWith('Promise<') || str.includes('PromiseLike<')) return true
+      // Check if the type has a 'then' method (implements PromiseLike interface)
+      // This catches thenables like drizzle-orm's PgRelationalQuery
+      const thenProp = type.getProperty('then')
+      return !!thenProp
     },
 
-    getReturnType(filePath, line, column) {
-      const sf = program.getSourceFile(filePath)
-      if (!sf) return null
-      const node = getNodeAtPosition(sf, line, column)
-      if (!node) return null
+    getReturnType(filePath, line, column, endLine?, endColumn?) {
+      const result = getNodeForFile(filePath, line, column, endLine, endColumn)
+      if (!result) return null
       try {
-        const type = checker.getTypeAtLocation(node)
+        const type = result.checker.getTypeAtLocation(result.node)
         const signatures = type.getCallSignatures()
         if (signatures.length === 0) return null
         const returnType = signatures[0].getReturnType()
-        return typeToString(returnType)
+        return typeToString(filePath, returnType)
       } catch {
         return null
       }
     },
 
-    getTypeString(filePath, line, column) {
-      const type = getTypeAtNode(filePath, line, column)
-      return type ? typeToString(type) : null
+    getTypeString(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
+      return type ? typeToString(filePath, type) : null
     },
 
-    isAnyType(filePath, line, column) {
-      const type = getTypeAtNode(filePath, line, column)
+    isAnyType(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
       if (!type) return false
       return (type.flags & ts.TypeFlags.Any) !== 0
     },
 
-    isVoidType(filePath, line, column) {
-      const type = getTypeAtNode(filePath, line, column)
+    isVoidType(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
       if (!type) return false
       return (type.flags & (ts.TypeFlags.Void | ts.TypeFlags.Undefined)) !== 0
     },
 
-    isBooleanType(filePath, line, column) {
-      const type = getTypeAtNode(filePath, line, column)
+    isBooleanType(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
       if (!type) return false
       return (type.flags & (ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral)) !== 0
     },
 
-    getParameterTypes(filePath, line, column) {
-      const sf = program.getSourceFile(filePath)
-      if (!sf) return null
-      const node = getNodeAtPosition(sf, line, column)
-      if (!node) return null
+    isNumberType(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
+      if (!type) return false
+      return (type.flags & (ts.TypeFlags.Number | ts.TypeFlags.NumberLiteral)) !== 0
+    },
+
+    getParameterTypes(filePath, line, column, endLine?, endColumn?) {
+      const result = getNodeForFile(filePath, line, column, endLine, endColumn)
+      if (!result) return null
       try {
-        const type = checker.getTypeAtLocation(node)
+        const type = result.checker.getTypeAtLocation(result.node)
         const signatures = type.getCallSignatures()
         if (signatures.length === 0) return null
         return signatures[0].getParameters().map((param) => ({
           name: param.getName(),
-          type: typeToString(checker.getTypeOfSymbolAtLocation(param, node)),
+          type: typeToString(filePath, result.checker.getTypeOfSymbolAtLocation(param, result.node)),
         }))
       } catch {
         return null
@@ -378,7 +492,27 @@ export function createTypeQueryService(
       const type1 = getTypeAtNode(filePath, line1, col1)
       const type2 = getTypeAtNode(filePath, line2, col2)
       if (!type1 || !type2) return false
-      return checker.isTypeAssignableTo(type1, type2) || checker.isTypeAssignableTo(type2, type1)
+      const sp = getProgramForFile(filePath)
+      if (!sp) return false
+      return sp.checker.isTypeAssignableTo(type1, type2) || sp.checker.isTypeAssignableTo(type2, type1)
+    },
+
+    hasTypeErrorInRange(filePath, startLine, endLine) {
+      const sp = getProgramForFile(filePath)
+      if (!sp) return false
+      const sf = sp.program.getSourceFile(filePath)
+      if (!sf) return false
+      try {
+        const diagnostics = sp.program.getSemanticDiagnostics(sf)
+        for (const d of diagnostics) {
+          if (d.start === undefined || d.file !== sf) continue
+          const diagLine = sf.getLineAndCharacterOfPosition(d.start).line
+          if (diagLine >= startLine && diagLine <= endLine) return true
+        }
+      } catch {
+        // Skip — diagnostics unavailable
+      }
+      return false
     },
   }
 }

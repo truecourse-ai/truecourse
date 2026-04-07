@@ -16,6 +16,9 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
       body = node.childForFieldName('body')
       // Arrow function with expression body always returns — skip
       if (body && body.type !== 'statement_block') return null
+      // Arrow functions passed as callbacks (e.g., useEffect, event handlers) commonly
+      // have mixed returns by design (React cleanup functions, early exits)
+      if (node.parent?.type === 'arguments') return null
     } else {
       body = node.childForFieldName('body')
     }

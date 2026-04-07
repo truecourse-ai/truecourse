@@ -18,6 +18,15 @@ export const magicStringVisitor: CodeRuleVisitor = {
       if (n.type === 'string' || n.type === 'template_string') {
         // Only plain strings, not template literals with expressions
         if (n.type === 'string') {
+          // Skip TypeScript type keywords (e.g., `string` inside `predefined_type`)
+          if (n.parent?.type === 'predefined_type') return
+          // Skip type annotation contexts
+          if (n.parent?.type === 'type_annotation' || n.parent?.type === 'literal_type'
+            || n.parent?.type === 'property_signature') return
+          // Skip JSX attribute values (Tailwind CSS classes, className, etc.)
+          if (n.parent?.type === 'jsx_attribute') return
+          // Skip strings inside JSX expression containers that are attribute values
+          if (n.parent?.type === 'jsx_expression' && n.parent.parent?.type === 'jsx_attribute') return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings

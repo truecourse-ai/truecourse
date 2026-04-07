@@ -2,9 +2,8 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 /**
- * Detects any string concatenation using + where a template literal could be used.
- * Unlike prefer-template-literal which only flags string+non-string, this flags
- * any binary + where one operand is a string literal.
+ * Detects string concatenation using + where a template literal could be used.
+ * Flags any binary + where one operand is a string literal and the other is not.
  */
 export const preferTemplateVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/prefer-template',

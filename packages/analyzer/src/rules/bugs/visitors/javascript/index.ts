@@ -102,7 +102,6 @@ import { arraySortWithoutCompareVisitor } from './array-sort-without-compare.js'
 import { contradictoryOptionalChainVisitor } from './contradictory-optional-chain.js'
 import { duplicateEnumValueVisitor } from './duplicate-enum-value.js'
 import { confusingNonNullAssertionVisitor } from './confusing-non-null-assertion.js'
-import { nullComparisonWithoutTypeCheckVisitor } from './null-comparison-without-type-check.js'
 import { extraNonNullAssertionVisitor } from './extra-non-null-assertion.js'
 import { labelVariableCollisionVisitor } from './label-variable-collision.js'
 import { unassignedVariableVisitor } from './unassigned-variable.js'
@@ -263,7 +262,6 @@ export const BUGS_JS_VISITORS: CodeRuleVisitor[] = [
   contradictoryOptionalChainVisitor,
   duplicateEnumValueVisitor,
   confusingNonNullAssertionVisitor,
-  nullComparisonWithoutTypeCheckVisitor,
   extraNonNullAssertionVisitor,
   labelVariableCollisionVisitor,
   unassignedVariableVisitor,

@@ -12,9 +12,16 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
     function walk(n: SyntaxNode) {
       if (n.type === 'string') {
         const content = n.text
-        if (content.length <= 3) return
+        if (content.length <= 5) return
         const parent = n.parent
+        // Skip TypeScript type keywords (e.g., `string` inside `predefined_type`)
+        if (parent?.type === 'predefined_type') return
         if (parent?.type === 'import_statement' || parent?.type === 'call_expression') return
+        // Skip JSX attribute values (SVG props, className, Tailwind classes)
+        if (parent?.type === 'jsx_attribute') return
+        // Skip type annotations and type contexts
+        if (parent?.type === 'type_annotation' || parent?.type === 'type_alias_declaration'
+          || parent?.type === 'property_signature' || parent?.type === 'literal_type') return
 
         const existing = stringCounts.get(content)
         if (existing) {

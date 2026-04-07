@@ -25,6 +25,12 @@ export const invariantReturnVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, dataFlow?: DataFlowContext) {
     if (!dataFlow) return null
 
+    // Skip async functions — void async functions intentionally return undefined from every path
+    if (node.children.some((c) => c.type === 'async')) return null
+
+    // Skip arrow functions used as callbacks (event handlers, useEffect, etc.)
+    if (node.type === 'arrow_function' && node.parent?.type === 'arguments') return null
+
     const scope = dataFlow.getScopeForNode(node)
     if (!scope) return null
 

@@ -1,11 +1,16 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isLikelyServerComponent } from './_helpers.js'
 
 export const inlineObjectInJsxPropVisitor: CodeRuleVisitor = {
   ruleKey: 'performance/deterministic/inline-object-in-jsx-prop',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['jsx_attribute'],
   visit(node, filePath, sourceCode) {
+    // Server components don't re-render on the client — inline allocation has no perf impact.
+    // Detect by: file is in a Next.js App Router path AND lacks 'use client' directive.
+    if (isLikelyServerComponent(filePath, sourceCode)) return null
+
     const value = node.namedChildren[1]
     if (!value) return null
 

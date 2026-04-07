@@ -16,10 +16,33 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
     const awaitedExpr = node.namedChildren[0]
     if (!awaitedExpr) return null
 
+    // If the type is `any` or `unknown`, we can't determine if it's a Promise — skip.
+    // Both are compatible with PromiseLike, so flagging them would be a false positive.
+    const isAny = typeQuery.isAnyType(
+      filePath,
+      awaitedExpr.startPosition.row,
+      awaitedExpr.startPosition.column,
+      awaitedExpr.endPosition.row,
+      awaitedExpr.endPosition.column,
+    )
+    if (isAny) return null
+
+    // Also skip `unknown` — it's not provably non-thenable
+    const typeStr = typeQuery.getTypeAtPosition(
+      filePath,
+      awaitedExpr.startPosition.row,
+      awaitedExpr.startPosition.column,
+      awaitedExpr.endPosition.row,
+      awaitedExpr.endPosition.column,
+    )
+    if (!typeStr || typeStr === 'unknown') return null
+
     const isPromise = typeQuery.isPromiseLike(
       filePath,
       awaitedExpr.startPosition.row,
       awaitedExpr.startPosition.column,
+      awaitedExpr.endPosition.row,
+      awaitedExpr.endPosition.column,
     )
     if (!isPromise) {
       return makeViolation(

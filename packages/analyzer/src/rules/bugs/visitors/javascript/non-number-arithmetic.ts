@@ -23,8 +23,8 @@ export const nonNumberArithmeticVisitor: CodeRuleVisitor = {
     const right = node.childForFieldName('right')
     if (!left || !right) return null
 
-    const leftType = typeQuery.getTypeAtPosition(filePath, left.startPosition.row, left.startPosition.column)
-    const rightType = typeQuery.getTypeAtPosition(filePath, right.startPosition.row, right.startPosition.column)
+    const leftType = typeQuery.getTypeAtPosition(filePath, left.startPosition.row, left.startPosition.column, left.endPosition.row, left.endPosition.column)
+    const rightType = typeQuery.getTypeAtPosition(filePath, right.startPosition.row, right.startPosition.column, right.endPosition.row, right.endPosition.column)
     if (!leftType || !rightType) return null
 
     const numericTypes = new Set(['number', 'bigint', 'any'])

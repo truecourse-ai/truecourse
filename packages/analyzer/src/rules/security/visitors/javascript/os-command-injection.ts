@@ -25,6 +25,12 @@ export const osCommandInjectionVisitor: CodeRuleVisitor = {
 
     // child_process.exec() / execSync()
     if (EXEC_METHODS.has(methodName)) {
+      // For member expressions (obj.exec()), only flag when the object is plausibly child_process.
+      // RegExp.exec() and other .exec() calls are not OS command execution.
+      if (fn.type === 'member_expression') {
+        const CP_OBJECTS = new Set(['child_process', 'cp', 'childProcess', 'proc'])
+        if (!CP_OBJECTS.has(objectName)) return null
+      }
       return makeViolation(
         this.ruleKey, node, filePath, 'critical',
         'OS command injection risk',

@@ -153,6 +153,26 @@ export function isInsideHook(node: SyntaxNode): boolean {
   return false
 }
 
+/**
+ * Check if a file is likely a React Server Component.
+ * Server components don't re-render on the client, so inline allocations
+ * have no performance impact.
+ *
+ * Detection: file is a .tsx/.jsx file that lacks a 'use client' directive.
+ * This only applies to Next.js App Router / React Server Components setups.
+ * We check for the presence of Next.js App Router file conventions in the path
+ * to avoid false negatives on non-RSC projects.
+ */
+export function isLikelyServerComponent(filePath: string, sourceCode: string): boolean {
+  // Only applies to JSX files
+  if (!/\.[tj]sx$/.test(filePath)) return false
+  // Only in Next.js App Router paths (contains /app/ directory)
+  if (!/\/app\//.test(filePath)) return false
+  // If the file has 'use client', it's a client component
+  if (sourceCode.includes("'use client'") || sourceCode.includes('"use client"')) return false
+  return true
+}
+
 export function findContainingStatement(node: SyntaxNode): SyntaxNode | null {
   let current: SyntaxNode | null = node
   while (current) {

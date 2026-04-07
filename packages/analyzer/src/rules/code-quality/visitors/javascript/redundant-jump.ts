@@ -32,6 +32,13 @@ export const redundantJumpVisitor: CodeRuleVisitor = {
       const stmts = parent.namedChildren
       if (stmts[stmts.length - 1] !== node) return null
 
+      // Only redundant if the parent block is the direct body of a loop.
+      // `continue` inside an `if`/`else`/`switch` within a loop is NOT redundant.
+      const grandparent = parent.parent
+      if (!grandparent) return null
+      const LOOP_TYPES = ['for_statement', 'for_in_statement', 'for_of_statement', 'while_statement', 'do_statement']
+      if (!LOOP_TYPES.includes(grandparent.type)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Redundant continue',

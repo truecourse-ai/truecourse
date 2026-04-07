@@ -132,16 +132,6 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     type: 'deterministic',
   },
   {
-    key: 'code-quality/deterministic/prefer-template-literal',
-    category: 'code',
-    domain: 'code-quality',
-    name: 'Prefer template literal',
-    description: 'String concatenation with + where a template literal would be cleaner.',
-    enabled: true,
-    severity: 'low',
-    type: 'deterministic',
-  },
-  {
     key: 'code-quality/deterministic/no-var-declaration',
     category: 'code',
     domain: 'code-quality',

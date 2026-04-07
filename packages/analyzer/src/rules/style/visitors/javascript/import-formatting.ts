@@ -30,6 +30,14 @@ export const importFormattingVisitor: CodeRuleVisitor = {
         child.type !== 'comment' &&
         child.type !== 'empty_statement'
       ) {
+        // Skip 'use client' / 'use server' directives — these must appear before imports
+        if (child.type === 'expression_statement') {
+          const expr = child.namedChildren[0]
+          if (expr?.type === 'string') {
+            const inner = expr.text.slice(1, -1) // strip quotes
+            if (inner === 'use client' || inner === 'use server') continue
+          }
+        }
         sawNonImport = true
       }
     }

@@ -28,6 +28,14 @@ export const httpCallNoTimeoutVisitor: CodeRuleVisitor = {
       if (args) {
         const optionsArg = args.namedChildren[1]
         if (optionsArg && optionsArg.text.includes('signal')) return null
+        // Skip fetch to relative URLs (same-origin internal API calls)
+        // Only flag external HTTP calls that could hang indefinitely
+        const urlArg = args.namedChildren[0]
+        if (urlArg) {
+          const urlText = urlArg.text
+          // Relative URLs start with '/' or backtick template starting with /
+          if (urlText.startsWith("'/") || urlText.startsWith('"/') || urlText.startsWith('`/')) return null
+        }
       }
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

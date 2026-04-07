@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-const EVAL_FUNCTIONS = new Set(['eval', 'exec'])
+const EVAL_FUNCTIONS = new Set(['eval'])
 const TIMER_FUNCTIONS = new Set(['setTimeout', 'setInterval'])
 
 export const evalUsageVisitor: CodeRuleVisitor = {

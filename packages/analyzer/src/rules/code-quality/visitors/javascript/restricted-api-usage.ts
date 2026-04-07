@@ -10,9 +10,6 @@ const RESTRICTED_GLOBALS = new Map<string, string>([
   ['event', 'Implicit global event object — use explicit event parameter instead'],
   ['fdescribe', 'Focused test suite — will skip other tests in CI'],
   ['fit', 'Focused test — will skip other tests in CI'],
-  ['name', 'Global name property — likely a bug, use a local variable'],
-  ['status', 'Global status property — likely a bug, use a local variable'],
-  ['length', 'Global length property — likely a bug, use a local variable'],
   ['location', 'Direct location mutation — use router navigation instead'],
 ])
 

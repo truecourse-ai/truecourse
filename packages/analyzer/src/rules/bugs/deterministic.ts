@@ -1896,16 +1896,7 @@ export const BUGS_DETERMINISTIC_RULES: AnalysisRule[] = [
     severity: 'medium',
     type: 'deterministic',
   },
-  {
-    key: 'bugs/deterministic/null-comparison-without-type-check',
-    category: 'code',
-    domain: 'bugs',
-    name: 'Null comparison without type check',
-    description: '`== null` matches both `null` and `undefined` — use `=== null` for precise null check.',
-    enabled: true,
-    severity: 'medium',
-    type: 'deterministic',
-  },
+  // null-comparison-without-type-check removed — `== null` is idiomatic JS/TS for null-or-undefined checks
   {
     key: 'bugs/deterministic/extra-non-null-assertion',
     category: 'code',

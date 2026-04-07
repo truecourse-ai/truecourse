@@ -93,10 +93,22 @@ describe('code-quality/deterministic/no-explicit-any', () => {
 });
 
 describe('code-quality/deterministic/star-import', () => {
-  it('detects namespace import in JS/TS', () => {
-    const violations = check(`import * as utils from './utils';`);
+  it('detects namespace import from external package', () => {
+    const violations = check(`import * as lodash from 'lodash';`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/star-import');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag namespace import from relative path (local module)', () => {
+    const violations = check(`import * as utils from './utils';`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/star-import');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag namespace import from react', () => {
+    const violations = check(`import * as React from 'react';`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/star-import');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag named imports', () => {
@@ -316,25 +328,7 @@ describe('code-quality/deterministic/no-useless-catch', () => {
   });
 });
 
-describe('code-quality/deterministic/prefer-template-literal', () => {
-  it('detects string + variable concatenation', () => {
-    const violations = check(`const msg = "Hello " + name;`);
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-template-literal');
-    expect(matches).toHaveLength(1);
-  });
-
-  it('does not flag number addition', () => {
-    const violations = check(`const sum = a + b;`);
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-template-literal');
-    expect(matches).toHaveLength(0);
-  });
-
-  it('does not flag two string literals concatenated', () => {
-    const violations = check(`const x = "hello" + " world";`);
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-template-literal');
-    expect(matches).toHaveLength(0);
-  });
-});
+// prefer-template-literal was removed (duplicate of prefer-template)
 
 describe('code-quality/deterministic/no-var-declaration', () => {
   it('detects var declaration in JavaScript', () => {
@@ -1764,16 +1758,28 @@ describe('code-quality/deterministic/useless-concat', () => {
 });
 
 describe('code-quality/deterministic/strict-equality', () => {
-  it('detects == operator', () => {
-    const violations = check(`if (x == null) {}`);
+  it('detects == operator with non-null operand', () => {
+    const violations = check(`if (x == 0) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/strict-equality');
     expect(matches).toHaveLength(1);
   });
 
-  it('detects != operator', () => {
-    const violations = check(`if (x != null) {}`);
+  it('detects != operator with non-null operand', () => {
+    const violations = check(`if (x != 0) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/strict-equality');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag == null (idiomatic null-or-undefined check)', () => {
+    const violations = check(`if (x == null) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/strict-equality');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag != null (idiomatic null-or-undefined check)', () => {
+    const violations = check(`if (x != null) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/strict-equality');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag === operator', () => {

@@ -30,11 +30,15 @@ function isBooleanGuarded(node: SyntaxNode): boolean {
   return false
 }
 
+// Common boolean-named identifiers that are always safe
+const BOOLEAN_NAMES = /^(is[A-Z]|has[A-Z]|show[A-Z]|can[A-Z]|should[A-Z]|loading|disabled|open|visible|checked|selected|expanded|active|enabled|hidden|readonly|required)/
+
 export const reactLeakedRenderVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/react-leaked-render',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['jsx_expression'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     // Detect: {count && <Component/>} where count could be 0
     // Look for binary_expression with && where left side is a potential non-boolean
     const expr = node.namedChildren[0]
@@ -46,17 +50,36 @@ export const reactLeakedRenderVisitor: CodeRuleVisitor = {
     const left = expr.childForFieldName('left')
     if (!left) return null
 
-    // If left side is not explicitly boolean-guarded, flag it
-    if (!isBooleanGuarded(left)) {
-      return makeViolation(
-        this.ruleKey, expr, filePath, 'medium',
-        'React leaked render: non-boolean condition',
-        `\`${left.text}\` in JSX condition may render unexpected values (like \`0\` or \`""\`) when falsy.`,
-        sourceCode,
-        `Convert to boolean: \`{!!${left.text} && ...}\` or \`{${left.text} > 0 && ...}\`.`,
-      )
+    // If left side is explicitly boolean-guarded, skip
+    if (isBooleanGuarded(left)) return null
+
+    // Skip common boolean-named identifiers
+    if (left.type === 'identifier' && BOOLEAN_NAMES.test(left.text)) return null
+    // Skip member access on common boolean names (e.g., props.isOpen)
+    if (left.type === 'member_expression') {
+      const prop = left.childForFieldName('property')
+      if (prop && BOOLEAN_NAMES.test(prop.text)) return null
     }
 
-    return null
+    // If type query is available, only flag when the type includes number
+    // (the leaked render bug only happens with 0 rendering as "0")
+    if (typeQuery) {
+      const isNumber = typeQuery.isNumberType(
+        filePath,
+        left.startPosition.row,
+        left.startPosition.column,
+        left.endPosition.row,
+        left.endPosition.column,
+      )
+      if (!isNumber) return null
+    }
+
+    return makeViolation(
+      this.ruleKey, expr, filePath, 'medium',
+      'React leaked render: non-boolean condition',
+      `\`${left.text}\` in JSX condition may render unexpected values (like \`0\`) when falsy.`,
+      sourceCode,
+      `Convert to boolean: \`{!!${left.text} && ...}\` or \`{${left.text} > 0 && ...}\`.`,
+    )
   },
 }

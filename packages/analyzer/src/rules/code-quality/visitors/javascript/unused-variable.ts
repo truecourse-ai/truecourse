@@ -37,7 +37,7 @@ export const unusedVariableVisitor: CodeRuleVisitor = {
         collectReadsUnscoped(n)
         return
       }
-      if (n.type === 'identifier') {
+      if (n.type === 'identifier' || n.type === 'shorthand_property_identifier') {
         const parent = n.parent
         if (parent) {
           if ((parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression')
@@ -54,7 +54,7 @@ export const unusedVariableVisitor: CodeRuleVisitor = {
     }
 
     function collectReadsUnscoped(n: SyntaxNode) {
-      if (n.type === 'identifier') read.add(n.text)
+      if (n.type === 'identifier' || n.type === 'shorthand_property_identifier') read.add(n.text)
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) collectReadsUnscoped(child)

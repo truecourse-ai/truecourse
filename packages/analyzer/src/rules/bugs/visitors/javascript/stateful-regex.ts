@@ -14,13 +14,27 @@ export const statefulRegexVisitor: CodeRuleVisitor = {
     // Only flag g or y (global or sticky) — those have stateful lastIndex
     if (!flagsText.includes('g') && !flagsText.includes('y')) return null
 
-    // Only flag if the regex is used directly in a call (not stored in a variable)
-    // i.e., the parent is a call_expression argument, not a variable_declarator
     const parent = node.parent
     if (!parent) return null
 
-    // If stored in a variable, it's fine — only flag inline use in function calls
-    if (parent.type === 'variable_declarator' || parent.type === 'assignment_expression') return null
+    // Inline regex in method calls like .replace(/x/g, ...) and .match(/x/g) are safe —
+    // a fresh regex instance is created each time. Only stored/reused regex is problematic.
+    if (parent.type === 'arguments') return null
+
+    // Regex stored in a module-scope variable and reused across function calls IS problematic.
+    // Only flag when the regex is assigned to a variable at module scope (not inside a function).
+    if (parent.type !== 'variable_declarator' && parent.type !== 'assignment_expression') return null
+
+    // Check if the variable is at module scope (parent chain reaches 'program' without hitting a function)
+    let ancestor = parent.parent
+    while (ancestor) {
+      if (ancestor.type === 'function_declaration' || ancestor.type === 'arrow_function'
+        || ancestor.type === 'function' || ancestor.type === 'method_definition') {
+        return null // Inside a function — regex is recreated each call, safe
+      }
+      if (ancestor.type === 'program') break
+      ancestor = ancestor.parent
+    }
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

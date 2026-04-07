@@ -19,7 +19,7 @@ export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
       // Unsafe call: calling a value typed as any
       const fn = node.childForFieldName('function')
       if (fn && fn.type === 'identifier') {
-        const isAny = typeQuery.isAnyType(filePath, fn.startPosition.row, fn.startPosition.column)
+        const isAny = typeQuery.isAnyType(filePath, fn.startPosition.row, fn.startPosition.column, fn.endPosition.row, fn.endPosition.column)
         if (isAny) {
           return makeViolation(
             this.ruleKey, node, filePath, 'medium',
@@ -36,7 +36,7 @@ export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
       // Unsafe member access: accessing property on any
       const obj = node.childForFieldName('object')
       if (obj && obj.type === 'identifier') {
-        const isAny = typeQuery.isAnyType(filePath, obj.startPosition.row, obj.startPosition.column)
+        const isAny = typeQuery.isAnyType(filePath, obj.startPosition.row, obj.startPosition.column, obj.endPosition.row, obj.endPosition.column)
         if (isAny) {
           const prop = node.childForFieldName('property')
           return makeViolation(
@@ -54,7 +54,7 @@ export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
       // Unsafe assignment: assigning any to a typed variable
       const value = node.childForFieldName('value')
       if (!value) return null
-      const isAny = typeQuery.isAnyType(filePath, value.startPosition.row, value.startPosition.column)
+      const isAny = typeQuery.isAnyType(filePath, value.startPosition.row, value.startPosition.column, value.endPosition.row, value.endPosition.column)
       if (isAny && value.type !== 'identifier') {
         // Only flag non-trivial any assignments (e.g., function calls returning any)
         if (value.type === 'call_expression') {

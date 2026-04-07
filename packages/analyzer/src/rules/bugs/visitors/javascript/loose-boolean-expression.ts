@@ -39,17 +39,29 @@ export const looseBooleanExpressionVisitor: CodeRuleVisitor = {
       filePath,
       expr.startPosition.row,
       expr.startPosition.column,
+      expr.endPosition.row,
+      expr.endPosition.column,
     )
     if (!isBoolean) {
       const typeStr = typeQuery.getTypeAtPosition(
         filePath,
         expr.startPosition.row,
         expr.startPosition.column,
+        expr.endPosition.row,
+        expr.endPosition.column,
       )
       // Skip if type is unknown or any
       if (!typeStr || typeStr === 'any' || typeStr === 'unknown') return null
       // Skip if it's already a boolean literal type
       if (typeStr === 'true' || typeStr === 'false') return null
+      // Skip object/array/function types — they can never be falsy (only null/undefined)
+      // so truthiness checks on them are always safe
+      if (typeStr.startsWith('{') || typeStr.endsWith('[]') || typeStr.startsWith('(')
+        || typeStr.includes('=>') || typeStr.includes('class ')) return null
+      // Skip when the type is a class/interface instance (starts with uppercase, not a primitive)
+      // These are objects that can only be truthy or null/undefined
+      const baseType = typeStr.replace(/\s*\|.*/, '') // first type in union
+      if (/^[A-Z]/.test(baseType) && !['Number', 'String', 'Boolean'].includes(baseType)) return null
 
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
