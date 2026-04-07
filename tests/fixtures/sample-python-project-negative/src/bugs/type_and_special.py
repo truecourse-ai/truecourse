@@ -17,24 +17,24 @@ f = open("data.txt", "rx")
 pairs = zip([1, 2, 3], ["a", "b"])
 
 
-# SKIP: bugs/deterministic/map-without-strict
+# VIOLATION: bugs/deterministic/map-without-strict
 result = map(lambda x, y: x + y, [1, 2], [3, 4, 5])
 
 
-# SKIP: bugs/deterministic/batched-without-strict
+# VIOLATION: bugs/deterministic/batched-without-strict
 from itertools import batched
 chunks = batched([1, 2, 3, 4, 5], 2)
 
 
-# SKIP: bugs/deterministic/datetime-without-timezone
+# VIOLATION: bugs/deterministic/datetime-without-timezone
 now = datetime.now()
 
 
-# SKIP: bugs/deterministic/datetime-min-max
+# VIOLATION: bugs/deterministic/datetime-min-max
 earliest = datetime.min
 
 
-# SKIP: bugs/deterministic/datetime-12h-format-without-ampm
+# VIOLATION: bugs/deterministic/datetime-12h-format-without-ampm
 formatted = now.strftime("%I:%M:%S")
 
 
@@ -46,7 +46,7 @@ bad_date = datetime(2024, 13, 1)
 amount = Decimal(0.1)
 
 
-# SKIP: bugs/deterministic/math-isclose-zero-no-abstol
+# VIOLATION: bugs/deterministic/math-isclose-zero-no-abstol
 close = math.isclose(0.0, 1e-10)
 
 
@@ -54,11 +54,11 @@ close = math.isclose(0.0, 1e-10)
 common = os.path.commonprefix(["/usr/lib", "/usr/local"])
 
 
-# SKIP: bugs/deterministic/subprocess-popen-preexec-fn
+# VIOLATION: bugs/deterministic/subprocess-popen-preexec-fn
 proc = subprocess.Popen(["ls"], preexec_fn=os.setpgrp)
 
 
-# SKIP: bugs/deterministic/invalid-mock-access
+# VIOLATION: bugs/deterministic/invalid-mock-access
 mock = MagicMock()
 mock.assert_called_once()
 
@@ -85,7 +85,7 @@ if sys.version[0] == "3":
     pass
 
 
-# SKIP: bugs/deterministic/return-in-generator
+# VIOLATION: bugs/deterministic/return-in-generator
 def bad_generator():
     yield 1
     return [2, 3]

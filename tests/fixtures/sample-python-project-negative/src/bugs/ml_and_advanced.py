@@ -16,7 +16,7 @@ class MyModel(nn.Module):
         self.layer = nn.Linear(10, 5)
 
 
-# SKIP: bugs/deterministic/sklearn-estimator-trailing-underscore
+# VIOLATION: bugs/deterministic/sklearn-estimator-trailing-underscore
 class MyEstimator(BaseEstimator):
     def __init__(self):
         self.coef_ = None

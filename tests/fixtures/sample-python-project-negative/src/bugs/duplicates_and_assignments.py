@@ -45,7 +45,7 @@ def process_data(data):
     data = data
 
 
-# SKIP: bugs/deterministic/self-or-cls-assignment
+# VIOLATION: bugs/deterministic/self-or-cls-assignment
 class Foo:
     def method(self):
         self = "reassigned"
@@ -56,7 +56,7 @@ import os
 import os
 
 
-# SKIP: bugs/deterministic/duplicate-entry-dunder-all
+# VIOLATION: bugs/deterministic/duplicate-entry-dunder-all
 __all__ = ["func_a", "func_b", "func_a"]
 
 
@@ -65,7 +65,7 @@ import json
 import json as json
 
 
-# SKIP: bugs/deterministic/redefined-argument-from-local
+# VIOLATION: bugs/deterministic/redefined-argument-from-local
 def transform(items):
     for items in range(10):
         pass

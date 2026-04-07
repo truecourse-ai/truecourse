@@ -97,7 +97,7 @@ class ReturnsList:
         return iter([1, 2, 3])
 
 
-# SKIP: bugs/deterministic/bad-staticmethod-argument
+# VIOLATION: bugs/deterministic/bad-staticmethod-argument
 class BadStatic:
     @staticmethod
     def process(self, data):
@@ -123,7 +123,7 @@ class BadClassmethod:
 "hello"()
 
 
-# SKIP: bugs/deterministic/single-string-slots
+# VIOLATION: bugs/deterministic/single-string-slots
 class StringSlots:
     __slots__ = "name"
 

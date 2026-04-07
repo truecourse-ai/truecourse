@@ -1,7 +1,7 @@
 """Bug violations: additional rules for complete coverage."""
 
 
-# SKIP: bugs/deterministic/assertion-after-expected-exception
+# VIOLATION: bugs/deterministic/assertion-after-expected-exception
 def test_after_raise():
     try:
         risky()
@@ -21,9 +21,8 @@ from os import *
 result = nonexistent_function()
 
 
-# SKIP: bugs/deterministic/not-in-operator-incompatible
-x = 5
-if x not in 42:
+# VIOLATION: bugs/deterministic/not-in-operator-incompatible
+if 5 in 42:
     pass
 
 

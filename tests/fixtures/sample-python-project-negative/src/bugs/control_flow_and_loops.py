@@ -27,7 +27,7 @@ def modify_iter():
             data.remove(item)
 
 
-# SKIP: bugs/deterministic/unused-loop-variable
+# VIOLATION: bugs/deterministic/unused-loop-variable
 for idx in range(10):
     print("hello")
 
@@ -60,8 +60,8 @@ def inconsistent_return(flag):
         return (1, 2, 3)
 
 
-# SKIP: bugs/deterministic/unary-prefix-increment-decrement
+# VIOLATION: bugs/deterministic/unary-prefix-increment-decrement
 x = 5
 y = ++x
-# SKIP: bugs/deterministic/unary-prefix-increment-decrement
+# VIOLATION: bugs/deterministic/unary-prefix-increment-decrement
 z = --x

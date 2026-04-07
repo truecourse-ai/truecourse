@@ -30,8 +30,8 @@ msg = "Hello %s, you are %d" % ("Alice",)
 pattern = re.compile(r"abc[]def")
 
 
-# SKIP: bugs/deterministic/unraw-re-pattern
-pattern2 = re.compile("\bword\b")
+# VIOLATION: bugs/deterministic/unraw-re-pattern
+pattern2 = re.compile("\d+\s+")
 
 
 # VIOLATION: bugs/deterministic/regex-invalid-python

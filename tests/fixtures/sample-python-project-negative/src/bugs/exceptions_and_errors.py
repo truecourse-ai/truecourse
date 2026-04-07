@@ -121,12 +121,12 @@ except ValueError:
     pass
 
 
-# SKIP: bugs/deterministic/useless-exception-statement
+# VIOLATION: bugs/deterministic/useless-exception-statement
 def bad_exception_handling():
     ValueError("new error")
 
 
-# SKIP: bugs/deterministic/useless-finally
+# VIOLATION: bugs/deterministic/useless-finally
 def pointless_finally():
     try:
         return 42
@@ -172,7 +172,7 @@ def return_in_all_branches():
         return 3
 
 
-# SKIP: bugs/deterministic/logging-exception-outside-handler
+# VIOLATION: bugs/deterministic/logging-exception-outside-handler
 logging.exception("something failed")
 
 
@@ -184,11 +184,11 @@ def log_err():
         logging.error("failed", exc_info=False)
 
 
-# SKIP: bugs/deterministic/logging-deprecated-warn
+# VIOLATION: bugs/deterministic/logging-deprecated-warn
 logging.warn("use warning instead")
 
 
-# SKIP: bugs/deterministic/logging-invalid-getlogger
+# VIOLATION: bugs/deterministic/logging-invalid-getlogger
 logger = logging.getLogger(__file__)
 
 
@@ -196,7 +196,7 @@ logger = logging.getLogger(__file__)
 logging.info("value is %s %s", 42)
 
 
-# SKIP: bugs/deterministic/warnings-no-stacklevel
+# VIOLATION: bugs/deterministic/warnings-no-stacklevel
 def emit_warning():
     warnings.warn("deprecated")
 

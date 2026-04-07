@@ -24,13 +24,13 @@ async def blocking_in_async():
     time.sleep(5)
 
 
-# SKIP: bugs/deterministic/async-busy-wait
+# VIOLATION: bugs/deterministic/async-busy-wait
 async def busy_wait():
     while not done:
         await asyncio.sleep(0.1)
 
 
-# SKIP: bugs/deterministic/async-function-with-timeout
+# VIOLATION: bugs/deterministic/async-function-with-timeout
 async def no_timeout(timeout=30):
     await long_task()
 
@@ -53,5 +53,5 @@ async def trio_sync():
     trio.sleep(1)
 
 
-# SKIP: bugs/deterministic/yield-return-outside-function
+# VIOLATION: bugs/deterministic/yield-return-outside-function
 return 1

@@ -4,7 +4,7 @@ import sys
 from contextvars import ContextVar
 
 
-# SKIP: bugs/deterministic/global-at-module-level
+# VIOLATION: bugs/deterministic/global-at-module-level
 global module_var
 
 
@@ -94,7 +94,7 @@ class MyDict:
         return self._data[key]
 
 
-# SKIP: bugs/deterministic/falsy-dict-get-fallback
+# VIOLATION: bugs/deterministic/falsy-dict-get-fallback
 val = config.get("key", [])
 
 
