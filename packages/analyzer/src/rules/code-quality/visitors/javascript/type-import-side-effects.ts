@@ -10,29 +10,40 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
     // The fix is to use import type { Foo } at the top level
     // This rule flags: import { type X, Y } where type import causes side effects
 
-    // Check if import has 'type' keyword at top level
-    const firstChild = node.child(1) // 'import' is child 0
-    const hasTopLevelType = firstChild?.type === 'type'
+    // Check if import has 'type' keyword at top level: import type { ... }
+    // In tree-sitter, import_statement > import_clause. For top-level type imports,
+    // the import_clause may start with a 'type' node.
+    const importClause = node.namedChildren.find(c => c.type === 'import_clause')
+    if (!importClause) return null
+
+    // Check if the import_clause starts with 'type' keyword
+    const firstClauseChild = importClause.child(0)
+    const hasTopLevelType = firstClauseChild?.type === 'type'
 
     if (hasTopLevelType) return null // Already a type import, fine
 
     // Check for inline type specifiers in named imports
     let hasInlineType = false
-    for (let i = 0; i < node.childCount; i++) {
-      const child = node.child(i)
-      if (!child || child.type !== 'named_imports') continue
-
-      for (let j = 0; j < child.childCount; j++) {
-        const spec = child.child(j)
-        if (!spec || spec.type !== 'import_specifier') continue
-
-        const tok0 = spec.child(0)
-        if (tok0?.type === 'type') {
-          hasInlineType = true
-          break
+    function findNamedImports(n: any) {
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (!child) continue
+        if (child.type === 'named_imports') {
+          for (let j = 0; j < child.childCount; j++) {
+            const spec = child.child(j)
+            if (!spec || spec.type !== 'import_specifier') continue
+            const tok0 = spec.child(0)
+            if (tok0?.type === 'type') {
+              hasInlineType = true
+              return
+            }
+          }
+        } else if (child.type === 'import_clause') {
+          findNamedImports(child)
         }
       }
     }
+    findNamedImports(node)
 
     if (!hasInlineType) return null
 

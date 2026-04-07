@@ -36,10 +36,14 @@ function hasAssertion(node: SyntaxNode): boolean {
 
 function isTestCallback(node: SyntaxNode): boolean {
   // it('name', () => { ... }) or it('name', function() { ... })
-  const parent = node.parent
-  if (!parent || parent.type !== 'call_expression') return false
+  // The arrow_function/function is inside an 'arguments' node which is a child of call_expression
+  const argsNode = node.parent
+  if (!argsNode || argsNode.type !== 'arguments') return false
 
-  const fn = parent.childForFieldName('function')
+  const callExpr = argsNode.parent
+  if (!callExpr || callExpr.type !== 'call_expression') return false
+
+  const fn = callExpr.childForFieldName('function')
   if (!fn) return false
 
   let fnName = ''

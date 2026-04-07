@@ -52,11 +52,14 @@ export const missingReactMemoVisitor: CodeRuleVisitor = {
     const firstParam = params.namedChildren[0]
     if (firstParam?.type === 'object_pattern' && firstParam.namedChildCount === 0) return null
 
+    // Strip comments before checking for memo references
+    const codeOnly = sourceCode.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+
     // Check if already wrapped in memo
-    if (sourceCode.includes(`memo(${funcName}`) || sourceCode.includes(`React.memo(${funcName}`)) return null
+    if (codeOnly.includes(`memo(${funcName}`) || codeOnly.includes(`React.memo(${funcName}`)) return null
 
     // Only flag if file seems to not use memo at all
-    if (sourceCode.includes('React.memo') || sourceCode.includes('memo(')) return null
+    if (codeOnly.includes('React.memo') || codeOnly.includes('memo(')) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

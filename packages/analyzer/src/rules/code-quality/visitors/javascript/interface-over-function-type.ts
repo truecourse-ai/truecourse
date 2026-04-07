@@ -6,7 +6,7 @@ export const interfaceOverFunctionTypeVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx'],
   nodeTypes: ['interface_declaration'],
   visit(node, filePath, sourceCode) {
-    const body = node.namedChildren.find((c) => c.type === 'object_type')
+    const body = node.namedChildren.find((c) => c.type === 'object_type' || c.type === 'interface_body')
     if (!body) return null
 
     const members = body.namedChildren

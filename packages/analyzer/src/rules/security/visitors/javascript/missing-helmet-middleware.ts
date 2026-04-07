@@ -28,7 +28,9 @@ export const missingHelmetMiddlewareVisitor: CodeRuleVisitor = {
       parent = parent.parent
     }
 
-    if (blockText && !blockText.includes('helmet')) {
+    // Strip comment lines so VIOLATION markers don't trigger false negatives
+    const codeText = blockText.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    if (codeText && !codeText.includes('helmet')) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Missing helmet middleware',

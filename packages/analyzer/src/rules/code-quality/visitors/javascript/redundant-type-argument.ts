@@ -24,9 +24,11 @@ export const redundantTypeArgumentVisitor: CodeRuleVisitor = {
     // Get the generic function/type being parameterized
     let target = parent.type === 'call_expression'
       ? parent.childForFieldName('function')
-      : parent.type === 'generic_type'
-        ? parent.namedChildren[0]
-        : null
+      : parent.type === 'new_expression'
+        ? parent.childForFieldName('constructor')
+        : parent.type === 'generic_type'
+          ? parent.namedChildren[0]
+          : null
 
     if (!target) return null
 

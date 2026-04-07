@@ -26,36 +26,34 @@ export const getterSetterTypeMismatchVisitor: CodeRuleVisitor = {
       const setKw = member.children.find((c) => c.text === 'set')
 
       if (getKw) {
-        // Find return type annotation
-        const funcNode = member.namedChildren.find((c) => c.type === 'function')
-        if (funcNode) {
-          const returnType = funcNode.childForFieldName('return_type')
-          if (returnType) {
-            getters.set((isStatic ? 'static:' : '') + propName, {
-              returnType: returnType.text.replace('->', '').replace(':', '').trim(),
-              node: member,
-            })
-          }
+        // In tree-sitter TypeScript, getter return type annotation is a direct
+        // child of method_definition (not nested inside a function node)
+        const returnType = member.childForFieldName('return_type')
+          ?? member.namedChildren.find((c) => c.type === 'type_annotation')
+        if (returnType) {
+          getters.set((isStatic ? 'static:' : '') + propName, {
+            returnType: returnType.text.replace('->', '').replace(':', '').trim(),
+            node: member,
+          })
         }
       }
 
       if (setKw) {
-        // Find parameter type annotation
-        const funcNode = member.namedChildren.find((c) => c.type === 'function')
-        if (funcNode) {
-          const params = funcNode.childForFieldName('parameters')
-          if (params) {
-            const firstParam = params.namedChildren.find((c) =>
-              c.type === 'required_parameter' || c.type === 'optional_parameter'
-            )
-            if (firstParam) {
-              const typeAnnotation = firstParam.namedChildren.find((c) => c.type === 'type_annotation')
-              if (typeAnnotation) {
-                setters.set((isStatic ? 'static:' : '') + propName, {
-                  paramType: typeAnnotation.text.replace(':', '').trim(),
-                  node: member,
-                })
-              }
+        // In tree-sitter TypeScript, setter parameters are a direct child
+        // of method_definition (not nested inside a function node)
+        const params = member.childForFieldName('parameters')
+          ?? member.namedChildren.find((c) => c.type === 'formal_parameters')
+        if (params) {
+          const firstParam = params.namedChildren.find((c) =>
+            c.type === 'required_parameter' || c.type === 'optional_parameter'
+          )
+          if (firstParam) {
+            const typeAnnotation = firstParam.namedChildren.find((c) => c.type === 'type_annotation')
+            if (typeAnnotation) {
+              setters.set((isStatic ? 'static:' : '') + propName, {
+                paramType: typeAnnotation.text.replace(':', '').trim(),
+                node: member,
+              })
             }
           }
         }

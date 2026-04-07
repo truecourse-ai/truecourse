@@ -32,7 +32,7 @@ export const sessionNotRegeneratedVisitor: CodeRuleVisitor = {
                 // Check whether the surrounding call chain includes regenerate
                 let ancestor = parent.parent
                 while (ancestor) {
-                  if (ancestor.text.includes('regenerate')) break
+                  if (ancestor.text.replace(/\/\/.*$/gm, '').includes('regenerate')) break
                   if (ancestor.type === 'program' || ancestor.type === 'module') {
                     return makeViolation(
                       this.ruleKey, node, filePath, 'high',

@@ -18,7 +18,8 @@ export const uncaughtExceptionNoHandlerVisitor: CodeRuleVisitor = {
       return null
     }
 
-    const text = sourceCode
+    // Strip comment lines so VIOLATION markers don't trigger false negatives
+    const text = sourceCode.replace(/\/\/.*$/gm, '')
     if (
       text.includes("'uncaughtException'") ||
       text.includes('"uncaughtException"') ||

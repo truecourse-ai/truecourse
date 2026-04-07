@@ -10,7 +10,8 @@ export const missingRateLimitingVisitor: CodeRuleVisitor = {
     // Only check files that define routes
     if (!filePath.match(/(?:route|controller|api|server|app)/i)) return null
 
-    const text = sourceCode
+    // Strip comment lines so VIOLATION markers don't trigger false negatives
+    const text = sourceCode.replace(/\/\/.*$/gm, '')
     const hasRoutes = EXPRESS_ROUTE_METHODS.has('get') && (
       text.includes('app.get(') || text.includes('router.get(') ||
       text.includes('app.post(') || text.includes('router.post(')

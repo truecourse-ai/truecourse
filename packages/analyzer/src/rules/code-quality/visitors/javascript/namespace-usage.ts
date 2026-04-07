@@ -4,7 +4,7 @@ import { makeViolation } from '../../../types.js'
 export const namespaceUsageVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/namespace-usage',
   languages: ['typescript', 'tsx'],
-  nodeTypes: ['module'],
+  nodeTypes: ['module', 'internal_module'],
   visit(node, filePath, sourceCode) {
     const keywordChild = node.children.find((c) => c.type === 'namespace' || c.text === 'namespace')
     if (!keywordChild) return null

@@ -17,8 +17,13 @@ export const switchExhaustivenessVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     if (!typeQuery) return null
 
-    const discriminant = node.childForFieldName('value')
+    let discriminant = node.childForFieldName('value')
     if (!discriminant) return null
+
+    // Unwrap parenthesized_expression — tree-sitter wraps switch values in parens
+    if (discriminant.type === 'parenthesized_expression' && discriminant.namedChildren[0]) {
+      discriminant = discriminant.namedChildren[0]
+    }
 
     const typeStr = typeQuery.getTypeAtPosition(
       filePath,
