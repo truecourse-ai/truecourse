@@ -8,7 +8,44 @@ datasource db {
 }
 
 model User {
-  id    String @id @default(uuid())
-  name  String
-  email String @unique
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  posts     Post[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(uuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+  createdAt DateTime @default(now())
+}
+
+// Intentional violations for analysis rule testing:
+// - Missing timestamps (no createdAt/updatedAt)
+// - category_id has no FK relation (missing foreign key)
+// - Overly nullable columns (4 of 6 non-PK columns are nullable)
+// - Naming inconsistency: mixes snake_case (category_id) with camelCase (viewCount)
+model Comment {
+  id          String  @id @default(uuid())
+  body        String?
+  category_id String?
+  post_id     String?
+  rating      Int?
+  viewCount   Int?
+  status      String  @default("draft")
+}
+
+// Another model with issues:
+// - Missing timestamps
+// - tag_id column with no FK relation
+model PostTag {
+  id     String  @id @default(uuid())
+  tag_id String
+  label  String?
 }

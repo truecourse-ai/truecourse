@@ -1,0 +1,5 @@
+{
+  "name": "sample-js-project-negative",
+  "private": true,
+  "workspaces": ["services/*", "shared/*"]
+}

@@ -1,9 +1,15 @@
-"""Shared formatting utilities."""
+from datetime import datetime
 
 
-def format_currency(amount):
-    return f"${amount:.2f}"
+def format_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "displayName": f"{user['name']} <{user['email']}>",
+        "createdAt": datetime.fromisoformat(str(user["createdAt"])).isoformat(),
+    }
 
 
-def format_date(dt):
-    return dt.strftime("%Y-%m-%d")
+def format_date(date: datetime) -> str:
+    return date.isoformat().split("T")[0]

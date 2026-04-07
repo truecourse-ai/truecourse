@@ -1,14 +1,17 @@
-"""User service business logic."""
+from ..repositories.user_repository import UserRepository
+
+repo = UserRepository()
 
 
 class UserService:
-    def __init__(self, repository):
-        self.repository = repository
+    def get_all(self) -> list:
+        return repo.find_all()
 
-    def get_user(self, user_id):
-        return self.repository.find_by_id(user_id)
+    def get_by_id(self, user_id: str):
+        return repo.find_by_id(user_id)
 
-    def create_user(self, name, email):
-        from ..models.user_model import User
-        user = User(id=0, name=name, email=email)
-        return self.repository.create(user)
+    def create(self, data: dict):
+        return repo.create(data)
+
+    def delete(self, user_id: str) -> None:
+        return repo.delete(user_id)

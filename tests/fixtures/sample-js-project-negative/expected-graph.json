@@ -202,22 +202,22 @@
   "deterministicViolations": [
     {
       "ruleKey": "architecture/deterministic/circular-module-dependency",
-      "title": "Circular module dependency: UserRepository \u2192 user.handler \u2192 UserService \u2192 UserRepository",
+      "title": "Circular module dependency: UserRepository → user.handler → UserService → UserRepository",
       "severity": "high"
     },
     {
       "ruleKey": "architecture/deterministic/cross-service-internal-import",
-      "title": "Cross-service internal import: user.handler \u2192 validators",
+      "title": "Cross-service internal import: user.handler → validators",
       "severity": "high"
     },
     {
       "ruleKey": "architecture/deterministic/cross-service-internal-import",
-      "title": "Cross-service internal import: UserService \u2192 formatters",
+      "title": "Cross-service internal import: UserService → formatters",
       "severity": "high"
     },
     {
       "ruleKey": "architecture/deterministic/data-layer-depends-on-api",
-      "title": "Layer violation: UserRepository \u2192 user.handler",
+      "title": "Layer violation: UserRepository → user.handler",
       "severity": "high"
     },
     {

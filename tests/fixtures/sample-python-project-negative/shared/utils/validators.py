@@ -1,11 +1,10 @@
-"""Shared validation utilities."""
 import re
 
 
-def validate_email(email):
-    pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
-    return bool(re.match(pattern, email))
+def validate_email(email: str) -> bool:
+    email_regex = r"^[^\s@]+@[^\s@]+\.[^\s@]+$"
+    return bool(re.match(email_regex, email))
 
 
-def validate_phone(phone):
-    return bool(re.match(r"^\+?1?\d{9,15}$", phone))
+def validate_name(name: str) -> bool:
+    return 2 <= len(name) <= 100

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { UserService } from '../services/user.service';
 
 export class UserController {
+  // VIOLATION: code-quality/deterministic/mutable-private-member
   private userService = new UserService();
 
   getAll = async (_req: Request, res: Response) => {

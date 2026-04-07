@@ -4,11 +4,15 @@ import { validateEmail } from '@sample/shared-utils';
 
 const userService = new UserService();
 
+// VIOLATION: code-quality/deterministic/missing-return-type
+// VIOLATION: code-quality/deterministic/missing-boundary-types
 export async function getUsers(_req: Request, res: Response) {
   const users = await userService.getAll();
   res.json(users);
 }
 
+// VIOLATION: code-quality/deterministic/missing-return-type
+// VIOLATION: code-quality/deterministic/missing-boundary-types
 export async function getUserById(req: Request, res: Response) {
   const user = await userService.getById(req.params.id);
   if (!user) {
@@ -18,6 +22,8 @@ export async function getUserById(req: Request, res: Response) {
   res.json(user);
 }
 
+// VIOLATION: code-quality/deterministic/missing-return-type
+// VIOLATION: code-quality/deterministic/missing-boundary-types
 export async function createUser(req: Request, res: Response) {
   const { name, email } = req.body;
   if (!validateEmail(email)) {
@@ -28,6 +34,8 @@ export async function createUser(req: Request, res: Response) {
   res.status(201).json(user);
 }
 
+// VIOLATION: code-quality/deterministic/missing-return-type
+// VIOLATION: code-quality/deterministic/missing-boundary-types
 export async function deleteUser(req: Request, res: Response) {
   await userService.delete(req.params.id);
   res.status(204).send();

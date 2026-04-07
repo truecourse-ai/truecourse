@@ -1,11 +1,12 @@
-"""Shared logging configuration."""
-import logging
+class Logger:
+    def info(self, message: str, *args) -> None:
+        print(f"[INFO] {message}", *args)
+
+    def error(self, message: str, *args) -> None:
+        print(f"[ERROR] {message}", *args)
+
+    def warn(self, message: str, *args) -> None:
+        print(f"[WARN] {message}", *args)
 
 
-def setup_logger(name):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
-    logger.addHandler(handler)
-    return logger
+logger = Logger()

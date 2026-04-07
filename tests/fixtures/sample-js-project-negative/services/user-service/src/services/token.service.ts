@@ -1,4 +1,9 @@
+/**
+ * Token service -- tests several patterns that previously caused false positives.
+ */
+
 export class TokenService {
+  // VIOLATION: code-quality/deterministic/mutable-private-member
   private cache: Map<string, string> = new Map();
 
   constructor() {
@@ -27,6 +32,7 @@ export class TokenService {
   }
 }
 
+/** Factory function */
 export function getTokenService(): TokenService {
   return new TokenService();
 }
