@@ -13,7 +13,7 @@ import { checkCodeRules, parseFile, detectLanguage } from '../../packages/analyz
 import { buildScopedCompilerOptions, createTypeQueryService } from '../../packages/analyzer/src/ts-compiler';
 import type { CodeViolation } from '../../packages/shared/src/types/analysis';
 
-const FIXTURE_PATH = new URL('../fixtures/sample-js-project-positive-old', import.meta.url).pathname;
+const FIXTURE_PATH = new URL('../fixtures/sample-js-project-positive-new', import.meta.url).pathname;
 
 function collectFiles(dir: string): string[] {
   const files: string[] = [];
@@ -41,6 +41,8 @@ function runCodeRules(rootPath: string): CodeViolation[] {
   }
 
   for (const filePath of filePaths) {
+    // Skip .d.ts files — they are type declarations, not source code to analyze
+    if (filePath.endsWith('.d.ts')) continue;
     const lang = detectLanguage(filePath);
     if (!lang) continue;
     const content = readFileSync(filePath, 'utf-8');
