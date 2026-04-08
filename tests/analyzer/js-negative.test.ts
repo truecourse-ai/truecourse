@@ -15,7 +15,7 @@ import { join, relative, basename } from 'path';
 import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 import { analyzeFile } from '../../packages/analyzer/src/file-analyzer';
 import { buildDependencyGraph, findEntryPoints } from '../../packages/analyzer/src/dependency-graph';
-import { performSplitAnalysis } from '../../packages/analyzer/src/split-analyzer';
+import { performSplitAnalysis, type SplitAnalysisResult } from '../../packages/analyzer/src/split-analyzer';
 import { checkModuleRules, checkMethodRules, checkServiceRules } from '../../packages/analyzer/src/rules/architecture/checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules';
 import { checkCodeRules, parseFile, detectLanguage } from '../../packages/analyzer/src';
@@ -186,24 +186,62 @@ describe('JS/TS negative fixture — code rules', () => {
 
 describe('JS/TS negative fixture — architecture', () => {
   let analyses: FileAnalysis[];
+  let expectedGraph: {
+    services: { name: string; type: string }[];
+    serviceDependencies: { source: string; target: string }[];
+    modules: { name: string; service: string; kind: string; layer: string }[];
+    moduleDependencies: {
+      source: string; sourceService: string;
+      target: string; targetService: string;
+      importedNames: string[];
+    }[];
+  };
 
   beforeAll(async () => {
     const files = discoverFiles(FIXTURE_PATH);
     const results = await Promise.all(files.map((f) => analyzeFile(f)));
     analyses = results.filter(Boolean) as FileAnalysis[];
+    expectedGraph = JSON.parse(readFileSync(join(FIXTURE_PATH, 'expected-graph.json'), 'utf-8'));
   });
 
-  it('detects services', () => {
+  function buildGraph() {
     const deps = buildDependencyGraph(analyses, FIXTURE_PATH);
     const split = performSplitAnalysis(FIXTURE_PATH, analyses, deps);
-    expect(split.services.length).toBeGreaterThan(0);
-    console.log(`Services: ${split.services.map((s) => s.name).join(', ')}`);
+    return {
+      deps, split,
+      services: split.services.map((s) => ({ name: s.name, type: s.type }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      modules: split.modules.map((m) => ({ name: m.name, service: m.serviceName, kind: m.kind, layer: m.layerName }))
+        .sort((a, b) => a.service.localeCompare(b.service) || a.name.localeCompare(b.name)),
+      serviceDependencies: split.dependencies.map((d) => ({ source: d.source, target: d.target }))
+        .sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target)),
+      moduleDependencies: split.moduleLevelDependencies.map((d) => ({
+        source: d.sourceModule, sourceService: d.sourceService,
+        target: d.targetModule, targetService: d.targetService,
+        importedNames: d.importedNames.sort(),
+      })).sort((a, b) => a.sourceService.localeCompare(b.sourceService) || a.source.localeCompare(b.source) || a.targetService.localeCompare(b.targetService) || a.target.localeCompare(b.target)),
+    };
+  }
+
+  it('detects the correct services', () => {
+    const { services } = buildGraph();
+    expect(services).toEqual(expectedGraph.services);
   });
 
-  it('detects modules', () => {
-    const deps = buildDependencyGraph(analyses, FIXTURE_PATH);
-    const split = performSplitAnalysis(FIXTURE_PATH, analyses, deps);
-    expect(split.modules.length).toBeGreaterThan(0);
-    console.log(`Modules: ${split.modules.length}`);
+  it('detects the correct service dependencies', () => {
+    const { serviceDependencies } = buildGraph();
+    expect(serviceDependencies).toEqual(expectedGraph.serviceDependencies);
   });
+
+  it('detects the correct modules', () => {
+    const { modules } = buildGraph();
+    expect(modules).toEqual(expectedGraph.modules);
+  });
+
+  it('detects the correct module dependencies', () => {
+    const { moduleDependencies } = buildGraph();
+    expect(moduleDependencies).toEqual(expectedGraph.moduleDependencies);
+  });
+
+  // Architecture violations are validated via ARCH-VIOLATION markers, not expected-graph.json
 });

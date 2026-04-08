@@ -5,408 +5,1157 @@
       "type": "api-server"
     },
     {
+      "name": "notification_service",
+      "type": "worker"
+    },
+    {
       "name": "user_service",
       "type": "api-server"
     },
     {
       "name": "utils",
       "type": "library"
+    },
+    {
+      "name": "worker",
+      "type": "worker"
     }
   ],
   "serviceDependencies": [
     {
       "source": "api_gateway",
       "target": "user_service"
-    },
-    {
-      "source": "api_gateway",
-      "target": "utils"
-    },
-    {
-      "source": "user_service",
-      "target": "utils"
     }
   ],
   "modules": [
     {
-      "name": "auth_middleware",
+      "name": "admin",
+      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "api",
-      "service": "api_gateway"
+      "layer": "api"
+    },
+    {
+      "name": "admin_controller",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "AdminAction",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "AdminProfile",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "analytics",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "analytics_service",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "AnalyticsError",
+      "service": "api_gateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "AnalyticsService",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "api_routes",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "arch_violations",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "AuditLog",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "AuditLogForm",
+      "service": "api_gateway",
+      "kind": "interface",
+      "layer": "api"
+    },
+    {
+      "name": "AuditLogHandler",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "auth_middleware",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "BaseAnalyticsProvider",
+      "service": "api_gateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "BaseExporter",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BaseMetric",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "cache_service",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "CacheService",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "CacheStats",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CacheWarmer",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "ChildService",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Config",
+      "service": "api_gateway",
+      "kind": "interface",
+      "layer": "api"
+    },
+    {
+      "name": "create_limiter",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "CSVExporter",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Dict",
+      "service": "api_gateway",
+      "kind": "interface",
+      "layer": "api"
+    },
+    {
+      "name": "EventProcessor",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ExtendedValidator",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FieldIterator",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "HeaderStore",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "health_check",
+      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "api",
-      "service": "api_gateway"
+      "layer": "api"
     },
     {
       "name": "HealthService",
+      "service": "api_gateway",
       "kind": "class",
-      "layer": "service",
-      "service": "api_gateway"
+      "layer": "service"
     },
     {
       "name": "helpers",
+      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "service",
-      "service": "api_gateway"
+      "layer": "service"
+    },
+    {
+      "name": "ItemCreate",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "ItemResponse",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "ItemTests",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "MetricAggregator",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricBatch",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricCollector",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricPoint",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricProcessor",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricRecord",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "metrics_service",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "MetricsConfig",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricsHandler",
+      "service": "api_gateway",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "MetricsList",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricStore",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricStream",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MetricType",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RateLimiter",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "redis_client",
+      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "data",
-      "service": "api_gateway"
+      "layer": "data"
+    },
+    {
+      "name": "ReportBuilder",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Reporter",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "security_utils",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SSHManager",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SystemConfig",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "TestAdminEndpoints",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "TestItemService",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "TimedMetric",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "UserController",
+      "service": "api_gateway",
       "kind": "class",
-      "layer": "api",
-      "service": "api_gateway"
+      "layer": "api"
+    },
+    {
+      "name": "UserListView",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "users",
+      "service": "api_gateway",
       "kind": "standalone",
-      "layer": "api",
-      "service": "api_gateway"
+      "layer": "api"
     },
     {
       "name": "UserService",
+      "service": "api_gateway",
       "kind": "class",
-      "layer": "external",
-      "service": "api_gateway"
+      "layer": "external"
+    },
+    {
+      "name": "validation",
+      "service": "api_gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ValidationPipeline",
+      "service": "api_gateway",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DeadLetterQueue",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "email_sender",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "email_templates",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "EmailSender",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "LocaleManager",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "notification_handlers",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "notification_service",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationModel",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationQueue",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "push_service",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PushConnection",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "queue_processor",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "render_plain_text",
+      "service": "notification_service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "TemplateEngine",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "TemplateEngine",
+      "service": "notification_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "audit_repository",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "AuditRepository",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "auth_handler",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "AuthProvider",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "AuthService",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "AuthSession",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "Base",
+      "service": "user_service",
       "kind": "interface",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "BaseNotification",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "Comment",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "connection",
+      "service": "user_service",
       "kind": "standalone",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "Notification",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "NotificationChannel",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "NotificationPriority",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "Post",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "PostTag",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
+    },
+    {
+      "name": "profile_repository",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "ProfileRepository",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "session_repository",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "session_service",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SessionHandler",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SessionModel",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SessionRepository",
+      "service": "user_service",
+      "kind": "class",
+      "layer": "data"
     },
     {
       "name": "start",
+      "service": "user_service",
       "kind": "standalone",
-      "layer": "api",
-      "service": "user_service"
+      "layer": "api"
     },
     {
       "name": "Token",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "token_service",
+      "service": "user_service",
       "kind": "standalone",
-      "layer": "service",
-      "service": "user_service"
+      "layer": "service"
     },
     {
       "name": "TokenService",
+      "service": "user_service",
       "kind": "class",
-      "layer": "service",
-      "service": "user_service"
+      "layer": "service"
     },
     {
       "name": "User",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "user_handler",
+      "service": "user_service",
       "kind": "standalone",
-      "layer": "api",
-      "service": "user_service"
+      "layer": "api"
     },
     {
       "name": "UserRepository",
+      "service": "user_service",
       "kind": "class",
-      "layer": "data",
-      "service": "user_service"
+      "layer": "data"
     },
     {
       "name": "UserService",
+      "service": "user_service",
       "kind": "class",
-      "layer": "service",
-      "service": "user_service"
+      "layer": "service"
+    },
+    {
+      "name": "verify_api_key",
+      "service": "user_service",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "AdvancedFormatter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "async_utils",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "BadClassmethod",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BadContext",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BadLen",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BadSelf",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BadStatic",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CharIterator",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "crypto",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "data_flow_bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "data_validator",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "DataValidator",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "date_utils",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "DateParser",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DupField",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EmptyDocstring",
+      "service": "utils",
+      "kind": "interface",
+      "layer": "data"
+    },
+    {
+      "name": "FormattedString",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "formatters",
+      "service": "utils",
       "kind": "standalone",
-      "layer": "service",
-      "service": "utils"
+      "layer": "service"
+    },
+    {
+      "name": "helpers",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "LazyString",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "Logger",
+      "service": "utils",
       "kind": "class",
-      "layer": "service",
-      "service": "utils"
+      "layer": "service"
+    },
+    {
+      "name": "MissingSelfClass",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "mixed_indent",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "patterns",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PropParams",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Repository",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SchemaValidator",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "security",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Slotted",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "string_utils",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "StringCollection",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StringProcessor",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "StringSlots",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TextFormatter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "TokenGenerator",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "User",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "validators",
+      "service": "utils",
       "kind": "standalone",
-      "layer": "service",
-      "service": "utils"
+      "layer": "service"
+    },
+    {
+      "name": "WordStream",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "AlertConfig",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "AlertManager",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "AlertSeverity",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "aws_operations",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "BadDunder",
+      "service": "worker",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "BadInit",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "BaseEvent",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "BasePipeline",
+      "service": "worker",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "CronScheduler",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "CustomTransformer",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "data_pipeline",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "data_processing",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "DataStore",
+      "service": "worker",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "FeatureExtractor",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "HealthChecker",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "ImageDataset",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "InfraStack",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "job_processor",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "JobConfigStore",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "JobProcessor",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "lambda_handler",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "MetricAggregator",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "MetricPoint",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "MetricsCollector",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "ml_pipeline",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "monitoring",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "my_pipeline",
+      "service": "worker",
+      "kind": "interface",
+      "layer": "data"
+    },
+    {
+      "name": "perf_optimizations",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PipelineState",
+      "service": "worker",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "reliability_checks",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "Schedule",
+      "service": "worker",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "scheduler",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SchedulerConfig",
+      "service": "worker",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "SimpleModel",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "task_runner",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
+    },
+    {
+      "name": "TaskRunner",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "TrainingPipeline",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UserEvent",
+      "service": "worker",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WorkerError",
+      "service": "worker",
+      "kind": "interface",
+      "layer": "external"
     }
   ],
-  "moduleDependencies": [
-    {
-      "source": "health_check",
-      "sourceService": "api_gateway",
-      "target": "HealthService",
-      "targetService": "api_gateway",
-      "importedNames": [
-        "HealthService"
-      ]
-    },
-    {
-      "source": "UserController",
-      "sourceService": "api_gateway",
-      "target": "UserService",
-      "targetService": "api_gateway",
-      "importedNames": [
-        "UserService"
-      ]
-    },
-    {
-      "source": "users",
-      "sourceService": "api_gateway",
-      "target": "UserController",
-      "targetService": "api_gateway",
-      "importedNames": [
-        "UserController"
-      ]
-    },
-    {
-      "source": "UserService",
-      "sourceService": "api_gateway",
-      "target": "formatters",
-      "targetService": "utils",
-      "importedNames": [
-        "format_user"
-      ]
-    },
-    {
-      "source": "start",
-      "sourceService": "user_service",
-      "target": "connection",
-      "targetService": "user_service",
-      "importedNames": [
-        "connect_database"
-      ]
-    },
-    {
-      "source": "start",
-      "sourceService": "user_service",
-      "target": "user_handler",
-      "targetService": "user_service",
-      "importedNames": [
-        "users_bp"
-      ]
-    },
-    {
-      "source": "Token",
-      "sourceService": "user_service",
-      "target": "Base",
-      "targetService": "user_service",
-      "importedNames": [
-        "Base"
-      ]
-    },
-    {
-      "source": "user_handler",
-      "sourceService": "user_service",
-      "target": "UserService",
-      "targetService": "user_service",
-      "importedNames": [
-        "UserService"
-      ]
-    },
-    {
-      "source": "user_handler",
-      "sourceService": "user_service",
-      "target": "validators",
-      "targetService": "utils",
-      "importedNames": [
-        "validate_email"
-      ]
-    },
-    {
-      "source": "UserRepository",
-      "sourceService": "user_service",
-      "target": "User",
-      "targetService": "user_service",
-      "importedNames": [
-        "User"
-      ]
-    },
-    {
-      "source": "UserRepository",
-      "sourceService": "user_service",
-      "target": "user_handler",
-      "targetService": "user_service",
-      "importedNames": [
-        "get_users"
-      ]
-    },
-    {
-      "source": "UserService",
-      "sourceService": "user_service",
-      "target": "UserRepository",
-      "targetService": "user_service",
-      "importedNames": [
-        "UserRepository"
-      ]
-    }
-  ],
-  "deterministicViolations": [
-    {
-      "ruleKey": "architecture/deterministic/circular-module-dependency",
-      "title": "Circular module dependency: UserRepository → user_handler → UserService → UserRepository",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/cross-service-internal-import",
-      "title": "Cross-service internal import: user_handler → validators",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/cross-service-internal-import",
-      "title": "Cross-service internal import: UserService → formatters",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/data-layer-depends-on-api",
-      "title": "Layer violation: UserRepository → user_handler",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: connection.disconnect_database",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: formatters.format_date",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: Logger.error",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: Logger.info",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: Logger.warn",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: validators.validate_name",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-module",
-      "title": "Dead module: Comment",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-module",
-      "title": "Dead module: Post",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-module",
-      "title": "Dead module: PostTag",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/god-service",
-      "title": "God service: api_gateway",
-      "severity": "medium"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: Comment",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: disconnect_database",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: format_date",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: Logger",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: Post",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: PostTag",
-      "severity": "low"
-    }
-  ]
+  "moduleDependencies": []
 }

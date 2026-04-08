@@ -178,24 +178,35 @@ describe('Python negative fixture — code rules', () => {
 
 describe('Python negative fixture — architecture', () => {
   let analyses: FileAnalysis[];
+  let expectedGraph: {
+    services: { name: string; type: string }[];
+    modules: { name: string; service: string; kind: string; layer: string }[];
+    deterministicViolations: { ruleKey: string; title: string; severity: string }[];
+  };
 
   beforeAll(async () => {
     const files = discoverFiles(FIXTURE_PATH);
     const results = await Promise.all(files.map((f) => analyzeFile(f)));
     analyses = results.filter(Boolean) as FileAnalysis[];
+    expectedGraph = JSON.parse(readFileSync(join(FIXTURE_PATH, 'expected-graph.json'), 'utf-8'));
   });
 
-  it('detects services', () => {
+  it('detects the correct services', () => {
     const deps = buildDependencyGraph(analyses, FIXTURE_PATH);
     const split = performSplitAnalysis(FIXTURE_PATH, analyses, deps);
-    expect(split.services.length).toBeGreaterThan(0);
-    console.log(`Services: ${split.services.map((s) => s.name).join(', ')}`);
+    const services = split.services
+      .map((s) => ({ name: s.name, type: s.type }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    expect(services).toEqual(expectedGraph.services);
   });
 
-  it('detects modules', () => {
+  it('detects the correct modules', () => {
     const deps = buildDependencyGraph(analyses, FIXTURE_PATH);
     const split = performSplitAnalysis(FIXTURE_PATH, analyses, deps);
-    expect(split.modules.length).toBeGreaterThan(0);
+    const modules = split.modules
+      .map((m) => ({ name: m.name, service: m.serviceName, kind: m.kind, layer: m.layerName }))
+      .sort((a, b) => a.service.localeCompare(b.service) || a.name.localeCompare(b.name));
+    expect(modules).toEqual(expectedGraph.modules);
     console.log(`Modules: ${split.modules.length}`);
   });
 });

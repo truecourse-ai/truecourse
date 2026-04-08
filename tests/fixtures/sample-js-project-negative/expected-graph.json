@@ -5,12 +5,24 @@
       "type": "api-server"
     },
     {
+      "name": "infrastructure",
+      "type": "unknown"
+    },
+    {
+      "name": "notification-service",
+      "type": "worker"
+    },
+    {
       "name": "user-service",
       "type": "api-server"
     },
     {
       "name": "utils",
       "type": "library"
+    },
+    {
+      "name": "web",
+      "type": "frontend"
     }
   ],
   "serviceDependencies": [
@@ -24,12 +36,32 @@
     },
     {
       "source": "user-service",
+      "target": "api-gateway"
+    },
+    {
+      "source": "user-service",
       "target": "utils"
+    },
+    {
+      "source": "web",
+      "target": "api-gateway"
     }
   ],
   "modules": [
     {
+      "name": "assertEverything",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "authMiddleware",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "error-handler",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "api"
@@ -47,10 +79,34 @@
       "layer": "service"
     },
     {
+      "name": "logger",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "performance",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "rate-limiter",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "redis",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "reliability",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
     },
     {
       "name": "UserController",
@@ -65,9 +121,207 @@
       "layer": "external"
     },
     {
+      "name": "AnyPrincipal",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ApolloServer",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "aws-resources",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "browser-security",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Bucket",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "CfnNotebookInstance",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DatabaseInstance",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Domain",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DOMParser",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "FileSystem",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "graphql-xml",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "iam-policies",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ManagedPolicy",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "network-tls",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "PolicyStatement",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Queue",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RestApi",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "s3-buckets",
+      "service": "infrastructure",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SignedXml",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Topic",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Volume",
+      "service": "infrastructure",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EmailTemplates",
+      "service": "notification-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationProcessor",
+      "service": "notification-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "queue-worker",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "sender",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "src",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
+      "name": "array-bugs",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "BadConstructor",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "comparisons",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Config",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "ConfigStore",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "connection",
       "service": "user-service",
       "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "errors",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "EventEmitter",
+      "service": "user-service",
+      "kind": "class",
       "layer": "data"
     },
     {
@@ -75,6 +329,48 @@
       "service": "user-service",
       "kind": "standalone",
       "layer": "service"
+    },
+    {
+      "name": "Mergeable",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "migrations",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "queries",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "query-builder",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "QueryBuilder",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "scope-bugs",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "SetterWithReturn",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
     },
     {
       "name": "src",
@@ -87,6 +383,12 @@
       "service": "user-service",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "types",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
     },
     {
       "name": "user.handler",
@@ -107,7 +409,157 @@
       "layer": "service"
     },
     {
+      "name": "validation",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Aliaser",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "AsyncInit",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Base",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Builder",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Calculator",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassA",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassB",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassC",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ClassD",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-advanced",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-basics",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-complexity",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-misc",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-modern",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-typescript",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "code-quality-unused",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Constants",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ConstructorNoReturn",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "Container",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "crypto",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Derived",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EarlyThis",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "EmptyStatic",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "formatters",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "legacy",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -119,13 +571,205 @@
       "layer": "service"
     },
     {
+      "name": "misc-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "MissingGetterReturn",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "MissingSuperCall",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "OnlyStatic",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ParamAssign",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "PropertyStore",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ReassignableClass",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "regex-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "remaining-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Secretive",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "security",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Service",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ServiceWorker",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "SetterNoReturn",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "style",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "UnreadAttribute",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UselessDefault",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "validators",
       "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "web-security",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Widget",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WrongNameClass",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "WrongNameClass",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Dashboard",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "Links",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "NotificationList",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ReactBugs",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ReactPerformance",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "RemainingReact",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "useNotifications",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "UserForm",
+      "service": "web",
       "kind": "standalone",
       "layer": "service"
     }
   ],
   "moduleDependencies": [
+    {
+      "source": "assertEverything",
+      "sourceService": "api-gateway",
+      "target": "HealthService",
+      "targetService": "api-gateway",
+      "importedNames": [
+        "HealthService"
+      ]
+    },
+    {
+      "source": "assertEverything",
+      "sourceService": "api-gateway",
+      "target": "UserController",
+      "targetService": "api-gateway",
+      "importedNames": [
+        "UserController"
+      ]
+    },
     {
       "source": "UserController",
       "sourceService": "api-gateway",
@@ -142,6 +786,42 @@
       "targetService": "utils",
       "importedNames": [
         "formatUser"
+      ]
+    },
+    {
+      "source": "NotificationProcessor",
+      "sourceService": "notification-service",
+      "target": "EmailTemplates",
+      "targetService": "notification-service",
+      "importedNames": [
+        "EmailTemplates"
+      ]
+    },
+    {
+      "source": "NotificationProcessor",
+      "sourceService": "notification-service",
+      "target": "sender",
+      "targetService": "notification-service",
+      "importedNames": [
+        "sendEmail"
+      ]
+    },
+    {
+      "source": "src",
+      "sourceService": "notification-service",
+      "target": "EmailTemplates",
+      "targetService": "notification-service",
+      "importedNames": [
+        "EmailTemplates"
+      ]
+    },
+    {
+      "source": "src",
+      "sourceService": "notification-service",
+      "target": "NotificationProcessor",
+      "targetService": "notification-service",
+      "importedNames": [
+        "NotificationProcessor"
       ]
     },
     {
@@ -197,93 +877,15 @@
       "importedNames": [
         "UserRepository"
       ]
-    }
-  ],
-  "deterministicViolations": [
-    {
-      "ruleKey": "architecture/deterministic/circular-module-dependency",
-      "title": "Circular module dependency: UserRepository → user.handler → UserService → UserRepository",
-      "severity": "high"
     },
     {
-      "ruleKey": "architecture/deterministic/cross-service-internal-import",
-      "title": "Cross-service internal import: user.handler → validators",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/cross-service-internal-import",
-      "title": "Cross-service internal import: UserService → formatters",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/data-layer-depends-on-api",
-      "title": "Layer violation: UserRepository → user.handler",
-      "severity": "high"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: connection.disconnectDatabase",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: formatters.formatDate",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: HealthService.check",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: logger.error",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: logger.info",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: logger.warn",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-method",
-      "title": "Dead method: validators.validateName",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-module",
-      "title": "Dead module: HealthService",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/dead-module",
-      "title": "Dead module: logger",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/god-service",
-      "title": "God service: api-gateway",
-      "severity": "medium"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: disconnectDatabase",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: formatDate",
-      "severity": "low"
-    },
-    {
-      "ruleKey": "architecture/deterministic/unused-export",
-      "title": "Unused export: validateName",
-      "severity": "low"
+      "source": "Dashboard",
+      "sourceService": "web",
+      "target": "NotificationList",
+      "targetService": "web",
+      "importedNames": [
+        "NotificationList"
+      ]
     }
   ]
 }
