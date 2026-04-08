@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@sample/shared-utils": ["./shared/utils/src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}
