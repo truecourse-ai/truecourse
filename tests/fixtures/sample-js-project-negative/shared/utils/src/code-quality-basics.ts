@@ -117,7 +117,7 @@ export function staticConcat() {
 
 // VIOLATION: code-quality/deterministic/inverted-boolean
 export function doubleNegate(x: number) {
-  return !!x;
+  return !(!x);
 }
 
 // VIOLATION: code-quality/deterministic/prefer-single-boolean-return

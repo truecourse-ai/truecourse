@@ -123,6 +123,10 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
         if (LOCALHOST_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
           return null
         }
+        // Exclude well-known namespace URIs (SVG xmlns, W3C, schema.org, etc.)
+        if (/w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org/.test(lower)) {
+          return null
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Clear-text protocol',

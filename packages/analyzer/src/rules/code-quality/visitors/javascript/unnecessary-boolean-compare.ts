@@ -21,6 +21,13 @@ export const unnecessaryBooleanCompareVisitor: CodeRuleVisitor = {
     if (leftIsBoolean && rightIsBoolean) return null
 
     const boolLiteral = leftIsBoolean ? left.text : right.text
+    const opText = op.text
+
+    // `=== false` and `!== true` may be intentional for nullable booleans (boolean | null)
+    // Only flag `=== true` and `!== false` which are always redundant
+    if (boolLiteral === 'false' && (opText === '===' || opText === '==')) return null
+    if (boolLiteral === 'true' && (opText === '!==' || opText === '!=')) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Unnecessary boolean comparison',

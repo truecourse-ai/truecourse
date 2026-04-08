@@ -7,6 +7,9 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
   nodeTypes: ['string', 'template_string'],
   visit(node, filePath, sourceCode) {
     const text = node.text
+    // Skip well-known namespace/standard URIs (SVG xmlns, schema.org, W3C, etc.)
+    if (/w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org/.test(text)) return null
+
     if (/https?:\/\/[a-zA-Z0-9]/.test(text) && !text.includes('example.com') && !text.includes('localhost')) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

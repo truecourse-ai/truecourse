@@ -17,6 +17,9 @@ export const confusingVoidExpressionVisitor: CodeRuleVisitor = {
     const value = node.namedChildren[0]
     if (!value) return null
 
+    // `return undefined` is explicit, not confusing — skip
+    if (value.text === 'undefined') return null
+
     // Check if the returned expression is void
     const isVoid = typeQuery.isVoidType(
       filePath,

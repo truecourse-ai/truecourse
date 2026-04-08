@@ -3314,6 +3314,7 @@ describe('security/deterministic/aws-unencrypted-sqs', () => {
 
   it('detects Queue without encryption', () => {
     const violations = check(`
+import { Queue } from 'aws-cdk-lib/aws-sqs';
 const queue = new Queue(this, 'MyQueue', {
   visibilityTimeout: Duration.seconds(300),
 });
@@ -3323,6 +3324,7 @@ const queue = new Queue(this, 'MyQueue', {
 
   it('detects Queue with QueueEncryption.UNENCRYPTED', () => {
     const violations = check(`
+import { Queue, QueueEncryption } from 'aws-cdk-lib/aws-sqs';
 const queue = new Queue(this, 'MyQueue', {
   encryption: QueueEncryption.UNENCRYPTED,
 });

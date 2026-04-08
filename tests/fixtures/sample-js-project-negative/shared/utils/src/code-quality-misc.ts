@@ -228,7 +228,8 @@ export function shorthandMix() {
   const name = 'Alice';
   const age = 30;
   const city = 'NYC';
-  return { name, title: 'Dr.', age, address: '123 St', city };
+  const country = 'US';
+  return { name, title: 'Dr.', age, address: '123 St', city, zip: '10001', country };
 }
 
 // VIOLATION: code-quality/deterministic/selector-parameter

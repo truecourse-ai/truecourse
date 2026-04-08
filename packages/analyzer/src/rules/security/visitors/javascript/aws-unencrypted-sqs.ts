@@ -19,6 +19,11 @@ export const awsUnencryptedSqsVisitor: CodeRuleVisitor = {
 
     if (ctorName !== 'Queue' && ctorName !== 'CfnQueue') return null
 
+    // Only flag AWS SQS queues — skip BullMQ, bull, and other non-AWS queue libraries
+    if (!sourceCode.includes('aws-cdk') && !sourceCode.includes('aws-sqs') && !sourceCode.includes('@aws-sdk')) {
+      return null
+    }
+
     const nodeText = node.text
     if (!/encryption\s*:|encryptionMasterKey|kmsKey|kmsMasterKeyId/i.test(nodeText)) {
       return makeViolation(

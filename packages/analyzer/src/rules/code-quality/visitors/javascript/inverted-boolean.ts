@@ -12,18 +12,8 @@ export const invertedBooleanVisitor: CodeRuleVisitor = {
     const operand = node.namedChildren[0]
     if (!operand) return null
 
-    if (operand.type === 'unary_expression') {
-      const innerOp = operand.children[0]
-      if (innerOp?.text === '!') {
-        return makeViolation(
-          this.ruleKey, node, filePath, 'low',
-          'Double negation',
-          '`!!x` converts to boolean but can be replaced with `Boolean(x)` for clarity.',
-          sourceCode,
-          'Replace `!!x` with `Boolean(x)` or use a direct boolean check.',
-        )
-      }
-    }
+    // `!!x` is idiomatic JS for boolean coercion — skip it
+    // Only flag the truly confusing `!(!x)` form below
 
     if (operand.type === 'parenthesized_expression') {
       const inner = operand.namedChildren[0]

@@ -11,7 +11,12 @@ export const caseWithoutBreakVisitor: CodeRuleVisitor = {
 
     if (stmts.length === 0) return null
 
-    const last = stmts[stmts.length - 1]
+    let last = stmts[stmts.length - 1]
+    // If the last statement is a block, check the last statement inside the block
+    if (last.type === 'statement_block') {
+      const blockStmts = last.namedChildren
+      if (blockStmts.length > 0) last = blockStmts[blockStmts.length - 1]
+    }
     if (last.type === 'break_statement' || last.type === 'return_statement'
       || last.type === 'throw_statement' || last.type === 'continue_statement') {
       return null

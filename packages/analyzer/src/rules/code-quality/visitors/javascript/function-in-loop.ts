@@ -7,7 +7,13 @@ export const functionInLoopVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['function_declaration', 'function_expression', 'arrow_function'],
   visit(node, filePath, sourceCode) {
-    const LOOP_TYPES = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement'])
+    // Skip arrow functions used as callbacks (arguments to a call)
+    // These are standard patterns: Promise callbacks, .map(), .then(), setTimeout, etc.
+    if (node.type === 'arrow_function') {
+      if (node.parent?.type === 'arguments' || node.parent?.type === 'new_expression') return null
+    }
+
+    const LOOP_TYPES = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement', 'for_of_statement'])
     let parent = node.parent
     while (parent) {
       if (LOOP_TYPES.has(parent.type)) {

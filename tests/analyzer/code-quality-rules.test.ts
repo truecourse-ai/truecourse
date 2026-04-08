@@ -1810,10 +1810,10 @@ describe('code-quality/deterministic/commented-out-code', () => {
 });
 
 describe('code-quality/deterministic/inverted-boolean', () => {
-  it('detects double negation !!x', () => {
+  it('does not flag idiomatic !!x', () => {
     const violations = check(`const b = !!value;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/inverted-boolean');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('detects !(!x)', () => {
@@ -2602,10 +2602,16 @@ describe('code-quality/deterministic/unnecessary-boolean-compare', () => {
     expect(matches).toHaveLength(1);
   });
 
-  it('detects === false comparison', () => {
-    const violations = check(`if (isReady === false) {}`);
+  it('detects === true comparison', () => {
+    const violations = check(`if (isReady === true) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-boolean-compare');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag === false (may be needed for nullable booleans)', () => {
+    const violations = check(`if (isReady === false) {}`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-boolean-compare');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag regular boolean check', () => {

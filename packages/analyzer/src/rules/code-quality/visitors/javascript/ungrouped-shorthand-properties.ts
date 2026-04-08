@@ -8,7 +8,7 @@ export const ungroupedShorthandPropertiesVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const properties = node.namedChildren.filter((c) => c.type === 'pair' || c.type === 'shorthand_property_identifier')
 
-    if (properties.length < 3) return null
+    if (properties.length < 6) return null
 
     let shorthandSection = false
     let regularSection = false

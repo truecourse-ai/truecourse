@@ -21,7 +21,9 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
       lowerPath.includes('cli.') ||
       lowerPath.includes('bin/') ||
       lowerPath.includes('server.') ||
-      lowerPath.includes('app.')
+      lowerPath.includes('app.') ||
+      lowerPath.includes('worker.') ||
+      lowerPath.includes('entrypoint.')
     ) {
       return null
     }
