@@ -159,7 +159,7 @@ export function wrapPrimitive() {
   return new String('hello');
 }
 
-// VIOLATION: bugs/deterministic/symbol-description
+// VIOLATION: code-quality/deterministic/symbol-description
 export function noDescription() {
   return Symbol();
 }

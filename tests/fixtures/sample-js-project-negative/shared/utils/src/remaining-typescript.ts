@@ -58,7 +58,7 @@ export function badErrorResponse(req: any, res: any) {
   res.json({ error: 'Something failed' });
 }
 
-// VIOLATION: architecture/deterministic/duplicate-import
+// ARCH-VIOLATION: architecture/deterministic/duplicate-import
 import { readFileSync } from 'fs';
 import { readFileSync as readSync } from 'fs';
 

@@ -9,7 +9,7 @@ import { UserController } from '../controllers/user.controller';
 let requestCount = 0;
 const apiVersion = 'v1';
 
-// VIOLATION: architecture/deterministic/duplicate-import
+// ARCH-VIOLATION: architecture/deterministic/duplicate-import
 import { Request as Req } from 'express';
 
 const router = Router();

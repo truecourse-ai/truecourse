@@ -47,7 +47,7 @@ export function stringPlusNumber() {
   return 'Items: ' + 5;
 }
 
-// VIOLATION: bugs/deterministic/symbol-description
+// VIOLATION: code-quality/deterministic/symbol-description
 export function noSymbolDesc() {
   return Symbol();
 }
