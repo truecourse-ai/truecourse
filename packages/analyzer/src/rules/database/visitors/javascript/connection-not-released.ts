@@ -10,6 +10,10 @@ export const connectionNotReleasedVisitor: CodeRuleVisitor = {
     const methodName = getMethodName(node)
     if (!CONNECTION_ACQUIRE_METHODS.has(methodName)) return null
 
+    // Only flag method calls on objects (pool.connect()), not standalone functions (getClient())
+    const fn = node.childForFieldName('function')
+    if (!fn || fn.type !== 'member_expression') return null
+
     // If the call is inside a try block, that's fine — assume finally releases it
     if (isInsideTryBody(node)) return null
 

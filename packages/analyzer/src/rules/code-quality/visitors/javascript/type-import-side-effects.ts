@@ -24,6 +24,7 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
 
     // Check for inline type specifiers in named imports
     let hasInlineType = false
+    let hasValueImport = false
     function findNamedImports(n: any) {
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
@@ -35,7 +36,8 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
             const tok0 = spec.child(0)
             if (tok0?.type === 'type') {
               hasInlineType = true
-              return
+            } else {
+              hasValueImport = true
             }
           }
         } else if (child.type === 'import_clause') {
@@ -46,6 +48,10 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
     findNamedImports(node)
 
     if (!hasInlineType) return null
+
+    // If there are value imports mixed with type imports, the module loads anyway —
+    // inline `type` is correct and preferred (no side-effect concern)
+    if (hasValueImport) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

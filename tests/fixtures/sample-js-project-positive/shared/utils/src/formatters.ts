@@ -5,7 +5,7 @@ interface UserInput {
   createdAt: string;
 }
 
-interface FormattedUser {
+export interface FormattedUser {
   id: string;
   name: string;
   email: string;

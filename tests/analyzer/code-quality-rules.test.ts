@@ -3784,7 +3784,7 @@ describe('code-quality/deterministic/regex-concise', () => {
 
 describe('code-quality/deterministic/missing-destructuring', () => {
   it('detects const x = obj.x pattern', () => {
-    const violations = check(`const name = user.name;`);
+    const violations = check(`const name = user.name;\nconst email = user.email;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/missing-destructuring');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });

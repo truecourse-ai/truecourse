@@ -6,6 +6,10 @@ export function noDefault(action: string): string {
   return 'unknown';
 }
 export function dotAccess(obj: Record<string, unknown>): unknown { return obj.name; }
+export function singlePropAccess(attrs: Record<string, unknown>): unknown[] {
+  const features = attrs.features;
+  return Array.isArray(features) ? features : [];
+}
 export function compute(a: number, b: number): number { return a + b; }
 export function flagParam(isVerbose: boolean): string { return isVerbose ? 'detailed' : 'short'; }
 export const unicodeRegex = /hello/u;

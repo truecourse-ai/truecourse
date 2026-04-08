@@ -19,6 +19,9 @@ export const unboundedArrayGrowthVisitor: CodeRuleVisitor = {
     const loopNode = findEnclosingLoop(node)
     if (!loopNode) return null
 
+    // for-in/for-of loops iterate over bounded collections — push is safe
+    if (loopNode.type === 'for_in_statement' || loopNode.type === 'for_of_statement') return null
+
     const loopText = loopNode.text
     if (loopText.includes('.length') && (loopText.includes('splice') || loopText.includes('shift') || loopText.includes('pop') || loopText.includes('slice'))) {
       return null

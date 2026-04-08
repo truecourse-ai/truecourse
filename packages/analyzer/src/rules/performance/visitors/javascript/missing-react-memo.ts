@@ -45,6 +45,10 @@ export const missingReactMemoVisitor: CodeRuleVisitor = {
     const bodyText = funcNode.text
     if (!bodyText.includes('<') || !bodyText.includes('>')) return null
 
+    // Skip simple presentational components with no hooks — memo adds no value
+    const hookPattern = /\buse[A-Z]\w*\s*\(/
+    if (!hookPattern.test(bodyText)) return null
+
     // Skip components with no props — memo provides no benefit
     const params = funcNode.childForFieldName('parameters') || funcNode.childForFieldName('parameter')
     if (!params || params.namedChildCount === 0) return null

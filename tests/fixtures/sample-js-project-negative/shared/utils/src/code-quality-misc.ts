@@ -130,9 +130,10 @@ export function voidUndefined() {
 }
 
 // VIOLATION: code-quality/deterministic/missing-destructuring
-export function noDestructure(config: { timeout: number }) {
+export function noDestructure(config: { timeout: number; retries: number }) {
   const timeout = config.timeout;
-  return timeout;
+  const retries = config.retries;
+  return timeout + retries;
 }
 
 // VIOLATION: code-quality/deterministic/missing-env-validation

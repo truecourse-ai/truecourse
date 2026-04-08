@@ -9,3 +9,8 @@ export function optionalChain(obj: { value: string } | null): string | undefined
 export function nullishCoalesce(x: string | null): string { return x ?? 'default'; }
 export function getArrayLength(arr: readonly unknown[]): number { return arr.length; }
 export const greeting = 'hello';
+
+// Allow invitation validation without auth (accept still requires auth)
+// This function handles both cases (success and failure)
+// Returns the processed result (or null if not found)
+export function commentedCodeClean(): string { return 'no false positives'; }

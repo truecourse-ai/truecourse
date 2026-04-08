@@ -19,6 +19,9 @@ export const unnecessaryTypeAssertionVisitor: CodeRuleVisitor = {
       const expr = node.namedChildren[0]
       if (!expr) return null
 
+      // process.env.* is always potentially undefined at runtime regardless of TS types
+      if (expr.text.startsWith('process.env.')) return null
+
       const typeStr = typeQuery.getTypeAtPosition(
         filePath,
         expr.startPosition.row,

@@ -13,6 +13,15 @@ export const reactReadonlyPropsVisitor: CodeRuleVisitor = {
     const typeName = nameNode.text
     if (!typeName.endsWith('Props')) return null
 
+    // Skip interfaces that extend other types — base types (e.g. React.HTMLAttributes)
+    // are not readonly, so forcing readonly on the extension is inconsistent
+    if (node.type === 'interface_declaration') {
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i)
+        if (child?.type === 'extends_clause' || child?.type === 'extends_type_clause') return null
+      }
+    }
+
     // Check if any property lacks readonly modifier
     const body = node.childForFieldName('body')
     if (!body) return null

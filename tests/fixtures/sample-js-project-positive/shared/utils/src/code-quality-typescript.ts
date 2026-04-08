@@ -7,3 +7,10 @@ export type SimpleMap = Map<string, boolean>;
 export function returnsUnknown(data: unknown): unknown { return data; }
 export function objectParam(val: Record<string, unknown>): Record<string, unknown> { return val; }
 export function isString(x: unknown): x is string { return typeof x === 'string'; }
+export function processValue(input: unknown): boolean {
+  if (typeof input === 'undefined') { return false; }
+  if (typeof input === 'object') { return input !== null; }
+  const result = String(input);
+  const trimmed = result.trim();
+  return trimmed.length > 0;
+}

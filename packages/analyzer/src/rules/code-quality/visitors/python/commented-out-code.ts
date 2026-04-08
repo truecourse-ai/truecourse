@@ -14,8 +14,8 @@ export const pythonCommentedOutCodeVisitor: CodeRuleVisitor = {
 
     const codePatterns = [
       /\b(def|class|import|from|return|if|for|while|try|except|with|raise|print)\b/,
-      /[;()]/,
-      /\w+\s*\(.*\)/,
+      /[;:]\s*$/,
+      /\w+\(.*\)/,
       /=\s*\w/,
     ]
 

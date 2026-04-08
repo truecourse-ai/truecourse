@@ -13,3 +13,12 @@ export function chunkArray(arr: readonly number[], size: number): number[][] {
 export function logMessage(msg: string): void {
   logger.info(msg);
 }
+export function groupByCategory(items: readonly { id: string; category: string }[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const item of items) {
+    const list = map.get(item.category) || [];
+    list.push(item.id);
+    map.set(item.category, list);
+  }
+  return map;
+}

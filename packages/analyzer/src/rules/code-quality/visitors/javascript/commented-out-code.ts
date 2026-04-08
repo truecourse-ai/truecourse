@@ -18,9 +18,9 @@ export const commentedOutCodeVisitor: CodeRuleVisitor = {
 
     const codePatterns = [
       /^\s*(const|let|var|function|return|if|for|while|import|export|class|throw|try|catch)\s/,
-      /[;{}()]\s*$/,
+      /[;{}]\s*$/,
       /=>/,
-      /\w+\s*\(.*\)\s*[;{]?\s*$/,
+      /\w+\(.*\)\s*[;{]?\s*$/,
     ]
 
     const matchCount = codePatterns.filter((p) => p.test(inner)).length

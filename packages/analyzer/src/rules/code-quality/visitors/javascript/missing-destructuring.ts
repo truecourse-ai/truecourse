@@ -39,6 +39,26 @@ export const missingDestructuringVisitor: CodeRuleVisitor = {
 
     const objText = objNode.text
 
+    // Only flag when there are 2+ sequential property accesses from the same object
+    // in the same block — a single access doesn't benefit from destructuring
+    const parentBlock = node.parent
+    if (!parentBlock) return null
+
+    const siblings = parentBlock.namedChildren
+    const myIndex = siblings.indexOf(node)
+    let sameObjectCount = 0
+    for (let i = Math.max(0, myIndex - 5); i < Math.min(siblings.length, myIndex + 6); i++) {
+      const sib = siblings[i]
+      if (sib.type !== 'variable_declaration' && sib.type !== 'lexical_declaration') continue
+      const sibDecl = sib.namedChildren.find((c) => c.type === 'variable_declarator')
+      if (!sibDecl) continue
+      const sibValue = sibDecl.childForFieldName('value')
+      if (sibValue?.type !== 'member_expression') continue
+      const sibObj = sibValue.childForFieldName('object')
+      if (sibObj?.text === objText) sameObjectCount++
+    }
+    if (sameObjectCount < 2) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Missing destructuring',

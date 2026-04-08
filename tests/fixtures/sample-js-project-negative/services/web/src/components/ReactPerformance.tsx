@@ -77,10 +77,10 @@ export function SingleChildProvider() {
 
 // VIOLATION: performance/deterministic/missing-react-memo
 export function NoMemoComponent({ count, label }: { count: number; label: string }) {
+  const [clicks, setClicks] = useState(0);
   return (
-    <div>
-      <span>{label}</span>
-      <span>{count}</span>
+    <div onClick={() => setClicks(clicks + 1)}>
+      <span>{label}: {count} (clicks: {clicks})</span>
     </div>
   );
 }

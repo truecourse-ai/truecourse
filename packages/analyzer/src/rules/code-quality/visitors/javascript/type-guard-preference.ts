@@ -111,6 +111,17 @@ export const typeGuardPreferenceVisitor: CodeRuleVisitor = {
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text ?? 'function'
 
+    // Only flag functions that look like type guard candidates:
+    // - Named with is/has/check prefix (convention for type guards)
+    // - Or very small functions (≤3 statements) whose primary purpose is the type check
+    const isGuardName = /^(is|has|check|assert)[A-Z]/.test(name)
+    if (!isGuardName) {
+      const statements = body.namedChildren.filter((c) =>
+        c.type.includes('statement') || c.type.includes('declaration') || c.type === 'return_statement'
+      )
+      if (statements.length > 3) return null
+    }
+
     return makeViolation(
       this.ruleKey,
       node,

@@ -16,6 +16,11 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     if (index.type === 'number') return null
     // Skip string indexes (object property access)
     if (index.type === 'string') return null
+    // Skip when index is cast to string (property key access, not array indexing)
+    if (index.type === 'as_expression' && /\bas\s+string\b/.test(index.text)) return null
+    // Skip when object is a Record/Map type assertion (property access, not array)
+    if (object.type === 'parenthesized_expression' && object.text.includes('Record<')) return null
+    if (object.type === 'as_expression' && object.text.includes('Record<')) return null
 
     // Skip if the index is a well-known safe pattern like .length - 1
     const indexText = index.text
