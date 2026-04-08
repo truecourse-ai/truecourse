@@ -14,6 +14,7 @@ export const AnalyzeRepoSchema = z.object({
   branch: z.string().optional(),
   enabledCategories: z.array(z.string()).optional().default([]),
   enableLlmRules: z.boolean().optional().default(true),
+  skipGit: z.boolean().optional().default(false),
 })
 
 export type AnalyzeRepoInput = z.infer<typeof AnalyzeRepoSchema>

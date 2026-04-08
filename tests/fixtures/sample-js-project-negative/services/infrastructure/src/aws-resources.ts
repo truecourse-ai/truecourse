@@ -1,6 +1,7 @@
 /**
  * AWS resource definitions — encryption, networking, compute.
  */
+import { Queue } from 'aws-cdk-lib/aws-sqs';
 
 declare class RestApi {
   constructor(scope: any, id: string, props: any);

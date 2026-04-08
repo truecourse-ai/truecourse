@@ -3154,6 +3154,16 @@ Leverages existing infrastructure: method-level call graph, flow tracer, analysi
 
 ---
 
+## TODO: Restore working-tree tests with isolated fixture
+
+The 3 `routes.test.ts` tests for `?ref=working-tree` were removed because they wrote files into the shared negative fixture, causing intermittent failures in concurrent tests. Restore them using a **temp copy** of the fixture with its own `.git` so they don't interfere:
+
+1. `GET /api/repos/:id/files?ref=working-tree — includes untracked files`
+2. `GET /api/repos/:id/file-content?ref=working-tree — returns working tree content`
+3. `GET /api/repos/:id/file-content — default returns committed, not working tree edits`
+
+---
+
 ## Phase 35: Git History Secret Scanning `STATUS: TODO`
 
 Scan git commit history for secrets that were committed and later removed. Gitleaks' primary use case — catching secrets that are technically still in git history even after deletion.

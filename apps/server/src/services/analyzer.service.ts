@@ -120,25 +120,32 @@ export async function runAnalysis(
   repoPath: string,
   _branch: string | undefined,
   onProgress: AnalysisProgressCallback,
-  options?: { skipStash?: boolean; signal?: AbortSignal },
+  options?: { skipStash?: boolean; skipGit?: boolean; signal?: AbortSignal },
 ): Promise<AnalysisResult> {
-  const git = await getGit(repoPath);
-
-  // Detect current branch (we never checkout — analyze whatever is checked out)
-  const currentBranch = (await git.branch()).current;
-
-  // Stash pending changes so the baseline reflects the committed state
+  let currentBranch = 'unknown';
   let didStash = false;
-  const statusResult = await git.status();
-  const hasChanges = !statusResult.isClean();
+  let isSubdirectory = false;
+  let hasChanges = false;
+  let git: Awaited<ReturnType<typeof getGit>> | undefined;
 
-  // Skip stashing when the repo path is a subdirectory of a larger repo
-  // (e.g., test fixtures inside the main repo). Stashing there would affect
-  // unrelated files and cause ENOENT errors in concurrent operations.
-  const gitRoot = (await git.revparse(['--show-toplevel'])).trim();
-  const isSubdirectory = path.resolve(repoPath) !== path.resolve(gitRoot);
+  if (!options?.skipGit) {
+    git = await getGit(repoPath);
 
-  if (hasChanges && !options?.skipStash && !isSubdirectory) {
+    // Detect current branch (we never checkout — analyze whatever is checked out)
+    currentBranch = (await git.branch()).current;
+
+    // Stash pending changes so the baseline reflects the committed state
+    const statusResult = await git.status();
+    hasChanges = !statusResult.isClean();
+
+    // Skip stashing when the repo path is a subdirectory of a larger repo
+    // (e.g., test fixtures inside the main repo). Stashing there would affect
+    // unrelated files and cause ENOENT errors in concurrent operations.
+    const gitRoot = (await git.revparse(['--show-toplevel'])).trim();
+    isSubdirectory = path.resolve(repoPath) !== path.resolve(gitRoot);
+  }
+
+  if (hasChanges && !options?.skipStash && !isSubdirectory && git) {
     onProgress({ step: 'stash', percent: 2, detail: 'Stashing pending changes to analyze committed state...' });
     try {
       const stashResult = await git.stash(['push', '--include-untracked', '-m', 'truecourse-analysis-stash']);

@@ -33,7 +33,7 @@ describe('flow.service (integration)', () => {
     initDatabase(DATABASE_URL);
 
     // Run analysis on the fixture project
-    analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true });
+    analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true, skipGit: true });
 
     // Create a repo record in DB (use unique path suffix to avoid conflicts with routes.test.ts)
     // Clean up any leftover from a previous crashed run

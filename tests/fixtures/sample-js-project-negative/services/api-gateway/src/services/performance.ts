@@ -33,11 +33,13 @@ export function spreadReduce(items: Array<{ key: string; value: number }>) {
 }
 
 // VIOLATION: performance/deterministic/unbounded-array-growth
-export function leakyLogs() {
+export function leakyLogs(source: Iterator<string>) {
   const logs: string[] = [];
-  setInterval(() => {
-    logs.push(new Date().toISOString());
-  }, 1000);
+  let next = source.next();
+  while (!next.done) {
+    logs.push(next.value);
+    next = source.next();
+  }
   return logs;
 }
 

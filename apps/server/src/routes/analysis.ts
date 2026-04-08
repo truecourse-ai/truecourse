@@ -62,7 +62,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
-      const { enabledCategories: globalEnabledCategories, enableLlmRules } = parsed.data;
+      const { enabledCategories: globalEnabledCategories, enableLlmRules, skipGit } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -75,9 +75,13 @@ router.post(
       }
 
       // Detect current branch and commit hash (never checkout — analyze what's on disk)
-      const git = await getGit(repo.path);
-      const branch = (await git.branch()).current || null;
-      const commitHash = (await git.revparse(['HEAD'])).trim();
+      let branch: string | null = null;
+      let commitHash: string | null = null;
+      if (!skipGit) {
+        const git = await getGit(repo.path);
+        branch = (await git.branch()).current || null;
+        commitHash = (await git.revparse(['HEAD'])).trim();
+      }
 
       // Create analysis row with 'running' status
       const [runningAnalysis] = await db

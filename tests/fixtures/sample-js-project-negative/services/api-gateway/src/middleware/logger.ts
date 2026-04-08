@@ -30,8 +30,10 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     };
 
     // VIOLATION: performance/deterministic/unbounded-array-growth
-    for (const entry of [log]) {
-      logs.push(entry);
+    let idx = 0;
+    while (idx < 1) {
+      logs.push(log);
+      idx++;
     }
 
     // VIOLATION: code-quality/deterministic/magic-number
