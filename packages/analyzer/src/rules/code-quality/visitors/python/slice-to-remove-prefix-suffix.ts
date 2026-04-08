@@ -16,10 +16,12 @@ export const pythonSliceToRemovePrefixSuffixVisitor: CodeRuleVisitor = {
     // Check for slice
     if (sub.type !== 'slice') return null
 
+    const sliceChildren = sub.namedChildren
     const sliceText = sub.text
 
     // Pattern: len(something):  → removeprefix
-    if (/^len\(.+\):$/.test(sliceText.trim())) {
+    // Slice has exactly 1 named child which is a call to len()
+    if (sliceChildren.length === 1 && sliceChildren[0].type === 'call') {
       const prefixMatch = sliceText.match(/^len\((.+)\):$/)
       if (prefixMatch) {
         return makeViolation(
@@ -33,7 +35,8 @@ export const pythonSliceToRemovePrefixSuffixVisitor: CodeRuleVisitor = {
     }
 
     // Pattern: :-len(something) → removesuffix
-    if (/^:-len\(.+\)$/.test(sliceText.trim())) {
+    // Slice has exactly 1 named child which is a unary_operator wrapping len()
+    if (sliceChildren.length === 1 && sliceChildren[0].type === 'unary_operator') {
       const suffixMatch = sliceText.match(/^:-len\((.+)\)$/)
       if (suffixMatch) {
         return makeViolation(

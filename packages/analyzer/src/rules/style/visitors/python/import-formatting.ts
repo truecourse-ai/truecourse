@@ -27,6 +27,7 @@ export const pythonImportFormattingVisitor: CodeRuleVisitor = {
       if (
         child.type !== 'import_statement' &&
         child.type !== 'import_from_statement' &&
+        child.type !== 'future_import_statement' &&
         child.type !== 'comment'
       ) {
         // Allow module docstring (expression_statement with string) as first non-comment

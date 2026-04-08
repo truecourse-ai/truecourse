@@ -20,19 +20,14 @@ export const pythonIdiomSimplificationVisitor: CodeRuleVisitor = {
       for (const child of node.namedChildren) {
         if (child.type === 'subscript') {
           const slice = child.childForFieldName('subscript') ?? child.namedChildren[1]
-          if (slice?.type === 'slice') {
-            const start = slice.childForFieldName('start')
-            const end = slice.childForFieldName('end')
-            const step = slice.childForFieldName('step')
-            if (!start && !end && !step) {
-              return makeViolation(
-                this.ruleKey, node, filePath, 'low',
-                'Python idiom: del x[:] → x.clear()',
-                '`del x[:]` removes all items but is less idiomatic than `x.clear()`.',
-                sourceCode,
-                'Replace `del x[:]` with `x.clear()`.',
-              )
-            }
+          if (slice?.type === 'slice' && slice.namedChildren.length === 0) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'low',
+              'Python idiom: del x[:] → x.clear()',
+              '`del x[:]` removes all items but is less idiomatic than `x.clear()`.',
+              sourceCode,
+              'Replace `del x[:]` with `x.clear()`.',
+            )
           }
         }
       }
@@ -42,10 +37,10 @@ export const pythonIdiomSimplificationVisitor: CodeRuleVisitor = {
     if (node.type === 'subscript') {
       const slice = node.childForFieldName('subscript') ?? node.namedChildren[1]
       if (slice?.type === 'slice') {
-        const start = slice.childForFieldName('start')
-        const end = slice.childForFieldName('end')
-        const step = slice.childForFieldName('step')
-        if (!start && !end && !step) {
+        // tree-sitter Python doesn't expose start/end/step as fields — use namedChildren
+        // Empty slice [:] has 0 named children (only the `:` token)
+        const sliceChildren = slice.namedChildren
+        if (sliceChildren.length === 0) {
           // Only flag when used as a value (not in del statement)
           const parent = node.parent
           if (parent && parent.type !== 'delete_statement') {
@@ -61,12 +56,12 @@ export const pythonIdiomSimplificationVisitor: CodeRuleVisitor = {
       }
       // FURB187: reversed slice [::-1] → reversed()
       if (slice?.type === 'slice') {
-        const step = slice.childForFieldName('step')
-        const start = slice.childForFieldName('start')
-        const end = slice.childForFieldName('end')
-        if (!start && !end && step?.type === 'unary_operator') {
-          const op = step.children[0]
-          const val = step.namedChildren[0]
+        const sliceChildren = slice.namedChildren
+        // [::-1] has exactly one named child: unary_operator(-1)
+        if (sliceChildren.length === 1 && sliceChildren[0].type === 'unary_operator') {
+          const unary = sliceChildren[0]
+          const op = unary.children[0]
+          const val = unary.namedChildren[0]
           if (op?.text === '-' && val?.text === '1') {
             return makeViolation(
               this.ruleKey, node, filePath, 'low',

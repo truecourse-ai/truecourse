@@ -189,6 +189,8 @@ function isPropertyAccess(node: SyntaxNode): boolean {
       ?? parent.childForFieldName('attribute')
     return prop === node
   }
+  // Python keyword argument keys (e.g., datefmt=...) are not variable references
+  if (parent.type === 'keyword_argument' && parent.childForFieldName('name') === node) return true
   return false
 }
 
@@ -273,6 +275,8 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
     // The last identifier in except clause is the binding name (if there's 'as')
     if (nameChildren.length > 0 && nameChildren[nameChildren.length - 1] === node) return true
   }
+  // except clause with as_pattern: `except (E1, E2) as name`
+  if (parent.type === 'as_pattern_target') return true
   // import
   if (parent.type === 'import_statement' || parent.type === 'import_from_statement') return true
   if (parent.type === 'aliased_import') {
@@ -281,7 +285,7 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
     const nameField = parent.childForFieldName('name')
     return nameField === node
   }
-  if (parent.type === 'dotted_name' && parent.parent?.type === 'import_statement') return true
+  if (parent.type === 'dotted_name' && (parent.parent?.type === 'import_statement' || parent.parent?.type === 'import_from_statement' || parent.parent?.type === 'future_import_statement')) return true
   // global/nonlocal statement
   if (parent.type === 'global_statement' || parent.type === 'nonlocal_statement') return true
   // expression_list as left of assignment
@@ -519,18 +523,20 @@ export function buildScopeTree(
       return
     }
 
-    // function definition name
+    // function definition name — register in the ENCLOSING scope, not the function's own scope
     if (parent.type === 'function_definition' && parent.childForFieldName('name') === node) {
-      if (!scope.variables.has(node.text)) {
-        createVariable(node.text, 'function', node, scope, false)
+      const enclosing = scope.parent ?? scope
+      if (!enclosing.variables.has(node.text)) {
+        createVariable(node.text, 'function', node, enclosing, false)
       }
       return
     }
 
-    // class definition name
+    // class definition name — register in the ENCLOSING scope
     if (parent.type === 'class_definition' && parent.childForFieldName('name') === node) {
-      if (!scope.variables.has(node.text)) {
-        createVariable(node.text, 'class', node, scope, false)
+      const enclosing = scope.parent ?? scope
+      if (!enclosing.variables.has(node.text)) {
+        createVariable(node.text, 'class', node, enclosing, false)
       }
       return
     }
@@ -575,6 +581,27 @@ export function buildScopeTree(
       }
       return
     }
+    if (parent.type === 'dotted_name' && parent.parent?.type === 'import_from_statement') {
+      // from foo.bar import baz -> module path identifiers are not bindings,
+      // but imported names (baz) are. Distinguish via module_name field.
+      const moduleName = parent.parent.childForFieldName('module_name')
+      if (parent === moduleName) {
+        // This is the module path (foo.bar) — not a binding
+        return
+      }
+      // This is an imported name — register it as an import
+      if (!scope.variables.has(node.text)) {
+        createVariable(node.text, 'import', node, scope, false)
+      }
+      return
+    }
+    if (parent.type === 'dotted_name' && parent.parent?.type === 'future_import_statement') {
+      // from __future__ import annotations — register as import
+      if (!scope.variables.has(node.text)) {
+        createVariable(node.text, 'import', node, scope, false)
+      }
+      return
+    }
 
     // for statement / for_in_clause
     if (
@@ -589,7 +616,7 @@ export function buildScopeTree(
     }
 
     // except clause as-name
-    if (parent.type === 'except_clause') {
+    if (parent.type === 'except_clause' || parent.type === 'as_pattern_target') {
       if (!scope.variables.has(node.text)) {
         createVariable(node.text, 'catch-parameter', node, scope, false)
       }

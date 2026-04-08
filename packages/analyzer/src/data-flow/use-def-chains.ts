@@ -110,8 +110,8 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
     const result: Variable[] = []
     const allVars = getAllVariables()
     for (const v of allVars) {
-      // Skip hoisted declarations (var, function)
-      if (v.kind === 'var' || v.kind === 'function' || v.kind === 'import' || v.kind === 'global' || v.kind === 'nonlocal') continue
+      // Skip hoisted declarations (var, function) and comprehension/catch variables
+      if (v.kind === 'var' || v.kind === 'function' || v.kind === 'import' || v.kind === 'global' || v.kind === 'nonlocal' || v.kind === 'for-variable' || v.kind === 'catch-parameter') continue
       if (v.useSites.length === 0) continue
 
       const declPos = v.declarationNode.startIndex
