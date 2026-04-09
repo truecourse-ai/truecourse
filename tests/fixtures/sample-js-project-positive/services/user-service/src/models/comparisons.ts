@@ -31,3 +31,9 @@ export function typedComparison(): boolean {
 export function properInCheck(obj: Record<string, unknown>): boolean {
   return 'length' in obj;
 }
+export function stringEquality(a: string, b: string): boolean {
+  return a === b;
+}
+export function numericLiteralArithmetic(items: readonly string[]): number[] {
+  return items.map((_, i) => i * 2);
+}

@@ -9,3 +9,9 @@ export class ReadAttribute {
   constructor(initial: string = 'secret') { this.data_ = initial; }
   getData(): string { return this.data_; }
 }
+export class ArrowMethodClass {
+  private handleClick = (): void => { /* arrow property — this is bound */ };
+  register(el: { addEventListener: (e: string, fn: () => void) => void }): void {
+    el.addEventListener('click', this.handleClick);
+  }
+}

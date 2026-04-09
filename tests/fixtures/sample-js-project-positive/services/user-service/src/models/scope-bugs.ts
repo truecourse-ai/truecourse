@@ -10,3 +10,11 @@ export function properSwitch(x: number): string {
   if (x === 2) return 'matched';
   return 'default';
 }
+export function nonOverlappingShadow(input: string): string {
+  if (!input) {
+    const data = 'fallback';
+    throw new Error(data);
+  }
+  const data = input.trim();
+  return data;
+}
