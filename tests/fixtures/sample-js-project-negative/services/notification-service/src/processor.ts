@@ -22,6 +22,7 @@ export class NotificationProcessor {
   private queue: NotificationQueue = { items: [], maxRetries: 3 };
   private templates = new EmailTemplates();
 
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   async enqueue(data: { type: string; recipient: string; subject?: string; body: string }) {
@@ -126,6 +127,7 @@ export class NotificationProcessor {
   /**
    * Clean up old notifications.
    */
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   async cleanup(notifications: Notification[]) {
@@ -135,6 +137,7 @@ export class NotificationProcessor {
     return notifications.filter((n) => now - n.createdAt.getTime() < maxAge);
   }
 
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
   getQueueStats() {
     const total = this.queue.items.length;

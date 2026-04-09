@@ -15,6 +15,8 @@ export function formatUser(user: any) {
   };
 }
 
+// VIOLATION: architecture/deterministic/dead-method
+// VIOLATION: architecture/deterministic/unused-export
 export function formatDate(date: Date): string {
   return date.toISOString().split('T')[0]!;
 }

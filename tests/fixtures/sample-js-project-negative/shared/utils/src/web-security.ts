@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Web security utilities — CORS, cookies, Express configuration.
  */

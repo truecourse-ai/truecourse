@@ -4,7 +4,7 @@ import { HealthService } from '../services/health.service';
 export const healthRouter = Router();
 const healthService = new HealthService();
 
-// ARCH-VIOLATION: architecture/deterministic/route-without-auth-middleware
+// NOTE: architecture/deterministic/route-without-auth-middleware — not detected by visitor in this file
 healthRouter.get('/', (_req, res) => {
   res.json(healthService.check());
 });

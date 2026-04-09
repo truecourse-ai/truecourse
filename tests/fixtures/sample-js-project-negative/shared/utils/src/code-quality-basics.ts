@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Utility functions demonstrating common code quality issues.
  */
@@ -251,6 +252,14 @@ export function bitwiseInBool(a: number, b: number) {
   }
   return false;
 }
+
+// VIOLATION: code-quality/deterministic/todo-fixme
+// TODO: refactor this function to use a more efficient algorithm
+export function pendingRefactor(items: number[]) {
+  return items.reduce((sum, item) => sum + item, 0);
+}
+
+// NOTE: code-quality/deterministic/env-in-library-code — requires file path to contain /packages/ (fixture is under shared/)
 
 // VIOLATION: code-quality/deterministic/no-return-assign
 export function returnAssign(x: number) {

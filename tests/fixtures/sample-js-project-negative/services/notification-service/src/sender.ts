@@ -30,6 +30,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
   return response.json() as Promise<EmailResult>;
 }
 
+// VIOLATION: architecture/deterministic/unused-export
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
 export async function sendBulkEmails(
@@ -49,6 +50,8 @@ export async function sendBulkEmails(
   return results;
 }
 
+// VIOLATION: architecture/deterministic/dead-method
+// VIOLATION: architecture/deterministic/unused-export
 // VIOLATION: code-quality/deterministic/missing-return-type
 export function validateEmailAddress(email: string) {
   // VIOLATION: bugs/deterministic/redos-vulnerable-regex

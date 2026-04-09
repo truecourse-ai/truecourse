@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Miscellaneous code quality violations — covering remaining rules.
  */
@@ -61,6 +62,7 @@ export function bracketAccess(obj: Record<string, any>) {
 export function noOp() {
 }
 
+// VIOLATION: architecture/deterministic/too-many-parameters
 // VIOLATION: code-quality/deterministic/expression-complexity
 export function complexExpr(a: number, b: number, c: number, d: number, e: number, f: number, g: number) {
   return a + b * c - d / e + f * g - a + b;

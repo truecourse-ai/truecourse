@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Code complexity patterns — nesting, branching, function size.
  */
@@ -80,6 +81,7 @@ export function switchInSwitch(a: number, b: string) {
   }
 }
 
+// VIOLATION: architecture/deterministic/deeply-nested-logic
 // VIOLATION: code-quality/deterministic/cognitive-complexity
 export function complexFunction(x: number, y: number, z: number) {
   if (x > 0) {
@@ -134,6 +136,7 @@ export function manyBranches(type: string, value: number) {
   return 0;
 }
 
+// VIOLATION: architecture/deterministic/deeply-nested-logic
 // VIOLATION: code-quality/deterministic/max-nesting-depth
 export function deeplyNested(a: boolean, b: boolean, c: boolean, d: boolean, e: boolean) {
   if (a) {
@@ -150,6 +153,7 @@ export function deeplyNested(a: boolean, b: boolean, c: boolean, d: boolean, e: 
   return 'shallow';
 }
 
+// VIOLATION: architecture/deterministic/long-method
 // VIOLATION: code-quality/deterministic/max-statements-per-function
 export function tooManyStatements() {
   const a = 1; const b = 2; const c = 3; const d = 4; const e = 5;
@@ -162,6 +166,7 @@ export function tooManyStatements() {
   return a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p+q+r+s+t+u+v+w+x+y+z+aa+bb+cc+dd+ee;
 }
 
+// VIOLATION: architecture/deterministic/deeply-nested-logic
 // VIOLATION: code-quality/deterministic/too-many-branches
 export function manyIfElse(x: number) {
   if (x === 1) return 'a';

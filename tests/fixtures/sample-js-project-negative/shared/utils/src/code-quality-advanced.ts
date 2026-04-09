@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Advanced code quality patterns — blocks, regex, patterns.
  */

@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/circular-service-dependency
 import express from 'express';
 import cors from 'cors';
 import { userRouter } from './routes/users';

@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Remaining bug patterns not covered elsewhere.
  */
@@ -16,10 +17,24 @@ export async function awaitLiteral() {
   return x;
 }
 
-// NOTE: base-to-string needs typeQuery to detect object types (not resolving in fixture)
+// NOTE: bugs/deterministic/base-to-string — requires TypeQuery (needsTypeQuery: true)
 export function stringifyObj() {
   const obj: Record<string, number> = {};
   return obj.toString();
+}
+
+// VIOLATION: bugs/deterministic/symbol-description
+export function undescribedSymbol() {
+  return Symbol();
+}
+
+// VIOLATION: bugs/deterministic/unexpected-multiline
+export function unexpectedMultilineReturn(x: number) {
+  if (x > 10) {
+    return
+    x * 2;
+  }
+  return x;
 }
 
 // VIOLATION: bugs/deterministic/const-reassignment

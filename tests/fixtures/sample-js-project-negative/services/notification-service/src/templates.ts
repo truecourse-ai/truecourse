@@ -35,6 +35,7 @@ export class EmailTemplates {
     `;
   }
 
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   renderWelcome(userName: string) {
@@ -45,6 +46,7 @@ export class EmailTemplates {
     `;
   }
 
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   renderPasswordReset(resetLink: string) {
@@ -56,6 +58,7 @@ export class EmailTemplates {
     `;
   }
 
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/static-method-candidate
   renderAlert(level: string, message: string) {

@@ -116,13 +116,33 @@ function runCodeRules(rootPath: string): CodeViolation[] {
 // Tests
 // ---------------------------------------------------------------------------
 
+// Architecture checker rules — tested in the architecture describe block, not code rules.
+const ARCH_CHECKER_RULES = new Set([
+  'architecture/deterministic/circular-service-dependency',
+  'architecture/deterministic/circular-module-dependency',
+  'architecture/deterministic/god-service',
+  'architecture/deterministic/god-module',
+  'architecture/deterministic/unused-export',
+  'architecture/deterministic/dead-module',
+  'architecture/deterministic/orphan-file',
+  'architecture/deterministic/data-layer-depends-on-api',
+  'architecture/deterministic/data-layer-depends-on-external',
+  'architecture/deterministic/external-layer-depends-on-api',
+  'architecture/deterministic/cross-service-internal-import',
+  'architecture/deterministic/long-method',
+  'architecture/deterministic/too-many-parameters',
+  'architecture/deterministic/deeply-nested-logic',
+  'architecture/deterministic/dead-method',
+]);
+
 describe('JS/TS negative fixture — code rules', () => {
   let violations: CodeViolation[];
   let expected: ExpectedViolation[];
 
   beforeAll(() => {
     violations = runCodeRules(FIXTURE_PATH);
-    expected = parseExpectedViolations(FIXTURE_PATH);
+    // Exclude architecture checker rules — they are tested in the architecture test
+    expected = parseExpectedViolations(FIXTURE_PATH).filter(e => !ARCH_CHECKER_RULES.has(e.ruleKey));
   }, 60_000); // allow up to 60s for type query setup
 
   it('has expected violation markers', () => {
@@ -243,5 +263,64 @@ describe('JS/TS negative fixture — architecture', () => {
     expect(moduleDependencies).toEqual(expectedGraph.moduleDependencies);
   });
 
-  // Architecture violations are validated via ARCH-VIOLATION markers, not expected-graph.json
+  it('finds architecture violations for each expected marker', () => {
+    const { deps, split } = buildGraph();
+    const enabledRules = DETERMINISTIC_RULES.filter(r => r.enabled && r.key.startsWith('architecture/'));
+    const entryPointFiles = new Set(findEntryPoints(analyses, deps));
+
+    const archViolations = [
+      ...checkServiceRules(split.services, split.dependencies, enabledRules),
+      ...checkModuleRules(
+        split.modules, split.methods, deps, enabledRules,
+        split.moduleLevelDependencies, undefined, analyses, undefined, entryPointFiles, split.methodLevelDependencies,
+      ),
+      ...checkMethodRules(split.methods, enabledRules, split.methodLevelDependencies, entryPointFiles, analyses),
+    ];
+
+    // Parse VIOLATION markers for checker-produced architecture rules only.
+    // Rules with tree-sitter visitors are already tested by the code rules test.
+    const allExpected = parseExpectedViolations(FIXTURE_PATH);
+    const archExpected = allExpected.filter(e => ARCH_CHECKER_RULES.has(e.ruleKey));
+
+    expect(archExpected.length).toBeGreaterThan(0);
+    console.log(`Found ${archExpected.length} architecture checker VIOLATION markers`);
+    console.log(`Found ${archViolations.length} architecture violations from checkers`);
+
+    // Architecture violations are module/service level — match by ruleKey only, not filePath.
+    // Service-level violations (e.g. circular-service-dependency) have no filePath.
+    // Module-level violations have filePath so we can match more precisely.
+    const violationsByFile = new Map<string, Set<string>>();
+    const violationRuleKeys = new Set<string>();
+    for (const v of archViolations) {
+      violationRuleKeys.add(v.ruleKey);
+      const fp = 'filePath' in v ? (v as { filePath: string }).filePath : '';
+      if (fp) {
+        if (!violationsByFile.has(fp)) violationsByFile.set(fp, new Set());
+        violationsByFile.get(fp)!.add(v.ruleKey);
+      }
+    }
+
+    const missing = archExpected.filter(exp => {
+      // Try file+ruleKey match first (module/method violations have filePath)
+      const fileRules = violationsByFile.get(exp.filePath);
+      if (fileRules?.has(exp.ruleKey)) return false;
+      // Fall back to ruleKey-only match (service-level violations)
+      return !violationRuleKeys.has(exp.ruleKey);
+    });
+
+    if (missing.length > 0) {
+      console.log(`\nMISSING ARCH VIOLATIONS (${missing.length}):`);
+      for (const m of missing) {
+        console.log(`  ${m.ruleKey} at ${relative(FIXTURE_PATH, m.filePath)}:${m.line}`);
+      }
+    }
+
+    // Report architecture rule coverage
+    const expectedArchRules = new Set(archExpected.map(e => e.ruleKey));
+    const coveredCount = [...expectedArchRules].filter(r => violationRuleKeys.has(r)).length;
+    console.log(`\nArchitecture checker rule coverage: ${coveredCount}/${expectedArchRules.size} expected rules detected`);
+    console.log(`Architecture checker rules found: ${[...violationRuleKeys].sort().join(', ')}`);
+
+    expect(missing.length).toBe(0);
+  });
 });

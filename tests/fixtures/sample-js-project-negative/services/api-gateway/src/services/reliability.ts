@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Reliability patterns — error handling, promises, resource management.
  */

@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Miscellaneous bugs — covers remaining bug patterns.
  */
@@ -36,7 +37,7 @@ export function badIndexCheck(arr: string[]) {
   return arr.indexOf('item') > 0;
 }
 
-// NOTE: non-number-arithmetic — @ts-ignore suppresses TypeQuery type info, so rule can't detect
+// NOTE: bugs/deterministic/non-number-arithmetic — requires TypeQuery (needsTypeQuery: true)
 export function stringMath() {
   // @ts-ignore
   return 'hello' - 1;
@@ -179,7 +180,7 @@ export function handleDirection(dir: 'up' | 'down' | 'left' | 'right'): string {
   }
 }
 
-// NOTE: unsafe-enum-comparison needs typeQuery to resolve enum member types (not available in fixture)
+// NOTE: bugs/deterministic/unsafe-enum-comparison — requires TypeQuery (needsTypeQuery: true)
 export enum Color { Red, Blue, Green }
 export function compareEnum(n: number) {
   return Color.Red === n;
@@ -203,7 +204,7 @@ export function negateNonNumber() {
   return -x;
 }
 
-// NOTE: unhandled-promise needs typeQuery.isPromiseLike (not resolving in fixture)
+// NOTE: bugs/deterministic/unhandled-promise — requires TypeQuery (needsTypeQuery: true, isPromiseLike)
 export function unhandled() {
   Promise.resolve(42);
 }
@@ -241,13 +242,15 @@ export function spreadPrimitive(s: string) {
   return [...s];
 }
 
-// NOTE: misused-promise needs typeQuery.isPromiseLike (not resolving in fixture)
+// NOTE: bugs/deterministic/misused-promise — requires TypeQuery (needsTypeQuery: true, isPromiseLike)
 export function boolPromise() {
   const p = Promise.resolve(true);
   if (p) {
     return 'truthy';
   }
 }
+
+// NOTE: bugs/deterministic/yield-return-outside-function — Python-only rule (no JS visitor)
 
 // VIOLATION: bugs/deterministic/missing-await
 export async function forgot() {

@@ -1,8 +1,10 @@
+// VIOLATION: architecture/deterministic/dead-module
 // VIOLATION: code-quality/deterministic/unsafe-any-usage
 const config: any = {};
 config.level;
 
 export const logger = {
+  // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/unsafe-any-usage
   info: (message: string) => {
     const meta: any = {};

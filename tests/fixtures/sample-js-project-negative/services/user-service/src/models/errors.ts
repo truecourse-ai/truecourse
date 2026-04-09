@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Error handling patterns — contains various error/catch bug patterns.
  */

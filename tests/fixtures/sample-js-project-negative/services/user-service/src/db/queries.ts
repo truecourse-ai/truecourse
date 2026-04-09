@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Database query utilities — covers connection, query, and ORM patterns.
  */

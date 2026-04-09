@@ -10,6 +10,8 @@ export async function connectDatabase(): Promise<PrismaClient> {
   return client;
 }
 
+// VIOLATION: architecture/deterministic/dead-method
+// VIOLATION: architecture/deterministic/unused-export
 export async function disconnectDatabase(): Promise<void> {
   if (client) {
     await client.$disconnect();

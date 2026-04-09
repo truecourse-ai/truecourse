@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/god-module
 /**
  * Security utilities and middleware helpers.
  */
@@ -138,4 +139,66 @@ export function longTermKeys() {
 export function sensitiveUrl() {
   // VIOLATION: security/deterministic/sensitive-data-in-url
   return fetch('https://api.example.com/login?password=secret123');
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function fetchLegacyApi() {
+  // VIOLATION: security/deterministic/clear-text-protocol
+  return fetch('http://api.legacy-system.com/v1/data');
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function loadWalletFromBackup() {
+  // VIOLATION: security/deterministic/hardcoded-blockchain-mnemonic
+  const mnemonic = 'abandon ability able about above absent absorb abstract absurd abuse access accident';
+  return mnemonic;
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function getInternalServiceUrl() {
+  // VIOLATION: security/deterministic/hardcoded-ip
+  const dbHost = '10.0.3.47';
+  return `https://${dbHost}:5432/mydb`;
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function connectToPaymentGateway() {
+  // VIOLATION: security/deterministic/hardcoded-secret
+  const apiSecret = 'sk_live_4eC39HqLyjWDarjtT1zdp7dc';
+  return { apiSecret };
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function setSessionCookie(res: any, token: string) {
+  // VIOLATION: security/deterministic/cookie-without-httponly
+  res.cookie('session', token, { secure: true, sameSite: 'strict' });
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function queryLdapDirectory() {
+  // VIOLATION: security/deterministic/ldap-unauthenticated
+  const ldapUrl = 'ldap://directory.corp.example.com/dc=example,dc=com';
+  return ldapUrl;
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function registerUser(req: any) {
+  const User = { create: (data: any) => data };
+  // VIOLATION: security/deterministic/password-stored-plaintext
+  return User.create({ email: req.body.email, password: req.body.password });
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function hashUserPassword(password: string) {
+  const crypto = require('crypto');
+  // VIOLATION: security/deterministic/unpredictable-salt-missing
+  return crypto.createHash('sha256').update(password).digest('hex');
 }

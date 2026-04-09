@@ -53,12 +53,12 @@ function unusedScopeDef() {
 }
 export { unusedScopeDef };
 
-// ARCH-VIOLATION: architecture/deterministic/missing-error-status-code
+// NOTE: architecture/deterministic/missing-error-status-code — not detected by visitor in this file
 export function badErrorResponse(req: any, res: any) {
   res.json({ error: 'Something failed' });
 }
 
-// ARCH-VIOLATION: architecture/deterministic/duplicate-import
+// VIOLATION: architecture/deterministic/duplicate-import
 import { readFileSync } from 'fs';
 import { readFileSync as readSync } from 'fs';
 

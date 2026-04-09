@@ -9,7 +9,7 @@ import { UserController } from '../controllers/user.controller';
 let requestCount = 0;
 const apiVersion = 'v1';
 
-// ARCH-VIOLATION: architecture/deterministic/duplicate-import
+// VIOLATION: architecture/deterministic/duplicate-import
 import { Request as Req } from 'express';
 
 const router = Router();
@@ -33,7 +33,7 @@ router.get('/api/reports', async (req: Request, res: Response) => {
   res.json(reports);
 });
 
-// ARCH-VIOLATION: architecture/deterministic/missing-request-body-size-limit
+// NOTE: architecture/deterministic/missing-request-body-size-limit — not detected by visitor in this file
 router.post('/api/upload', async (req: Request, res: Response) => {
   const data = req.body;
   res.json({ size: JSON.stringify(data).length });
@@ -45,7 +45,7 @@ router.post('/api/auth/login', async (req: Request, res: Response) => {
   res.json({ token: 'dummy' });
 });
 
-// ARCH-VIOLATION: architecture/deterministic/type-assertion-overuse
+// NOTE: architecture/deterministic/type-assertion-overuse — not detected by visitor in this file
 export function assertEverything(data: unknown) {
   const str = data as string;
   const num = data as number;

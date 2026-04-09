@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/cross-service-internal-import
 import axios from 'axios';
 import { formatUser } from '@sample/shared-utils';
 

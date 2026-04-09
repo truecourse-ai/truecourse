@@ -1,3 +1,5 @@
+// VIOLATION: architecture/deterministic/circular-module-dependency
+// VIOLATION: architecture/deterministic/data-layer-depends-on-api
 import { PrismaClient } from '@prisma/client';
 import { getUsers } from '../handlers/user.handler';
 

@@ -1,3 +1,4 @@
+// VIOLATION: architecture/deterministic/cross-service-internal-import
 import { Request, Response } from 'express';
 import { UserService } from '../services/user.service';
 import { validateEmail } from '@sample/shared-utils';
