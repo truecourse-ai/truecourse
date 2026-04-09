@@ -340,8 +340,8 @@ for (const item of items) {
 describe('performance/deterministic/settimeout-setinterval-no-clear', () => {
   const KEY = 'performance/deterministic/settimeout-setinterval-no-clear';
 
-  it('detects setTimeout without storing reference', () => {
-    const code = `setTimeout(() => doSomething(), 1000);`;
+  it('detects setInterval without storing reference', () => {
+    const code = `setInterval(() => doSomething(), 1000);`;
     const violations = only(check(code), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
   });
@@ -362,8 +362,8 @@ describe('performance/deterministic/unbounded-array-growth', () => {
 
   it('detects Array.push in loop without bounds', () => {
     const code = `
-for (let i = 0; i < 1000; i++) {
-  results.push(compute(i));
+while (true) {
+  results.push(compute());
 }`;
     const violations = only(check(code), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);

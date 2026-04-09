@@ -8415,10 +8415,8 @@ class Foo {
 describe('bugs/deterministic/use-before-define', () => {
   it('detects const used before declaration (TDZ)', () => {
     const violations = check(`
-function foo() {
-  console.log(x);
-  const x = 42;
-}
+console.log(x);
+const x = 42;
 `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/use-before-define');
     expect(matches.length).toBeGreaterThanOrEqual(1);

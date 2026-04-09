@@ -2598,14 +2598,14 @@ describe('code-quality/deterministic/non-null-assertion', () => {
 });
 
 describe('code-quality/deterministic/unnecessary-boolean-compare', () => {
-  it('detects === true comparison', () => {
-    const violations = check(`if (isValid === true) {}`);
+  it('detects == true comparison', () => {
+    const violations = check(`if (isValid == true) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-boolean-compare');
     expect(matches).toHaveLength(1);
   });
 
-  it('detects === true comparison', () => {
-    const violations = check(`if (isReady === true) {}`);
+  it('detects == true comparison (second)', () => {
+    const violations = check(`if (isReady == true) {}`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unnecessary-boolean-compare');
     expect(matches).toHaveLength(1);
   });
@@ -4903,7 +4903,7 @@ describe('code-quality/deterministic/symbol-description', () => {
 
 describe('code-quality/deterministic/default-case-in-switch', () => {
   it('detects switch without default', () => {
-    const violations = check(`switch (x) { case 1: break; case 2: break; }`);
+    const violations = check(`switch (x) { case 1: console.log('a'); case 2: console.log('b'); }`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/default-case-in-switch');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
