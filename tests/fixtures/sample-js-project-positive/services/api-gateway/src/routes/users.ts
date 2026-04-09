@@ -24,3 +24,19 @@ export function mustFind(items: readonly string[], target: string): string {
 export function getReversed(items: readonly number[]): number[] {
   return [...items].reverse();
 }
+
+// Positive: inconsistent-return — all paths return (if-with-return + switch-with-default)
+export function formatValue(value: string | null, mode: string): string {
+  if (!value) return 'N/A';
+  switch (mode) {
+    case 'upper': return value.toUpperCase();
+    case 'lower': return value.toLowerCase();
+    default: return value;
+  }
+}
+
+// Positive: missing-unique-constraint — lookup by primary key (not a uniqueness check)
+declare const db: { query: { items: { findFirst: (opts: unknown) => unknown } } };
+export function refetchById(itemId: string): unknown {
+  return db.query.items.findFirst({ where: { id: itemId } });
+}
