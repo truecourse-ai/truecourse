@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { formatUser } from '@sample/shared-utils';
 
-// VIOLATION: code-quality/deterministic/env-in-library-code
+// NOTE: code-quality/deterministic/env-in-library-code — skipped for non-packages files
 const USER_SERVICE_URL = process.env.USER_SERVICE_URL || 'http://localhost:3001';
 
 export class UserService {

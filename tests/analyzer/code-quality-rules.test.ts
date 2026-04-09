@@ -7248,7 +7248,7 @@ const result = newFn();
 describe('code-quality/deterministic/env-in-library-code', () => {
   it('detects process.env in library code', () => {
     const tree = parseCode(`const url = process.env.API_URL;`, 'typescript');
-    const violations = checkCodeRules(tree, '/src/services/user-service.ts', `const url = process.env.API_URL;`, enabledRules, 'typescript');
+    const violations = checkCodeRules(tree, '/packages/shared/lib/utils.ts', `const url = process.env.API_URL;`, enabledRules, 'typescript');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/env-in-library-code');
     expect(matches).toHaveLength(1);
   });

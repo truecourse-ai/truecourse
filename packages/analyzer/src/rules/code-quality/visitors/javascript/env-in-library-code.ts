@@ -33,6 +33,10 @@ export const envInLibraryCodeVisitor: CodeRuleVisitor = {
     // Allow in script files
     if (lowerPath.includes('/scripts/')) return null
 
+    // Only flag process.env in packages/ directories — these are true shared libraries.
+    // Files under apps/ are application code, not reusable libraries, even if in apps/*/lib/.
+    if (!lowerPath.includes('/packages/')) return null
+
     // Allow in API route / entry point directories (Next.js, Express, etc.)
     if (lowerPath.includes('/app/api/') || lowerPath.includes('/pages/api/') || lowerPath.includes('/routes/')) return null
 

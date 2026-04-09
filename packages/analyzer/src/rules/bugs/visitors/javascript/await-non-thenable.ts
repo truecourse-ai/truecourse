@@ -16,6 +16,13 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
     const awaitedExpr = node.namedChildren[0]
     if (!awaitedExpr) return null
 
+    // Skip ALL await on call_expression and member_expression chains — any function/method call
+    // may return a Promise at runtime even when static type analysis can't determine it.
+    // This MUST be checked before any type queries to avoid false positives from
+    // LangChain .invoke(), Prisma queries, dynamically typed wrappers, etc.
+    if (awaitedExpr.type === 'call_expression') return null
+    if (awaitedExpr.type === 'member_expression') return null
+
     // If the type is `any` or `unknown`, we can't determine if it's a Promise — skip.
     // Both are compatible with PromiseLike, so flagging them would be a false positive.
     const isAny = typeQuery.isAnyType(
@@ -44,12 +51,6 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
       awaitedExpr.endPosition.row,
       awaitedExpr.endPosition.column,
     )
-    // Skip ALL await on call_expression nodes — any function/method call may return a Promise
-    // at runtime even when static type analysis can't determine it (e.g., LangChain .invoke(),
-    // Prisma queries, dynamically typed wrappers). Only flag await on clearly non-thenable
-    // expressions like literals, identifiers with known primitive types, etc.
-    if (awaitedExpr.type === 'call_expression') return null
-
     if (!isPromise) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

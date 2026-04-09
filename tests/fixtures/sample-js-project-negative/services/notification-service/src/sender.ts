@@ -2,9 +2,9 @@
  * Email sender — handles SMTP connection and delivery.
  */
 
-// VIOLATION: code-quality/deterministic/env-in-library-code
+// NOTE: code-quality/deterministic/env-in-library-code — skipped for non-packages files
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.example.com';
-// VIOLATION: code-quality/deterministic/env-in-library-code
+// NOTE: code-quality/deterministic/env-in-library-code — skipped for non-packages files
 const SMTP_PORT = process.env.SMTP_PORT || '587';
 
 interface EmailResult {

@@ -128,6 +128,12 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
 
     const usedIds = collectIdentifiers(body, new Set([...paramNames, ...EXCLUDED_IDENTIFIERS, ...localDecls]))
 
+    // Collect names of local functions defined in the component body.
+    // Regular function declarations/expressions in the component body are recreated
+    // every render, so adding them to deps causes infinite re-render loops.
+    // Only useCallback-wrapped functions are stable enough for deps.
+    const componentBodyFunctions = new Set<string>()
+
     // Collect names of local functions defined in the component whose body only calls
     // stable references (useState setters like setX, other stable functions).
     // These functions are effectively stable and don't need to be in deps.
@@ -173,6 +179,11 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
         }
 
         if (fnName && fnBody) {
+          // Track all component-body function declarations — these are recreated every
+          // render and adding them to deps causes infinite re-render loops.
+          // Only useCallback-wrapped functions should be in deps.
+          componentBodyFunctions.add(fnName)
+
           // Check if every call in this function body is to a setState setter (set[A-Z])
           // or another stable reference
           let allCallsStable = true
@@ -214,7 +225,8 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       id.length > 1 &&
       !EXCLUDED_IDENTIFIERS.has(id) &&
       !refAccessedIds.has(id) &&
-      !stableFunctions.has(id)
+      !stableFunctions.has(id) &&
+      !componentBodyFunctions.has(id)
     )
 
     // Skip when the source code near the useEffect contains eslint-disable — the developer

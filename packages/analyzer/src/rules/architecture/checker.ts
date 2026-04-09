@@ -34,7 +34,7 @@ export interface ModuleViolation {
 // ---------------------------------------------------------------------------
 
 const GOD_SERVICE_FILE_THRESHOLD = 120
-const GOD_SERVICE_LAYER_THRESHOLD = 4
+const GOD_SERVICE_LAYER_THRESHOLD = 5
 
 /**
  * Check deterministic service-level rules and return violations.
@@ -347,6 +347,13 @@ export function checkModuleRules(
             for (const arg of call.arguments) {
               const match = arg.match(/['"].*?([^/'"]+?)(?:\.\w+)?['"]$/)
               if (match) dynamicImportModuleBasenames.add(match[1])
+              // Also extract the full basename without stripping dotted segments
+              // (e.g., '../services/user.service' → 'user.service' to match files like user.service.ts)
+              const fullMatch = arg.match(/['"].*\/([^/'"]+?)['"]$/)
+              if (fullMatch) {
+                const fullBasename = fullMatch[1].replace(/\.\w+$/, '')
+                if (fullBasename) dynamicImportModuleBasenames.add(fullBasename)
+              }
             }
           }
         }
@@ -676,6 +683,10 @@ export function checkMethodRules(
     // Build set of module basenames that are dynamically imported — exports from these modules are live
     const dynamicImportModules = new Set<string>()
     const thisRefMethods = new Set<string>()
+    // Track all exported names from every file (for cross-file reference checks)
+    const allExportedNames = new Set<string>()
+    // Track all names referenced in imports across all files
+    const allImportedNames = new Set<string>()
     if (fileAnalyses) {
       for (const fa of fileAnalyses) {
         for (const call of fa.calls) {
@@ -699,7 +710,7 @@ export function checkMethodRules(
               }
             }
           }
-          // Track this.methodName references in call arguments
+          // Track this.methodName references in call arguments AND callee
           if (call.arguments) {
             for (const arg of call.arguments) {
               const thisRefs = arg.match(/this\.(\w+)/g)
@@ -714,11 +725,29 @@ export function checkMethodRules(
           // (e.g., this.handleResponse(), this.service.method())
           const calleeThisMatch = call.callee.match(/^this\.(\w+)/)
           if (calleeThisMatch) thisRefMethods.add(calleeThisMatch[1])
+
+          // Also track ALL callees that contain a method name — even through intermediaries
+          // like this.service.methodName() or obj.methodName()
+          const dotParts = call.callee.split('.')
+          if (dotParts.length > 0) {
+            thisRefMethods.add(dotParts[dotParts.length - 1])
+          }
         }
         for (const cls of fa.classes) {
           if (cls.interfaces && cls.interfaces.length > 0) {
             classesWithImplements.add(cls.name)
           }
+          // Also check if the class has a superClass — methods may come from the parent
+          if (cls.superClass) {
+            classesWithImplements.add(cls.name)
+          }
+        }
+        // Collect all exported names and imported names for cross-reference
+        for (const exp of fa.exports) {
+          allExportedNames.add(exp.name)
+        }
+        for (const imp of fa.imports) {
+          for (const spec of imp.specifiers) allImportedNames.add(spec.name)
         }
       }
     }
@@ -765,8 +794,12 @@ export function checkMethodRules(
           if (basename && dynamicImportModules.has(basename)) continue
         }
 
-        // Skip methods referenced as this.methodName in any expression
+        // Skip methods referenced as this.methodName in any expression (from call data)
         if (thisRefMethods.has(method.name)) continue
+
+        // Skip exported functions that are imported anywhere in the codebase
+        // (handles dynamic imports like: const { getUserLocation } = await import('./geo'))
+        if (method.isExported && allImportedNames.has(method.name)) continue
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-method',

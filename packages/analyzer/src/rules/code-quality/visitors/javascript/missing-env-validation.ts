@@ -35,27 +35,59 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
       depth++
     }
 
-    // Check for if-throw validation pattern in the surrounding scope.
-    // Pattern: `if (!process.env.VAR) throw ...` or `if (process.env.VAR === undefined) throw ...`
-    // Walk up to find the containing block (function body or program) and scan siblings.
-    let container = node.parent
-    while (container && container.type !== 'statement_block' && container.type !== 'program') {
-      container = container.parent
+    // Check for if-throw/return validation pattern ANYWHERE in the source code.
+    // Broad text search: if the file contains an if-statement referencing the env var name
+    // together with a throw or return, the variable is validated somewhere.
+    // This catches patterns like:
+    //   const dbUrl = process.env.DATABASE_URL
+    //   if (!dbUrl) throw new Error('...')
+    // as well as validation functions, guard clauses, etc.
+    const envVarRegex = new RegExp(
+      // Match: env var name appears near an if + throw/return within a reasonable range
+      `(?:if\\s*\\([^)]*\\b${envVarName}\\b|\\b${envVarName}\\b[^;]*(?:if\\s*\\())`,
+    )
+    if (envVarRegex.test(sourceCode)) {
+      // Found a reference to the env var in an if-condition somewhere in the file.
+      // Now check if there's also a throw or return near it.
+      const lines = sourceCode.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(envVarName) && /\bif\s*\(/.test(lines[i])) {
+          // Check the next few lines for throw/return
+          for (let j = i; j < Math.min(i + 5, lines.length); j++) {
+            if (/\b(throw|return)\b/.test(lines[j])) return null
+          }
+        }
+        // Also check: if statement on one line, env var referenced in condition
+        if (/\bif\s*\(/.test(lines[i]) && lines[i].includes(envVarName)) {
+          for (let j = i; j < Math.min(i + 5, lines.length); j++) {
+            if (/\b(throw|return)\b/.test(lines[j])) return null
+          }
+        }
+      }
     }
-    if (container) {
-      for (let i = 0; i < container.namedChildCount; i++) {
-        const stmt = container.namedChild(i)
-        if (!stmt || stmt.type !== 'if_statement') continue
-        const condition = stmt.childForFieldName('condition')
-        if (!condition) continue
-        // Check if the condition references this env var
-        if (!condition.text.includes(envVarName)) continue
-        // Check if the if body contains a throw
-        const ifBody = stmt.childForFieldName('consequence')
-        if (!ifBody) continue
-        const hasThrow = ifBody.type === 'throw_statement' ||
-          (ifBody.namedChildren && ifBody.namedChildren.some(c => c.type === 'throw_statement'))
-        if (hasThrow) return null
+
+    // Also check: variable assigned from env, then validated with if(!var) throw/return
+    // Pattern: const/let varName = process.env.ENVVAR; ... if (!varName) throw/return
+    // Find the variable name this env access is assigned to
+    let assignTarget: string | null = null
+    const varDeclarator = node.parent?.parent // member_expression → member_expression (process.env.X) → variable_declarator
+    if (varDeclarator?.type === 'variable_declarator') {
+      assignTarget = varDeclarator.childForFieldName('name')?.text ?? null
+    }
+    // Also check direct assignment: varName = process.env.X
+    if (!assignTarget && node.parent?.parent?.type === 'assignment_expression') {
+      const left = node.parent.parent.childForFieldName('left')
+      if (left?.type === 'identifier') assignTarget = left.text
+    }
+    if (assignTarget) {
+      const lines = sourceCode.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        // Check if there's an if-statement referencing the assigned variable with throw/return
+        if (/\bif\s*\(/.test(lines[i]) && lines[i].includes(assignTarget)) {
+          for (let j = i; j < Math.min(i + 5, lines.length); j++) {
+            if (/\b(throw|return)\b/.test(lines[j])) return null
+          }
+        }
       }
     }
 

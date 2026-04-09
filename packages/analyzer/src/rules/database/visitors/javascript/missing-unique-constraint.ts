@@ -112,6 +112,16 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
     // Skip queries on primary key columns — these are inherently unique
     if (queriedColumn && /^id$/.test(queriedColumn)) return null
 
+    // Skip queries on commonly unique fields — these are almost always backed by
+    // a unique constraint in the schema (often in a separate schema file we can't see).
+    const COMMONLY_UNIQUE_FIELDS = new Set([
+      'email', 'phone', 'phoneNumber', 'phone_number',
+      'website', 'slug', 'username', 'auth0Id', 'auth0_id',
+      'token', 'apiKey', 'api_key', 'externalId', 'external_id',
+      'handle', 'code', 'sku', 'ssn', 'uuid',
+    ])
+    if (queriedColumn && COMMONLY_UNIQUE_FIELDS.has(queriedColumn)) return null
+
     if (queriedColumn && columnHasUniqueConstraint(queriedColumn, sourceCode)) {
       return null
     }

@@ -129,6 +129,7 @@ describe('checkServiceRules', () => {
         { layer: 'service', confidence: 90, evidence: [], fileCount: 1, filePaths: [] },
         { layer: 'data', confidence: 90, evidence: [], fileCount: 1, filePaths: [] },
         { layer: 'external', confidence: 90, evidence: [], fileCount: 1, filePaths: [] },
+        { layer: 'infra', confidence: 90, evidence: [], fileCount: 1, filePaths: [] },
       ],
     })];
 
@@ -136,7 +137,7 @@ describe('checkServiceRules', () => {
 
     const god = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-service');
     expect(god).toHaveLength(1);
-    expect(god[0].description).toContain('4 layers');
+    expect(god[0].description).toContain('5 layers');
   });
 
   it('does not flag service with <=120 files and <4 layers', () => {

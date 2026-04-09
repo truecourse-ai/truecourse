@@ -26,7 +26,7 @@ export function emptyReject() {
   return Promise.reject();
 }
 
-// VIOLATION: reliability/deterministic/floating-promise
+// NOTE: reliability/deterministic/floating-promise — skipped for sync caller of async function
 export function callFetch() {
   fetchData();
 }

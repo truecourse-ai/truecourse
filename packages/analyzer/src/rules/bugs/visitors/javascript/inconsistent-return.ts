@@ -38,6 +38,20 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
         }
       }
     }
+    // For arrow functions and function expressions assigned to a variable,
+    // check if the variable_declarator has a type annotation (e.g., `const fn: () => JSX.Element = () => { ... }`)
+    if (node.type === 'arrow_function' || node.type === 'function') {
+      const parent = node.parent
+      if (parent?.type === 'variable_declarator') {
+        for (let i = 0; i < parent.childCount; i++) {
+          const child = parent.child(i)
+          if (child?.type === 'type_annotation') return null
+        }
+      }
+      // Also check for `as` type assertion wrapping the function expression
+      // (e.g., `const fn = (() => { ... }) as SomeType`)
+      if (parent?.type === 'as_expression' || parent?.type === 'satisfies_expression') return null
+    }
 
     // Skip constructor, setter — they can have inconsistent returns by design
     if (node.type === 'method_definition') {

@@ -55,9 +55,11 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
         }
       }
       if (n.type === 'return_statement') {
-        // Collect all identifiers inside the return value
+        // Collect all identifiers inside the return value (including shorthand properties like { sampleData })
         function collectReturnIds(r: SyntaxNode) {
-          if (r.type === 'identifier') returnedVars.add(r.text)
+          if (r.type === 'identifier' || r.type === 'shorthand_property_identifier' || r.type === 'shorthand_property_identifier_pattern') {
+            returnedVars.add(r.text)
+          }
           for (let i = 0; i < r.childCount; i++) {
             const c = r.child(i)
             if (c) collectReturnIds(c)
@@ -104,6 +106,10 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
             reads.add(n.text)
           }
         }
+      }
+      // Shorthand property identifiers in objects (e.g., `{ sampleData }`) count as reads
+      if (n.type === 'shorthand_property_identifier' || n.type === 'shorthand_property_identifier_pattern') {
+        reads.add(n.text)
       }
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

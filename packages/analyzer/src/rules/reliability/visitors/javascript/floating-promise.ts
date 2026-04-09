@@ -42,6 +42,22 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
 
     if (!isLikelyAsync) return null
 
+    // For bare function calls (not method calls on an object), only flag if the
+    // enclosing function is async. Synchronous factory functions like createBullBoard()
+    // imported from packages match async prefixes but don't return promises.
+    if (fn.type === 'identifier') {
+      let enclosing = node.parent
+      while (enclosing) {
+        if (enclosing.type === 'arrow_function' || enclosing.type === 'function_expression' ||
+            enclosing.type === 'function_declaration' || enclosing.type === 'method_definition') {
+          const isAsync = enclosing.children.some(c => c.type === 'async')
+          if (!isAsync) return null
+          break
+        }
+        enclosing = enclosing.parent
+      }
+    }
+
     // Skip when the async call is inside a useEffect/useLayoutEffect callback.
     // Pattern: call_expression → arguments → arrow_function/function_expression → ... → our node
     let ancestor = node.parent

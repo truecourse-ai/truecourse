@@ -59,6 +59,11 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
                 // e.g., ['a', 'b', 'c'].map(...) or [1, 2, 3].map(...)
                 if (mapObj?.type === 'array') return null
 
+                // Skip when .map() is called on a property accessed from an object
+                // (e.g., vehicle.imageUrls.map, message.mediaUrls.map, user.permissions.map)
+                // These are data display lists that are read-only and not reordered.
+                if (mapObj?.type === 'member_expression') return null
+
                 // Skip inside skeleton/loading/placeholder components
                 let ancestor = node.parent
                 while (ancestor) {

@@ -133,9 +133,16 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
       if (allSameKeys) return null
     }
 
+    // Normalize void-like return types: void, Promise<void>, and undefined are semantically equivalent
+    const VOID_LIKE = new Set(['void', 'Promise<void>', 'undefined'])
+    const normalizedReturnTypes = new Set<string>()
+    for (const t of returnTypes) {
+      normalizedReturnTypes.add(VOID_LIKE.has(t) ? 'void' : t)
+    }
+
     // If there are significantly different base types
-    if (returnTypes.size > 1) {
-      const types = [...returnTypes]
+    if (normalizedReturnTypes.size > 1) {
+      const types = [...normalizedReturnTypes]
       const baseTypes = types.filter(t => t !== 'null' && t !== 'undefined')
 
       // Normalize base types: treat empty arrays as compatible with any array type,
