@@ -15,6 +15,8 @@ export const variableShadowingVisitor: CodeRuleVisitor = {
       if (inner.kind === 'parameter') continue
       // Skip catch parameters — often named 'e', 'err', etc. and shadow outer
       if (inner.kind === 'catch-parameter') continue
+      // Skip when outer is declared after inner — they don't overlap at runtime
+      if (outer.declarationNode.startIndex > inner.declarationNode.startIndex) continue
       return makeViolation(
         this.ruleKey,
         inner.declarationNode,

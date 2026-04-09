@@ -43,7 +43,22 @@ export const missingAwaitVisitor: CodeRuleVisitor = {
     )
     if (!isPromise) return null
 
+    // Skip when the result is used as a subquery — passed to another call or template
     const fn = value.childForFieldName('function')
+    const nameNode2 = node.childForFieldName('name')
+    if (nameNode2?.type === 'identifier') {
+      const varName2 = nameNode2.text
+      const parentBlock = node.parent?.parent
+      if (parentBlock) {
+        // Check if the variable is used in a template tag or as argument to another call
+        const blockText = parentBlock.text
+        if (blockText.includes(`\${${varName2}}`) || new RegExp(`\\(.*\\b${varName2}\\b.*\\)`).test(blockText)) {
+          // Variable is composed into another expression — likely a subquery
+          return null
+        }
+      }
+    }
+
     const fnText = fn?.text ?? 'fn'
     const nameNode = node.childForFieldName('name')
     const varName = nameNode?.text ?? 'result'

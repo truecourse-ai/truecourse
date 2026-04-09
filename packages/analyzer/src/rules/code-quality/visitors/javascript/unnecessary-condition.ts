@@ -30,6 +30,8 @@ export const unnecessaryConditionVisitor: CodeRuleVisitor = {
 
     // Skip if it's already a comparison or logical expression
     if (expr.type === 'binary_expression' || expr.type === 'unary_expression') return null
+    // Skip call expressions — type query may return the object type instead of the return type
+    if (expr.type === 'call_expression') return null
 
     const typeStr = typeQuery.getTypeAtPosition(
       filePath,

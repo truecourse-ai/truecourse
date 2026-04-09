@@ -72,6 +72,21 @@ export const unboundMethodVisitor: CodeRuleVisitor = {
 
     const methodName = property.text
 
+    // Skip if the method is an arrow function property (lexically bound this)
+    let classBody: SyntaxNode | null = node.parent
+    while (classBody && classBody.type !== 'class_body') classBody = classBody.parent
+    if (classBody) {
+      for (const member of classBody.namedChildren) {
+        if (member.type === 'public_field_definition' || member.type === 'field_definition') {
+          const nameNode = member.children.find((c) => c.type === 'property_identifier')
+          if (nameNode?.text === methodName) {
+            const value = member.childForFieldName('value')
+            if (value?.type === 'arrow_function') return null
+          }
+        }
+      }
+    }
+
     return makeViolation(
       this.ruleKey,
       node,

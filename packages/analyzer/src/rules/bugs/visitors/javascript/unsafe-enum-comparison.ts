@@ -27,9 +27,10 @@ export const unsafeEnumComparisonVisitor: CodeRuleVisitor = {
     const rightType = typeQuery.getTypeAtPosition(filePath, right.startPosition.row, right.startPosition.column)
     if (!leftType || !rightType) return null
 
-    // Check if one side is an enum and the other is a raw number/string
-    const leftIsEnum = leftType.includes('.') && !leftType.startsWith('"') && !leftType.startsWith('\'')
-    const rightIsEnum = rightType.includes('.') && !rightType.startsWith('"') && !rightType.startsWith('\'')
+    // Check if one side is an enum — must match EnumName.Member pattern (PascalCase.identifier)
+    const enumPattern = /^[A-Z][a-zA-Z0-9]*\.[A-Z_][a-zA-Z0-9_]*$/
+    const leftIsEnum = enumPattern.test(leftType)
+    const rightIsEnum = enumPattern.test(rightType)
 
     if (leftIsEnum && !rightIsEnum && (rightType === 'number' || rightType === 'string')) {
       return makeViolation(

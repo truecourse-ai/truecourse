@@ -634,6 +634,10 @@ export function checkMethodRules(
         // Skip methods called implicitly by the runtime (e.g., Python dunders, JS constructors)
         if (method.isImplicitCall) continue
 
+        // Skip PascalCase exports — likely React components called via JSX
+        // which the method-level dependency graph can't reliably track
+        if (/^[A-Z][a-zA-Z0-9]*$/.test(method.name) && method.isExported) continue
+
         violations.push({
           ruleKey: 'architecture/deterministic/dead-method',
           title: `Dead method: ${method.moduleName}.${method.name}`,

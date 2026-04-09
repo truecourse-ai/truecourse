@@ -31,6 +31,9 @@ export const nonNumberArithmeticVisitor: CodeRuleVisitor = {
     const leftOk = numericTypes.has(leftType) || /^\d+$/.test(leftType)
     const rightOk = numericTypes.has(rightType) || /^\d+$/.test(rightType)
 
+    // Skip if either operand is a numeric literal — it's definitely a number
+    if (left.type === 'number' || right.type === 'number') return null
+
     if (!leftOk || !rightOk) {
       const badSide = !leftOk ? `left operand is \`${leftType}\`` : `right operand is \`${rightType}\``
       return makeViolation(
