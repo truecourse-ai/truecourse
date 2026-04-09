@@ -18,11 +18,9 @@ export const unusedExpressionVisitor: CodeRuleVisitor = {
     if (expr.type === 'unary_expression' && expr.children[0]?.text === 'delete') return null
     if (expr.type === 'unary_expression' && expr.children[0]?.text === 'void') return null
     if (expr.type === 'string') {
-      const parent = node.parent
-      if (parent) {
-        const idx = parent.namedChildren.indexOf(node)
-        if (idx === 0) return null
-      }
+      // Skip directive strings: 'use client', 'use server', 'use strict'
+      const stripped = expr.text.replace(/['"]/g, '')
+      if (stripped === 'use client' || stripped === 'use server' || stripped === 'use strict') return null
     }
     if (expr.type === 'template_string') return null
     if (expr.type === 'new_expression') return null

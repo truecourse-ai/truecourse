@@ -21,6 +21,12 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     const obj = left.childForFieldName('object')
     if (!obj) return null
 
+    // Skip React ref assignments: ref.current[index] = el
+    if (obj.type === 'member_expression') {
+      const objProp = obj.childForFieldName('property')
+      if (objProp?.text === 'current') return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Prototype pollution',

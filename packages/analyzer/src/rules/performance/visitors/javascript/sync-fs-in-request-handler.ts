@@ -20,6 +20,10 @@ export const syncFsInRequestHandlerVisitor: CodeRuleVisitor = {
 
     if (!SYNC_FS_METHODS.has(methodName)) return null
 
+    // Skip standalone scripts (not request handlers)
+    const lowerPath = filePath.toLowerCase()
+    if (lowerPath.includes('/scripts/') || lowerPath.includes('/bin/') || lowerPath.includes('/cli/')) return null
+
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 
     return makeViolation(

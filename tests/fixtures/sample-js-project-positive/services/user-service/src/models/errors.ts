@@ -16,9 +16,8 @@ export async function asyncCatch(): Promise<unknown> {
   try { return await fetch('/api').then((r) => r.json()); } catch { logger.error('Failed'); return null; }
 }
 export function classifyInput(input: string): string {
-  switch (input) {
-    case 'error': return 'error-type';
-    case 'warning': return 'warning-type';
-    default: return 'info-type';
+  if (input === 'error') {
+    return 'error-type';
   }
+  return 'info-type';
 }

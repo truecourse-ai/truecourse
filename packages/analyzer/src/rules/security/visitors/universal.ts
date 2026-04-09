@@ -88,6 +88,9 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     const ip = match[1]
     if (EXCLUDED_IPS.has(ip)) return null
 
+    // Skip version-like numbers in User-Agent strings, semver, etc.
+    if (/Mozilla|Chrome|Safari|Firefox|AppleWebKit|Gecko/i.test(stripped)) return null
+
     // Validate each octet is 0-255
     const octets = ip.split('.')
     if (octets.some((o) => parseInt(o, 10) > 255)) return null

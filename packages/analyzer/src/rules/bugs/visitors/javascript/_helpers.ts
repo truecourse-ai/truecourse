@@ -29,7 +29,7 @@ export const ARRAY_METHODS_REQUIRING_RETURN = new Set([
 export const PRIMITIVE_TYPES = new Set(['number', 'string', 'true', 'false', 'null', 'undefined'])
 
 export const PURE_ARRAY_METHODS = new Set([
-  'map', 'filter', 'slice', 'concat', 'flat', 'flatMap', 'reverse', 'sort', 'toSorted', 'toReversed',
+  'map', 'filter', 'slice', 'concat', 'flat', 'flatMap', 'toSorted', 'toReversed',
   'join', 'keys', 'values', 'entries', 'find', 'findIndex', 'findLast', 'findLastIndex',
   'indexOf', 'lastIndexOf', 'includes', 'every', 'some', 'reduce', 'reduceRight',
 ])
@@ -44,7 +44,7 @@ export const KNOWN_ARG_ORDERS: Array<{ fn: string; params: string[][] }> = [
 ]
 
 export const VOID_RETURNING_METHODS = new Set([
-  'forEach', 'push', 'pop', 'shift', 'unshift', 'splice', 'reverse', 'fill',
+  'forEach', 'push', 'pop', 'shift', 'unshift', 'splice', 'fill',
   'delete', 'clear', 'set', 'add',
 ])
 
