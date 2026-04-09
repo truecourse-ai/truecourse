@@ -77,6 +77,24 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip when ALL returns use the same constructor/function call (e.g., all NextResponse.json(...))
+    const returnCallNames = new Set<string>()
+    let allReturnsAreCallsToSameFunction = true
+    for (const ret of returnStmts) {
+      const value = ret.namedChildren[0]
+      if (!value || value.type !== 'call_expression') {
+        allReturnsAreCallsToSameFunction = false
+        break
+      }
+      const callee = value.childForFieldName('function')
+      if (!callee) {
+        allReturnsAreCallsToSameFunction = false
+        break
+      }
+      returnCallNames.add(callee.text)
+    }
+    if (allReturnsAreCallsToSameFunction && returnCallNames.size === 1) return null
+
     // If there are significantly different base types
     if (returnTypes.size > 1) {
       const types = [...returnTypes]

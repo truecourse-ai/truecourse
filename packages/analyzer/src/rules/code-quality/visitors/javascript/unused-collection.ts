@@ -64,6 +64,10 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
           } else {
             reads.add(n.text)
           }
+          // Check if the variable appears in a return statement — that counts as usage
+          if (parent.type === 'return_statement') {
+            reads.add(n.text)
+          }
         }
       }
       for (let i = 0; i < n.childCount; i++) {

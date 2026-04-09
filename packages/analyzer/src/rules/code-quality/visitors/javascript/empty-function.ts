@@ -20,6 +20,21 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
       if (nameNode?.text === 'constructor') return null
     }
 
+    // Skip empty arrow functions inside .catch() — intentional no-op error suppression
+    if (node.type === 'arrow_function') {
+      const parent = node.parent
+      if (parent?.type === 'arguments') {
+        const grandparent = parent.parent
+        if (grandparent?.type === 'call_expression') {
+          const gpFn = grandparent.childForFieldName('function')
+          if (gpFn?.type === 'member_expression') {
+            const gpProp = gpFn.childForFieldName('property')
+            if (gpProp?.text === 'catch') return null
+          }
+        }
+      }
+    }
+
     // Get the function name for a clearer message
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text || 'anonymous'

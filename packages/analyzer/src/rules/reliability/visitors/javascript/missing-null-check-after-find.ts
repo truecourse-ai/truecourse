@@ -19,6 +19,14 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     // Skip if optional chaining is used: arr.find(...)?.property
     if (parent.type === 'optional_chain_expression') return null
 
+    // Skip when the parent is a member_expression using optional chaining (?.)
+    if (parent.type === 'member_expression' && parent.childForFieldName('object')?.id === node.id) {
+      const parentText = parent.text
+      const findCallEnd = node.endIndex - parent.startIndex
+      const afterFind = parentText.slice(findCallEnd)
+      if (afterFind.startsWith('?.')) return null
+    }
+
     // If result is used in member access immediately: arr.find(...).property
     if (parent.type === 'member_expression' && parent.childForFieldName('object')?.id === node.id) {
       return makeViolation(

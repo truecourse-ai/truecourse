@@ -13,7 +13,7 @@ export const unusedFunctionParameterVisitor: CodeRuleVisitor = {
     if (!body) return null
     const bodyText = body.text
 
-    for (let i = 0; i < params.namedChildCount; i++) {
+    paramLoop: for (let i = 0; i < params.namedChildCount; i++) {
       const param = params.namedChild(i)
       if (!param) continue
 
@@ -30,6 +30,37 @@ export const unusedFunctionParameterVisitor: CodeRuleVisitor = {
 
       if (!paramName) continue
       if (paramName.startsWith('_')) continue
+
+      // Skip constructor parameters with accessibility modifiers (public, private, protected, readonly)
+      // These are TypeScript parameter properties — they ARE used as class fields
+      if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
+        const paramText = param.text
+        if (/^(public|private|protected|readonly)\s/.test(paramText)) continue
+      }
+
+      // Skip `request`/`req` in exported async functions with 2+ params (Next.js route handlers etc.)
+      if ((paramName === 'request' || paramName === 'req') && params.namedChildCount >= 2) {
+        let funcNode = node
+        if (funcNode.type === 'arrow_function' || funcNode.type === 'function_expression') {
+          funcNode = funcNode.parent ?? funcNode
+        }
+        // Check if the function (or its variable declaration) is exported and async
+        const funcText = node.text
+        const isAsync = funcText.startsWith('async ') || funcText.includes('async (') || funcText.includes('async(')
+          || node.children.some((c) => c.type === 'async')
+        if (isAsync) {
+          let ancestor = node.parent
+          while (ancestor) {
+            if (ancestor.type === 'export_statement') {
+              continue paramLoop
+            }
+            // Stop climbing at function boundaries
+            if (ancestor.type === 'function_declaration' || ancestor.type === 'method_definition'
+              || ancestor.type === 'class_declaration') break
+            ancestor = ancestor.parent
+          }
+        }
+      }
 
       // For block bodies ({...}), strip the braces. For expression bodies, use as-is.
       const bodyContent = body.type === 'statement_block' ? bodyText.slice(1, -1) : bodyText

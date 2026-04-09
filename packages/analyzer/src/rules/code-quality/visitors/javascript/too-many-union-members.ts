@@ -8,6 +8,10 @@ export const tooManyUnionMembersVisitor: CodeRuleVisitor = {
   nodeTypes: ['union_type'],
   visit(node, filePath, sourceCode) {
     if (node.parent?.type === 'union_type') return null
+
+    // Skip unions in .d.ts files — these are externally-defined protocol enums
+    if (filePath.endsWith('.d.ts')) return null
+
     // Skip unions inside type arguments (e.g., Pick<T, 'a' | 'b' | 'c'> — key unions, not type unions)
     let ancestor = node.parent
     while (ancestor) {

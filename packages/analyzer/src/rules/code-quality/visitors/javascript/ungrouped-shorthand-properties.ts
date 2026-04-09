@@ -8,11 +8,11 @@ export const ungroupedShorthandPropertiesVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const properties = node.namedChildren.filter((c) => c.type === 'pair' || c.type === 'shorthand_property_identifier')
 
-    if (properties.length < 6) return null
+    // Only consider objects with 5+ properties
+    if (properties.length < 5) return null
 
-    let shorthandSection = false
-    let regularSection = false
-    let ungrouped = false
+    let transitions = 0
+    let prevIsShorthand: boolean | null = null
 
     for (const prop of properties) {
       const isShorthand = prop.type === 'shorthand_property_identifier'
@@ -22,15 +22,14 @@ export const ungroupedShorthandPropertiesVisitor: CodeRuleVisitor = {
           return key?.type === 'property_identifier' && value?.type === 'identifier' && key.text === value.text
         })())
 
-      if (isShorthand) {
-        if (regularSection) ungrouped = true
-        shorthandSection = true
-      } else {
-        if (shorthandSection) regularSection = true
+      if (prevIsShorthand !== null && isShorthand !== prevIsShorthand) {
+        transitions++
       }
+      prevIsShorthand = isShorthand
     }
 
-    if (ungrouped) {
+    // Only flag when there are 4+ transitions — allows logical domain grouping
+    if (transitions >= 4) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Ungrouped shorthand properties',

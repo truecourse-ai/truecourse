@@ -14,6 +14,10 @@ export const unusedConstructorResultVisitor: CodeRuleVisitor = {
     const intentionalCtors = ['Worker', 'Promise', 'Observable', 'EventEmitter']
     if (intentionalCtors.some((ic) => name.includes(ic))) return null
 
+    // Skip standard validation patterns where the constructor throws on invalid input
+    // and the object is intentionally unused (e.g., new URL(input), new RegExp(pattern))
+    if (name === 'URL' || name === 'RegExp') return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Unused constructor result',

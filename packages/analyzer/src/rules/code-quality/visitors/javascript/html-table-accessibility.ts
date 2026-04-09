@@ -60,6 +60,19 @@ export const htmlTableAccessibilityVisitor: CodeRuleVisitor = {
 
     // S5256: <table> should have <th> or <thead>
     if (tagName === 'table') {
+      // Skip generic reusable table wrapper components that receive {children}
+      // and pass content through — accessibility is the consumer's responsibility
+      let ancestor: SyntaxNode | null = node.parent
+      while (ancestor) {
+        if (ancestor.type === 'function_declaration' || ancestor.type === 'arrow_function'
+          || ancestor.type === 'function' || ancestor.type === 'method_definition') {
+          const params = ancestor.childForFieldName('parameters')
+          if (params && params.text.includes('children')) return null
+          break
+        }
+        ancestor = ancestor.parent
+      }
+
       if (!hasDescendantWithTag(node, 'th') && !hasDescendantWithTag(node, 'thead')) {
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',

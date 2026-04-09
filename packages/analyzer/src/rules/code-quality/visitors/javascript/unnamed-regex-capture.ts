@@ -15,6 +15,25 @@ export const unnamedRegexCaptureVisitor: CodeRuleVisitor = {
       if (src[i] === '(') {
         const next = src[i + 1]
         if (next !== '?') {
+          // Extract the content of this capture group
+          let depth = 1
+          let j = i + 1
+          while (j < src.length && depth > 0) {
+            if (src[j] === '\\') { j += 2; continue }
+            if (src[j] === '(') depth++
+            else if (src[j] === ')') depth--
+            j++
+          }
+          const groupContent = src.slice(i + 1, j - 1)
+
+          // Skip groups that are purely alternation of short literals/tokens
+          // e.g., (a|b), (\?|$), (http|https), (s?)
+          if (groupContent.includes('|')) {
+            const alternatives = groupContent.split('|')
+            const isSimpleAlternation = alternatives.every((alt) => /^[a-zA-Z0-9_\\?.^$*+\-]+$/.test(alt) && alt.length <= 10)
+            if (isSimpleAlternation) continue
+          }
+
           hasUnnamed = true
           break
         }

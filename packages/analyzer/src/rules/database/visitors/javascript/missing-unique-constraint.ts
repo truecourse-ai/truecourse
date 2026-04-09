@@ -8,6 +8,36 @@ const FIND_ONE_METHODS = new Set([
   'exists', 'count',
 ])
 
+/**
+ * Extract the column name being queried from a findFirst/findUnique `where` clause.
+ * Handles patterns like: `{ where: { email: value } }` or `{ email: value }`.
+ */
+function extractQueriedColumn(callNode: SyntaxNode): string | null {
+  const args = callNode.childForFieldName('arguments')
+  if (!args) return null
+
+  const argText = args.text
+  // Match `where: { columnName: ... }` or direct `{ columnName: ... }`
+  const whereMatch = argText.match(/where\s*:\s*\{\s*(\w+)\s*:/) || argText.match(/\{\s*(\w+)\s*:/)
+  return whereMatch ? whereMatch[1] : null
+}
+
+/**
+ * Check if a column has a `.unique()` constraint in the schema definition
+ * by searching the full source code of the project root (program node).
+ */
+function columnHasUniqueConstraint(columnName: string, sourceCode: string): boolean {
+  // Match patterns like: `email: varchar().unique()`, `email: text().notNull().unique()`,
+  // `email: z.string().unique()`, or Sequelize `unique: true` in column definition
+  const uniqueChainPattern = new RegExp(
+    `\\b${columnName}\\b[^;\\n]*\\.unique\\(`,
+  )
+  const uniquePropPattern = new RegExp(
+    `\\b${columnName}\\b[^}]*unique\\s*:\\s*true`,
+  )
+  return uniqueChainPattern.test(sourceCode) || uniquePropPattern.test(sourceCode)
+}
+
 export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-unique-constraint',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -47,6 +77,13 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
     const hasWriteAfterCheck = ormWriteArr.some((m) => bodyText.includes(`.${m}(`))
 
     if (!hasWriteAfterCheck) return null
+
+    // Check if the queried column already has a .unique() constraint in the source code.
+    // If so, the uniqueness IS enforced at the database level and this is not a violation.
+    const queriedColumn = extractQueriedColumn(node)
+    if (queriedColumn && columnHasUniqueConstraint(queriedColumn, sourceCode)) {
+      return null
+    }
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

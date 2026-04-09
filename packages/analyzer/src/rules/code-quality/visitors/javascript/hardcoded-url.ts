@@ -10,6 +10,13 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
     // Skip well-known namespace/standard URIs (SVG xmlns, schema.org, W3C, etc.)
     if (/w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org/.test(text)) return null
 
+    // Skip URLs inside JSX placeholder/descriptive attributes
+    const parent = node.parent
+    if (parent?.type === 'jsx_attribute') {
+      const attrName = parent.childForFieldName('name')?.text ?? ''
+      if (/^(placeholder|aria-label|aria-description|title|alt)$/.test(attrName)) return null
+    }
+
     if (/https?:\/\/[a-zA-Z0-9]/.test(text) && !text.includes('example.com') && !text.includes('localhost')) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

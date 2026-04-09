@@ -44,11 +44,11 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
       awaitedExpr.endPosition.row,
       awaitedExpr.endPosition.column,
     )
-    // Skip method calls when the resolved type suggests unresolvable third-party API
-    // (contains generics, import types, or complex signatures the type query can't evaluate)
+    // Skip method calls on member expressions — we can't reliably determine external
+    // library return types (e.g., LangChain .invoke(), Prisma .findMany(), etc.)
     if (!isPromise && awaitedExpr.type === 'call_expression') {
       const fn = awaitedExpr.childForFieldName('function')
-      if (fn?.type === 'member_expression' && typeStr && /[<>{}()]|import\(/.test(typeStr)) return null
+      if (fn?.type === 'member_expression') return null
     }
 
     if (!isPromise) {

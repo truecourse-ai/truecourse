@@ -33,6 +33,39 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
       if (node.children.some((c) => c.text === 'set' && c.type !== 'property_identifier')) return null
     }
 
+    // Skip when the function body ends with a throw statement (all paths return or throw)
+    const bodyStatements = body.namedChildren.filter((c) => c.type !== 'comment')
+    if (bodyStatements.length > 0) {
+      const lastStmt = bodyStatements[bodyStatements.length - 1]
+      if (lastStmt.type === 'throw_statement') return null
+    }
+
+    // Skip when the function body contains a switch with ALL cases (including default) returning or throwing
+    function hasExhaustiveSwitch(block: SyntaxNode): boolean {
+      for (let i = 0; i < block.namedChildCount; i++) {
+        const child = block.namedChild(i)
+        if (!child || child.type !== 'switch_statement') continue
+        const switchBody = child.childForFieldName('body')
+        if (!switchBody) continue
+        const cases = switchBody.namedChildren.filter(
+          (c) => c.type === 'switch_case' || c.type === 'switch_default',
+        )
+        if (cases.length === 0) continue
+        const hasDefault = cases.some((c) => c.type === 'switch_default')
+        if (!hasDefault) continue
+        const allTerminate = cases.every((caseNode) => {
+          const stmts = caseNode.namedChildren.filter((s) => s.type !== 'comment')
+          return stmts.some(
+            (s) => s.type === 'return_statement' || s.type === 'throw_statement',
+          )
+        })
+        if (allTerminate) return true
+      }
+      return false
+    }
+
+    if (hasExhaustiveSwitch(body)) return null
+
     let hasValueReturn = false
     let hasVoidReturn = false
 

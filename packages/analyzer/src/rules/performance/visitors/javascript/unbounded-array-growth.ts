@@ -22,6 +22,15 @@ export const unboundedArrayGrowthVisitor: CodeRuleVisitor = {
     // for-in/for-of loops iterate over bounded collections — push is safe
     if (loopNode.type === 'for_in_statement' || loopNode.type === 'for_of_statement') return null
 
+    // for_statement loops iterate a bounded number of times — push is safe
+    if (loopNode.type === 'for_statement') return null
+
+    // while loops with regex.exec() iterate bounded matches — push is safe
+    if (loopNode.type === 'while_statement') {
+      const condition = loopNode.childForFieldName('condition')
+      if (condition && /\.exec\s*\(/.test(condition.text)) return null
+    }
+
     const loopText = loopNode.text
     if (loopText.includes('.length') && (loopText.includes('splice') || loopText.includes('shift') || loopText.includes('pop') || loopText.includes('slice'))) {
       return null

@@ -6,8 +6,9 @@ export const unnecessaryBooleanCompareVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['binary_expression'],
   visit(node, filePath, sourceCode) {
-    const op = node.children.find((c) => c.type === '===' || c.type === '!=='
-      || c.type === '==' || c.type === '!=')
+    // Only flag loose equality (== / !=) — strict equality (=== / !==) is intentional
+    // for tri-state values (boolean | null, boolean | undefined)
+    const op = node.children.find((c) => c.type === '==' || c.type === '!=')
     if (!op) return null
 
     const left = node.childForFieldName('left')
@@ -23,17 +24,12 @@ export const unnecessaryBooleanCompareVisitor: CodeRuleVisitor = {
     const boolLiteral = leftIsBoolean ? left.text : right.text
     const opText = op.text
 
-    // `=== false` and `!== true` may be intentional for nullable booleans (boolean | null)
-    // Only flag `=== true` and `!== false` which are always redundant
-    if (boolLiteral === 'false' && (opText === '===' || opText === '==')) return null
-    if (boolLiteral === 'true' && (opText === '!==' || opText === '!=')) return null
-
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Unnecessary boolean comparison',
-      `Comparing to \`${boolLiteral}\` is redundant — use the expression directly or negate it.`,
+      `Comparing to \`${boolLiteral}\` with \`${opText}\` is redundant — use the expression directly or negate it.`,
       sourceCode,
-      `Remove the \`=== ${boolLiteral}\` comparison and use the expression directly.`,
+      `Remove the \`${opText} ${boolLiteral}\` comparison and use the expression directly.`,
     )
   },
 }

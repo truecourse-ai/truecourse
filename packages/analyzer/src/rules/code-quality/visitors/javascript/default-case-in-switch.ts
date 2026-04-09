@@ -15,6 +15,17 @@ export const defaultCaseInSwitchVisitor: CodeRuleVisitor = {
     const cases = body.namedChildren.filter((c) => c.type === 'switch_case')
     if (cases.length === 0) return null
 
+    // Skip exhaustive switches — all case clauses end with return, throw, or break
+    const allCasesTerminate = cases.every((caseNode) => {
+      const caseChildren = caseNode.namedChildren
+      if (caseChildren.length === 0) return false
+      const lastChild = caseChildren[caseChildren.length - 1]
+      return lastChild.type === 'return_statement' ||
+        lastChild.type === 'throw_statement' ||
+        lastChild.type === 'break_statement'
+    })
+    if (allCasesTerminate) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Missing default case in switch',

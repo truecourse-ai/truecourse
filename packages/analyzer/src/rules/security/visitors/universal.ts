@@ -130,6 +130,24 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
         if (/w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org/.test(lower)) {
           return null
         }
+        // Exclude string comparisons/checks — the protocol URL is being inspected, not used
+        // as a connection target. E.g., input.startsWith('http://'), url.includes('http://').
+        const parent = node.parent
+        if (parent?.type === 'arguments') {
+          const grandparent = parent.parent
+          if (grandparent?.type === 'call_expression') {
+            const fn = grandparent.childForFieldName('function')
+            if (fn?.type === 'member_expression') {
+              const prop = fn.childForFieldName('property')
+              const methodName = prop?.text
+              if (methodName === 'startsWith' || methodName === 'includes' ||
+                  methodName === 'match' || methodName === 'test' ||
+                  methodName === 'endsWith' || methodName === 'indexOf') {
+                return null
+              }
+            }
+          }
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Clear-text protocol',

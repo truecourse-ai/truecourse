@@ -200,7 +200,7 @@ export function callOptional() {
 
 // VIOLATION: code-quality/deterministic/unnecessary-boolean-compare
 export function boolCompare(flag: boolean) {
-  if (flag === true) {
+  if (flag == true) {
     return 'yes';
   }
   return 'no';

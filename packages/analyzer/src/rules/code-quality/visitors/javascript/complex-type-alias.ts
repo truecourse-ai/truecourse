@@ -48,6 +48,17 @@ export const complexTypeAliasVisitor: CodeRuleVisitor = {
     const depth = maxBracketDepth(typeText)
     const members = countUnionIntersectionMembers(typeText)
 
+    // Skip union types where ALL members are simple string or number literals
+    // (e.g., 'a' | 'b' | 'c' — these are enums/discriminated unions, not complex types)
+    if (typeValue.type === 'union_type') {
+      const allLiterals = typeValue.namedChildren.every((child) => {
+        const t = child.type
+        return t === 'literal_type' || t === 'string' || t === 'number'
+          || (t === 'predefined_type' && (child.text === 'string' || child.text === 'number'))
+      })
+      if (allLiterals) return null
+    }
+
     if (depth >= DEPTH_THRESHOLD || members >= MEMBER_THRESHOLD) {
       const reason = depth >= DEPTH_THRESHOLD
         ? `nesting depth of ${depth} (threshold: ${DEPTH_THRESHOLD})`

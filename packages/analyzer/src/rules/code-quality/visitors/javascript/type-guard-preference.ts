@@ -108,6 +108,21 @@ export const typeGuardPreferenceVisitor: CodeRuleVisitor = {
     // Must return a boolean-ish expression
     if (!hasBooleanReturn(body)) return null
 
+    // Only flag functions with a single return statement containing a typeof/instanceof check.
+    // Functions with multiple returns or complex logic are classification functions, not type guards.
+    const returnStatements: SyntaxNode[] = []
+    function collectReturns(n: SyntaxNode) {
+      if (n.type === 'return_statement') returnStatements.push(n)
+      // Don't recurse into nested functions
+      if (n.type === 'arrow_function' || n.type === 'function_declaration' || n.type === 'function_expression' || n.type === 'function') return
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectReturns(child)
+      }
+    }
+    collectReturns(body)
+    if (returnStatements.length > 1) return null
+
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text ?? 'function'
 

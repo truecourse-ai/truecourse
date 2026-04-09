@@ -5,8 +5,22 @@ import { JS_LANGUAGES, isLiteralNode } from './_helpers.js'
 export const constantBinaryExpressionVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/constant-binary-expression',
   languages: JS_LANGUAGES,
-  nodeTypes: ['binary_expression'],
+  nodeTypes: ['binary_expression', 'ternary_expression'],
   visit(node, filePath, sourceCode) {
+    // For ternary expressions: skip when the test is a runtime identifier (not a compile-time constant)
+    if (node.type === 'ternary_expression') {
+      const condition = node.childForFieldName('condition')
+      if (condition && condition.type === 'identifier') return null
+      // Only flag ternaries where condition is a literal
+      if (!condition || !isLiteralNode(condition)) return null
+      return makeViolation(
+        this.ruleKey, node, filePath, 'medium',
+        'Constant ternary expression',
+        `\`${node.text}\` has a constant condition that always evaluates to the same branch.`,
+        sourceCode,
+        'Replace with the value of the branch that is always taken.',
+      )
+    }
     const left = node.childForFieldName('left')
     const right = node.childForFieldName('right')
     const operator = node.children.find((c) =>

@@ -13,6 +13,16 @@ export const regexComplexityVisitor: CodeRuleVisitor = {
     if (!patternNode) return null
 
     const pattern = patternNode.text
+
+    // Skip well-known regex patterns (UUID, email, ISO date, semver)
+    const wellKnownPatterns = [
+      /\[0-9a-f\]\{8\}-?\[0-9a-f\]\{4\}/i,            // UUID
+      /\[a-zA-Z0-9.*\].*@.*\[a-zA-Z0-9\]/,             // Email
+      /\\d\{4\}[-/]\\d\{2\}[-/]\\d\{2\}/,              // ISO date
+      /\\d+\\.\\d+\\.\\d+/,                              // Semver
+    ]
+    if (wellKnownPatterns.some((wp) => wp.test(pattern))) return null
+
     if (pattern.length < MAX_REGEX_LENGTH) {
       // Count groups
       const groupCount = (pattern.match(/\(/g) || []).length

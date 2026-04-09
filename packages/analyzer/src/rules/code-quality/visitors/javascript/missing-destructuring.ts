@@ -36,6 +36,9 @@ export const missingDestructuringVisitor: CodeRuleVisitor = {
     if (valueNode.children.some((c) => c.type === '[')) return null
     // Skip if it's on `this`
     if (objNode.text === 'this') return null
+    // Skip when the object expression contains `as any` or `as unknown` — destructuring would lose the cast
+    const objText0 = objNode.text
+    if (objText0.includes('as any') || objText0.includes('as unknown')) return null
 
     const objText = objNode.text
 

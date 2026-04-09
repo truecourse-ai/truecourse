@@ -12,6 +12,13 @@ export const tsDeclarationStyleVisitor: CodeRuleVisitor = {
 
     const members = body.namedChildren.filter((c) => c.type !== 'comment')
     if (members.length === 0) {
+      // Skip interfaces with an extends clause — `interface Foo extends Bar {}` is a valid
+      // pattern for extending types without adding new members.
+      const hasExtends = node.children.some(
+        (c) => c.type === 'extends_type_clause' || c.type === 'extends_clause' || c.type === 'class_heritage'
+      )
+      if (hasExtends) return null
+
       const name = node.childForFieldName('name')
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

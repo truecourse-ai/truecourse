@@ -510,6 +510,18 @@ export function checkModuleRules(
     if (ruleKeys.has('architecture/deterministic/cross-service-internal-import')) {
       const internalLayers = new Set(['data', 'service', 'external'])
 
+      // Build a lookup of file imports for path-alias detection
+      const fileImportSources = new Map<string, Set<string>>()
+      if (fileAnalyses) {
+        for (const fa of fileAnalyses) {
+          const sources = new Set<string>()
+          for (const imp of fa.imports) {
+            sources.add(imp.source)
+          }
+          fileImportSources.set(fa.filePath, sources)
+        }
+      }
+
       for (const dep of moduleLevelDeps) {
         if (dep.sourceService === dep.targetService) continue
         if (libraryServiceNames?.has(dep.targetService)) continue
@@ -517,6 +529,23 @@ export function checkModuleRules(
         const tgtMod = moduleByKey.get(`${dep.targetService}::${dep.targetModule}`)
         if (!srcMod || !tgtMod) continue
         if (!internalLayers.has(tgtMod.layerName)) continue
+
+        // Skip when the import uses a path alias (@/ or ~/) — these always resolve
+        // locally within the app, so it's not a real cross-service import.
+        if (dep.sourceFilePath) {
+          const importSources = fileImportSources.get(dep.sourceFilePath)
+          if (importSources) {
+            const hasLocalAliasForTarget = [...importSources].some((src) => {
+              if (!src.startsWith('@/') && !src.startsWith('~/')) return false
+              // Check if this alias import could be the one producing this dependency
+              // by matching imported names against the import specifier path segments
+              const lastSegment = src.split('/').pop()?.toLowerCase() || ''
+              return dep.importedNames.some((name) => name.toLowerCase() === lastSegment)
+                || tgtMod.name.toLowerCase() === lastSegment
+            })
+            if (hasLocalAliasForTarget) continue
+          }
+        }
 
         violations.push({
           ruleKey: 'architecture/deterministic/cross-service-internal-import',
@@ -621,6 +650,32 @@ export function checkMethodRules(
       connectedMethods.add(`${dep.calleeService}::${dep.calleeModule}::${dep.calleeMethod}`)
     }
 
+    // Build set of method names referenced as event handler arguments
+    // (e.g., .on('event', this.methodName), .once('close', this.handleClose))
+    const eventHandlerMethods = new Set<string>()
+    // Build set of class names that have an `implements` clause
+    const classesWithImplements = new Set<string>()
+    if (fileAnalyses) {
+      for (const fa of fileAnalyses) {
+        for (const call of fa.calls) {
+          if (call.callee.endsWith('.on') || call.callee.endsWith('.once') || call.callee.endsWith('.addEventListener')) {
+            if (call.arguments) {
+              for (const arg of call.arguments) {
+                // Match this.methodName patterns
+                const thisMatch = arg.match(/^this\.(\w+)$/)
+                if (thisMatch) eventHandlerMethods.add(thisMatch[1])
+              }
+            }
+          }
+        }
+        for (const cls of fa.classes) {
+          if (cls.interfaces && cls.interfaces.length > 0) {
+            classesWithImplements.add(cls.name)
+          }
+        }
+      }
+    }
+
     for (const method of methods) {
       const key = `${method.serviceName}::${method.moduleName}::${method.name}`
       if (!connectedMethods.has(key)) {
@@ -637,6 +692,12 @@ export function checkMethodRules(
         // Skip PascalCase exports — likely React components called via JSX
         // which the method-level dependency graph can't reliably track
         if (/^[A-Z][a-zA-Z0-9]*$/.test(method.name) && method.isExported) continue
+
+        // Skip methods bound as event handlers (.on('event', this.method), .addEventListener, etc.)
+        if (eventHandlerMethods.has(method.name)) continue
+
+        // Skip methods in classes with `implements` clause — they fulfill an interface contract
+        if (classesWithImplements.has(method.moduleName)) continue
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-method',

@@ -15,6 +15,22 @@ export const staticMethodCandidateVisitor: CodeRuleVisitor = {
     // Only flag methods inside class bodies, not object literal methods (Proxy handlers, etc.)
     if (node.parent?.type !== 'class_body') return null
 
+    // Skip methods in classes that extend or implement — they may be overriding base class methods
+    const classNode = node.parent?.parent
+    if (classNode) {
+      for (let i = 0; i < classNode.childCount; i++) {
+        const child = classNode.child(i)
+        if (child && (child.type === 'class_heritage' || child.type === 'extends_clause' || child.type === 'implements_clause')) return null
+      }
+      // Also check for extends/implements keywords directly in the class text before the body
+      const classText = classNode.text
+      const bodyStart = classNode.childForFieldName('body')
+      if (bodyStart) {
+        const preamble = classText.slice(0, bodyStart.startIndex - classNode.startIndex)
+        if (/\b(extends|implements)\b/.test(preamble)) return null
+      }
+    }
+
     // Skip constructors
     const nameNode = node.childForFieldName('name')
     if (!nameNode) return null

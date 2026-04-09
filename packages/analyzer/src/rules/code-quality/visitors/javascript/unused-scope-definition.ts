@@ -30,6 +30,20 @@ export const unusedScopeDefinitionVisitor: CodeRuleVisitor = {
       if (v.kind === 'parameter') continue
       // Skip imports — handled by bundler/TypeScript
       if (v.kind === 'import') continue
+      // Check if the variable is used as a shorthand property identifier in an object literal
+      let usedAsShorthand = false
+      function checkShorthand(n: import('tree-sitter').SyntaxNode) {
+        if (usedAsShorthand) return
+        if (n.type === 'shorthand_property_identifier' || n.type === 'shorthand_property_identifier_pattern') {
+          if (n.text === v.name) { usedAsShorthand = true; return }
+        }
+        for (let i = 0; i < n.childCount; i++) {
+          const child = n.child(i)
+          if (child) checkShorthand(child)
+        }
+      }
+      checkShorthand(v.scope.node)
+      if (usedAsShorthand) continue
       // Report: local variable or function defined but never used
       const typeLabel = v.kind === 'function' ? 'function' : v.kind === 'class' ? 'class' : 'variable'
       return makeViolation(

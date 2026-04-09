@@ -14,6 +14,25 @@ export const asyncVoidFunctionVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (!parent || parent.type !== 'expression_statement') return null
 
+    // Skip when the unhandled async call is inside a useEffect/useLayoutEffect callback.
+    // Pattern: useEffect(() => { asyncFn(); }) — this is the standard React pattern.
+    const grandparent = parent.parent // statement_block (callback body)
+    if (grandparent && grandparent.type === 'statement_block') {
+      const callbackFn = grandparent.parent // arrow_function or function_expression
+      if (callbackFn && (callbackFn.type === 'arrow_function' || callbackFn.type === 'function_expression')) {
+        const callbackArgs = callbackFn.parent // arguments node
+        if (callbackArgs && callbackArgs.type === 'arguments') {
+          const effectCall = callbackArgs.parent // call_expression
+          if (effectCall && effectCall.type === 'call_expression') {
+            const effectFn = effectCall.childForFieldName('function')
+            if (effectFn && (effectFn.text === 'useEffect' || effectFn.text === 'useLayoutEffect')) {
+              return null
+            }
+          }
+        }
+      }
+    }
+
     const fn = node.childForFieldName('function')
     if (!fn) return null
 

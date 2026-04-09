@@ -86,12 +86,34 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
         const nameNode = n.childForFieldName('name')
         if (nameNode?.type === 'identifier') localDecls.add(nameNode.text)
       }
+      // Also collect function declarations defined inside the effect body
+      if (n.type === 'function_declaration') {
+        const nameNode = n.childForFieldName('name')
+        if (nameNode?.type === 'identifier') localDecls.add(nameNode.text)
+      }
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) collectLocalDecls(child)
       }
     }
     collectLocalDecls(body)
+
+    // Collect identifiers accessed via .current (ref pattern — refs are stable)
+    const refAccessedIds = new Set<string>()
+    function collectRefAccesses(n: SyntaxNode) {
+      if (n.type === 'member_expression') {
+        const prop = n.childForFieldName('property')
+        const obj = n.childForFieldName('object')
+        if (prop?.text === 'current' && obj?.type === 'identifier') {
+          refAccessedIds.add(obj.text)
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectRefAccesses(child)
+      }
+    }
+    collectRefAccesses(body)
 
     const usedIds = collectIdentifiers(body, new Set([...paramNames, ...EXCLUDED_IDENTIFIERS, ...localDecls]))
 
@@ -101,7 +123,8 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       /^[a-z]/.test(id) &&
       !id.startsWith('set') &&
       id.length > 1 &&
-      !EXCLUDED_IDENTIFIERS.has(id)
+      !EXCLUDED_IDENTIFIERS.has(id) &&
+      !refAccessedIds.has(id)
     )
 
     if (suspiciousIds.length > 0) {

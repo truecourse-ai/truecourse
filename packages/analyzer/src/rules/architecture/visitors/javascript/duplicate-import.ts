@@ -16,6 +16,13 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
       const moduleName = source.text.replace(/['"]/g, '')
 
       if (sourceMap.has(moduleName)) {
+        const prevImp = sourceMap.get(moduleName)!
+        // Skip when one import is type-only and the other is a value import.
+        // `import type { T }` and `import { V }` from the same module is valid TS.
+        const prevIsTypeOnly = prevImp.text.includes('import type')
+        const currentIsTypeOnly = imp.text.includes('import type')
+        if (prevIsTypeOnly !== currentIsTypeOnly) continue
+
         return makeViolation(
           this.ruleKey, imp, filePath, 'low',
           'Duplicate import',

@@ -39,6 +39,16 @@ export const unnecessaryTypeParameterVisitor: CodeRuleVisitor = {
       if (!nameNode) continue
       const paramName = nameNode.text
 
+      // Skip when the type parameter has a constraint (extends clause) AND is used
+      // in the return type — callers depend on it for type inference
+      const hasConstraint = tp.namedChildren.some(c => c.type === 'constraint' || c.type === 'extends')
+        || tp.text.includes(' extends ')
+      if (hasConstraint && returnType) {
+        const returnText = returnType.text
+        const constrainedRegex = new RegExp(`\\b${paramName}\\b`)
+        if (constrainedRegex.test(returnText)) continue
+      }
+
       // Count occurrences in the signature (excluding the declaration itself)
       const regex = new RegExp(`\\b${paramName}\\b`, 'g')
       const matches = signatureText.match(regex)
