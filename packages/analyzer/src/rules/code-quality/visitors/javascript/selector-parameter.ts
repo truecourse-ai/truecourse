@@ -30,7 +30,7 @@ export const selectorParameterVisitor: CodeRuleVisitor = {
       if (!paramName) continue
 
       function isUsedAsSelector(n: SyntaxNode): boolean {
-        if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return false
+        if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return false
         if (n.type === 'if_statement') {
           const condition = n.childForFieldName('condition')
           if (condition) {

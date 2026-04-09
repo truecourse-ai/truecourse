@@ -12,7 +12,7 @@ export const pythonImportFormattingVisitor: CodeRuleVisitor = {
     let sawNonImport = false
     let isFirstStatement = true
     for (const child of parent.namedChildren) {
-      if (child === node) {
+      if (child?.id === node.id) {
         if (sawNonImport) {
           return makeViolation(
             this.ruleKey, node, filePath, 'low',

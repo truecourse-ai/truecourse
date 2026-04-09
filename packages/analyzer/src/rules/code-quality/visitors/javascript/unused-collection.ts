@@ -23,7 +23,7 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
     }
 
     function collectDecls(n: SyntaxNode) {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
       if (n.type === 'variable_declaration' || n.type === 'lexical_declaration') {
         for (const decl of n.namedChildren) {
           if (decl.type === 'variable_declarator') {
@@ -57,9 +57,9 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
       if (n.type === 'identifier') {
         const parent = n.parent
         if (parent) {
-          if ((parent.type === 'variable_declarator') && parent.childForFieldName('name') === n) {
+          if ((parent.type === 'variable_declarator') && parent.childForFieldName('name')?.id === n.id) {
             // declaration — not a read
-          } else if ((parent.type === 'assignment_expression') && parent.childForFieldName('left') === n) {
+          } else if ((parent.type === 'assignment_expression') && parent.childForFieldName('left')?.id === n.id) {
             // Pure assignment left side (x = something)
           } else {
             reads.add(n.text)

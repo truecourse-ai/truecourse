@@ -27,7 +27,7 @@ export const pythonGlobalVariableNotAssignedVisitor: CodeRuleVisitor = {
       let hasAssignment = false
 
       function check(n: typeof node) {
-        if (n === node) return
+        if (n.id === node.id) return
         if (
           n.type === 'assignment' ||
           n.type === 'augmented_assignment' ||

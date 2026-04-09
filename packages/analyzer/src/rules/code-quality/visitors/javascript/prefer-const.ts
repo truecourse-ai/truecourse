@@ -37,7 +37,7 @@ export const preferConstVisitor: CodeRuleVisitor = {
             return
           }
         }
-        if ((n.type === 'for_in_statement') && n !== node.parent) {
+        if ((n.type === 'for_in_statement') && n.id !== node.parent?.id) {
           const left = n.childForFieldName('left')
           if (left?.text?.includes(varName)) {
             isReassigned = true

@@ -35,7 +35,7 @@ export const parameterReassignmentVisitor: CodeRuleVisitor = {
     if (!bodyNode) return null
 
     function findReassignment(n: SyntaxNode): SyntaxNode | null {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return null
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return null
 
       if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
         const left = n.childForFieldName('left')

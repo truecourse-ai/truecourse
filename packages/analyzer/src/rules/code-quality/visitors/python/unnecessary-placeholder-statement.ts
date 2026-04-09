@@ -35,7 +35,7 @@ export const pythonUnnecessaryPlaceholderStatementVisitor: CodeRuleVisitor = {
 
       // Check if the block has other statements
       const otherStmts = parent.namedChildren.filter((c) => {
-        if (c === node) return false
+        if (c.id === node.id) return false
         // Skip docstrings
         if (c.type === 'expression_statement') {
           const inner = c.namedChildren[0]

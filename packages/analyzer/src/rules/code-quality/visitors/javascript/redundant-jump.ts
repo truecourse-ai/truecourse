@@ -12,7 +12,7 @@ export const redundantJumpVisitor: CodeRuleVisitor = {
       const parent = node.parent
       if (!parent) return null
       const stmts = parent.namedChildren
-      if (stmts[stmts.length - 1] !== node) return null
+      if (stmts[stmts.length - 1]?.id !== node.id) return null
       const grandparent = parent.parent
       if (!grandparent) return null
       if (!JS_FUNCTION_TYPES.includes(grandparent.type)) return null
@@ -30,7 +30,7 @@ export const redundantJumpVisitor: CodeRuleVisitor = {
       const parent = node.parent
       if (!parent) return null
       const stmts = parent.namedChildren
-      if (stmts[stmts.length - 1] !== node) return null
+      if (stmts[stmts.length - 1]?.id !== node.id) return null
 
       // Only redundant if the parent block is the direct body of a loop.
       // `continue` inside an `if`/`else`/`switch` within a loop is NOT redundant.

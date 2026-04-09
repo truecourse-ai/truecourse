@@ -17,7 +17,7 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
 
     // Skip dict/object keys (only check values)
     const parent = node.parent
-    if (parent?.type === 'pair' && parent.childForFieldName('key') === node) {
+    if (parent?.type === 'pair' && parent.childForFieldName('key')?.id === node.id) {
       return null
     }
 

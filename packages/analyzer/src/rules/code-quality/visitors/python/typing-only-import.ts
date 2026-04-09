@@ -112,7 +112,7 @@ function isInAnnotation(node: SyntaxNode): boolean {
   while (current) {
     if (current.type === 'type') return true
     // Function return type annotation
-    if (current.type === 'function_definition' && current.childForFieldName('return_type') === node) return true
+    if (current.type === 'function_definition' && current.childForFieldName('return_type')?.id === node.id) return true
     current = current.parent
   }
   return false

@@ -16,7 +16,7 @@ export const cognitiveComplexityVisitor: CodeRuleVisitor = {
     const INCREMENT_TYPES = new Set(['if_statement', 'for_statement', 'for_in_statement', 'while_statement', 'do_statement', 'switch_statement', 'catch_clause', 'ternary_expression'])
 
     function walk(n: SyntaxNode, nesting: number) {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
 
       if (INCREMENT_TYPES.has(n.type)) {
         complexity += 1 + nesting

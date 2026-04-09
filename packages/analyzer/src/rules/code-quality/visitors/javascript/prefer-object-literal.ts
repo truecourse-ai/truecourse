@@ -32,7 +32,7 @@ export const preferObjectLiteralVisitor: CodeRuleVisitor = {
     if (!grandParent) return null
 
     const stmts = grandParent.namedChildren
-    const declIdx = stmts.indexOf(parent)
+    const declIdx = stmts.findIndex((s) => s.id === parent.id)
     if (declIdx === -1 || declIdx + 1 >= stmts.length) return null
 
     const nextStmt = stmts[declIdx + 1]

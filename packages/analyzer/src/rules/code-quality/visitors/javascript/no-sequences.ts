@@ -10,7 +10,7 @@ export const noSequencesVisitor: CodeRuleVisitor = {
     if (parent?.type === 'for_statement') {
       const initializer = parent.childForFieldName('initializer')
       const increment = parent.childForFieldName('increment')
-      if (initializer === node || increment === node) return null
+      if (initializer?.id === node.id || increment?.id === node.id) return null
     }
 
     return makeViolation(

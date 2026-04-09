@@ -20,9 +20,9 @@ export const blockScopedVarVisitor: CodeRuleVisitor = {
 
     // Skip if this is a declaration position
     if (
-      (parent.type === 'variable_declarator' && parent.childForFieldName('name') === node) ||
-      (parent.type === 'function_declaration' && parent.childForFieldName('name') === node) ||
-      (parent.type === 'class_declaration' && parent.childForFieldName('name') === node)
+      (parent.type === 'variable_declarator' && parent.childForFieldName('name')?.id === node.id) ||
+      (parent.type === 'function_declaration' && parent.childForFieldName('name')?.id === node.id) ||
+      (parent.type === 'class_declaration' && parent.childForFieldName('name')?.id === node.id)
     ) return null
 
     const variable = dataFlow.resolveReference(node)

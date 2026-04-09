@@ -37,7 +37,7 @@ export const missingErrorEventHandlerVisitor: CodeRuleVisitor = {
     if (!statement || !statement.parent) return null
 
     const siblings = statement.parent.namedChildren
-    const stmtIndex = siblings.indexOf(statement)
+    const stmtIndex = siblings.findIndex((s) => s.id === statement.id)
     if (stmtIndex < 0) return null
 
     // Check the next few statements for .on('error'

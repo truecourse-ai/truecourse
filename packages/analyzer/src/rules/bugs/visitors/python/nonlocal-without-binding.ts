@@ -40,7 +40,7 @@ export const pythonNonlocalWithoutBindingVisitor: CodeRuleVisitor = {
         if (left?.type === 'identifier') enclosingNames.add(left.text)
       }
       // Don't recurse into nested function bodies (only their params)
-      if (n !== node && n.type === 'function_definition') {
+      if (n.id !== node.id && n.type === 'function_definition') {
         const params = n.childForFieldName('parameters')
         if (params) collectEnclosingNames(params)
         return

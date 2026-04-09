@@ -15,7 +15,7 @@ export const unusedVariableVisitor: CodeRuleVisitor = {
     const read = new Set<string>()
 
     function collectDeclarations(n: SyntaxNode) {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
       if ((n.type === 'variable_declaration' || n.type === 'lexical_declaration')) {
         for (const declarator of n.namedChildren) {
           if (declarator.type === 'variable_declarator') {
@@ -33,7 +33,7 @@ export const unusedVariableVisitor: CodeRuleVisitor = {
     }
 
     function collectReads(n: SyntaxNode) {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) {
         collectReadsUnscoped(n)
         return
       }
@@ -41,9 +41,9 @@ export const unusedVariableVisitor: CodeRuleVisitor = {
         const parent = n.parent
         if (parent) {
           if ((parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression')
-            && parent.childForFieldName('left') === n) return
-          if (parent.type === 'variable_declarator' && parent.childForFieldName('name') === n) return
-          if (parent.type === 'for_in_statement' && parent.childForFieldName('left') === n) return
+            && parent.childForFieldName('left')?.id === n.id) return
+          if (parent.type === 'variable_declarator' && parent.childForFieldName('name')?.id === n.id) return
+          if (parent.type === 'for_in_statement' && parent.childForFieldName('left')?.id === n.id) return
         }
         read.add(n.text)
       }

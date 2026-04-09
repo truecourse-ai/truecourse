@@ -19,7 +19,7 @@ export const unexpectedMultilineVisitor: CodeRuleVisitor = {
     if (!parent) return null
 
     const siblings = parent.namedChildren
-    const idx = siblings.indexOf(node)
+    const idx = siblings.findIndex(n => n.id === node.id)
     if (idx < 0 || idx >= siblings.length - 1) return null
 
     const next = siblings[idx + 1]

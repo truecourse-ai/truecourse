@@ -14,7 +14,7 @@ export const pythonPandasUseOfDotValuesVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (parent?.type === 'assignment') {
       const left = parent.childForFieldName('left')
-      if (left === node) return null
+      if (left?.id === node.id) return null
     }
 
     return makeViolation(

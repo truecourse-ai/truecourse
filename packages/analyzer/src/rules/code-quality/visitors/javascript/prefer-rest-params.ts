@@ -12,9 +12,9 @@ export const preferRestParamsVisitor: CodeRuleVisitor = {
       if (parent.type === 'arrow_function') return null
       if (parent.type === 'function_declaration' || parent.type === 'function_expression' || parent.type === 'method_definition') {
         const nodeParent = node.parent
-        if (nodeParent?.type === 'member_expression' && nodeParent.childForFieldName('object') === node) {
+        if (nodeParent?.type === 'member_expression' && nodeParent.childForFieldName('object')?.id === node.id) {
           // arguments.xxx — definitely the arguments object
-        } else if (nodeParent?.type === 'call_expression' && nodeParent.childForFieldName('function') === node) {
+        } else if (nodeParent?.type === 'call_expression' && nodeParent.childForFieldName('function')?.id === node.id) {
           return null
         }
         return makeViolation(

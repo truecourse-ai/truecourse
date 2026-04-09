@@ -24,7 +24,7 @@ export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
         return
       }
       // Don't descend into nested functions
-      if (n.type === 'function_definition' && n !== node) return
+      if (n.type === 'function_definition' && n.id !== node.id) return
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) walk(child)

@@ -15,7 +15,7 @@ export const pythonUnusedVariableVisitor: CodeRuleVisitor = {
     const read = new Set<string>()
 
     function collectDeclarations(n: SyntaxNode) {
-      if (n.type === 'function_definition' && n !== node) return
+      if (n.type === 'function_definition' && n.id !== node.id) return
       if (n.type === 'assignment') {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier') {
@@ -29,7 +29,7 @@ export const pythonUnusedVariableVisitor: CodeRuleVisitor = {
     }
 
     function collectReads(n: SyntaxNode) {
-      if (n.type === 'function_definition' && n !== node) {
+      if (n.type === 'function_definition' && n.id !== node.id) {
         // Mark all identifiers in nested functions as read
         function markAll(m: SyntaxNode) {
           if (m.type === 'identifier') read.add(m.text)
@@ -43,7 +43,7 @@ export const pythonUnusedVariableVisitor: CodeRuleVisitor = {
       }
       if (n.type === 'identifier') {
         const parent = n.parent
-        if (parent?.type === 'assignment' && parent.childForFieldName('left') === n) {
+        if (parent?.type === 'assignment' && parent.childForFieldName('left')?.id === n.id) {
           // left side of assignment — not a read
         } else {
           read.add(n.text)

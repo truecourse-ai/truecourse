@@ -24,8 +24,8 @@ export const misleadingArrayReverseVisitor: CodeRuleVisitor = {
     // Flag when: const x = arr.reverse() or let x = arr.sort(...)
     // i.e., parent is variable_declarator or assignment_expression right-hand side
     if (
-      (parent.type === 'variable_declarator' && parent.childForFieldName('value') === node) ||
-      (parent.type === 'assignment_expression' && parent.childForFieldName('right') === node)
+      (parent.type === 'variable_declarator' && parent.childForFieldName('value')?.id === node.id) ||
+      (parent.type === 'assignment_expression' && parent.childForFieldName('right')?.id === node.id)
     ) {
       if (obj.type === 'identifier') {
         return makeViolation(

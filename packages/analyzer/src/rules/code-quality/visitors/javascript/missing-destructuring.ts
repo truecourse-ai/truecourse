@@ -45,7 +45,7 @@ export const missingDestructuringVisitor: CodeRuleVisitor = {
     if (!parentBlock) return null
 
     const siblings = parentBlock.namedChildren
-    const myIndex = siblings.indexOf(node)
+    const myIndex = siblings.findIndex(n => n.id === node.id)
     let sameObjectCount = 0
     for (let i = Math.max(0, myIndex - 5); i < Math.min(siblings.length, myIndex + 6); i++) {
       const sib = siblings[i]

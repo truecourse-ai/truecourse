@@ -16,7 +16,7 @@ export const tooManyBranchesVisitor: CodeRuleVisitor = {
     const BRANCH_TYPES = new Set(['if_statement', 'switch_case'])
 
     function walk(n: SyntaxNode) {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
       if (BRANCH_TYPES.has(n.type)) branchCount++
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

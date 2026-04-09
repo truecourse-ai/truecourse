@@ -22,7 +22,7 @@ export const requireAwaitVisitor: CodeRuleVisitor = {
         hasAwait = true
         return
       }
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) walk(child)

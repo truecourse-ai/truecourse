@@ -30,14 +30,14 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     if (node.parent && (node.parent.text.startsWith(node.text + '?.') || node.text.includes('?.'))) return null
 
     // Skip array writes (assignment targets) — writing to an index can't crash
-    if (node.parent?.type === 'assignment_expression' && node.parent.childForFieldName('left') === node) return null
+    if (node.parent?.type === 'assignment_expression' && node.parent.childForFieldName('left')?.id === node.id) return null
 
     // Check if there is a bounds check nearby (same block)
     const statement = findContainingStatement(node)
     if (!statement || !statement.parent) return null
 
     const siblings = statement.parent.namedChildren
-    const stmtIndex = siblings.indexOf(statement)
+    const stmtIndex = siblings.findIndex(n => n.id === statement.id)
 
     // Look at preceding statements for a bounds check
     for (let i = Math.max(0, stmtIndex - 3); i < stmtIndex; i++) {

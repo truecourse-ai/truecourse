@@ -31,7 +31,7 @@ export const uselessIncrementVisitor: CodeRuleVisitor = {
 
     // Detect pre-increment whose result goes unused: the parent is expression_statement (already confirmed)
     // and it's a pre-increment/decrement (operator before argument)
-    const isPre = expr.children.indexOf(op) < expr.children.indexOf(arg)
+    const isPre = expr.children.findIndex((c) => c.id === op.id) < expr.children.findIndex((c) => c.id === arg.id)
     if (isPre) {
       return makeViolation(
         this.ruleKey, expr, filePath, 'medium',

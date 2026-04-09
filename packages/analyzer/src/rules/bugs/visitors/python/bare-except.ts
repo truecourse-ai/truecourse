@@ -12,8 +12,8 @@ export const pythonBareExceptVisitor: CodeRuleVisitor = {
 
     if (!exceptKeyword || !colon) return null
 
-    const exceptIdx = children.indexOf(exceptKeyword)
-    const colonIdx = children.indexOf(colon)
+    const exceptIdx = children.findIndex((c) => c.id === exceptKeyword.id)
+    const colonIdx = children.findIndex((c) => c.id === colon.id)
 
     const hasCatchType = children.slice(exceptIdx + 1, colonIdx).some(
       (c) => c.type === 'identifier' || c.type === 'as_pattern' || c.type === 'dotted_name'

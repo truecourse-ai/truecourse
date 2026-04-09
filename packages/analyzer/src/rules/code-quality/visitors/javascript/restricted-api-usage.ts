@@ -32,9 +32,9 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
 
       // Only flag if used as a standalone expression or in a call, not as a property/declaration
       if (
-        parent.type === 'member_expression' && parent.childForFieldName('property') === node
+        parent.type === 'member_expression' && parent.childForFieldName('property')?.id === node.id
       ) return null
-      if (parent.type === 'variable_declarator' && parent.childForFieldName('name') === node) return null
+      if (parent.type === 'variable_declarator' && parent.childForFieldName('name')?.id === node.id) return null
       if (parent.type === 'formal_parameters' || parent.type === 'required_parameter') return null
       if (parent.type === 'property_identifier') return null
       if (parent.type === 'import_specifier' || parent.type === 'export_specifier') return null

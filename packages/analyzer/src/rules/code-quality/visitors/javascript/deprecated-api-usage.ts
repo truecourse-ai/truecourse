@@ -92,7 +92,7 @@ function hasPrecedingDeprecatedJsDoc(stmt: SyntaxNode): boolean {
   // Find this statement's index among parent's children
   let stmtIdx = -1
   for (let i = 0; i < parent.childCount; i++) {
-    if (parent.child(i) === stmt) {
+    if (parent.child(i)?.id === stmt.id) {
       stmtIdx = i
       break
     }
@@ -138,7 +138,7 @@ function findFirstDeprecatedReference(
       if (!inDecl) {
         // Also skip if this is a property access (a.deprecated — 'deprecated' is a property, not a reference)
         const parent = node.parent
-        if (parent?.type === 'member_expression' && parent.childForFieldName('property') === node) {
+        if (parent?.type === 'member_expression' && parent.childForFieldName('property')?.id === node.id) {
           // Skip — this is property access, not a reference
         } else {
           return makeViolation(

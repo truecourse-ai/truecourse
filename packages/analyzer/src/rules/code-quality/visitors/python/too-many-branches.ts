@@ -16,7 +16,7 @@ export const pythonTooManyBranchesVisitor: CodeRuleVisitor = {
     const BRANCH_TYPES = new Set(['if_statement', 'elif_clause'])
 
     function walk(n: SyntaxNode) {
-      if (n.type === 'function_definition' && n !== node) return
+      if (n.type === 'function_definition' && n.id !== node.id) return
       if (BRANCH_TYPES.has(n.type)) branchCount++
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

@@ -16,7 +16,7 @@ export const nonExistentOperatorVisitor: CodeRuleVisitor = {
     if (!op) return null
 
     // Make sure it's plain = (not +=, -=, etc.)
-    const opIdx = node.children.indexOf(op)
+    const opIdx = node.children.findIndex((c) => c.id === op.id)
     if (opIdx === 0) return null
 
     const before = node.children[opIdx - 1]

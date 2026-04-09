@@ -12,7 +12,7 @@ export const pythonRedundantJumpVisitor: CodeRuleVisitor = {
       const parent = node.parent
       if (!parent || parent.type !== 'block') return null
       const stmts = parent.namedChildren
-      if (stmts[stmts.length - 1] !== node) return null
+      if (stmts[stmts.length - 1]?.id !== node.id) return null
       // parent.parent should be a function_definition
       const grandparent = parent.parent
       if (!grandparent || grandparent.type !== 'function_definition') return null
@@ -30,7 +30,7 @@ export const pythonRedundantJumpVisitor: CodeRuleVisitor = {
       const parent = node.parent
       if (!parent || parent.type !== 'block') return null
       const stmts = parent.namedChildren
-      if (stmts[stmts.length - 1] !== node) return null
+      if (stmts[stmts.length - 1]?.id !== node.id) return null
 
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

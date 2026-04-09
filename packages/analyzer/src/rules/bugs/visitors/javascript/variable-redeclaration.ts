@@ -37,7 +37,7 @@ export const variableRedeclarationVisitor: CodeRuleVisitor = {
         }
       }
       // Don't recurse into nested function scopes
-      if (n !== node && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return
+      if (n.id !== node.id && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) collectVars(child)
@@ -71,7 +71,7 @@ export const variableRedeclarationVisitor: CodeRuleVisitor = {
           }
         }
       }
-      if (n !== node && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return null
+      if (n.id !== node.id && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return null
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) {

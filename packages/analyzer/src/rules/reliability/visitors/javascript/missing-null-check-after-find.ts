@@ -20,7 +20,7 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     if (parent.type === 'optional_chain_expression') return null
 
     // If result is used in member access immediately: arr.find(...).property
-    if (parent.type === 'member_expression' && parent.childForFieldName('object') === node) {
+    if (parent.type === 'member_expression' && parent.childForFieldName('object')?.id === node.id) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Missing null check after .find()',
@@ -33,7 +33,7 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     // If result is used in a call: arr.find(...).method()
     if (parent.type === 'call_expression') {
       const parentFn = parent.childForFieldName('function')
-      if (parentFn?.type === 'member_expression' && parentFn.childForFieldName('object') === node) {
+      if (parentFn?.type === 'member_expression' && parentFn.childForFieldName('object')?.id === node.id) {
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Missing null check after .find()',

@@ -8,7 +8,8 @@ export const caseDeclarationLeakVisitor: CodeRuleVisitor = {
   nodeTypes: ['switch_case'],
   visit(node, filePath, sourceCode) {
     // Get statements in this case (not the value field)
-    const statements = node.namedChildren.filter((c) => c !== node.childForFieldName('value'))
+    const valueNode = node.childForFieldName('value')
+    const statements = node.namedChildren.filter((c) => !valueNode || c.id !== valueNode.id)
 
     // Check if any statement is a lexical declaration not wrapped in a block
     for (const stmt of statements) {

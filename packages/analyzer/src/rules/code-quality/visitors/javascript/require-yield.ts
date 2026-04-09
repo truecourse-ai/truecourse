@@ -19,8 +19,8 @@ export const requireYieldVisitor: CodeRuleVisitor = {
         hasYield = true
         return
       }
-      if ((n.type === 'generator_function' || n.type === 'generator_function_declaration') && n !== node) return
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return
+      if ((n.type === 'generator_function' || n.type === 'generator_function_declaration') && n.id !== node.id) return
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) walk(child)

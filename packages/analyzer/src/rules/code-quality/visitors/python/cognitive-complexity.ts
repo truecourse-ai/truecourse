@@ -16,7 +16,7 @@ export const pythonCognitiveComplexityVisitor: CodeRuleVisitor = {
     const INCREMENT_TYPES = new Set(['if_statement', 'for_statement', 'while_statement', 'except_clause', 'with_statement'])
 
     function walk(n: SyntaxNode, nesting: number) {
-      if (n.type === 'function_definition' && n !== node) return
+      if (n.type === 'function_definition' && n.id !== node.id) return
 
       if (INCREMENT_TYPES.has(n.type)) {
         complexity += 1 + nesting

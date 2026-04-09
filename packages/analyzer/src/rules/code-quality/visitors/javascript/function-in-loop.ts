@@ -28,7 +28,7 @@ export const functionInLoopVisitor: CodeRuleVisitor = {
           'Move the function outside the loop, or use block-scoped `let` and closures carefully.',
         )
       }
-      if (JS_FUNCTION_TYPES.includes(parent.type) && parent !== node) break
+      if (JS_FUNCTION_TYPES.includes(parent.type) && parent.id !== node.id) break
       parent = parent.parent
     }
     return null

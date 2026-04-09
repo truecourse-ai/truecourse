@@ -21,8 +21,8 @@ export const pythonDefaultExceptNotLastVisitor: CodeRuleVisitor = {
 
       if (!exceptKw || !colon) continue
 
-      const exceptIdx = children.indexOf(exceptKw)
-      const colonIdx = children.indexOf(colon)
+      const exceptIdx = children.findIndex((c) => c.id === exceptKw.id)
+      const colonIdx = children.findIndex((c) => c.id === colon.id)
       const hasCatchType = children.slice(exceptIdx + 1, colonIdx).some(
         (c) => c.type === 'identifier' || c.type === 'tuple' || c.type === 'attribute'
       )
