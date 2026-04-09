@@ -781,6 +781,11 @@ export function checkMethodRules(
         // Skip methods bound as event handlers (.on('event', this.method), .addEventListener, etc.)
         if (eventHandlerMethods.has(method.name)) continue
 
+        // Skip methods with "handle" prefix — these are event handler callbacks that are
+        // typically bound in JSX (onClick={this.handleX}) or passed as arguments to
+        // frameworks that can't be statically traced.
+        if (/^handle[A-Z]/.test(method.name)) continue
+
         // Skip methods in classes with `implements` clause — they fulfill an interface contract
         if (classesWithImplements.has(method.moduleName)) continue
 
@@ -800,6 +805,47 @@ export function checkMethodRules(
         // Skip exported functions that are imported anywhere in the codebase
         // (handles dynamic imports like: const { getUserLocation } = await import('./geo'))
         if (method.isExported && allImportedNames.has(method.name)) continue
+
+        // Skip exported functions whose name appears in ANY call argument across the codebase
+        // (catches callbacks passed as arguments: retry(getUserLocation), app.use(validateWebhook), etc.)
+        if (method.isExported) {
+          let referencedInArgs = false
+          if (fileAnalyses) {
+            for (const fa of fileAnalyses) {
+              for (const call of fa.calls) {
+                if (call.arguments) {
+                  for (const arg of call.arguments) {
+                    if (arg.includes(method.name)) {
+                      referencedInArgs = true
+                      break
+                    }
+                  }
+                  if (referencedInArgs) break
+                }
+              }
+              if (referencedInArgs) break
+            }
+          }
+          if (referencedInArgs) continue
+        }
+
+        // Skip methods in files with any class that extends or implements something —
+        // these methods may be required by the parent class or interface contract
+        {
+          let fileHasInheritance = false
+          if (fileAnalyses) {
+            for (const fa of fileAnalyses) {
+              if (fa.filePath !== method.filePath) continue
+              for (const cls of fa.classes) {
+                if ((cls.interfaces && cls.interfaces.length > 0) || cls.superClass) {
+                  fileHasInheritance = true
+                  break
+                }
+              }
+            }
+          }
+          if (fileHasInheritance) continue
+        }
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-method',

@@ -99,3 +99,10 @@ export function getPositive(nums: readonly number[]): number[] {
 
 // Positive: required-type-annotations — parameter with default value (inferred type)
 export function greet(name = 'world'): string { return `Hello ${name}`; }
+
+// Positive: missing-env-validation — env var validated on next line
+export function getRedisUrl(): string {
+  const url = process.env.REDIS_URL;
+  if (!url) throw new Error('REDIS_URL required');
+  return url;
+}

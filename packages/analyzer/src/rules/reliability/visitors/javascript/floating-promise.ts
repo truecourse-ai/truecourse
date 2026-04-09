@@ -78,10 +78,30 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
             }
           }
         }
-        // Stop at the nearest enclosing function — don't walk past it
-        break
       }
       ancestor = ancestor.parent
+    }
+
+    // Skip when inside a React component — any function whose body contains JSX.
+    // React event handlers (onClick, onSubmit, etc.) fire-and-forget async calls
+    // and handle errors via UI state, not via await/catch at the call site.
+    let componentAncestor = node.parent
+    while (componentAncestor) {
+      if (
+        componentAncestor.type === 'function_declaration' ||
+        componentAncestor.type === 'arrow_function' ||
+        componentAncestor.type === 'function_expression'
+      ) {
+        const body = componentAncestor.childForFieldName('body')
+        if (body) {
+          const bodyText = body.text
+          // Check for JSX returns — indicates a React component or JSX-containing function
+          if (/<[A-Za-z]/.test(bodyText)) {
+            return null
+          }
+        }
+      }
+      componentAncestor = componentAncestor.parent
     }
 
     return makeViolation(

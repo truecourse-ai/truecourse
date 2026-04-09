@@ -13,8 +13,21 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
   needsTypeQuery: true,
   visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     if (!typeQuery) return null
-    const awaitedExpr = node.namedChildren[0]
+    let awaitedExpr = node.namedChildren[0]
     if (!awaitedExpr) return null
+
+    // Unwrap type assertions and non-null assertions that may wrap the inner expression:
+    // `await (expr as T)`, `await expr!`, `await (<T>expr)`, `await (expr satisfies T)`
+    // These wrappers hide the actual call_expression/member_expression underneath.
+    const WRAPPER_TYPES = new Set([
+      'as_expression', 'satisfies_expression', 'type_assertion',
+      'non_null_expression', 'parenthesized_expression',
+    ])
+    while (WRAPPER_TYPES.has(awaitedExpr.type)) {
+      const inner = awaitedExpr.namedChildren[0]
+      if (!inner) break
+      awaitedExpr = inner
+    }
 
     // Skip ALL await on call_expression and member_expression chains — any function/method call
     // may return a Promise at runtime even when static type analysis can't determine it.

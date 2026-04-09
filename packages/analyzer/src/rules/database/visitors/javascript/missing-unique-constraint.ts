@@ -107,7 +107,11 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
 
     // Check if the queried column already has a .unique() constraint in the source code.
     // If so, the uniqueness IS enforced at the database level and this is not a violation.
-    const queriedColumn = extractQueriedColumn(node)
+    const queriedColumnRaw = extractQueriedColumn(node)
+
+    // The column name from the query might be qualified (e.g., "users.email", "dealers.phoneNumber").
+    // Extract just the field name (after the last dot) for matching.
+    const queriedColumn = queriedColumnRaw?.includes('.') ? queriedColumnRaw.split('.').pop()! : queriedColumnRaw
 
     // Skip queries on primary key columns — these are inherently unique
     if (queriedColumn && /^id$/.test(queriedColumn)) return null
@@ -119,11 +123,27 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
       'website', 'slug', 'username', 'auth0Id', 'auth0_id',
       'token', 'apiKey', 'api_key', 'externalId', 'external_id',
       'handle', 'code', 'sku', 'ssn', 'uuid',
+      'userId', 'user_id', 'name',
     ])
     if (queriedColumn && COMMONLY_UNIQUE_FIELDS.has(queriedColumn)) return null
 
     if (queriedColumn && columnHasUniqueConstraint(queriedColumn, sourceCode)) {
       return null
+    }
+
+    // Also check the raw qualified column name against the source code for unique constraints
+    if (queriedColumnRaw && queriedColumnRaw !== queriedColumn && columnHasUniqueConstraint(queriedColumnRaw, sourceCode)) {
+      return null
+    }
+
+    // Skip when the function body contains an explicit "already exists" / "duplicate" error message.
+    // This is a business validation pattern (e.g., "Email already in use"), not a race-prone uniqueness check.
+    const enclosingBody = getEnclosingFunctionBody(node)
+    if (enclosingBody) {
+      const funcText = enclosingBody.text
+      if (/already\s+(exists|in\s+use|registered|taken)|duplicate/i.test(funcText)) {
+        return null
+      }
     }
 
     return makeViolation(

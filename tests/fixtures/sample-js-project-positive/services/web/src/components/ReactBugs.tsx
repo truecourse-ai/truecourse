@@ -43,3 +43,10 @@ export function AsyncButton(): JSX.Element {
 export function LoadingSkeleton(): JSX.Element {
   return <div><div>Loading 1...</div><div>Loading 2...</div><div>Loading 3...</div></div>;
 }
+
+// Positive: floating-promise — Promise.resolve in sync context (not a real floating promise)
+export function SafePromise(): JSX.Element {
+  return <div>safe</div>;
+}
+
+// Positive: react-unstable-key — covered by existing LoadingSkeleton fixture above

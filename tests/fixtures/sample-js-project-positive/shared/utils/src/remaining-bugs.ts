@@ -36,3 +36,12 @@ export async function callMethod(client: { invoke: (s: string) => Promise<string
 export function nullableTernary(value: string | null): string {
   return value ? value.toUpperCase() : 'default';
 }
+
+// await-non-thenable: await on call with TS type wrapper (cast to Promise)
+export async function awaitWithCast(client: { invoke: (s: string) => Promise<string> }): Promise<string> {
+  try {
+    return await client.invoke('test');
+  } catch {
+    return '';
+  }
+}

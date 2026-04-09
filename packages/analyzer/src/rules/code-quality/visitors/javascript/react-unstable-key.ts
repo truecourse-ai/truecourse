@@ -64,6 +64,11 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
                 // These are data display lists that are read-only and not reordered.
                 if (mapObj?.type === 'member_expression') return null
 
+                // Skip when .map() is called on a call expression result
+                // (e.g., path.split('/').map(), Object.keys(x).map(), getItems().map())
+                // These produce derived arrays that are display-only.
+                if (mapObj?.type === 'call_expression') return null
+
                 // Skip inside skeleton/loading/placeholder components
                 let ancestor = node.parent
                 while (ancestor) {
@@ -104,6 +109,32 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
                         // Match `const name =` at module level
                         if (new RegExp(`\\bconst\\s+${name}\\s*[:=]`).test(declText)) return null
                       }
+                    }
+                  }
+
+                  // Skip when the variable is computed/derived from another expression
+                  // (e.g., `const segments = path.split('/')`, `const items = useMemo(...)`)
+                  // by searching the enclosing function body for its declaration.
+                  let enclosingFunc = node.parent
+                  while (enclosingFunc) {
+                    if (
+                      enclosingFunc.type === 'function_declaration' ||
+                      enclosingFunc.type === 'arrow_function' ||
+                      enclosingFunc.type === 'function_expression'
+                    ) {
+                      break
+                    }
+                    enclosingFunc = enclosingFunc.parent
+                  }
+                  if (enclosingFunc) {
+                    const funcBody = enclosingFunc.childForFieldName('body')
+                    if (funcBody) {
+                      // Search for `const name = someCall(...)` or `const name = expr.method(...)`
+                      // which indicates the array is derived/computed data, not mutable state
+                      const derivedPattern = new RegExp(
+                        `\\bconst\\s+${name}\\s*=\\s*(?:[\\w.]+\\(|\\[)`,
+                      )
+                      if (derivedPattern.test(funcBody.text)) return null
                     }
                   }
                 }

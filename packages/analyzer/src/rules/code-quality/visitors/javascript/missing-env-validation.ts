@@ -68,24 +68,58 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
 
     // Also check: variable assigned from env, then validated with if(!var) throw/return
     // Pattern: const/let varName = process.env.ENVVAR; ... if (!varName) throw/return
-    // Find the variable name this env access is assigned to
+    // Find the variable name this env access is assigned to.
+    // AST: node (member_expression: process.env.X) → parent is variable_declarator
     let assignTarget: string | null = null
-    const varDeclarator = node.parent?.parent // member_expression → member_expression (process.env.X) → variable_declarator
-    if (varDeclarator?.type === 'variable_declarator') {
-      assignTarget = varDeclarator.childForFieldName('name')?.text ?? null
+    const directParent = node.parent
+    if (directParent?.type === 'variable_declarator') {
+      assignTarget = directParent.childForFieldName('name')?.text ?? null
     }
     // Also check direct assignment: varName = process.env.X
-    if (!assignTarget && node.parent?.parent?.type === 'assignment_expression') {
-      const left = node.parent.parent.childForFieldName('left')
+    if (!assignTarget && directParent?.type === 'assignment_expression') {
+      const left = directParent.childForFieldName('left')
       if (left?.type === 'identifier') assignTarget = left.text
+    }
+    // Also check destructured or nested: const { X } = process.env or other patterns
+    // where the parent is something else but grandparent is a variable_declarator
+    if (!assignTarget && directParent?.parent?.type === 'variable_declarator') {
+      assignTarget = directParent.parent.childForFieldName('name')?.text ?? null
     }
     if (assignTarget) {
       const lines = sourceCode.split('\n')
       for (let i = 0; i < lines.length; i++) {
         // Check if there's an if-statement referencing the assigned variable with throw/return
         if (/\bif\s*\(/.test(lines[i]) && lines[i].includes(assignTarget)) {
-          for (let j = i; j < Math.min(i + 5, lines.length); j++) {
+          for (let j = i; j < Math.min(i + 10, lines.length); j++) {
             if (/\b(throw|return)\b/.test(lines[j])) return null
+          }
+        }
+        // Also check: bare `if (!assignTarget)` on one line and throw/return on the next
+        const negCheck = new RegExp(`if\\s*\\(\\s*!\\s*${assignTarget}\\b`)
+        if (negCheck.test(lines[i])) {
+          for (let j = i; j < Math.min(i + 10, lines.length); j++) {
+            if (/\b(throw|return)\b/.test(lines[j])) return null
+          }
+        }
+        // Also check: ternary or logical-OR validation: assignTarget || throw/default
+        if (lines[i].includes(assignTarget) && /\|\||&&|\?\?/.test(lines[i])) {
+          if (/\b(throw|return)\b/.test(lines[i])) return null
+        }
+      }
+    }
+
+    // Final fallback: search for ANY if-statement that references the env var name
+    // (by variable or env var name) followed by throw/return within 10 lines
+    {
+      const lines = sourceCode.split('\n')
+      const searchTerms = [envVarName]
+      if (assignTarget) searchTerms.push(assignTarget)
+      for (const term of searchTerms) {
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes(term) && (/!\s*\w/.test(lines[i]) || /===?\s*undefined/.test(lines[i]) || /==\s*null/.test(lines[i]))) {
+            for (let j = i; j < Math.min(i + 10, lines.length); j++) {
+              if (/\b(throw|return|process\.exit)\b/.test(lines[j])) return null
+            }
           }
         }
       }

@@ -49,6 +49,10 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     if (!typeQuery) return null
 
+    // Skip functions in shadcn/ui generated component files — these are auto-generated
+    // third-party code that should not be modified or flagged.
+    if (/\/components\/ui\//.test(filePath)) return null
+
     const body = node.childForFieldName('body')
     if (!body) return null
 
