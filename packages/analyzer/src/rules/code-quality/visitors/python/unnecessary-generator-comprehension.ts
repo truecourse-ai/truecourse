@@ -14,10 +14,20 @@ export const pythonUnnecessaryGeneratorComprehensionVisitor: CodeRuleVisitor = {
 
     const args = node.childForFieldName('arguments')
     if (!args) return null
-    const positional = args.namedChildren.filter((a) => a.type !== 'keyword_argument')
-    if (positional.length !== 1) return null
 
-    const arg = positional[0]
+    // tree-sitter may parse list(x for x in ...) with generator_expression as
+    // the arguments field itself (not inside argument_list)
+    let arg: import('tree-sitter').SyntaxNode | null = null
+    if (args.type === 'generator_expression') {
+      arg = args
+    } else if (args.type === 'argument_list') {
+      const positional = args.namedChildren.filter((a) => a.type !== 'keyword_argument')
+      if (positional.length !== 1) return null
+      arg = positional[0]
+    } else {
+      return null
+    }
+
     // Check for generator_expression inside list() / set()
     if (constructor === 'list' && arg.type === 'generator_expression') {
       return makeViolation(

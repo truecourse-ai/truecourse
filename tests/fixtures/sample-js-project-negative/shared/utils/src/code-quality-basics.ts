@@ -245,7 +245,7 @@ export function chainAssign() {
   return a + b + c;
 }
 
-// NOTE: bitwise-in-boolean — flaky detection, works sometimes
+// VIOLATION: code-quality/deterministic/bitwise-in-boolean
 export function bitwiseInBool(a: number, b: number) {
   if (a | b) {
     return true;
@@ -259,7 +259,6 @@ export function pendingRefactor(items: number[]) {
   return items.reduce((sum, item) => sum + item, 0);
 }
 
-// NOTE: code-quality/deterministic/env-in-library-code — requires file path to contain /packages/ (fixture is under shared/)
 
 // VIOLATION: code-quality/deterministic/no-return-assign
 export function returnAssign(x: number) {

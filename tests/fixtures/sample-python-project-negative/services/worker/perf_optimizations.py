@@ -70,7 +70,6 @@ def create_training_loader(dataset: ImageDataset, batch_size: int = 32):
 
 def process_items(items):
     """Process items with unnecessary list wrapping."""
-    # SKIP: performance/deterministic/unnecessary-iterable-allocation
-    # Reason: tree-sitter Python doesn't create generator_expression inside function calls.
+    # VIOLATION: performance/deterministic/unnecessary-iterable-allocation
     for item in list(x * 2 for x in items):
         print(item)

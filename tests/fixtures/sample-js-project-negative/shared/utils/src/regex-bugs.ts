@@ -2,7 +2,6 @@
  * Regex-related bugs — various regex anti-patterns.
  */
 
-// NOTE: control-chars-in-regex requires literal control bytes in source (impossible in committed files)
 export const controlChars = /[\x00-\x1f]/;
 
 // VIOLATION: bugs/deterministic/empty-character-class

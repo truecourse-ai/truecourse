@@ -15,11 +15,9 @@ export const unnecessaryIterableAllocationVisitor: CodeRuleVisitor = {
     const args = right.childForFieldName('arguments')
     if (!args) return null
 
-    const firstArg = args.namedChildren[0]
-    if (!firstArg) return null
-
-    // If the argument is a generator expression or another iterable call
-    if (firstArg.type === 'generator_expression' || firstArg.type === 'call') {
+    // When list() is called with a generator expression, tree-sitter parses the
+    // arguments field as a generator_expression (not argument_list containing one).
+    if (args.type === 'generator_expression') {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Unnecessary list() allocation in for loop',
@@ -27,6 +25,20 @@ export const unnecessaryIterableAllocationVisitor: CodeRuleVisitor = {
         sourceCode,
         'Remove the list() wrapper and iterate the generator directly.',
       )
+    }
+
+    // Handle list(range(...)) or list(some_iterable_call())
+    if (args.type === 'argument_list') {
+      const firstArg = args.namedChildren[0]
+      if (firstArg && (firstArg.type === 'generator_expression' || firstArg.type === 'call')) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'low',
+          'Unnecessary list() allocation in for loop',
+          'Wrapping an iterable in list() before iterating creates an unnecessary intermediate list. Iterate the iterable directly.',
+          sourceCode,
+          'Remove the list() wrapper and iterate the iterable directly.',
+        )
+      }
     }
 
     return null

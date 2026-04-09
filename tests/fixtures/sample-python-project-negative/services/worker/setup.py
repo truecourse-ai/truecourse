@@ -1,6 +1,5 @@
 """Legacy setup.py that should be migrated to pyproject.toml."""
-# SKIP: bugs/deterministic/invalid-pyproject-toml
-# Reason: Visitor file exists but is not registered in the Python visitors index.
+# VIOLATION: bugs/deterministic/invalid-pyproject-toml
 from setuptools import setup, find_packages
 
 setup(

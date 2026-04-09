@@ -37,10 +37,9 @@ export function badIndexCheck(arr: string[]) {
   return arr.indexOf('item') > 0;
 }
 
-// NOTE: bugs/deterministic/non-number-arithmetic — requires TypeQuery (needsTypeQuery: true)
-export function stringMath() {
-  // @ts-ignore
-  return 'hello' - 1;
+// VIOLATION: bugs/deterministic/non-number-arithmetic
+export function stringMath(s: string, n: number) {
+  return s - n;
 }
 
 // VIOLATION: bugs/deterministic/incorrect-string-concat
@@ -180,7 +179,7 @@ export function handleDirection(dir: 'up' | 'down' | 'left' | 'right'): string {
   }
 }
 
-// NOTE: bugs/deterministic/unsafe-enum-comparison — requires TypeQuery (needsTypeQuery: true)
+// VIOLATION: bugs/deterministic/unsafe-enum-comparison
 export enum Color { Red, Blue, Green }
 export function compareEnum(n: number) {
   return Color.Red === n;
@@ -204,7 +203,7 @@ export function negateNonNumber() {
   return -x;
 }
 
-// NOTE: bugs/deterministic/unhandled-promise — requires TypeQuery (needsTypeQuery: true, isPromiseLike)
+// VIOLATION: bugs/deterministic/unhandled-promise
 export function unhandled() {
   Promise.resolve(42);
 }
@@ -242,7 +241,7 @@ export function spreadPrimitive(s: string) {
   return [...s];
 }
 
-// NOTE: bugs/deterministic/misused-promise — requires TypeQuery (needsTypeQuery: true, isPromiseLike)
+// VIOLATION: bugs/deterministic/misused-promise
 export function boolPromise() {
   const p = Promise.resolve(true);
   if (p) {

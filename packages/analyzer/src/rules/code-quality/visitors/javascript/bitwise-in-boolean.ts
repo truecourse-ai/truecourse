@@ -22,7 +22,7 @@ export const bitwiseInBooleanVisitor: CodeRuleVisitor = {
     if (!parent) return null
 
     const isBoolContext = BOOL_CONTEXT_TYPES.has(parent.type)
-      && parent.childForFieldName('condition') === current
+      && parent.childForFieldName('condition')?.id === current.id
 
     if (!isBoolContext) return null
 

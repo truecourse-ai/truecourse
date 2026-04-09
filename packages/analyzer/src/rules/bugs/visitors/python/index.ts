@@ -232,6 +232,7 @@ import { pythonArgumentTypeMismatchVisitor } from './argument-type-mismatch-pyth
 import { pythonScikitPipelineCacheDirectAccessVisitor } from './scikit-pipeline-cache-direct-access.js'
 import { pythonTypeStubVersionCheckErrorVisitor } from './type-stub-version-check-error.js'
 import { pythonTypeStubAnnotationErrorVisitor } from './type-stub-annotation-error.js'
+import { invalidPyprojectTomlVisitor } from './invalid-pyproject-toml.js'
 
 export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonEmptyCatchVisitor,
@@ -468,4 +469,5 @@ export const BUGS_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonScikitPipelineCacheDirectAccessVisitor,
   pythonTypeStubVersionCheckErrorVisitor,
   pythonTypeStubAnnotationErrorVisitor,
+  invalidPyprojectTomlVisitor,
 ]

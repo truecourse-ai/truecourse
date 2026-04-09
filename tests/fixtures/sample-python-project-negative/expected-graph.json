@@ -701,6 +701,12 @@
       "layer": "service"
     },
     {
+      "name": "AppConfig",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "async_utils",
       "service": "utils",
       "kind": "standalone",
@@ -740,6 +746,12 @@
       "name": "CharIterator",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "code_patterns",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -803,6 +815,12 @@
       "layer": "service"
     },
     {
+      "name": "has_hidden_char",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "helpers",
       "service": "utils",
       "kind": "standalone",
@@ -830,6 +848,12 @@
       "name": "mixed_indent",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "ModelForm",
+      "service": "utils",
+      "kind": "interface",
       "layer": "service"
     },
     {
@@ -908,6 +932,12 @@
       "name": "User",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "UserProfileForm",
+      "service": "utils",
+      "kind": "interface",
       "layer": "service"
     },
     {

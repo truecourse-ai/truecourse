@@ -17,9 +17,9 @@ export async function awaitLiteral() {
   return x;
 }
 
-// NOTE: bugs/deterministic/base-to-string — requires TypeQuery (needsTypeQuery: true)
+// VIOLATION: bugs/deterministic/base-to-string
 export function stringifyObj() {
-  const obj: Record<string, number> = {};
+  const obj: { name: string; value: number } = { name: 'a', value: 1 };
   return obj.toString();
 }
 

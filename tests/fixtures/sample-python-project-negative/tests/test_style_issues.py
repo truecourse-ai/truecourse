@@ -12,3 +12,8 @@ def test_user_creation():
 def test_basic_math():
     """Normal test without issues."""
     assert 1 + 1 == 2
+
+
+# VIOLATION: style/deterministic/unnecessary-parentheses-style
+def get_user_count():
+    return (total_count)

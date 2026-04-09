@@ -16,8 +16,15 @@ function getLoopVarNames(node: SyntaxNode): string[] {
 
 function findAssignments(bodyNode: SyntaxNode, varNames: Set<string>): SyntaxNode | null {
   for (let i = 0; i < bodyNode.childCount; i++) {
-    const child = bodyNode.child(i)
+    let child = bodyNode.child(i)
     if (!child) continue
+    // tree-sitter wraps assignments in expression_statement
+    if (child.type === 'expression_statement') {
+      const inner = child.namedChildren[0]
+      if (inner && (inner.type === 'assignment' || inner.type === 'augmented_assignment')) {
+        child = inner
+      }
+    }
     if (child.type === 'assignment') {
       const left = child.childForFieldName('left')
       if (left?.type === 'identifier' && varNames.has(left.text)) return child

@@ -27,7 +27,7 @@ export const pythonDeeplyNestedFstringVisitor: CodeRuleVisitor = {
       current = current.parent
     }
 
-    if (depth < 2) return null
+    if (depth < 1) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

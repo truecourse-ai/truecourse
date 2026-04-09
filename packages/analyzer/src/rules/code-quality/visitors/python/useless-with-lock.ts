@@ -7,8 +7,19 @@ export const pythonUselessWithLockVisitor: CodeRuleVisitor = {
   nodeTypes: ['with_statement'],
   visit(node, filePath, sourceCode) {
     // with threading.Lock(): or with Lock(): — creating new lock inline
-    for (const item of node.namedChildren) {
-      if (item.type !== 'with_item') continue
+    // tree-sitter wraps with items in: with_clause > with_item
+    const withItems: import('tree-sitter').SyntaxNode[] = []
+    for (const child of node.namedChildren) {
+      if (child.type === 'with_item') {
+        withItems.push(child)
+      } else if (child.type === 'with_clause') {
+        for (const sub of child.namedChildren) {
+          if (sub.type === 'with_item') withItems.push(sub)
+        }
+      }
+    }
+
+    for (const item of withItems) {
       const value = item.namedChildren[0]
       if (!value) continue
 

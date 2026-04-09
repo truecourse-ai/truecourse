@@ -33,9 +33,17 @@ export const pythonIfElseInsteadOfDictGetVisitor: CodeRuleVisitor = {
     // Check if-body assigns: var = dict[key]
     function getSingleAssign(body: SyntaxNode): { target: string; value: string } | null {
       const stmts = body.namedChildren
-      if (stmts.length !== 1 || stmts[0].type !== 'assignment') return null
-      const left = stmts[0].childForFieldName('left')
-      const right = stmts[0].childForFieldName('right')
+      if (stmts.length !== 1) return null
+      // tree-sitter wraps assignments in expression_statement
+      let assignNode = stmts[0]
+      if (assignNode.type === 'expression_statement') {
+        const inner = assignNode.namedChildren[0]
+        if (inner?.type === 'assignment') assignNode = inner
+        else return null
+      }
+      if (assignNode.type !== 'assignment') return null
+      const left = assignNode.childForFieldName('left')
+      const right = assignNode.childForFieldName('right')
       return left && right ? { target: left.text, value: right.text } : null
     }
 

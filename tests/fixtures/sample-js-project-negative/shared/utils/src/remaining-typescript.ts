@@ -53,7 +53,6 @@ function unusedScopeDef() {
 }
 export { unusedScopeDef };
 
-// NOTE: architecture/deterministic/missing-error-status-code — not detected by visitor in this file
 export function badErrorResponse(req: any, res: any) {
   res.json({ error: 'Something failed' });
 }

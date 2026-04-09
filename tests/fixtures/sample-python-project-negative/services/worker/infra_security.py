@@ -30,6 +30,15 @@ class InfraStack:
         )
         return statement
 
+    def create_iam_all_privileges(self):
+        """Create IAM policy granting all privileges."""
+        # VIOLATION: security/deterministic/aws-iam-all-privileges-python
+        admin_policy = iam.PolicyStatement(
+            actions=["*"],
+            resources=["arn:aws:s3:::admin-bucket/*"],
+        )
+        return admin_policy
+
     def create_iam_all_resources(self):
         """Create IAM policy granting access to all resources."""
         # VIOLATION: security/deterministic/aws-iam-all-resources-python
@@ -168,6 +177,17 @@ class InfraStack:
         # VIOLATION: security/deterministic/s3-insecure-http
         client = boto3.client("s3", use_ssl=False)
         return client
+
+    def create_public_rds_instance(self):
+        """Create publicly accessible RDS instance."""
+        # VIOLATION: security/deterministic/aws-public-resource-python
+        db = rds.CfnDBInstance(
+            self.scope,
+            "PublicDB",
+            engine="postgres",
+            publicly_accessible=True,
+        )
+        return db
 
     def get_bucket_policy_unrestricted(self):
         """Return an S3 bucket policy with wildcard principal."""

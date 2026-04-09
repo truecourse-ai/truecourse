@@ -39,13 +39,20 @@ export const pythonDjangoModelFormFieldsVisitor: CodeRuleVisitor = {
     if (!metaBody) return null
 
     // Look for fields = '__all__' or exclude = [...]
-    for (const stmt of metaBody.namedChildren) {
+    for (const rawStmt of metaBody.namedChildren) {
+      // tree-sitter wraps assignments in expression_statement
+      let stmt = rawStmt
+      if (stmt.type === 'expression_statement') {
+        const inner = stmt.namedChildren[0]
+        if (inner?.type === 'assignment') stmt = inner
+        else continue
+      }
       if (stmt.type !== 'assignment') continue
       const left = stmt.childForFieldName('left')
       const right = stmt.childForFieldName('right')
       if (!left || !right) continue
 
-      if (left.text === 'fields' && right.text === "'__all__'") {
+      if (left.text === 'fields' && (right.text === "'__all__'" || right.text === '"__all__"')) {
         return makeViolation(
           this.ruleKey, stmt, filePath, 'medium',
           'Django ModelForm with fields = "__all__"',

@@ -15,8 +15,16 @@ export const pythonIfElseDictLookupVisitor: CodeRuleVisitor = {
     // Check all branches assign to the same variable
     function getSingleAssignmentTarget(body: import('tree-sitter').SyntaxNode): string | null {
       const stmts = body.namedChildren
-      if (stmts.length !== 1 || stmts[0].type !== 'assignment') return null
-      return stmts[0].childForFieldName('left')?.text ?? null
+      if (stmts.length !== 1) return null
+      // tree-sitter wraps assignments in expression_statement
+      let assignNode = stmts[0]
+      if (assignNode.type === 'expression_statement') {
+        const inner = assignNode.namedChildren[0]
+        if (inner?.type === 'assignment') assignNode = inner
+        else return null
+      }
+      if (assignNode.type !== 'assignment') return null
+      return assignNode.childForFieldName('left')?.text ?? null
     }
 
     const mainBody = node.childForFieldName('consequence')

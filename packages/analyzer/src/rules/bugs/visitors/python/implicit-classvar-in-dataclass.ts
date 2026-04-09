@@ -33,41 +33,57 @@ export const pythonImplicitClassvarInDataclassVisitor: CodeRuleVisitor = {
 
     const className = node.childForFieldName('name')?.text ?? 'class'
 
-    for (const stmt of body.namedChildren) {
+    for (const rawStmt of body.namedChildren) {
+      // tree-sitter wraps assignments in expression_statement
+      let stmt = rawStmt
+      if (stmt.type === 'expression_statement') {
+        const inner = stmt.namedChildren[0]
+        if (inner) stmt = inner
+      }
+
       // Look for annotated assignments: var: Type = value
+      // tree-sitter may represent these as 'assignment' with a 'type' child,
+      // or as 'annotated_assignment'
+      const isAnnotated = stmt.type === 'annotated_assignment' ||
+        (stmt.type === 'assignment' && stmt.namedChildren.some((c) => c.type === 'type'))
+      if (!isAnnotated) continue
+
+      // Get annotation text
+      let annotText: string | null = null
       if (stmt.type === 'annotated_assignment') {
-        const annotation = stmt.childForFieldName('annotation')
-        if (!annotation) continue
+        annotText = stmt.childForFieldName('annotation')?.text ?? null
+      } else {
+        // assignment with type child
+        const typeNode = stmt.namedChildren.find((c) => c.type === 'type')
+        annotText = typeNode?.text ?? null
+      }
+      if (!annotText) continue
 
-        const annotText = annotation.text
+      // Skip if already has ClassVar
+      if (annotText.includes('ClassVar')) continue
 
-        // Skip if already has ClassVar
-        if (annotText.includes('ClassVar')) continue
+      // Skip if it's a field() call (dataclass field)
+      const value = stmt.childForFieldName('value') ?? stmt.childForFieldName('right')
+      if (value?.type === 'call') {
+        const func = value.childForFieldName('function')
+        if (func?.text === 'field' || func?.text.endsWith('.field')) continue
+      }
 
-        // Skip if it's a field() call (dataclass field)
-        const value = stmt.childForFieldName('value')
-        if (value?.type === 'call') {
-          const func = value.childForFieldName('function')
-          if (func?.text === 'field' || func?.text.endsWith('.field')) continue
-        }
+      // Flag if the variable has an ALL_CAPS name (convention for class constants)
+      const targetNode = stmt.childForFieldName('left') ?? stmt.namedChildren[0]
+      if (!targetNode) continue
 
-        // Flag if the variable has an ALL_CAPS name (convention for class constants)
-        // or if assigned a literal value suggesting it's a class constant
-        const targetNode = stmt.childForFieldName('left') ?? stmt.namedChildren[0]
-        if (!targetNode) continue
+      const varName = targetNode.text
 
-        const varName = targetNode.text
-
-        // ALL_CAPS pattern strongly suggests class variable
-        if (/^[A-Z][A-Z0-9_]*$/.test(varName) && varName.length > 1) {
-          return makeViolation(
-            this.ruleKey, stmt, filePath, 'medium',
-            'Implicit class variable in dataclass',
-            `\`${className}.${varName}\` looks like a class variable but is missing \`ClassVar\` annotation — it will be treated as an instance field by the dataclass machinery.`,
-            sourceCode,
-            `Annotate with \`ClassVar\`: \`${varName}: ClassVar[${annotText}]\`.`,
-          )
-        }
+      // ALL_CAPS pattern strongly suggests class variable
+      if (/^[A-Z][A-Z0-9_]*$/.test(varName) && varName.length > 1) {
+        return makeViolation(
+          this.ruleKey, rawStmt, filePath, 'medium',
+          'Implicit class variable in dataclass',
+          `\`${className}.${varName}\` looks like a class variable but is missing \`ClassVar\` annotation — it will be treated as an instance field by the dataclass machinery.`,
+          sourceCode,
+          `Annotate with \`ClassVar\`: \`${varName}: ClassVar[${annotText}]\`.`,
+        )
       }
     }
 

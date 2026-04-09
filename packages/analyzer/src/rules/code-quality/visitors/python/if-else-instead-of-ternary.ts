@@ -5,7 +5,13 @@ import type { SyntaxNode } from 'tree-sitter'
 function getSingleAssignment(body: SyntaxNode): { varName: string; value: string } | null {
   const stmts = body.namedChildren
   if (stmts.length !== 1) return null
-  const stmt = stmts[0]
+  // tree-sitter wraps assignments in expression_statement
+  let stmt = stmts[0]
+  if (stmt.type === 'expression_statement') {
+    const inner = stmt.namedChildren[0]
+    if (inner?.type === 'assignment') stmt = inner
+    else return null
+  }
   if (stmt.type !== 'assignment') return null
   const left = stmt.childForFieldName('left')
   const right = stmt.childForFieldName('right')

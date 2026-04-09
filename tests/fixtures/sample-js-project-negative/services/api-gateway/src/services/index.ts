@@ -2,6 +2,10 @@
  * Service barrel file.
  */
 
-// NOTE: architecture/deterministic/barrel-file-re-export-all — not detected by visitor in this file
+// VIOLATION: architecture/deterministic/barrel-file-re-export-all
 export * from './user.service';
 export * from './health.service';
+export * from './arch-violations';
+export * from './performance';
+export * from './reliability';
+export * from './performance';

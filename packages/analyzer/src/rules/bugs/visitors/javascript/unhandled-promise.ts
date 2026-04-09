@@ -48,6 +48,8 @@ export const unhandledPromiseVisitor: CodeRuleVisitor = {
       filePath,
       expr.startPosition.row,
       expr.startPosition.column,
+      expr.endPosition.row,
+      expr.endPosition.column,
     )
     if (isPromise) {
       return makeViolation(

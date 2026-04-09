@@ -11,5 +11,5 @@
       "@sample/shared-utils": ["./shared/utils/src/index.ts"]
     }
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts", "**/*.tsx"]
 }

@@ -41,3 +41,21 @@ export async function deleteUser(req: Request, res: Response) {
   await userService.delete(req.params.id);
   res.status(204).send();
 }
+
+// VIOLATION: architecture/deterministic/missing-error-status-code
+export async function dangerousAction(_req: Request, res: Response) {
+  try {
+    throw new Error('fail');
+  } catch (e) {
+    res.json({ error: 'Something went wrong' });
+  }
+}
+
+// VIOLATION: architecture/deterministic/raw-error-in-response
+export async function unsafeErrorHandler(_req: Request, res: Response) {
+  try {
+    throw new Error('internal failure');
+  } catch (err: any) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+}

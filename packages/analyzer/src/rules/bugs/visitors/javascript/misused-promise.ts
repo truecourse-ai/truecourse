@@ -22,6 +22,12 @@ export const misusedPromiseVisitor: CodeRuleVisitor = {
     }
     if (!condition) return null
 
+    // Unwrap parenthesized_expression to get the inner expression
+    while (condition && condition.type === 'parenthesized_expression' && condition.namedChildren.length > 0) {
+      condition = condition.namedChildren[0]
+    }
+    if (!condition) return null
+
     // Skip if the condition is an await expression
     if (condition.type === 'await_expression') return null
 
@@ -29,6 +35,8 @@ export const misusedPromiseVisitor: CodeRuleVisitor = {
       filePath,
       condition.startPosition.row,
       condition.startPosition.column,
+      condition.endPosition.row,
+      condition.endPosition.column,
     )
     if (isPromise) {
       return makeViolation(

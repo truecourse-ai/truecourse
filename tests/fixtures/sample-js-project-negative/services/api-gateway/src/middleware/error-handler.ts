@@ -17,7 +17,6 @@ export function errorHandler(err: AppError, _req: Request, res: Response, _next:
 
   const statusCode = err.statusCode || 500;
 
-  // NOTE: architecture/deterministic/raw-error-in-response — not detected by visitor in this file
   res.status(statusCode).json({
     error: err.message,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
