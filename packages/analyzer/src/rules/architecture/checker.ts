@@ -382,15 +382,18 @@ export function checkModuleRules(
         const fileBasename = method.filePath.split('/').pop()?.replace(/\.\w+$/, '')
         if (fileBasename && dynamicImportModuleBasenames.has(fileBasename)) continue
 
-        // Skip exported functions referenced by name in any source code
-        // (catches destructured dynamic imports, string references, etc.)
+        // Skip exported functions referenced in any call or import across the codebase
         if (fileAnalyses) {
-          let referencedInSource = false
+          let referencedAnywhere = false
           for (const fa of fileAnalyses) {
             if (fa.filePath === method.filePath) continue
-            if (fa.rawSource?.includes(method.name)) { referencedInSource = true; break }
+            for (const call of fa.calls) {
+              if (call.callee.includes(method.name)) { referencedAnywhere = true; break }
+              if (call.arguments?.some((a) => a.includes(method.name))) { referencedAnywhere = true; break }
+            }
+            if (referencedAnywhere) break
           }
-          if (referencedInSource) continue
+          if (referencedAnywhere) continue
         }
 
         violations.push({
@@ -822,15 +825,25 @@ export function checkMethodRules(
         // (handles dynamic imports like: const { getUserLocation } = await import('./geo'))
         if (method.isExported && allImportedNames.has(method.name)) continue
 
-        // Skip exported functions referenced by name in any source code
-        // (catches destructured dynamic imports, string references, etc.)
+        // Skip exported functions referenced in any call expression across the codebase
+        // (catches dynamic imports like: const { getUserLocation } = await import('./service'))
         if (method.isExported && fileAnalyses) {
-          let referencedInSource = false
+          let referencedAnywhere = false
           for (const fa of fileAnalyses) {
-            if (fa.filePath === method.filePath) continue // skip own file
-            if (fa.rawSource?.includes(method.name)) { referencedInSource = true; break }
+            if (fa.filePath === method.filePath) continue
+            // Check if method name appears in any call's callee or arguments
+            for (const call of fa.calls) {
+              if (call.callee.includes(method.name)) { referencedAnywhere = true; break }
+              if (call.arguments?.some((a) => a.includes(method.name))) { referencedAnywhere = true; break }
+            }
+            if (referencedAnywhere) break
+            // Check if method name appears in any import specifier (static imports)
+            for (const imp of fa.imports) {
+              if (imp.specifiers.some((s) => s.name === method.name)) { referencedAnywhere = true; break }
+            }
+            if (referencedAnywhere) break
           }
-          if (referencedInSource) continue
+          if (referencedAnywhere) continue
         }
 
         // Skip exported functions whose name appears in ANY call argument across the codebase
