@@ -114,7 +114,9 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
     const queriedColumn = queriedColumnRaw?.includes('.') ? queriedColumnRaw.split('.').pop()! : queriedColumnRaw
 
     // Skip queries on primary key columns — these are inherently unique
-    if (queriedColumn && /^id$/.test(queriedColumn)) return null
+    if (queriedColumn && /^(id|_id|pk)$/i.test(queriedColumn)) return null
+    // Also skip when the raw query text references a .id field (PK refetch pattern)
+    if (queriedColumnRaw && /\.id\b/.test(queriedColumnRaw)) return null
 
     // Skip queries on commonly unique fields — these are almost always backed by
     // a unique constraint in the schema (often in a separate schema file we can't see).

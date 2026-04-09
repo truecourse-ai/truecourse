@@ -113,6 +113,23 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
 
     if (hasExhaustiveSwitch(body)) return null
 
+    // Skip when every top-level statement in the body is a return, if-with-return, or switch-with-returns
+    // (no fall-through path to implicit undefined)
+    const allStmtsTerminate = bodyStatements.every((stmt) => {
+      if (stmt.type === 'return_statement' || stmt.type === 'throw_statement') return true
+      if (stmt.type === 'if_statement') {
+        // Only terminal if BOTH branches (consequence + alternative) have returns
+        const consequence = stmt.childForFieldName('consequence')
+        const alternative = stmt.childForFieldName('alternative')
+        if (!alternative) return false // no else = can fall through
+        return (consequence?.text.includes('return ') ?? false)
+          && (alternative?.text.includes('return ') ?? false)
+      }
+      if (stmt.type === 'switch_statement') return true // switch already checked above
+      return false
+    })
+    if (allStmtsTerminate && bodyStatements.length > 0) return null
+
     let hasValueReturn = false
     let hasVoidReturn = false
 

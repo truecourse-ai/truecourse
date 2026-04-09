@@ -382,6 +382,17 @@ export function checkModuleRules(
         const fileBasename = method.filePath.split('/').pop()?.replace(/\.\w+$/, '')
         if (fileBasename && dynamicImportModuleBasenames.has(fileBasename)) continue
 
+        // Skip exported functions referenced by name in any source code
+        // (catches destructured dynamic imports, string references, etc.)
+        if (fileAnalyses) {
+          let referencedInSource = false
+          for (const fa of fileAnalyses) {
+            if (fa.filePath === method.filePath) continue
+            if (fa.rawSource?.includes(method.name)) { referencedInSource = true; break }
+          }
+          if (referencedInSource) continue
+        }
+
         violations.push({
           ruleKey: 'architecture/deterministic/unused-export',
           title: `Unused export: ${method.name}`,
@@ -736,10 +747,15 @@ export function checkMethodRules(
         for (const cls of fa.classes) {
           if (cls.interfaces && cls.interfaces.length > 0) {
             classesWithImplements.add(cls.name)
+            // Also add the module name so method.moduleName matches
+            const modName = fa.filePath.split('/').pop()?.replace(/\.\w+$/, '')
+            if (modName) classesWithImplements.add(modName)
           }
           // Also check if the class has a superClass — methods may come from the parent
           if (cls.superClass) {
             classesWithImplements.add(cls.name)
+            const modName = fa.filePath.split('/').pop()?.replace(/\.\w+$/, '')
+            if (modName) classesWithImplements.add(modName)
           }
         }
         // Collect all exported names and imported names for cross-reference
@@ -805,6 +821,17 @@ export function checkMethodRules(
         // Skip exported functions that are imported anywhere in the codebase
         // (handles dynamic imports like: const { getUserLocation } = await import('./geo'))
         if (method.isExported && allImportedNames.has(method.name)) continue
+
+        // Skip exported functions referenced by name in any source code
+        // (catches destructured dynamic imports, string references, etc.)
+        if (method.isExported && fileAnalyses) {
+          let referencedInSource = false
+          for (const fa of fileAnalyses) {
+            if (fa.filePath === method.filePath) continue // skip own file
+            if (fa.rawSource?.includes(method.name)) { referencedInSource = true; break }
+          }
+          if (referencedInSource) continue
+        }
 
         // Skip exported functions whose name appears in ANY call argument across the codebase
         // (catches callbacks passed as arguments: retry(getUserLocation), app.use(validateWebhook), etc.)
