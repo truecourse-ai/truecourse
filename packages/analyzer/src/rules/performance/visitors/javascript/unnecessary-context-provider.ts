@@ -23,13 +23,20 @@ export const unnecessaryContextProviderVisitor: CodeRuleVisitor = {
     )
 
     if (children.length === 1) {
+      const child = children[0]
+      // Skip when rendering {children} — standard provider wrapper pattern
+      if (child.type === 'jsx_expression' && child.text.includes('children')) return null
       // Skip when the single child is a PascalCase component — wrapping one root component
       // in a Provider is the standard React pattern (app root, layout wrappers)
-      const child = children[0]
       if (child.type === 'jsx_element') {
         const childTag = child.namedChildren.find((c) => c.type === 'jsx_opening_element')
         const childName = childTag?.namedChildren.find((c) => c.type === 'identifier' || c.type === 'member_expression')
         if (childName && /^[A-Z]/.test(childName.text)) return null
+        // Skip when child element has complex content (nested elements/expressions) —
+        // the subtree likely contains context consumers
+        const childContent = child.namedChildren.filter((c) =>
+          c.type !== 'jsx_opening_element' && c.type !== 'jsx_closing_element' && c.type !== 'jsx_text')
+        if (childContent.length > 0) return null
       }
       if (child.type === 'jsx_self_closing_element') {
         const childName = child.namedChildren.find((c) => c.type === 'identifier' || c.type === 'member_expression')

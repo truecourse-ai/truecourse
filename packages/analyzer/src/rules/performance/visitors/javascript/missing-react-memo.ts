@@ -49,6 +49,12 @@ export const missingReactMemoVisitor: CodeRuleVisitor = {
     const hookPattern = /\buse[A-Z]\w*\s*\(/
     if (!hookPattern.test(bodyText)) return null
 
+    // Skip components with non-optimization hooks — they re-render from their own
+    // triggers (state, effects, external subscriptions), making memo ineffective.
+    // Only flag when ALL hooks are optimization-only (useMemo, useCallback, useRef).
+    const stripped = bodyText.replace(/\buse(Memo|Callback|Ref)\b/g, '')
+    if (/\buse[A-Z]\w*\s*\(/.test(stripped)) return null
+
     // Skip components with no props — memo provides no benefit
     const params = funcNode.childForFieldName('parameters') || funcNode.childForFieldName('parameter')
     if (!params || params.namedChildCount === 0) return null

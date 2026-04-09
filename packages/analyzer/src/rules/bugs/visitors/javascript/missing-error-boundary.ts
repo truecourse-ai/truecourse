@@ -25,11 +25,13 @@ export const missingErrorBoundaryVisitor: CodeRuleVisitor = {
     if (routePattern.test(filePath)) return null
 
     // Check for data-fetching patterns
+    // Only flag patterns where ErrorBoundary can actually catch errors:
+    // useQuery/useSWR throw during render (catchable), Suspense uses error boundaries.
+    // useEffect+fetch is NOT flagged — errors in useEffect are async and cannot be caught by ErrorBoundary.
     const hasAsyncData =
       /\buseQuery\b/.test(sourceCode) ||
       /\buseSWR\b/.test(sourceCode) ||
-      /\bSuspense\b/.test(sourceCode) ||
-      /\buseEffect\b[\s\S]{0,200}\bfetch\b/.test(sourceCode)
+      /\bSuspense\b/.test(sourceCode)
 
     if (!hasAsyncData) return null
 
@@ -42,7 +44,7 @@ export const missingErrorBoundaryVisitor: CodeRuleVisitor = {
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Missing error boundary',
-      'Component uses async data fetching (useQuery/useSWR/Suspense/fetch) but no ErrorBoundary is present — unhandled errors will crash the component tree.',
+      'Component uses async data fetching (useQuery/useSWR/Suspense) but no ErrorBoundary is present — unhandled errors will crash the component tree.',
       sourceCode,
       'Wrap the component tree with an ErrorBoundary to handle rendering errors gracefully.',
     )

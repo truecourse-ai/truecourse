@@ -28,6 +28,7 @@ export const pythonProcessExitInLibraryVisitor: CodeRuleVisitor = {
       lowerPath.includes('__main__') ||
       lowerPath.includes('main.') ||
       lowerPath.includes('cli.') ||
+      lowerPath.includes('scripts/') ||
       lowerPath.includes('manage.') ||
       lowerPath.includes('app.')
     ) {

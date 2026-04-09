@@ -77,13 +77,14 @@ export function SingleChildProvider() {
 
 // VIOLATION: performance/deterministic/missing-react-memo
 export function NoMemoComponent({ count, label }: { count: number; label: string }) {
-  const [clicks, setClicks] = useState(0);
+  const formatted = useMemo(() => `${label}: ${count}`, [label, count]);
   return (
-    <div onClick={() => setClicks(clicks + 1)}>
-      <span>{label}: {count} (clicks: {clicks})</span>
+    <div>
+      <span>{formatted}</span>
     </div>
   );
 }
+declare function useMemo<T>(fn: () => T, deps: unknown[]): T;
 
 // VIOLATION: code-quality/deterministic/react-unstable-key
 export function IndexKeyList({ items }: { items: string[] }) {

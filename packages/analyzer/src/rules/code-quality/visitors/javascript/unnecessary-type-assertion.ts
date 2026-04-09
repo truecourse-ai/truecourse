@@ -22,6 +22,11 @@ export const unnecessaryTypeAssertionVisitor: CodeRuleVisitor = {
       // process.env.* is always potentially undefined at runtime regardless of TS types
       if (expr.text.startsWith('process.env.')) return null
 
+      // Skip non-null assertions on member expressions and call expressions —
+      // TypeQuery resolves narrowed types that may drop null/undefined, but the
+      // declared type (optional property, Map.get(), Array.shift()) genuinely allows it
+      if (expr.type === 'member_expression' || expr.type === 'call_expression' || expr.type === 'subscript_expression') return null
+
       const typeStr = typeQuery.getTypeAtPosition(
         filePath,
         expr.startPosition.row,
@@ -58,6 +63,9 @@ export const unnecessaryTypeAssertionVisitor: CodeRuleVisitor = {
       )
 
       if (exprType && targetType && exprType === targetType) {
+        // Skip narrowing via keyof — `key as keyof T` provides a useful type constraint
+        // even when TS resolves both sides to the same type (e.g. string)
+        if (typeAnnotation.text.includes('keyof')) return null
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Unnecessary type assertion',

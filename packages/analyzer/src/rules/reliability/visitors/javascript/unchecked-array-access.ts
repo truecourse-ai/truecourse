@@ -26,6 +26,12 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     const indexText = index.text
     if (indexText.includes('.length')) return null
 
+    // Skip when result is accessed with optional chaining (obj[key]?.prop) — already null-safe
+    if (node.parent && (node.parent.text.startsWith(node.text + '?.') || node.text.includes('?.'))) return null
+
+    // Skip array writes (assignment targets) — writing to an index can't crash
+    if (node.parent?.type === 'assignment_expression' && node.parent.childForFieldName('left') === node) return null
+
     // Check if there is a bounds check nearby (same block)
     const statement = findContainingStatement(node)
     if (!statement || !statement.parent) return null
@@ -39,6 +45,22 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
       if (sibText.includes('.length') && (sibText.includes(indexText) || sibText.includes('if'))) {
         return null
       }
+      // Check for `key in obj` pattern (property existence check)
+      if (sibText.includes(' in ') && sibText.includes(indexText)) {
+        return null
+      }
+    }
+
+    // Check if inside a for loop that bounds the index variable to array length
+    let ancestor: SyntaxNode | null = node.parent
+    while (ancestor) {
+      if (ancestor.type === 'for_statement') {
+        const condition = ancestor.childForFieldName('condition')
+        if (condition && condition.text.includes('.length') && condition.text.includes(indexText)) return null
+      }
+      if (ancestor.type === 'function_declaration' || ancestor.type === 'arrow_function' ||
+          ancestor.type === 'function_expression' || ancestor.type === 'method_definition') break
+      ancestor = ancestor.parent
     }
 
     // Check if the parent is an if condition checking bounds
@@ -47,9 +69,11 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
       if (parent.type === 'if_statement') {
         const condition = parent.childForFieldName('condition')
         if (condition && condition.text.includes('.length')) return null
+        if (condition && condition.text.includes(' in ') && condition.text.includes(indexText)) return null
       }
       if (parent.type === 'ternary_expression' || parent.type === 'binary_expression') {
         if (parent.text.includes('.length')) return null
+        if (parent.text.includes(' in ') && parent.text.includes(indexText)) return null
       }
       parent = parent.parent
     }

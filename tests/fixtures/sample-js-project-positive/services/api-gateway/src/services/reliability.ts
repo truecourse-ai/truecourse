@@ -23,3 +23,22 @@ export function doubleRaf(): void {
     });
   });
 }
+export function mapReturnInTryCatch(items: readonly string[]): string[] {
+  try {
+    return items.map((item) => item.toUpperCase());
+  } catch {
+    const empty: string[] = [];
+    return empty;
+  }
+}
+export function getFromCache(cache: { open: () => string }): string {
+  try { return cache.open(); } catch { return ''; }
+}
+export function healthCheck(): string {
+  try {
+    // Check Redis/queue connection status
+    return 'healthy';
+  } catch {
+    return 'unhealthy';
+  }
+}

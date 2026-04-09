@@ -9,6 +9,13 @@ export function optionalChain(obj: { value: string } | null): string | undefined
 export function nullishCoalesce(x: string | null): string { return x ?? 'default'; }
 export function getArrayLength(arr: readonly unknown[]): number { return arr.length; }
 export const greeting = 'hello';
+export function processItemsInLoop(items: ReadonlyArray<{ readonly id: string; readonly value: number }>): Array<{ process: () => number }> {
+  const results: Array<{ process: () => number }> = [];
+  for (const item of items) {
+    results.push({ process: () => item.value * 2 });
+  }
+  return results;
+}
 
 // Allow invitation validation without auth (accept still requires auth)
 // This function handles both cases (success and failure)

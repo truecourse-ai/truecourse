@@ -12,6 +12,8 @@ export function singlePropAccess(attrs: Record<string, unknown>): unknown[] {
 }
 export function compute(a: number, b: number): number { return a + b; }
 export function flagParam(isVerbose: boolean): string { return isVerbose ? 'detailed' : 'short'; }
+export function hookWithUndefined(): void { React.useState<string | undefined>(undefined); }
+declare const React: { useState: <T>(v: T) => [T, (v: T) => void] };
 export const unicodeRegex = /hello/u;
 export const digitPattern = /\d+/u;
 export function namedGroups(text: string): { year: string; month: string } | null {

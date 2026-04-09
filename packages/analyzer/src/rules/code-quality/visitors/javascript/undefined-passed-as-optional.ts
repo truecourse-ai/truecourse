@@ -16,9 +16,14 @@ export const undefinedPassedAsOptionalVisitor: CodeRuleVisitor = {
     if (lastArg.text !== 'undefined') return null
 
     // Skip React hooks where undefined is the standard initial value
+    // Handles both `useState(undefined)` and `React.useState(undefined)`
     const fn = node.childForFieldName('function')
-    const fnText = fn?.text ?? ''
-    if (/^use[A-Z]/.test(fnText)) return null
+    let fnName = fn?.text ?? ''
+    if (fn && fn.type === 'member_expression') {
+      const prop = fn.childForFieldName('property')
+      if (prop) fnName = prop.text
+    }
+    if (/^use[A-Z]/.test(fnName)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

@@ -21,9 +21,12 @@ export const missingFinallyCleanupVisitor: CodeRuleVisitor = {
     const bodyText = body.text
 
     for (const method of RESOURCE_OPEN_METHODS) {
-      if (bodyText.includes(method)) {
+      // Use word boundary + call syntax to avoid matching substrings (e.g. "connection" matching "connect")
+      if (new RegExp(`\\b${method}\\s*\\(`).test(bodyText)) {
         // Skip createServer with .listen() — server lifecycle, not resource leak
         if (method === 'createServer' && bodyText.includes('.listen')) continue
+        // Skip 'connect' and 'open' when called as method on existing object (pool/managed resource)
+        if ((method === 'connect' || method === 'open') && new RegExp(`\\.\\s*${method}\\s*\\(`).test(bodyText)) continue
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Missing finally cleanup for resource',

@@ -1,6 +1,7 @@
 """Database migration runner script."""
 import logging
 import argparse
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -22,4 +23,6 @@ def main() -> int:
     """Run migrations and return the exit code."""
     args = parse_args()
     success = run_migrations(args.target)
-    return 0 if success else 1
+    if not success:
+        sys.exit(1)
+    return 0

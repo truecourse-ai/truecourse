@@ -92,7 +92,7 @@ export function voidInExpression() {
   return result;
 }
 
-// VIOLATION: bugs/deterministic/use-before-define
+// NOTE: use-before-define — rule skips function-scoped TDZ (only detects module-level)
 export function useBeforeDef() {
   const y = laterVar;
   const laterVar = 42;

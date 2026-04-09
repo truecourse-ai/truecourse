@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 export function SafeHook(): JSX.Element { return <div>Safe</div>; }
 export function StableDep(): JSX.Element { return <div>Stable</div>; }
 export function AccessibleTable(): JSX.Element {
@@ -8,4 +9,9 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 export function StyledButton({ variant, ...rest }: ButtonProps): JSX.Element {
   return <button className={variant} {...rest} />;
+}
+const EFFECT_TIMEOUT_MS = 10_000;
+export function EffectWithFetch(): JSX.Element {
+  useEffect(() => { fetch('/api/data', { signal: AbortSignal.timeout(EFFECT_TIMEOUT_MS) }).catch(() => undefined); }, []);
+  return <div>loaded</div>;
 }

@@ -14,3 +14,4 @@ export function processValue(input: unknown): boolean {
   const trimmed = result.trim();
   return trimmed.length > 0;
 }
+export function lookupKey(obj: Record<string, unknown>, key: string): unknown { return obj[key as keyof typeof obj]; }

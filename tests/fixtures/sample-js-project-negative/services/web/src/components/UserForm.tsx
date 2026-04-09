@@ -18,7 +18,7 @@ interface UserFormProps {
   roles: string[];
 }
 
-// VIOLATION: performance/deterministic/missing-react-memo
+// NOTE: missing-react-memo — skipped: component uses useState (internal state triggers re-renders)
 export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormProps) {
   const [name, setName] = useState(initialUser?.name ?? '');
   const [email, setEmail] = useState(initialUser?.email ?? '');

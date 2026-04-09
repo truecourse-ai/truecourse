@@ -13,6 +13,9 @@ export const functionInLoopVisitor: CodeRuleVisitor = {
       if (node.parent?.type === 'arguments' || node.parent?.type === 'new_expression') return null
     }
 
+    // Skip functions used as property values in objects (config callbacks, options)
+    if (node.parent?.type === 'pair') return null
+
     const LOOP_TYPES = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement', 'for_of_statement'])
     let parent = node.parent
     while (parent) {

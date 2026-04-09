@@ -41,3 +41,22 @@ export function reduceWithInit(items: readonly number[]): number {
 export function safeCopyReverse(arr: readonly number[]): number[] {
   return [...arr].reverse();
 }
+
+export function accessWithKeyInCheck(items: Record<string, number>, key: string): number {
+  if (key in items) {
+    return items[key];
+  }
+  return 0;
+}
+
+export function accessWithOptionalChaining(config: Record<string, { label: string }>, key: string): string {
+  return config[key]?.label ?? 'unknown';
+}
+
+export function accessInBoundedLoop(items: readonly string[]): string {
+  for (let i = 0; i < items.length - 1; i++) {
+    if (items[i] === items[i + 1]) return items[i];
+  }
+  return '';
+}
+

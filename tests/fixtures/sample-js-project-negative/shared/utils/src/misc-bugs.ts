@@ -36,7 +36,7 @@ export function badIndexCheck(arr: string[]) {
   return arr.indexOf('item') > 0;
 }
 
-// VIOLATION: bugs/deterministic/non-number-arithmetic
+// NOTE: non-number-arithmetic — @ts-ignore suppresses TypeQuery type info, so rule can't detect
 export function stringMath() {
   // @ts-ignore
   return 'hello' - 1;

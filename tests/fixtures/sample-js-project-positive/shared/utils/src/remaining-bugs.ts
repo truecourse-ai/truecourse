@@ -10,8 +10,6 @@ export class ReadAttribute {
   getData(): string { return this.data_; }
 }
 export class ArrowMethodClass {
-  private handleClick = (): void => { /* arrow property — this is bound */ };
-  register(el: { addEventListener: (e: string, fn: () => void) => void }): void {
-    el.addEventListener('click', this.handleClick);
-  }
+  private readonly handleClick = (): boolean => true;
+  getHandler(): () => boolean { return this.handleClick; }
 }

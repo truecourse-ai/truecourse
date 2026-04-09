@@ -17,6 +17,9 @@ declare module 'react' {
   export function useMemo<T>(factory: () => T, deps: readonly unknown[]): T;
   export function useRef<T>(initialValue: T): Ref<T>;
   export function memo<P extends Record<string, unknown>>(component: (props: P) => JSX.Element): (props: P) => JSX.Element;
+  export interface Context<T> { Provider: any }
+  export function useContext<T>(context: Context<T>): T;
+  export function createContext<T>(defaultValue: T): Context<T>;
 
   const React: {
     useState: typeof useState;
@@ -25,6 +28,8 @@ declare module 'react' {
     useMemo: typeof useMemo;
     useRef: typeof useRef;
     memo: typeof memo;
+    useContext: typeof useContext;
+    createContext: typeof createContext;
   };
   export default React;
 }
