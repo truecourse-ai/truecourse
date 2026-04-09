@@ -16,6 +16,9 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (!parent) return null
 
+    // Skip if optional chaining is used: arr.find(...)?.property
+    if (parent.type === 'optional_chain_expression') return null
+
     // If result is used in member access immediately: arr.find(...).property
     if (parent.type === 'member_expression' && parent.childForFieldName('object') === node) {
       return makeViolation(

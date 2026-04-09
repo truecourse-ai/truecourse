@@ -33,6 +33,10 @@ export const asyncPromiseFunctionVisitor: CodeRuleVisitor = {
     }
 
     if (hasReturnNewPromise(body)) {
+      // Skip when the Promise wraps callback-based APIs — these can't use async/await
+      const bodyText = body.text
+      if (/\b(setTimeout|setInterval|addEventListener)\b/.test(bodyText) ||
+          /\.on\s*\(/.test(bodyText) || /\.once\s*\(/.test(bodyText)) return null
       const nameNode = node.childForFieldName('name')
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

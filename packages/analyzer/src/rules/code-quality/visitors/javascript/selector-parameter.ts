@@ -51,7 +51,7 @@ export const selectorParameterVisitor: CodeRuleVisitor = {
       }
 
       if (isUsedAsSelector(bodyNode)) {
-        const selectorNames = /^(is|has|should|with|use|enable|show|force|flag|toggle|include|exclude|allow|skip|only)/i
+        const selectorNames = /^(is|has|should|with|enable|show|force|flag|toggle|include|exclude|allow|skip|only)/i
         if (selectorNames.test(paramName) || paramName.endsWith('Flag') || paramName.endsWith('Mode') || paramName === 'mode') {
           return makeViolation(
             this.ruleKey, param, filePath, 'low',

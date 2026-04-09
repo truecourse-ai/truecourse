@@ -11,7 +11,8 @@ export const setTimeoutNoStoreVisitor: CodeRuleVisitor = {
 
     const fn = expr.childForFieldName('function')
     if (!fn || fn.type !== 'identifier') return null
-    if (fn.text !== 'setTimeout' && fn.text !== 'setInterval') return null
+    // Only flag setInterval — setTimeout without storing ID is standard for fire-and-forget delays
+    if (fn.text !== 'setInterval') return null
 
     // If the expression_statement directly calls setTimeout/setInterval without assignment,
     // the return value (timer ref) is lost

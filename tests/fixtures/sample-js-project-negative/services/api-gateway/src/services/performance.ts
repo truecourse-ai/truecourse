@@ -56,8 +56,8 @@ export function chunkArray(arr: number[]) {
 
 // VIOLATION: performance/deterministic/settimeout-setinterval-no-clear
 export function delayedLog() {
-  setTimeout(() => {
-    console.log('delayed');
+  setInterval(() => {
+    console.log('polling');
   }, 5000);
 }
 
