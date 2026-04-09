@@ -42,6 +42,32 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
 
     if (!isLikelyAsync) return null
 
+    // Skip when the async call is inside a useEffect/useLayoutEffect callback.
+    // Pattern: call_expression → arguments → arrow_function/function_expression → ... → our node
+    let ancestor = node.parent
+    while (ancestor) {
+      if (ancestor.type === 'arrow_function' || ancestor.type === 'function_expression') {
+        const parentOfFn = ancestor.parent
+        if (parentOfFn?.type === 'arguments') {
+          const callExpr = parentOfFn.parent
+          if (callExpr?.type === 'call_expression') {
+            const callee = callExpr.childForFieldName('function')
+            if (callee) {
+              const calleeName = callee.type === 'identifier' ? callee.text
+                : callee.type === 'member_expression' ? callee.childForFieldName('property')?.text
+                : ''
+              if (calleeName === 'useEffect' || calleeName === 'useLayoutEffect') {
+                return null
+              }
+            }
+          }
+        }
+        // Stop at the nearest enclosing function — don't walk past it
+        break
+      }
+      ancestor = ancestor.parent
+    }
+
     return makeViolation(
       this.ruleKey, expr, filePath, 'high',
       'Floating promise',

@@ -41,6 +41,37 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
       }
     }
 
+    // First pass: collect all variable names that appear on the LEFT side of an assignment
+    const assignedVars = new Set<string>()
+    // Also collect all variable names that appear in a return statement
+    const returnedVars = new Set<string>()
+
+    function collectAssignmentsAndReturns(n: SyntaxNode) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
+      if (n.type === 'assignment_expression') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier') {
+          assignedVars.add(left.text)
+        }
+      }
+      if (n.type === 'return_statement') {
+        // Collect all identifiers inside the return value
+        function collectReturnIds(r: SyntaxNode) {
+          if (r.type === 'identifier') returnedVars.add(r.text)
+          for (let i = 0; i < r.childCount; i++) {
+            const c = r.child(i)
+            if (c) collectReturnIds(c)
+          }
+        }
+        collectReturnIds(n)
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectAssignmentsAndReturns(child)
+      }
+    }
+    collectAssignmentsAndReturns(bodyNode)
+
     const reads = new Set<string>()
     function collectReads(n: SyntaxNode) {
       if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) {
@@ -60,20 +91,10 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
           if ((parent.type === 'variable_declarator') && parent.childForFieldName('name')?.id === n.id) {
             // declaration — not a read
           } else if ((parent.type === 'assignment_expression') && parent.childForFieldName('left')?.id === n.id) {
-            // Assignment target — but if the variable is a collection and the assigned value
-            // eventually gets returned, that counts as usage. Mark as read so we don't
-            // false-positive on "reassigned then returned" patterns.
-            const rightSide = parent.childForFieldName('right')
-            if (rightSide) {
-              // Check if this assignment result is later returned
-              let ancestor = parent.parent
-              while (ancestor) {
-                if (ancestor.type === 'return_statement') {
-                  reads.add(n.text)
-                  break
-                }
-                ancestor = ancestor.parent
-              }
+            // Assignment target — if this variable is both reassigned AND returned
+            // anywhere in the function, it's used (pattern: reassign then return).
+            if (assignedVars.has(n.text) && returnedVars.has(n.text)) {
+              reads.add(n.text)
             }
           } else {
             reads.add(n.text)

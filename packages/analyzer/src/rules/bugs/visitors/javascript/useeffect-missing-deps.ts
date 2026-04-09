@@ -128,6 +128,84 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
 
     const usedIds = collectIdentifiers(body, new Set([...paramNames, ...EXCLUDED_IDENTIFIERS, ...localDecls]))
 
+    // Collect names of local functions defined in the component whose body only calls
+    // stable references (useState setters like setX, other stable functions).
+    // These functions are effectively stable and don't need to be in deps.
+    const stableFunctions = new Set<string>()
+
+    // Walk the component body (parent of the useEffect call) to find function declarations
+    // and arrow function assignments that only call setState setters
+    let componentBody = node.parent
+    while (componentBody && componentBody.type !== 'statement_block') {
+      componentBody = componentBody.parent
+    }
+    if (componentBody) {
+      for (let i = 0; i < componentBody.namedChildCount; i++) {
+        const stmt = componentBody.namedChild(i)
+        if (!stmt) continue
+
+        // Match: const fetchX = () => { ... } or const fetchX = async () => { ... }
+        // or function fetchX() { ... }
+        let fnName: string | undefined
+        let fnBody: SyntaxNode | null = null
+
+        if (stmt.type === 'lexical_declaration' || stmt.type === 'variable_declaration') {
+          for (let j = 0; j < stmt.namedChildCount; j++) {
+            const decl = stmt.namedChild(j)
+            if (decl?.type === 'variable_declarator') {
+              const nameNode = decl.childForFieldName('name')
+              const value = decl.childForFieldName('value')
+              if (nameNode?.type === 'identifier' && value) {
+                // Handle `async () => {}` wrapped in await_expression or direct arrow
+                const fn = value.type === 'arrow_function' ? value
+                  : value.type === 'function' ? value
+                  : null
+                if (fn) {
+                  fnName = nameNode.text
+                  fnBody = fn.childForFieldName('body')
+                }
+              }
+            }
+          }
+        } else if (stmt.type === 'function_declaration') {
+          fnName = stmt.childForFieldName('name')?.text
+          fnBody = stmt.childForFieldName('body')
+        }
+
+        if (fnName && fnBody) {
+          // Check if every call in this function body is to a setState setter (set[A-Z])
+          // or another stable reference
+          let allCallsStable = true
+          let hasAnyCalls = false
+          function checkCalls(n: SyntaxNode) {
+            if (n.type === 'call_expression') {
+              hasAnyCalls = true
+              const callee = n.childForFieldName('function')
+              if (callee) {
+                const calleeName = callee.text
+                // setState setters: setX, setIsLoading, etc.
+                if (/^set[A-Z]/.test(calleeName)) {
+                  // This is stable — continue
+                } else if (EXCLUDED_IDENTIFIERS.has(calleeName)) {
+                  // Global/builtin — stable
+                } else {
+                  allCallsStable = false
+                }
+              }
+            }
+            for (let ci = 0; ci < n.childCount; ci++) {
+              const child = n.child(ci)
+              if (child) checkCalls(child)
+            }
+          }
+          checkCalls(fnBody)
+          if (hasAnyCalls && allCallsStable) {
+            stableFunctions.add(fnName)
+          }
+        }
+      }
+    }
+
     // Filter to only include identifiers that look like state/props variables
     // Heuristic: identifiers that aren't all-caps (constants), that start with lowercase
     const suspiciousIds = [...usedIds].filter(id =>
@@ -135,7 +213,8 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       !id.startsWith('set') &&
       id.length > 1 &&
       !EXCLUDED_IDENTIFIERS.has(id) &&
-      !refAccessedIds.has(id)
+      !refAccessedIds.has(id) &&
+      !stableFunctions.has(id)
     )
 
     // Skip when the source code near the useEffect contains eslint-disable — the developer

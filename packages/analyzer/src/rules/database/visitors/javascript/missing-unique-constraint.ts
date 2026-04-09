@@ -43,8 +43,26 @@ function columnHasUniqueConstraint(columnName: string, sourceCode: string): bool
   const globalUniquePattern = new RegExp(
     `\\.unique\\([^)]*\\)[\\s\\S]{0,200}\\b${columnName}\\b|\\b${columnName}\\b[\\s\\S]{0,200}\\.unique\\(`,
   )
+
+  // Line-by-line search: find any line containing both the column name and .unique(
+  const lines = sourceCode.split('\n')
+  let lineByLineMatch = false
+  for (const line of lines) {
+    if (line.includes(columnName) && /\.unique\(/.test(line)) {
+      lineByLineMatch = true
+      break
+    }
+  }
+
+  // Also check for unique constraints defined in indexes or table-level constraints
+  // e.g., `unique([columnName])`, `uniqueIndex('...', [columnName])`
+  const indexUniquePattern = new RegExp(
+    `unique(?:Index)?\\s*\\([^)]*\\b${columnName}\\b`,
+  )
+
   return uniqueChainPattern.test(sourceCode) || uniquePropPattern.test(sourceCode)
     || multiLineUniquePattern.test(sourceCode) || globalUniquePattern.test(sourceCode)
+    || lineByLineMatch || indexUniquePattern.test(sourceCode)
 }
 
 export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
@@ -90,6 +108,10 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
     // Check if the queried column already has a .unique() constraint in the source code.
     // If so, the uniqueness IS enforced at the database level and this is not a violation.
     const queriedColumn = extractQueriedColumn(node)
+
+    // Skip queries on primary key columns — these are inherently unique
+    if (queriedColumn && /^id$/.test(queriedColumn)) return null
+
     if (queriedColumn && columnHasUniqueConstraint(queriedColumn, sourceCode)) {
       return null
     }

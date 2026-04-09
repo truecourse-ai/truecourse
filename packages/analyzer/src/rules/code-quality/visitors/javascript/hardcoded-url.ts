@@ -26,7 +26,19 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
       if (/default|placeholder|example|sample|template/.test(varName)) return null
     }
 
-    if (/https?:\/\/[a-zA-Z0-9]/.test(text) && !text.includes('example.com') && !text.includes('localhost')) {
+    // Skip URLs inside .default() method calls (e.g., Zod schema defaults: z.string().default('http://...'))
+    if (parent?.type === 'arguments') {
+      const callExpr = parent.parent
+      if (callExpr?.type === 'call_expression') {
+        const callee = callExpr.childForFieldName('function')
+        if (callee?.type === 'member_expression') {
+          const prop = callee.childForFieldName('property')
+          if (prop?.text === 'default') return null
+        }
+      }
+    }
+
+    if (/https?:\/\/[a-zA-Z0-9]/.test(text) && !text.includes('example.com') && !text.includes('localhost') && !text.includes('placeholder')) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Hardcoded URL',

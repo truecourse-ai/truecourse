@@ -25,6 +25,20 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
 
     if (!body || body.type !== 'statement_block') return null
 
+    // Skip when the function has an explicit return type annotation — the compiler enforces consistency
+    const returnType = node.childForFieldName('return_type')
+    if (returnType) return null
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)
+      if (child?.type === 'type_annotation') {
+        const params = node.childForFieldName('parameters')
+        if (params && child.startPosition.row >= params.endPosition.row
+            && (child.startPosition.row > params.endPosition.row || child.startPosition.column >= params.endPosition.column)) {
+          return null
+        }
+      }
+    }
+
     // Skip constructor, setter — they can have inconsistent returns by design
     if (node.type === 'method_definition') {
       const name = node.childForFieldName('name')

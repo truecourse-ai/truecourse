@@ -33,7 +33,7 @@ export function useNotifications(userId: string) {
   }
 
   useEffect(() => {
-    // VIOLATION: reliability/deterministic/floating-promise
+    // NOTE: floating-promise — skipped inside useEffect callback (standard React pattern)
     fetchNotifications();
   }, [userId]);
 

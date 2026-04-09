@@ -33,6 +33,9 @@ export const envInLibraryCodeVisitor: CodeRuleVisitor = {
     // Allow in script files
     if (lowerPath.includes('/scripts/')) return null
 
+    // Allow in API route / entry point directories (Next.js, Express, etc.)
+    if (lowerPath.includes('/app/api/') || lowerPath.includes('/pages/api/') || lowerPath.includes('/routes/')) return null
+
     // Allow in logger config files
     const fileName = filePath.split('/').pop()?.toLowerCase() || ''
     if (fileName === 'logger.ts' || fileName === 'logger.js') return null

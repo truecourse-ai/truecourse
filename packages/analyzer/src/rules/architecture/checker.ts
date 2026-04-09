@@ -33,7 +33,7 @@ export interface ModuleViolation {
 // Service-level checks
 // ---------------------------------------------------------------------------
 
-const GOD_SERVICE_FILE_THRESHOLD = 50
+const GOD_SERVICE_FILE_THRESHOLD = 120
 const GOD_SERVICE_LAYER_THRESHOLD = 4
 
 /**
@@ -332,11 +332,22 @@ export function checkModuleRules(
     // Build set of route handler names — functions consumed by the framework
     // via decorators (@app.route, @router.get) or router bindings (router.get('/', handler))
     const routeHandlerNames = new Set<string>()
+    // Build set of module basenames that are targets of dynamic import() calls
+    const dynamicImportModuleBasenames = new Set<string>()
     if (fileAnalyses) {
       for (const fa of fileAnalyses) {
         if (fa.routeRegistrations) {
           for (const route of fa.routeRegistrations) {
             if (route.handlerName) routeHandlerNames.add(route.handlerName)
+          }
+        }
+        // Collect dynamic import() targets from call expressions
+        for (const call of fa.calls) {
+          if (call.callee === 'import' && call.arguments) {
+            for (const arg of call.arguments) {
+              const match = arg.match(/['"].*?([^/'"]+?)(?:\.\w+)?['"]$/)
+              if (match) dynamicImportModuleBasenames.add(match[1])
+            }
           }
         }
       }
@@ -358,6 +369,11 @@ export function checkModuleRules(
 
         // Skip functions called directly within their own file
         if (calledInOwnFile.get(method.filePath)?.has(method.name)) continue
+
+        // Skip exports from modules that are targets of dynamic import() calls
+        // (e.g., `import('./utils')` makes all exports of utils reachable at runtime)
+        const fileBasename = method.filePath.split('/').pop()?.replace(/\.\w+$/, '')
+        if (fileBasename && dynamicImportModuleBasenames.has(fileBasename)) continue
 
         violations.push({
           ruleKey: 'architecture/deterministic/unused-export',
@@ -657,6 +673,8 @@ export function checkMethodRules(
     const classesWithImplements = new Set<string>()
     // Build set of method names referenced via dynamic import() or this.methodName in any expression
     const dynamicImportTargets = new Set<string>()
+    // Build set of module basenames that are dynamically imported — exports from these modules are live
+    const dynamicImportModules = new Set<string>()
     const thisRefMethods = new Set<string>()
     if (fileAnalyses) {
       for (const fa of fileAnalyses) {
@@ -670,15 +688,18 @@ export function checkMethodRules(
               }
             }
           }
-          // Track dynamic import() targets
+          // Track dynamic import() targets — both function names and module paths
           if (call.callee === 'import' && call.arguments) {
             for (const arg of call.arguments) {
               // Extract identifier from the import path (last segment without extension)
               const match = arg.match(/['"].*?([^/'"]+?)(?:\.\w+)?['"]$/)
-              if (match) dynamicImportTargets.add(match[1])
+              if (match) {
+                dynamicImportTargets.add(match[1])
+                dynamicImportModules.add(match[1])
+              }
             }
           }
-          // Track this.methodName references in any call arguments
+          // Track this.methodName references in call arguments
           if (call.arguments) {
             for (const arg of call.arguments) {
               const thisRefs = arg.match(/this\.(\w+)/g)
@@ -689,12 +710,25 @@ export function checkMethodRules(
               }
             }
           }
+          // Track this.methodName references in the callee itself
+          // (e.g., this.handleResponse(), this.service.method())
+          const calleeThisMatch = call.callee.match(/^this\.(\w+)/)
+          if (calleeThisMatch) thisRefMethods.add(calleeThisMatch[1])
         }
         for (const cls of fa.classes) {
           if (cls.interfaces && cls.interfaces.length > 0) {
             classesWithImplements.add(cls.name)
           }
         }
+      }
+    }
+
+    // Build a lookup from method file path → file basename for dynamic import matching
+    const moduleFileToBasename = new Map<string, string>()
+    for (const m of methods) {
+      if (!moduleFileToBasename.has(m.filePath)) {
+        const basename = m.filePath.split('/').pop()?.replace(/\.\w+$/, '')
+        if (basename) moduleFileToBasename.set(m.filePath, basename)
       }
     }
 
@@ -723,6 +757,13 @@ export function checkMethodRules(
 
         // Skip methods whose name appears as a dynamic import() target
         if (dynamicImportTargets.has(method.name)) continue
+
+        // Skip exported methods from modules that are targets of dynamic import() calls
+        // (e.g., `import('./utils')` makes all exports of utils.ts reachable)
+        if (method.isExported) {
+          const basename = moduleFileToBasename.get(method.filePath)
+          if (basename && dynamicImportModules.has(basename)) continue
+        }
 
         // Skip methods referenced as this.methodName in any expression
         if (thisRefMethods.has(method.name)) continue

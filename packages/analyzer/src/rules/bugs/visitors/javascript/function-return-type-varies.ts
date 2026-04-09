@@ -52,6 +52,17 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
+    // Skip when the function has an explicit return type annotation — the compiler enforces consistency
+    const returnType = node.childForFieldName('return_type')
+    if (returnType) return null
+    // Also check for type_annotation child (some grammars use this)
+    for (let i = 0; i < node.childCount; i++) {
+      const child = node.child(i)
+      if (child?.type === 'type_annotation' && child.startPosition.row >= (node.childForFieldName('parameters')?.endPosition.row ?? 0)) {
+        return null
+      }
+    }
+
     const returnStmts = collectReturnStatements(body)
     if (returnStmts.length < 2) return null
 
@@ -94,6 +105,33 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
       returnCallNames.add(callee.text)
     }
     if (allReturnsAreCallsToSameFunction && returnCallNames.size === 1) return null
+
+    // Skip when all return expressions are object literals with the same set of keys
+    // (discriminated unions like {isNew: true} vs {isNew: false} are consistent shapes)
+    const allObjectLiterals = returnStmts.every(ret => {
+      const value = ret.namedChildren[0]
+      return value && value.type === 'object'
+    })
+    if (allObjectLiterals && returnStmts.length >= 2) {
+      const keySets = returnStmts.map(ret => {
+        const value = ret.namedChildren[0]!
+        const keys: string[] = []
+        for (let i = 0; i < value.namedChildCount; i++) {
+          const prop = value.namedChild(i)
+          if (prop?.type === 'pair') {
+            const key = prop.childForFieldName('key')
+            if (key) keys.push(key.text)
+          } else if (prop?.type === 'shorthand_property_identifier' || prop?.type === 'shorthand_property_identifier_pattern') {
+            keys.push(prop.text)
+          } else if (prop?.type === 'spread_element') {
+            keys.push(`...${prop.text}`)
+          }
+        }
+        return keys.sort().join(',')
+      })
+      const allSameKeys = keySets.every(k => k === keySets[0])
+      if (allSameKeys) return null
+    }
 
     // If there are significantly different base types
     if (returnTypes.size > 1) {

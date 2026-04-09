@@ -44,13 +44,11 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
       awaitedExpr.endPosition.row,
       awaitedExpr.endPosition.column,
     )
-    // Skip ALL await expressions where the awaited value is a call_expression on a
-    // member_expression. These are method calls whose return type we can't reliably
-    // determine from static analysis (e.g., LangChain .invoke(), Prisma .findMany(), etc.)
-    if (awaitedExpr.type === 'call_expression') {
-      const fn = awaitedExpr.childForFieldName('function')
-      if (fn?.type === 'member_expression') return null
-    }
+    // Skip ALL await on call_expression nodes — any function/method call may return a Promise
+    // at runtime even when static type analysis can't determine it (e.g., LangChain .invoke(),
+    // Prisma queries, dynamically typed wrappers). Only flag await on clearly non-thenable
+    // expressions like literals, identifiers with known primitive types, etc.
+    if (awaitedExpr.type === 'call_expression') return null
 
     if (!isPromise) {
       return makeViolation(

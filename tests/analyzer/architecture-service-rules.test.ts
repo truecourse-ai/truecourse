@@ -109,15 +109,15 @@ describe('checkServiceRules', () => {
   });
 
   // God service
-  it('detects god service by file count (>50)', () => {
-    const services = [makeService({ name: 'big-svc', fileCount: 55 })];
+  it('detects god service by file count (>120)', () => {
+    const services = [makeService({ name: 'big-svc', fileCount: 125 })];
 
     const violations = checkServiceRules(services, [], enabledRules);
 
     const god = violations.filter((v) => v.ruleKey === 'architecture/deterministic/god-service');
     expect(god).toHaveLength(1);
     expect(god[0].title).toContain('big-svc');
-    expect(god[0].description).toContain('55 files');
+    expect(god[0].description).toContain('125 files');
   });
 
   it('detects god service by layer count (>=4)', () => {
@@ -139,10 +139,10 @@ describe('checkServiceRules', () => {
     expect(god[0].description).toContain('4 layers');
   });
 
-  it('does not flag service with <=50 files and <4 layers', () => {
+  it('does not flag service with <=120 files and <4 layers', () => {
     const services = [makeService({
       name: 'normal-svc',
-      fileCount: 40,
+      fileCount: 100,
       layers: [
         { layer: 'api', confidence: 90, evidence: [], fileCount: 1, filePaths: [] },
         { layer: 'service', confidence: 90, evidence: [], fileCount: 1, filePaths: [] },

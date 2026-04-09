@@ -35,6 +35,30 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
       depth++
     }
 
+    // Check for if-throw validation pattern in the surrounding scope.
+    // Pattern: `if (!process.env.VAR) throw ...` or `if (process.env.VAR === undefined) throw ...`
+    // Walk up to find the containing block (function body or program) and scan siblings.
+    let container = node.parent
+    while (container && container.type !== 'statement_block' && container.type !== 'program') {
+      container = container.parent
+    }
+    if (container) {
+      for (let i = 0; i < container.namedChildCount; i++) {
+        const stmt = container.namedChild(i)
+        if (!stmt || stmt.type !== 'if_statement') continue
+        const condition = stmt.childForFieldName('condition')
+        if (!condition) continue
+        // Check if the condition references this env var
+        if (!condition.text.includes(envVarName)) continue
+        // Check if the if body contains a throw
+        const ifBody = stmt.childForFieldName('consequence')
+        if (!ifBody) continue
+        const hasThrow = ifBody.type === 'throw_statement' ||
+          (ifBody.namedChildren && ifBody.namedChildren.some(c => c.type === 'throw_statement'))
+        if (hasThrow) return null
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       `Unvalidated env var: process.env.${envVarName}`,

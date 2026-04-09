@@ -55,6 +55,10 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
                   }
                 }
 
+                // Skip when .map() is called on a static inline array literal
+                // e.g., ['a', 'b', 'c'].map(...) or [1, 2, 3].map(...)
+                if (mapObj?.type === 'array') return null
+
                 // Skip inside skeleton/loading/placeholder components
                 let ancestor = node.parent
                 while (ancestor) {
@@ -72,10 +76,31 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
                   ancestor = ancestor.parent
                 }
 
-                // Skip when the .map() receiver is a module-level constant array
+                // Skip when file path indicates a landing/marketing/demo page
+                // (static lists in these pages are never reordered)
+                if (/(?:landing|hero|pricing|demo|marketing|features)/i.test(filePath)) return null
+
+                // Skip when the .map() receiver is a module-level constant:
+                // - UPPER_CASE names (e.g., FEATURES, BREADCRUMBS)
+                // - Any identifier declared as `const` at module/top level
                 if (mapObj?.type === 'identifier') {
                   const name = mapObj.text
+                  // ALL_CAPS constants
                   if (/^[A-Z_][A-Z_0-9]*$/.test(name)) return null
+                  // Check if the identifier is declared as a const at module level
+                  // by walking up to the program root and searching for const declarations
+                  let root = node.parent
+                  while (root?.parent) root = root.parent
+                  if (root) {
+                    for (let ci = 0; ci < root.namedChildCount; ci++) {
+                      const topStmt = root.namedChild(ci)
+                      if (topStmt?.type === 'lexical_declaration' || topStmt?.type === 'export_statement') {
+                        const declText = topStmt.text
+                        // Match `const name =` at module level
+                        if (new RegExp(`\\bconst\\s+${name}\\s*[:=]`).test(declText)) return null
+                      }
+                    }
+                  }
                 }
 
                 // We're in a .map() — check if JSX element has a key prop

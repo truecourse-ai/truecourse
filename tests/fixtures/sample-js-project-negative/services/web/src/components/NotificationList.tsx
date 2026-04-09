@@ -33,7 +33,7 @@ export function NotificationList({ userId, onDismiss, style }: NotificationListP
   }, [userId]);
 
   useEffect(() => {
-    // VIOLATION: reliability/deterministic/floating-promise
+    // NOTE: floating-promise — skipped inside useEffect callback (standard React pattern)
     loadNotifications();
   }, [userId]);
 
