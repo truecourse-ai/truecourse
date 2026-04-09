@@ -22,7 +22,7 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
       lowerPath.includes('bin/') ||
       lowerPath.includes('server.') ||
       lowerPath.includes('app.') ||
-      lowerPath.includes('worker.') ||
+      lowerPath.endsWith('/worker.ts') || lowerPath.endsWith('/worker.js') ||
       lowerPath.includes('entrypoint.')
     ) {
       return null

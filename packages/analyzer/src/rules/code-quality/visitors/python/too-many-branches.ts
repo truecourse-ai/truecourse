@@ -12,7 +12,8 @@ export const pythonTooManyBranchesVisitor: CodeRuleVisitor = {
     if (!bodyNode) return null
 
     let branchCount = 0
-    const BRANCH_TYPES = new Set(['if_statement', 'elif_clause', 'else_clause'])
+    // Count if_statement and elif_clause, but NOT else_clause (part of the if, counting both doubles up)
+    const BRANCH_TYPES = new Set(['if_statement', 'elif_clause'])
 
     function walk(n: SyntaxNode) {
       if (n.type === 'function_definition' && n !== node) return

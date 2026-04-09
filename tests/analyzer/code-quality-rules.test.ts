@@ -1221,6 +1221,8 @@ def many_branches(x):
         return 'i'
     elif x == 10:
         return 'j'
+    elif x == 11:
+        return 'k'
     else:
         return 'z'
 `, 'python');

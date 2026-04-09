@@ -12,7 +12,11 @@ export const deeplyNestedFunctionsVisitor: CodeRuleVisitor = {
     while (parent) {
       if (parent.type === 'function_declaration' || parent.type === 'function_expression'
         || parent.type === 'arrow_function' || parent.type === 'method_definition') {
-        depth++
+        // Don't count arrow functions passed as callback arguments as nesting levels
+        const isCallbackArrow = parent.type === 'arrow_function' && parent.parent?.type === 'arguments'
+        if (!isCallbackArrow) {
+          depth++
+        }
       }
       parent = parent.parent
     }

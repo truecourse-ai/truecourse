@@ -12,7 +12,8 @@ export const tooManyBranchesVisitor: CodeRuleVisitor = {
     if (!bodyNode) return null
 
     let branchCount = 0
-    const BRANCH_TYPES = new Set(['if_statement', 'else_clause', 'switch_case'])
+    // Count if_statement and switch_case, but NOT else_clause (it's part of the if, counting both doubles up)
+    const BRANCH_TYPES = new Set(['if_statement', 'switch_case'])
 
     function walk(n: SyntaxNode) {
       if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) return

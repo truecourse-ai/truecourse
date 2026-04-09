@@ -24,3 +24,5 @@ def format_date(date: datetime) -> str:
 def clean_comment_example() -> str:
     """Ensure natural-language comments with parentheses are not flagged."""
     return "no false positives"
+
+

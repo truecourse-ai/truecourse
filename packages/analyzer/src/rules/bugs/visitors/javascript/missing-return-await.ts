@@ -59,6 +59,13 @@ function findReturnWithoutAwait(node: import('tree-sitter').SyntaxNode): import(
 
       // Return value is a call expression (not awaited)
       if (returnValue.type === 'call_expression') {
+        // Skip known synchronous APIs (NextResponse.json, Response.json, res.json, etc.)
+        const callFn = returnValue.childForFieldName('function')
+        if (callFn?.type === 'member_expression') {
+          const obj = callFn.childForFieldName('object')
+          const objText = obj?.text ?? ''
+          if (/^(NextResponse|Response|res|reply)$/.test(objText)) continue
+        }
         return child
       }
     }

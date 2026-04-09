@@ -6,13 +6,17 @@ export const uncaughtExceptionNoHandlerVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
-    // Only check entry-point-like files
+    // Only check entry-point-like files, skip library/package modules
     const lowerPath = filePath.toLowerCase()
+    if (lowerPath.includes('/packages/') || lowerPath.includes('/lib/')) {
+      return null
+    }
     if (
       !lowerPath.includes('index.') &&
       !lowerPath.includes('main.') &&
       !lowerPath.includes('server.') &&
       !lowerPath.includes('app.') &&
+      !lowerPath.endsWith('/worker.ts') && !lowerPath.endsWith('/worker.js') &&
       !lowerPath.includes('bin/')
     ) {
       return null
