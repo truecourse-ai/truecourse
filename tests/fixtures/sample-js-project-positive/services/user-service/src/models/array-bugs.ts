@@ -60,3 +60,16 @@ export function accessInBoundedLoop(items: readonly string[]): string {
   return '';
 }
 
+export function accessWithFallback(config: Record<string, number>, key: string): number {
+  return config[key] || 0;
+}
+
+export function accessByMemberExpression(priority: Record<string, number>, item: { readonly type: string }): number {
+  return priority[item.type];
+}
+
+export function accessWithBoundsGuard(delays: readonly number[], count: number): number | null {
+  if (count >= delays.length) return null;
+  return delays[count];
+}
+
