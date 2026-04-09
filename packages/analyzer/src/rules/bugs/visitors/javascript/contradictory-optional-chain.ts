@@ -23,6 +23,22 @@ export const contradictoryOptionalChainVisitor: CodeRuleVisitor = {
     }
 
     if (containsOptionalChain(inner)) {
+      // Skip when on the right side of && — the left side acts as a null guard
+      let parent = node.parent
+      while (parent) {
+        if (parent.type === 'binary_expression' && parent.children.some((c) => c.text === '&&')) {
+          const right = parent.childForFieldName('right')
+          // Check if the non_null_expression is structurally within the right operand
+          if (right) {
+            let n: import('tree-sitter').SyntaxNode | null = node
+            while (n && n !== parent) {
+              if (n === right) return null
+              n = n.parent
+            }
+          }
+        }
+        parent = parent.parent
+      }
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Non-null assertion after optional chain',

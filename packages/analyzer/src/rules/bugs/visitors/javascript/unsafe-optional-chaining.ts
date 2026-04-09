@@ -14,6 +14,8 @@ export const unsafeOptionalChainingVisitor: CodeRuleVisitor = {
     // Check if the function/constructor expression contains optional chaining
     // Look for parenthesized_expression wrapping an optional chain
     function containsOptionalChain(n: SyntaxNode): boolean {
+      // Don't recurse into function bodies (IIFEs may use ?. internally, that's fine)
+      if (n.type === 'arrow_function' || n.type === 'function_expression' || n.type === 'function') return false
       if (n.type === 'member_expression' || n.type === 'subscript_expression' || n.type === 'call_expression') {
         // Check for ?. operator
         if (n.children.some((c) => c.text === '?.')) return true

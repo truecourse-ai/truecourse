@@ -19,7 +19,12 @@ export const CASE_TERMINATORS = new Set(['break_statement', 'return_statement', 
 export const LITERAL_TYPES = new Set(['string', 'number', 'true', 'false', 'null', 'undefined'])
 
 export function isLiteralNode(n: SyntaxNode): boolean {
-  return LITERAL_TYPES.has(n.type) || n.type === 'template_string'
+  if (LITERAL_TYPES.has(n.type)) return true
+  // Template strings are only literal if they have no interpolations
+  if (n.type === 'template_string') {
+    return !n.namedChildren.some((c) => c.type === 'template_substitution')
+  }
+  return false
 }
 
 export const ARRAY_METHODS_REQUIRING_RETURN = new Set([

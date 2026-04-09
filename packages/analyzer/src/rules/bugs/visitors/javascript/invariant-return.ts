@@ -60,6 +60,9 @@ export const invariantReturnVisitor: CodeRuleVisitor = {
     const first = values[0]
     if (!values.every((v) => v === first)) return null
 
+    // Skip void functions (all bare returns) — early exits in void functions are standard
+    if (first === 'undefined' && returns.every((r) => r.namedChildren.length === 0)) return null
+
     // Get function name for the message
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text ?? 'function'

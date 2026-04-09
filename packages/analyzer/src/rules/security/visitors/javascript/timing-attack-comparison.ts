@@ -19,6 +19,8 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
     const rightText = right.text
 
     if (SENSITIVE_COMPARISON_PATTERNS.test(leftText) || SENSITIVE_COMPARISON_PATTERNS.test(rightText)) {
+      // Skip if the file already uses timingSafeEqual — the === is likely a format check, not a secret comparison
+      if (sourceCode.includes('timingSafeEqual')) return null
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Timing attack via string comparison',

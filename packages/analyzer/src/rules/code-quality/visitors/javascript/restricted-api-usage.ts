@@ -39,6 +39,23 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
       if (parent.type === 'property_identifier') return null
       if (parent.type === 'import_specifier' || parent.type === 'export_specifier') return null
 
+      // Skip if identifier is declared as a local variable or parameter in scope
+      const declPattern = new RegExp(`\\b(?:const|let|var)\\s+${node.text}\\b`)
+      let scope = node.parent
+      while (scope) {
+        if (scope.type === 'statement_block' || scope.type === 'program') {
+          if (declPattern.test(scope.text)) return null
+        }
+        // Also check function parameters
+        if (scope.type === 'arrow_function' || scope.type === 'function_declaration' ||
+            scope.type === 'function_expression' || scope.type === 'method_definition') {
+          const params = scope.childForFieldName('parameters')
+          if (params && params.text.includes(node.text)) return null
+          break
+        }
+        scope = scope.parent
+      }
+
       const reason = RESTRICTED_GLOBALS.get(node.text)
       if (reason) {
         return makeViolation(

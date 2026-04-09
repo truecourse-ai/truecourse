@@ -8,6 +8,13 @@ export const tooManyUnionMembersVisitor: CodeRuleVisitor = {
   nodeTypes: ['union_type'],
   visit(node, filePath, sourceCode) {
     if (node.parent?.type === 'union_type') return null
+    // Skip unions inside type arguments (e.g., Pick<T, 'a' | 'b' | 'c'> — key unions, not type unions)
+    let ancestor = node.parent
+    while (ancestor) {
+      if (ancestor.type === 'type_arguments') return null
+      if (ancestor.type === 'type_alias_declaration' || ancestor.type === 'interface_declaration') break
+      ancestor = ancestor.parent
+    }
 
     function countMembers(n: SyntaxNode): number {
       if (n.type !== 'union_type') return 1

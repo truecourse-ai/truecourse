@@ -17,6 +17,20 @@ export const useBeforeDefineVisitor: CodeRuleVisitor = {
         .filter(u => u.node.startIndex < declPos)
         .sort((a, b) => a.node.startIndex - b.node.startIndex)[0]
       if (!earliestUseSite) continue
+
+      // Skip when usage is inside a function body — the function only executes
+      // after module initialization, so the const IS defined by execution time
+      let parent = earliestUseSite.node.parent
+      let insideFunction = false
+      while (parent) {
+        if (parent.type === 'function_declaration' || parent.type === 'arrow_function' ||
+            parent.type === 'function_expression' || parent.type === 'method_definition') {
+          insideFunction = true
+          break
+        }
+        parent = parent.parent
+      }
+      if (insideFunction) continue
       return makeViolation(
         this.ruleKey,
         earliestUseSite.node,

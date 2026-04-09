@@ -12,6 +12,9 @@ export const staticMethodCandidateVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['method_definition'],
   visit(node, filePath, sourceCode) {
+    // Only flag methods inside class bodies, not object literal methods (Proxy handlers, etc.)
+    if (node.parent?.type !== 'class_body') return null
+
     // Skip constructors
     const nameNode = node.childForFieldName('name')
     if (!nameNode) return null

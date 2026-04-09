@@ -79,7 +79,21 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       collectParams(params)
     }
 
-    const usedIds = collectIdentifiers(body, new Set([...paramNames, ...EXCLUDED_IDENTIFIERS]))
+    // Collect identifiers declared inside the callback body (local to the effect)
+    const localDecls = new Set<string>()
+    function collectLocalDecls(n: SyntaxNode) {
+      if (n.type === 'variable_declarator') {
+        const nameNode = n.childForFieldName('name')
+        if (nameNode?.type === 'identifier') localDecls.add(nameNode.text)
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectLocalDecls(child)
+      }
+    }
+    collectLocalDecls(body)
+
+    const usedIds = collectIdentifiers(body, new Set([...paramNames, ...EXCLUDED_IDENTIFIERS, ...localDecls]))
 
     // Filter to only include identifiers that look like state/props variables
     // Heuristic: identifiers that aren't all-caps (constants), that start with lowercase

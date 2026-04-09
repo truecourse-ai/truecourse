@@ -28,6 +28,9 @@ export const filenameClassMismatchVisitor: CodeRuleVisitor = {
 
     if (!exportedName) return null
 
+    // Skip config files — export default config is a standard convention
+    if (/\.(config|rc)\.(ts|js|mjs|cjs)$/.test(filePath)) return null
+
     // Extract filename without extension
     const fileBase = filePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? ''
     if (!fileBase) return null

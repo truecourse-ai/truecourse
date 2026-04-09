@@ -19,6 +19,23 @@ export const unhandledPromiseVisitor: CodeRuleVisitor = {
     // Skip if already handled: void expr, expr.catch(), await expr
     if (expr.type === 'await_expression') return null
     if (expr.type === 'void_expression') return null
+    // Skip resolve/reject calls inside Promise constructors
+    if (expr.type === 'call_expression') {
+      const fn = expr.childForFieldName('function')
+      if (fn?.type === 'identifier' && (fn.text === 'resolve' || fn.text === 'reject')) {
+        // Verify we're inside a new Promise() callback
+        let ancestor = node.parent
+        while (ancestor) {
+          if ((ancestor.type === 'arrow_function' || ancestor.type === 'function_expression') &&
+              ancestor.parent?.type === 'arguments' &&
+              ancestor.parent.parent?.type === 'new_expression') {
+            const ctor = ancestor.parent.parent.childForFieldName('constructor')
+            if (ctor?.text === 'Promise') return null
+          }
+          ancestor = ancestor.parent
+        }
+      }
+    }
     if (expr.type === 'call_expression') {
       const fn = expr.childForFieldName('function')
       if (fn?.type === 'member_expression') {
