@@ -20,13 +20,17 @@ export const duplicateBranchesVisitor: CodeRuleVisitor = {
         const bodyText = consequence.text.trim()
         const duplicate = bodies.find((b) => b.text === bodyText)
         if (duplicate) {
-          return makeViolation(
-            this.ruleKey, current, filePath, 'medium',
-            'Duplicate branch body',
-            'This branch has identical code to an earlier branch — likely a copy-paste error.',
-            sourceCode,
-            'Fix the branch body to differ or merge the conditions.',
-          )
+          // Skip trivial single-statement duplicates (e.g., `hasMore = false` in multiple conditions)
+          const stmtCount = consequence.namedChildren.filter((c) => c.type !== 'comment').length
+          if (stmtCount > 1) {
+            return makeViolation(
+              this.ruleKey, current, filePath, 'medium',
+              'Duplicate branch body',
+              'This branch has identical code to an earlier branch — likely a copy-paste error.',
+              sourceCode,
+              'Fix the branch body to differ or merge the conditions.',
+            )
+          }
         }
         bodies.push({ text: bodyText, node: consequence })
       }

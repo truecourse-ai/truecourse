@@ -13,15 +13,19 @@ export const undefinedPassedAsOptionalVisitor: CodeRuleVisitor = {
     if (argList.length === 0) return null
 
     const lastArg = argList[argList.length - 1]
-    if (lastArg.text === 'undefined') {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'low',
-        'Explicit undefined as optional argument',
-        'Passing `undefined` explicitly as a trailing argument is redundant — just omit it.',
-        sourceCode,
-        'Remove the explicit `undefined` argument — optional parameters default to `undefined` automatically.',
-      )
-    }
-    return null
+    if (lastArg.text !== 'undefined') return null
+
+    // Skip React hooks where undefined is the standard initial value
+    const fn = node.childForFieldName('function')
+    const fnText = fn?.text ?? ''
+    if (/^use[A-Z]/.test(fnText)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'low',
+      'Explicit undefined as optional argument',
+      'Passing `undefined` explicitly as a trailing argument is redundant — just omit it.',
+      sourceCode,
+      'Remove the explicit `undefined` argument — optional parameters default to `undefined` automatically.',
+    )
   },
 }

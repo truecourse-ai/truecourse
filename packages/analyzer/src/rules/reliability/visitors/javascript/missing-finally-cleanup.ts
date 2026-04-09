@@ -22,6 +22,8 @@ export const missingFinallyCleanupVisitor: CodeRuleVisitor = {
 
     for (const method of RESOURCE_OPEN_METHODS) {
       if (bodyText.includes(method)) {
+        // Skip createServer with .listen() — server lifecycle, not resource leak
+        if (method === 'createServer' && bodyText.includes('.listen')) continue
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Missing finally cleanup for resource',

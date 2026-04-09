@@ -19,6 +19,22 @@ export const consoleErrorNoContextVisitor: CodeRuleVisitor = {
     // Only flag if there's exactly one argument that looks like an error variable
     if (args.namedChildren.length !== 1) return null
 
+    // Skip inside .catch() callbacks — the catch handler context is self-evident
+    let parent = node.parent
+    while (parent) {
+      if (parent.type === 'arrow_function' || parent.type === 'function_expression' || parent.type === 'function') {
+        if (parent.parent?.type === 'arguments') {
+          const callFn = parent.parent.parent?.childForFieldName('function')
+          if (callFn?.type === 'member_expression') {
+            const method = callFn.childForFieldName('property')
+            if (method?.text === 'catch') return null
+          }
+        }
+        break
+      }
+      parent = parent.parent
+    }
+
     const arg = args.namedChildren[0]
     if (arg.type === 'identifier') {
       const name = arg.text.toLowerCase()

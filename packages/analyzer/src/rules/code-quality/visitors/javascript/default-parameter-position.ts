@@ -27,6 +27,9 @@ export const defaultParameterPositionVisitor: CodeRuleVisitor = {
       if (hasDefault) {
         foundDefault = true
       } else if (foundDefault) {
+        // Skip when the non-default param after a default is optional (valid TS pattern)
+        const isOptional = param.type === 'optional_parameter' || param.text.includes('?')
+        if (isOptional) continue
         const nameNode = param.childForFieldName('pattern') ?? param.childForFieldName('name') ?? param.namedChildren[0]
         const name = nameNode?.text ?? 'parameter'
         return makeViolation(

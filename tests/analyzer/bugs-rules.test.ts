@@ -699,8 +699,10 @@ describe('bugs/deterministic/duplicate-branches', () => {
     const violations = check(`
       if (x > 1) {
         doA();
+        doB();
       } else if (x > 2) {
         doA();
+        doB();
       }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/duplicate-branches');
