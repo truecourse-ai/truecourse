@@ -21,3 +21,6 @@ export function processItemsInLoop(items: ReadonlyArray<{ readonly id: string; r
 // This function handles both cases (success and failure)
 // Returns the processed result (or null if not found)
 export function commentedCodeClean(): string { return 'no false positives'; }
+
+// Positive: unbounded-array-growth — push in bounded for-of loop
+export function boundedPush(items: readonly string[]): string[] { const result: string[] = []; for (const item of items) { result.push(item); } return result; }

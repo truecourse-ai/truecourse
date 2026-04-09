@@ -22,3 +22,52 @@ export function namedGroups(text: string): { year: string; month: string } | nul
   if (match?.groups === undefined) return null;
   return { year: match.groups.year, month: match.groups.month };
 }
+
+// Positive: unused-function-parameter — Next.js route handler pattern
+export async function routeHandler(request: Request, { params }: { params: { id: string } }): Promise<Response> {
+  try {
+    return await Promise.resolve(Response.json({ id: params.id }));
+  } catch {
+    return Response.json({ error: 'fail' });
+  }
+}
+
+// Positive: dot-notation-enforcement — bracket access on Record type
+export function recordAccess(input: Record<string, number>): number { const counts: Record<string, number> = input; return counts['active'] || 0; }
+
+// Positive: ungrouped-shorthand-properties — domain-grouped shorthand/non-shorthand
+export function groupedProps(name: string, age: number): Record<string, unknown> {
+  return { name, age, title: 'Dr.', address: '123 St' };
+}
+
+// Positive: unnamed-regex-capture — alternation-only group (not a capture)
+export function matchExtension(url: string): boolean { return /\.css(\?|$)/iu.test(url); }
+
+// Positive: unnecessary-boolean-compare — strict comparison on tri-state
+export function triStateCheck(flag: boolean | null): string { return flag === true ? 'yes' : 'no'; }
+
+// Positive: empty-function / no-empty-function — catch with empty handler
+export function fireAndForget(): void { Promise.resolve().catch(() => {}); }
+
+// Positive: type-guard-preference — classification with complex logic
+export function classify(x: unknown): boolean {
+  if (typeof x === 'string') return true;
+  if (typeof x === 'number') return x > 0;
+  return false;
+}
+
+// Positive: default-case-in-switch — exhaustive switch on string union
+export function exhaustiveAction(a: 'start' | 'stop' | 'pause'): string {
+  switch (a) { case 'start': return 'go'; case 'stop': return 'halt'; case 'pause': return 'wait'; }
+  return '';
+}
+
+// Positive: missing-destructuring — access on type-asserted expression
+export function anyAccess(data: unknown): string { const name = (data as Record<string, unknown>).name; return String(name); }
+
+// Positive: unused-scope-definition — variable used in shorthand property
+export function shorthandUsage(): Record<string, number> { const count = 42; return { count }; }
+
+// Positive: static-method-candidate — method in class with extends (override)
+class Base { prefix = ''; process(s: string): string { return this.prefix + s; } }
+export class Handler extends Base { process(s: string): string { return s.toUpperCase(); } }

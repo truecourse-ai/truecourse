@@ -11,3 +11,8 @@ export function performSafeQuery(userId: string): string {
 }
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0';
 export function getUA(): string { return USER_AGENT; }
+
+// positive: clear-text-protocol — checking for http:// in validation should NOT trigger
+export function isHttpUrl(input: string): boolean {
+  return input.startsWith('http://');
+}

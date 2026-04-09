@@ -13,3 +13,26 @@ export class ArrowMethodClass {
   private readonly handleClick = (): boolean => true;
   getHandler(): () => boolean { return this.handleClick; }
 }
+
+// inconsistent-return: exhaustive switch where all cases return
+export function exhaustiveSwitch(action: string): string {
+  switch (action) {
+    case 'start': return 'starting';
+    case 'stop': return 'stopping';
+    default: return 'unknown';
+  }
+}
+
+// await-non-thenable: async function awaiting a method call on an object
+export async function callMethod(client: { invoke: (s: string) => Promise<string> }): Promise<string> {
+  try {
+    return await client.invoke('test');
+  } catch {
+    return 'error';
+  }
+}
+
+// constant-binary-expression: ternary on a nullable variable
+export function nullableTernary(value: string | null): string {
+  return value ? value.toUpperCase() : 'default';
+}

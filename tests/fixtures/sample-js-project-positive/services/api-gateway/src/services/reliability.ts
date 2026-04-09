@@ -42,3 +42,8 @@ export function healthCheck(): string {
     return 'unhealthy';
   }
 }
+
+// Positive: missing-null-check-after-find — find with optional chaining
+export function safeFindAccess(items: ReadonlyArray<{ id: number; name: string }>, targetId: number): string {
+  return items.find((i) => i.id === targetId)?.name ?? 'unknown';
+}
