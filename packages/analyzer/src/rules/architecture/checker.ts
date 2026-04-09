@@ -740,11 +740,12 @@ export function checkMethodRules(
           const calleeThisMatch = call.callee.match(/^this\.(\w+)/)
           if (calleeThisMatch) thisRefMethods.add(calleeThisMatch[1])
 
-          // Also track ALL callees that contain a method name — even through intermediaries
-          // like this.service.methodName() or obj.methodName()
-          const dotParts = call.callee.split('.')
-          if (dotParts.length > 0) {
-            thisRefMethods.add(dotParts[dotParts.length - 1])
+          // Track method names from call arguments (callbacks passed to functions)
+          if (call.arguments) {
+            for (const arg of call.arguments) {
+              // Simple identifier arguments (not expressions) are likely function references
+              if (/^\w+$/.test(arg)) thisRefMethods.add(arg)
+            }
           }
         }
         for (const cls of fa.classes) {
