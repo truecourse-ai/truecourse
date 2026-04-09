@@ -70,6 +70,22 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
         // Check if the last statement terminates all paths
         function isTerminal(stmt: SyntaxNode): boolean {
           if (TERMINALS.has(stmt.type)) return true
+          // if_statement with else: terminates if both branches terminate
+          if (stmt.type === 'if_statement') {
+            const elseClause = stmt.namedChildren.find((c) => c.type === 'else_clause')
+            if (!elseClause) return false
+            const ifBody = stmt.namedChildren.find((c) => c.type === 'statement_block')
+            const ifStmts = ifBody?.namedChildren.filter((c) => c.type !== 'comment') ?? []
+            const ifTerminates = ifStmts.length > 0 && isTerminal(ifStmts[ifStmts.length - 1])
+            const elseBody = elseClause.namedChildren[0]
+            if (!elseBody) return false
+            if (elseBody.type === 'if_statement') return ifTerminates && isTerminal(elseBody)
+            if (elseBody.type === 'statement_block') {
+              const elseStmts = elseBody.namedChildren.filter((c) => c.type !== 'comment')
+              return ifTerminates && elseStmts.length > 0 && isTerminal(elseStmts[elseStmts.length - 1])
+            }
+            return false
+          }
           // try_statement: terminates if all try+catch blocks terminate
           if (stmt.type === 'try_statement') {
             const tryBlock = stmt.namedChildren.find((c) => c.type === 'statement_block')

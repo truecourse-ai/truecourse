@@ -12,6 +12,8 @@ export const identicalFunctionsVisitor: CodeRuleVisitor = {
 
     function walk(n: SyntaxNode) {
       if (JS_FUNCTION_TYPES.includes(n.type)) {
+        // Skip functions that are arguments to calls (e.g., Drizzle column defs)
+        if (n.parent?.type === 'arguments') { return }
         const body = getFunctionBody(n)
         if (body && body.namedChildCount > 0) {
           const normalized = body.text.replace(/\s+/g, ' ').trim()

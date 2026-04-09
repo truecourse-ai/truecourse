@@ -15,6 +15,17 @@ export const missingUseMemoExpensiveVisitor: CodeRuleVisitor = {
     const prop = fn.childForFieldName('property')
     if (!prop || !EXPENSIVE_ARRAY_METHODS.has(prop.text)) return null
 
+    // Skip when chained on Object.entries/keys/values — these produce small arrays
+    const obj = fn.childForFieldName('object')
+    if (obj?.type === 'call_expression') {
+      const objFn = obj.childForFieldName('function')
+      if (objFn?.type === 'member_expression') {
+        const objObj = objFn.childForFieldName('object')
+        const objProp = objFn.childForFieldName('property')
+        if (objObj?.text === 'Object' && objProp && ['entries', 'keys', 'values'].includes(objProp.text)) return null
+      }
+    }
+
     // Check if inside a React component function (heuristic: PascalCase function containing JSX return)
     const enclosingFn = findEnclosingFunctionNode(node)
     if (!enclosingFn) return null
