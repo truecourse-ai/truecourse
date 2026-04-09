@@ -8,6 +8,21 @@ export const preferSingleBooleanReturnVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: JS_FUNCTION_TYPES,
   visit(node, filePath, sourceCode) {
+    // Skip callback functions passed to .filter(), .some(), .every(), .find(), .findIndex()
+    const parent = node.parent
+    if (parent?.type === 'arguments') {
+      const callExpr = parent.parent
+      if (callExpr?.type === 'call_expression') {
+        const fn = callExpr.childForFieldName('function')
+        if (fn?.type === 'member_expression') {
+          const method = fn.childForFieldName('property')?.text
+          if (method === 'filter' || method === 'some' || method === 'every' || method === 'find' || method === 'findIndex') {
+            return null
+          }
+        }
+      }
+    }
+
     const bodyNode = getFunctionBody(node)
     if (!bodyNode) return null
 

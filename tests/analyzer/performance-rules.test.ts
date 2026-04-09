@@ -279,7 +279,7 @@ describe('performance/deterministic/json-parse-in-loop', () => {
   it('detects JSON.parse inside for loop', () => {
     const code = `
 for (const item of items) {
-  const data = JSON.parse(item);
+  const data = JSON.parse(configStr);
 }`;
     const violations = only(check(code), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
@@ -288,7 +288,7 @@ for (const item of items) {
   it('detects JSON.stringify inside while loop', () => {
     const code = `
 while (queue.length) {
-  const str = JSON.stringify(queue.pop());
+  const str = JSON.stringify(sharedObj);
 }`;
     const violations = only(check(code), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);

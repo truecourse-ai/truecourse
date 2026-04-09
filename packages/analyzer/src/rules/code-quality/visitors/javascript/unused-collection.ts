@@ -60,7 +60,21 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
           if ((parent.type === 'variable_declarator') && parent.childForFieldName('name')?.id === n.id) {
             // declaration — not a read
           } else if ((parent.type === 'assignment_expression') && parent.childForFieldName('left')?.id === n.id) {
-            // Pure assignment left side (x = something)
+            // Assignment target — but if the variable is a collection and the assigned value
+            // eventually gets returned, that counts as usage. Mark as read so we don't
+            // false-positive on "reassigned then returned" patterns.
+            const rightSide = parent.childForFieldName('right')
+            if (rightSide) {
+              // Check if this assignment result is later returned
+              let ancestor = parent.parent
+              while (ancestor) {
+                if (ancestor.type === 'return_statement') {
+                  reads.add(n.text)
+                  break
+                }
+                ancestor = ancestor.parent
+              }
+            }
           } else {
             reads.add(n.text)
           }

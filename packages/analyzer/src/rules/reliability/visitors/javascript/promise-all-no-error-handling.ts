@@ -24,6 +24,34 @@ export const promiseAllNoErrorHandlingVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (parent?.type === 'await_expression' && isInsideTryCatch(parent)) return null
 
+    // Skip Next.js page/layout files — errors are handled by error.tsx boundary
+    if (/\/app\/.*(?:page|layout)\.[tj]sx?$/.test(filePath)) return null
+
+    // Skip shutdown/teardown/cleanup functions — errors during shutdown are typically acceptable
+    let ancestor: import('tree-sitter').SyntaxNode | null = node.parent
+    while (ancestor) {
+      if (
+        ancestor.type === 'function_declaration' ||
+        ancestor.type === 'method_definition' ||
+        ancestor.type === 'arrow_function' ||
+        ancestor.type === 'function_expression'
+      ) {
+        const nameNode = ancestor.childForFieldName('name')
+        const funcName = nameNode?.text?.toLowerCase() ?? ''
+        // For arrow_function/function_expression, check if the variable declarator has a name
+        if (!funcName && (ancestor.type === 'arrow_function' || ancestor.type === 'function_expression')) {
+          const parentDecl = ancestor.parent
+          if (parentDecl?.type === 'variable_declarator') {
+            const varName = parentDecl.childForFieldName('name')?.text?.toLowerCase() ?? ''
+            if (varName.includes('shutdown') || varName.includes('teardown') || varName.includes('cleanup')) return null
+          }
+        }
+        if (funcName.includes('shutdown') || funcName.includes('teardown') || funcName.includes('cleanup')) return null
+        break
+      }
+      ancestor = ancestor.parent
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Promise.all without error handling',

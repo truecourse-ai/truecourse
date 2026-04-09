@@ -20,6 +20,12 @@ export const confusingVoidExpressionVisitor: CodeRuleVisitor = {
     // `return undefined` is explicit, not confusing — skip
     if (value.text === 'undefined') return null
 
+    // `return undefined as T` is an intentional type cast — skip
+    if (value.type === 'as_expression') {
+      const expr = value.childForFieldName('expression') ?? value.namedChildren[0]
+      if (expr?.text === 'undefined') return null
+    }
+
     // Check if the returned expression is void
     const isVoid = typeQuery.isVoidType(
       filePath,

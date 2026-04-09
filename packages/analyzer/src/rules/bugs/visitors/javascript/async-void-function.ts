@@ -33,6 +33,22 @@ export const asyncVoidFunctionVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip when the async call is inside an arrow function used as a JSX event handler.
+    // Pattern: onClick={() => { asyncFn(); }} or onChange={async () => { asyncFn(); }}
+    // Ancestor chain: expression_statement → statement_block → arrow_function → jsx_expression → jsx_attribute
+    if (grandparent && grandparent.type === 'statement_block') {
+      const arrowFn = grandparent.parent
+      if (arrowFn && arrowFn.type === 'arrow_function') {
+        const jsxExpr = arrowFn.parent
+        if (jsxExpr && jsxExpr.type === 'jsx_expression') {
+          const jsxAttr = jsxExpr.parent
+          if (jsxAttr && jsxAttr.type === 'jsx_attribute') {
+            return null
+          }
+        }
+      }
+    }
+
     const fn = node.childForFieldName('function')
     if (!fn) return null
 

@@ -13,6 +13,30 @@ export const uselessConcatVisitor: CodeRuleVisitor = {
     const right = node.childForFieldName('right')
 
     if (left?.type === 'string' && right?.type === 'string') {
+      // Skip when ALL operands in the entire concatenation chain are string literals.
+      // Multi-line string literal concatenation is a formatting choice, not a logic error.
+      let root = node
+      while (root.parent?.type === 'binary_expression') {
+        const parentOp = root.parent.children.find((c) => c.type === '+')
+        if (parentOp) {
+          root = root.parent
+        } else {
+          break
+        }
+      }
+      // Walk the entire chain and check if every leaf is a string literal
+      function allStringLiterals(n: typeof node): boolean {
+        if (n.type === 'string') return true
+        if (n.type === 'binary_expression') {
+          const l = n.childForFieldName('left')
+          const r = n.childForFieldName('right')
+          const hasPlus = n.children.some((c) => c.type === '+')
+          if (hasPlus && l && r) return allStringLiterals(l) && allStringLiterals(r)
+        }
+        return false
+      }
+      if (allStringLiterals(root)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Useless string concatenation',

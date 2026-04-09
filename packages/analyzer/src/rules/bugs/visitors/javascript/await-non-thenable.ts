@@ -44,9 +44,10 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
       awaitedExpr.endPosition.row,
       awaitedExpr.endPosition.column,
     )
-    // Skip method calls on member expressions — we can't reliably determine external
-    // library return types (e.g., LangChain .invoke(), Prisma .findMany(), etc.)
-    if (!isPromise && awaitedExpr.type === 'call_expression') {
+    // Skip ALL await expressions where the awaited value is a call_expression on a
+    // member_expression. These are method calls whose return type we can't reliably
+    // determine from static analysis (e.g., LangChain .invoke(), Prisma .findMany(), etc.)
+    if (awaitedExpr.type === 'call_expression') {
       const fn = awaitedExpr.childForFieldName('function')
       if (fn?.type === 'member_expression') return null
     }

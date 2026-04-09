@@ -25,6 +25,10 @@ export const redundantTemplateExpressionVisitor: CodeRuleVisitor = {
     const exprNode = sub.namedChildren[0]
     const exprText = exprNode?.text ?? 'expr'
 
+    // Skip when the interpolated expression contains || or ?? operators — the template
+    // performs necessary string coercion on the fallback/nullish-coalescing result
+    if (exprNode && (exprText.includes('||') || exprText.includes('??'))) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Redundant template expression',

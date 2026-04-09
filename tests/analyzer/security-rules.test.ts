@@ -1643,8 +1643,8 @@ describe('security/deterministic/sensitive-data-in-url', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
 
-  it('detects token in query string', () => {
-    const violations = check(`const url = "https://api.example.com/data?token=abc123";`);
+  it('detects api_key in query string', () => {
+    const violations = check(`const url = "https://api.example.com/data?api_key=abc123";`);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
 

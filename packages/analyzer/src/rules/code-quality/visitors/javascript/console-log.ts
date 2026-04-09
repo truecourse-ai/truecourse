@@ -14,6 +14,12 @@ export const consoleLogVisitor: CodeRuleVisitor = {
     if (obj.text !== 'console') return null
     if (prop.text !== 'log' && prop.text !== 'debug') return null
 
+    // Skip CLI scripts, script files, and test files — console.log is expected there
+    const lowerPath = filePath.toLowerCase()
+    if (lowerPath.includes('/scripts/')) return null
+    if (lowerPath.endsWith('.script.ts') || lowerPath.endsWith('.script.js')) return null
+    if (/\.(test|spec|e2e)\.[jt]sx?$/.test(lowerPath)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       `console.${prop.text} call`,

@@ -49,7 +49,7 @@ export function reduceNoInit(items: number[]) {
   return items.reduce((acc, val) => acc + val);
 }
 
-// VIOLATION: bugs/deterministic/misleading-array-reverse
+// NOTE: misleading-array-reverse now skipped when original not used after reverse
 export function copyReverse(arr: number[]) {
   const sorted = arr.reverse();
   return sorted;

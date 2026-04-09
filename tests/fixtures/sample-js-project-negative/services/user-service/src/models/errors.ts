@@ -2,7 +2,7 @@
  * Error handling patterns — contains various error/catch bug patterns.
  */
 
-// VIOLATION: bugs/deterministic/empty-catch
+// NOTE: empty-catch now skipped for JSON.parse try/catch pattern
 export function silentParseError() {
   try {
     JSON.parse('invalid');

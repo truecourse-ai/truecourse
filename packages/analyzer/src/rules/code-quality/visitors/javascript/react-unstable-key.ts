@@ -44,6 +44,40 @@ export const reactUnstableKeyVisitor: CodeRuleVisitor = {
             if (fn?.type === 'member_expression') {
               const prop = fn.childForFieldName('property')
               if (prop?.text === 'map') {
+                // Skip when .map() is called on Array.from() or Array() — these are
+                // static, non-reorderable lists (e.g., skeleton loaders)
+                const mapObj = fn.childForFieldName('object')
+                if (mapObj?.type === 'call_expression') {
+                  const mapObjFn = mapObj.childForFieldName('function')
+                  if (mapObjFn) {
+                    const fnText = mapObjFn.text
+                    if (fnText === 'Array.from' || fnText === 'Array') return null
+                  }
+                }
+
+                // Skip inside skeleton/loading/placeholder components
+                let ancestor = node.parent
+                while (ancestor) {
+                  if (
+                    ancestor.type === 'function_declaration' ||
+                    ancestor.type === 'arrow_function' ||
+                    ancestor.type === 'function' ||
+                    ancestor.type === 'variable_declarator'
+                  ) {
+                    const funcName = ancestor.type === 'variable_declarator'
+                      ? ancestor.childForFieldName('name')?.text
+                      : ancestor.childForFieldName('name')?.text
+                    if (funcName && /skeleton|loading|placeholder/i.test(funcName)) return null
+                  }
+                  ancestor = ancestor.parent
+                }
+
+                // Skip when the .map() receiver is a module-level constant array
+                if (mapObj?.type === 'identifier') {
+                  const name = mapObj.text
+                  if (/^[A-Z_][A-Z_0-9]*$/.test(name)) return null
+                }
+
                 // We're in a .map() — check if JSX element has a key prop
                 const openTag = node.type === 'jsx_element'
                   ? node.childForFieldName('open_tag')

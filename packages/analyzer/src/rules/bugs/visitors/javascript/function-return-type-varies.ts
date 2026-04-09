@@ -99,8 +99,19 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
     if (returnTypes.size > 1) {
       const types = [...returnTypes]
       const baseTypes = types.filter(t => t !== 'null' && t !== 'undefined')
+
+      // Normalize base types: treat empty arrays as compatible with any array type,
+      // and objects with same keys but different boolean literal values as same type
+      const normalizedBaseTypes = new Set(baseTypes.map(t => {
+        // Treat empty array literal types (e.g., "never[]") as "array"
+        if (t === 'never[]' || t === '[]') return 'array'
+        // Normalize any array type to "array" so they compare equal to empty arrays
+        if (t.endsWith('[]')) return 'array'
+        return t
+      }))
+
       // Allow nullable returns (type | null), but flag truly mixed returns (string | number)
-      if (baseTypes.length > 1) {
+      if (normalizedBaseTypes.size > 1) {
         const nameNode = node.childForFieldName('name')
         const fnName = nameNode?.text ?? '<anonymous>'
         return makeViolation(

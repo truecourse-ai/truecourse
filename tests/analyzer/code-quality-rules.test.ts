@@ -1746,14 +1746,14 @@ describe('code-quality/deterministic/useless-computed-key', () => {
 });
 
 describe('code-quality/deterministic/useless-concat', () => {
-  it('detects concatenation of two string literals', () => {
-    const violations = check(`const x = "hello" + " world";`);
+  it('detects adjacent string literals in mixed concatenation chain', () => {
+    const violations = check(`const x = "hello" + " world" + name;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-concat');
     expect(matches).toHaveLength(1);
   });
 
-  it('does not flag string + variable', () => {
-    const violations = check(`const x = "hello " + name;`);
+  it('does not flag all-literal concatenation (formatting choice)', () => {
+    const violations = check(`const x = "hello" + " world";`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/useless-concat');
     expect(matches).toHaveLength(0);
   });

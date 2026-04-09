@@ -55,6 +55,20 @@ export const unnecessaryTypeParameterVisitor: CodeRuleVisitor = {
       const count = matches ? matches.length : 0
 
       if (count <= 1) {
+        // Skip when the type parameter appears in both the return type AND
+        // a type assertion (`as T`) in the function body — common pattern for
+        // typed HTTP request methods like `request<T>(): Promise<T>`
+        if (returnType) {
+          const returnText = returnType.text
+          const returnRegex = new RegExp(`\\b${paramName}\\b`)
+          if (returnRegex.test(returnText)) {
+            const body = node.childForFieldName('body')
+            if (body && new RegExp(`\\bas\\s+${paramName}\\b`).test(body.text)) {
+              continue
+            }
+          }
+        }
+
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Unnecessary type parameter',

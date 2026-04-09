@@ -3,7 +3,7 @@
  */
 
 export class TokenService {
-  // VIOLATION: code-quality/deterministic/mutable-private-member
+  // NOTE: mutable-private-member now skipped for Map/Set containers
   private cache: Map<string, string> = new Map();
 
   constructor() {

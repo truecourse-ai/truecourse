@@ -240,7 +240,7 @@ describe('database/deterministic/missing-transaction', () => {
     const violations = check(`
 async function transfer() {
   await Account.update({ balance: from.balance - amount }, { where: { id: fromId } });
-  await Account.update({ balance: to.balance + amount }, { where: { id: toId } });
+  await TransferLog.create({ fromId, toId, amount });
 }
 `)
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-transaction')

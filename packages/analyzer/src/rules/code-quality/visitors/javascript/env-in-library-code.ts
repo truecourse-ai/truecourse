@@ -30,6 +30,20 @@ export const envInLibraryCodeVisitor: CodeRuleVisitor = {
       if (lowerPath.includes(pattern)) return null
     }
 
+    // Allow in script files
+    if (lowerPath.includes('/scripts/')) return null
+
+    // Allow in logger config files
+    const fileName = filePath.split('/').pop()?.toLowerCase() || ''
+    if (fileName === 'logger.ts' || fileName === 'logger.js') return null
+
+    // Allow standard config env vars (NODE_ENV, LOG_LEVEL)
+    const envAccess = node.parent
+    if (envAccess?.type === 'member_expression') {
+      const envVar = envAccess.childForFieldName('property')?.text
+      if (envVar === 'NODE_ENV' || envVar === 'LOG_LEVEL') return null
+    }
+
     // Allow in test files
     if (/\.(test|spec|e2e)\.[jt]sx?$/.test(lowerPath)) return null
 

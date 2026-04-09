@@ -71,3 +71,31 @@ export function shorthandUsage(): Record<string, number> { const count = 42; ret
 // Positive: static-method-candidate — method in class with extends (override)
 class Base { prefix = ''; process(s: string): string { return this.prefix + s; } }
 export class Handler extends Base { process(s: string): string { return s.toUpperCase(); } }
+
+// Positive: useless-concat — multi-line string literal concatenation (compile-time constant)
+const desc = `Hello world from here`;
+export function getDesc(): string { return desc; }
+
+// Positive: env-in-library-code — process.env.NODE_ENV in a config module
+export const isDev = process.env.NODE_ENV === 'development';
+
+// Positive: redundant-template-expression — template with || fallback (dynamic expression)
+export function formatVal(val: string | null): string { return `Value: ${val || 'none'}`; }
+
+// Positive: mutable-private-member — class with private readonly Map (container mutation is fine)
+export class Registry {
+  private readonly items = new Map<string, number>();
+  set(k: string, v: number): void { this.items.set(k, v); }
+  get(k: string): number | undefined { return this.items.get(k); }
+}
+
+// Positive: prefer-single-boolean-return — filter predicate with if/return true/return false
+export function getPositive(nums: readonly number[]): number[] {
+  return nums.filter((n) => {
+    if (n > 0) return true;
+    return false;
+  });
+}
+
+// Positive: required-type-annotations — parameter with default value (inferred type)
+export function greet(name = 'world'): string { return `Hello ${name}`; }

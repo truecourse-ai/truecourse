@@ -11,6 +11,29 @@ export const emptyCatchVisitor: CodeRuleVisitor = {
     if (!body) return null
     const statements = body.namedChildren.filter((c) => c.type !== 'comment')
     if (statements.length === 0) {
+      // Skip empty catch when the try body is a single JSON.parse() call (common tryParse pattern)
+      const tryStmt = node.parent
+      if (tryStmt?.type === 'try_statement') {
+        const tryBody = tryStmt.childForFieldName('body')
+        if (tryBody) {
+          const tryStatements = tryBody.namedChildren.filter((c) => c.type !== 'comment')
+          if (tryStatements.length === 1) {
+            const stmtText = tryStatements[0].text
+            if (/JSON\.parse\s*\(/.test(stmtText)) return null
+          }
+        }
+
+        // Skip when there are multiple sequential try/catch blocks (strategy chain pattern)
+        const parentBlock = tryStmt.parent
+        if (parentBlock) {
+          let tryCount = 0
+          for (let i = 0; i < parentBlock.namedChildCount; i++) {
+            if (parentBlock.namedChild(i)?.type === 'try_statement') tryCount++
+          }
+          if (tryCount >= 2) return null
+        }
+      }
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Empty catch block',

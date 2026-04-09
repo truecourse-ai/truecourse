@@ -63,7 +63,7 @@ const orm = {
 
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
-// VIOLATION: database/deterministic/missing-transaction
+// NOTE: missing-transaction now skipped for single-table operations
 export async function seedDatabase(
   // VIOLATION: code-quality/deterministic/readonly-parameter-types
   users: Array<{ name: string; email: string }>,

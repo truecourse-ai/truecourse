@@ -30,7 +30,7 @@ export async function alterTable() {
   await db.query('ALTER TABLE users ADD COLUMN age INTEGER');
 }
 
-// VIOLATION: database/deterministic/missing-transaction
+// NOTE: missing-transaction now skipped for single-table operations
 export async function multiWrite(name: string, email: string) {
   await User.create({ name });
   await User.insert({ email });

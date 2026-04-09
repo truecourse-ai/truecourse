@@ -38,6 +38,10 @@ export const pythonUndefinedNameVisitor: CodeRuleVisitor = {
       // Skip `__all__`, `__name__`, `__file__` etc. — module-level dunder attrs
       if (/^__\w+__$/.test(ref.name)) continue
 
+      // Skip attribute access via self (self._foo, self.bar) — instance attributes
+      // are defined dynamically in __init__ and can't be tracked by AST data flow
+      if (parent.type === 'attribute' && parent.childForFieldName('object')?.text === 'self') continue
+
       return makeViolation(
         this.ruleKey,
         ref.node,

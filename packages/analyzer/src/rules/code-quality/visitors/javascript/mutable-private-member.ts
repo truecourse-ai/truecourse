@@ -78,6 +78,21 @@ export const mutablePrivateMemberVisitor: CodeRuleVisitor = {
       if (!nameNode) continue
 
       const name = nameNode.text.replace(/^#/, '')
+
+      // Skip Map, Set, WeakMap — these are designed to be mutated via .set/.delete
+      const typeAnnotation = member.children.find((c) => c.type === 'type_annotation')
+      const typeText = typeAnnotation?.text ?? ''
+      if (/\b(Map|Set|WeakMap)\b/.test(typeText)) continue
+
+      // Also check initializer for `new Map()`, `new Set()`, `new WeakMap()`
+      const initializer = member.children.find(
+        (c) => c.type === 'new_expression',
+      )
+      if (initializer) {
+        const ctor = initializer.childForFieldName('constructor')
+        if (ctor && /^(Map|Set|WeakMap)$/.test(ctor.text)) continue
+      }
+
       privateFields.set(name, nameNode)
     }
 

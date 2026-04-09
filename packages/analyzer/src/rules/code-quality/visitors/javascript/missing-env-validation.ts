@@ -6,6 +6,10 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['member_expression'],
   visit(node, filePath, sourceCode) {
+    // Skip build/tool configuration files — these run at build time, not runtime
+    const fileName = filePath.split('/').pop() || ''
+    if (/^drizzle\.config\.|\.config\.(ts|js|mjs|cjs)$/.test(fileName)) return null
+
     const obj = node.childForFieldName('object')
     const prop = node.childForFieldName('property')
     if (!obj || !prop) return null

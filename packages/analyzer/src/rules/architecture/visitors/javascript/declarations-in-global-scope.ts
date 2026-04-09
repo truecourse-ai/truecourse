@@ -29,6 +29,9 @@ export const declarationsInGlobalScopeVisitor: CodeRuleVisitor = {
       if (value && (value.type === 'arrow_function' || value.type === 'function' || value.type === 'class')) return null
     }
 
+    // Skip violations with missing source location — unusable without filePath/line info
+    if (!filePath || !node.startPosition) return null
+
     // Flag mutable global state
     const keyword = node.children[0]
     if (keyword?.text === 'let') {

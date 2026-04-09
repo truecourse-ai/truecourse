@@ -28,3 +28,18 @@ export function RefEffect(): JSX.Element {
   useEffect(() => { if (ref.current) ref.current.focus(); }, []);
   return <div ref={ref}>focused</div>;
 }
+
+// Positive: async-void-function — onClick wrapper calling async function (not async itself)
+const CLICK_TIMEOUT_MS = 5000;
+async function handleClick(): Promise<void> {
+  await fetch('/api/action', { signal: AbortSignal.timeout(CLICK_TIMEOUT_MS) });
+}
+export function AsyncButton(): JSX.Element {
+  const onClick = (): void => { handleClick().catch(() => undefined); };
+  return <button onClick={onClick}>Click</button>;
+}
+
+// Positive: react-unstable-key — static skeleton list (no dynamic key needed)
+export function LoadingSkeleton(): JSX.Element {
+  return <div><div>Loading 1...</div><div>Loading 2...</div><div>Loading 3...</div></div>;
+}

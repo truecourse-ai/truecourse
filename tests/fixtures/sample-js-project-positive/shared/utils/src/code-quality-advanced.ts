@@ -47,3 +47,23 @@ export function pairwise(items: readonly number[]): number { let sum = 0; for (l
 
 // Positive: unused-collection — collection reassigned and returned
 export function buildList(): string[] { let items: string[] = ['a']; items = [...items, 'b']; return items; }
+
+// Positive: json-parse-in-loop — parsing different strings each iteration (not same string)
+export function parseAll(items: readonly string[]): unknown[] {
+  const results: unknown[] = [];
+  for (const item of items) {
+    try {
+      results.push(JSON.parse(item));
+    } catch {
+      // skip invalid JSON
+    }
+  }
+  return results;
+}
+
+// Positive: prototype-pollution — Object.entries iteration (safe, not bracket assignment from user input)
+export function applyMapping(target: Record<string, string>, source: Record<string, string>): void {
+  for (const [key, val] of Object.entries(source)) {
+    target[key] = val;
+  }
+}

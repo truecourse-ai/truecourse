@@ -17,6 +17,15 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
       if (/^(placeholder|aria-label|aria-description|title|alt)$/.test(attrName)) return null
     }
 
+    // Skip URLs in variable assignments where variable name indicates a placeholder/config default
+    if (parent?.type === 'variable_declarator' || parent?.type === 'assignment_expression' || parent?.type === 'pair') {
+      const nameNode = parent.type === 'pair'
+        ? parent.childForFieldName('key')
+        : parent.childForFieldName('name')
+      const varName = nameNode?.text?.toLowerCase() ?? ''
+      if (/default|placeholder|example|sample|template/.test(varName)) return null
+    }
+
     if (/https?:\/\/[a-zA-Z0-9]/.test(text) && !text.includes('example.com') && !text.includes('localhost')) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

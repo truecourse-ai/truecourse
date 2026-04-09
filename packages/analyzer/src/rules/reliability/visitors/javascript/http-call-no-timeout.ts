@@ -24,6 +24,8 @@ export const httpCallNoTimeoutVisitor: CodeRuleVisitor = {
 
     // fetch() call
     if (funcName === 'fetch') {
+      // Skip client-side React components fetching own API — browser fetch has default timeouts
+      if (/\.tsx$/.test(filePath) && /\/components\//.test(filePath)) return null
       const args = node.childForFieldName('arguments')
       if (args) {
         const optionsArg = args.namedChildren[1]

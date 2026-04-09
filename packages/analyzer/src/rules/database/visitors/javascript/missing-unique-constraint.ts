@@ -35,7 +35,16 @@ function columnHasUniqueConstraint(columnName: string, sourceCode: string): bool
   const uniquePropPattern = new RegExp(
     `\\b${columnName}\\b[^}]*unique\\s*:\\s*true`,
   )
+  // Also check if .unique() appears anywhere near the column name across multiple lines
+  const multiLineUniquePattern = new RegExp(
+    `\\b${columnName}\\b[\\s\\S]{0,200}\\.unique\\(`,
+  )
+  // Check if anywhere in the file there's a .unique() call associated with this column
+  const globalUniquePattern = new RegExp(
+    `\\.unique\\([^)]*\\)[\\s\\S]{0,200}\\b${columnName}\\b|\\b${columnName}\\b[\\s\\S]{0,200}\\.unique\\(`,
+  )
   return uniqueChainPattern.test(sourceCode) || uniquePropPattern.test(sourceCode)
+    || multiLineUniquePattern.test(sourceCode) || globalUniquePattern.test(sourceCode)
 }
 
 export const missingUniqueConstraintVisitor: CodeRuleVisitor = {

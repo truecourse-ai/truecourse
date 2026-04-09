@@ -71,6 +71,12 @@ function checkFunctionDeclaration(
 
     if (!paramName || hasTypeAnnotation) continue
 
+    // Skip parameters with a default value — TypeScript infers the type from the initializer
+    if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
+      const valueNode = param.childForFieldName('value')
+      if (valueNode) continue
+    }
+
     // Skip commonly understood parameter names
     if (['_', 'e', 'err', 'error', 'event', 'req', 'res', 'next'].includes(paramName)) continue
 

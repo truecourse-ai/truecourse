@@ -110,7 +110,7 @@ export function computedKey() {
   return { ['name']: 'Alice' };
 }
 
-// VIOLATION: code-quality/deterministic/useless-concat
+// NOTE: useless-concat now skipped for all-literal string concatenation
 export function staticConcat() {
   return 'hello' + 'world';
 }

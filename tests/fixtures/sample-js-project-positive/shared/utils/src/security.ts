@@ -16,3 +16,8 @@ export function getUA(): string { return USER_AGENT; }
 export function isHttpUrl(input: string): boolean {
   return input.startsWith('http://');
 }
+
+// Positive: sensitive-data-in-url — invitation token in URL (not a secret/password)
+export function inviteUrl(invitationToken: string): string {
+  return `/accept?invitation=${invitationToken}`;
+}

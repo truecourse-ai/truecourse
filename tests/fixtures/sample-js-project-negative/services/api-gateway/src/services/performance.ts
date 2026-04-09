@@ -15,7 +15,7 @@ export function matchPatterns(items: string[]) {
   return results;
 }
 
-// VIOLATION: performance/deterministic/json-parse-in-loop
+// NOTE: json-parse-in-loop now skipped for dynamic per-iteration arguments
 export function parseItems(items: string[]) {
   const results: any[] = [];
   for (const item of items) {

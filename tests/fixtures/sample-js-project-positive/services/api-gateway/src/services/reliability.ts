@@ -47,3 +47,8 @@ export function healthCheck(): string {
 export function safeFindAccess(items: ReadonlyArray<{ id: number; name: string }>, targetId: number): string {
   return items.find((i) => i.id === targetId)?.name ?? 'unknown';
 }
+
+// Positive: floating-promise — Map.delete is synchronous (not a promise)
+export function cleanupMap(cache: Map<string, number>, key: string): void {
+  cache.delete(key);
+}

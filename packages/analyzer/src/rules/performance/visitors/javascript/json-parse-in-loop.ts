@@ -17,6 +17,68 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
 
     if (!isInsideLoop(node)) return null
 
+    // Skip when parsing different data each iteration — only flag when the same
+    // static value is parsed repeatedly. Dynamic arguments: variables that are
+    // loop iterators, array element access, or function call results.
+    const args = node.childForFieldName('arguments')
+    if (args) {
+      const firstArg = args.namedChildren[0]
+      if (firstArg) {
+        // Function call result: JSON.parse(getData()) — different each iteration
+        if (firstArg.type === 'call_expression') return null
+        // Array/object element access: JSON.parse(items[i]) — different each iteration
+        if (firstArg.type === 'subscript_expression') return null
+        // Template literal: JSON.parse(`${x}`) — likely dynamic
+        if (firstArg.type === 'template_string') return null
+        // Variable that is a loop parameter (for-of/for-in variable, or for-loop index)
+        if (firstArg.type === 'identifier') {
+          const varName = firstArg.text
+          let current = node.parent
+          while (current) {
+            if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
+              const left = current.childForFieldName('left')
+              if (left && left.text.includes(varName)) return null
+            }
+            if (current.type === 'for_statement') {
+              const init = current.childForFieldName('initializer')
+              if (init && init.text.includes(varName)) return null
+            }
+            // .forEach / .map callback parameter
+            if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
+              const params = current.childForFieldName('parameters')
+              if (params && params.text.includes(varName)) {
+                const callParent = current.parent?.parent
+                if (callParent?.type === 'call_expression') return null
+              }
+            }
+            current = current.parent
+          }
+        }
+        // Member expression like item.data — likely different per iteration
+        if (firstArg.type === 'member_expression') {
+          const obj = firstArg.childForFieldName('object')
+          if (obj?.type === 'identifier') {
+            // Check if the object is a loop variable
+            let current = node.parent
+            while (current) {
+              if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
+                const left = current.childForFieldName('left')
+                if (left && left.text.includes(obj.text)) return null
+              }
+              if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
+                const params = current.childForFieldName('parameters')
+                if (params && params.text.includes(obj.text)) {
+                  const callParent = current.parent?.parent
+                  if (callParent?.type === 'call_expression') return null
+                }
+              }
+              current = current.parent
+            }
+          }
+        }
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       `JSON.${prop.text}() inside loop`,

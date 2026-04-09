@@ -17,22 +17,27 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
     // If there's already a transaction call in this body, skip
     if (bodyHasTransactionCall(body)) return null
 
-    // Count write calls in the body
-    let writeCount = 0
+    // Count write calls in the body, tracking DIFFERENT table names.
+    // A single insert or single update on the same table doesn't need a transaction.
+    const tableNames = new Set<string>()
     let isSecondOccurrence = false
     let seenSelf = false
+    let writeCount = 0
 
     function countWrites(n: SyntaxNode) {
       if (n.type === 'call_expression') {
         const fn = n.childForFieldName('function')
         let mName = ''
+        let tableName = ''
         if (fn?.type === 'member_expression') {
           mName = fn.childForFieldName('property')?.text ?? ''
+          tableName = fn.childForFieldName('object')?.text ?? ''
         } else if (fn?.type === 'identifier') {
           mName = fn.text
         }
         if (ORM_WRITE_METHODS.has(mName)) {
           writeCount++
+          if (tableName) tableNames.add(tableName)
           if (n.id === node.id) {
             seenSelf = true
           } else if (seenSelf) {
@@ -48,8 +53,9 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
 
     countWrites(body)
 
-    // Only flag on the second occurrence (to avoid N reports for N writes)
-    if (writeCount >= 2 && isSecondOccurrence) {
+    // Only flag when there are 2+ writes to DIFFERENT tables in the same function.
+    // A single table with multiple writes (e.g., upsert pattern) typically doesn't need a transaction.
+    if (writeCount >= 2 && tableNames.size >= 2 && isSecondOccurrence) {
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Multiple writes without transaction',

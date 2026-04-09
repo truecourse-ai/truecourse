@@ -218,7 +218,7 @@ export function voidNoArg() {
   return void 0;
 }
 
-// VIOLATION: bugs/deterministic/prototype-pollution
+// NOTE: prototype-pollution now skipped for Object.entries/Object.keys iteration
 export function mergeDeep(target: any, source: any) {
   for (const key of Object.keys(source)) {
     target[key] = source[key];

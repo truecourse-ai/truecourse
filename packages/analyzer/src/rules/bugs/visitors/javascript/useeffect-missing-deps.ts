@@ -39,6 +39,17 @@ const EXCLUDED_IDENTIFIERS = new Set([
   'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
   'fetch', 'Math', 'JSON', 'Object', 'Array', 'String', 'Number',
   'Promise', 'Error', 'Date', 'RegExp', 'Map', 'Set',
+  // Browser globals / Web APIs
+  'parseFloat', 'parseInt', 'getComputedStyle',
+  'localStorage', 'sessionStorage', 'navigator',
+  'requestAnimationFrame', 'cancelAnimationFrame',
+  'URL', 'URLSearchParams', 'Boolean',
+  // Common stable imports
+  'require', 'module', 'exports', 'Buffer', 'Symbol',
+  'WeakMap', 'WeakSet', 'Proxy', 'Reflect', 'Intl',
+  'atob', 'btoa', 'isNaN', 'isFinite', 'encodeURIComponent',
+  'decodeURIComponent', 'encodeURI', 'decodeURI',
+  'alert', 'confirm', 'prompt', 'performance',
 ])
 
 export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
@@ -126,6 +137,12 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       !EXCLUDED_IDENTIFIERS.has(id) &&
       !refAccessedIds.has(id)
     )
+
+    // Skip when the source code near the useEffect contains eslint-disable — the developer
+    // has explicitly suppressed this lint and we should respect that decision
+    const nodeStartLine = node.startPosition.row
+    const linesAbove = sourceCode.split('\n').slice(Math.max(0, nodeStartLine - 2), nodeStartLine + 1)
+    if (linesAbove.some(line => line.includes('eslint-disable'))) return null
 
     if (suspiciousIds.length > 0) {
       return makeViolation(

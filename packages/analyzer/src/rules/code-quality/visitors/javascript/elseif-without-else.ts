@@ -10,6 +10,9 @@ export const elseifWithoutElseVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (parent?.type === 'else_clause') return null
 
+    // Skip files in /components/ui/ directories (third-party generated components like shadcn/ui)
+    if (/\/components\/ui\//.test(filePath)) return null
+
     let hasElseIf = false
     let hasElse = false
 

@@ -33,8 +33,11 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
       if (prop) funcName = prop.text
     }
 
+    // Skip .delete() calls — Map.delete(), Set.delete(), WeakMap.delete() etc. return boolean, not Promise
+    if (funcName === 'delete' && fn.type === 'member_expression') return null
+
     // Heuristic: only flag commonly known async patterns
-    const ASYNC_PREFIXES = ['fetch', 'save', 'send', 'delete', 'update', 'create', 'remove', 'upload', 'download', 'load']
+    const ASYNC_PREFIXES = ['fetch', 'save', 'send', 'update', 'create', 'remove', 'upload', 'download', 'load']
     const isLikelyAsync = ASYNC_PREFIXES.some((p) => funcName.toLowerCase().startsWith(p))
 
     if (!isLikelyAsync) return null

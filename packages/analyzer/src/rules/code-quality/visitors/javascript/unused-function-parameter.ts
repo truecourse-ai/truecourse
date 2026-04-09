@@ -38,28 +38,26 @@ export const unusedFunctionParameterVisitor: CodeRuleVisitor = {
         if (/^(public|private|protected|readonly)\s/.test(paramText)) continue
       }
 
-      // Skip `request`/`req` in exported async functions with 2+ params (Next.js route handlers etc.)
-      if ((paramName === 'request' || paramName === 'req') && params.namedChildCount >= 2) {
-        let funcNode = node
-        if (funcNode.type === 'arrow_function' || funcNode.type === 'function_expression') {
-          funcNode = funcNode.parent ?? funcNode
+      // Skip `request`/`req` in ALL exported functions (Next.js route handlers, Express middleware, etc.)
+      if (paramName === 'request' || paramName === 'req') {
+        let ancestor = node.parent
+        while (ancestor) {
+          if (ancestor.type === 'export_statement') {
+            continue paramLoop
+          }
+          // Stop climbing at function boundaries
+          if (ancestor.type === 'function_declaration' || ancestor.type === 'method_definition'
+            || ancestor.type === 'class_declaration') break
+          ancestor = ancestor.parent
         }
-        // Check if the function (or its variable declaration) is exported and async
+      }
+
+      // Skip `job` param in async functions (BullMQ worker pattern)
+      if (paramName === 'job') {
         const funcText = node.text
         const isAsync = funcText.startsWith('async ') || funcText.includes('async (') || funcText.includes('async(')
           || node.children.some((c) => c.type === 'async')
-        if (isAsync) {
-          let ancestor = node.parent
-          while (ancestor) {
-            if (ancestor.type === 'export_statement') {
-              continue paramLoop
-            }
-            // Stop climbing at function boundaries
-            if (ancestor.type === 'function_declaration' || ancestor.type === 'method_definition'
-              || ancestor.type === 'class_declaration') break
-            ancestor = ancestor.parent
-          }
-        }
+        if (isAsync) continue
       }
 
       // For block bodies ({...}), strip the braces. For expression bodies, use as-is.

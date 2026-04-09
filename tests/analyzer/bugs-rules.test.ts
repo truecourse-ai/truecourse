@@ -2535,13 +2535,13 @@ describe('bugs/deterministic/incorrect-string-concat', () => {
 
 describe('bugs/deterministic/misleading-array-reverse', () => {
   it('detects const sorted = arr.reverse()', () => {
-    const violations = check(`const reversed = arr.reverse();`);
+    const violations = check(`const reversed = arr.reverse();\nconsole.log(arr);`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/misleading-array-reverse');
     expect(matches).toHaveLength(1);
   });
 
   it('detects let sorted = arr.sort()', () => {
-    const violations = check(`let sorted = arr.sort();`);
+    const violations = check(`let sorted = arr.sort();\nconsole.log(arr);`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/misleading-array-reverse');
     expect(matches).toHaveLength(1);
   });

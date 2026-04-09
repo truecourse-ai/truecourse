@@ -40,7 +40,17 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
       if (lastStmt.type === 'throw_statement') return null
     }
 
-    // Skip when the function body contains a switch with ALL cases (including default) returning or throwing
+    // Skip when the function body contains a throw_statement at any level
+    // (functions where all non-return paths throw are safe)
+    function containsThrowAtTopLevel(block: SyntaxNode): boolean {
+      for (let i = 0; i < block.namedChildCount; i++) {
+        const child = block.namedChild(i)
+        if (child?.type === 'throw_statement') return true
+      }
+      return false
+    }
+
+    // Skip when the function body contains a switch with ALL cases returning or throwing
     function hasExhaustiveSwitch(block: SyntaxNode): boolean {
       for (let i = 0; i < block.namedChildCount; i++) {
         const child = block.namedChild(i)
@@ -52,14 +62,23 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
         )
         if (cases.length === 0) continue
         const hasDefault = cases.some((c) => c.type === 'switch_default')
-        if (!hasDefault) continue
         const allTerminate = cases.every((caseNode) => {
           const stmts = caseNode.namedChildren.filter((s) => s.type !== 'comment')
           return stmts.some(
             (s) => s.type === 'return_statement' || s.type === 'throw_statement',
           )
         })
-        if (allTerminate) return true
+        if (allTerminate && hasDefault) return true
+        // Without default: if all cases terminate AND a throw follows the switch,
+        // the function is exhaustive (validated enum/union pattern)
+        if (allTerminate && !hasDefault) {
+          // Check if the next sibling after the switch is a throw
+          const switchIndex = block.namedChildren.indexOf(child)
+          const nextSibling = block.namedChildren[switchIndex + 1]
+          if (nextSibling?.type === 'throw_statement') return true
+          // Also check if the function body ends with a throw after the switch
+          if (containsThrowAtTopLevel(block)) return true
+        }
       }
       return false
     }

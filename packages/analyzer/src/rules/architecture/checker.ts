@@ -33,7 +33,7 @@ export interface ModuleViolation {
 // Service-level checks
 // ---------------------------------------------------------------------------
 
-const GOD_SERVICE_FILE_THRESHOLD = 20
+const GOD_SERVICE_FILE_THRESHOLD = 50
 const GOD_SERVICE_LAYER_THRESHOLD = 4
 
 /**
@@ -347,6 +347,9 @@ export function checkModuleRules(
         // Skip exports from entry point files — they're consumed by the framework/runtime
         if (entryPointFiles?.has(method.filePath)) continue
 
+        // Skip exports from shadcn/ui component library directories — these export all variants for consumer use
+        if (/\/components\/ui\//.test(method.filePath)) continue
+
         // Skip class methods — they're accessed via the class, not individually imported
         if (classModuleNames.has(method.moduleName)) continue
 
@@ -491,6 +494,8 @@ export function checkModuleRules(
 
         for (const [ruleKey, srcLayer, tgtLayer] of layerViolationRules) {
           if (srcMod.layerName === srcLayer && tgtMod.layerName === tgtLayer) {
+            // Skip modules in workers/jobs directories — these are infrastructure, not a true layer violation
+            if ((srcLayer === 'data' || srcLayer === 'external') && /\/(?:workers|jobs)\//.test(srcMod.filePath)) continue
             violations.push({
               ruleKey,
               title: `Layer violation: ${srcMod.name} → ${tgtMod.name}`,
@@ -530,20 +535,15 @@ export function checkModuleRules(
         if (!srcMod || !tgtMod) continue
         if (!internalLayers.has(tgtMod.layerName)) continue
 
-        // Skip when the import uses a path alias (@/ or ~/) — these always resolve
-        // locally within the app, so it's not a real cross-service import.
+        // Skip ALL imports that use @/ or ~/ path aliases — these ALWAYS resolve
+        // locally within the app, so it's never a real cross-service import.
         if (dep.sourceFilePath) {
           const importSources = fileImportSources.get(dep.sourceFilePath)
           if (importSources) {
-            const hasLocalAliasForTarget = [...importSources].some((src) => {
-              if (!src.startsWith('@/') && !src.startsWith('~/')) return false
-              // Check if this alias import could be the one producing this dependency
-              // by matching imported names against the import specifier path segments
-              const lastSegment = src.split('/').pop()?.toLowerCase() || ''
-              return dep.importedNames.some((name) => name.toLowerCase() === lastSegment)
-                || tgtMod.name.toLowerCase() === lastSegment
-            })
-            if (hasLocalAliasForTarget) continue
+            const hasAnyLocalAlias = [...importSources].some((src) =>
+              src.startsWith('@/') || src.startsWith('~/')
+            )
+            if (hasAnyLocalAlias) continue
           }
         }
 
@@ -608,7 +608,7 @@ export function checkMethodRules(
   if (ruleKeys.has('architecture/deterministic/too-many-parameters')) {
     for (const method of methods) {
       const paramThreshold = getMaxParameters(method.filePath)
-      if (method.paramCount >= paramThreshold) {
+      if (method.paramCount > paramThreshold) {
         violations.push({
           ruleKey: 'architecture/deterministic/too-many-parameters',
           title: `Too many parameters: ${method.moduleName}.${method.name}`,
@@ -655,6 +655,9 @@ export function checkMethodRules(
     const eventHandlerMethods = new Set<string>()
     // Build set of class names that have an `implements` clause
     const classesWithImplements = new Set<string>()
+    // Build set of method names referenced via dynamic import() or this.methodName in any expression
+    const dynamicImportTargets = new Set<string>()
+    const thisRefMethods = new Set<string>()
     if (fileAnalyses) {
       for (const fa of fileAnalyses) {
         for (const call of fa.calls) {
@@ -664,6 +667,25 @@ export function checkMethodRules(
                 // Match this.methodName patterns
                 const thisMatch = arg.match(/^this\.(\w+)$/)
                 if (thisMatch) eventHandlerMethods.add(thisMatch[1])
+              }
+            }
+          }
+          // Track dynamic import() targets
+          if (call.callee === 'import' && call.arguments) {
+            for (const arg of call.arguments) {
+              // Extract identifier from the import path (last segment without extension)
+              const match = arg.match(/['"].*?([^/'"]+?)(?:\.\w+)?['"]$/)
+              if (match) dynamicImportTargets.add(match[1])
+            }
+          }
+          // Track this.methodName references in any call arguments
+          if (call.arguments) {
+            for (const arg of call.arguments) {
+              const thisRefs = arg.match(/this\.(\w+)/g)
+              if (thisRefs) {
+                for (const ref of thisRefs) {
+                  thisRefMethods.add(ref.slice(5)) // strip "this."
+                }
               }
             }
           }
@@ -698,6 +720,12 @@ export function checkMethodRules(
 
         // Skip methods in classes with `implements` clause — they fulfill an interface contract
         if (classesWithImplements.has(method.moduleName)) continue
+
+        // Skip methods whose name appears as a dynamic import() target
+        if (dynamicImportTargets.has(method.name)) continue
+
+        // Skip methods referenced as this.methodName in any expression
+        if (thisRefMethods.has(method.name)) continue
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-method',
