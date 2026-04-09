@@ -172,7 +172,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: {}, existingAnalysisId: runningAnalysis.id });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash: commitHash ?? undefined, metadata: {}, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
@@ -295,7 +295,8 @@ router.post(
             .limit(1);
           if (prevAnalysisRow?.commitHash) {
             try {
-              const diffOutput = await git.diff([prevAnalysisRow.commitHash, 'HEAD', '--name-only']);
+              const gitForDiff = await getGit(repo.path);
+              const diffOutput = await gitForDiff.diff([prevAnalysisRow.commitHash, 'HEAD', '--name-only']);
               const changedFiles = diffOutput.trim().split('\n').filter(Boolean);
               if (changedFiles.length > 0) {
                 changedFileSet = new Set(changedFiles);
