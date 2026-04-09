@@ -54,3 +54,10 @@ export function copyReverse(arr: number[]) {
   const sorted = arr.reverse();
   return sorted;
 }
+
+// VIOLATION: bugs/deterministic/misleading-array-reverse
+export function reverseAndUse(arr: number[]) {
+  const sorted = arr.reverse();
+  console.log(arr);
+  return sorted;
+}

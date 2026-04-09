@@ -301,6 +301,12 @@
       "layer": "data"
     },
     {
+      "name": "Config",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ConfigStore",
       "service": "user-service",
       "kind": "class",

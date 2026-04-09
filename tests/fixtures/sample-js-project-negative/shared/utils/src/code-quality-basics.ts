@@ -115,6 +115,11 @@ export function staticConcat() {
   return 'hello' + 'world';
 }
 
+// VIOLATION: code-quality/deterministic/useless-concat
+export function concatWithVar(name: string) {
+  return 'hello' + ' ' + name;
+}
+
 // VIOLATION: code-quality/deterministic/inverted-boolean
 export function doubleNegate(x: number) {
   return !(!x);

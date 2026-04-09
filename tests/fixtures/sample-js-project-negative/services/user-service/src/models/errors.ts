@@ -10,6 +10,11 @@ export function silentParseError() {
   }
 }
 
+// VIOLATION: bugs/deterministic/empty-catch
+export function silentFail() {
+  try { throw new Error('fail'); } catch (e) {}
+}
+
 // VIOLATION: bugs/deterministic/unsafe-finally
 export function unsafeFinally() {
   try {

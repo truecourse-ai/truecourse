@@ -24,6 +24,12 @@ export function parseItems(items: string[]) {
   return results;
 }
 
+// VIOLATION: performance/deterministic/json-parse-in-loop
+export function parseStatic() {
+  const config = '{"key":"value"}';
+  for (let i = 0; i < 10; i++) { JSON.parse(config); }
+}
+
 // VIOLATION: performance/deterministic/spread-in-reduce
 export function spreadReduce(items: Array<{ key: string; value: number }>) {
   return items.reduce((acc, item) => ({

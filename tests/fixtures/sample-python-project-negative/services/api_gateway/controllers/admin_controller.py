@@ -210,6 +210,12 @@ def get_primary_admin(admins: list) -> str:
     return name
 
 
+# VIOLATION: code-quality/deterministic/unused-unpacked-variable
+def process_pair():
+    x, y = (1, 2)
+    return x
+
+
 # SKIP: code-quality/deterministic/no-explicit-any
 # Reason: Visitor checks for 'type' node with parent of type 'type', but tree-sitter Python
 # never creates this nesting. The parent of a type annotation node is typed_parameter,

@@ -99,6 +99,10 @@ export function useBeforeDef() {
   return y;
 }
 
+// VIOLATION: bugs/deterministic/use-before-define
+export const earlyRef = laterConst + 1;
+const laterConst = 42;
+
 // VIOLATION: code-quality/deterministic/useless-catch
 export function catchAndThrow() {
   try {

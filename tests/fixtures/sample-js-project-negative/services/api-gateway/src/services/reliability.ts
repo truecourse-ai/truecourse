@@ -34,6 +34,11 @@ async function fetchData() {
   return { data: 'test' };
 }
 
+// VIOLATION: reliability/deterministic/floating-promise
+export async function fireAndForget() {
+  fetchData();
+}
+
 // VIOLATION: reliability/deterministic/promise-all-no-error-handling
 export async function fetchAll(urls: string[]) {
   const results = await Promise.all(urls.map((url) => fetch(url)));

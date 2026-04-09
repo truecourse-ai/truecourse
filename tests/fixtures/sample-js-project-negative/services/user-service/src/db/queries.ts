@@ -36,6 +36,14 @@ export async function multiWrite(name: string, email: string) {
   await User.insert({ email });
 }
 
+// VIOLATION: database/deterministic/missing-transaction
+const Account = { update: (data: any) => data };
+const Transfer = { insert: (data: any) => data };
+export async function transferFunds(fromId: string, toId: string, amount: number) {
+  await Account.update({ id: fromId, balance: -amount });
+  await Transfer.insert({ from: fromId, to: toId, amount });
+}
+
 // VIOLATION: database/deterministic/missing-unique-constraint
 export async function checkAndCreate(email: string) {
   if (!(await User.findOne({ email }))) {

@@ -226,6 +226,11 @@ export function mergeDeep(target: any, source: any) {
   return target;
 }
 
+// VIOLATION: bugs/deterministic/prototype-pollution
+export function setDynamic(obj: any, key: string, value: unknown) {
+  obj[key] = value;
+}
+
 // VIOLATION: bugs/deterministic/restrict-plus-operands
 export function addMixed(x: string, y: number) {
   return x + y;
