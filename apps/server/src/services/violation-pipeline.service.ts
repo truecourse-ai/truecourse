@@ -8,7 +8,7 @@ import {
   services,
   violations,
 } from '../db/schema.js';
-import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, type TypeQueryService } from '@truecourse/analyzer';
+import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -236,6 +236,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
+  // Build schema index from the analyzer's existing databaseResult.
+  // Wraps Drizzle/Prisma/SQLAlchemy parser output in a fast lookup so visitors
+  // (currently missing-unique-constraint) can answer "is users.email unique?"
+  // with real schema data instead of name-based heuristics.
+  let schemaIndex: SchemaIndex | undefined;
+  if (hasSchemaAwareVisitors(enabledCodeKeys)) {
+    schemaIndex = buildSchemaIndex(result.databaseResult);
+  }
+
   if (hasLlm) tracker?.done('scan', `${fileContents.size} files`);
 
   // ---------------------------------------------------------------------------
@@ -343,7 +352,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         if (!fc) continue;
 
         const tree = parseFile(changedFileSet ? filePath : filePath, fc.content, lang);
-        const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, fc.content, enabledCodeRules, lang, typeQuery);
+        const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, fc.content, enabledCodeRules, lang, typeQuery, schemaIndex);
         allCodeViolations.push(...codeRuleViolations);
       } catch {
         // Skip files that fail to parse

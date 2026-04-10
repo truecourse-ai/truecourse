@@ -2,6 +2,7 @@ import type { Tree } from 'tree-sitter'
 import type { AnalysisRule, CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { walkAstWithVisitors, type CodeRuleVisitor } from './types.js'
 import type { TypeQueryService } from '../ts-compiler.js'
+import type { SchemaIndex } from '../services/schema-index.js'
 
 // Import all domain visitors
 import { SECURITY_JS_VISITORS } from './security/visitors/javascript/index.js'
@@ -55,6 +56,16 @@ export function hasTypeAwareVisitors(enabledRuleKeys: Set<string>): boolean {
 }
 
 /**
+ * Returns true if any registered code visitor requires a SchemaIndex.
+ * Used by the pipeline to decide whether to build the schema index.
+ */
+export function hasSchemaAwareVisitors(enabledRuleKeys: Set<string>): boolean {
+  return ALL_CODE_VISITORS.some(
+    (v) => v.needsSchemaIndex && enabledRuleKeys.has(v.ruleKey),
+  )
+}
+
+/**
  * Check all code-level rules by walking the AST and firing matching visitors.
  * This is a combined checker that runs security, bugs, and code-quality domain
  * visitors in a single AST pass for efficiency.
@@ -68,6 +79,7 @@ export function checkCodeRules(
   enabledRules: AnalysisRule[],
   language?: SupportedLanguage,
   typeQuery?: TypeQueryService,
+  schemaIndex?: SchemaIndex,
 ): CodeViolation[] {
   const enabledKeys = new Set(
     enabledRules
@@ -77,5 +89,5 @@ export function checkCodeRules(
 
   if (enabledKeys.size === 0) return []
 
-  return walkAstWithVisitors(tree, filePath, sourceCode, ALL_CODE_VISITORS, enabledKeys, language, typeQuery)
+  return walkAstWithVisitors(tree, filePath, sourceCode, ALL_CODE_VISITORS, enabledKeys, language, typeQuery, schemaIndex)
 }

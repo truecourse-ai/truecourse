@@ -45,27 +45,20 @@ export async function transferFunds(fromId: string, toId: string, amount: number
   await Transfer.insert({ from: fromId, to: toId, amount });
 }
 
+// `phone` is NOT @unique in schema.prisma — race-prone uniqueness check.
+const prisma = { user: { findFirst: (_o: any) => null as any, create: (_d: any) => null as any }, profile: { findFirst: (_o: any) => null as any, create: (_d: any) => null as any } };
 // VIOLATION: database/deterministic/missing-unique-constraint
-export async function checkAndCreate(email: string) {
-  if (!(await User.findOne({ email }))) {
-    await User.create({ email });
+export async function checkAndCreateByPhone(phone: string) {
+  if (!(await prisma.user.findFirst({ where: { phone } }))) {
+    await prisma.user.create({ data: { phone } });
   }
 }
 
+// `displayName` is NOT @unique in schema.prisma — race-prone uniqueness check.
 // VIOLATION: database/deterministic/missing-unique-constraint
-// Drizzle-style query — column "displayName" is not commonly unique and has no .unique() in scope
-const drizzleDb = {
-  query: { profiles: { findFirst: (_opts: any) => null as any } },
-  insert: (_t: any) => ({ values: (_v: any) => Promise.resolve() }),
-};
-const profiles = { displayName: 'display_name', id: 'id' };
-const eq = (_col: any, _val: any) => ({});
 export async function checkAndCreateProfile(displayName: string) {
-  const existing = await drizzleDb.query.profiles.findFirst({
-    where: eq(profiles.displayName, displayName),
-  });
-  if (!existing) {
-    await drizzleDb.insert(profiles).values({ displayName });
+  if (!(await prisma.profile.findFirst({ where: { displayName } }))) {
+    await prisma.profile.create({ data: { displayName } });
   }
 }
 

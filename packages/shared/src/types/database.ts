@@ -23,6 +23,7 @@ export const ColumnInfoSchema = z.object({
   type: z.string(),
   isNullable: z.boolean().optional(),
   isPrimaryKey: z.boolean().optional(),
+  isUnique: z.boolean().optional(),
   defaultValue: z.string().optional(),
   isForeignKey: z.boolean().optional(),
   referencesTable: z.string().optional(),
@@ -52,6 +53,12 @@ export const TableInfoSchema = z.object({
   columns: z.array(ColumnInfoSchema),
   primaryKey: z.string().optional(),
   indexes: z.array(IndexInfoSchema).optional(),
+  /**
+   * Alternative names this table is known by. Used for ORMs where the
+   * query-side name differs from the SQL name — e.g. Drizzle exports the
+   * table as `salesPeople` (variable name) but the SQL name is `sales_people`.
+   */
+  aliases: z.array(z.string()).optional(),
 })
 
 export type TableInfo = z.infer<typeof TableInfoSchema>

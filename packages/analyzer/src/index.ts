@@ -57,6 +57,7 @@ export { detectDatabases, parseDockerCompose } from './database-detector.js'
 export { parsePrismaSchema } from './schema-parsers/prisma.js'
 export { parseDrizzleSchema } from './schema-parsers/drizzle.js'
 export { parseSqlAlchemySchema } from './schema-parsers/sqlalchemy.js'
+export { buildSchemaIndex, EMPTY_SCHEMA_INDEX, type SchemaIndex } from './services/schema-index.js'
 
 // Patterns
 export { matchesPattern, serviceDetectionPatterns, dataLayerPatterns, apiLayerPatterns, externalLayerPatterns, DATABASE_IMPORT_MAP, CONNECTION_ENV_VARS, DOCKER_IMAGE_MAP } from './patterns/index.js'
@@ -115,7 +116,7 @@ export { getAllDefaultRules } from './rule-engine.js'
  * Combined code-rule checker that runs all AST-based domain checkers.
  * Drop-in replacement for the old checkCodeRules function.
  */
-export { checkCodeRules, hasTypeAwareVisitors } from './rules/combined-code-checker.js'
+export { checkCodeRules, hasTypeAwareVisitors, hasSchemaAwareVisitors } from './rules/combined-code-checker.js'
 
 /**
  * High-level function to analyze an entire repository

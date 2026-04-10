@@ -2,7 +2,12 @@ import type { TableInfo, ColumnInfo, RelationInfo } from '@truecourse/shared'
 
 /**
  * Parse a Drizzle schema TypeScript file and extract tables and relations.
- * Uses regex-based parsing on the source code.
+ *
+ * Uses a manual brace counter (not regex) to extract the columns block,
+ * because Drizzle column declarations like
+ *   `userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' })`
+ * contain braces nested inside parens. A naive regex with `\{...\}`
+ * stops at the first close brace, missing later columns.
  */
 export function parseDrizzleSchema(sourceCode: string): {
   tables: TableInfo[]
@@ -11,22 +16,33 @@ export function parseDrizzleSchema(sourceCode: string): {
   const tables: TableInfo[] = []
   const relations: RelationInfo[] = []
 
-  // Find pgTable/mysqlTable/sqliteTable calls
+  // Find the start of each pgTable/mysqlTable/sqliteTable call.
   // Pattern: export const xxx = pgTable('table_name', { ... })
-  const tablePattern = /(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:pgTable|mysqlTable|sqliteTable)\s*\(\s*['"](\w+)['"]\s*,\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/g
+  const headerPattern = /(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:pgTable|mysqlTable|sqliteTable)\s*\(\s*['"](\w+)['"]\s*,\s*\{/g
 
-  let match
-  while ((match = tablePattern.exec(sourceCode)) !== null) {
-    const tableName = match[2]!
-    const columnsBlock = match[3]!
+  let header
+  while ((header = headerPattern.exec(sourceCode)) !== null) {
+    const variableName = header[1]!  // e.g. `salesPeople` from `export const salesPeople = pgTable(...)`
+    const tableName = header[2]!     // e.g. `sales_people` from `pgTable('sales_people', ...)`
+    // header.index is the start of the export statement; the open `{` is the
+    // last character of the matched header, so block content starts right after.
+    const blockStart = header.index + header[0]!.length
+    const columnsBlock = extractBalancedBlock(sourceCode, blockStart)
+    if (columnsBlock === null) continue
+
     const columns = parseDrizzleColumns(columnsBlock)
-
     const primaryKey = columns.find((c) => c.isPrimaryKey)?.name
+
+    // Store both the SQL name and the JS variable name. Drizzle queries use
+    // the variable name (`db.query.salesPeople.findFirst(...)`), while the
+    // SQL name (`sales_people`) is what migrations and tools see.
+    const aliases = variableName !== tableName ? [variableName] : undefined
 
     tables.push({
       name: tableName,
       columns,
       primaryKey,
+      aliases,
     })
   }
 
@@ -48,6 +64,58 @@ export function parseDrizzleSchema(sourceCode: string): {
   return { tables, relations }
 }
 
+/**
+ * Walk the source from `start` (the position right after an opening `{`)
+ * counting brace depth, and return the substring up to the matching close.
+ *
+ * Strings (single, double, backtick) and comments are ignored so that braces
+ * inside string literals don't throw off the counter. Returns null if no
+ * matching close is found.
+ */
+function extractBalancedBlock(source: string, start: number): string | null {
+  let depth = 1
+  let i = start
+  while (i < source.length) {
+    const ch = source[i]!
+
+    // Skip string literals (single/double/backtick)
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch
+      i++
+      while (i < source.length) {
+        if (source[i] === '\\') { i += 2; continue }
+        if (source[i] === quote) { i++; break }
+        i++
+      }
+      continue
+    }
+
+    // Skip line comments
+    if (ch === '/' && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n') i++
+      continue
+    }
+
+    // Skip block comments
+    if (ch === '/' && source[i + 1] === '*') {
+      i += 2
+      while (i < source.length - 1 && !(source[i] === '*' && source[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        return source.slice(start, i)
+      }
+    }
+    i++
+  }
+  return null
+}
+
 function parseDrizzleColumns(block: string): ColumnInfo[] {
   const columns: ColumnInfo[] = []
 
@@ -66,6 +134,9 @@ function parseDrizzleColumns(block: string): ColumnInfo[] {
     const isPrimaryKey = chain.includes('.primaryKey()')
     const isNotNull = chain.includes('.notNull()')
     const isNullable = !isNotNull && !isPrimaryKey
+    // Drizzle marks unique columns via `.unique()` or `.unique('constraint_name')`.
+    // PKs are inherently unique — represented separately via isPrimaryKey.
+    const isUnique = /\.unique\s*\(/.test(chain)
 
     // Detect default
     let defaultValue: string | undefined
@@ -91,6 +162,7 @@ function parseDrizzleColumns(block: string): ColumnInfo[] {
       type: mapDrizzleType(colType),
       isNullable: isNullable || undefined,
       isPrimaryKey: isPrimaryKey || undefined,
+      isUnique: isUnique || undefined,
       defaultValue,
       isForeignKey: isForeignKey || undefined,
       referencesTable,

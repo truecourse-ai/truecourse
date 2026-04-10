@@ -217,7 +217,16 @@ model User {
     const content = readFileSync(fixturePath, 'utf-8');
     const result = parsePrismaSchema(content);
 
-    expect(result.tables).toHaveLength(4);
+    // Schema models: User, Post, Comment, PostTag, Profile
+    expect(result.tables).toHaveLength(5);
+
+    const profileTable = result.tables.find((t) => t.name === 'Profile')!;
+    expect(profileTable).toBeDefined();
+    expect(profileTable.columns.map((c) => c.name)).toContain('displayName');
+    // displayName is intentionally NOT @unique — used by the
+    // missing-unique-constraint negative fixture.
+    const displayNameCol = profileTable.columns.find((c) => c.name === 'displayName')!;
+    expect(displayNameCol.isUnique).toBeUndefined();
 
     const userTable = result.tables.find((t) => t.name === 'User')!;
     expect(userTable).toBeDefined();

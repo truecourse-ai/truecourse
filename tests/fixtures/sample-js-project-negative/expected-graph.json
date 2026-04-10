@@ -277,6 +277,12 @@
       "layer": "api"
     },
     {
+      "name": "subscribeIfNew",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
       "name": "array-bugs",
       "service": "user-service",
       "kind": "standalone",

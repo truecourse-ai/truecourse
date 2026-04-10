@@ -11,9 +11,20 @@ model User {
   id        String   @id @default(uuid())
   email     String   @unique
   name      String?
+  // `phone` is intentionally NOT @unique — used by missing-unique-constraint
+  // negative fixture to verify the rule fires on race-prone uniqueness checks.
+  phone     String?
   posts     Post[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Profile is used by missing-unique-constraint negative fixture for testing
+// race-prone uniqueness checks via displayName (NOT @unique).
+model Profile {
+  id          String  @id @default(uuid())
+  displayName String
+  bio         String?
 }
 
 model Post {

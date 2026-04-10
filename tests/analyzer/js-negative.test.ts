@@ -18,7 +18,8 @@ import { buildDependencyGraph, findEntryPoints } from '../../packages/analyzer/s
 import { performSplitAnalysis, type SplitAnalysisResult } from '../../packages/analyzer/src/split-analyzer';
 import { checkModuleRules, checkMethodRules, checkServiceRules } from '../../packages/analyzer/src/rules/architecture/checker';
 import { DETERMINISTIC_RULES } from '../../packages/analyzer/src/rules';
-import { checkCodeRules, parseFile, detectLanguage } from '../../packages/analyzer/src';
+import { checkCodeRules, parseFile, detectLanguage, buildSchemaIndex } from '../../packages/analyzer/src';
+import { detectDatabases } from '../../packages/analyzer/src/database-detector';
 import { buildScopedCompilerOptions, createTypeQueryService } from '../../packages/analyzer/src/ts-compiler';
 import type { FileAnalysis, CodeViolation } from '../../packages/shared/src/types/analysis';
 
@@ -73,7 +74,10 @@ function parseExpectedViolations(rootPath: string): ExpectedViolation[] {
 /**
  * Run code-level rules on all files in the fixture.
  */
-function runCodeRules(rootPath: string): CodeViolation[] {
+function runCodeRules(
+  rootPath: string,
+  precomputed?: { analyses: FileAnalysis[]; split: SplitAnalysisResult },
+): CodeViolation[] {
   const enabledRules = DETERMINISTIC_RULES.filter((r) => r.enabled);
   const allViolations: CodeViolation[] = [];
 
@@ -100,12 +104,20 @@ function runCodeRules(rootPath: string): CodeViolation[] {
     typeQuery = createTypeQueryService(filePaths, scoped);
   }
 
+  // Build schema index from the project's database schemas (Drizzle/Prisma/etc.)
+  // Visitors that need it (e.g. missing-unique-constraint) opt in via needsSchemaIndex.
+  let schemaIndex: ReturnType<typeof buildSchemaIndex> | undefined;
+  if (precomputed) {
+    const databaseResult = detectDatabases(rootPath, precomputed.analyses, precomputed.split.services);
+    schemaIndex = buildSchemaIndex(databaseResult);
+  }
+
   for (const filePath of filePaths) {
     const lang = detectLanguage(filePath);
     if (!lang) continue;
     const content = readFileSync(filePath, 'utf-8');
     const tree = parseFile(filePath, content, lang);
-    const violations = checkCodeRules(tree, filePath, content, enabledRules, lang, typeQuery);
+    const violations = checkCodeRules(tree, filePath, content, enabledRules, lang, typeQuery, schemaIndex);
     allViolations.push(...violations);
   }
 
@@ -139,8 +151,15 @@ describe('JS/TS negative fixture — code rules', () => {
   let violations: CodeViolation[];
   let expected: ExpectedViolation[];
 
-  beforeAll(() => {
-    violations = runCodeRules(FIXTURE_PATH);
+  beforeAll(async () => {
+    // Build the project's analyses + split so the schema index can be populated
+    // (needed by missing-unique-constraint and any future schema-aware rules).
+    const files = await discoverFiles(FIXTURE_PATH);
+    const results = await Promise.all(files.map((f) => analyzeFile(f)));
+    const analyses = results.filter(Boolean) as FileAnalysis[];
+    const deps = buildDependencyGraph(analyses, FIXTURE_PATH);
+    const split = performSplitAnalysis(FIXTURE_PATH, analyses, deps);
+    violations = runCodeRules(FIXTURE_PATH, { analyses, split });
     // Exclude architecture checker rules — they are tested in the architecture test
     expected = parseExpectedViolations(FIXTURE_PATH).filter(e => !ARCH_CHECKER_RULES.has(e.ruleKey));
   }, 60_000); // allow up to 60s for type query setup

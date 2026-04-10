@@ -4,6 +4,7 @@ import type { CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { buildDataFlowContext } from '../data-flow/index.js'
 import type { DataFlowContext } from '../data-flow/index.js'
 import type { TypeQueryService } from '../ts-compiler.js'
+import type { SchemaIndex } from '../services/schema-index.js'
 
 export interface CodeRuleVisitor {
   ruleKey: string
@@ -11,7 +12,15 @@ export interface CodeRuleVisitor {
   languages?: SupportedLanguage[]
   needsDataFlow?: boolean
   needsTypeQuery?: boolean
-  visit(node: SyntaxNode, filePath: string, sourceCode: string, dataFlow?: DataFlowContext, typeQuery?: TypeQueryService): CodeViolation | null
+  needsSchemaIndex?: boolean
+  visit(
+    node: SyntaxNode,
+    filePath: string,
+    sourceCode: string,
+    dataFlow?: DataFlowContext,
+    typeQuery?: TypeQueryService,
+    schemaIndex?: SchemaIndex,
+  ): CodeViolation | null
 }
 
 export function makeViolation(
@@ -57,6 +66,7 @@ export function walkAstWithVisitors(
   enabledRuleKeys: Set<string>,
   language?: SupportedLanguage,
   typeQuery?: TypeQueryService,
+  schemaIndex?: SchemaIndex,
 ): CodeViolation[] {
   // Filter visitors by enabled rules and language
   const activeVisitors = visitors.filter((v) => {
@@ -91,7 +101,14 @@ export function walkAstWithVisitors(
     const visitors = visitorsByNodeType.get(node.type)
     if (visitors) {
       for (const visitor of visitors) {
-        const violation = visitor.visit(node, filePath, sourceCode, visitor.needsDataFlow ? dataFlow : undefined, visitor.needsTypeQuery ? typeQuery : undefined)
+        const violation = visitor.visit(
+          node,
+          filePath,
+          sourceCode,
+          visitor.needsDataFlow ? dataFlow : undefined,
+          visitor.needsTypeQuery ? typeQuery : undefined,
+          visitor.needsSchemaIndex ? schemaIndex : undefined,
+        )
         if (violation) {
           violations.push(violation)
         }
