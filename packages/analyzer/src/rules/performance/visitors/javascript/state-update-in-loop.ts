@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { isInsideLoop } from './_helpers.js'
+import { detectUiFramework } from '../../../_shared/framework-detection.js'
 
 const REACT_STATE_SETTERS = /^set[A-Z]/
 
@@ -19,6 +20,10 @@ export const stateUpdateInLoopVisitor: CodeRuleVisitor = {
 
     // Must match React setter naming convention: setFoo(...)
     if (!REACT_STATE_SETTERS.test(funcName)) return null
+
+    // Gate by React import — pre-fix the rule fired on any OOP class with
+    // setter methods (`setName`, `setTitle`) on non-React projects.
+    if (detectUiFramework(node) !== 'react') return null
 
     if (!isInsideLoop(node)) return null
 

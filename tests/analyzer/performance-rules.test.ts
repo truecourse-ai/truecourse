@@ -308,13 +308,28 @@ while (queue.length) {
 describe('performance/deterministic/state-update-in-loop', () => {
   const KEY = 'performance/deterministic/state-update-in-loop';
 
-  it('detects setState call inside for loop', () => {
+  it('detects setState call inside for loop (in React file)', () => {
     const code = `
+import React from 'react';
 for (const item of items) {
   setCount(item.count);
 }`;
     const violations = only(check(code), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT flag setX in a non-React file (e.g. OOP class with setters)', () => {
+    const code = `
+class UserService {
+  update(users) {
+    for (const user of users) {
+      this.setName(user.name);
+    }
+  }
+  setName(name) { this.name = name; }
+}`;
+    const violations = only(check(code), KEY);
+    expect(violations).toHaveLength(0);
   });
 
   it('does not flag setter outside loop', () => {

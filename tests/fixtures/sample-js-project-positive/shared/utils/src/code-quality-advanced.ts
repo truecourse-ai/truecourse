@@ -89,3 +89,29 @@ export function pairBuilder<K, V>(key: K, value: V): Map<K, V> {
 export function createBufferSync(size: number): ArrayBuffer {
   return new ArrayBuffer(size);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3: framework overfit fixes
+// ---------------------------------------------------------------------------
+
+// Positive: state-update-in-loop — bare setX() identifier call in a loop in a
+// non-React file. Pre-fix the rule fired on any /^set[A-Z]/ call in a loop;
+// now gated by React import (this file does not import React).
+declare const setStringValue: (s: string) => void;
+export function applyTitles(items: readonly string[]): void {
+  for (const item of items) {
+    setStringValue(item);
+  }
+}
+
+// Positive: static-method-candidate — Vue lifecycle method on a class extending
+// a Vue base. Pre-fix the hardcoded React-only contractMethods list missed
+// Vue/Angular/Svelte lifecycle methods. Now: classes that extend ANY base are
+// skipped via the existing heritage check.
+declare const VueBase: { new(): { mounted(): void } };
+class MyVueComponent extends VueBase {
+  mounted(): void {
+    console.warn('mounted');
+  }
+}
+export const vueComponent = new MyVueComponent();

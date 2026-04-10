@@ -64,13 +64,15 @@ export const staticMethodCandidateVisitor: CodeRuleVisitor = {
     // Check if `this` or `super` is used in the body
     if (usesThisOrSuper(body)) return null
 
-    // Skip methods that are commonly part of interfaces/contracts
-    const contractMethods = new Set([
-      'toString', 'valueOf', 'toJSON', 'render', 'componentDidMount',
-      'componentDidUpdate', 'componentWillUnmount', 'shouldComponentUpdate',
-      'getDerivedStateFromError', 'getSnapshotBeforeUpdate',
+    // Skip universal Object.prototype methods that are intentional overrides.
+    // Framework lifecycle methods (React, Vue, Angular, Svelte) are already
+    // handled by the heritage check above — those classes always extend a
+    // framework base class. The previous list hardcoded React-specific names
+    // and missed Vue's `mounted`, Angular's `ngOnInit`, etc.
+    const universalContractMethods = new Set([
+      'toString', 'valueOf', 'toJSON',
     ])
-    if (contractMethods.has(name)) return null
+    if (universalContractMethods.has(name)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

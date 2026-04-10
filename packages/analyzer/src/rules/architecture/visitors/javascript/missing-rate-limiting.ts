@@ -2,18 +2,19 @@ import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { EXPRESS_ROUTE_METHODS } from './_helpers.js'
+import {
+  detectWebFramework,
+  importsRateLimiter,
+  isRateLimitMiddlewareName,
+} from '../../../_shared/framework-detection.js'
 
 /**
  * Walk the AST to find actual call expressions that look like route definitions:
  *   app.get('/path', handler)
  *   router.post('/path', handler)
  *   etc.
- *
- * This replaces the previous text-grep + always-true `EXPRESS_ROUTE_METHODS.has('get')`
- * check, which was broken (the .has('get') was a constant that always returned true,
- * defeating the entire condition).
  */
-function hasExpressLikeRoute(root: SyntaxNode): boolean {
+function hasWebRoute(root: SyntaxNode): boolean {
   function walk(n: SyntaxNode): boolean {
     if (n.type === 'call_expression') {
       const fn = n.childForFieldName('function')
@@ -21,12 +22,34 @@ function hasExpressLikeRoute(root: SyntaxNode): boolean {
         const obj = fn.childForFieldName('object')
         const prop = fn.childForFieldName('property')
         if (obj && prop && EXPRESS_ROUTE_METHODS.has(prop.text)) {
-          // Common Express-style route receivers: `app`, `router`, `route`
-          if (obj.type === 'identifier' && /^(app|router|route)$/i.test(obj.text)) {
+          // Common route receivers across Express/Fastify/Koa/Hono: app, router, route
+          if (obj.type === 'identifier' && /^(app|router|route|fastify|server)$/i.test(obj.text)) {
             return true
           }
         }
       }
+    }
+    for (const child of n.namedChildren) {
+      if (walk(child)) return true
+    }
+    return false
+  }
+  return walk(root)
+}
+
+/**
+ * Walk the AST looking for any call to a rate-limit middleware identifier.
+ * Catches both the import-and-call pattern (`app.use(rateLimit({...}))`)
+ * and the variable pattern (`const limiter = rateLimit(...); app.use(limiter)`).
+ */
+function hasRateLimitMiddlewareCall(root: SyntaxNode): boolean {
+  function walk(n: SyntaxNode): boolean {
+    if (n.type === 'call_expression') {
+      const fn = n.childForFieldName('function')
+      let name = ''
+      if (fn?.type === 'identifier') name = fn.text
+      else if (fn?.type === 'member_expression') name = fn.childForFieldName('property')?.text ?? ''
+      if (name && isRateLimitMiddlewareName(name)) return true
     }
     for (const child of n.namedChildren) {
       if (walk(child)) return true
@@ -41,32 +64,28 @@ export const missingRateLimitingVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
-    // Only check files that define routes
-    if (!filePath.match(/(?:route|controller|api|server|app)/i)) return null
+    // Skip if we don't recognize the framework — without that, we can't tell
+    // whether the route is real or whether rate limiting is applied externally.
+    const framework = detectWebFramework(node)
+    if (framework === 'unknown') return null
 
-    // Real AST check for route definitions, not text grep.
-    if (!hasExpressLikeRoute(node)) return null
+    // Need at least one route definition in this file
+    if (!hasWebRoute(node)) return null
 
-    // NOTE: Phase 3 will replace this substring-based rate-limiter detection with
-    // framework-aware import detection. For now we keep the existing heuristic to
-    // avoid scope creep — the always-true bug above was the actual blocker.
-    const text = sourceCode.replace(/\/\/.*$/gm, '')
-    const hasRateLimiting =
-      text.includes('rateLimit') ||
-      text.includes('rate-limit') ||
-      text.includes('rateLimiter') ||
-      text.includes('RateLimiter') ||
-      text.includes('throttle') ||
-      text.includes('slowDown')
+    // Skip if a rate-limiter package is imported (covers all the supported
+    // frameworks: express-rate-limit, @fastify/rate-limit, koa-ratelimit, etc.)
+    if (importsRateLimiter(node)) return null
 
-    if (hasRateLimiting) return null
+    // Skip if a rate-limit middleware is called by name anywhere in the file
+    // (e.g. project-local `rateLimiter()` helper, custom `throttle()` middleware).
+    if (hasRateLimitMiddlewareCall(node)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'API without rate limiting',
-      'Route file has no rate limiting middleware. APIs should be rate-limited to prevent abuse.',
+      `Route file uses ${framework} but has no rate limiting middleware. APIs should be rate-limited to prevent abuse.`,
       sourceCode,
-      'Add rate limiting: app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }))',
+      'Add rate limiting middleware (e.g. express-rate-limit, @fastify/rate-limit, hono-rate-limiter).',
     )
   },
 }

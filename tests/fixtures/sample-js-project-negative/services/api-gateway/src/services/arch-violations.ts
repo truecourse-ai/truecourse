@@ -3,6 +3,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { z } from 'zod';
 import { UserController } from '../controllers/user.controller';
 
 // VIOLATION: architecture/deterministic/declarations-in-global-scope
