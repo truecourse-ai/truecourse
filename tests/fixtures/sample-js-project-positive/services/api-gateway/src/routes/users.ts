@@ -40,3 +40,21 @@ declare const db: { query: { items: { findFirst: (opts: unknown) => unknown } } 
 export function refetchById(itemId: string): unknown {
   return db.query.items.findFirst({ where: { id: itemId } });
 }
+
+// Positive: missing-unique-constraint — Drizzle eq() lookup by primary key
+declare const drizzleDb: {
+  query: { users: { findFirst: (opts: unknown) => unknown } };
+  insert: (t: unknown) => { values: (v: unknown) => Promise<void> };
+};
+declare const users: { id: string; email: string };
+declare const eq: (col: unknown, val: unknown) => unknown;
+export function getUserById(userId: string): unknown {
+  return drizzleDb.query.users.findFirst({ where: eq(users.id, userId) });
+}
+
+// Positive: missing-unique-constraint — Drizzle eq() lookup by email (commonly unique field)
+export async function findOrCreateByEmail(email: string): Promise<unknown> {
+  const found = await drizzleDb.query.users.findFirst({ where: eq(users.email, email) });
+  if (!found) await drizzleDb.insert(users).values({ email });
+  return found;
+}

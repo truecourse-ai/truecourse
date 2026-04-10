@@ -696,13 +696,17 @@ export function checkMethodRules(
     const dynamicImportTargets = new Set<string>()
     // Build set of module basenames that are dynamically imported — exports from these modules are live
     const dynamicImportModules = new Set<string>()
-    const thisRefMethods = new Set<string>()
+    // Per-file map of `this.methodName` references — only valid within the same file
+    // (a `this.foo` call in fileA does not mean `foo` in fileB is live).
+    const thisRefMethodsByFile = new Map<string, Set<string>>()
     // Track all exported names from every file (for cross-file reference checks)
     const allExportedNames = new Set<string>()
     // Track all names referenced in imports across all files
     const allImportedNames = new Set<string>()
     if (fileAnalyses) {
       for (const fa of fileAnalyses) {
+        const fileThisRefs = new Set<string>()
+        thisRefMethodsByFile.set(fa.filePath, fileThisRefs)
         for (const call of fa.calls) {
           if (call.callee.endsWith('.on') || call.callee.endsWith('.once') || call.callee.endsWith('.addEventListener')) {
             if (call.arguments) {
@@ -724,13 +728,13 @@ export function checkMethodRules(
               }
             }
           }
-          // Track this.methodName references in call arguments AND callee
+          // Track this.methodName references in call arguments AND callee — per-file scope
           if (call.arguments) {
             for (const arg of call.arguments) {
               const thisRefs = arg.match(/this\.(\w+)/g)
               if (thisRefs) {
                 for (const ref of thisRefs) {
-                  thisRefMethods.add(ref.slice(5)) // strip "this."
+                  fileThisRefs.add(ref.slice(5)) // strip "this."
                 }
               }
             }
@@ -738,13 +742,13 @@ export function checkMethodRules(
           // Track this.methodName references in the callee itself
           // (e.g., this.handleResponse(), this.service.method())
           const calleeThisMatch = call.callee.match(/^this\.(\w+)/)
-          if (calleeThisMatch) thisRefMethods.add(calleeThisMatch[1])
+          if (calleeThisMatch) fileThisRefs.add(calleeThisMatch[1])
 
-          // Track method names from call arguments (callbacks passed to functions)
+          // Track method names from call arguments (callbacks passed to functions in same file)
           if (call.arguments) {
             for (const arg of call.arguments) {
               // Simple identifier arguments (not expressions) are likely function references
-              if (/^\w+$/.test(arg)) thisRefMethods.add(arg)
+              if (/^\w+$/.test(arg)) fileThisRefs.add(arg)
             }
           }
         }
@@ -819,73 +823,38 @@ export function checkMethodRules(
           if (basename && dynamicImportModules.has(basename)) continue
         }
 
-        // Skip methods referenced as this.methodName in any expression (from call data)
-        if (thisRefMethods.has(method.name)) continue
+        // Skip methods referenced as this.methodName or as a callback identifier
+        // within their own file (a `this.foo` in another file does not make this method live).
+        if (thisRefMethodsByFile.get(method.filePath)?.has(method.name)) continue
 
         // Skip exported functions that are imported anywhere in the codebase
         // (handles dynamic imports like: const { getUserLocation } = await import('./geo'))
         if (method.isExported && allImportedNames.has(method.name)) continue
 
         // Skip exported functions referenced in any call expression across the codebase
-        // (catches dynamic imports like: const { getUserLocation } = await import('./service'))
+        // (catches dynamic imports like: const { getUserLocation } = await import('./service')).
+        // Match exact identifiers — substring matches caused FNs (e.g. method "id" matched "getId").
         if (method.isExported && fileAnalyses) {
           let referencedAnywhere = false
           for (const fa of fileAnalyses) {
             if (fa.filePath === method.filePath) continue
-            // Check if method name appears in any call's callee or arguments
+            // Exact-match callee (`foo` or `obj.foo`) or call arguments (`foo`)
             for (const call of fa.calls) {
-              if (call.callee.includes(method.name)) { referencedAnywhere = true; break }
-              if (call.arguments?.some((a) => a.includes(method.name))) { referencedAnywhere = true; break }
+              if (call.callee === method.name || call.callee.endsWith('.' + method.name)) {
+                referencedAnywhere = true; break
+              }
+              if (call.arguments?.some((a) => a === method.name)) {
+                referencedAnywhere = true; break
+              }
             }
             if (referencedAnywhere) break
-            // Check if method name appears in any import specifier (static imports)
+            // Exact-match import specifiers (static imports)
             for (const imp of fa.imports) {
               if (imp.specifiers.some((s) => s.name === method.name)) { referencedAnywhere = true; break }
             }
             if (referencedAnywhere) break
           }
           if (referencedAnywhere) continue
-        }
-
-        // Skip exported functions whose name appears in ANY call argument across the codebase
-        // (catches callbacks passed as arguments: retry(getUserLocation), app.use(validateWebhook), etc.)
-        if (method.isExported) {
-          let referencedInArgs = false
-          if (fileAnalyses) {
-            for (const fa of fileAnalyses) {
-              for (const call of fa.calls) {
-                if (call.arguments) {
-                  for (const arg of call.arguments) {
-                    if (arg.includes(method.name)) {
-                      referencedInArgs = true
-                      break
-                    }
-                  }
-                  if (referencedInArgs) break
-                }
-              }
-              if (referencedInArgs) break
-            }
-          }
-          if (referencedInArgs) continue
-        }
-
-        // Skip methods in files with any class that extends or implements something —
-        // these methods may be required by the parent class or interface contract
-        {
-          let fileHasInheritance = false
-          if (fileAnalyses) {
-            for (const fa of fileAnalyses) {
-              if (fa.filePath !== method.filePath) continue
-              for (const cls of fa.classes) {
-                if ((cls.interfaces && cls.interfaces.length > 0) || cls.superClass) {
-                  fileHasInheritance = true
-                  break
-                }
-              }
-            }
-          }
-          if (fileHasInheritance) continue
         }
 
         violations.push({

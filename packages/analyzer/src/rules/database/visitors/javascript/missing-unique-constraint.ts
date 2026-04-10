@@ -10,14 +10,23 @@ const FIND_ONE_METHODS = new Set([
 
 /**
  * Extract the column name being queried from a findFirst/findUnique `where` clause.
- * Handles patterns like: `{ where: { email: value } }` or `{ email: value }`.
+ * Handles patterns:
+ *  - Prisma:  `{ where: { email: value } }` or `{ email: value }`
+ *  - Drizzle: `{ where: eq(users.email, value) }`
+ *  - Drizzle compound: `{ where: and(eq(users.email, ...), ...) }` (returns first column)
  */
 function extractQueriedColumn(callNode: SyntaxNode): string | null {
   const args = callNode.childForFieldName('arguments')
   if (!args) return null
 
   const argText = args.text
-  // Match `where: { columnName: ... }` or direct `{ columnName: ... }`
+
+  // Drizzle: `where: eq(table.column, value)` — extract `column` from `table.column`.
+  // Also handles wrappers like `and(eq(...), ...)`, `or(eq(...))` by matching the first eq().
+  const drizzleMatch = argText.match(/where\s*:\s*[\w$]*\(?[\s\S]*?eq\s*\(\s*\w+\.(\w+)\s*,/)
+  if (drizzleMatch) return drizzleMatch[1]
+
+  // Prisma object syntax: `where: { columnName: ... }` or direct `{ columnName: ... }`
   const whereMatch = argText.match(/where\s*:\s*\{\s*(\w+)\s*:/) || argText.match(/\{\s*(\w+)\s*:/)
   return whereMatch ? whereMatch[1] : null
 }
@@ -125,7 +134,6 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
       'website', 'slug', 'username', 'auth0Id', 'auth0_id',
       'token', 'apiKey', 'api_key', 'externalId', 'external_id',
       'handle', 'code', 'sku', 'ssn', 'uuid',
-      'userId', 'user_id', 'name',
     ])
     if (queriedColumn && COMMONLY_UNIQUE_FIELDS.has(queriedColumn)) return null
 
