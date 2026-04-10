@@ -6,7 +6,8 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/floating-promise',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['expression_statement'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     // Look for expression statements containing a call expression that likely returns a promise
     const expr = node.namedChildren[0]
     if (!expr) return null
@@ -34,30 +35,33 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
       if (prop) funcName = prop.text
     }
 
-    // Skip .delete() calls — Map.delete(), Set.delete(), WeakMap.delete() etc. return boolean, not Promise
-    if (funcName === 'delete' && fn.type === 'member_expression') return null
+    // Use real type info to check if the call returns a Promise.
+    // Replaces the previous ASYNC_PREFIXES name heuristic which:
+    //   - missed async calls without a known prefix (commit, dispatch, query, publish, ...)
+    //   - falsely flagged sync functions like createBullBoard, loadConfigSync, removeListener
+    //
+    // Skip when no type info is available (plain JS without JSDoc, files outside the
+    // TS program, etc.) — conservative default to avoid FPs.
+    if (!typeQuery) return null
+    const isPromise = typeQuery.isPromiseLike(
+      filePath,
+      expr.startPosition.row,
+      expr.startPosition.column,
+      expr.endPosition.row,
+      expr.endPosition.column,
+    )
+    if (!isPromise) return null
 
-    // Heuristic: only flag commonly known async patterns
-    const ASYNC_PREFIXES = ['fetch', 'save', 'send', 'update', 'create', 'remove', 'upload', 'download', 'load']
-    const isLikelyAsync = ASYNC_PREFIXES.some((p) => funcName.toLowerCase().startsWith(p))
-
-    if (!isLikelyAsync) return null
-
-    // For bare function calls (not method calls on an object), only flag if the
-    // enclosing function is async. Synchronous factory functions like createBullBoard()
-    // imported from packages match async prefixes but don't return promises.
-    if (fn.type === 'identifier') {
-      let enclosing = node.parent
-      while (enclosing) {
-        if (enclosing.type === 'arrow_function' || enclosing.type === 'function_expression' ||
-            enclosing.type === 'function_declaration' || enclosing.type === 'method_definition') {
-          const isAsync = enclosing.children.some(c => c.type === 'async')
-          if (!isAsync) return null
-          break
-        }
-        enclosing = enclosing.parent
-      }
-    }
+    // Also skip if the call's static type is `any` — an `any` value satisfies
+    // PromiseLike but we can't trust the result.
+    const isAny = typeQuery.isAnyType(
+      filePath,
+      expr.startPosition.row,
+      expr.startPosition.column,
+      expr.endPosition.row,
+      expr.endPosition.column,
+    )
+    if (isAny) return null
 
     // Skip when the async call is inside a useEffect/useLayoutEffect callback.
     // Pattern: call_expression → arguments → arrow_function/function_expression → ... → our node

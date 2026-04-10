@@ -83,11 +83,20 @@ export function pairBuilder<K, V>(key: K, value: V): Map<K, V> {
   return map;
 }
 
-// Positive: floating-promise — sync function whose name happens to start with "create"
-// Pre-fix this would be flagged because "create" was in ASYNC_PREFIXES.
-// (Will be re-verified once Phase 4 migrates floating-promise to TypeQueryService.)
+// Positive: floating-promise — sync functions whose names match old ASYNC_PREFIXES.
+// Pre-fix these were flagged because the rule used a name heuristic.
+// Phase 4 (TypeQueryService) verifies via real type info that these return non-Promise.
+const DEFAULT_SIZE = 1024;
 export function createBufferSync(size: number): ArrayBuffer {
   return new ArrayBuffer(size);
+}
+export function loadConfigSync(): { ready: boolean } {
+  return { ready: true };
+}
+export function callSyncCreate(): ArrayBuffer {
+  // Bare call of a sync function whose name starts with "create" — pre-fix the
+  // ASYNC_PREFIXES heuristic flagged this. Type info now correctly skips it.
+  return createBufferSync(DEFAULT_SIZE);
 }
 
 // ---------------------------------------------------------------------------

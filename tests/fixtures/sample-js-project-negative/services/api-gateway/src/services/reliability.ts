@@ -40,6 +40,14 @@ export async function fireAndForget() {
   fetchData();
 }
 
+// VIOLATION: reliability/deterministic/floating-promise
+// `commit` does NOT match the old ASYNC_PREFIXES heuristic — the previous rule
+// missed this. The TypeQueryService check now catches it via the real return type.
+async function commit(): Promise<void> {}
+export async function commitWithoutAwait() {
+  commit();
+}
+
 // VIOLATION: reliability/deterministic/promise-all-no-error-handling
 export async function fetchAll(urls: string[]) {
   const results = await Promise.all(urls.map((url) => fetch(url)));

@@ -315,9 +315,14 @@ describe('reliability/deterministic/missing-null-check-after-find', () => {
 describe('reliability/deterministic/floating-promise', () => {
   const ruleKey = 'reliability/deterministic/floating-promise';
 
-  it('detects floating fetch call', () => {
+  // This rule now requires TypeQueryService to check if the call returns a Promise.
+  // Without type info (as in these inline tests), it correctly skips all detections —
+  // end-to-end coverage is provided by the JS positive/negative fixtures, which run
+  // through the full analyzer pipeline with the TS compiler attached.
+
+  it('does not flag without type query (requires type-aware analysis)', () => {
     const violations = check(`fetchData();`);
-    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 
   it('does not flag awaited call', () => {
@@ -330,7 +335,7 @@ describe('reliability/deterministic/floating-promise', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 
-  it('does not flag non-async-looking function calls', () => {
+  it('does not flag non-promise-returning function calls', () => {
     const violations = check(`console.log("hello");`);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
