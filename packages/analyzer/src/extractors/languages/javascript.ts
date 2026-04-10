@@ -184,12 +184,14 @@ function extractClassName(node: SyntaxNode): string {
  */
 function extractHeritage(node: SyntaxNode): {
   superClass?: string
+  interfaces?: string[]
 } {
   let superClass: string | undefined
+  const interfaces: string[] = []
 
   const heritageNode = node.childForFieldName('heritage')
   if (!heritageNode) {
-    return { superClass }
+    return { superClass, interfaces: interfaces.length > 0 ? interfaces : undefined }
   }
 
   for (const child of heritageNode.children) {
@@ -199,9 +201,15 @@ function extractHeritage(node: SyntaxNode): {
         superClass = value.text
       }
     }
+    // TypeScript implements clause
+    if (child.type === 'implements_clause') {
+      for (const typeNode of child.namedChildren) {
+        interfaces.push(typeNode.text)
+      }
+    }
   }
 
-  return { superClass }
+  return { superClass, interfaces: interfaces.length > 0 ? interfaces : undefined }
 }
 
 /**
@@ -349,7 +357,7 @@ export function extractJavaScriptClasses(
       methods,
       properties,
       superClass: heritage.superClass,
-      interfaces: undefined, // JavaScript doesn't have implements
+      interfaces: heritage.interfaces,
       decorators: undefined,
       location,
     })
