@@ -99,6 +99,7 @@ export function runDeterministicMethodChecks(
     enabledDeterministic,
     result.methodLevelDependencies || [],
     result.entryPointFiles,
+    result.fileAnalyses,
   );
 }
 

@@ -189,7 +189,7 @@ function extractHeritage(node: SyntaxNode): {
   let superClass: string | undefined
   const interfaces: string[] = []
 
-  const heritageNode = node.childForFieldName('heritage')
+  const heritageNode = node.childForFieldName('heritage') || node.namedChildren.find((c) => c.type === 'class_heritage')
   if (!heritageNode) {
     return { superClass, interfaces: interfaces.length > 0 ? interfaces : undefined }
   }
