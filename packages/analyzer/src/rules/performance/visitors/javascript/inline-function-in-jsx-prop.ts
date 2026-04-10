@@ -21,12 +21,22 @@ export const inlineFunctionInJsxPropVisitor: CodeRuleVisitor = {
     if (!expr) return null
 
     // Skip native HTML elements — inline functions on <button>, <input>, <div> etc.
-    // don't cause child re-render issues (no React.memo on DOM elements)
+    // don't cause child re-render issues (no React.memo on DOM elements).
+    //
+    // Custom elements (web components) follow the kebab-case convention:
+    // `<my-button>`, `<x-foo>`. They DO support React.memo via wrappers, so
+    // we should NOT skip them. The previous code skipped any lowercase tag,
+    // which incorrectly exempted custom elements.
     const jsxElement = node.parent // jsx_opening_element or jsx_self_closing_element
     if (jsxElement) {
       const tagName = jsxElement.childForFieldName('name')
-      if (tagName?.type === 'identifier' && tagName.text[0] === tagName.text[0].toLowerCase()) {
-        return null // native element like <button>, <input>, <div>
+      if (tagName?.type === 'identifier') {
+        const name = tagName.text
+        const startsLower = name[0] === name[0].toLowerCase()
+        const isCustomElement = name.includes('-')
+        if (startsLower && !isCustomElement) {
+          return null // native HTML element like <button>, <input>, <div>
+        }
       }
     }
 

@@ -2,6 +2,9 @@
 /**
  * Database query utilities — covers connection, query, and ORM patterns.
  */
+// Import an ORM so orm-lazy-load-in-loop knows this file uses ORM patterns.
+// (The Lucid `BaseModel` import is unused at runtime, just signals ORM presence.)
+import { BaseModel as _BaseModel } from '@adonisjs/lucid/orm';
 
 const pool = {
   connect: () => ({ query: (q: string) => [], release: () => {} }),

@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getMethodName, isInsideLoop } from './_helpers.js'
+import { detectOrm } from '../../../_shared/framework-detection.js'
 
 // Method names that suggest lazy loading from an ORM instance
 const ORM_LAZY_TRIGGER_METHODS = new Set([
@@ -18,6 +19,12 @@ export const ormLazyLoadInLoopVisitor: CodeRuleVisitor = {
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
     if (!isInsideLoop(node)) return null
+
+    // Skip when no ORM is imported in this file. Method names like `.all()`,
+    // `.first()`, `.get()`, `.load()`, `.fetch()` are extremely common outside
+    // ORM contexts (Map.get, Array.find equivalents, fetch API, etc.) and
+    // produced massive FPs on non-ORM codebases pre-fix.
+    if (detectOrm(node) === 'unknown') return null
 
     const methodName = getMethodName(node)
 

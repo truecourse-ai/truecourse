@@ -27,6 +27,15 @@ export type Validator =
   | 'class-validator'
   | 'effect-schema'
   | 'unknown'
+export type Orm =
+  | 'drizzle'
+  | 'prisma'
+  | 'sequelize'
+  | 'typeorm'
+  | 'mongoose'
+  | 'objection'
+  | 'lucid'
+  | 'unknown'
 
 // ---------------------------------------------------------------------------
 // Import source extraction (cached per program root)
@@ -156,6 +165,27 @@ export function detectValidator(node: SyntaxNode): Validator {
     if (src === 'runtypes') return 'runtypes'
     if (src === 'class-validator') return 'class-validator'
     if (src === 'effect' || src.startsWith('effect/') || src === '@effect/schema') return 'effect-schema'
+  }
+  return 'unknown'
+}
+
+/**
+ * Detect the ORM (Object-Relational Mapper) used by a file based on its imports.
+ *
+ * Returns 'unknown' if no recognized ORM is imported. Visitors that detect
+ * ORM-specific patterns (lazy loading, N+1 queries, etc.) should treat
+ * 'unknown' as "skip — this file doesn't use a supported ORM".
+ */
+export function detectOrm(node: SyntaxNode): Orm {
+  const sources = getImportSources(node)
+  for (const src of sources) {
+    if (src === 'drizzle-orm' || src.startsWith('drizzle-orm/')) return 'drizzle'
+    if (src === '@prisma/client' || src === 'prisma') return 'prisma'
+    if (src === 'sequelize' || src === 'sequelize-typescript') return 'sequelize'
+    if (src === 'typeorm') return 'typeorm'
+    if (src === 'mongoose') return 'mongoose'
+    if (src === 'objection') return 'objection'
+    if (src === '@adonisjs/lucid' || src.startsWith('@adonisjs/lucid/')) return 'lucid'
   }
   return 'unknown'
 }

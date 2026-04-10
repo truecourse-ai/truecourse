@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { isInsideLoop } from './_helpers.js'
+import { containsIdentifierExact } from '../../../_shared/javascript-helpers.js'
 
 export const jsonParseInLoopVisitor: CodeRuleVisitor = {
   ruleKey: 'performance/deterministic/json-parse-in-loop',
@@ -20,6 +21,10 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
     // Skip when parsing different data each iteration — only flag when the same
     // static value is parsed repeatedly. Dynamic arguments: variables that are
     // loop iterators, array element access, or function call results.
+    //
+    // Identifier matching uses containsIdentifierExact (real AST) instead of
+    // text.includes(varName), which leaked across substrings (varName "i"
+    // matched "iterator", "valid", etc.).
     const args = node.childForFieldName('arguments')
     if (args) {
       const firstArg = args.namedChildren[0]
@@ -37,16 +42,16 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
           while (current) {
             if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
               const left = current.childForFieldName('left')
-              if (left && left.text.includes(varName)) return null
+              if (left && containsIdentifierExact(left, varName)) return null
             }
             if (current.type === 'for_statement') {
               const init = current.childForFieldName('initializer')
-              if (init && init.text.includes(varName)) return null
+              if (init && containsIdentifierExact(init, varName)) return null
             }
             // .forEach / .map callback parameter
             if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
               const params = current.childForFieldName('parameters')
-              if (params && params.text.includes(varName)) {
+              if (params && containsIdentifierExact(params, varName)) {
                 const callParent = current.parent?.parent
                 if (callParent?.type === 'call_expression') return null
               }
@@ -56,18 +61,18 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
         }
         // Member expression like item.data — likely different per iteration
         if (firstArg.type === 'member_expression') {
-          const obj = firstArg.childForFieldName('object')
-          if (obj?.type === 'identifier') {
+          const innerObj = firstArg.childForFieldName('object')
+          if (innerObj?.type === 'identifier') {
             // Check if the object is a loop variable
             let current = node.parent
             while (current) {
               if (current.type === 'for_in_statement' || current.type === 'for_of_statement') {
                 const left = current.childForFieldName('left')
-                if (left && left.text.includes(obj.text)) return null
+                if (left && containsIdentifierExact(left, innerObj.text)) return null
               }
               if (current.type === 'arrow_function' || current.type === 'function_expression' || current.type === 'function') {
                 const params = current.childForFieldName('parameters')
-                if (params && params.text.includes(obj.text)) {
+                if (params && containsIdentifierExact(params, innerObj.text)) {
                   const callParent = current.parent?.parent
                   if (callParent?.type === 'call_expression') return null
                 }

@@ -185,8 +185,11 @@ with db.connect() as conn:
 // ---------------------------------------------------------------------------
 
 describe('database/deterministic/orm-lazy-load-in-loop', () => {
-  it('detects related() call inside for loop', () => {
+  // The rule now requires the file to import a known ORM. Without one,
+  // method names like .all() / .first() / .get() are too ambiguous to flag.
+  it('detects related() call inside for loop (with Lucid import)', () => {
     const violations = check(`
+import { BaseModel } from '@adonisjs/lucid/orm'
 for (const user of users) {
   const posts = await user.related('posts').fetch();
 }
@@ -195,14 +198,28 @@ for (const user of users) {
     expect(matches.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('detects chained .all() inside for loop', () => {
+  it('detects chained .all() inside for loop (with ORM import)', () => {
     const violations = check(`
+import { BaseModel } from '@adonisjs/lucid/orm'
 for (const user of users) {
   const posts = await user.posts.all();
 }
 `)
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/orm-lazy-load-in-loop')
     expect(matches.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does NOT flag .all() / .first() outside an ORM context', () => {
+    // Common non-ORM uses of .all(): Array.from, Map iteration, Promise.all results
+    const violations = check(`
+const map = new Map();
+for (const key of keys) {
+  const items = map.get(key);
+  const first = items.first();
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/orm-lazy-load-in-loop')
+    expect(matches).toHaveLength(0)
   })
 
   it('does not flag fetch() outside loop', () => {
