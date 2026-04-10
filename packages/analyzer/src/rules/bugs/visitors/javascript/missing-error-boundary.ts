@@ -20,10 +20,6 @@ export const missingErrorBoundaryVisitor: CodeRuleVisitor = {
     // Only check files that look like React components
     if (!sourceCode.includes('React') && !sourceCode.includes('react') && !sourceCode.includes('jsx')) return null
 
-    // Skip Next.js page/layout files — error boundaries are typically at the layout level
-    const routePattern = /\/(page|layout|loading|error|not-found|template)\.(tsx|jsx|ts|js)$/
-    if (routePattern.test(filePath)) return null
-
     // Check for data-fetching patterns
     // Only flag patterns where ErrorBoundary can actually catch errors:
     // useQuery/useSWR throw during render (catchable), Suspense uses error boundaries.

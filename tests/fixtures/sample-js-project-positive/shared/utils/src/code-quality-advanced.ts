@@ -67,3 +67,25 @@ export function applyMapping(target: Record<string, string>, source: Record<stri
     target[key] = val;
   }
 }
+
+// Positive: missing-react-memo — TS generics with comparison operators must NOT be flagged as JSX.
+// Pre-fix the rule used `text.includes('<') && text.includes('>')` and matched generics.
+export function compareGeneric<T extends number>(a: T, b: T): number {
+  if (a > b) return 1;
+  if (a < b) return -1;
+  return 0;
+}
+
+// Positive: missing-react-memo — nested generics in return type, no JSX
+export function pairBuilder<K, V>(key: K, value: V): Map<K, V> {
+  const map = new Map<K, V>();
+  map.set(key, value);
+  return map;
+}
+
+// Positive: floating-promise — sync function whose name happens to start with "create"
+// Pre-fix this would be flagged because "create" was in ASYNC_PREFIXES.
+// (Will be re-verified once Phase 4 migrates floating-promise to TypeQueryService.)
+export function createBufferSync(size: number): ArrayBuffer {
+  return new ArrayBuffer(size);
+}

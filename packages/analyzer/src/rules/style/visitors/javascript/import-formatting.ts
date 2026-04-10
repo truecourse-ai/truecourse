@@ -30,13 +30,13 @@ export const importFormattingVisitor: CodeRuleVisitor = {
         child.type !== 'comment' &&
         child.type !== 'empty_statement'
       ) {
-        // Skip 'use client' / 'use server' directives — these must appear before imports
+        // Skip directive prologues — string-literal expression statements that
+        // appear before any code (per the ECMAScript "directive prologue" spec).
+        // Covers 'use strict', 'use client', 'use server', 'use cache', and any
+        // future directive without hardcoding framework-specific names.
         if (child.type === 'expression_statement') {
           const expr = child.namedChildren[0]
-          if (expr?.type === 'string') {
-            const inner = expr.text.slice(1, -1) // strip quotes
-            if (inner === 'use client' || inner === 'use server') continue
-          }
+          if (expr?.type === 'string') continue
         }
         sawNonImport = true
       }

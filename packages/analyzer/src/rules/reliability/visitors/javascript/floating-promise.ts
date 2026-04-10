@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsJsx } from '../../../_shared/javascript-helpers.js'
 
 export const floatingPromiseVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/floating-promise',
@@ -93,12 +94,9 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
         componentAncestor.type === 'function_expression'
       ) {
         const body = componentAncestor.childForFieldName('body')
-        if (body) {
-          const bodyText = body.text
-          // Check for JSX returns — indicates a React component or JSX-containing function
-          if (/<[A-Za-z]/.test(bodyText)) {
-            return null
-          }
+        // Real AST JSX check — see _shared/javascript-helpers.ts
+        if (body && containsJsx(body)) {
+          return null
         }
       }
       componentAncestor = componentAncestor.parent

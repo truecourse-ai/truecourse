@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { findEnclosingFunctionNode, isInsideHook, findContainingStatement } from './_helpers.js'
+import { containsJsx } from '../../../_shared/javascript-helpers.js'
 
 const EXPENSIVE_ARRAY_METHODS = new Set(['sort', 'filter', 'reduce', 'flatMap', 'flat'])
 
@@ -75,18 +76,30 @@ export const missingUseMemoExpensiveVisitor: CodeRuleVisitor = {
       if (elements.length <= 5) return null
     }
 
-    // Skip in non-React files (no JSX elements or React imports)
+    // Skip in non-React files (no JSX elements or React imports).
+    // Use a real AST JSX check + check import sources, not text grep.
     let root = node.parent
     while (root?.parent) root = root.parent
     if (root) {
       let hasReactIndicator = false
+      // Check imports for any module starting with 'react' (react, react-dom, react-router, etc.)
       for (let i = 0; i < root.namedChildCount; i++) {
         const child = root.namedChild(i)
         if (!child) continue
-        if (child.type === 'import_statement' && child.text.includes('react')) { hasReactIndicator = true; break }
-        if (child.text.includes('jsx') || child.text.includes('JSX')) { hasReactIndicator = true; break }
+        if (child.type === 'import_statement') {
+          const sourceNode = child.childForFieldName('source')
+          const importedFrom = sourceNode?.text.replace(/^['"]|['"]$/g, '') ?? ''
+          if (importedFrom === 'react' || importedFrom.startsWith('react/') || importedFrom.startsWith('react-')) {
+            hasReactIndicator = true
+            break
+          }
+        }
       }
-      if (!hasReactIndicator && !/\.(tsx|jsx)$/.test(filePath)) return null
+      // Or check the file extension (.tsx/.jsx → React-flavoured)
+      if (!hasReactIndicator && !/\.(tsx|jsx)$/.test(filePath)) {
+        // As a final check, walk the AST to see if there's any actual JSX
+        if (!containsJsx(root)) return null
+      }
     }
 
     return makeViolation(

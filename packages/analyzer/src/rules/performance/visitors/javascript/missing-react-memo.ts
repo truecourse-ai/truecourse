@@ -1,6 +1,7 @@
 import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsJsx } from '../../../_shared/javascript-helpers.js'
 
 export const missingReactMemoVisitor: CodeRuleVisitor = {
   ruleKey: 'performance/deterministic/missing-react-memo',
@@ -37,13 +38,10 @@ export const missingReactMemoVisitor: CodeRuleVisitor = {
     // not React components. React components use PascalCase.
     if (funcName === funcName.toUpperCase()) return null
 
-    // Skip Next.js/framework route files — page, layout, loading, error, route handlers
-    const routePatterns = /\/(page|layout|loading|error|not-found|template|route)\.(tsx|jsx|ts|js)$/
-    if (routePatterns.test(filePath)) return null
+    // Check if component returns JSX (real AST check, not text grep — see _shared/javascript-helpers.ts)
+    if (!containsJsx(funcNode)) return null
 
-    // Check if component returns JSX
     const bodyText = funcNode.text
-    if (!bodyText.includes('<') || !bodyText.includes('>')) return null
 
     // Skip simple presentational components with no hooks — memo adds no value
     const hookPattern = /\buse[A-Z]\w*\s*\(/
