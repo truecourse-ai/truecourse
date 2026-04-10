@@ -43,7 +43,7 @@ function createVariable(
 
 const JS_SCOPE_NODES = new Set([
   'program',
-  'function_declaration', 'function', 'arrow_function',
+  'function_declaration', 'function', 'function_expression', 'arrow_function',
   'method_definition', 'generator_function_declaration', 'generator_function',
 ])
 
@@ -53,7 +53,7 @@ const JS_BLOCK_SCOPE_PARENTS = new Set([
 ])
 
 const JS_FUNCTION_NODES = new Set([
-  'function_declaration', 'function', 'arrow_function',
+  'function_declaration', 'function', 'function_expression', 'arrow_function',
   'method_definition', 'generator_function_declaration', 'generator_function',
 ])
 
@@ -821,10 +821,50 @@ export function buildScopeTree(
       }
     }
 
-    // Handle shorthand_property_identifier_pattern as declaration for JS
+    // Destructured bindings: `const { body } = req`, `const [first] = arr`.
+    // The binding identifier is a `shorthand_property_identifier_pattern` (object
+    // destructuring) — not an `identifier` — so the walker above misses it, AND
+    // declareJsVariable's `parent.type === 'variable_declarator'` check fails
+    // because the immediate parent is `object_pattern`, not variable_declarator.
+    // Walk up to find the enclosing variable_declarator and create the binding
+    // directly here.
     if (isJs && node.type === 'shorthand_property_identifier_pattern') {
-      // These are declarations in destructuring patterns
-      // Already handled by declareJsVariable through parent checks
+      // Find the enclosing variable_declarator (could be nested inside object_pattern,
+      // pair_pattern, array_pattern, etc.)
+      let ancestor: SyntaxNode | null = node.parent
+      let declarator: SyntaxNode | null = null
+      while (ancestor) {
+        if (ancestor.type === 'variable_declarator') {
+          declarator = ancestor
+          break
+        }
+        // Stop walking if we hit a function boundary — destructured params handled separately
+        if (
+          ancestor.type === 'formal_parameters' ||
+          ancestor.type === 'function_declaration' ||
+          ancestor.type === 'arrow_function' ||
+          ancestor.type === 'method_definition'
+        ) {
+          break
+        }
+        ancestor = ancestor.parent
+      }
+      if (declarator) {
+        const grandparent = declarator.parent
+        const name = node.text
+        if (grandparent?.type === 'variable_declaration') {
+          const targetScope = findFunctionScope(scope)
+          if (!targetScope.variables.has(name)) {
+            createVariable(name, 'var', node, targetScope, false)
+          }
+        } else if (grandparent?.type === 'lexical_declaration') {
+          const keyword = grandparent.child(0)?.text
+          const kind: DeclarationKind = keyword === 'const' ? 'const' : 'let'
+          if (!scope.variables.has(name)) {
+            createVariable(name, kind, node, scope, false)
+          }
+        }
+      }
     }
 
     // Recurse children

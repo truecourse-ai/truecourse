@@ -307,13 +307,26 @@ app.post('/users', async (req, res) => {
     expect(matches.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('detects response.data passed directly to insert()', () => {
+  it('detects destructured req.body alias passed to insert()', () => {
     const violations = check(`
-const resp = await fetch('/api/data');
-await Record.insert(response.data);
+app.post('/users', async (req, res) => {
+  const { body } = req;
+  await Record.insert(body);
+});
 `)
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/unvalidated-external-data')
     expect(matches.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('does NOT flag a local var named data initialized from non-request source', () => {
+    const violations = check(`
+async function syncFromCache(userId: string) {
+  const data = await cache.get(userId);
+  await Record.insert(data);
+}
+`)
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/unvalidated-external-data')
+    expect(matches).toHaveLength(0)
   })
 
   it('does not flag create with inline literal object', () => {

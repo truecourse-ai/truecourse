@@ -91,3 +91,11 @@ export async function deleteAll() {
 export async function createFromRequest(req: any) {
   await User.create(req.body);
 }
+
+// VIOLATION: database/deterministic/unvalidated-external-data
+// Destructured alias of req.body — pre-fix this was MISSED because the rule
+// only matched the literal substring "req.body". Now caught via scope analysis.
+export async function createFromDestructuredRequest(req: any) {
+  const { body } = req;
+  await User.create(body);
+}

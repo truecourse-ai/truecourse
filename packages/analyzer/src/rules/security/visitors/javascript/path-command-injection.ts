@@ -1,11 +1,14 @@
 import type { CodeRuleVisitor } from '../../../types.js'
+import type { DataFlowContext } from '../../../../data-flow/types.js'
 import { makeViolation } from '../../../types.js'
+import { findUserInputAccess } from '../../../_shared/javascript-helpers.js'
 
 export const pathCommandInjectionVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/path-command-injection',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
-  visit(node, filePath, sourceCode) {
+  needsDataFlow: true,
+  visit(node, filePath, sourceCode, dataFlow?: DataFlowContext) {
     const fn = node.childForFieldName('function')
     if (!fn) return null
 
@@ -23,12 +26,9 @@ export const pathCommandInjectionVisitor: CodeRuleVisitor = {
     const args = node.childForFieldName('arguments')
     if (!args) return null
 
-    // Check if any argument references user input patterns
+    // Real AST + scope-aware user input detection. See _shared/javascript-helpers.ts.
     for (const arg of args.namedChildren) {
-      const argText = arg.text.toLowerCase()
-      if (argText.includes('req.') || argText.includes('params') ||
-          argText.includes('query') || argText.includes('body') ||
-          argText.includes('userinput') || argText.includes('user_input')) {
+      if (findUserInputAccess(arg, dataFlow)) {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Path-based command injection',

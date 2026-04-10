@@ -1,5 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
+import type { DataFlowContext } from '../../../../data-flow/types.js'
 import { makeViolation } from '../../../types.js'
+import { findUserInputAccess } from '../../../_shared/javascript-helpers.js'
 
 const TEMPLATE_ENGINE_METHODS = new Set(['render', 'compile', 'template', 'renderString', 'renderFile'])
 
@@ -7,7 +9,8 @@ export const dynamicallyConstructedTemplateVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/dynamically-constructed-template',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
-  visit(node, filePath, sourceCode) {
+  needsDataFlow: true,
+  visit(node, filePath, sourceCode, dataFlow?: DataFlowContext) {
     const fn = node.childForFieldName('function')
     if (!fn) return null
 
@@ -30,35 +33,28 @@ export const dynamicallyConstructedTemplateVisitor: CodeRuleVisitor = {
     // Flag if the first arg is a template literal with user-input substitution
     if (firstArg.type === 'template_string') {
       const hasSubstitution = firstArg.namedChildren.some((c) => c.type === 'template_substitution')
-      if (hasSubstitution) {
-        const argText = firstArg.text.toLowerCase()
-        if (argText.includes('req.') || argText.includes('params') ||
-            argText.includes('query') || argText.includes('body') ||
-            argText.includes('input') || argText.includes('user')) {
-          return makeViolation(
-            this.ruleKey, node, filePath, 'high',
-            'Dynamically constructed template',
-            `${methodName}() called with a template string containing user-controlled input. This may enable Server-Side Template Injection (SSTI).`,
-            sourceCode,
-            'Never construct template strings from user input. Pass user data as template variables instead.',
-          )
-        }
-      }
-    }
-
-    // Flag if the first arg is a binary_expression (concatenation) including req. access
-    if (firstArg.type === 'binary_expression') {
-      const argText = firstArg.text.toLowerCase()
-      if (argText.includes('req.') || argText.includes('params') ||
-          argText.includes('query') || argText.includes('body')) {
+      // Real AST + scope-aware user input detection (see _shared/javascript-helpers.ts).
+      // Walks all template substitutions to find user input references.
+      if (hasSubstitution && findUserInputAccess(firstArg, dataFlow)) {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Dynamically constructed template',
-          `${methodName}() called with a concatenated string containing user-controlled input. This may enable SSTI.`,
+          `${methodName}() called with a template string containing user-controlled input. This may enable Server-Side Template Injection (SSTI).`,
           sourceCode,
           'Never construct template strings from user input. Pass user data as template variables instead.',
         )
       }
+    }
+
+    // Flag if the first arg is a binary_expression (concatenation) referencing user input
+    if (firstArg.type === 'binary_expression' && findUserInputAccess(firstArg, dataFlow)) {
+      return makeViolation(
+        this.ruleKey, node, filePath, 'high',
+        'Dynamically constructed template',
+        `${methodName}() called with a concatenated string containing user-controlled input. This may enable SSTI.`,
+        sourceCode,
+        'Never construct template strings from user input. Pass user data as template variables instead.',
+      )
     }
 
     return null
