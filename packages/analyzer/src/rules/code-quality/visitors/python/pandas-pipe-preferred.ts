@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { SyntaxNode } from 'tree-sitter'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 const CHAIN_THRESHOLD = 4
 
@@ -12,6 +13,11 @@ export const pythonPandasPipePreferredVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node: SyntaxNode, filePath, sourceCode) {
+    // Only flag in files that actually use pandas. Pre-fix this fired on
+    // SQLAlchemy `.filter().join().group_by()` chains, Django QuerySet
+    // chains, and any codebase with 4+ chained method calls.
+    if (!importsPandas(node)) return null
+
     // Count chained attribute calls
     let depth = 0
     let cur: SyntaxNode | null = node

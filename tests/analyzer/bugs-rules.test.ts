@@ -2981,6 +2981,37 @@ def foo(ts=datetime.now()):
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/function-call-in-default-argument');
     expect(matches).toHaveLength(0);
   });
+
+  it('does NOT flag FastAPI Depends()', () => {
+    // FastAPI Depends is the idiomatic DI pattern, not a bug.
+    const violations = check(`
+from fastapi import FastAPI, Depends
+def route(db=Depends(get_db)):
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/function-call-in-default-argument');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag FastAPI Query/Body/Path/Header/Cookie/Form/File/Security', () => {
+    const violations = check(`
+from fastapi import Query, Body, Path
+def route(limit=Query(10), item=Body(...), id=Path(...)):
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/function-call-in-default-argument');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag fastapi.Depends (qualified form)', () => {
+    const violations = check(`
+import fastapi
+def route(db=fastapi.Depends(get_db)):
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/function-call-in-default-argument');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

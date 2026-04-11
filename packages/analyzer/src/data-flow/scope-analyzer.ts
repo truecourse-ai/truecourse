@@ -187,10 +187,13 @@ function isPropertyAccess(node: SyntaxNode): boolean {
   if (parent.type === 'member_expression' || parent.type === 'attribute') {
     const prop = parent.childForFieldName('property')
       ?? parent.childForFieldName('attribute')
-    return prop === node
+    // Compare node IDs, not proxy objects — `childForFieldName` returns a
+    // fresh SyntaxNode proxy on each call, so `prop === node` is flaky even
+    // when both refer to the same underlying AST node.
+    return prop?.id === node.id
   }
   // Python keyword argument keys (e.g., datefmt=...) are not variable references
-  if (parent.type === 'keyword_argument' && parent.childForFieldName('name') === node) return true
+  if (parent.type === 'keyword_argument' && parent.childForFieldName('name')?.id === node.id) return true
   return false
 }
 
@@ -203,11 +206,11 @@ function isJsDeclarationPosition(node: SyntaxNode): boolean {
   if (!parent) return false
 
   // variable_declarator name
-  if (parent.type === 'variable_declarator' && parent.childForFieldName('name') === node) return true
+  if (parent.type === 'variable_declarator' && parent.childForFieldName('name')?.id === node.id) return true
   // function/class declaration name
   if (
     (parent.type === 'function_declaration' || parent.type === 'generator_function_declaration' || parent.type === 'class_declaration') &&
-    parent.childForFieldName('name') === node
+    parent.childForFieldName('name')?.id === node.id
   ) return true
   // formal parameters
   if (parent.type === 'formal_parameters' || parent.type === 'required_parameter' || parent.type === 'optional_parameter') return true
@@ -216,18 +219,18 @@ function isJsDeclarationPosition(node: SyntaxNode): boolean {
   // rest_pattern / rest_element child
   if (parent.type === 'rest_pattern' || parent.type === 'rest_element') return true
   // pair_pattern value side
-  if (parent.type === 'pair_pattern' && parent.childForFieldName('value') === node) return true
+  if (parent.type === 'pair_pattern' && parent.childForFieldName('value')?.id === node.id) return true
   // assignment_pattern left side
-  if (parent.type === 'assignment_pattern' && parent.childForFieldName('left') === node) return true
+  if (parent.type === 'assignment_pattern' && parent.childForFieldName('left')?.id === node.id) return true
   // array_pattern / object_pattern direct child
   if (parent.type === 'array_pattern' || parent.type === 'object_pattern') return true
   // import specifiers
   if (parent.type === 'import_specifier' || parent.type === 'import_clause' || parent.type === 'namespace_import') {
     // For import_specifier, the local name (alias or original) is the declaration
     const alias = parent.childForFieldName('alias')
-    if (alias) return alias === node
+    if (alias) return alias.id === node.id
     const nameField = parent.childForFieldName('name')
-    if (nameField === node) return true
+    if (nameField?.id === node.id) return true
     // namespace_import: import * as X
     return true
   }
@@ -246,13 +249,13 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
   if (!parent) return false
 
   // assignment left
-  if (parent.type === 'assignment' && parent.childForFieldName('left') === node) return true
+  if (parent.type === 'assignment' && parent.childForFieldName('left')?.id === node.id) return true
   // augmented assignment left
-  if (parent.type === 'augmented_assignment' && parent.childForFieldName('left') === node) return true
+  if (parent.type === 'augmented_assignment' && parent.childForFieldName('left')?.id === node.id) return true
   // function/class def name
   if (
     (parent.type === 'function_definition' || parent.type === 'class_definition') &&
-    parent.childForFieldName('name') === node
+    parent.childForFieldName('name')?.id === node.id
   ) return true
   // parameters
   if (
@@ -261,9 +264,9 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
     parent.type === 'list_splat_pattern' || parent.type === 'dictionary_splat_pattern'
   ) return true
   // for statement left
-  if (parent.type === 'for_statement' && parent.childForFieldName('left') === node) return true
+  if (parent.type === 'for_statement' && parent.childForFieldName('left')?.id === node.id) return true
   // for_in_clause (comprehensions)
-  if (parent.type === 'for_in_clause' && parent.childForFieldName('left') === node) return true
+  if (parent.type === 'for_in_clause' && parent.childForFieldName('left')?.id === node.id) return true
   // except clause
   if (parent.type === 'except_clause') {
     // The name after 'as' in `except E as name`
@@ -273,7 +276,7 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
       if (c && c.type === 'identifier') nameChildren.push(c)
     }
     // The last identifier in except clause is the binding name (if there's 'as')
-    if (nameChildren.length > 0 && nameChildren[nameChildren.length - 1] === node) return true
+    if (nameChildren.length > 0 && nameChildren[nameChildren.length - 1].id === node.id) return true
   }
   // except clause with as_pattern: `except (E1, E2) as name`
   if (parent.type === 'as_pattern_target') return true
@@ -281,9 +284,9 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
   if (parent.type === 'import_statement' || parent.type === 'import_from_statement') return true
   if (parent.type === 'aliased_import') {
     const alias = parent.childForFieldName('alias')
-    if (alias) return alias === node
+    if (alias) return alias.id === node.id
     const nameField = parent.childForFieldName('name')
-    return nameField === node
+    return nameField?.id === node.id
   }
   if (parent.type === 'dotted_name' && (parent.parent?.type === 'import_statement' || parent.parent?.type === 'import_from_statement' || parent.parent?.type === 'future_import_statement')) return true
   // global/nonlocal statement
@@ -292,9 +295,9 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
   if (parent.type === 'expression_list' || parent.type === 'pattern_list' || parent.type === 'tuple_pattern') {
     const grandparent = parent.parent
     if (grandparent) {
-      if (grandparent.type === 'assignment' && grandparent.childForFieldName('left') === parent) return true
-      if (grandparent.type === 'for_statement' && grandparent.childForFieldName('left') === parent) return true
-      if (grandparent.type === 'for_in_clause' && grandparent.childForFieldName('left') === parent) return true
+      if (grandparent.type === 'assignment' && grandparent.childForFieldName('left')?.id === parent.id) return true
+      if (grandparent.type === 'for_statement' && grandparent.childForFieldName('left')?.id === parent.id) return true
+      if (grandparent.type === 'for_in_clause' && grandparent.childForFieldName('left')?.id === parent.id) return true
     }
   }
 
@@ -316,7 +319,11 @@ export function buildScopeTree(
 ): { rootScope: Scope; deferredRefs: DeferredReference[] } {
   nextScopeId = 0
   const isJs = isJsLanguage(language)
-  const nodeToScope = new Map<SyntaxNode, Scope>()
+  // Key by `node.id` (a stable number), NOT by the SyntaxNode proxy itself.
+  // Tree-sitter's JS binding returns a fresh proxy on every field / child
+  // access, so `node.parent === node.parent` can be false even when both
+  // refer to the same AST node. Using the numeric id makes lookups stable.
+  const nodeToScope = new Map<number, Scope>()
   const deferredRefs: DeferredReference[] = []
 
   // Track Python global/nonlocal declarations per function scope
@@ -325,7 +332,7 @@ export function buildScopeTree(
 
   // Create root scope
   const rootScope = createScope('module', rootNode, null)
-  nodeToScope.set(rootNode, rootScope)
+  nodeToScope.set(rootNode.id, rootScope)
 
   // ---------------------------------------------------------------------------
   // Pass 1: Build scope tree, collect declarations and references
@@ -360,7 +367,7 @@ export function buildScopeTree(
   function findCurrentScope(node: SyntaxNode): Scope {
     let current: SyntaxNode | null = node
     while (current) {
-      const scope = nodeToScope.get(current)
+      const scope = nodeToScope.get(current.id)
       if (scope) return scope
       current = current.parent
     }
@@ -397,7 +404,7 @@ export function buildScopeTree(
     // function/generator declaration name
     if (
       (parent.type === 'function_declaration' || parent.type === 'generator_function_declaration') &&
-      parent.childForFieldName('name') === node
+      parent.childForFieldName('name')?.id === node.id
     ) {
       // Functions are hoisted to the enclosing function scope
       const targetScope = findFunctionScope(scope)
@@ -408,7 +415,7 @@ export function buildScopeTree(
     }
 
     // class declaration name
-    if (parent.type === 'class_declaration' && parent.childForFieldName('name') === node) {
+    if (parent.type === 'class_declaration' && parent.childForFieldName('name')?.id === node.id) {
       if (!scope.variables.has(node.text)) {
         createVariable(node.text, 'class', node, scope, false)
       }
@@ -424,7 +431,7 @@ export function buildScopeTree(
       // Find the function scope (which is the scope created for the function body)
       const funcNode = findFunctionAncestor(node)
       if (funcNode) {
-        const funcScope = nodeToScope.get(funcNode)
+        const funcScope = nodeToScope.get(funcNode.id)
         if (funcScope && !funcScope.variables.has(node.text)) {
           createVariable(node.text, 'parameter', node, funcScope, false)
         }
@@ -436,7 +443,7 @@ export function buildScopeTree(
     if (parent.type === 'rest_pattern' || parent.type === 'rest_element') {
       const funcNode = findFunctionAncestor(node)
       if (funcNode) {
-        const funcScope = nodeToScope.get(funcNode)
+        const funcScope = nodeToScope.get(funcNode.id)
         if (funcScope && !funcScope.variables.has(node.text)) {
           createVariable(node.text, 'parameter', node, funcScope, false)
         }
@@ -449,7 +456,7 @@ export function buildScopeTree(
       if (isInFormalParameters(node)) {
         const funcNode = findFunctionAncestor(node)
         if (funcNode) {
-          const funcScope = nodeToScope.get(funcNode)
+          const funcScope = nodeToScope.get(funcNode.id)
           if (funcScope && !funcScope.variables.has(node.text)) {
             createVariable(node.text, 'parameter', node, funcScope, false)
           }
@@ -464,7 +471,7 @@ export function buildScopeTree(
       if (isInFormalParameters(node)) {
         const funcNode = findFunctionAncestor(node)
         if (funcNode) {
-          const funcScope = nodeToScope.get(funcNode)
+          const funcScope = nodeToScope.get(funcNode.id)
           if (funcScope && !funcScope.variables.has(parent.text)) {
             createVariable(parent.text, 'parameter', parent, funcScope, false)
           }
@@ -485,7 +492,7 @@ export function buildScopeTree(
 
     // Catch clause parameter
     if (parent.type === 'catch_clause') {
-      const catchScope = nodeToScope.get(parent)
+      const catchScope = nodeToScope.get(parent.id)
       if (catchScope && !catchScope.variables.has(node.text)) {
         createVariable(node.text, 'catch-parameter', node, catchScope, false)
       }
@@ -524,7 +531,7 @@ export function buildScopeTree(
     }
 
     // function definition name — register in the ENCLOSING scope, not the function's own scope
-    if (parent.type === 'function_definition' && parent.childForFieldName('name') === node) {
+    if (parent.type === 'function_definition' && parent.childForFieldName('name')?.id === node.id) {
       const enclosing = scope.parent ?? scope
       if (!enclosing.variables.has(node.text)) {
         createVariable(node.text, 'function', node, enclosing, false)
@@ -533,7 +540,7 @@ export function buildScopeTree(
     }
 
     // class definition name — register in the ENCLOSING scope
-    if (parent.type === 'class_definition' && parent.childForFieldName('name') === node) {
+    if (parent.type === 'class_definition' && parent.childForFieldName('name')?.id === node.id) {
       const enclosing = scope.parent ?? scope
       if (!enclosing.variables.has(node.text)) {
         createVariable(node.text, 'class', node, enclosing, false)
@@ -549,7 +556,7 @@ export function buildScopeTree(
     ) {
       const funcNode = findPyFunctionAncestor(node)
       if (funcNode) {
-        const funcScope = nodeToScope.get(funcNode)
+        const funcScope = nodeToScope.get(funcNode.id)
         if (funcScope && !funcScope.variables.has(node.text)) {
           createVariable(node.text, 'parameter', node, funcScope, false)
         }
@@ -567,7 +574,7 @@ export function buildScopeTree(
     if (parent.type === 'aliased_import') {
       const alias = parent.childForFieldName('alias')
       const localName = alias ? alias.text : node.text
-      if (alias === node || (!alias && parent.childForFieldName('name') === node)) {
+      if (alias?.id === node.id || (!alias && parent.childForFieldName('name')?.id === node.id)) {
         if (!scope.variables.has(localName)) {
           createVariable(localName, 'import', node, scope, false)
         }
@@ -576,7 +583,7 @@ export function buildScopeTree(
     }
     if (parent.type === 'dotted_name' && parent.parent?.type === 'import_statement') {
       // import foo.bar -> only 'foo' is bound
-      if (parent.namedChild(0) === node && !scope.variables.has(node.text)) {
+      if (parent.namedChild(0)?.id === node.id && !scope.variables.has(node.text)) {
         createVariable(node.text, 'import', node, scope, false)
       }
       return
@@ -585,7 +592,7 @@ export function buildScopeTree(
       // from foo.bar import baz -> module path identifiers are not bindings,
       // but imported names (baz) are. Distinguish via module_name field.
       const moduleName = parent.parent.childForFieldName('module_name')
-      if (parent === moduleName) {
+      if (parent.id === moduleName?.id) {
         // This is the module path (foo.bar) — not a binding
         return
       }
@@ -606,7 +613,7 @@ export function buildScopeTree(
     // for statement / for_in_clause
     if (
       (parent.type === 'for_statement' || parent.type === 'for_in_clause') &&
-      parent.childForFieldName('left') === node
+      parent.childForFieldName('left')?.id === node.id
     ) {
       const targetScope = resolveTargetScopePy(node.text, scope)
       if (!targetScope.variables.has(node.text)) {
@@ -626,7 +633,7 @@ export function buildScopeTree(
     // Assignment left side
     if (
       (parent.type === 'assignment' || parent.type === 'augmented_assignment') &&
-      parent.childForFieldName('left') === node
+      parent.childForFieldName('left')?.id === node.id
     ) {
       const isPrivate = node.text.startsWith('_') && !node.text.startsWith('__')
       const targetScope = resolveTargetScopePy(node.text, scope)
@@ -645,9 +652,9 @@ export function buildScopeTree(
       const grandparent = parent.parent
       if (grandparent) {
         const isLeftSide =
-          (grandparent.type === 'assignment' && grandparent.childForFieldName('left') === parent) ||
-          (grandparent.type === 'for_statement' && grandparent.childForFieldName('left') === parent) ||
-          (grandparent.type === 'for_in_clause' && grandparent.childForFieldName('left') === parent)
+          (grandparent.type === 'assignment' && grandparent.childForFieldName('left')?.id === parent.id) ||
+          (grandparent.type === 'for_statement' && grandparent.childForFieldName('left')?.id === parent.id) ||
+          (grandparent.type === 'for_in_clause' && grandparent.childForFieldName('left')?.id === parent.id)
         if (isLeftSide) {
           const kind: DeclarationKind = grandparent.type === 'assignment' ? 'assignment' : 'for-variable'
           const targetScope = resolveTargetScopePy(node.text, scope)
@@ -724,9 +731,9 @@ export function buildScopeTree(
   function getImportLocalName(node: SyntaxNode, parent: SyntaxNode): string | null {
     if (parent.type === 'import_specifier') {
       const alias = parent.childForFieldName('alias')
-      if (alias) return alias === node ? alias.text : null
+      if (alias) return alias.id === node.id ? alias.text : null
       const nameField = parent.childForFieldName('name')
-      return nameField === node ? node.text : null
+      return nameField?.id === node.id ? node.text : null
     }
     if (parent.type === 'import_clause') {
       return node.text
@@ -741,9 +748,9 @@ export function buildScopeTree(
   if (!isJs) {
     function collectGlobalNonlocal(node: SyntaxNode, scope: Scope): void {
       const scopeKind = getScopeKind(node)
-      if (scopeKind && node !== rootNode) {
+      if (scopeKind && node.id !== rootNode.id) {
         const newScope = createScope(scopeKind, node, scope)
-        nodeToScope.set(node, newScope)
+        nodeToScope.set(node.id, newScope)
         for (let i = 0; i < node.childCount; i++) {
           const child = node.child(i)
           if (child) collectGlobalNonlocal(child, newScope)
@@ -785,7 +792,7 @@ export function buildScopeTree(
     // Clear scope tree to rebuild properly (keep global/nonlocal info)
     rootScope.children = []
     nodeToScope.clear()
-    nodeToScope.set(rootNode, rootScope)
+    nodeToScope.set(rootNode.id, rootScope)
     // Clear variables too - they'll be recreated
     rootScope.variables = new Map()
     nextScopeId = 1 // root is 0
@@ -796,11 +803,11 @@ export function buildScopeTree(
     let scope = currentScope
 
     // Check if this node creates a new scope
-    if (node !== rootNode) {
+    if (node.id !== rootNode.id) {
       const scopeKind = getScopeKind(node)
       if (scopeKind) {
         scope = createScope(scopeKind, node, currentScope)
-        nodeToScope.set(node, scope)
+        nodeToScope.set(node.id, scope)
       }
     }
 

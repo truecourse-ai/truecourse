@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 /**
  * Detects pd.merge() or DataFrame.merge() without explicit `on` and `how` parameters.
@@ -9,6 +10,10 @@ export const pythonPandasMergeParametersVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
+    // Gate on file actually using pandas. `merge()` is an extremely common
+    // method name — git merge, dict merge, string merge, etc.
+    if (!importsPandas(node)) return null
+
     const fn = node.childForFieldName('function')
     if (!fn) return null
 

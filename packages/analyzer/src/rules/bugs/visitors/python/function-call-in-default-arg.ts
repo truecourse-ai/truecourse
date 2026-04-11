@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { SAFE_DEFAULT_CALLS } from './_helpers.js'
+import { isFastApiDependsCall } from '../../../_shared/python-framework-detection.js'
 
 export const pythonFunctionCallInDefaultArgVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/function-call-in-default-argument',
@@ -15,6 +16,13 @@ export const pythonFunctionCallInDefaultArgVisitor: CodeRuleVisitor = {
 
     // Allow known safe calls like list(), dict(), etc. (although they'd be caught by mutable-default-arg)
     if (fn.type === 'identifier' && SAFE_DEFAULT_CALLS.has(fn.text)) return null
+
+    // FastAPI dependency-injection helpers (Depends, Query, Body, Path, Header,
+    // Cookie, Form, File, Security) are the idiomatic way to declare route
+    // parameters — they are explicitly designed to be used as default values
+    // and DO NOT suffer from the mutable-default-arg problem. Pre-fix this
+    // rule generated ~150 FPs on arnata-brain's FastAPI routes.
+    if (isFastApiDependsCall(value)) return null
 
     // Flag any other function call — it runs once at definition time
     const paramName = node.childForFieldName('name')?.text ?? 'parameter'

@@ -13,12 +13,15 @@ function collectNames(pattern: SyntaxNode): string[] {
 
 function countUsages(name: string, scope: SyntaxNode, skipNode: SyntaxNode): number {
   let count = 0
+  // Compare by `node.id`, not by SyntaxNode identity — tree-sitter returns a
+  // fresh proxy on every access, so `n === skipNode` is non-deterministic.
+  const skipId = skipNode.id
   function walk(n: SyntaxNode) {
-    if (n === skipNode) return
+    if (n.id === skipId) return
     if (n.type === 'identifier' && n.text === name) {
       // Check it's not part of a declaration
       const p = n.parent
-      if (p?.type === 'assignment' && p.childForFieldName('left') === n) return
+      if (p?.type === 'assignment' && p.childForFieldName('left')?.id === n.id) return
       count++
     }
     for (let i = 0; i < n.childCount; i++) {

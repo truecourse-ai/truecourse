@@ -16,10 +16,14 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
   const { rootScope, deferredRefs } = buildScopeTree(rootNode, language)
   const knownGlobals = isJsLanguage(language) ? JS_GLOBALS : PYTHON_GLOBALS
 
-  // Build node-to-scope lookup for getScopeForNode
-  const nodeToScope = new Map<SyntaxNode, Scope>()
+  // Build node-to-scope lookup for getScopeForNode.
+  // Key by `node.id` (a stable number), NOT the SyntaxNode proxy itself —
+  // tree-sitter's JS binding returns a fresh proxy on every field/child
+  // access, so a Map keyed by the proxy is non-deterministic (two calls to
+  // `node.parent` may return two different proxies for the same AST node).
+  const nodeToScope = new Map<number, Scope>()
   function indexScopes(scope: Scope): void {
-    nodeToScope.set(scope.node, scope)
+    nodeToScope.set(scope.node.id, scope)
     for (const child of scope.children) {
       indexScopes(child)
     }
@@ -71,7 +75,7 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
     // Walk up from the node to find its enclosing scope
     let current: SyntaxNode | null = node
     while (current) {
-      const scope = nodeToScope.get(current)
+      const scope = nodeToScope.get(current.id)
       if (scope) return scope
       current = current.parent
     }
@@ -175,12 +179,12 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
         if (parent) {
           if (
             (parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression' || parent.type === 'assignment' || parent.type === 'augmented_assignment') &&
-            parent.childForFieldName('left') === use.node
+            parent.childForFieldName('left')?.id === use.node.id
           ) {
             isWritten = true
           } else if (parent.type === 'call_expression' || parent.type === 'call') {
             const func = parent.childForFieldName('function')
-            if (func === use.node) {
+            if (func?.id === use.node.id) {
               isCalled = true
             } else {
               isRead = true

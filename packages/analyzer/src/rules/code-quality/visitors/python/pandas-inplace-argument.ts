@@ -1,11 +1,16 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 export const pythonPandasInplaceArgumentVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/pandas-inplace-argument',
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
+    // Gate on file actually using pandas. Other libraries also accept
+    // `inplace=True` as a kwarg — we shouldn't flag them.
+    if (!importsPandas(node)) return null
+
     const args = node.childForFieldName('arguments')
     if (!args) return null
 

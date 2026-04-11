@@ -1,20 +1,11 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import {
+  importsFastApi,
+  isFastApiDependsCall,
+} from '../../../_shared/python-framework-detection.js'
 
 type SyntaxNode = import('tree-sitter').SyntaxNode
-
-function hasDependsCall(defaultValue: SyntaxNode): boolean {
-  if (defaultValue.type === 'call') {
-    const fn = defaultValue.childForFieldName('function')
-    if (!fn) return false
-    if (fn.type === 'identifier' && fn.text === 'Depends') return true
-    if (fn.type === 'attribute') {
-      const attr = fn.childForFieldName('attribute')
-      return attr?.text === 'Depends'
-    }
-  }
-  return false
-}
 
 function isAnnotatedType(annotation: SyntaxNode): boolean {
   // Annotated[type, Depends(...)]
@@ -30,13 +21,20 @@ export const pythonFastapiNonAnnotatedDependencyVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['function_definition'],
   visit(node, filePath, sourceCode) {
+    // Only applies to FastAPI files. Pre-fix this fired on any file that
+    // happened to call a function named `Depends()`, including custom
+    // internal helpers in non-FastAPI codebases.
+    if (!importsFastApi(node)) return null
+
     const params = node.childForFieldName('parameters')
     if (!params) return null
 
     for (const param of params.namedChildren) {
       if (param.type === 'default_parameter' || param.type === 'typed_default_parameter') {
         const defaultValue = param.childForFieldName('value')
-        if (!defaultValue || !hasDependsCall(defaultValue)) continue
+        // Match any FastAPI DI helper (Depends, Query, Body, Path, Header,
+        // Cookie, Form, File, Security) — not just the literal `Depends`.
+        if (!defaultValue || !isFastApiDependsCall(defaultValue)) continue
 
         const annotation = param.childForFieldName('type')
         if (!annotation || !isAnnotatedType(annotation)) {

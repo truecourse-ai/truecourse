@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 /**
  * Detects pd.to_datetime() with dayfirst=True but a date string like "2024-01-15"
@@ -10,6 +11,10 @@ export const pythonPandasDatetimeFormatVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
+    // Gate on file actually using pandas. `to_datetime` is also used by
+    // `datetime` and other libraries.
+    if (!importsPandas(node)) return null
+
     const fn = node.childForFieldName('function')
     if (!fn) return null
 

@@ -1,13 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { SyntaxNode } from 'tree-sitter'
-
-function inheritsFromModel(node: SyntaxNode): boolean {
-  const args = node.childForFieldName('superclasses')
-  if (!args) return false
-  const text = args.text
-  return text.includes('models.Model') || text.includes('Model')
-}
+import { importsDjango, isDjangoModelClass } from '../../../_shared/python-framework-detection.js'
 
 function hasStrMethod(classBody: SyntaxNode): boolean {
   for (const child of classBody.namedChildren) {
@@ -29,7 +23,11 @@ export const pythonDjangoModelWithoutStrVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['class_definition'],
   visit(node, filePath, sourceCode) {
-    if (!inheritsFromModel(node)) return null
+    // Gate on the file actually importing Django. Pre-fix this rule fired on
+    // Pydantic `BaseModel`, SQLAlchemy `DeclarativeModel`, and any class whose
+    // superclass text happened to contain "Model".
+    if (!importsDjango(node)) return null
+    if (!isDjangoModelClass(node)) return null
 
     const classBody = node.childForFieldName('body')
     if (!classBody) return null

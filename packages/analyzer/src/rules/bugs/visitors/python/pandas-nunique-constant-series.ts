@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 // Detects: series.nunique() called on a series that was assigned a constant value
 // e.g., pd.Series([1, 1, 1]).nunique() always returns 1
@@ -10,6 +11,9 @@ export const pythonPandasNuniqueConstantSeriesVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
+    // Gate on file actually using pandas.
+    if (!importsPandas(node)) return null
+
     // Match: <expr>.nunique()
     const func = node.childForFieldName('function')
     if (!func || func.type !== 'attribute') return null

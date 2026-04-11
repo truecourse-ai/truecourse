@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 const DEPRECATED_ATTRS: Record<string, string> = {
   isnull: 'isna',
@@ -12,6 +13,10 @@ export const pythonPandasDeprecatedAccessorVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['attribute'],
   visit(node, filePath, sourceCode) {
+    // Gate on file actually using pandas. `.isnull` in particular collides
+    // with SQLAlchemy filters and custom code outside pandas contexts.
+    if (!importsPandas(node)) return null
+
     const attr = node.childForFieldName('attribute')
     if (!attr) return null
 

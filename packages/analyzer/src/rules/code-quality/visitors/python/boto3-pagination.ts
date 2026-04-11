@@ -1,5 +1,7 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsAwsSdk } from '../../../_shared/python-framework-detection.js'
 
 // Common boto3 methods that return paginated results
 const PAGINATED_METHODS = new Set([
@@ -14,24 +16,52 @@ const PAGINATED_METHODS = new Set([
   'list_distributions', 'list_invalidations',
 ])
 
+/**
+ * True if `node` (a call expression) is a method call on an object that was
+ * produced by `client.get_paginator(...).paginate(...)`. We walk the attribute
+ * chain to see if any ancestor call's function is a paginator construction.
+ *
+ * Pre-fix this was a `node.text.includes('get_paginator')` check which matched
+ * the string inside comments, docstrings, and unrelated variables.
+ */
+function isInsidePaginatorChain(node: SyntaxNode): boolean {
+  // Walk up the expression chain. If this call's receiver is a call to
+  // `get_paginator(...).paginate(...)`, skip.
+  const fn = node.childForFieldName('function')
+  if (fn?.type === 'attribute') {
+    const obj = fn.childForFieldName('object')
+    if (obj?.type === 'call') {
+      const innerFn = obj.childForFieldName('function')
+      if (innerFn?.type === 'attribute') {
+        const innerAttr = innerFn.childForFieldName('attribute')
+        if (innerAttr?.text === 'get_paginator' || innerAttr?.text === 'paginate') {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
 export const pythonBoto3PaginationVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/boto3-pagination',
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
+    // Gate on the file actually using the AWS SDK. Pre-fix this rule fired
+    // on SQLAlchemy `.query()` / `.filter()`, Redis `.scan()`, and any
+    // `list_*` helper in unrelated codebases — the method names in
+    // PAGINATED_METHODS are too generic to check without a framework gate.
+    if (!importsAwsSdk(node)) return null
+
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'attribute') return null
 
     const attr = fn.childForFieldName('attribute')
     if (!attr || !PAGINATED_METHODS.has(attr.text)) return null
 
-    // Make sure it's not using a paginator (look for get_paginator in parent expression)
-    const parent = node.parent
-    if (parent) {
-      // If it's inside an assignment or expression, check if it's result of get_paginator
-      const text = node.text
-      if (text.includes('get_paginator') || text.includes('paginate')) return null
-    }
+    // Skip if we're already inside a paginator chain.
+    if (isInsidePaginatorChain(node)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

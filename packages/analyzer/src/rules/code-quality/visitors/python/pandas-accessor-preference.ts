@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsPandas } from '../../../_shared/python-framework-detection.js'
 
 /**
  * Detects pandas accessor style preferences (pandas-vet rules):
@@ -20,6 +21,11 @@ export const pythonPandasAccessorPreferenceVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['attribute'],
   visit(node, filePath, sourceCode) {
+    // Gate on file actually using pandas. The method names `.at`, `.iat`,
+    // `.stack()`, `.pivot()`, `.read_table()` are all extremely generic and
+    // collide with non-pandas code.
+    if (!importsPandas(node)) return null
+
     const attr = node.childForFieldName('attribute')
     if (!attr) return null
 

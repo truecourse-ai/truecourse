@@ -4563,13 +4563,20 @@ describe('code-quality/deterministic/pprint-usage (Python)', () => {
 
 describe('code-quality/deterministic/pandas-deprecated-accessor (Python)', () => {
   it('detects isnull() deprecated accessor', () => {
-    const violations = check(`df.isnull()`, 'python');
+    const violations = check(`import pandas as pd\ndf.isnull()`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-deprecated-accessor');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag isna()', () => {
-    const violations = check(`df.isna()`, 'python');
+    const violations = check(`import pandas as pd\ndf.isna()`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-deprecated-accessor');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag isnull() when pandas is not imported (non-pandas file)', () => {
+    // SQLAlchemy filters also use .isnull() — must not be flagged.
+    const violations = check(`from sqlalchemy import select\nfilter_ = Model.col.isnull()`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-deprecated-accessor');
     expect(matches).toHaveLength(0);
   });
@@ -4745,13 +4752,27 @@ describe('code-quality/deterministic/subclass-builtin-collection (Python)', () =
 
 describe('code-quality/deterministic/boto3-pagination (Python)', () => {
   it('detects boto3 list operation without paginator', () => {
-    const violations = check(`response = client.list_objects(Bucket="my-bucket")`, 'python');
+    const violations = check(`import boto3\nresponse = client.list_objects(Bucket="my-bucket")`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boto3-pagination');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag paginator usage', () => {
-    const violations = check(`paginator = client.get_paginator("list_objects")`, 'python');
+    const violations = check(`import boto3\npaginator = client.get_paginator("list_objects")`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boto3-pagination');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag SQLAlchemy .query() / .filter() in non-boto3 files', () => {
+    // Pre-fix this triggered on SQLAlchemy queries because `query` is in the
+    // PAGINATED_METHODS set.
+    const violations = check(`from sqlalchemy import select\nresults = session.query(User).filter(User.id > 0)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boto3-pagination');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag Redis .scan() in non-boto3 files', () => {
+    const violations = check(`import redis\nr = redis.Redis()\nfor key in r.scan():\n    pass`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boto3-pagination');
     expect(matches).toHaveLength(0);
   });
@@ -5152,13 +5173,20 @@ describe('code-quality/deterministic/numpy-legacy-random (Python)', () => {
 
 describe('code-quality/deterministic/pandas-inplace-argument (Python)', () => {
   it('detects inplace=True', () => {
-    const violations = check(`df.sort_values("col", inplace=True)`, 'python');
+    const violations = check(`import pandas as pd\ndf.sort_values("col", inplace=True)`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-inplace-argument');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag inplace=False', () => {
-    const violations = check(`df = df.sort_values("col", inplace=False)`, 'python');
+    const violations = check(`import pandas as pd\ndf = df.sort_values("col", inplace=False)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-inplace-argument');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag inplace=True in non-pandas file', () => {
+    // Other libraries also accept `inplace=True` — we must not flag them.
+    const violations = check(`other_lib.run(inplace=True)`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-inplace-argument');
     expect(matches).toHaveLength(0);
   });
@@ -5166,13 +5194,26 @@ describe('code-quality/deterministic/pandas-inplace-argument (Python)', () => {
 
 describe('code-quality/deterministic/pandas-use-of-dot-values (Python)', () => {
   it('detects df.values usage', () => {
-    const violations = check(`arr = df.values`, 'python');
+    const violations = check(`import pandas as pd\narr = df.values`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-use-of-dot-values');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag df.to_numpy()', () => {
-    const violations = check(`arr = df.to_numpy()`, 'python');
+    const violations = check(`import pandas as pd\narr = df.to_numpy()`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-use-of-dot-values');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag dict.values() method call even with pandas imported', () => {
+    // `.values()` (method call) is dict.values(), not pandas .values attribute.
+    const violations = check(`import pandas as pd\nfor v in d.values():\n  print(v)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-use-of-dot-values');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag .values in non-pandas file', () => {
+    const violations = check(`arr = d.values`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-use-of-dot-values');
     expect(matches).toHaveLength(0);
   });
@@ -5734,6 +5775,7 @@ describe('code-quality/deterministic/blanket-type-ignore (Python)', () => {
 describe('code-quality/deterministic/fastapi-non-annotated-dependency (Python)', () => {
   it('detects non-Annotated Depends() parameter', () => {
     const code = `
+from fastapi import FastAPI, Depends
 def route(db = Depends(get_db)):
     pass
 `.trim();
@@ -5744,12 +5786,36 @@ def route(db = Depends(get_db)):
 
   it('does not flag Annotated Depends parameter', () => {
     const code = `
+from fastapi import FastAPI, Depends
+from typing import Annotated
 def route(db: Annotated[Session, Depends(get_db)]):
     pass
 `.trim();
     const violations = check(code, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
     expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag Depends() in non-FastAPI files', () => {
+    // Custom `Depends` helpers in non-FastAPI codebases should not trigger.
+    const code = `
+def route(db = Depends(get_db)):
+    pass
+`.trim();
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('also flags Query/Body/Path without Annotated', () => {
+    const code = `
+from fastapi import FastAPI, Query
+def route(limit = Query(default=10)):
+    pass
+`.trim();
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -5959,15 +6025,21 @@ describe('code-quality/deterministic/numpy-nonzero-preferred (Python)', () => {
 
 describe('code-quality/deterministic/pandas-read-csv-dtype (Python)', () => {
   it('detects pd.read_csv without dtype', () => {
-    const violations = check(`df = pd.read_csv("data.csv")`, 'python');
+    const violations = check(`import pandas as pd\ndf = pd.read_csv("data.csv")`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-read-csv-dtype');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag pd.read_csv with dtype', () => {
-    const violations = check(`df = pd.read_csv("data.csv", dtype={"id": str})`, 'python');
+    const violations = check(`import pandas as pd\ndf = pd.read_csv("data.csv", dtype={"id": str})`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-read-csv-dtype');
     expect(matches).toHaveLength(0);
+  });
+
+  it('detects read_csv imported by name (no pd. prefix)', () => {
+    const violations = check(`from pandas import read_csv\ndf = read_csv("data.csv")`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-read-csv-dtype');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -6206,19 +6278,25 @@ class Child(Parent):
 
 describe('code-quality/deterministic/pandas-accessor-preference (Python)', () => {
   it('detects .at accessor usage', () => {
-    const violations = check('val = df.at[0, "col"]', 'python');
+    const violations = check('import pandas as pd\nval = df.at[0, "col"]', 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-accessor-preference');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('detects .iat accessor usage', () => {
-    const violations = check('val = df.iat[0, 1]', 'python');
+    const violations = check('import pandas as pd\nval = df.iat[0, 1]', 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-accessor-preference');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag .loc accessor', () => {
-    const violations = check('val = df.loc[0, "col"]', 'python');
+    const violations = check('import pandas as pd\nval = df.loc[0, "col"]', 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-accessor-preference');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag .at/.iat in non-pandas file', () => {
+    const violations = check('val = obj.at[0]', 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-accessor-preference');
     expect(matches).toHaveLength(0);
   });
@@ -6535,13 +6613,20 @@ if x in my_set:
 
 describe('code-quality/deterministic/pandas-merge-parameters (Python)', () => {
   it('detects merge without on and how', () => {
-    const violations = check(`result = df1.merge(df2)`, 'python');
+    const violations = check(`import pandas as pd\nresult = df1.merge(df2)`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-merge-parameters');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag merge with explicit on and how', () => {
-    const violations = check(`result = df1.merge(df2, on="id", how="left")`, 'python');
+    const violations = check(`import pandas as pd\nresult = df1.merge(df2, on="id", how="left")`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-merge-parameters');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag .merge() in non-pandas file', () => {
+    // git merge, dict merge, custom merge — none should trigger.
+    const violations = check(`result = dict1.merge(dict2)`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/pandas-merge-parameters');
     expect(matches).toHaveLength(0);
   });
@@ -7548,6 +7633,174 @@ if TYPE_CHECKING:
     from module import something
 `, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-checking-alias-annotation');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 framework-detection gates: builtin-shadowing + SQLAlchemy / Pydantic
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/builtin-shadowing (Python) — Phase 2 gates', () => {
+  it('flags module-level assignment to a built-in name', () => {
+    const violations = check(`id = 0`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('flags function-local assignment to a built-in name', () => {
+    const violations = check(`
+def foo(state):
+    input = {"state": state}
+    return input
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT flag SQLAlchemy mapped_column() in a class body', () => {
+    const violations = check(`
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Integer
+class User:
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    type: Mapped[int] = mapped_column(Integer)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag SQLAlchemy Column() in a class body (pre-2.0 style)', () => {
+    const violations = check(`
+from sqlalchemy import Column, Integer
+class User:
+    id = Column(Integer, primary_key=True)
+    type = Column(Integer)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag Pydantic Field() inside a class body', () => {
+    const violations = check(`
+from pydantic import BaseModel, Field
+class User(BaseModel):
+    id: int = Field(...)
+    type: str = Field(default="user")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag plain annotated attribute inside a dataclass', () => {
+    const violations = check(`
+from dataclasses import dataclass
+@dataclass
+class Config:
+    id: str
+    type: str = "default"
+    format: str = "json"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag plain annotated attribute inside a plain class', () => {
+    // Class attributes don't shadow built-ins — they live in the class
+    // namespace and are accessed via `self.id` or `Foo.id`.
+    const violations = check(`
+class Plain:
+    id: int
+    type: str
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag SQLAlchemy Mapped[T] annotation at module level', () => {
+    // Module-level `id: Mapped[int] = mapped_column(...)` is unusual but
+    // the gate still skips it via the annotation check.
+    const violations = check(`
+from sqlalchemy.orm import Mapped, mapped_column
+id: Mapped[int] = mapped_column()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags module-level `id = 0` in a file that imports SQLAlchemy', () => {
+    // A file can import SQLAlchemy AND still have a real shadowing at
+    // module level — the gate is per-assignment, not per-file.
+    const violations = check(`
+from sqlalchemy import Column, Integer
+id = 0
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/builtin-shadowing');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2: print-statement-in-production script-like skip
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/print-statement-in-production (Python) — Phase 2 script skip', () => {
+  it('flags print() in a library file without a main guard', () => {
+    const violations = check(`
+def greet():
+    print("hi")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/print-statement-in-production');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT flag print() in a file with a top-level __main__ guard', () => {
+    // The presence of a main guard anywhere in the file marks it as a
+    // script / CLI tool where print() is a legitimate output channel.
+    const violations = check(`
+def greet(name):
+    print(f"Hello, {name}!")
+
+if __name__ == "__main__":
+    greet("world")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/print-statement-in-production');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag print() in the reversed main guard comparison', () => {
+    const violations = check(`
+if "__main__" == __name__:
+    print("running as script")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/print-statement-in-production');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2: console-log (Python print) script-like skip
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/console-log (Python) — Phase 2 script skip', () => {
+  it('flags print() in a library file without a main guard', () => {
+    const violations = check(`
+def greet():
+    print("hi")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT flag print() in a file with a top-level __main__ guard', () => {
+    const violations = check(`
+def greet(name):
+    print(f"Hello, {name}!")
+
+if __name__ == "__main__":
+    greet("world")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/console-log');
     expect(matches).toHaveLength(0);
   });
 });
