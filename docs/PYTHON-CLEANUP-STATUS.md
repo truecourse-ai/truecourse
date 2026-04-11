@@ -6,7 +6,8 @@ visitors. Battle-tested against `arnata-brain` (693 Python files).
 **Starting baseline (pre-Phase-1):** 12,873 violations across 224 rules,
 ~4,508 false positives (~35% FP rate) verified by parallel sampling agents.
 
-**Current state (after Phase 2):** 11,943 violations, **-930 false positives**.
+**Current state (after Phase 3):** 10,594 violations, **-2,279 false positives**
+cumulative (17.7% reduction).
 
 ---
 
@@ -150,26 +151,125 @@ Two concrete manifestations in the data-flow layer:
 
 ---
 
-## Phase 3 — Scope / data-flow fixes — ⬜ NOT STARTED
+## Phase 3 — Scope / data-flow fixes — ✅ COMPLETE
 
-**Scope:** fix ~1,244 FPs in rules that depend on scope analysis.
+**Battle test delta:** 11,943 → 10,594 (-1,349 FPs, -11.3%). Exceeded the
+~900 FP target by 50% thanks to the combined scope-analyzer and rule-level
+fixes.
 
-**Target rules:**
-- `bugs/deterministic/undefined-name` (115 remaining after Phase 2 side-fix)
-- `code-quality/deterministic/magic-value-comparison` (595 FPs)
-- `bugs/deterministic/falsy-dict-get-fallback` (est. ~200)
-- `bugs/deterministic/default-except-not-last` (est. ~50)
+### Rules fixed
 
-**Known gaps in scope analyzer:**
-- Lambda parameter scoping
-- Walrus operator (`:=`) binding scope
-- List/dict/set comprehension variable scoping
-- Forward references in type annotations
-- `ContextVar` / `contextvars` pattern
-- Dataclass-style forward references
+| Rule | Before | After | Delta |
+|---|---|---|---|
+| `bugs/deterministic/falsy-dict-get-fallback` | 595 | 3 | **-592 (99.5%)** |
+| `code-quality/deterministic/magic-value-comparison` | 595 | 36 | **-559 (94%)** |
+| `bugs/deterministic/undefined-name` | 115 | 0 | **-115 (100%)** |
+| `bugs/deterministic/default-except-not-last` | 83 | 0 | **-83 (100%)** |
 
-The Phase 2 scope-analyzer proxy-identity fix already eliminated -5
-`undefined-name` FPs; Phase 3 will tackle the remaining 115.
+**Remaining cases are verified true positives:**
+- 3 `falsy-dict`: all real `d.get(k, falsy) or fallback` anti-pattern catches
+- 36 `magic-value`: unexplained numbers (`padding != 4`, `page > 10`,
+  `len(value) >= 14`, `ts > 10_000_000_000`) and URL-style string literals
+  (`"/sync"`, `"/package/"`) that should be named constants
+
+### Scope-analyzer improvements
+
+The scope analyzer was missing five concrete Python constructs:
+
+1. **Lambda scopes.** `lambda` was not in `PY_SCOPE_NODES`, so lambda
+   parameters (`lambda x: x.id`) were not declared and `x` was reported as
+   undefined. Fix: add `'lambda'` to `PY_SCOPE_NODES`, return `'function'`
+   from `getScopeKind`, declare `lambda_parameters` children via a new
+   `findPyLambdaAncestor` helper.
+
+2. **Walrus operator `named_expression`.** PEP 572 walrus bindings
+   (`if (data := compute()):`) were not recognized. Fix: add
+   `named_expression.name` to `isPyDeclarationPosition`, declare the name
+   via a new `findPyWalrusTargetScope` helper that skips comprehension
+   scopes (per PEP 572 "leaked" binding semantics).
+
+3. **Nested tuple unpacking in for loops.** `for i, (a, b) in ...` only
+   declared `i` — the inner `(a, b)` pattern's children weren't found
+   because the grandparent was `pattern_list`, not `for_statement`. Fix:
+   walk up nested `tuple_pattern` / `pattern_list` / `list_pattern` nodes
+   to find the root pattern before checking for `for_statement` /
+   `assignment` as grandparent.
+
+4. **Aliased dotted imports.** `import a.b.c as d` leaked `a`, `b`, `c`
+   as undeclared references because the `dotted_name` parent chain ran
+   through `aliased_import`, which wasn't in the import-position check.
+   Fix: add `aliased_import` (and `relative_import` for `from ..pkg`
+   form) to the parent-type check in `isPyDeclarationPosition`.
+
+5. **Missing built-ins in `PYTHON_GLOBALS`.** ~55 Python exception
+   classes and built-in functions were missing: `KeyboardInterrupt`,
+   `SystemExit`, `TimeoutError`, `ConnectionError`, `ArithmeticError`,
+   `LookupError`, `PermissionError`, `Warning`, `DeprecationWarning`,
+   `chr`, `ord`, `bin`, `oct`, `hex`, `divmod`, `pow`, `NotImplemented`,
+   `Ellipsis`, `__build_class__`, etc. Fix: expand `PYTHON_GLOBALS` in
+   `known-globals.ts`.
+
+### Rule-level fixes
+
+- **`magic-value-comparison`** — added context-aware skip:
+  - Skip if the other operand is `attribute` or `subscript` (e.g.
+    `response.status == 200`, `row["status"] == 200`)
+  - Skip idiomatic strings: dunder (`"__main__"`), HTTP methods, file
+    extensions (`.pdf`), MIME types, enum-like identifiers (snake_case /
+    UPPER_CASE, ≤32 chars)
+  - Still fire on bare-identifier vs number (`count > 42`) and unexplained
+    multi-word strings (`"really specific phrase"`)
+
+- **`falsy-dict-get-fallback`** — rewrote to only catch the actual
+  anti-pattern. Bare `d.get(k, 0)` is idiomatic and no longer flagged.
+  The rule now requires:
+  1. The call's parent is a `boolean_operator`
+  2. The call is the LEFT operand
+  3. The operator is `or`
+  4. The RIGHT operand is non-falsy (otherwise there's nothing to mask)
+
+- **`default-except-not-last`** — fixed AST traversal to accept
+  `as_pattern` (from `except X as e:`) and `parenthesized_expression`
+  (from `except (A, B) as e:`) as valid catch types. Pre-fix the rule
+  thought `except httpx.HTTPStatusError as e:` was a bare except and
+  incorrectly flagged the following specific handler.
+
+### Phase 3 files modified
+
+**Source:**
+- `packages/analyzer/src/data-flow/known-globals.ts`
+- `packages/analyzer/src/data-flow/scope-analyzer.ts`
+- `packages/analyzer/src/rules/code-quality/visitors/python/magic-value-comparison.ts`
+- `packages/analyzer/src/rules/bugs/visitors/python/falsy-dict-get-fallback.ts`
+- `packages/analyzer/src/rules/bugs/visitors/python/default-except-not-last.ts`
+
+**Fixtures (positive — clean code that must NOT fire):**
+- `tests/fixtures/sample-python-project-positive/shared/utils/walrus_and_lambda.py`
+- `tests/fixtures/sample-python-project-positive/shared/utils/tag_dispatch.py`
+- `tests/fixtures/sample-python-project-positive/shared/utils/dict_get_patterns.py`
+- `tests/fixtures/sample-python-project-positive/shared/utils/try_except_patterns.py`
+
+**Fixtures (negative — real TP markers):**
+- `tests/fixtures/sample-python-project-negative/services/worker/phase3_tps.py`
+  — 6 real TP markers: magic-value (3), falsy-dict (2), default-except (1)
+- `tests/fixtures/sample-python-project-negative/expected-graph.json` —
+  added `phase3_tps` module entry
+
+**Negative fixture markers re-categorized as SKIP** (10 cases that were
+false-positive markers pre-fix, now documented as intentional skips):
+- `services/notification_service/queue_processor.py` (3)
+- `services/notification_service/email_sender.py` (1)
+- `services/notification_service/templates.py` (1)
+- `services/user_service/services/auth_service.py` (1)
+- `services/worker/monitoring.py` (2)
+- `services/worker/task_runner.py` (2)
+
+**Tests updated:**
+- `tests/analyzer/bugs-rules.test.ts` — 11 new Phase 3 tests
+  (default-except with `as_pattern`, falsy-dict with `or` pattern,
+  undefined-name with lambda/walrus/builtins/nested tuple/imports)
+- `tests/analyzer/code-quality-rules.test.ts` — 9 new Phase 3 tests
+  (magic-value-comparison context-aware skips + real TP fires)
 
 ---
 
@@ -247,17 +347,21 @@ visitors that share a substring leak (single shared helper).
 |---|---|---|---|
 | Pre-Phase-1 baseline | **12,873** | — | 224 total |
 | After Phase 1 | 12,873 | 0 | (infrastructure only) |
-| After Phase 2 | **11,943** | **-930** | 16 rules impacted |
+| After Phase 2 | 11,943 | -930 | 16 rules |
+| After Phase 3 | **10,594** | **-1,349** | 4 rules |
+| **Cumulative** | 10,594 | **-2,279** | 20 rules |
 | Target after Phase 7 | ~8,365 | -4,508 total | 0% FP rate |
 
 ## Full test suite
 
-- **3,263 / 3,263 passing** after Phase 2, stable across 3/3 runs
-- `python-positive.test.ts` no longer flakes (de-flaked by the scope-analyzer
+- **3,286 / 3,286 passing** after Phase 3 (+23 new Phase 3 unit tests)
+- `python-positive.test.ts` stable (de-flaked by the Phase 2 scope-analyzer
   proxy-identity fix)
-- `python-negative.test.ts` no longer flakes
+- `python-negative.test.ts` stable
 
 ## Next step
 
-Phase 3: scope / data-flow fixes. Start by auditing the scope analyzer for
-the gaps listed in the Phase 3 section and draft a plan.
+Phase 4: Architecture-checker plumbing fixes (~207 FPs). Targets the
+null-filePath bug in `cross-service-internal-import`, `duplicate-import`,
+`data-layer-depends-on-external`, `long-method`, `dead-method`, `unused-export`
+— same shape as the JS `fileAnalyses` null bug that was fixed in JS Phase 4.

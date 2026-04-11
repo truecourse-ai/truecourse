@@ -25,17 +25,59 @@ export const JS_GLOBALS = new Set([
 ])
 
 export const PYTHON_GLOBALS = new Set([
-  'print', 'len', 'range', 'type', 'int', 'str', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
-  'None', 'True', 'False', 'super', 'self', 'cls',
-  'open', 'input', 'map', 'filter', 'zip', 'enumerate', 'sorted', 'reversed',
-  'min', 'max', 'sum', 'abs', 'round', 'any', 'all',
+  // Built-in types
+  'int', 'str', 'float', 'bool', 'list', 'dict', 'set', 'tuple', 'bytes', 'bytearray',
+  'memoryview', 'complex', 'frozenset', 'object', 'type', 'slice', 'range',
+  // Constants
+  'None', 'True', 'False', 'NotImplemented', 'Ellipsis',
+  // Implicit class/instance
+  'super', 'self', 'cls',
+  // Built-in functions
+  'print', 'len', 'open', 'input', 'map', 'filter', 'zip', 'enumerate', 'sorted', 'reversed',
+  'min', 'max', 'sum', 'abs', 'round', 'any', 'all', 'divmod', 'pow', 'format',
   'isinstance', 'issubclass', 'hasattr', 'getattr', 'setattr', 'delattr',
   'id', 'hash', 'repr', 'dir', 'vars', 'globals', 'locals',
   'iter', 'next', 'callable', 'classmethod', 'staticmethod', 'property',
-  'ValueError', 'TypeError', 'KeyError', 'IndexError', 'AttributeError', 'RuntimeError',
-  'Exception', 'BaseException', 'StopIteration', 'NotImplementedError',
-  'ImportError', 'ModuleNotFoundError', 'FileNotFoundError', 'OSError', 'IOError',
-  'object', 'bytes', 'bytearray', 'memoryview', 'complex', 'frozenset',
-  'breakpoint', 'exit', 'quit',
+  'chr', 'ord', 'bin', 'oct', 'hex', 'ascii',
+  'breakpoint', 'exit', 'quit', 'help', 'license', 'copyright', 'credits',
+  'compile', 'eval', 'exec', '__import__', '__build_class__',
+  // Standard exceptions — base
+  'BaseException', 'Exception', 'BaseExceptionGroup', 'ExceptionGroup',
+  'StopIteration', 'StopAsyncIteration', 'GeneratorExit',
+  // System / keyboard
+  'SystemExit', 'KeyboardInterrupt',
+  // Arithmetic
+  'ArithmeticError', 'ZeroDivisionError', 'FloatingPointError', 'OverflowError',
+  // Assertion / name
+  'AssertionError', 'NameError', 'UnboundLocalError',
+  // Attribute / lookup
+  'AttributeError', 'LookupError', 'IndexError', 'KeyError',
+  // Memory / recursion
+  'MemoryError', 'RecursionError', 'BufferError',
+  // OS / IO
+  'OSError', 'IOError', 'EnvironmentError',
+  'BlockingIOError', 'ChildProcessError',
+  'ConnectionError', 'BrokenPipeError', 'ConnectionAbortedError',
+  'ConnectionRefusedError', 'ConnectionResetError',
+  'FileExistsError', 'FileNotFoundError', 'InterruptedError',
+  'IsADirectoryError', 'NotADirectoryError', 'PermissionError',
+  'ProcessLookupError', 'TimeoutError', 'EOFError',
+  // Import
+  'ImportError', 'ModuleNotFoundError',
+  // Runtime / value / type
+  'RuntimeError', 'NotImplementedError', 'TypeError', 'ValueError',
+  'ReferenceError', 'SystemError',
+  // Syntax
+  'SyntaxError', 'IndentationError', 'TabError',
+  // Unicode
+  'UnicodeError', 'UnicodeDecodeError', 'UnicodeEncodeError', 'UnicodeTranslateError',
+  // Warnings
+  'Warning', 'UserWarning', 'DeprecationWarning', 'PendingDeprecationWarning',
+  'SyntaxWarning', 'RuntimeWarning', 'FutureWarning', 'ImportWarning',
+  'UnicodeWarning', 'BytesWarning', 'ResourceWarning', 'EncodingWarning',
+  // Module-level dunders
   '__name__', '__file__', '__doc__', '__all__', '__init__', '__main__',
+  '__builtins__', '__annotations__', '__dict__', '__class__', '__module__',
+  '__qualname__', '__spec__', '__loader__', '__package__', '__path__',
+  '__version__', '__author__',
 ])

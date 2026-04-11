@@ -100,7 +100,7 @@ class AlertManager:
     def send_webhook(self, url: str, payload: dict) -> bool:
         # VIOLATION: reliability/deterministic/http-call-no-timeout
         response = requests.post(url, json=payload)
-        # VIOLATION: code-quality/deterministic/magic-value-comparison
+        # SKIP: magic-value-comparison — HTTP status code with attribute context (Phase 3)
         return response.status_code == 200
 
     # VIOLATION: style/deterministic/docstring-completeness
@@ -134,7 +134,7 @@ class HealthChecker:
             try:
                 # VIOLATION: reliability/deterministic/http-call-no-timeout
                 resp = requests.get(url)
-                # VIOLATION: code-quality/deterministic/magic-value-comparison
+                # SKIP: magic-value-comparison — HTTP status code with attribute context (Phase 3)
                 self._results[name] = resp.status_code == 200
             except:
                 self._results[name] = False

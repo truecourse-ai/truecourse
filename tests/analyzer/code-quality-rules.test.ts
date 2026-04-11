@@ -7804,3 +7804,96 @@ if __name__ == "__main__":
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3: magic-value-comparison context-aware skips
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/magic-value-comparison (Python) — Phase 3', () => {
+  it('flags bare identifier compared to a truly-magic number', () => {
+    const violations = check(`
+def f(count):
+    if count == 42:
+        return True
+    return False
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT flag `if __name__ == "__main__":`', () => {
+    const violations = check(`if __name__ == "__main__":\n    pass`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag HTTP status codes on attribute operand', () => {
+    const violations = check(`
+def f(response):
+    if response.status == 200:
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag enum-like tag string comparisons', () => {
+    const violations = check(`
+def f(action):
+    if action.kind == "evaluate_messages":
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag file extension comparisons', () => {
+    const violations = check(`
+def f(file_path):
+    if file_path.suffix.lower() == ".pdf":
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag HTTP method comparisons', () => {
+    const violations = check(`
+def f(request):
+    if request.method == "GET":
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag len() call result comparisons', () => {
+    const violations = check(`
+def f(items):
+    if len(items) == 0:
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag subscript comparisons', () => {
+    const violations = check(`
+def f(row):
+    if row["count"] == 5:
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag dunder string comparisons', () => {
+    const violations = check(`
+def f(name):
+    if name == "__main__":
+        return True
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
+    expect(matches).toHaveLength(0);
+  });
+});

@@ -1,10 +1,23 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 /**
- * Detects dict.get(key, 0) or dict.get(key, "") where the falsy default
- * could mask existing falsy values. Consider checking None explicitly instead.
+ * Detects the specific anti-pattern:
+ *
+ *   count = data.get("count", 0) or default_count
+ *
+ * The `.get()` already returns `0` when the key is missing, but the `or`
+ * ALSO triggers the fallback when the key exists with a genuinely-zero
+ * value — masking the distinction between "missing" and "present but falsy".
+ *
+ * Bare `data.get("count", 0)` WITHOUT the `or fallback` is idiomatic and
+ * correct Python — it's not flagged.
  */
+
+const FALSY_DEFAULTS = new Set(['0', '0.0', '""', "''", '[]', '{}', 'False', '()', 'b""', "b''"])
+const FALSY_FALLBACK_RHS = new Set(['None', '0', '0.0', '""', "''", '[]', '{}', 'False', '()'])
+
 export const pythonFalsyDictGetFallbackVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/falsy-dict-get-fallback',
   languages: ['python'],
@@ -23,22 +36,32 @@ export const pythonFalsyDictGetFallbackVisitor: CodeRuleVisitor = {
     if (positionalArgs.length < 2) return null
 
     const defaultArg = positionalArgs[1]
+    if (!FALSY_DEFAULTS.has(defaultArg.text)) return null
 
-    // Check if the default is a falsy value: 0, "", '', [], {}, False, ()
-    const falsyDefaults = new Set(['0', '""', "''", '[]', '{}', 'False', '()', 'b""', "b''"])
-    const defaultText = defaultArg.text
+    // Only fire if the .get() call is the LEFT side of an `or` boolean chain.
+    // Bare `d.get(k, 0)` is idiomatic and not a bug.
+    const parent = node.parent
+    if (parent?.type !== 'boolean_operator') return null
+    const operator = parent.children.find((c) => c.type === 'or' || c.text === 'or')
+    if (!operator) return null
+    const leftOperand = parent.namedChildren[0]
+    if (leftOperand?.id !== node.id) return null
+    const rightOperand = parent.namedChildren[1]
+    if (!rightOperand) return null
 
-    if (!falsyDefaults.has(defaultText)) return null
+    // Skip if the right-hand fallback is ALSO falsy — there's no
+    // "accidental fallback" bug because both sides are equivalent.
+    if (FALSY_FALLBACK_RHS.has(rightOperand.text)) return null
 
     const dictObj = func.childForFieldName('object')
     const keyArg = positionalArgs[0]
 
     return makeViolation(
-      this.ruleKey, node, filePath, 'low',
-      'Falsy dict.get fallback',
-      `\`${dictObj?.text}.get(${keyArg?.text}, ${defaultText})\` uses a falsy default — if the dictionary contains a falsy value for this key, you can't distinguish it from a missing key. Consider checking for \`None\` explicitly.`,
+      this.ruleKey, node, filePath, 'medium',
+      'Falsy dict.get fallback chained with `or`',
+      `\`${dictObj?.text}.get(${keyArg?.text}, ${defaultArg.text}) or ${rightOperand.text}\` — the \`or\` triggers the fallback when the key exists with a falsy value, not just when the key is missing. This masks the distinction.`,
       sourceCode,
-      `Use \`${dictObj?.text}.get(${keyArg?.text})\` and check \`if value is None:\` to distinguish missing keys from falsy values.`,
+      `Use an explicit \`None\` check: \`v = ${dictObj?.text}.get(${keyArg?.text})\` then \`if v is None: v = ${rightOperand.text}\`.`,
     )
   },
 }

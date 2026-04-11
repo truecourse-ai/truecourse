@@ -104,7 +104,7 @@ class MetricsCollector:
 
     # VIOLATION: style/deterministic/docstring-completeness
     def increment_counter(self, name: str) -> None:
-        # VIOLATION: bugs/deterministic/falsy-dict-get-fallback
+        # SKIP: falsy-dict-get-fallback — bare .get() used in arithmetic, not `or` fallback (Phase 3)
         self._counters[name] = self._counters.get(name, 0) + 1
 
     # VIOLATION: style/deterministic/docstring-completeness
@@ -130,7 +130,7 @@ def run_health_check(service_urls):
         try:
             # VIOLATION: reliability/deterministic/http-call-no-timeout
             resp = requests.get(f"{url}/health")
-            # VIOLATION: code-quality/deterministic/magic-value-comparison
+            # SKIP: magic-value-comparison — HTTP status code with attribute context (Phase 3)
             results[url] = resp.status_code == 200
         except:
             results[url] = False

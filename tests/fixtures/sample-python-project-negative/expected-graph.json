@@ -1121,6 +1121,12 @@
       "layer": "service"
     },
     {
+      "name": "phase3_tps",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "PipelineState",
       "service": "worker",
       "kind": "class",

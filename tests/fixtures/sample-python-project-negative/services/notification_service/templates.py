@@ -100,7 +100,7 @@ class LocaleManager:
     def get_translation(self, key: str, locale: Optional[str] = None) -> str:
         loc = locale or self.default_locale
         translations = self._translations.get(loc, {})
-        # VIOLATION: bugs/deterministic/falsy-dict-get-fallback
+        # SKIP: falsy-dict-get-fallback — bare .get() without `or` fallback is idiomatic (Phase 3)
         return translations.get(key, "")
 
     # VIOLATION: style/deterministic/docstring-completeness

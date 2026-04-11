@@ -68,6 +68,7 @@ function isJsLanguage(lang: SupportedLanguage): boolean {
 const PY_SCOPE_NODES = new Set([
   'module',
   'function_definition',
+  'lambda',
   'class_definition',
   'list_comprehension', 'set_comprehension', 'dictionary_comprehension', 'generator_expression',
 ])
@@ -261,8 +262,11 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
   if (
     parent.type === 'parameters' || parent.type === 'default_parameter' ||
     parent.type === 'typed_parameter' || parent.type === 'typed_default_parameter' ||
-    parent.type === 'list_splat_pattern' || parent.type === 'dictionary_splat_pattern'
+    parent.type === 'list_splat_pattern' || parent.type === 'dictionary_splat_pattern' ||
+    parent.type === 'lambda_parameters'
   ) return true
+  // walrus operator: `name := value` binds `name` at the enclosing function scope
+  if (parent.type === 'named_expression' && parent.childForFieldName('name')?.id === node.id) return true
   // for statement left
   if (parent.type === 'for_statement' && parent.childForFieldName('left')?.id === node.id) return true
   // for_in_clause (comprehensions)
@@ -288,16 +292,39 @@ function isPyDeclarationPosition(node: SyntaxNode): boolean {
     const nameField = parent.childForFieldName('name')
     return nameField?.id === node.id
   }
-  if (parent.type === 'dotted_name' && (parent.parent?.type === 'import_statement' || parent.parent?.type === 'import_from_statement' || parent.parent?.type === 'future_import_statement')) return true
+  if (parent.type === 'dotted_name' && (
+    parent.parent?.type === 'import_statement' ||
+    parent.parent?.type === 'import_from_statement' ||
+    parent.parent?.type === 'future_import_statement' ||
+    parent.parent?.type === 'aliased_import' ||
+    parent.parent?.type === 'relative_import'
+  )) return true
   // global/nonlocal statement
   if (parent.type === 'global_statement' || parent.type === 'nonlocal_statement') return true
-  // expression_list as left of assignment
-  if (parent.type === 'expression_list' || parent.type === 'pattern_list' || parent.type === 'tuple_pattern') {
-    const grandparent = parent.parent
-    if (grandparent) {
-      if (grandparent.type === 'assignment' && grandparent.childForFieldName('left')?.id === parent.id) return true
-      if (grandparent.type === 'for_statement' && grandparent.childForFieldName('left')?.id === parent.id) return true
-      if (grandparent.type === 'for_in_clause' && grandparent.childForFieldName('left')?.id === parent.id) return true
+  // Nested tuple / pattern destructuring: `for i, (a, b) in ...` or
+  // `a, [b, c] = f()`. Walk up through nested pattern_list / tuple_pattern /
+  // list_pattern nodes until we find the root pattern, then check if its
+  // parent is the left of an assignment / for_statement / for_in_clause.
+  if (
+    parent.type === 'expression_list' ||
+    parent.type === 'pattern_list' ||
+    parent.type === 'tuple_pattern' ||
+    parent.type === 'list_pattern'
+  ) {
+    let rootPattern: SyntaxNode = parent
+    while (rootPattern.parent && (
+      rootPattern.parent.type === 'tuple_pattern' ||
+      rootPattern.parent.type === 'pattern_list' ||
+      rootPattern.parent.type === 'list_pattern' ||
+      rootPattern.parent.type === 'expression_list'
+    )) {
+      rootPattern = rootPattern.parent
+    }
+    const rootParent = rootPattern.parent
+    if (rootParent) {
+      if (rootParent.type === 'assignment' && rootParent.childForFieldName('left')?.id === rootPattern.id) return true
+      if (rootParent.type === 'for_statement' && rootParent.childForFieldName('left')?.id === rootPattern.id) return true
+      if (rootParent.type === 'for_in_clause' && rootParent.childForFieldName('left')?.id === rootPattern.id) return true
     }
   }
 
@@ -355,6 +382,7 @@ export function buildScopeTree(
       // Python
       if (node.type === 'module') return 'module'
       if (node.type === 'function_definition') return 'function'
+      if (node.type === 'lambda') return 'function' // Lambda params scope inside lambda body
       if (node.type === 'class_definition') return 'class'
       if (
         node.type === 'list_comprehension' || node.type === 'set_comprehension' ||
@@ -564,6 +592,28 @@ export function buildScopeTree(
       return
     }
 
+    // Lambda parameters — declare in the lambda's own scope (not the enclosing def)
+    if (parent.type === 'lambda_parameters') {
+      const lambdaNode = findPyLambdaAncestor(node)
+      if (lambdaNode) {
+        const lambdaScope = nodeToScope.get(lambdaNode.id)
+        if (lambdaScope && !lambdaScope.variables.has(node.text)) {
+          createVariable(node.text, 'parameter', node, lambdaScope, false)
+        }
+      }
+      return
+    }
+
+    // Walrus operator: `name := value` — binds `name` at the enclosing
+    // function scope per PEP 572 (not the comprehension scope if nested).
+    if (parent.type === 'named_expression' && parent.childForFieldName('name')?.id === node.id) {
+      const targetScope = findPyWalrusTargetScope(scope)
+      if (!targetScope.variables.has(node.text)) {
+        createVariable(node.text, 'assignment', node, targetScope, false)
+      }
+      return
+    }
+
     // Import
     if (parent.type === 'import_statement' || parent.type === 'import_from_statement') {
       if (!scope.variables.has(node.text)) {
@@ -647,16 +697,33 @@ export function buildScopeTree(
       return
     }
 
-    // expression_list / pattern_list as left of assignment or for
-    if (parent.type === 'expression_list' || parent.type === 'pattern_list' || parent.type === 'tuple_pattern') {
-      const grandparent = parent.parent
-      if (grandparent) {
+    // expression_list / pattern_list / tuple_pattern / list_pattern as left
+    // of an assignment or for loop. Nested patterns like
+    // `for i, (a, b) in ...` walk up through nested tuple_pattern nodes
+    // to find the root pattern whose parent is the actual for/assignment.
+    if (
+      parent.type === 'expression_list' ||
+      parent.type === 'pattern_list' ||
+      parent.type === 'tuple_pattern' ||
+      parent.type === 'list_pattern'
+    ) {
+      let rootPattern: SyntaxNode = parent
+      while (rootPattern.parent && (
+        rootPattern.parent.type === 'tuple_pattern' ||
+        rootPattern.parent.type === 'pattern_list' ||
+        rootPattern.parent.type === 'list_pattern' ||
+        rootPattern.parent.type === 'expression_list'
+      )) {
+        rootPattern = rootPattern.parent
+      }
+      const rootParent = rootPattern.parent
+      if (rootParent) {
         const isLeftSide =
-          (grandparent.type === 'assignment' && grandparent.childForFieldName('left')?.id === parent.id) ||
-          (grandparent.type === 'for_statement' && grandparent.childForFieldName('left')?.id === parent.id) ||
-          (grandparent.type === 'for_in_clause' && grandparent.childForFieldName('left')?.id === parent.id)
+          (rootParent.type === 'assignment' && rootParent.childForFieldName('left')?.id === rootPattern.id) ||
+          (rootParent.type === 'for_statement' && rootParent.childForFieldName('left')?.id === rootPattern.id) ||
+          (rootParent.type === 'for_in_clause' && rootParent.childForFieldName('left')?.id === rootPattern.id)
         if (isLeftSide) {
-          const kind: DeclarationKind = grandparent.type === 'assignment' ? 'assignment' : 'for-variable'
+          const kind: DeclarationKind = rootParent.type === 'assignment' ? 'assignment' : 'for-variable'
           const targetScope = resolveTargetScopePy(node.text, scope)
           if (!targetScope.variables.has(node.text)) {
             createVariable(node.text, kind, node, targetScope, false)
@@ -716,6 +783,38 @@ export function buildScopeTree(
       current = current.parent
     }
     return null
+  }
+
+  /** Find the nearest enclosing `lambda` node. */
+  function findPyLambdaAncestor(node: SyntaxNode): SyntaxNode | null {
+    let current = node.parent
+    while (current) {
+      if (current.type === 'lambda') return current
+      current = current.parent
+    }
+    return null
+  }
+
+  /**
+   * Walrus target scope per PEP 572: walrus bindings "leak" out of
+   * comprehension / generator expression scopes and bind at the nearest
+   * ENCLOSING function or module scope — skipping comprehension scopes.
+   */
+  function findPyWalrusTargetScope(scope: Scope): Scope {
+    let s: Scope | null = scope
+    while (s) {
+      if (s.kind === 'module') return s
+      // A `function` scope created from `function_definition` OR `lambda` is
+      // a valid walrus target. Comprehension scopes are also `function` kind
+      // internally, but their node type is `list_comprehension` etc. —
+      // distinguish by node type.
+      if (s.kind === 'function') {
+        const t = s.node.type
+        if (t === 'function_definition' || t === 'lambda') return s
+      }
+      s = s.parent
+    }
+    return scope
   }
 
   function isInFormalParameters(node: SyntaxNode): boolean {

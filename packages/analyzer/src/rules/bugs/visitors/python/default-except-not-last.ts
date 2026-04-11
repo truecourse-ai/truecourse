@@ -23,8 +23,20 @@ export const pythonDefaultExceptNotLastVisitor: CodeRuleVisitor = {
 
       const exceptIdx = children.findIndex((c) => c.id === exceptKw.id)
       const colonIdx = children.findIndex((c) => c.id === colon.id)
+      // A "catch type" is any node between `except` and `:` that denotes
+      // an exception class (or tuple of them) or an `as e` binding.
+      // Pre-fix the check missed `as_pattern` (from `except X as e:`),
+      // causing the rule to misidentify every `except X as e:` as a bare
+      // except and fire incorrectly on the following specific handler.
       const hasCatchType = children.slice(exceptIdx + 1, colonIdx).some(
-        (c) => c.type === 'identifier' || c.type === 'tuple' || c.type === 'attribute'
+        (c) =>
+          c.type === 'identifier' ||
+          c.type === 'tuple' ||
+          c.type === 'attribute' ||
+          c.type === 'as_pattern' ||
+          c.type === 'parenthesized_expression' ||
+          c.type === 'subscript' ||
+          c.type === 'call',
       )
 
       if (!hasCatchType) {

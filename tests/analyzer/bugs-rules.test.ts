@@ -6829,6 +6829,151 @@ except:
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/default-except-not-last');
     expect(matches).toHaveLength(0);
   });
+
+  it('does NOT flag except X as e followed by another except X as e', () => {
+    // Pre-fix the rule didn't recognize `as_pattern` as a catch type,
+    // so it mistakenly flagged the first handler as a "bare except".
+    const violations = check(`
+try:
+    something()
+except httpx.HTTPStatusError as e:
+    handle_http(e)
+except httpx.RequestError as e:
+    handle_request(e)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/default-except-not-last');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag except (A, B) as e pattern', () => {
+    const violations = check(`
+try:
+    something()
+except (ValueError, TypeError) as e:
+    handle(e)
+except KeyError as e:
+    handle_key(e)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/default-except-not-last');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: falsy-dict-get-fallback — Phase 3 rewrite
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/falsy-dict-get-fallback', () => {
+  it('does NOT flag bare .get(key, 0)', () => {
+    const violations = check(`count = data.get("count", 0)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/falsy-dict-get-fallback');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag bare .get(key, [])', () => {
+    const violations = check(`items = data.get("items", [])`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/falsy-dict-get-fallback');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag bare .get(key, {})', () => {
+    const violations = check(`nested = data.get("nested", {})`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/falsy-dict-get-fallback');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('flags .get(key, 0) or default_count', () => {
+    const violations = check(`count = data.get("count", 0) or default_count`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/falsy-dict-get-fallback');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('flags .get(key, "") or "fallback"', () => {
+    const violations = check(`name = data.get("name", "") or "fallback"`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/falsy-dict-get-fallback');
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does NOT flag when the or fallback is also falsy', () => {
+    // If both sides are falsy, the `or` doesn't mask anything meaningful.
+    const violations = check(`x = data.get("k", 0) or None`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/falsy-dict-get-fallback');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Python: undefined-name — Phase 3 scope analyzer fixes
+// ---------------------------------------------------------------------------
+
+describe('Python: bugs/deterministic/undefined-name — Phase 3', () => {
+  it('resolves lambda parameters in the body', () => {
+    const violations = check(`
+def f(items):
+    return sorted(items, key=lambda x: x.id)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/undefined-name');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('resolves walrus operator bindings', () => {
+    const violations = check(`
+def f(items):
+    if (first := items[0]):
+        return first
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/undefined-name');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag KeyboardInterrupt, SystemExit, TimeoutError', () => {
+    const violations = check(`
+def classify(err):
+    if isinstance(err, KeyboardInterrupt):
+        return "interrupt"
+    if isinstance(err, SystemExit):
+        return "exit"
+    if isinstance(err, TimeoutError):
+        return "timeout"
+    return "other"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/undefined-name');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('resolves nested tuple unpack in for loop', () => {
+    const violations = check(`
+def f(items):
+    for i, (a, b) in enumerate(items):
+        process(i, a, b)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/undefined-name');
+    // `process` will still be undefined (no import), but a/b/i must resolve.
+    const undefNames = matches.map((v) => v.description ?? '')
+    for (const name of ['a', 'b', 'i']) {
+      expect(undefNames.every((d) => !d.includes(`\`${name}\` is not defined`))).toBe(true);
+    }
+  });
+
+  it('resolves aliased dotted imports', () => {
+    const violations = check(`
+import core.services.foo as foo
+def use():
+    return foo.run()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/undefined-name');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('resolves from .. relative imports', () => {
+    const violations = check(`
+from ..main import sio
+def emit():
+    sio.emit("event")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/undefined-name');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

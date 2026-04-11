@@ -49,15 +49,15 @@ class NotificationQueue:
     # VIOLATION: code-quality/deterministic/missing-type-hints
     def _send_notification(self, notification):
         channel = notification.get("channel", "email")
-        # VIOLATION: code-quality/deterministic/magic-value-comparison
+        # SKIP: magic-value-comparison — enum-like string tag dispatch (Phase 3)
         if channel == "email":
             # VIOLATION: reliability/deterministic/http-call-no-timeout
             requests.post(f"{self.url}/send-email", json=notification)
-        # VIOLATION: code-quality/deterministic/magic-value-comparison
+        # SKIP: magic-value-comparison — enum-like string tag dispatch (Phase 3)
         elif channel == "sms":
             # VIOLATION: reliability/deterministic/http-call-no-timeout
             requests.post(f"{self.url}/send-sms", json=notification)
-        # VIOLATION: code-quality/deterministic/magic-value-comparison
+        # SKIP: magic-value-comparison — enum-like string tag dispatch (Phase 3)
         elif channel == "push":
             # VIOLATION: reliability/deterministic/http-call-no-timeout
             requests.post(f"{self.url}/send-push", json=notification)
