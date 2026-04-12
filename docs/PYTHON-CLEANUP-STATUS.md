@@ -6,8 +6,8 @@ visitors. Battle-tested against `arnata-brain` (693 Python files).
 **Starting baseline (pre-Phase-1):** 12,873 violations across 224 rules,
 ~4,508 false positives (~35% FP rate) verified by parallel sampling agents.
 
-**Current state (after Phase 4):** 10,588 violations, **-2,285 false positives**
-cumulative (17.8% reduction).
+**Current state (after Phase 5):** 10,402 violations, **-2,471 false positives**
+cumulative (19.2% reduction).
 
 ---
 
@@ -316,22 +316,33 @@ Violations to investigate:
 
 ---
 
-## Phase 5 — Schema index for `missing-unique-constraint` — ⬜ NOT STARTED
+## Phase 5 — Schema index for `missing-unique-constraint` — ✅ COMPLETE
 
-**Scope:** eliminate ~195 FPs in the Python
-`database/deterministic/missing-unique-constraint` visitor by wiring it
-into the existing `SchemaIndex` built during JS Phase 5.
+**Battle test delta:** 10,588 → 10,402 (-186 FPs, 95% elimination).
 
-**Work needed:**
-- Extend `SchemaIndex` to recognize SQLAlchemy `Mapped[...] = mapped_column(...,
-  unique=True)` and `Column(..., unique=True)` patterns
-- Thread the index into the Python visitor via `needsSchemaIndex`
-- Extract table + column names from `session.query(Model).filter(...)` and
-  `session.execute(select(...))` patterns
-- Skip the visitor when the column is actually `@unique` in the schema
+**Root cause:** `PYTHON_FIND_METHODS` included `'get'` and `'filter'` which
+matched `dict.get()` and `list.filter()` — not database queries. 195/195
+arnata-brain FPs were from dictionary operations, not ORM queries.
 
-JS Phase 5 already built the SchemaIndex framework and hooked it into the
-analyzer pipeline. Python just needs the parser extensions + visitor wiring.
+**Fixes applied:**
+1. **ORM gate** — `detectPythonOrm(node)` skips files without SQLAlchemy /
+   Django / Tortoise / Peewee imports
+2. **Refined `PYTHON_FIND_METHODS`** — removed `'get'` and `'filter'`;
+   kept ORM-specific terminators: `first`, `one`, `one_or_none`, `exists`,
+   `get_or_none`, `get_or_create`, `scalar_one`, `scalar_one_or_none`
+3. **SchemaIndex wiring** — `needsSchemaIndex: true`, extracts table +
+   column from Python ORM patterns (`session.query(User).filter(...)`,
+   `Model.objects.get(...)`, keyword arguments), validates against the
+   schema index. Falls back to conservative skip when schema is unavailable.
+
+**Files modified:**
+- `packages/analyzer/src/rules/database/visitors/python/missing-unique-constraint.ts` — full rewrite
+- `packages/analyzer/src/rules/database/visitors/python/_helpers.ts` — refined `PYTHON_FIND_METHODS`
+- `tests/fixtures/sample-python-project-negative/services/user_service/repositories/profile_repository.py` — added SQLAlchemy import for ORM gate
+- `tests/fixtures/sample-python-project-positive/shared/utils/dict_get_in_orm_file.py` — new positive fixture
+
+**Result:** 195 → 9. The remaining 9 are real check-then-act patterns in
+ORM files that lack a UNIQUE constraint on the queried column.
 
 ---
 
@@ -374,22 +385,24 @@ visitors that share a substring leak (single shared helper).
 | After Phase 1 | 12,873 | 0 | (infrastructure only) |
 | After Phase 2 | 11,943 | -930 | 16 rules |
 | After Phase 3 | 10,594 | -1,349 | 4 rules |
-| After Phase 4 | **10,588** | **-6** | 1 rule + filePath fix |
-| **Cumulative** | 10,588 | **-2,285** | 21 rules |
+| After Phase 4 | 10,588 | -6 | 1 rule + filePath fix |
+| After Phase 5 | **10,402** | **-186** | missing-unique-constraint |
+| **Cumulative** | 10,402 | **-2,471** | 22 rules |
 | Target after Phase 7 | ~8,365 | -4,508 total | 0% FP rate |
 
 ## Full test suite
 
-- **3,286 / 3,286 passing** after Phase 4
+- **3,286 / 3,286 passing** after Phase 5
 - `python-positive.test.ts` stable (de-flaked by the Phase 2 scope-analyzer
   proxy-identity fix)
 - `python-negative.test.ts` stable
 
 ## Next step
 
-Phase 5: Schema index for Python `missing-unique-constraint` (~195 FPs).
-Wire the existing `SchemaIndex` (built in JS Phase 5) into the Python
-visitor.
+Phase 6: Heuristic / detection improvements (~649 FPs). Smaller per-rule
+fixes for rules like `datetime-without-timezone`, `redundant-jump`,
+`async-unused-async`, `require-await`, `missing-fstring-syntax`, etc.
+Also re-adds the two Phase 2 deferred fixture files.
 
 After Phase 5-7 are all complete, return to investigate the 261 deferred
 architecture violations from Phase 4.

@@ -60,8 +60,13 @@ export const PYTHON_WRITE_METHODS = new Set([
   'bulk_create', 'bulk_update', 'filter',
 ])
 
+// ORM-specific find methods used in check-then-act patterns. Pre-Phase-5
+// this set included 'get' and 'filter' which match dict.get() and
+// list.filter() — too generic. Now limited to names that are unambiguously
+// ORM query terminators.
 export const PYTHON_FIND_METHODS = new Set([
-  'get', 'filter', 'first', 'one', 'one_or_none', 'exists',
+  'first', 'one', 'one_or_none', 'exists',
+  'get_or_none', 'get_or_create', 'scalar_one', 'scalar_one_or_none',
 ])
 
 export const PYTHON_ORM_LAZY_METHODS = new Set([

@@ -4,6 +4,7 @@ import json
 import logging
 from typing import Optional, Dict, List
 from datetime import datetime
+from sqlalchemy.orm import Session
 
 
 # VIOLATION: style/deterministic/docstring-completeness
