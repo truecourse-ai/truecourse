@@ -532,6 +532,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     relatedServiceId: string | null;
     relatedModuleId: string | null;
     violationType: string; // 'service' | 'module' | 'function'
+    // Code location fields — populated from ModuleViolation.filePath.
+    // Pre-Phase-4 these were dropped during conversion, causing all
+    // architecture-checker violations to show filePath: null in the API.
+    filePath?: string | null;
+    lineStart?: number | null;
+    lineEnd?: number | null;
+    snippet?: string | null;
   }
 
   // Build a name-based lookup for modules (moduleName → moduleId)
@@ -569,6 +576,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       relatedServiceId: null,
       relatedModuleId: v.relatedModuleName ? moduleNameToId.get(v.relatedModuleName) || null : null,
       violationType: v.methodName ? 'function' : 'module',
+      filePath: v.filePath || null,
     });
   }
 
@@ -711,6 +719,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         ruleKey: det.ruleKey,
         firstSeenAnalysisId: analysisId,
         firstSeenAt: now,
+        filePath: det.filePath || null,
+        lineStart: det.lineStart || null,
+        lineEnd: det.lineEnd || null,
+        snippet: det.snippet || null,
       });
 
       allNewViolations.push({

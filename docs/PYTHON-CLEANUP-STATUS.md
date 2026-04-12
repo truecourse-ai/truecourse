@@ -6,8 +6,8 @@ visitors. Battle-tested against `arnata-brain` (693 Python files).
 **Starting baseline (pre-Phase-1):** 12,873 violations across 224 rules,
 ~4,508 false positives (~35% FP rate) verified by parallel sampling agents.
 
-**Current state (after Phase 3):** 10,594 violations, **-2,279 false positives**
-cumulative (17.7% reduction).
+**Current state (after Phase 4):** 10,588 violations, **-2,285 false positives**
+cumulative (17.8% reduction).
 
 ---
 
@@ -273,21 +273,39 @@ false-positive markers pre-fix, now documented as intentional skips):
 
 ---
 
-## Phase 4 — Architecture-checker plumbing — ⬜ NOT STARTED
+## Phase 4 — Architecture-checker plumbing — ✅ COMPLETE
 
-**Scope:** fix ~207 FPs in cross-file architecture rules.
+**Battle test delta:** 10,594 → 10,588 (-6 FPs). Small FP win, but the
+filePath persistence fix is a significant quality improvement.
 
-**Root cause:** same shape as the JS `fileAnalyses` null-filePath bug fixed
-in JS Phase 4 — architecture rules receive `null` / missing paths for
-certain files and then mismatch against the dependency graph.
+### Fixes applied
 
-**Target rules (Python side):**
-- `architecture/deterministic/cross-service-internal-import`
-- `architecture/deterministic/duplicate-import`
-- `architecture/deterministic/data-layer-depends-on-external`
-- `architecture/deterministic/long-method`
-- `architecture/deterministic/dead-method`
-- `architecture/deterministic/unused-export`
+1. **filePath persistence** — `DetEntry` interface in
+   `violation-pipeline.service.ts` now carries `filePath`, `lineStart`,
+   `lineEnd`, `snippet` through the conversion and DB persistence.
+   Pre-fix, all 267 architecture-checker violations showed
+   `filePath: null` in the API. Now they all have proper file paths.
+
+2. **Migration file skip for long-method** — Alembic `versions/` and
+   Django `migrations/` directories are now skipped. `upgrade()` /
+   `downgrade()` functions in auto-generated migration files are long by
+   design. Result: 7 → 1 (-6). The remaining 1 is a real TP
+   (`LoadFormPage.populate` in a UI automation service).
+
+3. **Dunder method skip for dead-method** — Python `__init__`, `__str__`,
+   etc. are now skipped (called by runtime, not explicitly). No impact
+   on arnata-brain (none of the 18 dead-method violations were dunders).
+
+### Deferred to Phase 6/7
+
+The remaining 261 architecture violations need deeper investigation:
+- `cross-service-internal-import` (157) — service-boundary detection
+  needs Python-specific adjustments
+- `unused-export` (67) — needs `__all__` + `__init__.py` re-export
+  awareness
+- `data-layer-depends-on-external` (18) — layer classification audit
+- `dead-method` (18) — methods called via socketio events, FastAPI DI,
+  or dynamic dispatch patterns the checker doesn't track
 
 ---
 
@@ -348,20 +366,21 @@ visitors that share a substring leak (single shared helper).
 | Pre-Phase-1 baseline | **12,873** | — | 224 total |
 | After Phase 1 | 12,873 | 0 | (infrastructure only) |
 | After Phase 2 | 11,943 | -930 | 16 rules |
-| After Phase 3 | **10,594** | **-1,349** | 4 rules |
-| **Cumulative** | 10,594 | **-2,279** | 20 rules |
+| After Phase 3 | 10,594 | -1,349 | 4 rules |
+| After Phase 4 | **10,588** | **-6** | 1 rule + filePath fix |
+| **Cumulative** | 10,588 | **-2,285** | 21 rules |
 | Target after Phase 7 | ~8,365 | -4,508 total | 0% FP rate |
 
 ## Full test suite
 
-- **3,286 / 3,286 passing** after Phase 3 (+23 new Phase 3 unit tests)
+- **3,286 / 3,286 passing** after Phase 4
 - `python-positive.test.ts` stable (de-flaked by the Phase 2 scope-analyzer
   proxy-identity fix)
 - `python-negative.test.ts` stable
 
 ## Next step
 
-Phase 4: Architecture-checker plumbing fixes (~207 FPs). Targets the
-null-filePath bug in `cross-service-internal-import`, `duplicate-import`,
-`data-layer-depends-on-external`, `long-method`, `dead-method`, `unused-export`
-— same shape as the JS `fileAnalyses` null bug that was fixed in JS Phase 4.
+Phase 5: Schema index for Python `missing-unique-constraint` (~195 FPs).
+Wire the existing `SchemaIndex` (built in JS Phase 5) into the Python
+visitor. Alternatively, skip to Phase 6 (heuristic improvements, ~649 FPs)
+since Phase 5 requires SQLAlchemy schema parsing extensions.

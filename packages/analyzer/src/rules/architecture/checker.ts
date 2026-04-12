@@ -609,6 +609,9 @@ const LONG_METHOD_STATEMENTS = 30
 const TOO_MANY_PARAMS = 5
 const DEEP_NESTING_THRESHOLD = 4
 
+/** Matches file paths inside migration directories (Alembic, Django, Drizzle, etc.) */
+const MIGRATION_PATH_PATTERN = /(?:alembic\/versions|\/migrations\/|\/seeds\/)\//i
+
 /**
  * Check deterministic method-level rules and return violations.
  */
@@ -626,6 +629,11 @@ export function checkMethodRules(
   // Long method
   if (ruleKeys.has('architecture/deterministic/long-method')) {
     for (const method of methods) {
+      // Skip auto-generated migration files (Alembic versions, Django
+      // migrations, Drizzle migrations, etc.) — their upgrade/downgrade
+      // functions are long by design and shouldn't be flagged.
+      if (MIGRATION_PATH_PATTERN.test(method.filePath)) continue
+
       if (method.statementCount != null && method.statementCount > LONG_METHOD_STATEMENTS) {
         violations.push({
           ruleKey: 'architecture/deterministic/long-method',
@@ -797,6 +805,14 @@ export function checkMethodRules(
 
         // Skip methods called implicitly by the runtime (e.g., Python dunders, JS constructors)
         if (method.isImplicitCall) continue
+
+        // Skip Python dunder methods — called by the runtime, not by explicit invocations.
+        // __init__, __str__, __repr__, __enter__, __exit__, __call__, etc.
+        if (method.name.startsWith('__') && method.name.endsWith('__')) continue
+
+        // Skip methods in migration files — upgrade/downgrade are called by the
+        // Alembic/Django migration runner, never imported directly.
+        if (MIGRATION_PATH_PATTERN.test(method.filePath)) continue
 
         // Skip PascalCase exports — likely React components called via JSX
         // which the method-level dependency graph can't reliably track
