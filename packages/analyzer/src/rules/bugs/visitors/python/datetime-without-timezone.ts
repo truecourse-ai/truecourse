@@ -33,14 +33,14 @@ export const pythonDatetimeWithoutTimezoneVisitor: CodeRuleVisitor = {
       return false
     })
 
-    // For datetime(...) constructor, if there are positional args (year, month, day, ...)
-    // the tz is the last positional arg (index 7)
     const positionalArgs = args.namedChildren.filter((a) => a.type !== 'keyword_argument')
 
-    // Skip if called with no args (e.g., datetime.now() — will have tz check below)
     if (funcText.endsWith('.now')) {
-      // datetime.now(tz=None) — flag if no tz arg
-      if (!hasTimezone) {
+      // datetime.now(timezone.utc) passes tz as the FIRST positional arg.
+      // Pre-Phase-6 the check only looked at keyword args, missing the
+      // most common usage pattern. Skip if ANY positional arg is present
+      // (the signature is `datetime.now(tz=None)` — one positional = tz).
+      if (!hasTimezone && positionalArgs.length === 0) {
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'datetime.now() without timezone',

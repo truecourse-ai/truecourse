@@ -23,12 +23,17 @@ export const pythonAsyncUnusedAsyncVisitor: CodeRuleVisitor = {
     const isAsync = node.children.some((c) => c.type === 'async')
     if (!isAsync) return null
 
+    // Skip async dunder methods — __aenter__, __aexit__, __aiter__,
+    // __anext__ MUST be async for protocol compliance even if their
+    // bodies don't use await/async-for/async-with.
+    const nameNode = node.childForFieldName('name')
+    if (nameNode?.text.startsWith('__') && nameNode.text.endsWith('__')) return null
+
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 
     if (hasAwaitOrAsyncFor(bodyNode)) return null
 
-    const nameNode = node.childForFieldName('name')
     const name = nameNode?.text || 'function'
 
     return makeViolation(

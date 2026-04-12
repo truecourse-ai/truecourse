@@ -12,6 +12,13 @@ export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
     const isAsync = node.children.some((c) => c.type === 'async')
     if (!isAsync) return null
 
+    // Skip async dunder methods — __aenter__, __aexit__, __aiter__,
+    // __anext__ MUST be async for protocol compliance even if their
+    // bodies don't await anything.
+    const nameNode = node.childForFieldName('name')
+    const name = nameNode?.text || ''
+    if (name.startsWith('__') && name.endsWith('__')) return null
+
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 
