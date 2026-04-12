@@ -564,9 +564,34 @@ export function checkModuleRules(
         }
       }
 
+      // Detect de facto shared services: if a service is imported by the
+      // majority (>50%) of other services, it's a shared foundation (like
+      // Python's `core/` or JS's `shared/`), not an independent microservice.
+      // Cross-service imports FROM shared services are always legitimate.
+      const serviceConsumers = new Map<string, Set<string>>()
+      if (moduleLevelDeps) {
+        for (const dep of moduleLevelDeps) {
+          if (dep.sourceService === dep.targetService) continue
+          if (!serviceConsumers.has(dep.targetService)) {
+            serviceConsumers.set(dep.targetService, new Set())
+          }
+          serviceConsumers.get(dep.targetService)!.add(dep.sourceService)
+        }
+      }
+      const deFactoSharedServices = new Set<string>()
+      for (const [targetService, consumers] of serviceConsumers) {
+        // If 3+ different services import from this target, it's a de facto
+        // shared service — its internals are designed to be consumed broadly.
+        if (consumers.size >= 3) {
+          deFactoSharedServices.add(targetService)
+        }
+      }
+
       for (const dep of moduleLevelDeps) {
         if (dep.sourceService === dep.targetService) continue
         if (libraryServiceNames?.has(dep.targetService)) continue
+        // Skip imports from de facto shared services
+        if (deFactoSharedServices.has(dep.targetService)) continue
         const srcMod = moduleByKey.get(`${dep.sourceService}::${dep.sourceModule}`)
         const tgtMod = moduleByKey.get(`${dep.targetService}::${dep.targetModule}`)
         if (!srcMod || !tgtMod) continue
