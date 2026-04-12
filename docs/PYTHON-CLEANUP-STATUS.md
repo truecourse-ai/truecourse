@@ -296,11 +296,18 @@ filePath persistence fix is a significant quality improvement.
    etc. are now skipped (called by runtime, not explicitly). No impact
    on arnata-brain (none of the 18 dead-method violations were dunders).
 
-### Deferred to Phase 6/7
+### Deferred to post-Phase-7 investigation
 
-The remaining 261 architecture violations need deeper investigation:
+Phase 4 delivered only -6 of the estimated ~207 FPs. The remaining 261
+architecture violations need deeper investigation that was deferred to
+AFTER Phase 5-7 are complete. The decision: finish all phases first, then
+come back to investigate these 261 with the full battle-test data from
+all phases.
+
+Violations to investigate:
 - `cross-service-internal-import` (157) — service-boundary detection
-  needs Python-specific adjustments
+  needs Python-specific adjustments. Biggest chunk — sample 10-15 to
+  determine FP rate before committing to a fix.
 - `unused-export` (67) — needs `__all__` + `__init__.py` re-export
   awareness
 - `data-layer-depends-on-external` (18) — layer classification audit
@@ -382,5 +389,7 @@ visitors that share a substring leak (single shared helper).
 
 Phase 5: Schema index for Python `missing-unique-constraint` (~195 FPs).
 Wire the existing `SchemaIndex` (built in JS Phase 5) into the Python
-visitor. Alternatively, skip to Phase 6 (heuristic improvements, ~649 FPs)
-since Phase 5 requires SQLAlchemy schema parsing extensions.
+visitor.
+
+After Phase 5-7 are all complete, return to investigate the 261 deferred
+architecture violations from Phase 4.
