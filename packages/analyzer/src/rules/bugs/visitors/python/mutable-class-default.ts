@@ -56,6 +56,10 @@ export const pythonMutableClassDefaultVisitor: CodeRuleVisitor = {
         if (isMutable) {
           const left = expr.childForFieldName('left')
           const varName = left?.text ?? 'attribute'
+
+          // Skip ALL_CAPS names — these are class-level constants by Python
+          // convention. They happen to be mutable types but are never mutated.
+          if (/^[A-Z][A-Z0-9_]+$/.test(varName)) continue
           return makeViolation(
             this.ruleKey, expr, filePath, 'high',
             'Mutable class variable default',

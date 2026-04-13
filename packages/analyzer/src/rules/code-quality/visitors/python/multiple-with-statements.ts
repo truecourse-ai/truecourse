@@ -18,6 +18,14 @@ export const pythonMultipleWithStatementsVisitor: CodeRuleVisitor = {
     const siblings = parent.namedChildren
     if (siblings.length !== 1) return null
 
+    // Skip when one is sync `with` and the other is `async with` — these
+    // cannot be combined (e.g., `with tenacity.attempt:` wrapping
+    // `async with httpx.AsyncClient():`).
+    const outerWith = parent.parent!
+    const outerIsAsync = outerWith.children.some((c) => c.type === 'async')
+    const innerIsAsync = node.children.some((c) => c.type === 'async')
+    if (outerIsAsync !== innerIsAsync) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Multiple nested with statements',
