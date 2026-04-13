@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
 type SyntaxNode = import('tree-sitter').SyntaxNode
 
@@ -13,23 +14,25 @@ function isInsideClass(node: SyntaxNode): boolean {
   return false
 }
 
-function hasDecorator(node: SyntaxNode, ...names: string[]): boolean {
-  // Decorators may live on the function_definition itself OR on the parent
-  // decorated_definition (the canonical tree-sitter Python AST shape).
-  const targets = [node]
-  if (node.parent?.type === 'decorated_definition') {
-    targets.push(node.parent)
-  }
-  for (const target of targets) {
-    for (const child of target.children) {
-      if (child.type === 'decorator') {
-        const dec = child.namedChildren[0]
-        if (dec && names.includes(dec.text)) return true
-      }
+// Decorators that use `cls` as first argument instead of `self`.
+const CLS_DECORATORS = new Set([
+  'classmethod', 'validator', 'field_validator', 'root_validator',
+  'model_validator', 'pre_load', 'post_load',
+])
+
+function hasDecoratorByName(node: SyntaxNode, names: Set<string>): boolean {
+  const parent = node.parent
+  if (!parent || parent.type !== 'decorated_definition') return false
+  for (const child of parent.children) {
+    if (child.type === 'decorator') {
+      const name = getPythonDecoratorName(child)
+      if (name && names.has(name)) return true
     }
   }
   return false
 }
+
+const STATIC_SET = new Set(['staticmethod'])
 
 export const pythonSelfFirstArgumentVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/self-first-argument',
@@ -39,10 +42,10 @@ export const pythonSelfFirstArgumentVisitor: CodeRuleVisitor = {
     if (!isInsideClass(node)) return null
 
     // Skip static methods (they don't have self)
-    if (hasDecorator(node, 'staticmethod')) return null
+    if (hasDecoratorByName(node, STATIC_SET)) return null
 
-    // Class methods use cls, not self
-    if (hasDecorator(node, 'classmethod')) return null
+    // Skip class methods and Pydantic validators (they use cls, not self)
+    if (hasDecoratorByName(node, CLS_DECORATORS)) return null
 
     const params = node.childForFieldName('parameters')
     if (!params) return null
