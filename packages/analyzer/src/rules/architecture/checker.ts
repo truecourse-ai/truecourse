@@ -232,6 +232,17 @@ export function checkModuleRules(
       // only executes when called, not at module load time.
       if (cycle.isDynamic) continue
 
+      // Skip cycles where ALL nodes are ORM model files — bidirectional
+      // relationships (Model A → Model B → Model A) are the standard ORM
+      // pattern, not a design problem. SQLAlchemy, Django, and Tortoise
+      // all use lazy string annotations to resolve these at runtime.
+      const cycleNodes = cycle.chain.slice(0, -1) // last == first (cycle)
+      const allModels = cycleNodes.every((key) => {
+        const mod = modules.find((m) => `${m.serviceName}::${m.name}` === key)
+        return mod && /\/models\//.test(mod.filePath)
+      })
+      if (allModels) continue
+
       const severity = cycle.isTypeOnly ? 'info' : 'high'
       // Extract readable module names from "service::module" keys
       const readableChain = cycle.chain.map(key => {

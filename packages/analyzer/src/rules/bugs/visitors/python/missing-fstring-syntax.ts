@@ -129,21 +129,15 @@ function isLikelyFormatTemplate(node: SyntaxNode): boolean {
     }
   }
 
-  // Case 2: String is a function/method call argument and looks like a
-  // URL/API path template — e.g. `/api/1/tool/loads/{load_id}/shipper/email`.
-  // These are `.format()` template strings passed to functions that format them.
-  if (parent?.type === 'argument_list') {
+  // Case 2: String looks like a URL/path template containing {param} placeholders.
+  // Covers function arguments, dict values, and other contexts.
+  // Matches both `/api/{id}` paths and `https://example.com/{id}` full URLs.
+  {
     const content = extractStringContent(node)
-    if (content && /^\//.test(content) && /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(content)) {
-      return true // Looks like a URL path template
-    }
-  }
-
-  // Case 3: Dictionary value — `{"key": "/api/{id}/thing"}`
-  if (parent?.type === 'pair') {
-    const content = extractStringContent(node)
-    if (content && /^\//.test(content) && /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(content)) {
-      return true
+    if (content && /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(content)) {
+      if (/^\//.test(content) || /^https?:\/\//.test(content)) {
+        return true // URL or path template
+      }
     }
   }
 
