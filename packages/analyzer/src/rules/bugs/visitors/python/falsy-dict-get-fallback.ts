@@ -53,6 +53,17 @@ export const pythonFalsyDictGetFallbackVisitor: CodeRuleVisitor = {
     // "accidental fallback" bug because both sides are equivalent.
     if (FALSY_FALLBACK_RHS.has(rightOperand.text)) return null
 
+    // Skip if the RHS is ALSO a `.get()` call — this is an intentional
+    // fallback chain, e.g. `content.get("text", "") or content.get("html", "")`.
+    // The developer deliberately tries one key then another.
+    if (rightOperand.type === 'call') {
+      const rhsFunc = rightOperand.childForFieldName('function')
+      if (rhsFunc?.type === 'attribute') {
+        const rhsAttr = rhsFunc.childForFieldName('attribute')
+        if (rhsAttr?.text === 'get') return null
+      }
+    }
+
     const dictObj = func.childForFieldName('object')
     const keyArg = positionalArgs[0]
 

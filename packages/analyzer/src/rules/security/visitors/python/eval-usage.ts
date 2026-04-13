@@ -30,10 +30,21 @@ export const pythonEvalUsageVisitor: CodeRuleVisitor = {
 
       // For method calls (receiver.eval(), receiver.compile()), check if the
       // receiver is a known safe module/object — skip if so.
+      // Handles both simple `re.compile()` and chained `self._redis.eval()`.
       const receiver = fn.childForFieldName('object')
       if (receiver) {
-        const receiverName = receiver.type === 'identifier' ? receiver.text : null
-        if (receiverName && SAFE_METHOD_RECEIVERS.has(receiverName)) return null
+        let leafName: string | null = null
+        if (receiver.type === 'identifier') {
+          leafName = receiver.text
+        } else if (receiver.type === 'attribute') {
+          // For chained access like `self._redis`, extract the final attribute name
+          const attrChild = receiver.childForFieldName('attribute')
+          if (attrChild) {
+            // Strip leading underscores: `_redis` -> `redis`
+            leafName = attrChild.text.replace(/^_+/, '')
+          }
+        }
+        if (leafName && SAFE_METHOD_RECEIVERS.has(leafName)) return null
       }
     }
 

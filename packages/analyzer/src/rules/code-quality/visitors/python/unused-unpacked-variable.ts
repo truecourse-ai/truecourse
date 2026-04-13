@@ -50,9 +50,23 @@ export const pythonUnusedUnpackedVariableVisitor: CodeRuleVisitor = {
     const names = collectNames(left)
     if (names.length === 0) return null
 
-    // Get the enclosing scope
+    // Get the enclosing function/module scope — NOT just the nearest block.
+    // Python has function-level scoping, so a variable assigned in an inner
+    // block (if/for/with/try) is visible in the entire enclosing function.
     let scope: SyntaxNode | null = node.parent
-    while (scope && scope.type !== 'block' && scope.type !== 'module') {
+    while (scope) {
+      if (scope.type === 'module') break
+      if (scope.type === 'block') {
+        // Only stop at a function/class body block, not inner control-flow blocks
+        const blockParent = scope.parent
+        if (
+          blockParent?.type === 'function_definition' ||
+          blockParent?.type === 'class_definition' ||
+          blockParent?.type === 'module'
+        ) {
+          break
+        }
+      }
       scope = scope.parent
     }
     if (!scope) return null

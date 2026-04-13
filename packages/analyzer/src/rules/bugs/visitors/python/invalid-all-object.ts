@@ -13,6 +13,8 @@ export const pythonInvalidAllObjectVisitor: CodeRuleVisitor = {
     if (!right || right.type !== 'list') return null
 
     for (const item of right.namedChildren) {
+      // Skip comment nodes — tree-sitter includes them as children of the list
+      if (item.type === 'comment') continue
       if (item.type !== 'string') {
         return makeViolation(
           this.ruleKey, item, filePath, 'high',

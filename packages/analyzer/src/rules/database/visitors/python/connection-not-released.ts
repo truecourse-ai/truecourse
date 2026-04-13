@@ -11,6 +11,34 @@ export const pythonConnectionNotReleasedVisitor: CodeRuleVisitor = {
     const methodName = getPythonMethodName(node)
     if (!PYTHON_CONNECTION_METHODS.has(methodName)) return null
 
+    // Skip lock-related .acquire() calls — Redis locks, threading locks, etc.
+    // These are not database connections.
+    if (methodName === 'acquire') {
+      const fn = node.childForFieldName('function')
+      if (fn?.type === 'attribute') {
+        const receiver = fn.childForFieldName('object')
+        if (receiver) {
+          const recvText = receiver.text.toLowerCase()
+          // self.acquire() inside a class with "lock" in the name,
+          // or foo_lock.acquire(), or self._lock.acquire(), etc.
+          if (recvText === 'self') {
+            // Check if we're inside a class whose name suggests a lock
+            let parent: SyntaxNode | null = node.parent
+            while (parent) {
+              if (parent.type === 'class_definition') {
+                const nameNode = parent.childForFieldName('name')
+                if (nameNode && /lock/i.test(nameNode.text)) return null
+                break
+              }
+              parent = parent.parent
+            }
+          } else if (/lock/i.test(recvText)) {
+            return null
+          }
+        }
+      }
+    }
+
     // If wrapped in a try block — assume finally handles release
     if (isInsideTryBody(node)) return null
 

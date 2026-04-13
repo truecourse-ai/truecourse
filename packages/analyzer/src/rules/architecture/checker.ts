@@ -214,7 +214,10 @@ export function checkModuleRules(
             dep.importedNames.some(name => imp.specifiers.some(s => s.name === name))
           )
           const isTypeOnly = relevantImport?.isTypeOnly ?? false
-          const isDynamic = fileDynamicTargets.has(srcFile) && !relevantImport
+          // Python deferred imports (inside function bodies) are effectively
+          // dynamic — they break circular dependencies at runtime.
+          const isFunctionScoped = relevantImport?.isFunctionScoped ?? false
+          const isDynamic = isFunctionScoped || (fileDynamicTargets.has(srcFile) && !relevantImport)
 
           modEdgeMeta.set(edgeKey, { isDynamic, isTypeOnly })
         }
@@ -462,6 +465,11 @@ export function checkModuleRules(
         // Skip classes used as type annotations (params, return types, superclasses)
         if (usedAsType.has(mod.name)) continue
 
+        // Skip Python data model modules (Pydantic, dataclass, etc.) — these are
+        // often referenced by frameworks via response_model type annotations rather
+        // than explicit imports tracked by module-level deps.
+        if (/\/(?:models|schemas)\//.test(mod.filePath) && mod.filePath.endsWith('.py')) continue
+
         // Skip modules whose methods or name are referenced in the same file
         // (catches function references passed as arguments, e.g., retry=should_retry)
         const sameFileRefs = calledInOwnFile.get(mod.filePath)
@@ -533,6 +541,11 @@ export function checkModuleRules(
           if (srcMod.layerName === srcLayer && tgtMod.layerName === tgtLayer) {
             // Skip modules in workers/jobs directories — these are infrastructure, not a true layer violation
             if ((srcLayer === 'data' || srcLayer === 'external') && /\/(?:workers|jobs)\//.test(srcMod.filePath)) continue
+            // Skip Python orchestrators/services — these are the SERVICE layer, not
+            // the data layer. The layer classifier may misclassify them because they
+            // interact with both DB models and external clients. Only for .py files.
+            if (srcLayer === 'data' && srcMod.filePath.endsWith('.py') &&
+                /\/(?:orchestrators|services|modules|serverless)\//.test(srcMod.filePath)) continue
             violations.push({
               ruleKey,
               title: `Layer violation: ${srcMod.name} → ${tgtMod.name}`,

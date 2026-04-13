@@ -472,6 +472,18 @@ function extractClassProperties(body: SyntaxNode | null): ClassProperty[] {
 // Imports
 // ---------------------------------------------------------------------------
 
+/** True if the node is inside a function body (not at module level). */
+function isInsideFunctionBody(node: SyntaxNode): boolean {
+  let current = node.parent
+  while (current) {
+    if (current.type === 'function_definition') return true
+    if (current.type === 'class_definition') return false // class-level is module-equivalent
+    if (current.type === 'module') return false
+    current = current.parent
+  }
+  return false
+}
+
 export function extractPythonImports(tree: Tree, filePath: string): ImportStatement[] {
   const imports: ImportStatement[] = []
 
@@ -494,6 +506,7 @@ export function extractPythonImports(tree: Tree, filePath: string): ImportStatem
             source: child.text,
             specifiers,
             isTypeOnly: false,
+            isFunctionScoped: isInsideFunctionBody(node),
           })
         } else if (child.type === 'aliased_import') {
           const name = child.childForFieldName('name')?.text || ''
@@ -508,6 +521,7 @@ export function extractPythonImports(tree: Tree, filePath: string): ImportStatem
             source: name,
             specifiers: [{ name, alias, isDefault: false, isNamespace: true }],
             isTypeOnly: false,
+            isFunctionScoped: isInsideFunctionBody(node),
           })
         }
       }
@@ -581,6 +595,7 @@ export function extractPythonImports(tree: Tree, filePath: string): ImportStatem
           source,
           specifiers,
           isTypeOnly: false,
+          isFunctionScoped: isInsideFunctionBody(node),
         })
       }
     }

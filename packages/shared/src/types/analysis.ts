@@ -92,6 +92,9 @@ export const ImportStatementSchema = z.object({
   source: z.string(),
   specifiers: z.array(ImportSpecifierSchema),
   isTypeOnly: z.boolean(),
+  // True if the import is inside a function body (deferred import) rather
+  // than at module level. Python uses this pattern to break circular deps.
+  isFunctionScoped: z.boolean().optional(),
 })
 
 export type ImportStatement = z.infer<typeof ImportStatementSchema>

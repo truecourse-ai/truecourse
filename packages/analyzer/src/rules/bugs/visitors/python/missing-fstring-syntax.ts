@@ -96,6 +96,60 @@ function containsFormatSpecSyntax(content: string): boolean {
   return FORMAT_SPEC_PLACEHOLDER.test(content) || POSITIONAL_PLACEHOLDER.test(content)
 }
 
+/**
+ * Names that strongly suggest the string is a `.format()` template,
+ * a URL pattern, or a path template — NOT a missing f-string.
+ */
+const TEMPLATE_NAME_SUFFIXES = [
+  '_template', '_url', '_pattern', '_path', '_endpoint',
+  '_route', '_fmt', '_format', '_uri',
+]
+const TEMPLATE_NAME_EXACT = new Set([
+  'template', 'url', 'pattern', 'path', 'endpoint',
+  'route', 'fmt', 'format', 'uri', 'url_path',
+])
+
+/**
+ * True if the string is assigned to a variable whose name suggests a
+ * template, OR if the string is a function/method argument (i.e. being
+ * passed to a function that will likely call `.format()` on it).
+ */
+function isLikelyFormatTemplate(node: SyntaxNode): boolean {
+  const parent = node.parent
+
+  // Case 1: Assignment — `url_template = "/api/{id}"`
+  if (parent?.type === 'assignment') {
+    const lhs = parent.childForFieldName('left')
+    if (lhs) {
+      const varName = lhs.text.toLowerCase()
+      if (TEMPLATE_NAME_EXACT.has(varName)) return true
+      for (const suffix of TEMPLATE_NAME_SUFFIXES) {
+        if (varName.endsWith(suffix)) return true
+      }
+    }
+  }
+
+  // Case 2: String is a function/method call argument and looks like a
+  // URL/API path template — e.g. `/api/1/tool/loads/{load_id}/shipper/email`.
+  // These are `.format()` template strings passed to functions that format them.
+  if (parent?.type === 'argument_list') {
+    const content = extractStringContent(node)
+    if (content && /^\//.test(content) && /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(content)) {
+      return true // Looks like a URL path template
+    }
+  }
+
+  // Case 3: Dictionary value — `{"key": "/api/{id}/thing"}`
+  if (parent?.type === 'pair') {
+    const content = extractStringContent(node)
+    if (content && /^\//.test(content) && /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(content)) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export const pythonMissingFstringSyntaxVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/missing-fstring-syntax',
   languages: ['python'],
@@ -123,6 +177,10 @@ export const pythonMissingFstringSyntaxVisitor: CodeRuleVisitor = {
 
       // Skip strings with format-spec syntax like `{0}`, `{name!r}`, `{name:.2f}`
       if (containsFormatSpecSyntax(content)) return null
+
+      // Skip strings that are passed as arguments or assigned to variables
+      // likely to be used as `.format()` templates — URL paths, templates, etc.
+      if (isLikelyFormatTemplate(node)) return null
 
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
