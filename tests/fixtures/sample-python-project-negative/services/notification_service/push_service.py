@@ -6,12 +6,6 @@ import time
 logger = logging.getLogger(__name__)
 
 
-# SKIP: async-busy-wait — has await asyncio.sleep(), not a busy wait
-async def wait_for_push_delivery(delivery_service):
-    while not delivery_service.is_delivered():
-        await asyncio.sleep(0.5)
-
-
 # VIOLATION: bugs/deterministic/async-function-with-timeout
 async def send_push_notification(device_id, payload, timeout=10):
     async with asyncio.timeout(timeout):

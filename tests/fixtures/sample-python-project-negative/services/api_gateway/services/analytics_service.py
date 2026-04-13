@@ -158,8 +158,7 @@ def compute_health_score(metrics: dict) -> str:
     latency = metrics.get("avg_latency", 0)
     error_rate = metrics.get("error_rate", 0)
 
-    # SKIP: code-quality/deterministic/if-else-dict-lookup
-    # Reason: Visitor's getSingleAssignmentTarget checks for 'assignment' type but
+    # VIOLATION: code-quality/deterministic/if-else-dict-lookup
     # tree-sitter wraps body statements in 'expression_statement'. Cannot match.
     if latency < 50:
         speed_label = "instant"
@@ -172,15 +171,13 @@ def compute_health_score(metrics: dict) -> str:
     else:
         speed_label = "critical"
 
-    # SKIP: code-quality/deterministic/if-else-instead-of-dict-get
-    # Reason: Same expression_statement wrapping issue as if-else-dict-lookup.
+    # VIOLATION: code-quality/deterministic/if-else-instead-of-dict-get
     if "region" in metrics:
         region = metrics["region"]
     else:
         region = "unknown"
 
-    # SKIP: code-quality/deterministic/if-else-instead-of-ternary
-    # Reason: Same expression_statement wrapping issue as if-else-dict-lookup.
+    # VIOLATION: code-quality/deterministic/if-else-instead-of-ternary
     if error_rate > 0.5:
         status = "degraded"
     else:
@@ -310,16 +307,6 @@ def check_metric_in_group(metric: str) -> bool:
     return metric in ["latency", "throughput", "error_rate", "cpu", "memory"]
 
 
-def compute_percentile(values: List[float], pct: float) -> float:
-    """Compute percentile value."""
-    # SKIP: redundant-jump — duplicate return pattern, not a simple redundant jump
-    sorted_vals = sorted(values)
-    idx = int(len(sorted_vals) * pct)
-    result = sorted_vals[min(idx, len(sorted_vals) - 1)]
-    return result
-    return result
-
-
 # VIOLATION: code-quality/deterministic/duplicate-isinstance-call
 def validate_input(value) -> bool:
     if isinstance(value, str) or isinstance(value, str):
@@ -341,15 +328,13 @@ sort_func = sorted
 
 def format_values(values: List[float]) -> str:
     """Format values for display."""
-    # SKIP: code-quality/deterministic/unnecessary-generator-comprehension
-    # Reason: tree-sitter Python doesn't create a generator_expression node inside list()
+    # VIOLATION: code-quality/deterministic/unnecessary-generator-comprehension
     # calls - it parses the for_in_clause and expression as separate children.
     formatted = list(f"{v:.2f}" for v in values)
     return ", ".join(formatted)
 
 
-# SKIP: code-quality/deterministic/useless-with-lock
-# Reason: Visitor iterates node.namedChildren looking for 'with_item' but tree-sitter
+# VIOLATION: code-quality/deterministic/useless-with-lock
 # wraps it in 'with_clause'. Visitor cannot find the Lock() call.
 def safe_increment(counter: dict, key: str) -> None:
     with threading.Lock():
@@ -362,8 +347,7 @@ def debug_metrics():
     return {}
 
 
-# SKIP: code-quality/deterministic/print-statement-in-production
-# Reason: Visitor skips files with '/test' in path. Fixture path contains /tests/fixtures/.
+# VIOLATION: code-quality/deterministic/print-statement-in-production
 def log_metric(name: str, value: float) -> None:
     print(f"METRIC: {name}={value}")
 
@@ -373,8 +357,7 @@ def log_separator() -> None:
     print("")
 
 
-# SKIP: code-quality/deterministic/assert-in-production
-# Reason: Visitor skips files with '/test' in path. Fixture path contains /tests/fixtures/.
+# VIOLATION: code-quality/deterministic/assert-in-production
 def validate_config(config: dict) -> None:
     assert "api_key" in config, "API key is required"
 

@@ -73,8 +73,7 @@ NOTIFICATION_TYPES = ["email", "sms", "push", "webhook"]
 
 def send_notification(notification_type: str, recipient: str, message: str) -> bool:
     """Send a notification to a recipient."""
-    # SKIP: code-quality/deterministic/if-else-dict-lookup
-    # Reason: Same expression_statement wrapping issue as other if-else visitors.
+    # VIOLATION: code-quality/deterministic/if-else-dict-lookup
     if notification_type == "email":
         handler = send_email
     elif notification_type == "sms":

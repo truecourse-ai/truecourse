@@ -72,11 +72,6 @@ def get_latest_session():
     return [][0]
 
 
-# SKIP: bugs/deterministic/yield-return-outside-function
-# Reason: Python rejects yield/return at module level at parse time, and tree-sitter
-# may not produce valid AST nodes for this pattern.
-
-
 # VIOLATION: bugs/deterministic/yield-from-in-async
 async def stream_sessions(source):
     yield from source

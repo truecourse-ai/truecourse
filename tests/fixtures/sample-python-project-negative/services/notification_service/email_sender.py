@@ -74,7 +74,6 @@ class EmailSender:
     def send_batch(self, recipients, subject, body):
         """Send emails to a list of recipients."""
         results = {}
-        # SKIP: falsy-dict-get-fallback — bare .get() without `or` fallback is idiomatic (Phase 3)
         default_subject = self._template_cache.get("default_subject", "")
         for recipient in recipients:
             success = self.send_email(recipient, subject or default_subject, body)

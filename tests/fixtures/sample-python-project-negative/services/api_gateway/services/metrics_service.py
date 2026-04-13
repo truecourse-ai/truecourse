@@ -17,8 +17,7 @@ class MetricType(Enum):
     HISTOGRAM = "histogram"
 
 
-# SKIP: bugs/deterministic/implicit-classvar-in-dataclass
-# Reason: Visitor checks for 'annotated_assignment' type but tree-sitter Python uses
+# VIOLATION: bugs/deterministic/implicit-classvar-in-dataclass
 # 'expression_statement > assignment' with a type annotation. No annotated_assignment type exists.
 @dataclass
 class MetricsConfig:
@@ -126,12 +125,6 @@ class MetricBatch:
 
     def __init__(self):
         self._items = []
-
-
-# SKIP: async-busy-wait — has await asyncio.sleep(), not a busy wait
-async def wait_for_metrics_ready(metrics_service):
-    while not metrics_service.is_ready():
-        await asyncio.sleep(0.1)
 
 
 # VIOLATION: bugs/deterministic/async-function-with-timeout

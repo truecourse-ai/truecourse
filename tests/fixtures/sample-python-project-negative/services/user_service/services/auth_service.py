@@ -30,7 +30,6 @@ class AuthService:
             json={"username": username, "password": password}
         )
         if response.status_code != 200:
-            # SKIP: falsy-dict-get-fallback — bare .get() used in arithmetic, not `or` fallback (Phase 3)
             attempts = self._failed_attempts.get(username, 0)
             self._failed_attempts[username] = attempts + 1
             return None

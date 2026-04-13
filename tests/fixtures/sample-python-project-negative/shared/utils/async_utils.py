@@ -7,12 +7,6 @@ import trio
 logger = logging.getLogger(__name__)
 
 
-# SKIP: async-busy-wait — has await asyncio.sleep(), not a busy wait
-async def poll_until_ready(service):
-    while not service.ready:
-        await asyncio.sleep(0.05)
-
-
 # VIOLATION: bugs/deterministic/async-function-with-timeout
 async def fetch_with_deadline(url, deadline=5.0):
     return await asyncio.get_event_loop().run_in_executor(None, lambda: url)

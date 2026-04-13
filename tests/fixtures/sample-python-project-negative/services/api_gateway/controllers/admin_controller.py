@@ -46,9 +46,7 @@ def configure_admin(env: str) -> dict:
     return {"timeout": timeout, "env": env}
 
 
-# SKIP: code-quality/deterministic/redefined-loop-name
-# Reason: Visitor's findAssignments checks for direct 'assignment' children of the block,
-# but tree-sitter Python wraps them in 'expression_statement'. Visitor cannot match.
+# VIOLATION: code-quality/deterministic/redefined-loop-name
 def process_admin_configs(configs: List[dict]) -> List[str]:
     results = []
     for config in configs:
@@ -132,9 +130,7 @@ class AdminProfile(models.Model):
         return self.name
 
 
-# SKIP: code-quality/deterministic/django-model-form-fields
-# Reason: Visitor iterates Meta body looking for 'assignment' nodes but tree-sitter wraps
-# them in 'expression_statement'. Visitor cannot match the fields = '__all__' pattern.
+# VIOLATION: code-quality/deterministic/django-model-form-fields
 class AuditLogForm(forms.ModelForm):
     class Meta:
         model = AuditLog
@@ -178,8 +174,6 @@ if TYPE_CHECKING:
     pass
 
 
-# SKIP: typing-only-import — dataclass imported but not used as decorator in this file
-from dataclasses import dataclass
 
 
 # VIOLATION: code-quality/deterministic/type-checking-alias-annotation
@@ -216,8 +210,7 @@ def process_pair():
     return x
 
 
-# SKIP: code-quality/deterministic/no-explicit-any
-# Reason: Visitor checks for 'type' node with parent of type 'type', but tree-sitter Python
+# VIOLATION: code-quality/deterministic/no-explicit-any
 # never creates this nesting. The parent of a type annotation node is typed_parameter,
 # function_definition, or type_parameter - never another 'type' node.
 def handle_unknown(data: Any) -> Any:

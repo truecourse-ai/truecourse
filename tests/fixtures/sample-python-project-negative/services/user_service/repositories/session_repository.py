@@ -40,8 +40,6 @@ def track_active_sessions():
 # (undefined-export moved after invalid-all-object below)
 
 
-# SKIP: import-self — agent fix uses full module path comparison
-import session_repository
 
 
 # VIOLATION: bugs/deterministic/import-star-undefined

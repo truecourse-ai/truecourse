@@ -14,13 +14,11 @@ from collections import OrderedDict
 # (OrderedDict is imported but never used)
 
 
-# SKIP: architecture/deterministic/declarations-in-global-scope
-# Reason: Visitor checks node.parent?.type === 'module' but tree-sitter wraps assignments
+# VIOLATION: architecture/deterministic/declarations-in-global-scope
 # in expression_statement, so parent is 'expression_statement' not 'module'.
 shared_state = {"connections": 0, "last_seen": None}
 
-# SKIP: architecture/deterministic/declarations-in-global-scope
-# Reason: Same expression_statement wrapping issue.
+# VIOLATION: architecture/deterministic/declarations-in-global-scope
 request_counter = 0
 
 

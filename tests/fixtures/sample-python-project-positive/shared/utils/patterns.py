@@ -185,7 +185,7 @@ def vague_error() -> None:
     raise ValueError(msg)
 
 
-x_val = 1
+X_VAL = 1
 
 
 def break_in_finally() -> None:

@@ -178,10 +178,3 @@ class TestAdminEndpoints(unittest.TestCase):
 @lru_cache()
 def get_config():
     return {"debug": False}
-
-
-# SKIP: code-quality/deterministic/deeply-nested-fstring
-# Reason: Tree-sitter Python grammar cannot parse deeply nested f-strings at 3+ levels.
-# The visitor requires actual nested f-string AST nodes (f"...{f'...{f\"...\"}'}"),
-# but tree-sitter fails to parse this syntax correctly.
-nested_fstring_template = 'placeholder'

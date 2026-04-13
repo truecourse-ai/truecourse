@@ -34,35 +34,9 @@ def get_translated_subject(subject_key):
     return _(f"Email subject: {subject_key}")
 
 
-# SKIP: bugs/deterministic/invalid-print-syntax
-# Reason: tree-sitter Python parses 'print >> sys.stderr' as print_statement with chevron,
-# not binary_operator. Visitor expects binary_operator node type.
-pass
-
-
-# SKIP: bugs/deterministic/template-str-concatenation
-# Reason: Requires Python 3.14 t-string syntax (t"...") which tree-sitter cannot parse yet.
-def build_greeting():
-    name = "User"
-    greeting = "Hello " + name + " welcome!"
-    return greeting
-
-
-# SKIP: bugs/deterministic/template-string-not-processed
-# Reason: Requires Python 3.14 t-string syntax (t"...") which tree-sitter cannot parse yet.
-def format_email_body():
-    name = "User"
-    return f"Dear {name}, your account is ready."
-
-
 # VIOLATION: bugs/deterministic/bidirectional-unicode
 # The following string contains a bidirectional unicode char (RLO U+202E)
 ADMIN_CHECK = "is_admin = True‮"
-
-
-# SKIP: bugs/deterministic/invalid-character-in-source
-# Reason: Embedding invisible control characters (zero-width space U+200B) would make
-# the file difficult to maintain and could cause Python parse errors.
 
 
 class TemplateEngine:
