@@ -39,6 +39,12 @@ export const pythonSqlInjectionVisitor: CodeRuleVisitor = {
         const queryText = firstArg.text
         if (/:[a-z_]\w*|%s|%\(\w+\)s/.test(queryText)) return null
 
+        // Skip trivial f-strings that are just wrapping a single variable (e.g., f"{value}").
+        // These are type coercions, not SQL query construction.
+        const interpolations = firstArg.namedChildren.filter((c) => c.type === 'interpolation')
+        const nonInterpolationText = queryText.replace(/\{[^}]*\}/g, '').replace(/^f['"`]{1,3}|['"`]{1,3}$/g, '').trim()
+        if (interpolations.length === 1 && nonInterpolationText === '') return null
+
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Potential SQL injection',
