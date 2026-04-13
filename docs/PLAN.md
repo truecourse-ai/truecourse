@@ -2940,7 +2940,7 @@ Improve circular dependency detection with proper graph algorithms and lazy impo
    - Dynamic/lazy import cycle → low severity (warning)
    - Type-only import cycle → info (harmless)
 
-### 30.6 LLM Rule Prompts `STATUS: TODO`
+### 30.6 LLM Rule Prompts `STATUS: DONE`
 
 Write prompt text for 81 LLM rules across all domains. These rules already have definitions (key, name, description) but no `prompt` field — the text that guides the LLM during analysis.
 
