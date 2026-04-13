@@ -20,6 +20,18 @@ const UNAMBIGUOUS_DB_WRITES = new Set([
 
 function isOrmWriteCall(n: SyntaxNode): boolean {
   const name = getPythonMethodName(n)
+
+  // Raw SQL writes: execute("INSERT/UPDATE/DELETE ...")
+  if (name === 'execute' || name === 'executemany') {
+    const args = n.childForFieldName('arguments')
+    const firstArg = args?.namedChildren[0]
+    if (firstArg?.type === 'string') {
+      const sql = firstArg.text.toLowerCase()
+      if (/insert|update|delete|alter|create|drop/.test(sql)) return true
+    }
+    return false
+  }
+
   if (!PYTHON_WRITE_METHODS.has(name)) return false
 
   // Unambiguous DB write methods — always count

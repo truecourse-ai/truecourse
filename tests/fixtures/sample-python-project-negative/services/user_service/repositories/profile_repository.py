@@ -62,17 +62,17 @@ class ProfileRepository:
     # VIOLATION: style/deterministic/docstring-completeness
     # VIOLATION: code-quality/deterministic/no-self-use
     # VIOLATION: code-quality/deterministic/missing-type-hints
+    # VIOLATION: database/deterministic/missing-transaction
     def import_profiles(self, conn, data):
         """Import profiles from external data.
 
-        Multiple writes without transaction wrapping.
+        Multiple writes without proper safety wrapping.
         """
         for profile in data:
             conn.execute(
                 "INSERT INTO profiles (name, email) VALUES (?, ?)",
                 (profile["name"], profile["email"])
             )
-        # VIOLATION: database/deterministic/missing-transaction
         conn.execute(
             "UPDATE import_log SET status = 'complete' WHERE batch_id = ?",
             (data[0].get("batch_id"),)

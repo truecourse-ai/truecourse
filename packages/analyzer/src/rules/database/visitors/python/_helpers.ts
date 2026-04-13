@@ -57,7 +57,9 @@ export const PYTHON_SQL_METHODS = new Set([
 
 export const PYTHON_WRITE_METHODS = new Set([
   'add', 'add_all', 'merge', 'delete', 'update', 'save', 'create', 'insert',
-  'bulk_create', 'bulk_update', 'filter',
+  'bulk_create', 'bulk_update',
+  // NOTE: `filter` was removed — it's a READ method, not a write.
+  // `.filter()` on SQLAlchemy queries builds a WHERE clause, not a write.
 ])
 
 // ORM-specific find methods used in check-then-act patterns. Pre-Phase-5

@@ -204,7 +204,7 @@ def compute_stats(data: list) -> dict:
     return {"total": total}
 
 
-# NOTE: code-quality/deterministic/unused-unpacked-variable — skipped, variables used in context
+# VIOLATION: code-quality/deterministic/unused-unpacked-variable
 def get_primary_admin(admins: list) -> str:
     name, role, email = admins[0]
     return name
