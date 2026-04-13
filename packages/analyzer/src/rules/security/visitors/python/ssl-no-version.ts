@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 export const pythonSslNoVersionVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/ssl-no-version',
@@ -33,8 +34,10 @@ export const pythonSslNoVersionVisitor: CodeRuleVisitor = {
     }
 
     const firstArg = args.namedChildren[0]
-    if (firstArg && (firstArg.text.includes('PROTOCOL_TLS') && !firstArg.text.includes('PROTOCOL_TLS_CLIENT') &&
-        !firstArg.text.includes('PROTOCOL_TLS_SERVER'))) {
+    if (firstArg &&
+        containsPythonIdentifierExact(firstArg, 'PROTOCOL_TLS') &&
+        !containsPythonIdentifierExact(firstArg, 'PROTOCOL_TLS_CLIENT') &&
+        !containsPythonIdentifierExact(firstArg, 'PROTOCOL_TLS_SERVER')) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'SSL context without protocol version',

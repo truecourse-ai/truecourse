@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects dataclass __post_init__ methods that have parameters with default values.
@@ -35,10 +36,7 @@ export const pythonPostInitDefaultVisitor: CodeRuleVisitor = {
               const innerClass = sibling.namedChildren.find((c) => c.type === 'class_definition')
               if (innerClass === classDef) {
                 const decorators = sibling.namedChildren.filter((c) => c.type === 'decorator')
-                isDataclass = decorators.some((d) => {
-                  const text = d.text
-                  return text.includes('dataclass')
-                })
+                isDataclass = decorators.some((d) => getPythonDecoratorName(d) === 'dataclass')
               }
             }
           }
@@ -55,7 +53,7 @@ export const pythonPostInitDefaultVisitor: CodeRuleVisitor = {
 
     if (!isDataclass && grandparent?.type === 'decorated_definition') {
       const decorators = grandparent.namedChildren.filter((c) => c.type === 'decorator')
-      isDataclass = decorators.some((d) => d.text.includes('dataclass'))
+      isDataclass = decorators.some((d) => getPythonDecoratorName(d) === 'dataclass')
     }
 
     if (!isDataclass) return null

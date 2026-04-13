@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects a variable assigned immediately then reassigned without any use in between.
@@ -22,11 +23,16 @@ export const pythonRedeclaredAssignedNameVisitor: CodeRuleVisitor = {
         if (expr.type === 'assignment') {
           const target = expr.childForFieldName('left')
           if (!target || target.type !== 'identifier') continue
+
+          // Skip bare type annotations (e.g., `x: int` without `= value`).
+          // Tree-sitter parses these as `assignment` nodes without a `right` field.
+          const rhs = expr.childForFieldName('right')
+          if (!rhs) continue
+
           const name = target.text
           if (lastAssignment.has(name)) {
             // Skip sequential transforms: x = x.strip(), x = x.replace(...), etc.
-            const rhs = expr.childForFieldName('right')
-            if (rhs && rhs.text.includes(name)) {
+            if (containsPythonIdentifierExact(rhs, name)) {
               lastAssignment.set(name, i)
               continue
             }
@@ -40,11 +46,23 @@ export const pythonRedeclaredAssignedNameVisitor: CodeRuleVisitor = {
               continue
             }
 
+            // Skip step-tracker pattern: variable is reassigned inside a try body
+            // and read in the except handler for error context (e.g., step = "phase1"; ... step = "phase2";
+            // except: log(f"failed at {step}")).
+            if (node.type === 'block' && node.parent?.type === 'try_statement') {
+              const tryStmt = node.parent
+              const exceptClauses = tryStmt.namedChildren.filter((c) => c.type === 'except_clause')
+              if (exceptClauses.some((clause) => containsPythonIdentifierExact(clause, name))) {
+                lastAssignment.set(name, i)
+                continue
+              }
+            }
+
             // Check that between previous assignment and this one there's no reference to name
             let usedBetween = false
             for (let j = prevIdx + 1; j < i; j++) {
               const between = children[j]
-              if (between.text.includes(name)) {
+              if (containsPythonIdentifierExact(between, name)) {
                 usedBetween = true
                 break
               }
@@ -63,7 +81,7 @@ export const pythonRedeclaredAssignedNameVisitor: CodeRuleVisitor = {
         } else {
           // Any other expression — references may occur; clear assignments for names that appear
           for (const [name] of lastAssignment) {
-            if (child.text.includes(name)) {
+            if (containsPythonIdentifierExact(child, name)) {
               lastAssignment.delete(name)
             }
           }
@@ -71,7 +89,7 @@ export const pythonRedeclaredAssignedNameVisitor: CodeRuleVisitor = {
       } else {
         // Non-assignment statement — references names
         for (const [name] of lastAssignment) {
-          if (child.text.includes(name)) {
+          if (containsPythonIdentifierExact(child, name)) {
             lastAssignment.delete(name)
           }
         }

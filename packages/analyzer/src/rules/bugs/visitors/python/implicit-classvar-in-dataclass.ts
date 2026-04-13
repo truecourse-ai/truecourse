@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects class variables in dataclasses that are missing ClassVar annotation.
@@ -23,7 +24,7 @@ export const pythonImplicitClassvarInDataclassVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (parent?.type === 'decorated_definition') {
       const decorators = parent.namedChildren.filter((c) => c.type === 'decorator')
-      isDataclass = decorators.some((d) => d.text.includes('dataclass'))
+      isDataclass = decorators.some((d) => getPythonDecoratorName(d) === 'dataclass')
     }
 
     if (!isDataclass) return null

@@ -58,7 +58,7 @@ function isSelfImport(importName: string, filePath: string): boolean {
     const dir = parts[i]
     if (!dir || dir === '.' || dir === '..') break
     // Stop at common project-root markers
-    if (['site-packages', 'src', 'lib', 'dist', 'venv', '.venv', 'node_modules'].includes(dir)) break
+    if (['site-packages', 'src', 'lib', 'dist', 'venv', '.venv'].includes(dir)) break
     moduleSegments.unshift(dir)
   }
 

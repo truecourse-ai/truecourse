@@ -1,6 +1,7 @@
 import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName, getPythonDecoratorFullName } from '../../../_shared/python-helpers.js'
 
 // Detect: Flask class-based view (MethodView/View subclass) with route decorators
 // applied directly to the class instead of using the `decorators` class attribute
@@ -8,8 +9,24 @@ import { makeViolation } from '../../../types.js'
 function extendsFlaskView(classNode: SyntaxNode): boolean {
   const args = classNode.childForFieldName('superclasses')
   if (!args) return false
-  const text = args.text
-  return text.includes('MethodView') || text.includes('View') || text.includes('FlaskView')
+  const FLASK_VIEW_BASES = new Set(['MethodView', 'View', 'FlaskView'])
+  for (const child of args.namedChildren) {
+    // Handle `identifier` (View), `attribute` (flask.views.MethodView), `subscript` (View[T])
+    if (child.type === 'identifier' && FLASK_VIEW_BASES.has(child.text)) return true
+    if (child.type === 'attribute') {
+      const attr = child.childForFieldName('attribute')
+      if (attr && FLASK_VIEW_BASES.has(attr.text)) return true
+    }
+    if (child.type === 'subscript') {
+      const value = child.childForFieldName('value')
+      if (value?.type === 'identifier' && FLASK_VIEW_BASES.has(value.text)) return true
+      if (value?.type === 'attribute') {
+        const attr = value.childForFieldName('attribute')
+        if (attr && FLASK_VIEW_BASES.has(attr.text)) return true
+      }
+    }
+  }
+  return false
 }
 
 function hasDirectRouteDecorator(classNode: SyntaxNode): boolean {
@@ -18,9 +35,11 @@ function hasDirectRouteDecorator(classNode: SyntaxNode): boolean {
 
   for (const child of current.namedChildren) {
     if (child.type !== 'decorator') continue
-    if (child.text.includes('route') || child.text.includes('app.') || child.text.includes('bp.')) {
-      return true
-    }
+    const termName = getPythonDecoratorName(child)
+    const fullName = getPythonDecoratorFullName(child)
+    if (termName === 'route') return true
+    // Match decorators like @app.route, @bp.route, @app.get, etc.
+    if (fullName && /^(app|bp|blueprint)\.\w+$/.test(fullName)) return true
   }
   return false
 }

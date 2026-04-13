@@ -1,5 +1,42 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsNodeOfType } from '../../../_shared/python-helpers.js'
+
+/** Walk descendants for a `comparison_operator` containing an `in` or `not in` operator. */
+function hasComparisonWithIn(node: SyntaxNode): boolean {
+  if (node.type === 'comparison_operator') {
+    // comparison_operator children include the operators as anonymous nodes.
+    // `in` may appear as: 'in' keyword, 'not_in' type, or 'not in' text.
+    for (const child of node.children) {
+      if (child.type === 'in' || child.type === 'not_in') return true
+      if (!child.isNamed) {
+        const t = child.text
+        if (t === 'in' || t === 'not in') return true
+      }
+    }
+  }
+  for (const child of node.namedChildren) {
+    if (hasComparisonWithIn(child)) return true
+  }
+  return false
+}
+
+/** Walk descendants for a call whose method/function name matches. */
+function containsCallTo(node: SyntaxNode, methodName: string): boolean {
+  if (node.type === 'call') {
+    const fn = node.childForFieldName('function')
+    if (fn?.type === 'identifier' && fn.text === methodName) return true
+    if (fn?.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr?.text === methodName) return true
+    }
+  }
+  for (const child of node.namedChildren) {
+    if (containsCallTo(child, methodName)) return true
+  }
+  return false
+}
 
 /**
  * Detects __getitem__ and __setitem__ method bodies that access dict keys
@@ -29,12 +66,12 @@ export const pythonDictIndexMissingItemsVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    const bodyText = body.text
-
-    // Check for direct subscript access on self._data, self.data, self._store, etc.
-    // without a preceding __contains__ / 'in' check
-    const hasDirectAccess = /self\.\w+\[/.test(bodyText)
-    const hasContainsCheck = /\bin\b/.test(bodyText) || /__contains__/.test(bodyText) || /\.get\(/.test(bodyText)
+    // Check for direct subscript access via AST walk
+    const hasDirectAccess = containsNodeOfType(body, 'subscript')
+    // Check for containment check: 'in' inside comparison_operator, __contains__ call, or .get() call
+    const hasContainsCheck = hasComparisonWithIn(body) ||
+      containsCallTo(body, '__contains__') ||
+      containsCallTo(body, 'get')
 
     if (hasDirectAccess && !hasContainsCheck) {
       return makeViolation(

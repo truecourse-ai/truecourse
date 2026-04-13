@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName, getPythonDecoratorFullName } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects suboptimal pytest patterns:
@@ -34,21 +35,24 @@ export const pythonPytestSuboptimalPatternVisitor: CodeRuleVisitor = {
     }
 
     if (node.type === 'decorated_definition') {
-      for (const child of node.children) {
-        if (child.type === 'decorator') {
-          const decoratorText = child.text
-          // PT020: deprecated @pytest.yield_fixture
-          if (decoratorText.includes('yield_fixture')) {
-            return makeViolation(
-              this.ruleKey, node, filePath, 'low',
-              'Suboptimal pytest pattern: deprecated yield_fixture',
-              '`@pytest.yield_fixture` is deprecated. Use `@pytest.fixture` with `yield` instead.',
-              sourceCode,
-              'Replace `@pytest.yield_fixture` with `@pytest.fixture` and use `yield` in the body.',
-            )
-          }
-          // PT024: unnecessary asyncio mark on fixture
-          if (decoratorText.includes('pytest.mark.asyncio') && decoratorText.includes('fixture')) {
+      const decorators = node.children.filter((c) => c.type === 'decorator')
+      for (const d of decorators) {
+        // PT020: deprecated @pytest.yield_fixture
+        if (getPythonDecoratorName(d) === 'yield_fixture') {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'low',
+            'Suboptimal pytest pattern: deprecated yield_fixture',
+            '`@pytest.yield_fixture` is deprecated. Use `@pytest.fixture` with `yield` instead.',
+            sourceCode,
+            'Replace `@pytest.yield_fixture` with `@pytest.fixture` and use `yield` in the body.',
+          )
+        }
+        // PT024: unnecessary asyncio mark on fixture
+        if (getPythonDecoratorFullName(d) === 'pytest.mark.asyncio') {
+          // Check if the decorated definition also has a @pytest.fixture or @fixture decorator
+          const hasFixture = decorators.some((other) =>
+            getPythonDecoratorName(other) === 'fixture')
+          if (hasFixture) {
             return makeViolation(
               this.ruleKey, node, filePath, 'low',
               'Suboptimal pytest pattern: unnecessary asyncio mark on fixture',

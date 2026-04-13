@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 export const pythonUnsafeYamlLoadVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/unsafe-yaml-load',
@@ -24,25 +25,34 @@ export const pythonUnsafeYamlLoadVisitor: CodeRuleVisitor = {
     const args = node.childForFieldName('arguments')
     if (!args) return null
 
-    // If the second argument is not SafeLoader or FullLoader, flag it
-    if (args.namedChildren.length < 2) {
+    // Check all arguments (positional and keyword) for a safe Loader
+    let hasSafeLoader = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (name?.text === 'Loader' && value) {
+          if (containsPythonIdentifierExact(value, 'SafeLoader') ||
+              containsPythonIdentifierExact(value, 'FullLoader')) {
+            hasSafeLoader = true
+            break
+          }
+        }
+      } else {
+        // Positional argument — the second positional is the Loader
+        if (containsPythonIdentifierExact(arg, 'SafeLoader') ||
+            containsPythonIdentifierExact(arg, 'FullLoader')) {
+          hasSafeLoader = true
+          break
+        }
+      }
+    }
+
+    if (!hasSafeLoader) {
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Unsafe YAML load',
         'yaml.load() without a SafeLoader can deserialize arbitrary Python objects and execute code.',
-        sourceCode,
-        'Use yaml.safe_load() or pass Loader=yaml.SafeLoader.',
-      )
-    }
-
-    const loaderArg = args.namedChildren[1]
-    const loaderText = loaderArg?.text ?? ''
-    if (!loaderText.includes('SafeLoader') && !loaderText.includes('FullLoader') &&
-        !loaderText.includes('safe_load')) {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'high',
-        'Unsafe YAML load',
-        `yaml.load() with Loader=${loaderText} may allow arbitrary code execution.`,
         sourceCode,
         'Use yaml.safe_load() or pass Loader=yaml.SafeLoader.',
       )

@@ -1,5 +1,22 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isPythonTestFile, containsNodeOfType } from '../../../_shared/python-helpers.js'
+import type { SyntaxNode } from 'tree-sitter'
+
+/** Walk for `self.assert*()` method calls (unittest-style assertions). */
+function containsAssertMethodCall(node: SyntaxNode): boolean {
+  if (node.type === 'call') {
+    const fn = node.childForFieldName('function')
+    if (fn?.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr?.text.startsWith('assert')) return true
+    }
+  }
+  for (const child of node.namedChildren) {
+    if (containsAssertMethodCall(child)) return true
+  }
+  return false
+}
 
 /**
  * Detects test methods in test classes that don't follow naming conventions
@@ -20,10 +37,7 @@ export const pythonTestNotDiscoverableVisitor: CodeRuleVisitor = {
       className.endsWith('Test') ||
       className.endsWith('Tests')
 
-    const isTestFile =
-      filePath.includes('/test') ||
-      filePath.includes('_test.') ||
-      filePath.endsWith('test.py')
+    const isTestFile = isPythonTestFile(filePath)
 
     if (!isTestClass && !isTestFile) return null
 
@@ -46,8 +60,9 @@ export const pythonTestNotDiscoverableVisitor: CodeRuleVisitor = {
       if (name.startsWith('test_') || name.startsWith('_') || name.startsWith('setUp') || name.startsWith('tearDown') || name === 'setUp' || name === 'tearDown') continue
 
       // Check if the function body contains assertions (indicates it's a test)
-      const bodyText = funcNode.childForFieldName('body')?.text ?? ''
-      const hasAssertions = bodyText.includes('assert') || bodyText.includes('assertEqual') || bodyText.includes('assertRaises')
+      const funcBody = funcNode.childForFieldName('body')
+      if (!funcBody) continue
+      const hasAssertions = containsNodeOfType(funcBody, 'assert_statement') || containsAssertMethodCall(funcBody)
       if (!hasAssertions) continue
 
       return makeViolation(

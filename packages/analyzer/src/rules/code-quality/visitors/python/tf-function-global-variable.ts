@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorFullName } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects @tf.function decorated functions that depend on global Python variables
@@ -11,7 +12,7 @@ export const pythonTfFunctionGlobalVariableVisitor: CodeRuleVisitor = {
   nodeTypes: ['decorated_definition'],
   visit(node, filePath, sourceCode) {
     const decorators = node.namedChildren.filter((c) => c.type === 'decorator')
-    const hasTfFunction = decorators.some((d) => d.text === '@tf.function' || d.text.includes('tf.function'))
+    const hasTfFunction = decorators.some((d) => getPythonDecoratorFullName(d) === 'tf.function')
     if (!hasTfFunction) return null
 
     const funcNode = node.namedChildren.find((c) => c.type === 'function_definition' || c.type === 'async_function_definition')

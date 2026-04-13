@@ -19,9 +19,8 @@ export const pythonFunctionCallInDefaultArgVisitor: CodeRuleVisitor = {
 
     // FastAPI dependency-injection helpers (Depends, Query, Body, Path, Header,
     // Cookie, Form, File, Security) are the idiomatic way to declare route
-    // parameters — they are explicitly designed to be used as default values
-    // and DO NOT suffer from the mutable-default-arg problem. Pre-fix this
-    // rule generated ~150 FPs on arnata-brain's FastAPI routes.
+    // parameters. FastAPI DI helpers are designed to be used as default values
+    // and don't suffer from the mutable-default-arg problem.
     if (isFastApiDependsCall(value)) return null
 
     // Flag any other function call — it runs once at definition time

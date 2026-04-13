@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects outdated Python syntax that can be modernized (ruff UP rules):
@@ -55,8 +56,8 @@ export const pythonPyupgradeModernizationVisitor: CodeRuleVisitor = {
       ) {
         if (args) {
           const kwArgs = args.namedChildren.filter((c) => c.type === 'keyword_argument')
-          const hasStdout = kwArgs.some((kw) => kw.childForFieldName('name')?.text === 'stdout' && kw.text.includes('PIPE'))
-          const hasStderr = kwArgs.some((kw) => kw.childForFieldName('name')?.text === 'stderr' && kw.text.includes('PIPE'))
+          const hasStdout = kwArgs.some((kw) => kw.childForFieldName('name')?.text === 'stdout' && containsPythonIdentifierExact(kw, 'PIPE'))
+          const hasStderr = kwArgs.some((kw) => kw.childForFieldName('name')?.text === 'stderr' && containsPythonIdentifierExact(kw, 'PIPE'))
           const hasCaptureOutput = kwArgs.some((kw) => kw.childForFieldName('name')?.text === 'capture_output')
           if (hasStdout && hasStderr && !hasCaptureOutput) {
             return makeViolation(

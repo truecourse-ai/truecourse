@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 export const pythonAwsUnencryptedOpenSearchVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/aws-unencrypted-opensearch-python',
@@ -19,16 +20,34 @@ export const pythonAwsUnencryptedOpenSearchVisitor: CodeRuleVisitor = {
 
     if (funcName !== 'Domain' && funcName !== 'CfnDomain') return null
 
-    // Look for encryption_at_rest or EncryptionAtRestOptions with enabled=False
-    const nodeText = node.text
-    if (/encryption_at_rest.*enabled.*False|EncryptionAtRestOptions.*Enabled.*False/i.test(nodeText)) {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'high',
-        'Unencrypted OpenSearch domain',
-        `${funcName}() configured with encryption at rest disabled.`,
-        sourceCode,
-        'Enable encryption at rest for the OpenSearch domain.',
-      )
+    // Walk keyword arguments for encryption configuration
+    const argsNode = node.childForFieldName('arguments')
+    if (!argsNode) return null
+
+    for (const arg of argsNode.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (!name || !value) continue
+
+        const keyName = name.text
+        if (keyName === 'encryption_at_rest' || keyName === 'encrypt_at_rest' ||
+            keyName === 'EncryptionAtRestOptions' || keyName === 'encryption_at_rest_options') {
+          // Check for enabled=False inside the value — False is a `false` node type, not identifier
+          const hasFalse = value.type === 'false' || value.text === 'False' ||
+            (value.type === 'dictionary' && value.namedChildren.some(p =>
+              p.type === 'pair' && p.childForFieldName('value')?.type === 'false'))
+          if (hasFalse) {
+            return makeViolation(
+              this.ruleKey, node, filePath, 'high',
+              'Unencrypted OpenSearch domain',
+              `${funcName}() configured with encryption at rest disabled.`,
+              sourceCode,
+              'Enable encryption at rest for the OpenSearch domain.',
+            )
+          }
+        }
+      }
     }
 
     return null

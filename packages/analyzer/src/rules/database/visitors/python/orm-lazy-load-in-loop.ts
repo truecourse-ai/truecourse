@@ -14,7 +14,7 @@ const JSONB_COLUMN_NAMES = new Set([
   'extra', 'extras', 'attributes', 'attrs', 'properties', 'props', 'info',
   'details', 'tags', 'labels', 'annotations', 'headers', 'body', 'json',
   'result', 'results', 'response', 'request', 'state', 'status', 'errors',
-  'evaluation_details', 'raw_data', 'field_data', 'form_data', 'query_params',
+  'raw_data', 'field_data', 'form_data', 'query_params', 'evaluation_details',
 ])
 
 export const pythonOrmLazyLoadInLoopVisitor: CodeRuleVisitor = {

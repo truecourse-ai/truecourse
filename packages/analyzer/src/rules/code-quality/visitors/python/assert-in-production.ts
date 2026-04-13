@@ -1,20 +1,14 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isPythonTestFile } from '../../../_shared/python-helpers.js'
 
 export const pythonAssertInProductionVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/assert-in-production',
   languages: ['python'],
   nodeTypes: ['assert_statement'],
   visit(node, filePath, sourceCode) {
-    // Skip test files — check the file name (basename) and immediate directory, not the whole path
-    const segments = filePath.split('/')
-    const fileName = segments[segments.length - 1]?.toLowerCase() ?? ''
-    const dirName = segments[segments.length - 2]?.toLowerCase() ?? ''
-    if (
-      fileName.includes('test_') || fileName.includes('_test.') || fileName.startsWith('test.') ||
-      dirName === 'test' || dirName === 'tests' || dirName === '__tests__' ||
-      /\btest(s|ing)?\b/.test(dirName)
-    ) return null
+    // Skip test files
+    if (isPythonTestFile(filePath)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

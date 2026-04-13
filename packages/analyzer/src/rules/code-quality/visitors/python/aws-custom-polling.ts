@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonCallTo, containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 import { importsAwsSdk } from '../../../_shared/python-framework-detection.js'
 
 /**
@@ -24,11 +25,11 @@ export const pythonAwsCustomPollingVisitor: CodeRuleVisitor = {
     if (!hasDescribeCall) return null
 
     // Check for sleep call (indicates polling)
-    const hasSleep = bodyText.includes('time.sleep') || bodyText.includes('sleep(')
+    const hasSleep = containsPythonCallTo(body, 'time.sleep') || containsPythonCallTo(body, 'sleep')
     if (!hasSleep) return null
 
     // Check for status/state check
-    const hasStatusCheck = bodyText.includes('status') || bodyText.includes('state') || bodyText.includes('State') || bodyText.includes('Status')
+    const hasStatusCheck = containsPythonIdentifierExact(body, 'status') || containsPythonIdentifierExact(body, 'state') || containsPythonIdentifierExact(body, 'Status') || containsPythonIdentifierExact(body, 'State')
     if (!hasStatusCheck) return null
 
     return makeViolation(

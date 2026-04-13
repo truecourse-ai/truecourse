@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName, containsPythonCallTo } from '../../../_shared/python-helpers.js'
 
 export const pythonFlaskErrorHandlerVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/flask-error-handler-missing-status',
@@ -10,8 +11,7 @@ export const pythonFlaskErrorHandlerVisitor: CodeRuleVisitor = {
     const decorators = node.namedChildren.filter((c) => c.type === 'decorator')
     let isErrorHandler = false
     for (const dec of decorators) {
-      const decText = dec.text
-      if (decText.includes('errorhandler')) {
+      if (getPythonDecoratorName(dec) === 'errorhandler') {
         isErrorHandler = true
         break
       }
@@ -30,14 +30,14 @@ export const pythonFlaskErrorHandlerVisitor: CodeRuleVisitor = {
     // Flask error handlers should return (response, status_code) or jsonify(...), status_code
     if (!bodyText.includes('return')) return null
 
-    // Simple heuristic: check if the return has a comma (tuple) with a numeric status
+    // Check each return statement for a status code
     const returnStatements = body.namedChildren.filter((c) => c.type === 'return_statement')
     for (const ret of returnStatements) {
-      const retText = ret.text
-      // If it's a tuple return like return jsonify(...), 404 — that's fine
-      if (retText.includes(',')) continue
+      // If the return value is a tuple or expression_list, it includes a status code — fine
+      const retValue = ret.namedChildren[0]
+      if (retValue?.type === 'tuple' || retValue?.type === 'expression_list') continue
       // If it returns make_response with status — fine
-      if (retText.includes('make_response')) continue
+      if (containsPythonCallTo(ret, 'make_response')) continue
 
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

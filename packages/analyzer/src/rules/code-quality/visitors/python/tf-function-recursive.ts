@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorFullName, containsPythonCallTo } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects @tf.function decorated functions that call themselves recursively —
@@ -12,7 +13,7 @@ export const pythonTfFunctionRecursiveVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     // Check decorators for @tf.function
     const decorators = node.namedChildren.filter((c) => c.type === 'decorator')
-    const hasTfFunction = decorators.some((d) => d.text === '@tf.function' || d.text.includes('tf.function'))
+    const hasTfFunction = decorators.some((d) => getPythonDecoratorFullName(d) === 'tf.function')
     if (!hasTfFunction) return null
 
     const funcNode = node.namedChildren.find((c) => c.type === 'function_definition' || c.type === 'async_function_definition')
@@ -26,9 +27,7 @@ export const pythonTfFunctionRecursiveVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     // Check if body contains a call to the function itself
-    const bodyText = body.text
-    const callPattern = new RegExp(`\\b${funcName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`)
-    if (!callPattern.test(bodyText)) return null
+    if (!containsPythonCallTo(body, funcName)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

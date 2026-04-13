@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsSubscriptAccess } from '../../../_shared/python-helpers.js'
 
 export const incorrectDictIteratorVisitor: CodeRuleVisitor = {
   ruleKey: 'performance/deterministic/incorrect-dict-iterator',
@@ -29,11 +30,9 @@ export const incorrectDictIteratorVisitor: CodeRuleVisitor = {
     if (!left) return null
     const iterVar = left.text
 
-    const bodyText = body.text
-
     if (attr.text === 'keys') {
       // If iterating .keys() but body accesses dict[key], suggest .items()
-      if (bodyText.includes(`${dictName}[${iterVar}]`)) {
+      if (containsSubscriptAccess(body, dictName, iterVar)) {
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Iterating .keys() but accessing values by key',

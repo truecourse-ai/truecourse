@@ -1,21 +1,38 @@
 import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
 // Detect: @app.get('/...', status_code=204) with non-None response_model or return value
 
+const HTTP_METHOD_NAMES = new Set(['route', 'get', 'post', 'put', 'patch', 'delete', 'options', 'head'])
+
+/** Walk the decorator's call arguments for `keyword_argument` nodes. */
+function getDecoratorCallArgs(decorator: SyntaxNode): SyntaxNode[] {
+  const inner = decorator.namedChildren[0]
+  if (!inner) return []
+  // If the decorator expression is a call (e.g. @app.get('/...', status_code=204))
+  const call = inner.type === 'call' ? inner : null
+  if (!call) return []
+  const args = call.childForFieldName('arguments')
+  if (!args) return []
+  return args.namedChildren.filter((c) => c.type === 'keyword_argument')
+}
+
 function has204StatusCode(decorator: SyntaxNode): boolean {
-  const text = decorator.text
-  return text.includes('status_code=204') || text.includes('status_code = 204')
+  for (const kwarg of getDecoratorCallArgs(decorator)) {
+    const name = kwarg.childForFieldName('name')
+    const value = kwarg.childForFieldName('value')
+    if (name?.text === 'status_code' && value?.text === '204') return true
+  }
+  return false
 }
 
 function hasResponseBody(decorator: SyntaxNode): boolean {
-  const text = decorator.text
-  // If there's a response_model= that's not None
-  const match = text.match(/response_model\s*=\s*([^,)]+)/)
-  if (match) {
-    const model = match[1].trim()
-    if (model !== 'None') return true
+  for (const kwarg of getDecoratorCallArgs(decorator)) {
+    const name = kwarg.childForFieldName('name')
+    const value = kwarg.childForFieldName('value')
+    if (name?.text === 'response_model' && value?.text !== 'None') return true
   }
   return false
 }
@@ -33,8 +50,8 @@ export const pythonFastapi204WithBodyVisitor: CodeRuleVisitor = {
 
     for (const child of parent.namedChildren) {
       if (child.type !== 'decorator') continue
-      const text = child.text
-      if (!text.includes('route') && !text.match(/\.(get|post|put|patch|delete|options|head)\s*\(/)) continue
+      const termName = getPythonDecoratorName(child)
+      if (!termName || !HTTP_METHOD_NAMES.has(termName)) continue
 
       if (has204StatusCode(child)) has204 = true
       if (hasResponseBody(child)) hasBody = true

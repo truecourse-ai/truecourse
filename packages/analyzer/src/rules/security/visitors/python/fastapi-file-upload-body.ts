@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 export const pythonFastapiFileUploadBodyVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/fastapi-file-upload-body',
@@ -9,13 +10,36 @@ export const pythonFastapiFileUploadBodyVisitor: CodeRuleVisitor = {
     const params = node.childForFieldName('parameters')
     if (!params) return null
 
-    // Check parameters for UploadFile type annotation without size constraint
+    // Check parameters for UploadFile type annotation
+    let hasUploadFile = false
     for (const param of params.namedChildren) {
-      const paramText = param.text
-      if (/UploadFile/.test(paramText) && !/max_size|size_limit/.test(paramText)) {
-        // Check if there's no max_size validation in the function body
-        const body = node.childForFieldName('body')
-        if (body && !/max_size|size_limit|content.length|\.size/.test(body.text)) {
+      // Check the type annotation for UploadFile identifier
+      const typeAnnotation = param.childForFieldName('type')
+      if (typeAnnotation && containsPythonIdentifierExact(typeAnnotation, 'UploadFile')) {
+        hasUploadFile = true
+        break
+      }
+      // Also handle typed_default_parameter
+      if (param.type === 'typed_default_parameter') {
+        const typeNode = param.childForFieldName('type')
+        if (typeNode && containsPythonIdentifierExact(typeNode, 'UploadFile')) {
+          hasUploadFile = true
+          break
+        }
+      }
+    }
+
+    if (hasUploadFile) {
+      // Check if the function body has size validation
+      const body = node.childForFieldName('body')
+      if (body) {
+        const hasSizeCheck =
+          containsPythonIdentifierExact(body, 'max_size') ||
+          containsPythonIdentifierExact(body, 'size_limit') ||
+          containsPythonIdentifierExact(body, 'MAX_SIZE') ||
+          containsPythonIdentifierExact(body, 'MAX_FILE_SIZE') ||
+          containsPythonIdentifierExact(body, 'content_length')
+        if (!hasSizeCheck) {
           return makeViolation(
             this.ruleKey, node, filePath, 'medium',
             'FastAPI file upload without size limit',

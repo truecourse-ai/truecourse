@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonImportSources } from '../../../_shared/python-framework-detection.js'
 
 /** Built-in functions that execute arbitrary code. */
 const PYTHON_EVAL_BUILTINS = new Set(['eval', 'exec', 'compile'])
@@ -11,6 +12,22 @@ const PYTHON_EVAL_BUILTINS = new Set(['eval', 'exec', 'compile'])
 const SAFE_METHOD_RECEIVERS = new Set([
   're', 'regex', 'redis', 'model', 'torch', 'tf', 'np', 'pd', 'ast',
 ])
+
+/**
+ * Mapping from receiver names to their expected import module sources.
+ * Used to verify that a receiver is actually the safe module, not a local variable
+ * that happens to share the name.
+ */
+const SAFE_RECEIVER_IMPORT_SOURCES: Record<string, string[]> = {
+  're': ['re'],
+  'regex': ['regex'],
+  'redis': ['redis', 'redis.client', 'aioredis'],
+  'torch': ['torch', 'torch.nn'],
+  'tf': ['tensorflow', 'tensorflow.keras'],
+  'np': ['numpy'],
+  'pd': ['pandas'],
+  'ast': ['ast'],
+}
 
 export const pythonEvalUsageVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/eval-usage',
@@ -44,7 +61,24 @@ export const pythonEvalUsageVisitor: CodeRuleVisitor = {
             leafName = attrChild.text.replace(/^_+/, '')
           }
         }
-        if (leafName && SAFE_METHOD_RECEIVERS.has(leafName)) return null
+        if (leafName && SAFE_METHOD_RECEIVERS.has(leafName)) {
+          // Fast path: name matches a known safe receiver.
+          // Verify via import sources when a mapping is available.
+          const expectedSources = SAFE_RECEIVER_IMPORT_SOURCES[leafName]
+          if (expectedSources) {
+            const sources = getPythonImportSources(node)
+            // If imports confirm the safe module, skip
+            for (const src of sources) {
+              if (expectedSources.some(es => src === es || src.startsWith(es + '.'))) {
+                return null
+              }
+            }
+            // If there are no imports at all (snippet), trust the name
+            if (sources.size === 0) return null
+          }
+          // For receivers without import mapping (model, etc.), trust the name
+          if (!expectedSources) return null
+        }
       }
     }
 

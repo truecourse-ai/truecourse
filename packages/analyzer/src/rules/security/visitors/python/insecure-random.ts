@@ -1,6 +1,8 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+const SECURITY_SENSITIVE_NAMES = ['token', 'secret', 'key', 'nonce', 'salt', 'password', 'session']
+
 export const pythonInsecureRandomVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/insecure-random',
   languages: ['python'],
@@ -21,24 +23,25 @@ export const pythonInsecureRandomVisitor: CodeRuleVisitor = {
     if (objectName !== 'random') return null
     if (methodName !== 'random' && methodName !== 'randint' && methodName !== 'choice') return null
 
-    // Check if used in security-sensitive context
-    let parent = node.parent
-    while (parent) {
-      const parentText = parent.text.toLowerCase()
-      if (parentText.includes('token') || parentText.includes('secret') ||
-          parentText.includes('key') || parentText.includes('nonce') ||
-          parentText.includes('salt') || parentText.includes('password') ||
-          parentText.includes('session')) {
-        return makeViolation(
-          this.ruleKey, node, filePath, 'high',
-          'Insecure random number generator',
-          `random.${methodName}() is not cryptographically secure. Do not use it for tokens, keys, or secrets.`,
-          sourceCode,
-          'Use secrets.token_hex() or secrets.token_urlsafe() instead.',
-        )
+    // Check if used in security-sensitive context by inspecting the assignment target
+    let current = node.parent
+    while (current && current.type !== 'assignment' && current.type !== 'expression_statement') {
+      current = current.parent
+    }
+    if (current?.type === 'assignment') {
+      const target = current.childForFieldName('left')
+      if (target) {
+        const targetName = target.text.toLowerCase()
+        if (SECURITY_SENSITIVE_NAMES.some(n => targetName.includes(n))) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Insecure random number generator',
+            `random.${methodName}() is not cryptographically secure. Do not use it for tokens, keys, or secrets.`,
+            sourceCode,
+            'Use secrets.token_hex() or secrets.token_urlsafe() instead.',
+          )
+        }
       }
-      if (parent.type === 'expression_statement' || parent.type === 'assignment') break
-      parent = parent.parent
     }
 
     return null

@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonImportSources } from '../../../_shared/python-framework-detection.js'
 
 // Detects: synchronous blocking calls inside async functions in a Trio context
 // Common trio-specific sync calls that should use async equivalents
@@ -42,21 +43,9 @@ export const pythonTrioSyncCallVisitor: CodeRuleVisitor = {
 
     if (!insideAsync) return null
 
-    // Check if trio is imported (simple heuristic: file has 'import trio')
-    const root = node.tree?.rootNode
-    if (!root) return null
-
-    let trioImported = false
-    for (const child of root.namedChildren) {
-      if (child.type === 'import_statement' && child.text.includes('trio')) {
-        trioImported = true
-        break
-      }
-      if (child.type === 'import_from_statement' && child.text.includes('trio')) {
-        trioImported = true
-        break
-      }
-    }
+    // Check if trio is imported via AST-based import source detection
+    const importSources = getPythonImportSources(node)
+    const trioImported = [...importSources].some((src) => src === 'trio' || src.startsWith('trio.'))
 
     if (!trioImported) return null
 

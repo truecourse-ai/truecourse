@@ -1,13 +1,18 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { hasDecoratorNamed } from '../../../_shared/python-helpers.js'
 import type { SyntaxNode } from 'tree-sitter'
 
 function isInsideAbcClass(node: SyntaxNode): boolean {
   let cur: SyntaxNode | null = node.parent
   while (cur) {
     if (cur.type === 'class_definition') {
-      const args = cur.childForFieldName('superclasses')
-      if (args?.text.includes('ABC') || args?.text.includes('ABCMeta')) return true
+      const supers = cur.childForFieldName('superclasses')
+      if (!supers) return false
+      for (const child of supers.namedChildren) {
+        const baseName = extractBaseName(child)
+        if (baseName === 'ABC' || baseName === 'ABCMeta') return true
+      }
       return false
     }
     cur = cur.parent
@@ -15,14 +20,22 @@ function isInsideAbcClass(node: SyntaxNode): boolean {
   return false
 }
 
-function hasAbstractDecorator(node: SyntaxNode): boolean {
-  const decorated = node.parent
-  if (!decorated || decorated.type !== 'decorated_definition') return false
-  for (let i = 0; i < decorated.childCount; i++) {
-    const child = decorated.child(i)
-    if (child?.type === 'decorator' && child.text.includes('abstractmethod')) return true
+function extractBaseName(node: SyntaxNode): string | null {
+  if (node.type === 'identifier') return node.text
+  if (node.type === 'attribute') {
+    const attr = node.childForFieldName('attribute')
+    return attr?.text ?? null
   }
-  return false
+  if (node.type === 'subscript') {
+    const value = node.childForFieldName('value')
+    if (value) return extractBaseName(value)
+  }
+  if (node.type === 'keyword_argument') return null
+  return null
+}
+
+function hasAbstractDecorator(node: SyntaxNode): boolean {
+  return hasDecoratorNamed(node, 'abstractmethod')
 }
 
 function isEmptyBody(bodyNode: SyntaxNode): boolean {

@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName, getPythonDecoratorFullName } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects pytest fixture/decorator misuse patterns:
@@ -22,11 +23,15 @@ export const pythonPytestFixtureMisuseVisitor: CodeRuleVisitor = {
 
     // PT025: @pytest.mark.usefixtures on a fixture function
     const isFixture = decorators.some((d) => {
-      const text = d.text
-      return text.includes('pytest.fixture') || text === '@fixture'
+      const termName = getPythonDecoratorName(d)
+      const fullName = getPythonDecoratorFullName(d)
+      return fullName === 'pytest.fixture' || termName === 'fixture'
     })
 
-    const hasUsefixtures = decorators.find((d) => d.text.includes('usefixtures'))
+    const hasUsefixtures = decorators.find((d) => {
+      const termName = getPythonDecoratorName(d)
+      return termName === 'usefixtures'
+    })
 
     if (isFixture && hasUsefixtures) {
       return makeViolation(
@@ -40,7 +45,7 @@ export const pythonPytestFixtureMisuseVisitor: CodeRuleVisitor = {
 
     // PT026: @pytest.mark.usefixtures without parameters
     const emptyUsefixtures = decorators.find((d) => {
-      if (!d.text.includes('usefixtures')) return false
+      if (getPythonDecoratorName(d) !== 'usefixtures') return false
       // Check if the decorator call has no arguments
       const call = d.namedChildren.find((c) => c.type === 'call')
       if (!call) return false
@@ -61,7 +66,11 @@ export const pythonPytestFixtureMisuseVisitor: CodeRuleVisitor = {
 
     // PT019: fixture with params but missing request parameter
     if (isFixture) {
-      const fixtureDecorator = decorators.find((d) => d.text.includes('pytest.fixture') || d.text === '@fixture')
+      const fixtureDecorator = decorators.find((d) => {
+        const fullName = getPythonDecoratorFullName(d)
+        const termName = getPythonDecoratorName(d)
+        return fullName === 'pytest.fixture' || termName === 'fixture'
+      })
       if (fixtureDecorator) {
         // Check if decorator has params= argument
         const call = fixtureDecorator.namedChildren.find((c) => c.type === 'call')

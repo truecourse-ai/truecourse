@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isPythonTestFile } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects `assert False` in test code.
@@ -17,7 +18,7 @@ export const pythonPytestAssertAlwaysFalseVisitor: CodeRuleVisitor = {
     if (condition.type !== 'false') return null
 
     // Only flag in test files
-    if (!filePath.includes('test') && !filePath.includes('spec')) return null
+    if (!isPythonTestFile(filePath)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

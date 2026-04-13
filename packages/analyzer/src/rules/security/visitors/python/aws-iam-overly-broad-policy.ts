@@ -1,5 +1,18 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+
+/** Check if a node is or contains a string literal whose content is just "*". */
+function containsWildcardStringLiteral(node: SyntaxNode): boolean {
+  if (node.type === 'string') {
+    const stripped = node.text.replace(/^['"]|['"]$/g, '')
+    return stripped === '*'
+  }
+  for (const child of node.namedChildren) {
+    if (containsWildcardStringLiteral(child)) return true
+  }
+  return false
+}
 
 export const pythonAwsIamOverlyBroadPolicyVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/aws-iam-overly-broad-policy',
@@ -27,9 +40,8 @@ export const pythonAwsIamOverlyBroadPolicyVisitor: CodeRuleVisitor = {
         const name = arg.childForFieldName('name')
         const value = arg.childForFieldName('value')
         if (name?.text === 'actions' && value) {
-          const valText = value.text
-          // actions=["*"] or actions="*"
-          if (valText.includes('"*"') || valText.includes("'*'")) {
+          // actions=["*"] or actions="*" — check for string literal containing just "*"
+          if (containsWildcardStringLiteral(value)) {
             return makeViolation(
               this.ruleKey, node, filePath, 'critical',
               'Overly broad IAM policy',
@@ -72,8 +84,8 @@ export const pythonAwsIamAllPrivilegesVisitor: CodeRuleVisitor = {
         const name = arg.childForFieldName('name')
         const value = arg.childForFieldName('value')
         if (name?.text === 'actions' && value) {
-          const valText = value.text
-          if (valText.includes('"*"') || valText.includes("'*'")) {
+          // actions=["*"] or actions="*" — check for string literal containing just "*"
+          if (containsWildcardStringLiteral(value)) {
             return makeViolation(
               this.ruleKey, node, filePath, 'critical',
               'IAM grants all privileges',

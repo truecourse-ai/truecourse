@@ -17,9 +17,26 @@ function getMetaClass(classBody: SyntaxNode): SyntaxNode | null {
 }
 
 function inheritsFromModelForm(node: SyntaxNode): boolean {
-  const args = node.childForFieldName('superclasses')
-  if (!args) return false
-  return args.text.includes('ModelForm') || args.text.includes('forms.ModelForm')
+  const supers = node.childForFieldName('superclasses')
+  if (!supers) return false
+  for (const child of supers.namedChildren) {
+    const baseName = extractTerminalName(child)
+    if (baseName === 'ModelForm') return true
+  }
+  return false
+}
+
+function extractTerminalName(node: SyntaxNode): string | null {
+  if (node.type === 'identifier') return node.text
+  if (node.type === 'attribute') {
+    const attr = node.childForFieldName('attribute')
+    return attr?.text ?? null
+  }
+  if (node.type === 'subscript') {
+    const value = node.childForFieldName('value')
+    if (value) return extractTerminalName(value)
+  }
+  return null
 }
 
 export const pythonDjangoModelFormFieldsVisitor: CodeRuleVisitor = {

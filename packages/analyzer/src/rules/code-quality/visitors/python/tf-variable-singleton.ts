@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorFullName } from '../../../_shared/python-helpers.js'
 
 /**
  * Detects tf.Variable() created inside a @tf.function decorated function —
@@ -32,7 +33,7 @@ export const pythonTfVariableSingletonVisitor: CodeRuleVisitor = {
         const decorated = parent.parent
         if (decorated?.type === 'decorated_definition') {
           const decs = decorated.namedChildren.filter((c) => c.type === 'decorator')
-          if (decs.some((d) => d.text === '@tf.function' || d.text.includes('tf.function'))) {
+          if (decs.some((d) => getPythonDecoratorFullName(d) === 'tf.function')) {
             return makeViolation(
               this.ruleKey, node, filePath, 'medium',
               'tf.Variable inside @tf.function',

@@ -10,19 +10,19 @@ export const pythonDeeplyNestedFstringVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['string'],
   visit(node: SyntaxNode, filePath, sourceCode) {
-    // Must be an f-string
+    // Must be an f-string — check the text prefix with OR (not AND)
     const text = node.text
-    if (!text.startsWith('f"') && !text.startsWith("f'") && !text.startsWith('f"""') && !text.startsWith("f'''")) return null
+    if (!(text.startsWith('f"') || text.startsWith("f'") || text.startsWith('f"""') || text.startsWith("f'''"))) return null
 
     // Count nesting depth by traversing parent chain
     let depth = 0
     let current: SyntaxNode | null = node.parent
     while (current) {
-      if (
-        current.type === 'string' &&
-        (current.text.startsWith('f"') || current.text.startsWith("f'") || current.text.startsWith('f"""') || current.text.startsWith("f'''"))
-      ) {
-        depth++
+      if (current.type === 'string') {
+        const parentText = current.text
+        if (parentText.startsWith('f"') || parentText.startsWith("f'") || parentText.startsWith('f"""') || parentText.startsWith("f'''")) {
+          depth++
+        }
       }
       current = current.parent
     }

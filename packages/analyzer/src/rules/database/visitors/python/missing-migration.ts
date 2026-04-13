@@ -7,9 +7,13 @@ export const pythonMissingMigrationVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
-    if (/migrat/i.test(filePath)) return null
-    // Skip Alembic migration files (alembic/versions/*.py)
-    if (/alembic\/versions\//i.test(filePath)) return null
+    // Skip files inside migration directories (migrations/ or alembic/versions/)
+    const segments = filePath.split('/')
+    const inMigrations = segments.some((s, i) =>
+      s.toLowerCase() === 'migrations' ||
+      (s.toLowerCase() === 'versions' && segments[i - 1]?.toLowerCase() === 'alembic')
+    )
+    if (inMigrations) return null
 
     const methodName = getPythonMethodName(node)
     if (!PYTHON_SQL_METHODS.has(methodName)) return null

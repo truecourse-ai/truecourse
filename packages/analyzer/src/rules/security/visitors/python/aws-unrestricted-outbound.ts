@@ -1,5 +1,36 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
+
+/** Check if a node contains all-traffic port patterns: port=-1 or from_port=0+to_port=65535. */
+function isAllTrafficPort(node: SyntaxNode): boolean {
+  if (node.type === 'integer' && (node.text === '-1')) return true
+  if (containsPythonIdentifierExact(node, 'ALL_TRAFFIC') || containsPythonIdentifierExact(node, 'all_traffic')) return true
+  for (const child of node.namedChildren) {
+    if (isAllTrafficPort(child)) return true
+  }
+  return false
+}
+
+/** Check if a node contains a wildcard CIDR (0.0.0.0/0 or ::/0) or Peer.any_ipv4/6(). */
+function hasWildcardCidr(node: SyntaxNode): boolean {
+  if (node.type === 'string') {
+    const stripped = node.text.replace(/^['"]|['"]$/g, '')
+    return stripped === '0.0.0.0/0' || stripped === '::/0'
+  }
+  if (node.type === 'call') {
+    const fn = node.childForFieldName('function')
+    if (fn?.type === 'attribute') {
+      const attr = fn.childForFieldName('attribute')
+      if (attr?.text === 'any_ipv4' || attr?.text === 'any_ipv6') return true
+    }
+  }
+  for (const child of node.namedChildren) {
+    if (hasWildcardCidr(child)) return true
+  }
+  return false
+}
 
 export const pythonAwsUnrestrictedOutboundVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/aws-unrestricted-outbound',
@@ -17,13 +48,35 @@ export const pythonAwsUnrestrictedOutboundVisitor: CodeRuleVisitor = {
 
     if (funcName !== 'add_egress_rule' && funcName !== 'authorize_security_group_egress') return null
 
-    const nodeText = node.text
-    const hasAllTraffic = nodeText.includes('ALL_TRAFFIC') || nodeText.includes('all_traffic') ||
-      /port.*-1|from_port.*0.*to_port.*65535/i.test(nodeText)
-    const hasWildcard = nodeText.includes('0.0.0.0/0') || nodeText.includes('::/0') ||
-      nodeText.includes('Peer.any_ipv4()') || nodeText.includes('Peer.any_ipv6()')
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
 
-    if (hasAllTraffic && hasWildcard) {
+    // Walk keyword arguments to detect all-traffic + wildcard patterns
+    let foundAllTraffic = false
+    let foundWildcard = false
+    for (const arg of args.namedChildren) {
+      if (arg.type === 'keyword_argument') {
+        const name = arg.childForFieldName('name')
+        const value = arg.childForFieldName('value')
+        if (!name || !value) continue
+
+        const keyName = name.text
+        if (keyName === 'port' || keyName === 'from_port' || keyName === 'to_port' ||
+            keyName === 'ip_protocol' || keyName === 'connection') {
+          if (isAllTrafficPort(value)) foundAllTraffic = true
+        }
+        if (keyName === 'peer' || keyName === 'cidr_ip' || keyName === 'cidr_ipv6' ||
+            keyName === 'CidrIp' || keyName === 'CidrIpv6') {
+          if (hasWildcardCidr(value)) foundWildcard = true
+        }
+      } else {
+        // Positional arguments
+        if (isAllTrafficPort(arg)) foundAllTraffic = true
+        if (hasWildcardCidr(arg)) foundWildcard = true
+      }
+    }
+
+    if (foundAllTraffic && foundWildcard) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Unrestricted outbound communications',

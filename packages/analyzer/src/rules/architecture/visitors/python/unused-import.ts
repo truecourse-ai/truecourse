@@ -1,5 +1,20 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonModuleNode } from '../../../_shared/python-helpers.js'
+
+/**
+ * Walk the AST rooted at `root` looking for an `identifier` node with
+ * the given `name` that is NOT a descendant of `excludeNode`.
+ */
+function hasIdentifierOutside(root: SyntaxNode, name: string, excludeNode: SyntaxNode): boolean {
+  if (root === excludeNode) return false
+  if (root.type === 'identifier' && root.text === name) return true
+  for (const child of root.namedChildren) {
+    if (hasIdentifierOutside(child, name, excludeNode)) return true
+  }
+  return false
+}
 
 export const pythonUnusedImportVisitor: CodeRuleVisitor = {
   ruleKey: 'architecture/deterministic/unused-import',
@@ -30,25 +45,17 @@ export const pythonUnusedImportVisitor: CodeRuleVisitor = {
 
     if (names.length === 0) return null
 
-    // Check if names are used in the rest of the file
-    const importLineStart = node.startPosition.row
-    const importLineEnd = node.endPosition.row
-    const lines = sourceCode.split('\n')
-    const codeWithoutImport = [
-      ...lines.slice(0, importLineStart),
-      ...lines.slice(importLineEnd + 1),
-    ].join('\n')
-
     // Skip imports with a `# noqa` comment on the same line — these are
     // intentional side-effect imports (e.g., importing a module to register
     // event handlers, signal receivers, or plugins).
-    const importLine = lines[importLineStart] ?? ''
+    const importLine = sourceCode.split('\n')[node.startPosition.row] ?? ''
     if (/# *noqa\b/.test(importLine)) return null
 
+    // Check if names are used in the rest of the file via AST walk
+    const moduleNode = getPythonModuleNode(node)
     for (const name of names) {
       if (!name) continue
-      const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
-      if (!regex.test(codeWithoutImport)) {
+      if (!hasIdentifierOutside(moduleNode, name, node)) {
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           `Unused import: ${name}`,

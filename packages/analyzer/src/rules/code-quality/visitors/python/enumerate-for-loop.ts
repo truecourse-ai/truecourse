@@ -1,19 +1,5 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
-
-function counterUsedOnlyAsIndex(counterName: string, iterName: string, bodyNode: SyntaxNode): boolean {
-  // This is a simplified check - look for counterName being used as index into iterName
-  const bodyText = bodyNode.text
-  // Check if counter is used in subscript access to the iterable
-  return bodyText.includes(`${iterName}[${counterName}]`)
-}
-
-function findCounterInit(stmts: SyntaxNode[]): { counterName: string; isZero: boolean } | null {
-  // Look for: counter = 0 before the loop
-  // We check inside loop body for manual counter increments
-  return null
-}
 
 export const pythonEnumerateForLoopVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/enumerate-for-loop',

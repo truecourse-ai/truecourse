@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsNodeOfType } from '../../../_shared/python-helpers.js'
 
 /**
  * FA102: Detects type annotations that require `from __future__ import annotations`
@@ -39,7 +40,7 @@ export const pythonFutureAnnotationsImportVisitor: CodeRuleVisitor = {
     for (const child of node.namedChildren) {
       if (child.type === 'function_definition') {
         const returnType = child.childForFieldName('return_type')
-        if (returnType && returnType.text.includes('|')) {
+        if (returnType && containsNodeOfType(returnType, 'binary_operator')) {
           return makeViolation(
             this.ruleKey, node, filePath, 'low',
             'Future annotations import needed',

@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonImportSources } from '../../../_shared/python-framework-detection.js'
 
 const PYTHON_UNSAFE_XML_PARSERS = new Set(['parse', 'fromstring', 'iterparse', 'XMLParser'])
 
@@ -21,16 +22,33 @@ export const pythonXmlXxeVisitor: CodeRuleVisitor = {
     }
 
     // xml.etree.ElementTree.parse(), ET.parse(), etree.parse()
+    const UNSAFE_XML_RECEIVERS = new Set(['ElementTree', 'ET', 'etree', 'xml', 'lxml', 'XMLParser'])
     if (PYTHON_UNSAFE_XML_PARSERS.has(methodName) &&
-        (objectName.includes('ElementTree') || objectName === 'ET' || objectName === 'etree' ||
-         objectName === 'xml' || objectName === 'lxml')) {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'high',
-        'XML external entity injection',
-        `${objectName}.${methodName}() may be vulnerable to XXE attacks.`,
-        sourceCode,
-        'Use defusedxml instead: from defusedxml.ElementTree import parse.',
-      )
+        UNSAFE_XML_RECEIVERS.has(objectName)) {
+      // Verify via import sources that this is an XML library
+      const sources = getPythonImportSources(node)
+      let isXmlImport = false
+      for (const src of sources) {
+        if (src === 'xml' || src.startsWith('xml.') || src === 'lxml' || src.startsWith('lxml.') ||
+            src === 'xml.etree.ElementTree' || src === 'xml.dom' || src === 'xml.dom.minidom' ||
+            src === 'xml.sax' || src === 'xml.parsers.expat') {
+          isXmlImport = true
+          break
+        }
+      }
+      // Also accept the receiver name directly for common aliased imports (ET, etree)
+      if (!isXmlImport && (objectName === 'ET' || objectName === 'etree' || objectName === 'ElementTree')) {
+        isXmlImport = true // Common aliases; the import may use `as`
+      }
+      if (isXmlImport) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'high',
+          'XML external entity injection',
+          `${objectName}.${methodName}() may be vulnerable to XXE attacks.`,
+          sourceCode,
+          'Use defusedxml instead: from defusedxml.ElementTree import parse.',
+        )
+      }
     }
 
     return null

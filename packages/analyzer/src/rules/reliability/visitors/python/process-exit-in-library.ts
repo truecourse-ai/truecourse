@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isScriptLikeFile } from '../../../_shared/python-helpers.js'
 
 export const pythonProcessExitInLibraryVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/process-exit-in-library',
@@ -22,21 +23,8 @@ export const pythonProcessExitInLibraryVisitor: CodeRuleVisitor = {
 
     if (!((objectName === 'sys' && methodName === 'exit') || methodName === 'exit')) return null
 
-    // Allow in entry-point files
-    const lowerPath = filePath.toLowerCase()
-    if (
-      lowerPath.includes('__main__') ||
-      lowerPath.includes('main.') ||
-      lowerPath.includes('cli.') ||
-      lowerPath.includes('scripts/') ||
-      lowerPath.includes('manage.') ||
-      lowerPath.includes('app.')
-    ) {
-      return null
-    }
-
-    // Allow if guarded by if __name__ == "__main__"
-    if (sourceCode.includes('__name__') && sourceCode.includes('__main__')) return null
+    // Allow in entry-point / script-like files
+    if (isScriptLikeFile(node, filePath)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

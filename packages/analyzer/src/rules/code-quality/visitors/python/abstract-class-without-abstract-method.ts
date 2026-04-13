@@ -1,39 +1,41 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { hasDecoratorNamed, getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 import type { SyntaxNode } from 'tree-sitter'
 
-function hasAbstractDecorator(funcNode: SyntaxNode): boolean {
-  const decorated = funcNode.parent
-  if (!decorated || decorated.type !== 'decorated_definition') return false
-  for (let i = 0; i < decorated.childCount; i++) {
-    const child = decorated.child(i)
-    if (!child || child.type !== 'decorator') continue
-    const text = child.text
-    if (text.includes('abstractmethod')) return true
+function inheritsFromABC(node: SyntaxNode): boolean {
+  const supers = node.childForFieldName('superclasses')
+  if (!supers) return false
+  for (const child of supers.namedChildren) {
+    const baseName = extractBaseName(child)
+    if (baseName === 'ABC' || baseName === 'ABCMeta') return true
   }
   return false
 }
 
-function inheritsFromABC(node: SyntaxNode): boolean {
-  const args = node.childForFieldName('superclasses')
-  if (!args) return false
-  const text = args.text
-  return text.includes('ABC') || text.includes('ABCMeta')
+function extractBaseName(node: SyntaxNode): string | null {
+  if (node.type === 'identifier') return node.text
+  if (node.type === 'attribute') {
+    const attr = node.childForFieldName('attribute')
+    return attr?.text ?? null
+  }
+  if (node.type === 'subscript') {
+    const value = node.childForFieldName('value')
+    if (value) return extractBaseName(value)
+  }
+  if (node.type === 'keyword_argument') return null
+  return null
 }
 
 function hasAbstractMethod(classBody: SyntaxNode): boolean {
   for (let i = 0; i < classBody.childCount; i++) {
     const child = classBody.child(i)
     if (!child) continue
-    if (child.type === 'function_definition' && hasAbstractDecorator(child)) return true
+    if (child.type === 'function_definition' && hasDecoratorNamed(child, 'abstractmethod')) return true
     if (child.type === 'decorated_definition') {
-      const func = child.namedChildren.find((c) => c.type === 'function_definition')
-      if (func && hasAbstractDecorator(func)) return true
-      // Check decorator text
-      for (let j = 0; j < child.childCount; j++) {
-        const dec = child.child(j)
-        if (dec && dec.type === 'decorator' && dec.text.includes('abstractmethod')) return true
-      }
+      // Check decorators on the decorated_definition itself
+      const decs = child.namedChildren.filter((c) => c.type === 'decorator')
+      if (decs.some((d) => getPythonDecoratorName(d) === 'abstractmethod')) return true
     }
   }
   return false

@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 export const pythonSslVersionUnsafeVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/ssl-version-unsafe',
@@ -15,12 +16,19 @@ export const pythonSslVersionUnsafeVisitor: CodeRuleVisitor = {
     if (left.type === 'attribute') {
       const attr = left.childForFieldName('attribute')
       if (attr?.text === 'minimum_version') {
-        const val = right.text
-        if (val.includes('TLSv1_1') || (val.includes('TLSv1') && !val.includes('TLSv1_2') && !val.includes('TLSv1_3'))) {
+        // Check for deprecated TLS versions via AST identifier matching
+        const isUnsafe =
+          containsPythonIdentifierExact(right, 'TLSv1_1') ||
+          containsPythonIdentifierExact(right, 'PROTOCOL_TLSv1') ||
+          containsPythonIdentifierExact(right, 'PROTOCOL_TLSv1_1') ||
+          (containsPythonIdentifierExact(right, 'TLSv1') &&
+           !containsPythonIdentifierExact(right, 'TLSv1_2') &&
+           !containsPythonIdentifierExact(right, 'TLSv1_3'))
+        if (isUnsafe) {
           return makeViolation(
             this.ruleKey, node, filePath, 'high',
             'Unsafe SSL/TLS minimum version',
-            `Setting minimum TLS version to ${val}. TLS 1.0 and 1.1 are deprecated.`,
+            `Setting minimum TLS version to ${right.text}. TLS 1.0 and 1.1 are deprecated.`,
             sourceCode,
             'Set minimum_version to ssl.TLSVersion.TLSv1_2 or higher.',
           )
