@@ -118,6 +118,8 @@ export const pythonArgumentTypeMismatchVisitor: CodeRuleVisitor = {
         hasStarArgs = true
         continue
       }
+      // Skip comments — tree-sitter includes inline comments as named children
+      if (arg.type === 'comment') continue
       positionalCount++
     }
 

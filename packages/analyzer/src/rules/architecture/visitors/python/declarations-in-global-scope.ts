@@ -1,5 +1,20 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+
+/** Walk attribute chain to check if the root is a call (e.g., Path(...).parent.parent). */
+function rootIsCall(node: SyntaxNode): boolean {
+  if (node.type === 'call') return true
+  if (node.type === 'attribute') {
+    const obj = node.childForFieldName('object')
+    if (obj) return rootIsCall(obj)
+  }
+  if (node.type === 'subscript') {
+    const val = node.childForFieldName('value')
+    if (val) return rootIsCall(val)
+  }
+  return false
+}
 
 export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
   ruleKey: 'architecture/deterministic/declarations-in-global-scope',
@@ -47,11 +62,12 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
     // typically a typed config declaration, not dangerous mutable state.
     if (node.childForFieldName('type')) return null
 
-    // Skip RHS that is a function/constructor call — module-level
-    // initialization of singletons like `redis_client = Redis()` is
-    // standard Python, not dangerous mutable state.
+    // Skip RHS that is a function/constructor call or attribute chain from
+    // a call — module-level initialization like `redis_client = Redis()` or
+    // `project_root = Path(__file__).parent.parent` is standard Python.
     const right = node.childForFieldName('right')
     if (right?.type === 'call') return null
+    if (right?.type === 'attribute' && rootIsCall(right)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

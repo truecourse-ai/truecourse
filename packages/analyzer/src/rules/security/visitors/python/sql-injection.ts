@@ -33,6 +33,12 @@ export const pythonSqlInjectionVisitor: CodeRuleVisitor = {
     if (firstArg.type === 'string' && firstArg.text.startsWith('f')) {
       const hasInterpolation = firstArg.namedChildren.some((c) => c.type === 'interpolation')
       if (hasInterpolation) {
+        // Skip when the f-string ALSO uses parameterized values (:param, %s, %(name)s).
+        // This indicates the developer uses f-strings only for structural elements
+        // (table/column names, which can't be parameterized in SQL) and params for data.
+        const queryText = firstArg.text
+        if (/:[a-z_]\w*|%s|%\(\w+\)s/.test(queryText)) return null
+
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Potential SQL injection',

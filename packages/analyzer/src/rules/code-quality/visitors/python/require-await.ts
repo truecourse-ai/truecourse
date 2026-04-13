@@ -24,6 +24,21 @@ function hasFastApiRouteDecorator(funcNode: SyntaxNode): boolean {
   return false
 }
 
+/** Known async interface methods that MUST be async per framework contract. */
+const ASYNC_INTERFACE_METHODS = new Set([
+  'authenticate', 'on_connect', 'on_disconnect', 'on_receive',
+  'lifespan', 'startup', 'shutdown',
+])
+
+function isAsyncInterfaceMethod(funcNode: SyntaxNode): boolean {
+  const nameNode = funcNode.childForFieldName('name')
+  if (!nameNode || !ASYNC_INTERFACE_METHODS.has(nameNode.text)) return false
+  const parent = funcNode.parent
+  if (parent?.type !== 'block') return false
+  if (parent.parent?.type !== 'class_definition') return false
+  return true
+}
+
 export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/require-await',
   languages: ['python'],
@@ -43,6 +58,9 @@ export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
     // Skip FastAPI/Starlette route handlers — they MUST be async even without
     // await so the framework runs them in the async event loop.
     if (hasFastApiRouteDecorator(node)) return null
+
+    // Skip methods that implement known async interface contracts.
+    if (isAsyncInterfaceMethod(node)) return null
 
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null

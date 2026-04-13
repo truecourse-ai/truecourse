@@ -16,7 +16,7 @@ export const consoleLogVisitor: CodeRuleVisitor = {
 
     // Skip CLI scripts, script files, and test files — console.log is expected there
     const lowerPath = filePath.toLowerCase()
-    if (lowerPath.includes('/scripts/')) return null
+    if (lowerPath.includes('/scripts/') || lowerPath.includes('/script/')) return null
     if (lowerPath.endsWith('.script.ts') || lowerPath.endsWith('.script.js')) return null
     if (/\.(test|spec|e2e)\.[jt]sx?$/.test(lowerPath)) return null
 

@@ -493,6 +493,13 @@ export const hardcodedSecretInCommentVisitor: CodeRuleVisitor = {
     const stripped = stripCommentMarkers(raw)
     if (stripped.length < 8) return null
 
+    // Skip commented-out code — lines that look like code statements rather
+    // than prose comments. These may contain URL patterns or variable names
+    // that match secret patterns but aren't actual secrets.
+    const trimmed = stripped.trim()
+    if (/^(?:if |elif |else:|return |import |from |def |class |for |while |with |raise |try:|except |#|\/\/)/.test(trimmed)) return null
+    if (/^(?:await |async |yield |pass$|break$|continue$)/.test(trimmed)) return null
+
     // Scan the whole stripped comment text
     const match = scanForSecrets(stripped)
     if (match) {

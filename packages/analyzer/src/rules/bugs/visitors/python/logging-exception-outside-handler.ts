@@ -69,15 +69,20 @@ export const pythonLoggingExceptionOutsideHandlerVisitor: CodeRuleVisitor = {
 
     // Check if we're inside an except clause
     let parent = node.parent
+    let enclosingFuncName = ''
     while (parent) {
       if (parent.type === 'except_clause') return null // We're inside an exception handler — OK
-      if (
-        parent.type === 'function_definition' ||
-        parent.type === 'class_definition' ||
-        parent.type === 'module'
-      ) break
+      if (parent.type === 'function_definition') {
+        enclosingFuncName = parent.childForFieldName('name')?.text ?? ''
+        break
+      }
+      if (parent.type === 'class_definition' || parent.type === 'module') break
       parent = parent.parent
     }
+
+    // Skip functions that are clearly error-handling helpers — they're called
+    // exclusively from except blocks but the AST can't see the call site.
+    if (/^_?(?:handle|log|report|on)_(?:error|exception|failure|integrity)/i.test(enclosingFuncName)) return null
 
     const loggerText = obj.text
     const callText = `${loggerText}.${attrName}`

@@ -22,6 +22,27 @@ function hasFastApiRouteDecorator(funcNode: SyntaxNode): boolean {
   return false
 }
 
+/**
+ * Known method names that MUST be async per their framework interface contract,
+ * even when the implementation doesn't use await.
+ * E.g., Starlette AuthenticationBackend.authenticate, ASGI lifespan handlers.
+ */
+const ASYNC_INTERFACE_METHODS = new Set([
+  'authenticate', 'on_connect', 'on_disconnect', 'on_receive',
+  'lifespan', 'startup', 'shutdown',
+])
+
+/** True if the function is a method inside a class that overrides an async interface. */
+function isAsyncInterfaceMethod(funcNode: SyntaxNode): boolean {
+  const nameNode = funcNode.childForFieldName('name')
+  if (!nameNode || !ASYNC_INTERFACE_METHODS.has(nameNode.text)) return false
+  // Must be inside a class body
+  const parent = funcNode.parent
+  if (parent?.type !== 'block') return false
+  if (parent.parent?.type !== 'class_definition') return false
+  return true
+}
+
 function hasAwaitOrAsyncFor(node: SyntaxNode): boolean {
   if (node.type === 'await') return true
   if (node.type === 'for_statement' && node.children.some((c) => c.type === 'async')) return true
@@ -52,6 +73,10 @@ export const pythonAsyncUnusedAsyncVisitor: CodeRuleVisitor = {
     // Skip FastAPI/Starlette route handlers — they MUST be async even without
     // await so the framework runs them in the async event loop.
     if (hasFastApiRouteDecorator(node)) return null
+
+    // Skip methods that implement known async interface contracts — they MUST
+    // be async even without await to satisfy the base class protocol.
+    if (isAsyncInterfaceMethod(node)) return null
 
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
