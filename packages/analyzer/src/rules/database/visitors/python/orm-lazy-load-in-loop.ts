@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getPythonMethodName, PYTHON_ORM_LAZY_METHODS, isInsideLoop } from './_helpers.js'
+import { detectPythonOrm } from '../../../_shared/python-framework-detection.js'
 
 /**
  * Common JSONB / dict-like column names that should NOT be treated as ORM
@@ -13,6 +14,7 @@ const JSONB_COLUMN_NAMES = new Set([
   'extra', 'extras', 'attributes', 'attrs', 'properties', 'props', 'info',
   'details', 'tags', 'labels', 'annotations', 'headers', 'body', 'json',
   'result', 'results', 'response', 'request', 'state', 'status', 'errors',
+  'evaluation_details', 'raw_data', 'field_data', 'form_data', 'query_params',
 ])
 
 export const pythonOrmLazyLoadInLoopVisitor: CodeRuleVisitor = {
@@ -21,6 +23,10 @@ export const pythonOrmLazyLoadInLoopVisitor: CodeRuleVisitor = {
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
     if (!isInsideLoop(node)) return null
+
+    // Gate on ORM import — .exists(), .all(), .get() etc. are common
+    // outside ORM contexts (os.path.exists, dict.get, list.filter).
+    if (detectPythonOrm(node) === 'unknown') return null
 
     const methodName = getPythonMethodName(node)
     if (!PYTHON_ORM_LAZY_METHODS.has(methodName)) return null

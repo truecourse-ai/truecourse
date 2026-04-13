@@ -64,6 +64,10 @@ export const pythonFalsyDictGetFallbackVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip if the RHS is a comparison expression — this is intentional
+    // boolean logic, e.g. `trip.get("flag", False) or trip.get("type") == "value"`.
+    if (rightOperand.type === 'comparison_operator') return null
+
     const dictObj = func.childForFieldName('object')
     const keyArg = positionalArgs[0]
 

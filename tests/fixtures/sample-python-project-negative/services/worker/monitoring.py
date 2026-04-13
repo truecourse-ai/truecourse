@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import ssl
+from sqlalchemy.orm import Session
 import json
 import time
 import yaml

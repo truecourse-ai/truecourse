@@ -232,6 +232,7 @@ const posts = await user.related('posts').fetch();
 
   it('Python: detects ORM attribute access in loop', () => {
     const violations = check(`
+from django.db import models
 for user in users:
     posts = user.post_set.all()
 `, 'python')

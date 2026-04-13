@@ -176,6 +176,25 @@ export const pythonMissingFstringSyntaxVisitor: CodeRuleVisitor = {
       // likely to be used as `.format()` templates — URL paths, templates, etc.
       if (isLikelyFormatTemplate(node)) return null
 
+      // Skip triple-quoted strings containing SQL keywords — these are raw
+      // SQL queries with `.format()` placeholders like `{org_filter}`.
+      if (node.text.startsWith('"""') || node.text.startsWith("'''")) {
+        if (/\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|JOIN|GROUP BY|ORDER BY)\b/i.test(content)) {
+          return null
+        }
+      }
+
+      // Skip strings inside a parenthesized expression chained with .format()
+      // e.g., ("""...""").format(...)
+      const parentNode = node.parent
+      if (parentNode?.type === 'parenthesized_expression') {
+        const grandparent = parentNode.parent
+        if (grandparent?.type === 'attribute') {
+          const attr = grandparent.childForFieldName('attribute')
+          if (attr?.text === 'format' || attr?.text === 'format_map') return null
+        }
+      }
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'String looks like f-string but missing f prefix',

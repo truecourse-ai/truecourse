@@ -33,6 +33,7 @@ def process_items(items):
 
   it('TP: real relationship lazy loading in loop', () => {
     const code = `
+from sqlalchemy.orm import Session
 def get_order_items(orders):
     for order in orders:
         for item in order.items.all():
