@@ -227,7 +227,12 @@ export function checkModuleRules(
     const { cycles } = findCycles(modAdjacency, modEdgeMeta.size > 0 ? modEdgeMeta : undefined)
 
     for (const cycle of cycles) {
-      const severity = cycle.isTypeOnly ? 'info' : cycle.isDynamic ? 'low' : 'high'
+      // Skip cycles broken by dynamic/deferred imports — at runtime,
+      // the circular dependency doesn't exist because the deferred import
+      // only executes when called, not at module load time.
+      if (cycle.isDynamic) continue
+
+      const severity = cycle.isTypeOnly ? 'info' : 'high'
       // Extract readable module names from "service::module" keys
       const readableChain = cycle.chain.map(key => {
         const parts = key.split('::')
