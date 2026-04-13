@@ -328,3 +328,12 @@ def emit_deprecation(msg):
 def process(item):
     """Process a single item."""
     return item
+
+
+# --- Class pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: code-quality/deterministic/self-first-argument
+class BadService:
+    """Method uses 'this' instead of 'self' — violates Python convention."""
+    def do_work(this) -> None:
+        this.ready = True

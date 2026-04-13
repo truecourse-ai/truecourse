@@ -143,3 +143,25 @@ def execute_dynamic_code(code_str):
     """Execute dynamically provided code."""
     # VIOLATION: security/deterministic/eval-usage
     return eval(code_str)
+
+
+# --- Control flow TPs (moved from synthetic batch files) ---
+
+# VIOLATION: code-quality/deterministic/redundant-jump
+def process_all_items(items: list) -> None:
+    """continue at end of loop body — does nothing."""
+    for item in items:
+        handle_item(item)
+        continue
+
+
+# VIOLATION: code-quality/deterministic/redundant-jump
+def cleanup_resources() -> None:
+    """return at end of void function — redundant."""
+    logging.info("cleaning up")
+    return
+
+
+def handle_item(item: object) -> None:
+    """Stand-in."""
+    logging.debug("handling %s", item)

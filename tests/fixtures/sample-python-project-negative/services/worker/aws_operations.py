@@ -87,3 +87,17 @@ def invoke_downstream(payload: dict) -> dict:
 
 # VIOLATION: code-quality/deterministic/airflow-3-migration
 from airflow.operators.bash_operator import BashOperator
+
+
+# --- AWS pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: code-quality/deterministic/aws-custom-polling
+def wait_for_instance_started(ec2, instance_id: str) -> None:
+    """Custom polling loop instead of using EC2 waiter."""
+    import time
+    while True:
+        resp = ec2.describe_instances(InstanceIds=[instance_id])
+        state = resp["Reservations"][0]["Instances"][0]["State"]["Name"]
+        if state == "running":
+            break
+        time.sleep(10)

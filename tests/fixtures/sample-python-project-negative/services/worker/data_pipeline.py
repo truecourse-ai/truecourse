@@ -505,3 +505,14 @@ parts = ["hello" "world", "foo"]
 x = 42
 # VIOLATION: style/deterministic/import-formatting
 import threading
+
+
+# --- DB write pattern TPs (moved from synthetic batch files) ---
+from sqlalchemy.orm import Session as _Session
+
+
+# VIOLATION: performance/deterministic/batch-writes-in-loop
+def save_all_records(session: _Session, records: list) -> None:
+    """Individual session.add() in loop instead of bulk insert."""
+    for record in records:
+        session.add(record)

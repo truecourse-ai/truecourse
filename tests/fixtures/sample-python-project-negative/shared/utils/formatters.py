@@ -16,3 +16,11 @@ def format_user(user: dict) -> dict:
 # VIOLATION: code-quality/deterministic/missing-maxsplit-arg
 def format_date(date: datetime) -> str:
     return date.isoformat().split("T")[0]
+
+
+# --- String pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: bugs/deterministic/missing-fstring-syntax
+def greet_user(name: str) -> str:
+    """Missing f-prefix — {name} won't be interpolated."""
+    return "Hello {name}, welcome!"

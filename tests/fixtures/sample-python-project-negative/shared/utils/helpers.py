@@ -291,3 +291,46 @@ def save_user_data(db):
 def compute_value():
     """Helper function."""
     return 42
+
+
+# --- General pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: bugs/deterministic/unintentional-type-annotation
+def bad_annotation():
+    """Bare type annotation with no value and no later assignment."""
+    result: int
+    return None
+
+
+# VIOLATION: bugs/deterministic/loop-at-most-one-iteration
+def always_returns_first(items: list):
+    """Loop exits unconditionally on first iteration."""
+    for item in items:
+        return item
+
+
+# VIOLATION: bugs/deterministic/nonlocal-without-binding
+def outer_no_binding():
+    """nonlocal references a variable that doesn't exist in enclosing scope."""
+    def inner():
+        nonlocal missing_var
+        missing_var = 42
+    return inner
+
+
+# VIOLATION: code-quality/deterministic/redeclared-assigned-name
+def wasted_assignment():
+    """First assignment is immediately overwritten — value is lost."""
+    x = compute_something()
+    x = compute_something_else()
+    return x
+
+
+def compute_something():
+    """Stand-in."""
+    return 1
+
+
+def compute_something_else():
+    """Stand-in."""
+    return 2

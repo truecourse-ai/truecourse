@@ -17,3 +17,12 @@ class Logger:
 
 
 logger = Logger()
+
+
+# --- Logging pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: bugs/deterministic/logging-exception-outside-handler
+def log_outside_handler(data):
+    """logger.exception() called outside an except block."""
+    logger.exception("Something went wrong")
+    return data

@@ -833,6 +833,12 @@
       "layer": "service"
     },
     {
+      "name": "log_outside_handler",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Logger",
       "service": "utils",
       "kind": "class",
@@ -852,6 +858,18 @@
     },
     {
       "name": "ModelForm",
+      "service": "utils",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "MyDict",
+      "service": "utils",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "MyList",
       "service": "utils",
       "kind": "interface",
       "layer": "service"
@@ -1043,24 +1061,6 @@
       "layer": "service"
     },
     {
-      "name": "fp_batch_b_tps",
-      "service": "worker",
-      "kind": "standalone",
-      "layer": "service"
-    },
-    {
-      "name": "fp_batch_c_tps",
-      "service": "worker",
-      "kind": "standalone",
-      "layer": "service"
-    },
-    {
-      "name": "fp_batch_d_tps",
-      "service": "worker",
-      "kind": "standalone",
-      "layer": "external"
-    },
-    {
       "name": "HealthChecker",
       "service": "worker",
       "kind": "class",
@@ -1137,18 +1137,6 @@
       "service": "worker",
       "kind": "interface",
       "layer": "data"
-    },
-    {
-      "name": "MyDict",
-      "service": "worker",
-      "kind": "interface",
-      "layer": "service"
-    },
-    {
-      "name": "MyList",
-      "service": "worker",
-      "kind": "interface",
-      "layer": "service"
     },
     {
       "name": "perf_optimizations",

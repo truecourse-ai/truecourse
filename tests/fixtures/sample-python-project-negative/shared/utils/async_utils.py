@@ -68,3 +68,37 @@ async def process_item(item):
 
 def cleanup_resources():
     pass
+
+
+# --- Async pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: bugs/deterministic/async-busy-wait
+async def busy_poll_no_sleep(check_fn):
+    """Busy wait without await — uses time.sleep instead of asyncio.sleep."""
+    import time
+    while True:
+        if check_fn():
+            return True
+        time.sleep(1)
+
+
+# VIOLATION: bugs/deterministic/cancellation-exception-not-reraised
+async def swallow_cancel():
+    """Catches CancelledError without re-raising — suppresses cancellation."""
+    import asyncio
+    try:
+        await asyncio.sleep(10)
+    except asyncio.CancelledError:
+        logging.warning("Cancelled but not re-raised")
+
+
+# VIOLATION: code-quality/deterministic/require-await
+async def compute_total(items: list) -> float:
+    """Async function that never awaits — async keyword is unnecessary."""
+    return sum(getattr(i, "value", 0) for i in items)
+
+
+# VIOLATION: code-quality/deterministic/async-unused-async
+async def format_full_name(first: str, last: str) -> str:
+    """Async function that never uses await/async-for/async-with."""
+    return f"{first} {last}"

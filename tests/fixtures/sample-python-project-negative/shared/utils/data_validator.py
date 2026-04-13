@@ -127,3 +127,23 @@ def evaluate_rule(rule_expr):
     """Evaluate a dynamic validation rule expression."""
     # VIOLATION: security/deterministic/eval-usage
     return eval(rule_expr)
+
+
+# --- Type/collection pattern TPs (moved from synthetic batch files) ---
+
+# VIOLATION: code-quality/deterministic/subclass-builtin-collection
+class MyDict(dict):
+    """Subclassing dict directly — should use collections.UserDict."""
+
+
+# VIOLATION: code-quality/deterministic/subclass-builtin-collection
+class MyList(list):
+    """Subclassing list directly — should use collections.UserList."""
+
+
+# VIOLATION: code-quality/deterministic/type-check-without-type-error
+def check_type_wrong_exception(value):
+    """isinstance check raising RuntimeError instead of TypeError."""
+    if not isinstance(value, int):
+        raise RuntimeError("Expected an int")
+    return value

@@ -176,3 +176,16 @@ def cleanup_stale_connections(conn):
     # VIOLATION: database/deterministic/unsafe-delete-without-where
     conn.execute("DELETE FROM connections")
     conn.commit()
+
+
+# --- Boolean trap TP (moved from synthetic batch files) ---
+
+# VIOLATION: code-quality/deterministic/boolean-trap
+def launch_process(config):
+    """Custom function with boolean positional arg — genuine trap."""
+    return start_job(True, config)
+
+
+def start_job(flag, config):
+    """Stand-in."""
+    return config
