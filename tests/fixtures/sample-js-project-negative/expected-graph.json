@@ -766,8 +766,8 @@
   "moduleDependencies": [
     {
       "source": "assertEverything",
-      "sourceService": "api-gateway",
       "target": "HealthService",
+      "sourceService": "api-gateway",
       "targetService": "api-gateway",
       "importedNames": [
         "HealthService"
@@ -775,8 +775,8 @@
     },
     {
       "source": "assertEverything",
-      "sourceService": "api-gateway",
       "target": "UserController",
+      "sourceService": "api-gateway",
       "targetService": "api-gateway",
       "importedNames": [
         "UserController"
@@ -784,8 +784,8 @@
     },
     {
       "source": "UserController",
-      "sourceService": "api-gateway",
       "target": "UserService",
+      "sourceService": "api-gateway",
       "targetService": "api-gateway",
       "importedNames": [
         "UserService"
@@ -793,8 +793,8 @@
     },
     {
       "source": "UserService",
-      "sourceService": "api-gateway",
       "target": "formatters",
+      "sourceService": "api-gateway",
       "targetService": "utils",
       "importedNames": [
         "formatUser"
@@ -802,8 +802,8 @@
     },
     {
       "source": "NotificationProcessor",
-      "sourceService": "notification-service",
       "target": "EmailTemplates",
+      "sourceService": "notification-service",
       "targetService": "notification-service",
       "importedNames": [
         "EmailTemplates"
@@ -811,8 +811,8 @@
     },
     {
       "source": "NotificationProcessor",
-      "sourceService": "notification-service",
       "target": "sender",
+      "sourceService": "notification-service",
       "targetService": "notification-service",
       "importedNames": [
         "sendEmail"
@@ -820,8 +820,8 @@
     },
     {
       "source": "src",
-      "sourceService": "notification-service",
       "target": "EmailTemplates",
+      "sourceService": "notification-service",
       "targetService": "notification-service",
       "importedNames": [
         "EmailTemplates"
@@ -829,8 +829,8 @@
     },
     {
       "source": "src",
-      "sourceService": "notification-service",
       "target": "NotificationProcessor",
+      "sourceService": "notification-service",
       "targetService": "notification-service",
       "importedNames": [
         "NotificationProcessor"
@@ -838,26 +838,17 @@
     },
     {
       "source": "src",
-      "sourceService": "user-service",
       "target": "connection",
+      "sourceService": "user-service",
       "targetService": "user-service",
       "importedNames": [
         "connectDatabase"
       ]
     },
     {
-      "source": "src",
-      "sourceService": "user-service",
-      "target": "user.handler",
-      "targetService": "user-service",
-      "importedNames": [
-        "userRoutes"
-      ]
-    },
-    {
       "source": "user.handler",
-      "sourceService": "user-service",
       "target": "UserService",
+      "sourceService": "user-service",
       "targetService": "user-service",
       "importedNames": [
         "UserService"
@@ -865,8 +856,8 @@
     },
     {
       "source": "user.handler",
-      "sourceService": "user-service",
       "target": "validators",
+      "sourceService": "user-service",
       "targetService": "utils",
       "importedNames": [
         "validateEmail"
@@ -874,8 +865,8 @@
     },
     {
       "source": "UserRepository",
-      "sourceService": "user-service",
       "target": "user.handler",
+      "sourceService": "user-service",
       "targetService": "user-service",
       "importedNames": [
         "getUsers"
@@ -883,8 +874,8 @@
     },
     {
       "source": "UserService",
-      "sourceService": "user-service",
       "target": "UserRepository",
+      "sourceService": "user-service",
       "targetService": "user-service",
       "importedNames": [
         "UserRepository"
@@ -892,8 +883,8 @@
     },
     {
       "source": "Dashboard",
-      "sourceService": "web",
       "target": "NotificationList",
+      "sourceService": "web",
       "targetService": "web",
       "importedNames": [
         "NotificationList"
