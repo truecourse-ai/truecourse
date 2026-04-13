@@ -15,6 +15,21 @@ export const pythonConfusingImplicitConcatVisitor: CodeRuleVisitor = {
     // Look for concatenated_string nodes (implicit concat) inside collections/arg lists
     for (const child of node.namedChildren) {
       if (child.type === 'concatenated_string') {
+        // Skip when any adjacent string part is an f-string — this is an intentional pattern
+        // to split long f-strings across lines: "prefix " f"{variable}"
+        let hasFormatString = false
+        for (const part of child.namedChildren) {
+          const partText = part.text
+          if (partText.startsWith('f"') || partText.startsWith("f'") ||
+              partText.startsWith('f"""') || partText.startsWith("f'''") ||
+              partText.startsWith('F"') || partText.startsWith("F'") ||
+              partText.startsWith('F"""') || partText.startsWith("F'''")) {
+            hasFormatString = true
+            break
+          }
+        }
+        if (hasFormatString) continue
+
         // This is implicit string concatenation inside a list/set/args/tuple
         return makeViolation(
           this.ruleKey, child, filePath, 'medium',

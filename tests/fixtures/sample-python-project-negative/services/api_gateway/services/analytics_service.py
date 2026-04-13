@@ -312,7 +312,7 @@ def check_metric_in_group(metric: str) -> bool:
 
 def compute_percentile(values: List[float], pct: float) -> float:
     """Compute percentile value."""
-    # VIOLATION: code-quality/deterministic/redundant-jump
+    # SKIP: redundant-jump — duplicate return pattern, not a simple redundant jump
     sorted_vals = sorted(values)
     idx = int(len(sorted_vals) * pct)
     result = sorted_vals[min(idx, len(sorted_vals) - 1)]

@@ -16,9 +16,21 @@ export const pythonLoopAtMostOneIterationVisitor: CodeRuleVisitor = {
     const EXITS = new Set(['return_statement', 'raise_statement', 'break_statement'])
 
     if (EXITS.has(last.type)) {
-      // Ensure there's no conditional path that could skip the exit
-      const hasContinue = statements.some((s) => s.type === 'continue_statement')
-      if (hasContinue) return null
+      // If the loop body contains a `continue` anywhere (including inside
+      // if/else blocks), the loop CAN iterate more than once.
+      function containsContinue(n: import('tree-sitter').SyntaxNode): boolean {
+        if (n.type === 'continue_statement') return true
+        // Don't recurse into nested loops — their `continue` doesn't apply to us
+        if (n.type === 'for_statement' || n.type === 'while_statement') return false
+        // Don't recurse into nested function definitions
+        if (n.type === 'function_definition') return false
+        for (let i = 0; i < n.childCount; i++) {
+          const child = n.child(i)
+          if (child && containsContinue(child)) return true
+        }
+        return false
+      }
+      if (containsContinue(body)) return null
 
       // Check the last statement is not inside an if
       if (last.parent?.type !== 'block') return null

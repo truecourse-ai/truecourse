@@ -24,8 +24,23 @@ export const pythonRedeclaredAssignedNameVisitor: CodeRuleVisitor = {
           if (!target || target.type !== 'identifier') continue
           const name = target.text
           if (lastAssignment.has(name)) {
-            // Check that between previous assignment and this one there's no reference to name
+            // Skip sequential transforms: x = x.strip(), x = x.replace(...), etc.
+            const rhs = expr.childForFieldName('right')
+            if (rhs && rhs.text.includes(name)) {
+              lastAssignment.set(name, i)
+              continue
+            }
+
+            // Skip init-before-try pattern: x = None; try: x = compute()
+            // If the current assignment is inside a try block, the previous one is intentional init
             const prevIdx = lastAssignment.get(name)!
+            const nextStmt = children[prevIdx + 1]
+            if (nextStmt && nextStmt.type === 'try_statement') {
+              lastAssignment.set(name, i)
+              continue
+            }
+
+            // Check that between previous assignment and this one there's no reference to name
             let usedBetween = false
             for (let j = prevIdx + 1; j < i; j++) {
               const between = children[j]

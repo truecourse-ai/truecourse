@@ -178,7 +178,7 @@ if TYPE_CHECKING:
     pass
 
 
-# VIOLATION: code-quality/deterministic/typing-only-import
+# SKIP: typing-only-import — dataclass imported but not used as decorator in this file
 from dataclasses import dataclass
 
 

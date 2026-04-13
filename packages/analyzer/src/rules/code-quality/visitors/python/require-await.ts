@@ -1,7 +1,28 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
 type SyntaxNode = import('tree-sitter').SyntaxNode
+
+/** FastAPI / Starlette route decorator terminal names. */
+const FASTAPI_ROUTE_DECORATORS = new Set([
+  'get', 'post', 'put', 'delete', 'patch', 'head', 'options',
+  'websocket', 'api_route',
+])
+
+/** Check if the function has a FastAPI/Starlette route decorator. */
+function hasFastApiRouteDecorator(funcNode: SyntaxNode): boolean {
+  // Decorators live on the parent decorated_definition
+  const parent = funcNode.parent
+  if (!parent || parent.type !== 'decorated_definition') return false
+  for (const child of parent.children) {
+    if (child.type === 'decorator') {
+      const name = getPythonDecoratorName(child)
+      if (name && FASTAPI_ROUTE_DECORATORS.has(name)) return true
+    }
+  }
+  return false
+}
 
 export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/require-await',
@@ -18,6 +39,10 @@ export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text || ''
     if (name.startsWith('__') && name.endsWith('__')) return null
+
+    // Skip FastAPI/Starlette route handlers — they MUST be async even without
+    // await so the framework runs them in the async event loop.
+    if (hasFastApiRouteDecorator(node)) return null
 
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null

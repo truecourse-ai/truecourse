@@ -1,5 +1,25 @@
+import type { SyntaxNode } from 'tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+
+/**
+ * Collect all identifier names from a loop variable node, handling
+ * tuple/pattern unpacking like `k, v` or `(a, b, c)`.
+ */
+function collectLoopVarNames(node: SyntaxNode): Set<string> {
+  const names = new Set<string>()
+  function walk(n: SyntaxNode) {
+    if (n.type === 'identifier') {
+      names.add(n.text)
+    } else {
+      for (const child of n.namedChildren) {
+        walk(child)
+      }
+    }
+  }
+  walk(node)
+  return names
+}
 
 export const pythonDuplicateDictKeyVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/duplicate-dict-key',
@@ -14,14 +34,15 @@ export const pythonDuplicateDictKeyVisitor: CodeRuleVisitor = {
     const keyNode = pairNode.childForFieldName('key')
     if (!keyNode) return null
 
-    // Find the for_in_clause to get the loop variable
+    // Find the for_in_clause to get all loop variable identifiers
     const forInClause = node.namedChildren.find((c) => c.type === 'for_in_clause')
-    const loopVar = forInClause?.childForFieldName('left')?.text ?? ''
+    const leftNode = forInClause?.childForFieldName('left')
+    const loopVarNames = leftNode ? collectLoopVarNames(leftNode) : new Set<string>()
 
-    // A constant key is a literal or an identifier that is NOT the loop variable
+    // A constant key is a literal or an identifier that is NOT any loop variable
     const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'true', 'false', 'none'])
     const isConstantKey = LITERAL_TYPES.has(keyNode.type) ||
-      (keyNode.type === 'identifier' && loopVar && keyNode.text !== loopVar)
+      (keyNode.type === 'identifier' && loopVarNames.size > 0 && !loopVarNames.has(keyNode.text))
 
     if (isConstantKey) {
       return makeViolation(

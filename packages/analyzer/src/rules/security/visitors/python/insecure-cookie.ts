@@ -20,14 +20,19 @@ export const pythonInsecureCookieVisitor: CodeRuleVisitor = {
     const args = node.childForFieldName('arguments')
     if (!args) return null
 
-    // Check for secure=True in keyword arguments
+    // Check for secure=<non-falsy> in keyword arguments.
+    // Accept any value that is not explicitly False or None — this covers
+    // secure=True, secure=some_var, secure=get_secure_flag(request), etc.
     let hasSecure = false
     for (const arg of args.namedChildren) {
       if (arg.type === 'keyword_argument') {
         const name = arg.childForFieldName('name')
         const value = arg.childForFieldName('value')
-        if (name?.text === 'secure' && value?.text === 'True') {
-          hasSecure = true
+        if (name?.text === 'secure' && value) {
+          const valText = value.text
+          if (valText !== 'False' && valText !== 'None' && valText !== '0') {
+            hasSecure = true
+          }
         }
       }
     }

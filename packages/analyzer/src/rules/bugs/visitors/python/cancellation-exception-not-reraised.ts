@@ -2,6 +2,40 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { CANCELLATION_EXCEPTIONS } from './_helpers.js'
 
+function findEnclosingFunction(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+  let current: import('tree-sitter').SyntaxNode | null = node.parent
+  while (current) {
+    if (current.type === 'function_definition') return current
+    current = current.parent
+  }
+  return null
+}
+
+/**
+ * Check if a function body contains a `.cancel()` method call.
+ * This indicates the function intentionally cancels a task, so catching
+ * CancelledError is expected behavior (caller-initiated cancellation).
+ */
+function hasCancelCall(funcNode: import('tree-sitter').SyntaxNode): boolean {
+  function walk(n: import('tree-sitter').SyntaxNode): boolean {
+    if (n.type === 'call') {
+      const func = n.childForFieldName('function')
+      if (func?.type === 'attribute') {
+        const attr = func.childForFieldName('attribute')
+        if (attr?.text === 'cancel') return true
+      }
+    }
+    // Don't recurse into nested function definitions
+    if (n.type === 'function_definition' && n !== funcNode) return false
+    for (let i = 0; i < n.childCount; i++) {
+      const child = n.child(i)
+      if (child && walk(child)) return true
+    }
+    return false
+  }
+  return walk(funcNode)
+}
+
 export const pythonCancellationExceptionNotReraisedVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/cancellation-exception-not-reraised',
   languages: ['python'],
@@ -46,6 +80,13 @@ export const pythonCancellationExceptionNotReraisedVisitor: CodeRuleVisitor = {
     }
 
     if (!hasReraise(body)) {
+      // Check if the enclosing function intentionally cancels a task
+      // (calls `.cancel()` on a task variable). In that case, catching
+      // CancelledError without re-raising is correct — the caller initiated
+      // the cancellation itself (e.g., `task.cancel(); await task`).
+      const enclosingFunc = findEnclosingFunction(node)
+      if (enclosingFunc && hasCancelCall(enclosingFunc)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Cancellation exception swallowed',

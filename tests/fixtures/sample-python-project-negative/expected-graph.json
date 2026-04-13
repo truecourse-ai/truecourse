@@ -989,6 +989,12 @@
       "layer": "external"
     },
     {
+      "name": "BadService",
+      "service": "worker",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
       "name": "BaseEvent",
       "service": "worker",
       "kind": "class",
@@ -1035,6 +1041,24 @@
       "service": "worker",
       "kind": "class",
       "layer": "service"
+    },
+    {
+      "name": "fp_batch_b_tps",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "fp_batch_c_tps",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "fp_batch_d_tps",
+      "service": "worker",
+      "kind": "standalone",
+      "layer": "external"
     },
     {
       "name": "HealthChecker",
@@ -1113,6 +1137,18 @@
       "service": "worker",
       "kind": "interface",
       "layer": "data"
+    },
+    {
+      "name": "MyDict",
+      "service": "worker",
+      "kind": "interface",
+      "layer": "service"
+    },
+    {
+      "name": "MyList",
+      "service": "worker",
+      "kind": "interface",
+      "layer": "service"
     },
     {
       "name": "perf_optimizations",

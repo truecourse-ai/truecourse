@@ -44,6 +44,30 @@ export const pythonAsyncBusyWaitVisitor: CodeRuleVisitor = {
       return false
     }
 
+    /**
+     * Check if the loop body contains `await sleep(...)` — this means the
+     * loop properly yields control and is NOT a busy wait.
+     */
+    function hasAwaitedSleep(n: import('tree-sitter').SyntaxNode): boolean {
+      if (n.type === 'await' || n.type === 'await_expression') {
+        // The awaited expression should be a sleep call
+        for (let i = 0; i < n.childCount; i++) {
+          const child = n.child(i)
+          if (child && hasSleepCall(child)) return true
+        }
+      }
+      // Don't recurse into nested function definitions
+      if (n.type === 'function_definition') return false
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasAwaitedSleep(child)) return true
+      }
+      return false
+    }
+
+    // If the sleep is properly awaited, this is not a busy wait
+    if (hasAwaitedSleep(body)) return null
+
     if (hasSleepCall(body)) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',

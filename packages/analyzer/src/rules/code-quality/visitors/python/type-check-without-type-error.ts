@@ -34,6 +34,12 @@ export const pythonTypeCheckWithoutTypeErrorVisitor: CodeRuleVisitor = {
     const consequence = node.childForFieldName('consequence')
     if (!consequence) return null
 
+    // Exceptions that are valid for external/user data validation with isinstance checks
+    const VALID_DATA_VALIDATION_EXCEPTIONS = [
+      'ValueError', 'HTTPException', 'ValidationError', 'BadRequest',
+      'RequestValidationError', 'InvalidArgumentError',
+    ]
+
     for (const stmt of consequence.namedChildren) {
       if (stmt.type !== 'raise_statement') continue
       const expr = stmt.namedChildren[0]
@@ -42,8 +48,13 @@ export const pythonTypeCheckWithoutTypeErrorVisitor: CodeRuleVisitor = {
       const fnNode = expr.type === 'call' ? expr.childForFieldName('function') : expr
       const raisedType = fnNode?.text || ''
 
-      // It should be raising TypeError for type checks
-      if (raisedType && raisedType !== 'TypeError' && !raisedType.endsWith('TypeError')) {
+      // Skip if it's already TypeError — correct usage
+      if (raisedType === 'TypeError' || raisedType.endsWith('TypeError')) continue
+
+      // Skip ValueError, HTTPException, etc. — these are valid for external data validation
+      if (VALID_DATA_VALIDATION_EXCEPTIONS.some((e) => raisedType === e || raisedType.endsWith(e))) continue
+
+      if (raisedType) {
         return makeViolation(
           this.ruleKey, stmt, filePath, 'low',
           'Type check without TypeError',

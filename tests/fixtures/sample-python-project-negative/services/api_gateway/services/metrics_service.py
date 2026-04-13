@@ -128,7 +128,7 @@ class MetricBatch:
         self._items = []
 
 
-# VIOLATION: bugs/deterministic/async-busy-wait
+# SKIP: async-busy-wait — has await asyncio.sleep(), not a busy wait
 async def wait_for_metrics_ready(metrics_service):
     while not metrics_service.is_ready():
         await asyncio.sleep(0.1)

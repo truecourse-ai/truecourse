@@ -11,6 +11,7 @@ function isNoneDefault(node: SyntaxNode | null): boolean {
 function typeIncludesNone(typeNode: SyntaxNode): boolean {
   const text = typeNode.text
   return (
+    text === 'Any' ||          // Any already includes None
     text.includes('None') ||
     text.includes('Optional') ||
     text.startsWith('None ') ||

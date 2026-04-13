@@ -38,6 +38,7 @@ export const pythonSharedMutableModuleStateVisitor: CodeRuleVisitor = {
 
     const varName = left.text
     if (isConstantName(varName)) return null // ALL_CAPS are conventions for constants
+    if (varName === '__all__') return null // __all__ defines module public API, never mutated at runtime
 
     return makeViolation(
       this.ruleKey, node, filePath, 'high',

@@ -32,6 +32,10 @@ export const pythonNonlocalWithoutBindingVisitor: CodeRuleVisitor = {
           else if (p.type === 'default_parameter' || p.type === 'typed_default_parameter') {
             const pname = p.childForFieldName('name')
             if (pname) enclosingNames.add(pname.text)
+          } else if (p.type === 'typed_parameter') {
+            // typed_parameter: name: type
+            const pname = p.namedChildren.find((c) => c.type === 'identifier')
+            if (pname) enclosingNames.add(pname.text)
           }
         }
       }
@@ -39,36 +43,49 @@ export const pythonNonlocalWithoutBindingVisitor: CodeRuleVisitor = {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier') enclosingNames.add(left.text)
       }
-      // Don't recurse into nested function bodies (only their params)
-      if (n.id !== node.id && n.type === 'function_definition') {
+      if (n.type === 'augmented_assignment') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier') enclosingNames.add(left.text)
+      }
+      // for-loop variable: `for x in items:`
+      if (n.type === 'for_statement') {
+        const left = n.childForFieldName('left')
+        if (left?.type === 'identifier') enclosingNames.add(left.text)
+      }
+      // with-statement: `with open(f) as x:`
+      if (n.type === 'as_pattern') {
+        const alias = n.namedChildren.find((c) => c.type === 'as_pattern_target')
+        if (alias) {
+          const id = alias.namedChildren.find((c) => c.type === 'identifier')
+          if (id) enclosingNames.add(id.text)
+        }
+      }
+      // Don't recurse into any nested function body — including the
+      // current function being analyzed (`node`). We only collect params
+      // of nested functions (they're still in the enclosing scope).
+      if (n.type === 'function_definition') {
         const params = n.childForFieldName('parameters')
         if (params) collectEnclosingNames(params)
         return
       }
+      // Don't recurse into class definitions
+      if (n.type === 'class_definition') return
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) collectEnclosingNames(child)
       }
     }
 
-    // Walk enclosing function(s) — parent of current function_definition
+    // Walk enclosing function(s) — parent of current function_definition.
+    // Use `collectEnclosingNames` which recursively walks assignments,
+    // for-loop variables, with-statement bindings, etc.
     let parent = node.parent
     while (parent) {
       if (parent.type === 'function_definition') {
         const parentParams = parent.childForFieldName('parameters')
         if (parentParams) collectEnclosingNames(parentParams)
         const parentBody = parent.childForFieldName('body')
-        if (parentBody) {
-          for (const stmt of parentBody.namedChildren) {
-            if (stmt.type === 'expression_statement') {
-              const expr = stmt.namedChildren[0]
-              if (expr?.type === 'assignment') {
-                const left = expr.childForFieldName('left')
-                if (left?.type === 'identifier') enclosingNames.add(left.text)
-              }
-            }
-          }
-        }
+        if (parentBody) collectEnclosingNames(parentBody)
         break
       }
       parent = parent.parent
@@ -85,7 +102,7 @@ export const pythonNonlocalWithoutBindingVisitor: CodeRuleVisitor = {
     })()
 
     for (const { name, node: varNode } of nonlocalVars) {
-      if (!hasEnclosingFunction || (enclosingNames.size > 0 && !enclosingNames.has(name))) {
+      if (!hasEnclosingFunction || !enclosingNames.has(name)) {
         return makeViolation(
           this.ruleKey, varNode, filePath, 'high',
           'nonlocal without enclosing binding',

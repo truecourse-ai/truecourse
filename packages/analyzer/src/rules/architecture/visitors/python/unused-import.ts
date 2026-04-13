@@ -39,6 +39,12 @@ export const pythonUnusedImportVisitor: CodeRuleVisitor = {
       ...lines.slice(importLineEnd + 1),
     ].join('\n')
 
+    // Skip imports with a `# noqa` comment on the same line — these are
+    // intentional side-effect imports (e.g., importing a module to register
+    // event handlers, signal receivers, or plugins).
+    const importLine = lines[importLineStart] ?? ''
+    if (/# *noqa\b/.test(importLine)) return null
+
     for (const name of names) {
       if (!name) continue
       const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)

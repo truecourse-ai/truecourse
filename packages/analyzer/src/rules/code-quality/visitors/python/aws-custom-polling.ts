@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { importsAwsSdk } from '../../../_shared/python-framework-detection.js'
 
 /**
  * Detects custom polling loops with boto3 describe_* or get_* calls
@@ -10,6 +11,9 @@ export const pythonAwsCustomPollingVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['while_statement'],
   visit(node, filePath, sourceCode) {
+    // Only flag files that actually import an AWS SDK (boto3/botocore/aiobotocore)
+    if (!importsAwsSdk(node)) return null
+
     const body = node.childForFieldName('body')
     if (!body) return null
 

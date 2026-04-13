@@ -17,12 +17,23 @@ export const pythonFutureAnnotationsImportVisitor: CodeRuleVisitor = {
     const hasFutureAnnotations = sourceCode.includes('from __future__ import annotations')
     if (hasFutureAnnotations) return null
 
+    // If the file uses PEP 585 lowercase generics (list[...], dict[...], set[...], tuple[...])
+    // it already targets Python 3.10+ and doesn't need __future__ annotations
+    const pep585Pattern = /(?:->|:)\s*(?:list|dict|set|tuple|frozenset)\s*\[/
+    if (pep585Pattern.test(sourceCode)) return null
+
     // Check if file uses `X | Y` union syntax in annotations (PEP 604 syntax)
     // This requires Python 3.10+ or __future__ annotations on older versions
     // Look for `|` in type annotation contexts — this is a rough heuristic
     // We detect `-> X | Y` or `: X | Y` patterns
     const pep604Pattern = /(?:->|:)\s*\w[\w\[\], ]*\s*\|\s*\w/
     if (!pep604Pattern.test(sourceCode)) return null
+
+    // If the file also uses PEP 585 lowercase generics alongside the | syntax,
+    // it's already a 3.10+ file — no need for __future__ annotations
+    // (This catches cases like `def foo(x: list[int] | None) -> dict[str, int]:`)
+    const hasPep585Anywhere = /\b(?:list|dict|set|tuple|frozenset)\s*\[/.test(sourceCode)
+    if (hasPep585Anywhere) return null
 
     // Check if there are any function definitions with union syntax annotations
     for (const child of node.namedChildren) {

@@ -103,6 +103,60 @@ function extractColumnName(node: SyntaxNode): string | null {
   return null
 }
 
+/**
+ * Extract the column name from a chained call, walking DOWN the receiver chain.
+ *
+ * For `.first()` on a chain like `session.query(User).filter(User.id == val).first()`,
+ * the `.filter()` call is the receiver (object) of the `.first()` attribute, not a
+ * parent node. This function walks down to find filter/get calls in the chain.
+ */
+function extractColumnFromChain(node: SyntaxNode): string | null {
+  const fn = node.childForFieldName('function')
+  if (fn?.type !== 'attribute') return null
+
+  // The receiver of .first() / .one_or_none() etc.
+  let cur: SyntaxNode | null = fn.childForFieldName('object') ?? null
+  while (cur) {
+    if (cur.type === 'call') {
+      const callFn = cur.childForFieldName('function')
+      const methodName = callFn?.type === 'attribute' ? callFn.childForFieldName('attribute')?.text : null
+      if (methodName === 'filter' || methodName === 'filter_by' || methodName === 'get' ||
+          methodName === 'get_or_create' || methodName === 'get_or_none') {
+        const args = cur.childForFieldName('arguments')
+        if (args) {
+          // Keyword argument: filter_by(email=val) → 'email'
+          for (const child of args.namedChildren) {
+            if (child.type === 'keyword_argument') {
+              const key = child.childForFieldName('name')
+              if (key?.type === 'identifier') return key.text
+            }
+          }
+          // Comparison in filter: filter(User.email == val) → 'email'
+          for (const child of args.namedChildren) {
+            if (child.type === 'comparison_operator') {
+              const left = child.namedChildren[0]
+              if (left?.type === 'attribute') {
+                const col = left.childForFieldName('attribute')
+                if (col) return col.text
+              }
+            }
+          }
+        }
+      }
+      // Keep walking down the chain
+      const innerFn = cur.childForFieldName('function')
+      if (innerFn?.type === 'attribute') {
+        cur = innerFn.childForFieldName('object') ?? null
+      } else {
+        break
+      }
+    } else {
+      break
+    }
+  }
+  return null
+}
+
 export const pythonMissingUniqueConstraintVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-unique-constraint',
   languages: ['python'],
@@ -141,7 +195,11 @@ export const pythonMissingUniqueConstraintVisitor: CodeRuleVisitor = {
     // SchemaIndex validation — if a schema is available, check whether the
     // queried column actually has a UNIQUE constraint. Mirror JS visitor.
     const table = extractModelName(node)
-    const column = extractColumnName(node)
+    const column = extractColumnName(node) ?? extractColumnFromChain(node)
+
+    // Skip lookups by primary key fields — these are inherently unique and
+    // a .first() by id/pk is a standard read, not a uniqueness check.
+    if (column && /^(id|pk|_id|uuid)$/.test(column)) return null
 
     if (schemaIndex && schemaIndex.hasSchemas() && column) {
       if (table) {

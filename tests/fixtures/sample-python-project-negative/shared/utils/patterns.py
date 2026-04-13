@@ -39,7 +39,7 @@ def bad_type_check(x):
         return True
 
 
-# VIOLATION: code-quality/deterministic/type-check-without-type-error
+# SKIP: type-check-without-type-error — ValueError is valid for data validation
 def strict_type(x):
     if not isinstance(x, str):
         raise ValueError("expected string")

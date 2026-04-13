@@ -2,6 +2,24 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 /**
+ * Heuristic: true if the object text looks like a logging object.
+ * Matches: `logging`, `logger`, `log`, `self.logger`, `self.log`,
+ * `cls.logger`, `self._logger`, etc.
+ * Does NOT match: `future`, `task`, `outcome`, `retry_state.outcome`, etc.
+ */
+function isLoggerObject(objText: string): boolean {
+  // Direct `logging` module
+  if (objText === 'logging') return true
+  // Get the final dotted name part
+  const parts = objText.split('.')
+  const last = parts[parts.length - 1]
+  // Common logger variable names (with or without leading underscores)
+  const cleaned = last.replace(/^_+/, '')
+  if (cleaned === 'logger' || cleaned === 'log' || cleaned === 'logging') return true
+  return false
+}
+
+/**
  * Detects logging.exception() or exc_info=True used outside an except block.
  * These only make sense inside exception handlers.
  */
@@ -22,6 +40,15 @@ export const pythonLoggingExceptionOutsideHandlerVisitor: CodeRuleVisitor = {
     const attrName = attr.text
     const isExceptionMethod = attrName === 'exception'
     let hasExcInfo = false
+
+    if (isExceptionMethod) {
+      // Only flag when the object is a logger — `logging.exception()`,
+      // `logger.exception()`, `self.logger.exception()`, `cls.logger.exception()`.
+      // Do NOT flag `.exception()` on arbitrary objects like `Future.exception()`,
+      // `retry_state.outcome.exception()`, etc.
+      const objText = obj.text
+      if (!isLoggerObject(objText)) return null
+    }
 
     if (!isExceptionMethod) {
       // Check for exc_info=True keyword argument

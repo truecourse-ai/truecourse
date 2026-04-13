@@ -22,6 +22,12 @@ export const pythonBooleanTrapVisitor: CodeRuleVisitor = {
         const fnText = fn.text
         if (['bool', 'int', 'str', 'list', 'dict', 'set', 'print', 'sorted', 'reversed', 'filter', 'any', 'all'].includes(fnText)) return null
 
+        // Skip getattr/setattr/hasattr — the boolean is a default value, not a flag
+        if (['getattr', 'setattr', 'hasattr'].includes(fnText)) return null
+
+        // Skip Pydantic Field() calls — booleans are default values, not flags
+        if (fnText === 'Field') return null
+
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Boolean positional argument',

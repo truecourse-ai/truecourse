@@ -14,10 +14,18 @@ function isInsideClass(node: SyntaxNode): boolean {
 }
 
 function hasDecorator(node: SyntaxNode, ...names: string[]): boolean {
-  for (const child of node.children) {
-    if (child.type === 'decorator') {
-      const dec = child.namedChildren[0]
-      if (dec && names.includes(dec.text)) return true
+  // Decorators may live on the function_definition itself OR on the parent
+  // decorated_definition (the canonical tree-sitter Python AST shape).
+  const targets = [node]
+  if (node.parent?.type === 'decorated_definition') {
+    targets.push(node.parent)
+  }
+  for (const target of targets) {
+    for (const child of target.children) {
+      if (child.type === 'decorator') {
+        const dec = child.namedChildren[0]
+        if (dec && names.includes(dec.text)) return true
+      }
     }
   }
   return false

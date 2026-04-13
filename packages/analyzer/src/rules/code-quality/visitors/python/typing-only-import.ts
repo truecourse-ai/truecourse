@@ -110,9 +110,23 @@ function findUsages(root: SyntaxNode, name: string, importNode: SyntaxNode): Usa
 function isInAnnotation(node: SyntaxNode): boolean {
   let current = node.parent
   while (current) {
-    if (current.type === 'type') return true
-    // Function return type annotation
-    if (current.type === 'function_definition' && current.childForFieldName('return_type')?.id === node.id) return true
+    if (current.type === 'type') {
+      // In Python, function parameter and return type annotations are evaluated at runtime
+      // (unless `from __future__ import annotations` is in effect).
+      // So usage in a function signature is a RUNTIME use, not typing-only.
+      const typeParent = current.parent
+      if (typeParent) {
+        // Parameter annotation: type -> typed_parameter/typed_default_parameter -> parameters -> function_definition
+        if (typeParent.type === 'typed_parameter' || typeParent.type === 'typed_default_parameter') {
+          return false // runtime use — function parameter annotation
+        }
+        // Return type annotation: type -> function_definition (return_type field)
+        if (typeParent.type === 'function_definition') {
+          return false // runtime use — function return type annotation
+        }
+      }
+      return true // other type annotation contexts (variable annotations, etc.)
+    }
     current = current.parent
   }
   return false

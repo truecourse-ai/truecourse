@@ -1,6 +1,54 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+type SyntaxNode = import('tree-sitter').SyntaxNode
+
+const LOOP_TYPES = new Set(['for_statement', 'while_statement'])
+
+/**
+ * Walk up from `node` through nested blocks and check whether the jump is
+ * truly the last executable statement in its enclosing compound block (loop
+ * body or function body). A `continue` at the end of an `if` block inside a
+ * loop is only redundant when the `if` itself is the last statement in the
+ * loop body — otherwise the `continue` actually skips code that follows.
+ */
+function isLastInEnclosingBlock(node: SyntaxNode, stopType: 'loop' | 'function'): boolean {
+  let current: SyntaxNode | null = node
+  while (current) {
+    const parentBlock: SyntaxNode | null = current.parent
+    if (!parentBlock || parentBlock.type !== 'block') return false
+
+    // The node must be the last statement in this block
+    const stmts = parentBlock.namedChildren
+    if (stmts[stmts.length - 1]?.id !== current.id) return false
+
+    const owner: SyntaxNode | null = parentBlock.parent
+    if (!owner) return false
+
+    if (stopType === 'function' && owner.type === 'function_definition') return true
+    if (stopType === 'loop' && LOOP_TYPES.has(owner.type)) return true
+
+    // If the owner is an if/elif/else/try/except/with, keep walking up
+    // — the jump is only redundant if ALL enclosing blocks are also at the tail.
+    if (
+      owner.type === 'if_statement' ||
+      owner.type === 'elif_clause' ||
+      owner.type === 'else_clause' ||
+      owner.type === 'try_statement' ||
+      owner.type === 'except_clause' ||
+      owner.type === 'finally_clause' ||
+      owner.type === 'with_statement'
+    ) {
+      current = owner
+      continue
+    }
+
+    // Reached a non-compound-statement boundary — not redundant
+    return false
+  }
+  return false
+}
+
 export const pythonRedundantJumpVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/redundant-jump',
   languages: ['python'],
@@ -9,13 +57,8 @@ export const pythonRedundantJumpVisitor: CodeRuleVisitor = {
     if (node.type === 'return_statement') {
       // return with a value is not redundant
       if (node.namedChildren.length > 0) return null
-      const parent = node.parent
-      if (!parent || parent.type !== 'block') return null
-      const stmts = parent.namedChildren
-      if (stmts[stmts.length - 1]?.id !== node.id) return null
-      // parent.parent should be a function_definition
-      const grandparent = parent.parent
-      if (!grandparent || grandparent.type !== 'function_definition') return null
+
+      if (!isLastInEnclosingBlock(node, 'function')) return null
 
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
@@ -27,10 +70,7 @@ export const pythonRedundantJumpVisitor: CodeRuleVisitor = {
     }
 
     if (node.type === 'continue_statement') {
-      const parent = node.parent
-      if (!parent || parent.type !== 'block') return null
-      const stmts = parent.namedChildren
-      if (stmts[stmts.length - 1]?.id !== node.id) return null
+      if (!isLastInEnclosingBlock(node, 'loop')) return null
 
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

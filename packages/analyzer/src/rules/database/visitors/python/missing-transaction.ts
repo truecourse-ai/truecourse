@@ -3,13 +3,55 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getPythonMethodName, PYTHON_WRITE_METHODS, getPythonEnclosingFunctionBody } from './_helpers.js'
 
+/**
+ * Known ORM session / database receiver names. When we see `receiver.add()`,
+ * we only count it as a DB write if the receiver looks like an ORM object.
+ * This avoids false positives from `my_set.add(item)` or `my_list.update(vals)`.
+ */
+const ORM_RECEIVER_NAMES = new Set([
+  'session', 'db', 'conn', 'connection', 'cursor', 'engine',
+  'database', 'self', 'objects', 'manager', 'queryset', 'qs',
+])
+
+/** Methods that are unambiguously DB writes regardless of receiver. */
+const UNAMBIGUOUS_DB_WRITES = new Set([
+  'add_all', 'bulk_create', 'bulk_update', 'executemany',
+])
+
+function isOrmWriteCall(n: SyntaxNode): boolean {
+  const name = getPythonMethodName(n)
+  if (!PYTHON_WRITE_METHODS.has(name)) return false
+
+  // Unambiguous DB write methods — always count
+  if (UNAMBIGUOUS_DB_WRITES.has(name)) return true
+
+  // For ambiguous methods (add, update, delete, save, create, insert, merge, filter),
+  // check the receiver to confirm it looks like an ORM object.
+  const fn = n.childForFieldName('function')
+  if (fn?.type === 'attribute') {
+    const receiver = fn.childForFieldName('object')
+    if (receiver?.type === 'identifier') {
+      return ORM_RECEIVER_NAMES.has(receiver.text)
+    }
+    // Chained call: db.session.add() — check the root identifier
+    if (receiver?.type === 'attribute') {
+      const attrText = receiver.childForFieldName('attribute')?.text
+      if (attrText && ORM_RECEIVER_NAMES.has(attrText)) return true
+      const rootObj = receiver.childForFieldName('object')
+      if (rootObj?.type === 'identifier' && ORM_RECEIVER_NAMES.has(rootObj.text)) return true
+    }
+  }
+
+  return false
+}
+
 export const pythonMissingTransactionVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-transaction',
   languages: ['python'],
   nodeTypes: ['call'],
   visit(node, filePath, sourceCode) {
-    const methodName = getPythonMethodName(node)
-    if (!PYTHON_WRITE_METHODS.has(methodName)) return null
+    // Gate: the triggering node itself must be an ORM write call
+    if (!isOrmWriteCall(node)) return null
 
     const body = getPythonEnclosingFunctionBody(node)
     if (!body) return null
@@ -18,21 +60,18 @@ export const pythonMissingTransactionVisitor: CodeRuleVisitor = {
     // If there's already a transaction context, skip
     if (/transaction|atomic|begin\b/.test(bodyText)) return null
 
-    // Count write calls in the body
+    // Count ORM write calls in the body
     let writeCount = 0
     let seenSelf = false
     let isSecondOccurrence = false
 
     function countWrites(n: SyntaxNode) {
-      if (n.type === 'call') {
-        const name = getPythonMethodName(n)
-        if (PYTHON_WRITE_METHODS.has(name)) {
-          writeCount++
-          if (n.id === node.id) {
-            seenSelf = true
-          } else if (seenSelf) {
-            isSecondOccurrence = true
-          }
+      if (n.type === 'call' && isOrmWriteCall(n)) {
+        writeCount++
+        if (n.id === node.id) {
+          seenSelf = true
+        } else if (seenSelf) {
+          isSecondOccurrence = true
         }
       }
       for (let i = 0; i < n.childCount; i++) {

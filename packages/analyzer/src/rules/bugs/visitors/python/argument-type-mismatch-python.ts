@@ -7,8 +7,19 @@ import { makeViolation } from '../../../types.js'
  * function definition visible in the same file. Ignores *args/**kwargs.
  */
 
-function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, maxParams: number, hasVarArgs: boolean }> {
-  const defs = new Map<string, { minParams: number, maxParams: number, hasVarArgs: boolean }>()
+function isMethod(node: SyntaxNode): boolean {
+  // A function_definition is a method if it's inside a class_definition body
+  let current: SyntaxNode | null = node.parent
+  while (current) {
+    if (current.type === 'class_definition') return true
+    if (current.type === 'function_definition') return false // nested function, not a method
+    current = current.parent
+  }
+  return false
+}
+
+function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, maxParams: number, hasVarArgs: boolean, isMethod: boolean }> {
+  const defs = new Map<string, { minParams: number, maxParams: number, hasVarArgs: boolean, isMethod: boolean }>()
 
   function walk(node: SyntaxNode) {
     if (node.type === 'function_definition') {
@@ -18,6 +29,7 @@ function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, ma
         let hasVarArgs = false
         let required = 0
         let optional = 0
+        const methodDef = isMethod(node)
 
         for (let i = 0; i < params.namedChildCount; i++) {
           const p = params.namedChild(i)
@@ -37,9 +49,10 @@ function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, ma
         const firstParam = params.namedChildren.find((c) =>
           c.type === 'identifier' || c.type === 'typed_parameter'
         )
-        const isSelfOrCls = firstParam && (firstParam.text === 'self' || firstParam.text === 'cls' ||
-          (firstParam.type === 'typed_parameter' && firstParam.childForFieldName('name')?.text === 'self') ||
-          (firstParam.type === 'typed_parameter' && firstParam.childForFieldName('name')?.text === 'cls'))
+        const firstParamName = firstParam?.type === 'typed_parameter'
+          ? firstParam.childForFieldName('name')?.text
+          : firstParam?.text
+        const isSelfOrCls = firstParamName === 'self' || firstParamName === 'cls'
 
         // For methods, subtract self/cls from the count
         if (isSelfOrCls) {
@@ -50,6 +63,7 @@ function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, ma
           minParams: required,
           maxParams: hasVarArgs ? Infinity : required + optional,
           hasVarArgs,
+          isMethod: methodDef,
         })
       }
     }
@@ -82,16 +96,24 @@ export const pythonArgumentTypeMismatchVisitor: CodeRuleVisitor = {
     const def = defs.get(funcName)
     if (!def) return null
 
+    // Skip calls to methods — we only see the definition side and can't reliably
+    // know if it's invoked as a method (obj.foo()) or directly (foo()) from here.
+    if (def.isMethod) return null
+
     // Count positional arguments (exclude keyword arguments and *args/*kwargs)
     const args = node.childForFieldName('arguments')
     if (!args) return null
 
     let positionalCount = 0
+    let keywordCount = 0
     let hasStarArgs = false
     for (let i = 0; i < args.namedChildCount; i++) {
       const arg = args.namedChild(i)
       if (!arg) continue
-      if (arg.type === 'keyword_argument') continue
+      if (arg.type === 'keyword_argument') {
+        keywordCount++
+        continue
+      }
       if (arg.type === 'list_splat' || arg.type === 'dictionary_splat') {
         hasStarArgs = true
         continue
@@ -102,21 +124,24 @@ export const pythonArgumentTypeMismatchVisitor: CodeRuleVisitor = {
     // Can't check if caller uses *args or **kwargs
     if (hasStarArgs) return null
 
-    if (positionalCount < def.minParams) {
+    // Keyword args fill parameter slots, so total supplied = positional + keyword
+    const totalSupplied = positionalCount + keywordCount
+
+    if (totalSupplied < def.minParams) {
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Argument count mismatch',
-        `\`${funcName}()\` called with ${positionalCount} argument(s) but requires at least ${def.minParams}.`,
+        `\`${funcName}()\` called with ${totalSupplied} argument(s) but requires at least ${def.minParams}.`,
         sourceCode,
         `Pass the correct number of arguments to \`${funcName}()\`.`,
       )
     }
 
-    if (positionalCount > def.maxParams) {
+    if (totalSupplied > def.maxParams) {
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Argument count mismatch',
-        `\`${funcName}()\` called with ${positionalCount} argument(s) but accepts at most ${def.maxParams}.`,
+        `\`${funcName}()\` called with ${totalSupplied} argument(s) but accepts at most ${def.maxParams}.`,
         sourceCode,
         `Pass the correct number of arguments to \`${funcName}()\`.`,
       )
