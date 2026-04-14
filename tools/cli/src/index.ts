@@ -2,6 +2,7 @@
 
 import { Command } from "commander";
 import * as p from "@clack/prompts";
+import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -16,11 +17,14 @@ import { getPlatform } from "./commands/service/platform.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import { runHooksInstall, runHooksUninstall, runHooksStatus, runHooksRun } from "./commands/hooks.js";
 
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json");
+
 const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.2.2")
+  .version(version)
   .description("TrueCourse CLI - Setup and manage your TrueCourse instance");
 
 program

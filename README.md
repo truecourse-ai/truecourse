@@ -78,20 +78,49 @@ truecourse list --all                 # Show all violations (no pagination)
 truecourse list --diff                # Show diff check results
 truecourse add                        # Register repo without analyzing
 
-# Rules
+```
+
+### Rules
+
+Configure which rule categories and LLM-powered rules are enabled per repository:
+
+```bash
 truecourse rules categories           # Show enabled/disabled rule categories
 truecourse rules categories --disable style    # Disable a category
 truecourse rules categories --enable style     # Enable a category
 truecourse rules llm                  # Show LLM rules status
 truecourse rules llm --disable        # Disable LLM rules for this repo
 truecourse rules llm --enable         # Enable LLM rules for this repo
+```
 
-# Git hooks
+### Git Hooks
+
+TrueCourse can install a pre-commit hook that blocks commits with critical violations:
+
+```bash
 truecourse hooks install              # Install pre-commit hook
 truecourse hooks uninstall            # Remove pre-commit hook
 truecourse hooks status               # Show hook installation status
+```
 
-# Telemetry
+### Managing the Background Service
+
+When you choose "Background service" during setup, TrueCourse runs as a system service (launchd on macOS, systemd on Linux). These commands let you manage it directly:
+
+```bash
+truecourse service status             # Show service status
+truecourse service start              # Start the service
+truecourse service stop               # Stop the service
+truecourse service install            # Install as background service
+truecourse service uninstall          # Remove background service
+truecourse service logs               # Tail service logs
+```
+
+### Telemetry
+
+TrueCourse collects anonymous usage data to improve the product. It is automatically disabled in CI environments.
+
+```bash
 truecourse telemetry status           # Check telemetry status
 truecourse telemetry disable          # Opt out of anonymous telemetry
 truecourse telemetry enable           # Opt back in
