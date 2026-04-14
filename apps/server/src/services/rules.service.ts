@@ -2,7 +2,7 @@ import { eq, notInArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { rules } from '../db/schema.js';
 import { getAllDefaultRules } from '@truecourse/analyzer';
-import type { AnalysisRule } from '@truecourse/shared';
+import { type AnalysisRule, DOMAIN_ORDER } from '@truecourse/shared';
 
 /**
  * Seed default rules into the database.
@@ -25,7 +25,7 @@ export async function seedRules(): Promise<void> {
         enabled: rule.enabled,
         severity: rule.severity,
         type: rule.type,
-        isDependencyViolation: rule.isDependencyViolation ?? false,
+        contextRequirement: rule.contextRequirement ?? null,
       })
       .onConflictDoUpdate({
         target: rules.key,
@@ -36,7 +36,7 @@ export async function seedRules(): Promise<void> {
           prompt: rule.prompt ?? null,
           severity: rule.severity,
           type: rule.type,
-          isDependencyViolation: rule.isDependencyViolation ?? false,
+          contextRequirement: rule.contextRequirement ?? null,
           updatedAt: new Date(),
         },
       });
@@ -50,6 +50,15 @@ export async function seedRules(): Promise<void> {
   }
 }
 
+/** Derive domain from rule key (e.g., 'architecture/deterministic/foo' → 'architecture'). */
+function deriveDomain(key: string): AnalysisRule['domain'] {
+  const firstSlash = key.indexOf('/');
+  if (firstSlash === -1) return undefined;
+  const prefix = key.slice(0, firstSlash);
+  const validDomains = new Set<string>(DOMAIN_ORDER);
+  return validDomains.has(prefix) ? (prefix as AnalysisRule['domain']) : undefined;
+}
+
 /**
  * Get all rules from the database.
  */
@@ -58,12 +67,14 @@ export async function getRulesFromDb(): Promise<AnalysisRule[]> {
   return rows.map((r) => ({
     key: r.key,
     category: r.category as AnalysisRule['category'],
+    domain: deriveDomain(r.key),
     name: r.name,
     description: r.description,
     prompt: r.prompt ?? undefined,
     enabled: r.enabled,
     severity: r.severity as AnalysisRule['severity'],
     type: r.type as AnalysisRule['type'],
+    contextRequirement: r.contextRequirement as AnalysisRule['contextRequirement'],
   }));
 }
 
@@ -75,11 +86,13 @@ export async function getEnabledRules(): Promise<AnalysisRule[]> {
   return rows.map((r) => ({
     key: r.key,
     category: r.category as AnalysisRule['category'],
+    domain: deriveDomain(r.key),
     name: r.name,
     description: r.description,
     prompt: r.prompt ?? undefined,
     enabled: r.enabled,
     severity: r.severity as AnalysisRule['severity'],
     type: r.type as AnalysisRule['type'],
+    contextRequirement: r.contextRequirement as AnalysisRule['contextRequirement'],
   }));
 }

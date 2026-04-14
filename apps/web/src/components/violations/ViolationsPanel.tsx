@@ -1,12 +1,13 @@
 
 import { useCallback, useRef, useState, useMemo } from 'react';
-import { AlertTriangle, AlertCircle, Loader2, X, Shield, Network, Database, Box, FileCode, Braces, Search } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
-type CategoryFilter = 'all' | 'service' | 'module' | 'function' | 'database' | 'code';
+type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
+type TypeFilter = 'all' | 'deterministic' | 'llm';
 type ViolationsPanelProps = {
   violations: ViolationResponse[];
   isLoading: boolean;
@@ -26,12 +27,28 @@ type ViolationsPanelProps = {
 
 const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
   { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
-  { value: 'service', label: 'Service', icon: <Network className="h-3.5 w-3.5" /> },
-  { value: 'module', label: 'Module', icon: <Box className="h-3.5 w-3.5" /> },
-  { value: 'function', label: 'Function', icon: <Braces className="h-3.5 w-3.5" /> },
+  { value: 'security', label: 'Security', icon: <Shield className="h-3.5 w-3.5" /> },
+  { value: 'bugs', label: 'Bugs', icon: <Bug className="h-3.5 w-3.5" /> },
+  { value: 'architecture', label: 'Architecture', icon: <Network className="h-3.5 w-3.5" /> },
+  { value: 'performance', label: 'Performance', icon: <Zap className="h-3.5 w-3.5" /> },
+  { value: 'reliability', label: 'Reliability', icon: <HeartPulse className="h-3.5 w-3.5" /> },
+  { value: 'code-quality', label: 'Code Quality', icon: <Code2 className="h-3.5 w-3.5" /> },
   { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
-  { value: 'code', label: 'Code', icon: <FileCode className="h-3.5 w-3.5" /> },
+  { value: 'style', label: 'Style', icon: <Paintbrush className="h-3.5 w-3.5" /> },
 ];
+
+/** Derive domain from ruleKey (e.g. 'security/deterministic/foo' → 'security') */
+function getDomain(v: ViolationResponse): string {
+  const key = v.ruleKey || '';
+  const slash = key.indexOf('/');
+  return slash > 0 ? key.slice(0, slash) : v.type;
+}
+
+/** Derive detection type from ruleKey (e.g. 'security/deterministic/foo' → 'deterministic') */
+function getDetectionType(v: ViolationResponse): 'deterministic' | 'llm' {
+  const key = v.ruleKey || '';
+  return key.includes('/llm/') ? 'llm' : 'deterministic';
+}
 
 function matchesSearch(violation: ViolationResponse, search: string): boolean {
   const q = search.toLowerCase();
@@ -63,6 +80,7 @@ export function ViolationsPanel({
 }: ViolationsPanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [search, setSearch] = useState('');
 
   // Resizable ER panel
@@ -175,25 +193,26 @@ export function ViolationsPanel({
     });
   }, [violations, selectedPath, nodeFilePathMap]);
 
-  // Pre-category filtered: applies search + severity but not category
+  // Pre-category filtered: applies search + severity + type but not category
   const preCategoryFiltered = useMemo(() => {
     let result = pathFilteredViolations;
     if (severityFilter !== 'all') result = result.filter((v) => v.severity === severityFilter);
+    if (typeFilter !== 'all') result = result.filter((v) => getDetectionType(v) === typeFilter);
     if (search) result = result.filter((v) => matchesSearch(v, search));
     return result;
-  }, [pathFilteredViolations, severityFilter, search]);
+  }, [pathFilteredViolations, severityFilter, typeFilter, search]);
 
   // Apply category filter on top
   const fullyFilteredViolations = useMemo(() => {
     if (categoryFilter === 'all') return preCategoryFiltered;
-    return preCategoryFiltered.filter((v) => v.type === categoryFilter);
+    return preCategoryFiltered.filter((v) => getDomain(v) === categoryFilter);
   }, [preCategoryFiltered, categoryFilter]);
 
   // Category counts reflect search + severity filters
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const v of preCategoryFiltered) {
-      counts[v.type] = (counts[v.type] || 0) + 1;
+      counts[getDomain(v)] = (counts[getDomain(v)] || 0) + 1;
     }
     return counts;
   }, [preCategoryFiltered]);
@@ -221,14 +240,14 @@ export function ViolationsPanel({
   const filteredDiffCards = useMemo(() => {
     if (!preCategoryDiffCards) return null;
     if (categoryFilter === 'all') return preCategoryDiffCards;
-    return preCategoryDiffCards.filter((c) => c.violation.type === categoryFilter);
+    return preCategoryDiffCards.filter((c) => getDomain(c.violation) === categoryFilter);
   }, [preCategoryDiffCards, categoryFilter]);
 
   const diffCategoryCounts = useMemo(() => {
     if (!preCategoryDiffCards) return {};
     const counts: Record<string, number> = {};
     for (const c of preCategoryDiffCards) {
-      counts[c.violation.type] = (counts[c.violation.type] || 0) + 1;
+      counts[getDomain(c.violation)] = (counts[getDomain(c.violation)] || 0) + 1;
     }
     return counts;
   }, [preCategoryDiffCards]);
@@ -263,6 +282,21 @@ export function ViolationsPanel({
               />
             </div>
             <SeverityDropdown value={severityFilter} onChange={setSeverityFilter} counts={activeSeverityCounts} />
+            <div className="flex rounded-md border border-border">
+              {(['all', 'deterministic', 'llm'] as TypeFilter[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTypeFilter(t)}
+                  className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
+                    typeFilter === t
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {t === 'all' ? 'All' : t === 'deterministic' ? 'Det' : 'LLM'}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

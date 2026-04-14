@@ -1,5 +1,46 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { getIO } from './index.js';
+import { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS } from '@truecourse/shared';
+
+export { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS };
+
+// Domains that have LLM rules
+export const LLM_DOMAINS = DOMAIN_ORDER.filter((d: string) => ['security', 'bugs', 'architecture', 'code-quality', 'database'].includes(d));
+
+// Human-readable domain labels
+export const DOMAIN_LABELS: Record<string, string> = {
+  'security': 'Security',
+  'bugs': 'Bugs',
+  'architecture': 'Architecture',
+  'performance': 'Performance',
+  'reliability': 'Reliability',
+  'code-quality': 'Code quality',
+  'database': 'Database',
+  'style': 'Style',
+};
+
+export function buildAnalysisSteps(
+  enabledCategories?: string[],
+  enableLlmRules?: boolean,
+): { key: string; label: string }[] {
+  const steps: { key: string; label: string }[] = [
+    { key: 'parse', label: 'Parsing repository' },
+  ];
+
+
+  if (enableLlmRules) {
+    steps.push({ key: 'scan', label: 'Scanning files' });
+  }
+
+  const activeDomains = DOMAIN_ORDER.filter(d => !enabledCategories?.length || enabledCategories.includes(d));
+
+  for (const domain of activeDomains) {
+    steps.push({ key: domain, label: `${DOMAIN_LABELS[domain]} checks` });
+  }
+
+  steps.push({ key: 'persist', label: 'Saving results' });
+  return steps;
+}
 
 // Step status for checklist UI
 export type StepStatus = 'pending' | 'active' | 'done' | 'error';
@@ -19,8 +60,7 @@ export interface AnalysisProgressPayload {
 
 // Track in-progress analyses so we can inform clients that join mid-analysis
 const activeAnalyses = new Map<string, AnalysisProgressPayload>();
-// Track in-progress code reviews (background LLM code analysis)
-const activeCodeReviews = new Map<string, { analysisId: string }>();
+
 
 export function setupHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
@@ -37,11 +77,7 @@ export function setupHandlers(io: SocketServer): void {
         socket.emit('analysis:progress', { repoId, ...progress });
       }
 
-      // If code review is running in background, inform late joiner
-      const codeReview = activeCodeReviews.get(repoId);
-      if (codeReview) {
-        socket.emit('code-review:progress', { repoId, analysisId: codeReview.analysisId });
-      }
+
     });
 
     socket.on('leaveRepo', async (repoId: string) => {
@@ -165,19 +201,6 @@ export function emitViolationsReady(
 
 export function emitAnalysisCanceled(repoId: string): void {
   activeAnalyses.delete(repoId);
-  activeCodeReviews.delete(repoId);
   const io = getIO();
   io.to(`repo:${repoId}`).emit('analysis:canceled', { repoId });
-}
-
-export function emitCodeReviewProgress(repoId: string, analysisId: string): void {
-  activeCodeReviews.set(repoId, { analysisId });
-  const io = getIO();
-  io.to(`repo:${repoId}`).emit('code-review:progress', { repoId, analysisId });
-}
-
-export function emitCodeReviewReady(repoId: string, analysisId: string): void {
-  activeCodeReviews.delete(repoId);
-  const io = getIO();
-  io.to(`repo:${repoId}`).emit('code-review:ready', { repoId, analysisId });
 }

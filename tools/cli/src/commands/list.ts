@@ -8,22 +8,38 @@ import {
   renderDiffResults,
 } from "./helpers.js";
 
-export async function runList(): Promise<void> {
+export async function runList({ limit = 20, offset = 0 } = {}): Promise<void> {
   p.intro("Violations");
 
   await ensureServer();
   const repo = await ensureRepo();
 
   const serverUrl = getServerUrl();
-  const res = await fetch(`${serverUrl}/api/repos/${repo.id}/violations`);
+  const showAll = !isFinite(limit);
+
+  const params = new URLSearchParams();
+  if (!showAll) {
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+  }
+
+  const url = `${serverUrl}/api/repos/${repo.id}/violations${params.toString() ? `?${params}` : ""}`;
+  const res = await fetch(url);
 
   if (!res.ok) {
     p.log.error(`Failed to fetch violations: ${res.status}`);
     process.exit(1);
   }
 
-  const violations = (await res.json()) as Violation[];
-  renderViolations(violations);
+  const body = await res.json();
+
+  // Server returns { violations, total } when paginated, or array when not
+  if (Array.isArray(body)) {
+    renderViolations(body, { total: body.length });
+  } else {
+    const { violations, total } = body as { violations: Violation[]; total: number };
+    renderViolations(violations, { total, offset });
+  }
 }
 
 export async function runListDiff(): Promise<void> {

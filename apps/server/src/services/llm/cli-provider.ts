@@ -15,11 +15,9 @@ import {
   buildModuleTemplateVars,
   buildCodeTemplateVars,
   buildFlowTemplateVars,
-  buildEnrichmentTemplateVars,
   resolveId,
   resolveIds,
   type FlowEnrichmentContext,
-  type DeterministicDetectionForEnrichment,
   type PromptIdMap,
 } from './prompts.js';
 import {
@@ -28,7 +26,6 @@ import {
   ModuleViolationOutputSchema,
   DiffViolationOutputSchema,
   LifecycleServiceOutputSchema,
-  EnrichmentOutputSchema,
   CodeViolationOutputSchema,
   CodeViolationLifecycleOutputSchema,
   FlowEnrichmentOutputSchema,
@@ -49,7 +46,6 @@ import type {
   ModuleViolationsResult,
   CodeViolationsResult,
   CodeViolationRaw,
-  EnrichmentResult,
   FlowEnrichmentResult,
   DiffViolationItem,
   DiffViolationsResult,
@@ -95,6 +91,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   private callCounter = 0;
   private _analysisId: string | null = null;
   private _repoId: string | null = null;
+  private _repoPath: string | null = null;
   private _abortSignal: AbortSignal | null = null;
   private _usageRecords: UsageRecord[] = [];
 
@@ -110,6 +107,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
   /** Set repoId for child process tracking in the analysis registry. */
   setRepoId(repoId: string): void {
     this._repoId = repoId;
+  }
+
+  /** Set target repo path — used as cwd when spawning CLI so Read tool accesses the right files. */
+  setRepoPath(path: string): void {
+    this._repoPath = path;
   }
 
   async flushUsage(): Promise<void> {
@@ -192,6 +194,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       const child: ChildProcess = spawn(this.binaryName, args, {
         env: this.getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...(this._repoPath ? { cwd: this._repoPath } : {}),
       });
 
       // Register child process for cancellation tracking
@@ -315,6 +318,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         return this.parseAndValidate(raw, schema);
       } catch (err) {
         lastError = err as Error;
+        if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
         if (attempt < this.maxRetries) {
           log(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
         }
@@ -660,15 +664,26 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
     const hasExisting = context.existingViolations && context.existingViolations.length > 0;
-    const promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
-    const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: true });
+    let promptName: Parameters<typeof getPrompt>[0];
+    if (context.tier === 'metadata') {
+      promptName = hasExisting ? 'violations-code-metadata-lifecycle' : 'violations-code-metadata';
+    } else if (context.tier === 'targeted') {
+      promptName = hasExisting ? 'violations-code-targeted-lifecycle' : 'violations-code-targeted';
+    } else {
+      promptName = hasExisting ? 'violations-code-lifecycle' : 'violations-code';
+    }
+
+    // Only use file-path mode (Read tool) when files have real paths, not pre-built content
+    // from the context router (which uses synthetic path 'context' for metadata/targeted tiers)
+    const hasRealPaths = context.files.length > 0 && context.files.every((f) => f.path !== 'context');
+    const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: hasRealPaths });
     const { text: prompt } = await getPrompt(promptName, vars);
 
     log(`[CLI] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
     const t0 = Date.now();
 
-    // Code violations use Read tool access — longer timeout since Claude reads files via tools
-    const codeExtraArgs = ['--allowedTools', 'Read'];
+    // Only give Read tool access when files have real paths to read
+    const codeExtraArgs = hasRealPaths ? ['--allowedTools', 'Read'] : ['--tools', ''];
     const codeTimeoutMs = 300_000; // 5 minutes — code review uses Read tool, takes many turns
 
     if (hasExisting) {
@@ -747,72 +762,6 @@ export abstract class BaseCLIProvider implements LLMProvider {
     };
   }
 
-  private async enrichDeterministicViolationsBatch(
-    detections: DeterministicDetectionForEnrichment[],
-    architectureContext: string,
-    batchIndex: number,
-    totalBatches: number,
-  ): Promise<EnrichmentResult> {
-    const { vars, idMap } = buildEnrichmentTemplateVars(detections, architectureContext);
-    const { text: prompt } = await getPrompt('violations-enrich-deterministic', vars);
-
-    const label = totalBatches > 1 ? `enrichment-${batchIndex + 1}/${totalBatches}` : 'enrichment';
-    log(`[CLI] Enrichment ${label} starting for ${detections.length} detections...`);
-    const t0 = Date.now();
-    const enrichmentTimeoutMs = 300_000; // 5 minutes — enrichment processes many detections
-    const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, EnrichmentOutputSchema, {
-      extraArgs: ['--tools', ''], label, timeoutMs: enrichmentTimeoutMs,
-    });
-    const dur = Date.now() - t0;
-    log(`[CLI] Enrichment ${label} done in ${dur}ms — ${object.enrichedViolations.length} enriched`);
-    this.collectUsage('enrichment', cliUsage, dur);
-
-    return {
-      enrichedViolations: object.enrichedViolations.map((e) => ({
-        ...e,
-        id: resolveId(e.id, idMap) || e.id,
-      })),
-    };
-  }
-
-  async enrichDeterministicViolations(
-    detections: DeterministicDetectionForEnrichment[],
-    architectureContext: string,
-  ): Promise<EnrichmentResult> {
-    if (detections.length === 0) return { enrichedViolations: [] };
-
-    const ENRICHMENT_BATCH_SIZE = 150;
-
-    if (detections.length <= ENRICHMENT_BATCH_SIZE) {
-      return this.enrichDeterministicViolationsBatch(detections, architectureContext, 0, 1);
-    }
-
-    // Split into batches
-    const batches: DeterministicDetectionForEnrichment[][] = [];
-    for (let i = 0; i < detections.length; i += ENRICHMENT_BATCH_SIZE) {
-      batches.push(detections.slice(i, i + ENRICHMENT_BATCH_SIZE));
-    }
-
-    log(`[CLI] Enrichment: splitting ${detections.length} detections into ${batches.length} batches`);
-    const t0 = Date.now();
-
-    const results = await Promise.allSettled(
-      batches.map((batch, i) => this.enrichDeterministicViolationsBatch(batch, architectureContext, i, batches.length))
-    );
-
-    const allEnriched: EnrichmentResult['enrichedViolations'] = [];
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        allEnriched.push(...result.value.enrichedViolations);
-      } else {
-        log(`[CLI Enrichment] Batch failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
-      }
-    }
-
-    log(`[CLI] Enrichment total: ${Date.now() - t0}ms — ${allEnriched.length} enriched from ${detections.length} detections`);
-    return { enrichedViolations: allEnriched };
-  }
-
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {
     const { text: prompt } = await getPrompt('flow-enrichment', buildFlowTemplateVars(context));
 
@@ -851,6 +800,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const child = spawn(this.binaryName, args, {
       env: this.getCleanEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(this._repoPath ? { cwd: this._repoPath } : {}),
     });
 
     child.stdin!.write(prompt);

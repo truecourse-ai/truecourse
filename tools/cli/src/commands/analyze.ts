@@ -5,20 +5,95 @@ import {
   ensureRepo,
   getServerUrl,
   connectSocket,
+  readConfig,
   renderViolationsSummary,
   renderDiffResultsSummary,
-  openInBrowser,
 } from "./helpers.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
-export async function runAnalyze({ noAutostart = false, codeReview = false, deterministicOnly = false } = {}): Promise<void> {
+interface AnalysisStep {
+  key: string;
+  label: string;
+  status: "pending" | "active" | "done" | "error";
+  detail?: string;
+}
+
+// Spinner frames for active steps
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+let spinnerFrame = 0;
+let spinnerInterval: ReturnType<typeof setInterval> | null = null;
+let latestSteps: AnalysisStep[] | null = null;
+let renderedLineCount = 0;
+
+function renderSteps(steps: AnalysisStep[]): void {
+  // Move cursor up to overwrite previous render
+  if (renderedLineCount > 0) {
+    process.stderr.write(`\x1b[${renderedLineCount}A`);
+  }
+  for (const step of steps) {
+    const detail = step.detail ? ` — ${step.detail}` : "";
+
+    let icon: string;
+    let color: string;
+    const reset = "\x1b[0m";
+
+    switch (step.status) {
+      case "pending":
+        icon = "○";
+        color = "\x1b[2m";
+        break;
+      case "active":
+        icon = SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length];
+        color = "\x1b[36m"; // cyan
+        break;
+      case "done":
+        icon = "●";
+        color = "\x1b[32m"; // green
+        break;
+      case "error":
+        icon = "✕";
+        color = "\x1b[31m"; // red
+        break;
+      default:
+        icon = "○";
+        color = "";
+    }
+
+    process.stderr.write(`\x1b[2K${color}  ${icon} ${step.label}${detail}${reset}\n`);
+  }
+  renderedLineCount = steps.length;
+
+  // Start spinner animation if there are active steps
+  const hasActive = steps.some((s) => s.status === "active");
+  if (hasActive && !spinnerInterval) {
+    latestSteps = steps;
+    spinnerInterval = setInterval(() => {
+      spinnerFrame++;
+      if (latestSteps) renderSteps(latestSteps);
+    }, 80);
+  } else if (hasActive) {
+    latestSteps = steps;
+  } else if (!hasActive && spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+    latestSteps = null;
+  }
+}
+
+function stopSpinner(): void {
+  if (spinnerInterval) {
+    clearInterval(spinnerInterval);
+    spinnerInterval = null;
+  }
+}
+
+export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
   showFirstRunNotice();
 
   if (noAutostart) {
-    // Check if server is running without auto-starting
     const url = getServerUrl();
     try {
       const res = await fetch(`${url}/api/health`);
@@ -29,9 +104,11 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
     }
   }
 
-  const firstRun = noAutostart ? false : await ensureServer();
+  if (!noAutostart) await ensureServer();
   const repo = await ensureRepo();
   p.log.step(`Repository: ${repo.name}`);
+
+  const config = readConfig();
 
   const serverUrl = getServerUrl();
   const socket = connectSocket(repo.id);
@@ -42,11 +119,12 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
   // Handle Ctrl+C — cancel the analysis on the server
   let canceled = false;
   const onSigint = () => {
-    if (canceled) return; // second Ctrl+C — let it force exit
+    if (canceled) return;
     canceled = true;
+    stopSpinner();
     spinner.stop("Cancelling analysis...");
     fetch(`${serverUrl}/api/repos/${repo.id}/analyze/cancel`, { method: "POST" })
-      .catch(() => {}) // ignore errors
+      .catch(() => {})
       .finally(() => {
         socket.disconnect();
         process.exit(130);
@@ -60,9 +138,50 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
         reject(new Error("Analysis timed out after 15 minutes"));
       }, TIMEOUT_MS);
 
-      socket.on("analysis:progress", (data: { step: string; percent: number; detail?: string }) => {
-        const detail = data.detail ? ` — ${data.detail}` : "";
-        spinner.message(`${data.step} (${data.percent}%)${detail}`);
+      let stepsRendered = false;
+      let llmMode = false; // true when LLM is enabled (steps include 'scan')
+      let llmPromptAnswered = false;
+
+      let lastSteps: AnalysisStep[] | null = null;
+      const prePromptKeys = new Set(['parse', 'scan']);
+
+      socket.on("analysis:progress", (data: { step: string; percent: number; detail?: string; steps?: AnalysisStep[] }) => {
+        if (data.steps && data.steps.length > 0) {
+          lastSteps = data.steps;
+
+          // Detect LLM mode on first event
+          if (!llmMode && !stepsRendered && data.steps.some((s) => s.key === "scan")) {
+            llmMode = true;
+          }
+
+          if (llmMode && !llmPromptAnswered) {
+            // Before LLM prompt: show parse/scan as spinner messages
+            const parseStep = data.steps.find((s) => s.key === 'parse');
+            const scanStep = data.steps.find((s) => s.key === 'scan');
+            if (scanStep?.status === 'done') {
+              spinner.message(`Scanning files — ${scanStep.detail ?? 'done'}`);
+            } else if (scanStep?.status === 'active') {
+              spinner.message(`Scanning files${scanStep.detail ? ` — ${scanStep.detail}` : '...'}`);
+            } else if (parseStep?.status === 'done') {
+              spinner.message(`Parsing repository — ${parseStep.detail ?? 'done'}`);
+            } else if (parseStep?.status === 'active') {
+              spinner.message(`Parsing repository${parseStep.detail ? ` — ${parseStep.detail}` : '...'}`);
+            }
+            return;
+          }
+
+          // No-LLM mode or after LLM prompt: render step checklist
+          if (!stepsRendered) {
+            spinner.stop("Analyzing...");
+            stepsRendered = true;
+          }
+
+          // In LLM mode, filter out parse/scan since they were already shown as spinners
+          const stepsToRender = llmMode
+            ? data.steps.filter((s) => !prePromptKeys.has(s.key))
+            : data.steps;
+          renderSteps(stepsToRender);
+        }
       });
 
       let analysisComplete = false;
@@ -77,7 +196,6 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
 
       socket.on("analysis:complete", () => {
         analysisComplete = true;
-        spinner.message("Generating violations...");
         checkDone();
       });
 
@@ -91,11 +209,60 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
         reject(new Error("CANCELED"));
       });
 
+      // Handle LLM estimate confirmation
+      socket.on("analysis:llm-estimate", async (data: {
+        analysisId: string;
+        estimate: { totalEstimatedTokens: number; uniqueFileCount?: number; uniqueRuleCount?: number; tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }> };
+      }) => {
+        // Stop spinner, show parse/scan as completed log lines
+        stopSpinner();
+        if (lastSteps) {
+          const parseStep = lastSteps.find((s) => s.key === 'parse');
+          const scanStep = lastSteps.find((s) => s.key === 'scan');
+          if (parseStep) spinner.stop(`Parsing repository${parseStep.detail ? ` — ${parseStep.detail}` : ''}`);
+          if (scanStep) p.log.step(`Scanning files${scanStep.detail ? ` — ${scanStep.detail}` : ''}`);
+        } else {
+          spinner.stop("Analyzing...");
+        }
+
+        const totalRules = data.estimate.uniqueRuleCount ?? data.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
+        const totalFiles = data.estimate.uniqueFileCount ?? data.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
+        const tokens = data.estimate.totalEstimatedTokens;
+        const tokenStr = tokens >= 1_000_000
+          ? `~${(tokens / 1_000_000).toFixed(1)}M tokens`
+          : `~${Math.round(tokens / 1000)}k tokens`;
+        p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (${tokenStr})`);
+
+        const proceed = await p.confirm({
+          message: "Run LLM-powered rules?",
+          initialValue: true,
+        });
+
+        const shouldProceed = !p.isCancel(proceed) && proceed;
+        if (!shouldProceed) {
+          p.log.info("Skipping LLM rules.");
+        }
+
+        // Now show domain checklist — render cached state (without parse/scan)
+        llmPromptAnswered = true;
+        stepsRendered = true;
+        renderedLineCount = 0;
+        if (lastSteps) {
+          const domainSteps = lastSteps.filter((s) => !prePromptKeys.has(s.key));
+          renderSteps(domainSteps);
+        }
+
+        socket.emit("analysis:llm-proceed", {
+          analysisId: data.analysisId,
+          proceed: shouldProceed,
+        });
+      });
+
       // Trigger analysis
       fetch(`${serverUrl}/api/repos/${repo.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codeReview, deterministicOnly }),
+        body: JSON.stringify({ enabledCategories: config.enabledCategories ?? [], enableLlmRules: config.enableLlmRules ?? true }),
       }).then((res) => {
         if (!res.ok) {
           clearTimeout(timeout);
@@ -116,43 +283,30 @@ export async function runAnalyze({ noAutostart = false, codeReview = false, dete
       });
     });
 
-    spinner.stop("Analysis complete");
+    stopSpinner();
+    p.log.success("Analysis complete");
 
-    // Fetch architecture violations and code-level violations in parallel
-    const [archRes, codeRes] = await Promise.all([
-      fetch(`${serverUrl}/api/repos/${repo.id}/violations`),
-      fetch(`${serverUrl}/api/repos/${repo.id}/code-violations/summary`),
-    ]);
+    // Fetch violations summary
+    const res = await fetch(`${serverUrl}/api/repos/${repo.id}/violations/summary`);
 
-    if (!archRes.ok) {
-      p.log.error(`Failed to fetch violations: ${archRes.status}`);
-      process.exit(1);
-    }
-
-    const violations = (await archRes.json()) as Violation[];
-    const codeSummary = codeRes.ok
-      ? (await codeRes.json()) as { total: number; bySeverity: Record<string, number> }
-      : undefined;
-    renderViolationsSummary(violations, codeSummary);
-
-    if (!deterministicOnly) {
-      p.log.info("Code review running in background — results will appear in the dashboard");
-    }
-
-    const repoUrl = `${serverUrl}/repos/${repo.id}`;
-    if (firstRun) {
-      openInBrowser(repoUrl);
-      p.outro("Analysis complete — opened in browser");
+    if (res.ok) {
+      const summary = (await res.json()) as { total: number; bySeverity: Record<string, number> };
+      renderViolationsSummary([], summary);
     } else {
-      p.outro(`Analysis complete — open ${repoUrl}`);
+      // Fallback: fetch full violations list
+      const fallbackRes = await fetch(`${serverUrl}/api/repos/${repo.id}/violations`);
+      if (fallbackRes.ok) {
+        const violations = (await fallbackRes.json()) as Violation[];
+        renderViolationsSummary(violations);
+      }
     }
+
+    p.outro("Analysis complete — view results with: truecourse dashboard");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message === "CANCELED") {
-      spinner.stop("Analysis cancelled");
       p.outro("Analysis cancelled");
     } else {
-      spinner.stop("Analysis failed");
       p.log.error(message);
       process.exit(1);
     }

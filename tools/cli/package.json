@@ -16,14 +16,18 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
+    "@truecourse/analyzer": "workspace:*",
+    "@truecourse/shared": "workspace:^",
     "commander": "^12.1.0",
     "dotenv": "^16.4.0",
+    "js-yaml": "^4.1.0",
     "socket.io-client": "^4.7.0"
   },
   "optionalDependencies": {
     "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.19.15",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

@@ -8,6 +8,7 @@ export function useGraph(repoId: string, branch?: string, level: DepthLevel = 's
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [savedCollapsedIds, setSavedCollapsedIds] = useState<string[] | undefined>(undefined);
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

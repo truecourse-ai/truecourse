@@ -382,8 +382,13 @@ function buildModuleDependencies(
         matchedTargets = [...resolved]
       }
 
-      // If still no match (import *, side-effect, default), connect to first target only
-      const targets = matchedTargets.length > 0 ? matchedTargets : [targetModules[0]]
+      // If still no match, skip — creating a dependency to an arbitrary first
+      // module produces false edges that cause phantom circular dependencies.
+      // Pre-fix this connected to targetModules[0] which created false cycles
+      // like `LocationsController → search_locations → LocationsController`
+      // where search_locations never imports LocationsController.
+      if (matchedTargets.length === 0) continue
+      const targets = matchedTargets
 
       for (const tgtMod of targets) {
         // When resolved through barrel, use the actual module's file path

@@ -107,6 +107,9 @@ export function parsePrismaSchema(content: string): {
       const isPK = rest.includes('@id')
       const isNullable = isOptionalRelation || fieldType.endsWith('?')
       const isForeignKey = rest.includes('@relation')
+      // Prisma marks unique columns with @unique. PKs are inherently unique
+      // and represented separately via isPrimaryKey.
+      const isUnique = /@unique\b/.test(rest)
 
       // Extract default value
       let defaultValue: string | undefined
@@ -120,6 +123,7 @@ export function parsePrismaSchema(content: string): {
         type: mappedType,
         isNullable: isNullable || undefined,
         isPrimaryKey: isPK || undefined,
+        isUnique: isUnique || undefined,
         defaultValue,
       }
 

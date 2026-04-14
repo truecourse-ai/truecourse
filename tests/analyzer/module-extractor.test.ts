@@ -601,7 +601,7 @@ describe('extractModulesAndMethods', () => {
     expect(result.moduleDependencies[0].targetModule).toBe('Foo');
   });
 
-  it('falls back to first target module when importedNames is empty (import *)', () => {
+  it('skips module dependency when importedNames cannot be matched (no false edges)', () => {
     const analysis1 = makeAnalysis({
       filePath: '/repo/svc/src/app.ts',
       classes: [{
@@ -653,9 +653,8 @@ describe('extractModulesAndMethods', () => {
 
     const result = extractModulesAndMethods([analysis1, analysis2], layers, fileDeps);
 
-    // Should create only 1 edge to first module, not 3
-    expect(result.moduleDependencies).toHaveLength(1);
-    expect(result.moduleDependencies[0].targetModule).toBe('Alpha');
+    // Should create 0 edges — unmatched imports don't produce false dependencies
+    expect(result.moduleDependencies).toHaveLength(0);
   });
 
   it('skips standalone module creation for type-only files with no named functions', () => {

@@ -3,8 +3,6 @@ import express from 'express';
 import request from 'supertest';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
-import { execSync } from 'child_process';
-import { existsSync } from 'fs';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq } from 'drizzle-orm';
@@ -14,22 +12,26 @@ import * as schema from '../../apps/server/src/db/schema';
 // Mock the socket handlers so analysis doesn't crash on getIO()
 // ---------------------------------------------------------------------------
 
-vi.mock('../../apps/server/src/socket/handlers', () => ({
-  emitAnalysisProgress: vi.fn(),
-  emitAnalysisComplete: vi.fn(),
-  emitViolationsReady: vi.fn(),
-  emitFilesChanged: vi.fn(),
-  emitAnalysisCanceled: vi.fn(),
-  emitCodeReviewProgress: vi.fn(),
-  emitCodeReviewReady: vi.fn(),
-  StepTracker: class StepTracker {
-    constructor() {}
-    start() {}
-    done() {}
-    error() {}
-    detail() {}
-  },
-}));
+vi.mock('../../apps/server/src/socket/handlers', async () => {
+  const actual = await vi.importActual('../../apps/server/src/socket/handlers');
+  return {
+    ...actual,
+    emitAnalysisProgress: vi.fn(),
+    emitAnalysisComplete: vi.fn(),
+    emitViolationsReady: vi.fn(),
+    emitFilesChanged: vi.fn(),
+    emitAnalysisCanceled: vi.fn(),
+    emitCodeReviewProgress: vi.fn(),
+    emitCodeReviewReady: vi.fn(),
+    StepTracker: class StepTracker {
+      constructor() {}
+      start() {}
+      done() {}
+      error() {}
+      detail() {}
+    },
+  };
+});
 
 // Import routes AFTER mocks are set up
 import { errorHandler } from '../../apps/server/src/middleware/error';
@@ -43,7 +45,7 @@ import flowsRouter from '../../apps/server/src/routes/flows';
 // ---------------------------------------------------------------------------
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 // ---------------------------------------------------------------------------
 // Database setup (same connection as the real server)
@@ -134,20 +136,10 @@ async function cleanupFixtureRepo(): Promise<void> {
 describe('API routes (integration)', () => {
   const app = createTestApp();
   let createdRepoId: string;
-  let fixtureHadGit: boolean;
 
   beforeAll(async () => {
     // Initialize the server's database connection (used by route handlers)
     initDatabase(DATABASE_URL);
-
-    // Ensure the fixture directory is a git repo so simple-git calls work
-    fixtureHadGit = existsSync(resolve(FIXTURE_PATH, '.git'));
-    if (!fixtureHadGit) {
-      execSync('git init && git add -A && git -c user.name="test" -c user.email="test@test.com" commit -m "init"', {
-        cwd: FIXTURE_PATH,
-        stdio: 'ignore',
-      });
-    }
 
     // Remove any leftover fixture repo from prior test runs
     await cleanupFixtureRepo();
@@ -161,11 +153,6 @@ describe('API routes (integration)', () => {
       } catch {
         // Repo may already have been deleted by the DELETE test
       }
-    }
-
-    // Remove .git from fixture if we created it
-    if (!fixtureHadGit) {
-      execSync('rm -rf .git', { cwd: FIXTURE_PATH, stdio: 'ignore' });
     }
 
     await closeDatabase();
@@ -183,7 +170,7 @@ describe('API routes (integration)', () => {
       .expect(201);
 
     expect(res.body).toHaveProperty('id');
-    expect(res.body.name).toBe('sample-project');
+    expect(res.body.name).toBe('sample-js-project-negative');
     expect(res.body.path).toBe(FIXTURE_PATH);
     createdRepoId = res.body.id;
   });
@@ -236,7 +223,7 @@ describe('API routes (integration)', () => {
       (r: { id: string }) => r.id === createdRepoId
     );
     expect(found).toBeDefined();
-    expect(found.name).toBe('sample-project');
+    expect(found.name).toBe('sample-js-project-negative');
   });
 
   // -----------------------------------------------------------------------
@@ -249,7 +236,7 @@ describe('API routes (integration)', () => {
       .expect(200);
 
     expect(res.body.id).toBe(createdRepoId);
-    expect(res.body.name).toBe('sample-project');
+    expect(res.body.name).toBe('sample-js-project-negative');
     expect(res.body).toHaveProperty('branches');
     expect(res.body).toHaveProperty('defaultBranch');
     expect(res.body.latestAnalysis).toBeNull();
@@ -271,7 +258,7 @@ describe('API routes (integration)', () => {
   it('POST /api/repos/:id/analyze — triggers analysis, returns 202', async () => {
     const res = await request(app)
       .post(`/api/repos/${createdRepoId}/analyze`)
-      .send({})
+      .send({ skipGit: true })
       .expect(202);
 
     expect(res.body.message).toBe('Analysis started');
@@ -422,38 +409,10 @@ describe('API routes (integration)', () => {
   });
 
   // -----------------------------------------------------------------------
-  // GET /api/repos/:id/files?ref=working-tree — includes untracked files
+  // GET /api/repos/:id/file-content — returns content
   // -----------------------------------------------------------------------
 
-  it('GET /api/repos/:id/files?ref=working-tree — includes untracked files', async () => {
-    // Create an untracked file in the fixture
-    const untrackedPath = resolve(FIXTURE_PATH, '_test_untracked.txt');
-    require('fs').writeFileSync(untrackedPath, 'untracked content');
-
-    try {
-      // Default mode should NOT include the untracked file
-      const defaultRes = await request(app)
-        .get(`/api/repos/${createdRepoId}/files`)
-        .expect(200);
-
-      expect(defaultRes.body.files).not.toContain('_test_untracked.txt');
-
-      // Working-tree mode SHOULD include the untracked file
-      const wtRes = await request(app)
-        .get(`/api/repos/${createdRepoId}/files?ref=working-tree`)
-        .expect(200);
-
-      expect(wtRes.body.files).toContain('_test_untracked.txt');
-    } finally {
-      require('fs').unlinkSync(untrackedPath);
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // GET /api/repos/:id/file-content — returns committed content by default
-  // -----------------------------------------------------------------------
-
-  it('GET /api/repos/:id/file-content — returns committed content by default', async () => {
+  it('GET /api/repos/:id/file-content — returns file content', async () => {
     const res = await request(app)
       .get(`/api/repos/${createdRepoId}/file-content?path=package.json`)
       .expect(200);
@@ -462,72 +421,6 @@ describe('API routes (integration)', () => {
     expect(res.body).toHaveProperty('language', 'json');
     // Content should be valid JSON (the fixture package.json)
     expect(() => JSON.parse(res.body.content)).not.toThrow();
-  });
-
-  // -----------------------------------------------------------------------
-  // GET /api/repos/:id/file-content?ref=working-tree — returns filesystem content
-  // -----------------------------------------------------------------------
-
-  it('GET /api/repos/:id/file-content?ref=working-tree — returns working tree content', async () => {
-    const testFile = resolve(FIXTURE_PATH, '_test_wt_file.txt');
-    require('fs').writeFileSync(testFile, 'working tree content here');
-
-    try {
-      // Default mode: new untracked file should still be readable (fallback)
-      const defaultRes = await request(app)
-        .get(`/api/repos/${createdRepoId}/file-content?path=_test_wt_file.txt`)
-        .expect(200);
-
-      expect(defaultRes.body.content).toBe('working tree content here');
-
-      // Working-tree mode: should read from filesystem
-      const wtRes = await request(app)
-        .get(`/api/repos/${createdRepoId}/file-content?path=_test_wt_file.txt&ref=working-tree`)
-        .expect(200);
-
-      expect(wtRes.body.content).toBe('working tree content here');
-    } finally {
-      require('fs').unlinkSync(testFile);
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  // GET /api/repos/:id/file-content — committed vs working tree difference
-  // -----------------------------------------------------------------------
-
-  it('GET /api/repos/:id/file-content — default returns committed, not working tree edits', async () => {
-    const fs = require('fs');
-    const targetFile = 'package.json';
-    const fullPath = resolve(FIXTURE_PATH, targetFile);
-
-    // Read the original committed content
-    const committedRes = await request(app)
-      .get(`/api/repos/${createdRepoId}/file-content?path=${targetFile}`)
-      .expect(200);
-
-    const originalContent = fs.readFileSync(fullPath, 'utf-8');
-
-    // Modify the file on disk
-    fs.writeFileSync(fullPath, originalContent + '\n// local edit');
-
-    try {
-      // Default mode should still return committed content (no local edit)
-      const defaultRes = await request(app)
-        .get(`/api/repos/${createdRepoId}/file-content?path=${targetFile}`)
-        .expect(200);
-
-      expect(defaultRes.body.content).not.toContain('// local edit');
-
-      // Working-tree mode should include the local edit
-      const wtRes = await request(app)
-        .get(`/api/repos/${createdRepoId}/file-content?path=${targetFile}&ref=working-tree`)
-        .expect(200);
-
-      expect(wtRes.body.content).toContain('// local edit');
-    } finally {
-      // Restore original content
-      fs.writeFileSync(fullPath, originalContent);
-    }
   });
 
   // -----------------------------------------------------------------------

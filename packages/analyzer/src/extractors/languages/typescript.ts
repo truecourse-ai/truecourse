@@ -156,7 +156,7 @@ function extractHeritage(node: SyntaxNode): {
   const implementsInterfaces: string[] = []
   let superClass: string | undefined
 
-  const heritageNode = node.childForFieldName('heritage')
+  const heritageNode = node.childForFieldName('heritage') || node.namedChildren.find((c) => c.type === 'class_heritage')
   if (!heritageNode) {
     return { superClass, implementsInterfaces }
   }

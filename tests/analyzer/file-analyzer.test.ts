@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { analyzeFileContent, analyzeFile } from '../../packages/analyzer/src/file-analyzer';
 
-const FIXTURE_PATH = new URL('../fixtures/sample-project', import.meta.url).pathname;
+const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.meta.url).pathname;
 
 describe('analyzeFileContent', () => {
   it('extracts a simple function declaration', () => {

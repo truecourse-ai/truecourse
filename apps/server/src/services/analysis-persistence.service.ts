@@ -11,7 +11,7 @@ import {
   methods,
   moduleDeps,
   methodDeps,
-  codeViolations,
+  violations,
 } from '../db/schema.js';
 import type { AnalysisResult } from './analyzer.service.js';
 import type { CodeViolation } from '@truecourse/shared';
@@ -249,32 +249,40 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
 }
 
 /**
- * Persist code-level violations (file/line-level) into the code_violations table.
+ * Persist code-level violations (file/line-level) into the unified violations table.
  */
-export async function persistCodeViolations(
+export async function persistFileViolations(
   analysisId: string,
-  violations: CodeViolation[],
+  repoId: string,
+  codeViolations: CodeViolation[],
 ): Promise<void> {
-  if (violations.length === 0) return;
+  if (codeViolations.length === 0) return;
+
+  const now = new Date();
 
   // Bulk insert in batches of 100
   const BATCH_SIZE = 100;
-  for (let i = 0; i < violations.length; i += BATCH_SIZE) {
-    const batch = violations.slice(i, i + BATCH_SIZE);
-    await db.insert(codeViolations).values(
+  for (let i = 0; i < codeViolations.length; i += BATCH_SIZE) {
+    const batch = codeViolations.slice(i, i + BATCH_SIZE);
+    await db.insert(violations).values(
       batch.map((v) => ({
+        repoId,
         analysisId,
+        type: 'code' as const,
+        title: v.title,
+        content: v.content,
+        severity: v.severity,
+        status: 'new' as const,
+        ruleKey: v.ruleKey,
         filePath: v.filePath,
         lineStart: v.lineStart,
         lineEnd: v.lineEnd,
         columnStart: v.columnStart,
         columnEnd: v.columnEnd,
-        ruleKey: v.ruleKey,
-        severity: v.severity,
-        title: v.title,
-        content: v.content,
         snippet: v.snippet,
         fixPrompt: v.fixPrompt || null,
+        firstSeenAnalysisId: analysisId,
+        firstSeenAt: now,
       })),
     );
   }

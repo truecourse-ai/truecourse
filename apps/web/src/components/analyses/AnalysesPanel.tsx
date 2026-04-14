@@ -150,7 +150,6 @@ export function AnalysesPanel({
               <th className="px-4 py-2.5 font-medium">Provider</th>
               <th className="px-4 py-2.5 font-medium text-center">Services</th>
               <th className="px-4 py-2.5 font-medium">Violations</th>
-              <th className="px-4 py-2.5 font-medium">Code Violations</th>
               <th className="px-4 py-2.5 font-medium text-right">Duration</th>
               <th className="px-4 py-2.5 font-medium text-right">Tokens</th>
               <th className="px-4 py-2.5 font-medium text-right">Cost</th>
@@ -241,9 +240,6 @@ export function AnalysesPanel({
                   <td className="px-4 py-2.5 text-xs">
                     <SeverityBadges counts={a.violationsBySeverity} />
                   </td>
-                  <td className="px-4 py-2.5 text-xs">
-                    <SeverityBadges counts={a.codeViolationsBySeverity} />
-                  </td>
                   <td className="px-4 py-2.5 text-right text-xs text-muted-foreground">
                     {formatDuration(a.durationMs)}
                   </td>
@@ -251,7 +247,7 @@ export function AnalysesPanel({
                     {formatTokens(a.totalTokens)}
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs text-green-400">
-                    {formatCost(a.totalCost)}
+                    {a.provider === 'claude-code' ? '-' : formatCost(a.totalCost)}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-center gap-1">

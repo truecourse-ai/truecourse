@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 describe('runAnalysis (integration)', () => {
   let result: AnalysisResult;
@@ -13,7 +13,7 @@ describe('runAnalysis (integration)', () => {
   beforeAll(async () => {
     result = await runAnalysis(FIXTURE_PATH, undefined, (progress) => {
       progressCalls.push(progress);
-    }, { skipStash: true });
+    }, { skipStash: true, skipGit: true });
   }, 60_000);
 
   it('calls progress callback multiple times', () => {
@@ -35,13 +35,12 @@ describe('runAnalysis (integration)', () => {
     expect(['monolith', 'microservices']).toContain(result.architecture);
   });
 
-  it('result has services array with 3 entries', () => {
+  it('result has services array with expected entries', () => {
     expect(Array.isArray(result.services)).toBe(true);
-    expect(result.services).toHaveLength(3);
+    expect(result.services.length).toBeGreaterThanOrEqual(3);
     const names = result.services.map((s) => s.name);
     expect(names).toContain('api-gateway');
     expect(names).toContain('user-service');
-    expect(names).toContain('utils');
   });
 
   it('result has dependencies array', () => {

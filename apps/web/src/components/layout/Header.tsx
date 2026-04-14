@@ -8,10 +8,8 @@ import type { AnalysisSummary } from '@/lib/api';
 type HeaderProps = {
   repoName?: string;
   currentBranch?: string;
-  onAnalyze?: (options?: { codeReview?: boolean; deterministicOnly?: boolean }) => void;
-  onCodeReview?: () => void;
+  onAnalyze?: () => void;
   isAnalyzing?: boolean;
-  isCodeReviewing?: boolean;
   showBack?: boolean;
   backHref?: string;
   isChatOpen?: boolean;
@@ -29,9 +27,7 @@ export function Header({
   repoName,
   currentBranch,
   onAnalyze,
-  onCodeReview,
   isAnalyzing,
-  isCodeReviewing,
   showBack,
   backHref = '/',
   isChatOpen,
@@ -177,25 +173,12 @@ export function Header({
             <Button
               size="sm"
               onClick={() => onAnalyze()}
-              disabled={isAnalyzing || isCodeReviewing}
-              className="rounded-r-none"
+              disabled={isAnalyzing}
             >
               {isAnalyzing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               {isAnalyzing ? 'Analyzing...' : 'Analyze'}
             </Button>
-            <AnalyzeDropdown onSelect={(opt) => onAnalyze(opt)} disabled={isAnalyzing || isCodeReviewing} />
           </div>
-        )}
-        {onCodeReview && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onCodeReview}
-            disabled={isAnalyzing || isCodeReviewing}
-          >
-            {isCodeReviewing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-            {isCodeReviewing ? 'Reviewing...' : 'Code Review'}
-          </Button>
         )}
       </div>
 
@@ -224,45 +207,3 @@ export function Header({
   );
 }
 
-function AnalyzeDropdown({ onSelect, disabled }: { onSelect: (opts: { codeReview?: boolean; deterministicOnly?: boolean }) => void; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  return (
-    <div ref={ref} className="relative">
-      <Button
-        size="sm"
-        variant="default"
-        className="rounded-l-none border-l border-primary-foreground/20 px-1.5"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-md border border-border bg-popover p-1 shadow-md">
-          <button
-            className="flex w-full items-center rounded px-2 py-1.5 text-xs text-popover-foreground hover:bg-accent"
-            onClick={() => { onSelect({ codeReview: true }); setOpen(false); }}
-          >
-            Analyze with code review
-          </button>
-          <button
-            className="flex w-full items-center rounded px-2 py-1.5 text-xs text-popover-foreground hover:bg-accent"
-            onClick={() => { onSelect({ deterministicOnly: true }); setOpen(false); }}
-          >
-            Deterministic only (no LLM)
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}

@@ -85,6 +85,41 @@
       "when": 1774722440177,
       "tag": "0011_noisy_colleen_wing",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1775271555477,
+      "tag": "0012_abandoned_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1775400000000,
+      "tag": "0013_rule_key_restructure",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1775505556152,
+      "tag": "0014_wonderful_power_pack",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1775519487656,
+      "tag": "0015_small_stardust",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1775533818370,
+      "tag": "0016_typical_magus",
+      "breakpoints": true
     }
   ]
 }

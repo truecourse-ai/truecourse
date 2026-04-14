@@ -1,0 +1,148 @@
+import type { AnalysisRule } from '@truecourse/shared'
+
+export const DATABASE_LLM_RULES: AnalysisRule[] = [
+  {
+    key: 'database/llm/missing-foreign-key',
+    category: 'database',
+    domain: 'database',
+    name: 'Missing foreign key constraint',
+    description: 'Columns ending in _id without FK constraint.',
+    prompt:
+      'Look for columns ending in `_id` or `Id` that do not have a corresponding foreign key constraint defined. Missing foreign keys allow orphaned records and break referential integrity. Flag each instance with the table and column name.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/missing-index',
+    category: 'database',
+    domain: 'database',
+    name: 'Missing index on foreign key column',
+    description: 'FK columns without index cause slow queries.',
+    prompt:
+      'Check whether foreign key columns have an index defined. Foreign key columns without indexes cause slow JOIN queries and lookups. Flag any FK column that appears to lack an index.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/naming-inconsistency',
+    category: 'database',
+    domain: 'database',
+    name: 'Inconsistent naming conventions',
+    description: 'Mixed naming conventions across tables and columns.',
+    prompt:
+      'Check for mixed naming conventions across tables and columns. Common inconsistencies include mixing snake_case and camelCase, mixing singular and plural table names, or using inconsistent prefixes. Flag specific examples of inconsistency.',
+    enabled: true,
+    severity: 'low',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/missing-timestamps',
+    category: 'database',
+    domain: 'database',
+    name: 'Missing created_at / updated_at columns',
+    description: 'Tables missing standard timestamp columns for audit trails.',
+    prompt:
+      'Check whether tables have `created_at` and `updated_at` (or equivalent) timestamp columns. These are standard for audit trails and debugging. Flag tables that are missing one or both timestamp columns.',
+    enabled: true,
+    severity: 'low',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/overly-nullable',
+    category: 'database',
+    domain: 'database',
+    name: 'Too many nullable columns',
+    description: 'Tables where a large proportion of columns are nullable.',
+    prompt:
+      'Identify tables where a large proportion of columns are nullable. Excessive nullability often indicates a poorly normalized schema or optional fields that should be in a separate table. Flag tables where more than half of non-PK columns are nullable.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/inconsistent-data-validation',
+    category: 'database',
+    domain: 'database',
+    name: 'Validation in some paths but not others',
+    description: 'Same data type validated in one endpoint but not another — inconsistent enforcement.',
+    prompt:
+      'Find data types that are validated in some code paths but not others. Look for: email format validated in the registration endpoint but not the profile update endpoint, input length checked in the API layer but not in direct service calls, and Zod/Joi schemas applied to some endpoints but missing from others that accept the same data shape. Inconsistent validation creates bypass opportunities.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/missing-cascade-logic',
+    category: 'database',
+    domain: 'database',
+    name: 'Missing cascade on delete',
+    description: 'Parent record deleted without handling child records — orphaned data or foreign key violation.',
+    prompt:
+      'Find delete operations on parent records that do not handle related child records. Look for: DELETE queries or ORM destroy/remove calls on tables that have child tables referencing them, missing ON DELETE CASCADE in foreign key definitions, and application code that deletes a parent without first deleting or reassigning children. This causes orphaned data or foreign key constraint violations.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/stale-read-after-write',
+    category: 'database',
+    domain: 'database',
+    name: 'Read-after-write without consistency guarantee',
+    description: 'Writing to database then immediately reading — may get stale data with replicas or eventual consistency.',
+    prompt:
+      'Find code that writes to the database and then immediately reads back the same data assuming it will reflect the write. Look for: INSERT/UPDATE followed by a SELECT of the same record, creating a record then immediately querying a list expecting it to appear, and write operations followed by read operations that could be routed to a read replica. With replicas or caching, the read may return stale data.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/sensitive-data-unencrypted',
+    category: 'database',
+    domain: 'database',
+    name: 'Sensitive data stored unencrypted',
+    description: 'PII, passwords, or secrets stored in database as plain text instead of encrypted/hashed.',
+    prompt:
+      'Find sensitive data being stored in the database without encryption or hashing. Look for: password fields stored as plain text (not using bcrypt/argon2/scrypt), PII fields (SSN, credit card numbers, health data) stored as plain varchar without encryption, API keys or secrets stored unencrypted in database columns, and schema definitions for sensitive columns that lack encryption or hashing.',
+    enabled: true,
+    severity: 'critical',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/missing-soft-delete',
+    category: 'database',
+    domain: 'database',
+    name: 'Hard delete on auditable entity',
+    description: 'Business entity deleted permanently when soft delete (is_deleted flag) would be required for audit trail.',
+    prompt:
+      'Find business entities that are permanently deleted when they should be soft-deleted for audit purposes. Look for: DELETE operations on tables representing orders, transactions, user accounts, or other business-critical data, missing is_deleted or deleted_at columns on auditable tables, and direct row deletion where regulatory or business requirements demand an audit trail.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/denormalization-without-sync',
+    category: 'database',
+    domain: 'database',
+    name: 'Denormalized data without sync mechanism',
+    description: 'Data duplicated across tables without triggers, events, or application logic to keep in sync.',
+    prompt:
+      'Find denormalized data that lacks a synchronization mechanism. Look for: the same data stored in multiple tables (e.g., user name in both users and orders tables) without triggers, event handlers, or application logic to keep them in sync, cached aggregates (counts, totals) without update logic, and duplicated fields across schemas that could become stale independently.',
+    enabled: true,
+    severity: 'medium',
+    type: 'llm',
+  },
+  {
+    key: 'database/llm/query-in-transaction-too-long',
+    category: 'database',
+    domain: 'database',
+    name: 'Long-running transaction',
+    description: 'Transaction holding locks while doing external calls or heavy processing — blocks other operations.',
+    prompt:
+      'Find database transactions that hold locks for too long. Look for: transactions that include HTTP calls to external services, transactions wrapping heavy computation or file I/O, transactions that await user input or long-running async operations, and transactions that process large batches of records sequentially. Long-held locks block other operations and can cause deadlocks or timeouts.',
+    enabled: true,
+    severity: 'high',
+    type: 'llm',
+  },
+]

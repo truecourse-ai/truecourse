@@ -23,6 +23,7 @@ import { ServiceGroupNode } from '@/components/graph/nodes/ServiceGroupNode';
 import { DatabaseNode } from '@/components/graph/nodes/DatabaseNode';
 import { ModuleNode } from '@/components/graph/nodes/ModuleNode';
 import { MethodNode } from '@/components/graph/nodes/MethodNode';
+
 import { DependencyEdge } from '@/components/graph/edges/DependencyEdge';
 import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
@@ -32,8 +33,9 @@ import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network, Lo
 import * as api from '@/lib/api';
 import { useCollapseState } from '@/hooks/useCollapseState';
 import { applyCollapseState } from '@/lib/collapse';
-import type { DepthLevel } from '@/types/graph';
+import type { DepthLevel, SemanticZoomLevel } from '@/types/graph';
 import type { DiffCheckResponse } from '@/lib/api';
+
 
 type GraphCanvasProps = {
   initialNodes: Node[];
@@ -65,6 +67,7 @@ const nodeTypes: NodeTypes = {
   database: DatabaseNode as unknown as NodeTypes[string],
   module: ModuleNode as unknown as NodeTypes[string],
   method: MethodNode as unknown as NodeTypes[string],
+
 };
 
 const edgeTypes: EdgeTypes = {

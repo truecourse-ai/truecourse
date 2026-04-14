@@ -233,9 +233,112 @@ Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  // --- Code prompts ---
+  // --- Code prompts (context-routed) ---
+  'violations-code-metadata': {
+    prompt: `You are analyzing codebase metadata summaries. You can see function signatures, imports, call patterns, and route registrations — but NOT full source code. Identify structural issues detectable from this metadata.
+
+Rules to evaluate:
+{{llmRules}}
+
+Metadata summaries:
+{{fileList}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Since you only see metadata (signatures, imports, calls), focus on structural patterns — missing capabilities, dependency issues, and configuration problems detectable without reading function bodies.
+- Only report genuine issues. Do not flag trivial style preferences.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-code-targeted': {
+    prompt: `You are analyzing specific function implementations extracted from the codebase. Each function was selected because it matches criteria relevant to the rules below. Analyze the function bodies for the specified issues.
+
+Rules to evaluate:
+{{llmRules}}
+
+Extracted functions:
+{{fileList}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Each line in the source is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
+- Only report genuine issues. Do not flag trivial style preferences.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-code-metadata-lifecycle': {
+    prompt: `You are analyzing codebase metadata summaries. You can see function signatures, imports, call patterns, and route registrations — but NOT full source code. Identify structural issues detectable from this metadata.
+
+Rules to evaluate:
+{{llmRules}}
+
+Metadata summaries:
+{{fileList}}
+
+Previous code violations (from the PREVIOUS analysis):
+{{existingViolations}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Since you only see metadata (signatures, imports, calls), focus on structural patterns — missing capabilities, dependency issues, and configuration problems detectable without reading function bodies.
+- Only report genuine issues. Do not flag trivial style preferences.
+
+DE-DUPLICATION AND LIFECYCLE RULES:
+- Every previous code violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
+- Create a newViolations item only when the current issue is not already covered by any previous code violation.
+- Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  'violations-code-targeted-lifecycle': {
+    prompt: `You are analyzing specific function implementations extracted from the codebase. Each function was selected because it matches criteria relevant to the rules below. Analyze the function bodies for the specified issues.
+
+Rules to evaluate:
+{{llmRules}}
+
+Extracted functions:
+{{fileList}}
+
+Previous code violations (from the PREVIOUS analysis):
+{{existingViolations}}
+
+IMPORTANT:
+- Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
+- For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
+- filePath must exactly match one of the file paths provided above.
+- Each line in the source is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
+- Only report genuine issues. Do not flag trivial style preferences.
+
+DE-DUPLICATION AND LIFECYCLE RULES:
+- Every previous code violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
+- Create a newViolations item only when the current issue is not already covered by any previous code violation.
+- Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
+- Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
+
+Return your findings as structured data using the provided schema.`,
+    labels: ['production'],
+  },
+
+  // --- Code prompts (full-file, Tier 3) ---
   'violations-code': {
-    prompt: `You are a senior code reviewer. Analyze the following source files and identify semantic code quality issues that AST-based linting cannot detect.
+    prompt: `You are analyzing full source files for specific code issues. Each file was selected because it is relevant to the rules below. Analyze the complete file content and identify violations matching the specified rules.
 
 Rules to evaluate:
 {{llmRules}}
@@ -248,17 +351,16 @@ IMPORTANT:
 - For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
 - filePath must exactly match one of the file paths provided above.
 - Each line in the source files is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
-- Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block. Do NOT group multiple functions or unrelated code into one wide-spanning violation. If the same issue appears in multiple functions, report each as a separate violation with its own line range.
-- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue. For example, if a function on lines 10-20 has a problem on lines 14-16, use lineStart=14, lineEnd=16 — not the entire function.
-- Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
-- Do NOT report issues that overlap with deterministic linting (empty catch, console.log, hardcoded secrets, TODO comments, magic numbers, explicit any, SQL injection).
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
+- Only report genuine issues. Do not flag trivial style preferences.
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
   'violations-code-lifecycle': {
-    prompt: `You are a senior code reviewer. Analyze the following source files and identify semantic code quality issues that AST-based linting cannot detect.
+    prompt: `You are analyzing full source files for specific code issues. Each file was selected because it is relevant to the rules below. Analyze the complete file content and identify violations matching the specified rules.
 
 Rules to evaluate:
 {{llmRules}}
@@ -274,37 +376,15 @@ IMPORTANT:
 - For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
 - filePath must exactly match one of the file paths provided above.
 - Each line in the source files is prefixed with its line number (e.g. "46: const token = ..."). Use these numbers directly for lineStart and lineEnd — do NOT count lines yourself.
-- Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block. Do NOT group multiple functions or unrelated code into one wide-spanning violation. If the same issue appears in multiple functions, report each as a separate violation with its own line range.
-- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue. For example, if a function on lines 10-20 has a problem on lines 14-16, use lineStart=14, lineEnd=16 — not the entire function.
-- Only report genuine issues a senior developer would flag in code review. Do not flag trivial style preferences.
-- Do NOT report issues that overlap with deterministic linting (empty catch, console.log, hardcoded secrets, TODO comments, magic numbers, explicit any, SQL injection).
+- Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block.
+- lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
+- Only report genuine issues. Do not flag trivial style preferences.
 
 DE-DUPLICATION AND LIFECYCLE RULES:
 - Every previous code violation ID must appear in exactly one of resolvedViolationIds or unchangedViolationIds.
 - Create a newViolations item only when the current issue is not already covered by any previous code violation.
 - Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
 - Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
-
-Return your findings as structured data using the provided schema.`,
-    labels: ['production'],
-  },
-
-  'violations-enrich-deterministic': {
-    prompt: `Given these raw code analysis detections, produce a final violation for each with a clear title, detailed content, and actionable fixPrompt.
-
-Detections:
-{{detections}}
-
-Architecture context:
-{{context}}
-
-For each detection, write:
-- id: copy the exact id from the detection — do NOT modify or fabricate ids
-- title: a clear, concise title describing the issue
-- content: a detailed explanation of what is wrong and why it matters
-- fixPrompt: a specific, actionable prompt that an AI coding assistant could use to fix the issue. Use human-readable names (service names, file paths) — never include internal ids in fixPrompt.
-
-You MUST return exactly one enriched violation per input detection, with the matching id.
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -495,35 +575,6 @@ export function buildModuleTemplateVars(context: ModuleViolationContext): Templa
 // ---------------------------------------------------------------------------
 // Deterministic enrichment template variable helpers
 // ---------------------------------------------------------------------------
-
-export interface DeterministicDetectionForEnrichment {
-  id: string;
-  ruleKey: string;
-  title: string;
-  description: string;
-  severity: string;
-  category: string;
-  serviceName: string;
-  moduleName?: string;
-  methodName?: string;
-}
-
-/** Build template vars for violations-enrich-deterministic prompt. */
-export function buildEnrichmentTemplateVars(
-  detections: DeterministicDetectionForEnrichment[],
-  architectureContext: string,
-): TemplateVarsResult {
-  const idMap: PromptIdMap = new Map();
-
-  const detectionsList = detections
-    .map(
-      (d, i) =>
-        `- [id: ${assignId('det', i, d.id, idMap)}] [${d.severity.toUpperCase()}] ${d.title}: ${d.description} (rule: ${d.ruleKey}, category: ${d.category}, service: ${d.serviceName}${d.moduleName ? `, module: ${d.moduleName}` : ''}${d.methodName ? `, method: ${d.methodName}` : ''})`
-    )
-    .join('\n');
-
-  return { vars: { detections: detectionsList, context: architectureContext }, idMap };
-}
 
 // ---------------------------------------------------------------------------
 // Diff template variable helpers

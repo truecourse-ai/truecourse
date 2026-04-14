@@ -64,7 +64,7 @@ export function UsageDetailPanel({ repoId, analysisId, onBack }: UsageDetailPane
       costUsd: r.costUsd
         ? acc.costUsd + parseFloat(r.costUsd)
         : acc.costUsd,
-      hasCost: acc.hasCost || r.costUsd !== null,
+      hasCost: acc.hasCost || (r.costUsd !== null && r.provider !== 'claude-code'),
     }),
     { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, durationMs: 0, costUsd: 0, hasCost: false },
   );

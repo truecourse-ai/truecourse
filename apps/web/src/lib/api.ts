@@ -167,10 +167,10 @@ export function deleteRepo(id: string): Promise<void> {
   return fetchApi<void>(`/api/repos/${id}`, { method: 'DELETE' });
 }
 
-export function analyzeRepo(id: string, options?: { branch?: string; codeReview?: boolean; deterministicOnly?: boolean }): Promise<{ jobId: string }> {
+export function analyzeRepo(id: string, options?: { branch?: string }): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>(`/api/repos/${id}/analyze`, {
     method: 'POST',
-    body: JSON.stringify({ branch: options?.branch, codeReview: options?.codeReview ?? false, deterministicOnly: options?.deterministicOnly ?? false }),
+    body: JSON.stringify({ branch: options?.branch }),
   });
 }
 
@@ -180,7 +180,6 @@ export type AnalysisSummary = {
   status: string;
   branch: string | null;
   commitHash: string | null;
-  codeReview: boolean;
   architecture: string;
   createdAt: string;
   serviceCount?: number;
@@ -223,10 +222,6 @@ export function cancelAnalysis(repoId: string): Promise<{ message: string }> {
   return fetchApi(`/api/repos/${repoId}/analyze/cancel`, { method: 'POST' });
 }
 
-export function runCodeReview(repoId: string, analysisId: string): Promise<{ message: string }> {
-  return fetchApi(`/api/repos/${repoId}/analyses/${analysisId}/code-review`, { method: 'POST' });
-}
-
 // Graph
 export function getGraph(
   repoId: string,
@@ -240,6 +235,7 @@ export function getGraph(
   return fetchApi<GraphResponse>(`/api/repos/${repoId}/graph${qs ? `?${qs}` : ''}`);
 }
 
+// All-level response for semantic zoom
 export function saveGraphPositions(
   repoId: string,
   positions: Record<string, { x: number; y: number }>,
@@ -387,7 +383,6 @@ export type DiffViolationItem = {
 
 export type DiffCheckResponse = {
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
-  codeReview: boolean;
   resolvedViolations: ViolationResponse[];
   newViolations: DiffViolationItem[];
   summary: {
@@ -459,7 +454,7 @@ export function getCodeViolations(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<CodeViolationResponse[]>(
-    `/api/repos/${repoId}/code-violations${qs ? `?${qs}` : ''}`,
+    `/api/repos/${repoId}/violations${qs ? `?${qs}` : ''}`,
   );
 }
 
@@ -471,7 +466,7 @@ export function getCodeViolationSummary(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<CodeViolationSummary>(
-    `/api/repos/${repoId}/code-violations/summary${qs ? `?${qs}` : ''}`,
+    `/api/repos/${repoId}/violations/summary${qs ? `?${qs}` : ''}`,
   );
 }
 

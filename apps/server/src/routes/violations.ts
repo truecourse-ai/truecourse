@@ -11,7 +11,6 @@ import {
   modules,
   methods,
   violations,
-  codeViolations,
 } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
 import { generateViolations } from '../services/violation.service.js';
@@ -202,7 +201,14 @@ router.get(
       }
 
       // Build query conditions
-      const queryConditions = [eq(violations.analysisId, analysis.id)];
+      const queryConditions: ReturnType<typeof eq>[] = [eq(violations.analysisId, analysis.id)];
+
+      // Optional file filter
+      const fileParam = req.query.file as string | undefined;
+      if (fileParam) {
+        const absPath = fileParam.startsWith('/') ? fileParam : `${repo.path}/${fileParam}`;
+        queryConditions.push(eq(violations.filePath, absPath));
+      }
 
       // Status filter: default to active violations only
       const statusParam = req.query.status as string | undefined;
@@ -217,112 +223,80 @@ router.get(
         );
       }
 
-      const analysisViolations = await db
-        .select({
-          id: violations.id,
-          type: violations.type,
-          title: violations.title,
-          content: violations.content,
-          severity: violations.severity,
-          status: violations.status,
-          targetServiceId: violations.targetServiceId,
-          targetServiceName: services.name,
-          targetDatabaseId: violations.targetDatabaseId,
-          targetDatabaseName: databases.name,
-          targetModuleId: violations.targetModuleId,
-          targetModuleName: modules.name,
-          targetMethodId: violations.targetMethodId,
-          targetMethodName: methods.name,
-          targetTable: violations.targetTable,
-          fixPrompt: violations.fixPrompt,
-          firstSeenAt: violations.firstSeenAt,
-          createdAt: violations.createdAt,
-        })
+      // Severity ordering for consistent sort
+      const severityOrder = sql`CASE ${violations.severity}
+        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
+        WHEN 'low' THEN 3 WHEN 'info' THEN 4 ELSE 5 END`;
+
+      const selectFields = {
+        id: violations.id,
+        type: violations.type,
+        title: violations.title,
+        content: violations.content,
+        severity: violations.severity,
+        status: violations.status,
+        targetServiceId: violations.targetServiceId,
+        targetServiceName: services.name,
+        targetDatabaseId: violations.targetDatabaseId,
+        targetDatabaseName: databases.name,
+        targetModuleId: violations.targetModuleId,
+        targetModuleName: modules.name,
+        targetMethodId: violations.targetMethodId,
+        targetMethodName: methods.name,
+        targetTable: violations.targetTable,
+        fixPrompt: violations.fixPrompt,
+        firstSeenAt: violations.firstSeenAt,
+        createdAt: violations.createdAt,
+        ruleKey: violations.ruleKey,
+        filePath: violations.filePath,
+        lineStart: violations.lineStart,
+        lineEnd: violations.lineEnd,
+        columnStart: violations.columnStart,
+        columnEnd: violations.columnEnd,
+        snippet: violations.snippet,
+      };
+
+      // Pagination
+      const limitParam = parseInt(req.query.limit as string) || 0;
+      const offsetParam = parseInt(req.query.offset as string) || 0;
+
+      let query = db
+        .select(selectFields)
         .from(violations)
         .leftJoin(services, eq(violations.targetServiceId, services.id))
         .leftJoin(databases, eq(violations.targetDatabaseId, databases.id))
         .leftJoin(modules, eq(violations.targetModuleId, modules.id))
         .leftJoin(methods, eq(violations.targetMethodId, methods.id))
         .where(and(...queryConditions))
-        .orderBy(desc(violations.createdAt));
+        .orderBy(severityOrder, desc(violations.createdAt))
+        .$dynamic();
 
-      res.json(analysisViolations);
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// GET /api/repos/:id/code-violations - Get code-level violations
-router.get(
-  '/:id/code-violations',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      const filePath = req.query.file as string | undefined;
-      const analysisIdParam = req.query.analysisId as string | undefined;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
+      if (limitParam > 0) {
+        query = query.limit(limitParam).offset(offsetParam);
       }
 
-      let analysisId: string;
+      const [analysisViolations, totalResult] = await Promise.all([
+        query,
+        db.select({ count: count() }).from(violations).where(and(...queryConditions)),
+      ]);
 
-      if (analysisIdParam) {
-        const [specific] = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(and(eq(analyses.id, analysisIdParam), eq(analyses.repoId, id)))
-          .limit(1);
-        if (!specific) {
-          res.json([]);
-          return;
-        }
-        analysisId = specific.id;
+      const total = totalResult[0]?.count ?? 0;
+
+      // If pagination requested, return object with total; otherwise return array for backward compat
+      if (limitParam > 0 || offsetParam > 0) {
+        res.json({ violations: analysisViolations, total });
       } else {
-        const [latest] = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(and(eq(analyses.repoId, id), notDiffAnalysis))
-          .orderBy(desc(analyses.createdAt))
-          .limit(1);
-
-        if (!latest) {
-          res.json([]);
-          return;
-        }
-        analysisId = latest.id;
+        res.json(analysisViolations);
       }
-
-      const conditions = [eq(codeViolations.analysisId, analysisId)];
-      if (filePath) {
-        // Support both absolute and relative paths
-        const absPath = filePath.startsWith('/') ? filePath : `${repo.path}/${filePath}`;
-        conditions.push(eq(codeViolations.filePath, absPath));
-      }
-
-      const results = await db
-        .select()
-        .from(codeViolations)
-        .where(and(...conditions))
-        .orderBy(codeViolations.filePath, codeViolations.lineStart);
-
-      res.json(results);
     } catch (error) {
       next(error);
     }
   }
 );
 
-// GET /api/repos/:id/code-violations/summary - Summary counts by file and severity
+// GET /api/repos/:id/violations/summary - Summary counts by severity and file
 router.get(
-  '/:id/code-violations/summary',
+  '/:id/violations/summary',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
@@ -368,13 +342,16 @@ router.get(
 
       const rows = await db
         .select({
-          filePath: codeViolations.filePath,
-          severity: codeViolations.severity,
+          filePath: violations.filePath,
+          severity: violations.severity,
           count: count(),
         })
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, analysisId))
-        .groupBy(codeViolations.filePath, codeViolations.severity);
+        .from(violations)
+        .where(and(
+          eq(violations.analysisId, analysisId),
+          sql`${violations.status} IN ('new', 'unchanged')`,
+        ))
+        .groupBy(violations.filePath, violations.severity);
 
       const byFile: Record<string, number> = {};
       const bySeverity: Record<string, number> = {};
@@ -385,12 +362,14 @@ router.get(
       for (const row of rows) {
         const c = Number(row.count);
         total += c;
-        byFile[row.filePath] = (byFile[row.filePath] || 0) + c;
         bySeverity[row.severity] = (bySeverity[row.severity] || 0) + c;
 
-        const current = highestSeverityByFile[row.filePath];
-        if (!current || severityOrder.indexOf(row.severity) < severityOrder.indexOf(current)) {
-          highestSeverityByFile[row.filePath] = row.severity;
+        if (row.filePath) {
+          byFile[row.filePath] = (byFile[row.filePath] || 0) + c;
+          const current = highestSeverityByFile[row.filePath];
+          if (!current || severityOrder.indexOf(row.severity) < severityOrder.indexOf(current)) {
+            highestSeverityByFile[row.filePath] = row.severity;
+          }
         }
       }
 

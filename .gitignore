@@ -8,8 +8,11 @@ dist/
 coverage/
 out/
 tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
 
 # Pitch deck (keep images, ignore generated files)
 assets/generate-deck.js
 assets/*.pptx
 assets/*.pdf
+.claude/

@@ -15,7 +15,7 @@ import {
 } from '../../apps/server/src/services/flow.service';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-project');
+const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 const DATABASE_URL =
   process.env.DATABASE_URL ||
@@ -33,10 +33,16 @@ describe('flow.service (integration)', () => {
     initDatabase(DATABASE_URL);
 
     // Run analysis on the fixture project
-    analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true });
+    analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true, skipGit: true });
 
     // Create a repo record in DB (use unique path suffix to avoid conflicts with routes.test.ts)
+    // Clean up any leftover from a previous crashed run
     const uniquePath = `${FIXTURE_PATH}#flow-test`;
+    const existing = await db.select().from(schema.repos).where(eq(schema.repos.path, uniquePath));
+    if (existing.length > 0) {
+      await db.delete(schema.analyses).where(eq(schema.analyses.repoId, existing[0].id));
+      await db.delete(schema.repos).where(eq(schema.repos.id, existing[0].id));
+    }
     const [repo] = await db
       .insert(schema.repos)
       .values({ name: 'flow-test-repo', path: uniquePath })

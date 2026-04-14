@@ -208,4 +208,58 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
   }
 });
 
+// PUT /api/repos/:id/categories - Update per-repo disabled rule categories
+router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { enabledCategories } = req.body as { enabledCategories: string[] | null };
+
+    const [repo] = await db
+      .select()
+      .from(repos)
+      .where(eq(repos.id, id))
+      .limit(1);
+
+    if (!repo) {
+      throw createAppError('Repo not found', 404);
+    }
+
+    await db
+      .update(repos)
+      .set({ enabledCategories, updatedAt: new Date() })
+      .where(eq(repos.id, id));
+
+    res.json({ enabledCategories });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
+router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
+
+    const [repo] = await db
+      .select()
+      .from(repos)
+      .where(eq(repos.id, id))
+      .limit(1);
+
+    if (!repo) {
+      throw createAppError('Repo not found', 404);
+    }
+
+    await db
+      .update(repos)
+      .set({ enableLlmRules, updatedAt: new Date() })
+      .where(eq(repos.id, id));
+
+    res.json({ enableLlmRules });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

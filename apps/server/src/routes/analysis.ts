@@ -7,7 +7,6 @@ import {
   services,
   serviceDependencies,
   layers,
-  deterministicViolations,
   violations,
   databases,
   databaseConnections,
@@ -15,7 +14,6 @@ import {
   methods,
   moduleDeps,
   methodDeps,
-  codeViolations,
   analysisUsage,
 } from '../db/schema.js';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
@@ -31,10 +29,10 @@ import {
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
-  emitCodeReviewProgress,
-  emitCodeReviewReady,
   StepTracker,
+  buildAnalysisSteps,
 } from '../socket/handlers.js';
+import { getIO } from '../socket/index.js';
 import {
   registerAnalysis,
   unregisterAnalysis,
@@ -43,9 +41,8 @@ import {
 import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
 import {
   loadActiveViolations,
-  loadActiveCodeViolations,
 } from '../services/violation-lifecycle.service.js';
-import { runViolationPipeline, runCodeReview } from '../services/violation-pipeline.service.js';
+import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider } from '../services/llm/provider.js';
 import { trackEvent, detectLanguages, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
 
@@ -65,7 +62,7 @@ router.post(
       if (!parsed.success) {
         throw createAppError('Invalid request body', 400);
       }
-      const { codeReview: includeCodeReview, deterministicOnly } = parsed.data;
+      const { enabledCategories: globalEnabledCategories, enableLlmRules, skipGit } = parsed.data;
 
       const [repo] = await db
         .select()
@@ -78,9 +75,13 @@ router.post(
       }
 
       // Detect current branch and commit hash (never checkout — analyze what's on disk)
-      const git = await getGit(repo.path);
-      const branch = (await git.branch()).current || null;
-      const commitHash = (await git.revparse(['HEAD'])).trim();
+      let branch: string | null = null;
+      let commitHash: string | null = null;
+      if (!skipGit) {
+        const git = await getGit(repo.path);
+        branch = (await git.branch()).current || null;
+        commitHash = (await git.revparse(['HEAD'])).trim();
+      }
 
       // Create analysis row with 'running' status
       const [runningAnalysis] = await db
@@ -102,16 +103,15 @@ router.post(
 
       // Run analysis in the background
       try {
-        const trackerSteps = [
-          { key: 'parse', label: 'Parsing repository' },
-          { key: 'detect', label: 'Deterministic checks' },
-          ...(!deterministicOnly ? [
-            { key: 'enrich', label: 'Enriching detections' },
-            { key: 'architecture', label: 'Architecture analysis' },
-          ] : []),
-          { key: 'persist', label: 'Saving results' },
-          ...(!deterministicOnly && includeCodeReview ? [{ key: 'code-review', label: 'Code review' }] : []),
-        ];
+        // Resolve effective enabled categories
+        const effectiveCategories = globalEnabledCategories?.length
+          ? globalEnabledCategories
+          : (repo.enabledCategories ?? undefined);
+
+        // Resolve effective LLM toggle: per-repo override > request param
+        const effectiveLlmRules = repo.enableLlmRules ?? enableLlmRules;
+
+        const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
         const tracker = new StepTracker(id, trackerSteps);
 
         const analysisStartTime = Date.now();
@@ -172,7 +172,7 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash, metadata: { codeReview: includeCodeReview, deterministicOnly }, existingAnalysisId: runningAnalysis.id });
+          await persistAnalysisResult({ repoId: id, branch, result, commitHash: commitHash ?? undefined, metadata: {}, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
@@ -191,8 +191,6 @@ router.post(
         const previousAnalysisId = prevAnalysesForLifecycle.length > 1 ? prevAnalysesForLifecycle[1].id : null;
 
         let previousActiveViolations: Awaited<ReturnType<typeof loadActiveViolations>> = [];
-        let previousActiveCodeViolations: Awaited<ReturnType<typeof loadActiveCodeViolations>> = [];
-        let previousDeterministicViolations: { id: string; ruleKey: string; category: string; title: string; description: string; severity: string; serviceName: string; moduleName: string | null; methodName: string | null }[] = [];
 
         if (previousAnalysisId) {
           // Load violations from previous analysis directly
@@ -214,9 +212,14 @@ router.post(
               targetTable: violations.targetTable,
               fixPrompt: violations.fixPrompt,
               ruleKey: violations.ruleKey,
-              deterministicViolationId: violations.deterministicViolationId,
               firstSeenAnalysisId: violations.firstSeenAnalysisId,
               firstSeenAt: violations.firstSeenAt,
+              filePath: violations.filePath,
+              lineStart: violations.lineStart,
+              lineEnd: violations.lineEnd,
+              columnStart: violations.columnStart,
+              columnEnd: violations.columnEnd,
+              snippet: violations.snippet,
             })
             .from(violations)
             .leftJoin(services, eq(violations.targetServiceId, services.id))
@@ -228,45 +231,6 @@ router.post(
             (v) => v.status === 'new' || v.status === 'unchanged'
           );
 
-          const prevCodeViolationRows = await db
-            .select()
-            .from(codeViolations)
-            .where(eq(codeViolations.analysisId, previousAnalysisId));
-
-          previousActiveCodeViolations = prevCodeViolationRows
-            .filter((v) => v.status === 'new' || v.status === 'unchanged')
-            .map((r) => ({
-              id: r.id,
-              filePath: r.filePath,
-              lineStart: r.lineStart,
-              lineEnd: r.lineEnd,
-              columnStart: r.columnStart,
-              columnEnd: r.columnEnd,
-              ruleKey: r.ruleKey,
-              severity: r.severity,
-              title: r.title,
-              content: r.content,
-              snippet: r.snippet,
-              fixPrompt: r.fixPrompt,
-              firstSeenAnalysisId: r.firstSeenAnalysisId,
-              firstSeenAt: r.firstSeenAt,
-            }));
-
-          // Load previous deterministic violations
-          previousDeterministicViolations = await db
-            .select({
-              id: deterministicViolations.id,
-              ruleKey: deterministicViolations.ruleKey,
-              category: deterministicViolations.category,
-              title: deterministicViolations.title,
-              description: deterministicViolations.description,
-              severity: deterministicViolations.severity,
-              serviceName: deterministicViolations.serviceName,
-              moduleName: deterministicViolations.moduleName,
-              methodName: deterministicViolations.methodName,
-            })
-            .from(deterministicViolations)
-            .where(eq(deterministicViolations.analysisId, previousAnalysisId));
         }
 
         // Detect and persist flows
@@ -331,7 +295,8 @@ router.post(
             .limit(1);
           if (prevAnalysisRow?.commitHash) {
             try {
-              const diffOutput = await git.diff([prevAnalysisRow.commitHash, 'HEAD', '--name-only']);
+              const gitForDiff = await getGit(repo.path);
+              const diffOutput = await gitForDiff.diff([prevAnalysisRow.commitHash, 'HEAD', '--name-only']);
               const changedFiles = diffOutput.trim().split('\n').filter(Boolean);
               if (changedFiles.length > 0) {
                 changedFileSet = new Set(changedFiles);
@@ -346,15 +311,14 @@ router.post(
         // Run violation pipeline (deterministic + LLM + code rules + persistence)
         tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
 
-        const provider = deterministicOnly ? undefined : createLLMProvider();
+        const provider = enableLlmRules ? createLLMProvider() : undefined;
         if (provider) {
           provider.setAnalysisId(newAnalysisId);
           provider.setRepoId(id);
           provider.setAbortSignal(abortController.signal);
         }
-        let codeReviewPromise: Promise<void> | null = null;
         try {
-          const pipelineResult = await runViolationPipeline({
+          await runViolationPipeline({
             repoId: id,
             repoPath: repo.path,
             analysisId: newAnalysisId,
@@ -364,18 +328,60 @@ router.post(
             methodIdMap,
             dbIdMap,
             previousActiveViolations,
-            previousActiveCodeViolations,
-            previousDeterministicViolations,
             changedFileSet,
             tracker,
-            includeCodeReview: deterministicOnly ? false : includeCodeReview,
-            deterministicOnly,
+            enabledCategories: effectiveCategories,
+            enableLlmRules: effectiveLlmRules,
             provider,
             signal: abortController.signal,
+            onLlmEstimate: effectiveLlmRules ? (estimate) => {
+              return new Promise<boolean>((resolve) => {
+                const io = getIO();
+                const room = `repo:${id}`;
+
+                // Emit estimate to all clients in the room
+                io.to(room).emit('analysis:llm-estimate', {
+                  repoId: id,
+                  analysisId: newAnalysisId,
+                  estimate: {
+                    totalEstimatedTokens: estimate.totalEstimatedTokens,
+                    tiers: estimate.tiers,
+                    uniqueFileCount: estimate.uniqueFileCount,
+                    uniqueRuleCount: estimate.uniqueRuleCount,
+                  },
+                });
+
+                // Listen for response from any client in the room
+                const timeout = setTimeout(() => {
+                  // Auto-proceed after 60s if no response (e.g. no UI connected)
+                  cleanup();
+                  resolve(true);
+                }, 60_000);
+
+                function onProceed(data: { analysisId: string; proceed: boolean }) {
+                  if (data.analysisId !== newAnalysisId) return;
+                  cleanup();
+                  // Notify all clients to dismiss their confirmation UI
+                  io.to(room).emit('analysis:llm-resolved', { analysisId: newAnalysisId, proceed: data.proceed });
+                  resolve(data.proceed);
+                }
+
+                function cleanup() {
+                  clearTimeout(timeout);
+                  for (const [, socket] of io.sockets.sockets) {
+                    socket.removeListener('analysis:llm-proceed', onProceed);
+                  }
+                }
+
+                // Attach listener to all connected sockets
+                for (const [, socket] of io.sockets.sockets) {
+                  socket.on('analysis:llm-proceed', onProceed);
+                }
+              });
+            } : undefined,
           });
 
           emitViolationsReady(id, analysis.id);
-          codeReviewPromise = pipelineResult.codeReviewPromise;
         } catch (violationError) {
           // Don't log AbortError as a failure — it's expected on cancel
           if (violationError instanceof DOMException && violationError.name === 'AbortError') {
@@ -397,13 +403,6 @@ router.post(
           console.error('[Usage] Failed to record usage:', usageError instanceof Error ? usageError.message : String(usageError));
         }
 
-        // Mark code review as triggered before completing so it appears in the final checklist state
-        if (codeReviewPromise) {
-          tracker.start('code-review', 'Running in background...');
-        } else if (includeCodeReview) {
-          tracker.done('code-review', 'Skipped');
-        }
-
         emitAnalysisComplete(id, analysis.id);
 
         // Anonymous usage telemetry
@@ -415,29 +414,7 @@ router.post(
           durationRange: bucketDuration(Date.now() - analysisStartTime),
         });
 
-        // Fire-and-forget: background code review with deferred cleanup
-        if (codeReviewPromise) {
-          console.log(`[CodeReview] Started background code review for repo ${id}`);
-          emitCodeReviewProgress(id, analysis.id);
-          codeReviewPromise
-            .then(() => provider?.flushUsage())
-            .then(() => {
-              console.log(`[CodeReview] Completed for repo ${id}`);
-              emitCodeReviewReady(id, analysis.id);
-            })
-            .catch((err) => {
-              if (err instanceof DOMException && err.name === 'AbortError') {
-                console.log(`[CodeReview] Cancelled for repo ${id}`);
-              } else {
-                console.error(`[CodeReview] Failed for repo ${id}:`, err instanceof Error ? err.message : String(err));
-              }
-              // Always emit so UI doesn't hang
-              emitCodeReviewReady(id, analysis.id);
-            })
-            .finally(() => unregisterAnalysis(id));
-        } else {
-          unregisterAnalysis(id);
-        }
+        unregisterAnalysis(id);
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           console.log(`[Analysis] Cancelled for repo ${id}`);
@@ -483,88 +460,6 @@ router.post(
   }
 );
 
-// POST /api/repos/:id/analyses/:analysisId/code-review - Run code review on existing analysis
-router.post(
-  '/:id/analyses/:analysisId/code-review',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repoId = req.params.id as string;
-      const analysisId = req.params.analysisId as string;
-
-      const [repo] = await db.select().from(repos).where(eq(repos.id, repoId)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
-      const [analysis] = await db.select().from(analyses).where(eq(analyses.id, analysisId)).limit(1);
-      if (!analysis) throw createAppError('Analysis not found', 404);
-
-      // Get file paths from the analysis modules
-      const analysisModules = await db.select({ filePath: modules.filePath }).from(modules).where(eq(modules.analysisId, analysisId));
-      const filePaths = [...new Set(analysisModules.map((m) => m.filePath))];
-
-      if (filePaths.length === 0) throw createAppError('No files found in analysis', 400);
-
-      // Load previous active LLM code violations for lifecycle tracking
-      const prevCodeViolationRows = await db
-        .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, analysisId));
-
-      const previousCodeViolations = prevCodeViolationRows
-        .filter((v) => (v.status === 'new' || v.status === 'unchanged') && v.ruleKey.startsWith('llm/'))
-        .map((r) => ({
-          id: r.id,
-          filePath: r.filePath,
-          lineStart: r.lineStart,
-          lineEnd: r.lineEnd,
-          columnStart: r.columnStart,
-          columnEnd: r.columnEnd,
-          ruleKey: r.ruleKey,
-          severity: r.severity,
-          title: r.title,
-          content: r.content,
-          snippet: r.snippet,
-          fixPrompt: r.fixPrompt,
-          firstSeenAnalysisId: r.firstSeenAnalysisId,
-          firstSeenAt: r.firstSeenAt,
-        }));
-
-      // Mark analysis as having code review
-      await db.update(analyses).set({
-        metadata: sql`coalesce(${analyses.metadata}, '{}'::jsonb) || '{"codeReview": true}'::jsonb`,
-      }).where(eq(analyses.id, analysisId));
-
-      res.status(202).json({ message: 'Code review started', analysisId });
-
-      // Run in background
-      const provider = createLLMProvider();
-      provider.setAnalysisId(analysisId);
-      provider.setRepoId(repoId);
-
-      emitCodeReviewProgress(repoId, analysisId);
-
-      runCodeReview({
-        repoId,
-        repoPath: repo.path,
-        analysisId,
-        filePaths,
-        previousCodeViolations,
-        provider,
-      })
-        .then(() => provider.flushUsage())
-        .then(() => {
-          console.log(`[CodeReview] Completed for repo ${repoId}`);
-          emitCodeReviewReady(repoId, analysisId);
-        })
-        .catch((err) => {
-          console.error(`[CodeReview] Failed for repo ${repoId}:`, err instanceof Error ? err.message : String(err));
-          emitCodeReviewReady(repoId, analysisId);
-        });
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
 // GET /api/repos/:id/analyses - List past analyses (enhanced with counts)
 router.get(
   '/:id/analyses',
@@ -600,16 +495,12 @@ router.get(
       // Enrich with counts per analysis
       const enriched = await Promise.all(
         analysisList.map(async (a) => {
-          const [serviceCount, violationCounts, codeViolationCounts, usageSummary] = await Promise.all([
+          const [serviceCount, violationCounts, usageSummary] = await Promise.all([
             db.select({ count: sql<number>`count(*)::int` }).from(services).where(eq(services.analysisId, a.id)).then(([r]) => r.count),
             db.select({
               severity: violations.severity,
               count: sql<number>`count(*)::int`,
             }).from(violations).where(eq(violations.analysisId, a.id)).groupBy(violations.severity),
-            db.select({
-              severity: codeViolations.severity,
-              count: sql<number>`count(*)::int`,
-            }).from(codeViolations).where(eq(codeViolations.analysisId, a.id)).groupBy(codeViolations.severity),
             db.select({
               totalDurationMs: sql<number>`coalesce(sum(${analysisUsage.durationMs}), 0)::int`,
               totalTokens: sql<number>`coalesce(sum(${analysisUsage.totalTokens}), 0)::int`,
@@ -624,19 +515,12 @@ router.get(
             violationsBySeverity[severity] = count;
           }
 
-          const codeViolationsBySeverity: Record<string, number> = {};
-          for (const { severity, count } of codeViolationCounts) {
-            codeViolationsBySeverity[severity] = count;
-          }
-
           const meta = a.metadata as Record<string, unknown> | null;
           return {
             ...a,
             metadata: undefined, // don't send raw metadata to client
-            codeReview: meta?.codeReview === true,
             serviceCount,
             violationsBySeverity,
-            codeViolationsBySeverity,
             durationMs: usageSummary.totalDurationMs,
             totalTokens: usageSummary.totalTokens,
             totalCost: usageSummary.totalCost,
@@ -726,7 +610,6 @@ router.get(
       }
 
       const level = (req.query.level as string) || 'services';
-      const graphLevel = level.replace(/s$/, '') as GraphLevel;
 
       // Fetch all data in parallel
       const [
@@ -739,7 +622,7 @@ router.get(
         analysisModuleDeps,
         analysisMethods,
         analysisMethodDeps,
-        analysisDetViolations,
+        analysisViolationRows,
       ] = await Promise.all([
         db.select().from(services).where(eq(services.analysisId, analysis.id)),
         db.select().from(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id)),
@@ -750,8 +633,37 @@ router.get(
         db.select().from(moduleDeps).where(eq(moduleDeps.analysisId, analysis.id)),
         db.select().from(methods).where(eq(methods.analysisId, analysis.id)),
         db.select().from(methodDeps).where(eq(methodDeps.analysisId, analysis.id)),
-        db.select().from(deterministicViolations).where(eq(deterministicViolations.analysisId, analysis.id)),
+        db.select({
+          id: violations.id,
+          ruleKey: violations.ruleKey,
+          type: violations.type,
+          title: violations.title,
+          severity: violations.severity,
+          targetServiceId: violations.targetServiceId,
+          targetModuleId: violations.targetModuleId,
+          relatedServiceId: violations.relatedServiceId,
+          relatedModuleId: violations.relatedModuleId,
+        }).from(violations).where(eq(violations.analysisId, analysis.id)),
       ]);
+
+      const serviceIdToName = new Map(analysisServices.map((s) => [s.id, s.name]));
+      const moduleIdToName = new Map(analysisModules.map((m) => [m.id, m.name]));
+
+      const dependencyViolations = analysisViolationRows
+        .filter((v) => !!(v.relatedServiceId || v.relatedModuleId))
+        .map((v) => ({
+          id: v.id,
+          ruleKey: v.ruleKey,
+          category: v.type === 'service' ? 'service' : (v.type === 'function' ? 'method' : 'module'),
+          title: v.title,
+          severity: v.severity,
+          serviceName: v.targetServiceId ? (serviceIdToName.get(v.targetServiceId) ?? '') : '',
+          moduleName: v.targetModuleId ? (moduleIdToName.get(v.targetModuleId) ?? null) : null,
+          targetModuleId: v.targetModuleId || null,
+          relatedServiceId: v.relatedServiceId || null,
+          relatedModuleId: v.relatedModuleId || null,
+          isDependencyViolation: !!(v.relatedServiceId || v.relatedModuleId),
+        }));
 
       const layerData = analysisLayers.map((l) => ({
         id: l.id,
@@ -764,7 +676,7 @@ router.get(
         evidence: l.evidence as string[],
       }));
 
-      const graphData = buildUnifiedGraph(graphLevel, {
+      const unifiedInput = {
         services: analysisServices,
         serviceDeps: analysisDeps,
         layers: layerData,
@@ -774,8 +686,11 @@ router.get(
         methodDeps: analysisMethodDeps,
         databases: analysisDatabases,
         dbConnections: analysisDbConnections,
-        deterministicViolations: analysisDetViolations,
-      });
+        dependencyViolations: dependencyViolations,
+      };
+
+      const graphLevel = level.replace(/s$/, '') as GraphLevel;
+      const graphData = buildUnifiedGraph(graphLevel, unifiedInput);
 
       // Include saved node positions if any (namespaced by level)
       const allPositions = analysis.nodePositions as Record<string, unknown> | null;
@@ -1099,7 +1014,7 @@ router.post(
         return;
       }
 
-      // Load previous active violations for lifecycle tracking
+      // Load previous active violations for lifecycle tracking (unified — includes code violations)
       const prevViolationRows = await db
         .select({
           id: violations.id,
@@ -1118,9 +1033,14 @@ router.post(
           targetTable: violations.targetTable,
           fixPrompt: violations.fixPrompt,
           ruleKey: violations.ruleKey,
-          deterministicViolationId: violations.deterministicViolationId,
           firstSeenAnalysisId: violations.firstSeenAnalysisId,
           firstSeenAt: violations.firstSeenAt,
+          filePath: violations.filePath,
+          lineStart: violations.lineStart,
+          lineEnd: violations.lineEnd,
+          columnStart: violations.columnStart,
+          columnEnd: violations.columnEnd,
+          snippet: violations.snippet,
         })
         .from(violations)
         .leftJoin(services, eq(violations.targetServiceId, services.id))
@@ -1131,31 +1051,6 @@ router.post(
       const previousActiveViolations = prevViolationRows.filter(
         (v) => v.status === 'new' || v.status === 'unchanged'
       );
-
-      // Load previous active code violations
-      const prevCodeViolationRows = await db
-        .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, latestAnalysis.id));
-
-      const previousActiveCodeViolations = prevCodeViolationRows
-        .filter((v) => v.status === 'new' || v.status === 'unchanged')
-        .map((r) => ({
-          id: r.id,
-          filePath: r.filePath,
-          lineStart: r.lineStart,
-          lineEnd: r.lineEnd,
-          columnStart: r.columnStart,
-          columnEnd: r.columnEnd,
-          ruleKey: r.ruleKey,
-          severity: r.severity,
-          title: r.title,
-          content: r.content,
-          snippet: r.snippet,
-          fixPrompt: r.fixPrompt,
-          firstSeenAnalysisId: r.firstSeenAnalysisId,
-          firstSeenAt: r.firstSeenAt,
-        }));
 
       const git = await getGit(repo.path);
       const branch = (await git.branch()).current || undefined;
@@ -1203,22 +1098,6 @@ router.post(
           metadata: { isDiffAnalysis: true },
         });
 
-      // Load previous deterministic violations for lifecycle
-      const prevDetViolations = await db
-        .select({
-          id: deterministicViolations.id,
-          ruleKey: deterministicViolations.ruleKey,
-          category: deterministicViolations.category,
-          title: deterministicViolations.title,
-          description: deterministicViolations.description,
-          severity: deterministicViolations.severity,
-          serviceName: deterministicViolations.serviceName,
-          moduleName: deterministicViolations.moduleName,
-          methodName: deterministicViolations.methodName,
-        })
-        .from(deterministicViolations)
-        .where(eq(deterministicViolations.analysisId, latestAnalysis.id));
-
       const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
 
       // Run violation pipeline
@@ -1235,8 +1114,6 @@ router.post(
         methodIdMap,
         dbIdMap,
         previousActiveViolations,
-        previousActiveCodeViolations,
-        previousDeterministicViolations: prevDetViolations,
         changedFileSet,
         tracker: diffTracker,
         provider: diffProvider,
@@ -1295,11 +1172,11 @@ router.post(
           createdAt: v.firstSeenAt?.toISOString() ?? new Date().toISOString(),
         }));
 
-      // Load code violations from DB (pipeline persisted them with lifecycle status)
+      // Load code violations from DB (pipeline persisted them to the unified violations table)
       const diffCodeViolationRows = await db
         .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, diffAnalysisId));
+        .from(violations)
+        .where(and(eq(violations.analysisId, diffAnalysisId), sql`${violations.filePath} IS NOT NULL`));
 
       const newCodeViolationItems = diffCodeViolationRows
         .filter((cv) => cv.status === 'new')
@@ -1368,10 +1245,6 @@ router.post(
       // Clear progress bar
       emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
 
-      // Check if code review was run on this diff analysis
-      const diffMeta = await db.select({ metadata: analyses.metadata }).from(analyses).where(eq(analyses.id, diffAnalysisId)).limit(1);
-      const diffCodeReview = (diffMeta[0]?.metadata as Record<string, unknown> | null)?.codeReview === true;
-
       // Anonymous usage telemetry
       trackEvent('diff-check', {
         changedFileCount: changedFiles.length,
@@ -1388,7 +1261,6 @@ router.post(
         summary,
         isStale: false,
         diffAnalysisId,
-        codeReview: diffCodeReview,
       });
     } catch (error) {
       const repoId = req.params.id as string;
@@ -1506,11 +1378,11 @@ router.get(
           createdAt: v.createdAt.toISOString(),
         }));
 
-      // Load new code violations for this diff analysis
+      // Load new code violations for this diff analysis (from unified violations table)
       const diffCodeViolationRows = await db
         .select()
-        .from(codeViolations)
-        .where(eq(codeViolations.analysisId, diffAnalysis.id));
+        .from(violations)
+        .where(and(eq(violations.analysisId, diffAnalysis.id), sql`${violations.filePath} IS NOT NULL`));
 
       const newCodeViolations = diffCodeViolationRows
         .filter((v) => v.status === 'new')
@@ -1564,7 +1436,6 @@ router.get(
         changedFiles: metadata?.changedFiles || [],
         isStale,
         diffAnalysisId: diffAnalysis.id,
-        codeReview: metadata?.codeReview === true,
       });
     } catch (error) {
       next(error);

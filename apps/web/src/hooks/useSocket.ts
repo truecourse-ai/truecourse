@@ -18,11 +18,20 @@ export type AnalysisProgress = {
   steps?: AnalysisStep[];
 };
 
+export type LlmEstimate = {
+  analysisId: string;
+  estimate: {
+    totalEstimatedTokens: number;
+    tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }>;
+  };
+};
+
 type EventHandler = (data: unknown) => void;
 
 export function useSocket(repoId?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
+  const [llmEstimate, setLlmEstimate] = useState<LlmEstimate | null>(null);
   const handlersRef = useRef<Map<string, EventHandler[]>>(new Map());
 
   useEffect(() => {
@@ -69,15 +78,15 @@ export function useSocket(repoId?: string) {
     });
     socket.on('analysis:canceled', (data: unknown) => {
       setAnalysisProgress(null);
+      setLlmEstimate(null);
       handlersRef.current.get('analysis:canceled')?.forEach((h) => h(data));
     });
-    socket.on('code-review:progress', (data: unknown) => {
-      handlersRef.current.get('code-review:progress')?.forEach((h) => h(data));
+    socket.on('analysis:llm-estimate', (data: LlmEstimate) => {
+      setLlmEstimate(data);
     });
-    socket.on('code-review:ready', (data: unknown) => {
-      handlersRef.current.get('code-review:ready')?.forEach((h) => h(data));
+    socket.on('analysis:llm-resolved', () => {
+      setLlmEstimate(null);
     });
-
     if (socket.connected && repoId) {
       joinRepoRoom(repoId);
     }
@@ -110,5 +119,11 @@ export function useSocket(repoId?: string) {
 
   const clearProgress = useCallback(() => setAnalysisProgress(null), []);
 
-  return { isConnected, analysisProgress, clearProgress, onEvent };
+  const respondToLlmEstimate = useCallback((analysisId: string, proceed: boolean) => {
+    const socket = connectSocket();
+    socket.emit('analysis:llm-proceed', { analysisId, proceed });
+    setLlmEstimate(null);
+  }, []);
+
+  return { isConnected, analysisProgress, clearProgress, onEvent, llmEstimate, respondToLlmEstimate };
 }

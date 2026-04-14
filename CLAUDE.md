@@ -40,6 +40,10 @@ When investigating LLM-related issues (wrong outputs, missing data, hallucinatio
 
 Auth: Basic auth with `LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY` from `.env`.
 
+## Testing
+
+- When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
+
 ## Conventions
 
 - All tests live in the `tests/` directory at the repo root, not colocated with source files
