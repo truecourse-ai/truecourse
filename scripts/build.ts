@@ -110,7 +110,11 @@ const skillsSrc = path.join(ROOT, 'tools/cli/skills');
 const skillsDest = path.join(DIST, 'skills');
 copyDir(skillsSrc, skillsDest);
 
-// 7. Copy README and README assets used by npm package page rendering
+// 7. Copy postinstall script (rebuilds tree-sitter with C++20 on Node 24+)
+console.log('Copying postinstall script...');
+fs.copyFileSync(path.join(ROOT, 'scripts/postinstall.js'), path.join(DIST, 'postinstall.js'));
+
+// 7b. Copy README and README assets used by npm package page rendering
 console.log('Copying README and assets...');
 fs.copyFileSync(path.join(ROOT, 'README.md'), path.join(DIST, 'README.md'));
 copyDir(path.join(ROOT, 'assets'), path.join(DIST, 'assets'));
@@ -123,11 +127,14 @@ const serverPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/server/packag
 const cliPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'));
 const publishPkg = {
   name: 'truecourse',
-  version: rootPkg.version || '0.1.0',
+  version: cliPkg.version || '0.1.0',
   description: 'Visualize your codebase architecture as an interactive graph',
   type: 'module',
   bin: {
     truecourse: './cli.mjs',
+  },
+  scripts: {
+    postinstall: 'node postinstall.js',
   },
   engines: {
     node: '>=20',
