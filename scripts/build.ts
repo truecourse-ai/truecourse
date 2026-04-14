@@ -147,13 +147,7 @@ const publishPkg = {
     node: '>=20',
   },
   dependencies: {
-    // Native modules — versions from packages/analyzer/package.json
-    'tree-sitter': analyzerPkg.dependencies['tree-sitter'],
-    'tree-sitter-typescript': analyzerPkg.dependencies['tree-sitter-typescript'],
-    'tree-sitter-javascript': analyzerPkg.dependencies['tree-sitter-javascript'],
-    'tree-sitter-python': analyzerPkg.dependencies['tree-sitter-python'],
     'pyright': analyzerPkg.dependencies['pyright'],
-    // Runtime deps — versions from source package.json files
     'embedded-postgres': serverPkg.dependencies['embedded-postgres'],
     'dotenv': serverPkg.dependencies['dotenv'],
     'postgres': serverPkg.dependencies['postgres'],
@@ -161,6 +155,12 @@ const publishPkg = {
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
   },
   optionalDependencies: {
+    // tree-sitter is optional so npm continues if native compilation fails
+    // (Node 24 C++20 issue). The postinstall script rebuilds with the fix.
+    'tree-sitter': analyzerPkg.dependencies['tree-sitter'],
+    'tree-sitter-typescript': analyzerPkg.dependencies['tree-sitter-typescript'],
+    'tree-sitter-javascript': analyzerPkg.dependencies['tree-sitter-javascript'],
+    'tree-sitter-python': analyzerPkg.dependencies['tree-sitter-python'],
     'node-windows': '^1.0.0-beta.8',
   },
   license: 'MIT',
