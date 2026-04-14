@@ -30,12 +30,14 @@ try {
     });
     console.log('[TrueCourse] tree-sitter rebuilt successfully.');
   } catch {
-    console.error(
-      '\n[TrueCourse] Failed to rebuild tree-sitter.\n\n' +
+    console.warn(
+      '\n[TrueCourse] Could not rebuild tree-sitter automatically.\n' +
       'Fix: set the C++20 flag manually and reinstall:\n' +
       '  export CXXFLAGS="-std=c++20"\n' +
       '  npx truecourse\n\n' +
       'See: https://github.com/truecourse-ai/truecourse/issues/22\n'
     );
+    // Exit 0 — don't fail the install
+    process.exit(0);
   }
 }
