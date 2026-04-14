@@ -7,12 +7,39 @@
  * only specifies C++17. This script detects the failure and retries the
  * build with the correct flag.
  *
+ * Logs are written to ~/.truecourse/install.log for debugging.
+ *
  * See: https://github.com/truecourse-ai/truecourse/issues/22
  */
 
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const logDir = path.join(os.homedir(), '.truecourse');
+const logFile = path.join(logDir, 'install.log');
+
+function log(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  try {
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(logFile, line + '\n');
+  } catch {
+    // best effort
+  }
+  console.log(`[TrueCourse] ${msg}`);
+}
+
+log('--- postinstall started ---');
+log(`Node ${process.version}, platform=${process.platform}, arch=${process.arch}`);
+log(`CXXFLAGS=${process.env.CXXFLAGS || '(not set)'}`);
+
 try {
   require('tree-sitter');
-} catch {
+  log('tree-sitter: loaded OK');
+} catch (err) {
+  log(`tree-sitter: failed to load — ${err.message}`);
+
   const { execSync } = require('child_process');
   const packages = [
     'tree-sitter',
@@ -21,15 +48,16 @@ try {
     'tree-sitter-python',
   ].join(' ');
 
-  console.log('[TrueCourse] tree-sitter native module not found, rebuilding with C++20...');
+  log('Rebuilding with CXXFLAGS="-std=c++20"...');
 
   try {
     execSync(`CXXFLAGS="-std=c++20" npm rebuild ${packages}`, {
       stdio: 'inherit',
       env: { ...process.env, CXXFLAGS: '-std=c++20' },
     });
-    console.log('[TrueCourse] tree-sitter rebuilt successfully.');
+    log('tree-sitter: rebuilt OK');
   } catch {
+    log('tree-sitter: rebuild failed');
     console.warn(
       '\n[TrueCourse] Could not rebuild tree-sitter automatically.\n' +
       'Fix: set the C++20 flag manually and reinstall:\n' +
@@ -37,7 +65,8 @@ try {
       '  npx truecourse\n\n' +
       'See: https://github.com/truecourse-ai/truecourse/issues/22\n'
     );
-    // Exit 0 — don't fail the install
     process.exit(0);
   }
 }
+
+log('--- postinstall done ---');

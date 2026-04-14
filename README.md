@@ -85,12 +85,15 @@ truecourse add                        # Register repo without analyzing
 Configure which rule categories and LLM-powered rules are enabled per repository:
 
 ```bash
-truecourse rules categories           # Show enabled/disabled rule categories
-truecourse rules categories --disable style    # Disable a category
+# Categories
+truecourse rules categories                    # Show enabled/disabled
 truecourse rules categories --enable style     # Enable a category
-truecourse rules llm                  # Show LLM rules status
-truecourse rules llm --disable        # Disable LLM rules for this repo
-truecourse rules llm --enable         # Enable LLM rules for this repo
+truecourse rules categories --disable style    # Disable a category
+
+# LLM-powered rules
+truecourse rules llm                           # Show LLM rules status
+truecourse rules llm --enable                  # Enable LLM rules
+truecourse rules llm --disable                 # Disable LLM rules
 ```
 
 ### Git Hooks
