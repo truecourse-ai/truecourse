@@ -842,6 +842,45 @@ describe('code-quality/deterministic/redundant-jump', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump');
     expect(matches).toHaveLength(0);
   });
+
+  it('Python: does NOT flag continue that skips meaningful code after it', () => {
+    const violations = check(`
+for item in items:
+    if not item.get("active"):
+        continue
+    results.append(item["name"])
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump')).toHaveLength(0);
+  });
+
+  it('Python: does NOT flag continue inside an if with code after the if block', () => {
+    const violations = check(`
+for record in records:
+    if record.get("skip"):
+        logger.info("skipping")
+        continue
+    handle_record(record)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump')).toHaveLength(0);
+  });
+
+  it('Python: flags continue at the very end of a loop body (true positive)', () => {
+    const violations = check(`
+for item in items:
+    handle(item)
+    continue
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump')).toHaveLength(1);
+  });
+
+  it('Python: flags bare return at the end of a function (true positive)', () => {
+    const violations = check(`
+def cleanup():
+    logger.info("done")
+    return
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redundant-jump')).toHaveLength(1);
+  });
 });
 
 describe('code-quality/deterministic/no-script-url', () => {
@@ -1060,6 +1099,40 @@ describe('code-quality/deterministic/require-await', () => {
     `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await');
     expect(matches).toHaveLength(0);
+  });
+
+  it('Python: does NOT flag FastAPI route handler without await', () => {
+    const violations = check(`
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await')).toHaveLength(0);
+  });
+
+  it('Python: does NOT flag FastAPI POST handler without await', () => {
+    const violations = check(`
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.post("/items")
+async def create_item(name: str):
+    return {"name": name}
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await')).toHaveLength(0);
+  });
+
+  it('Python: flags plain async function without await (true positive)', () => {
+    const violations = check(`
+async def compute_total(items):
+    return sum(i.value for i in items)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/require-await')).toHaveLength(1);
   });
 });
 
@@ -7895,5 +7968,361 @@ def f(name):
 `, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/magic-value-comparison');
     expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// subclass-builtin-collection — Enum mixin FP fix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/subclass-builtin-collection — Enum mixin FP fix', () => {
+  it('does NOT flag class(str, enum.Enum) — standard string enum pattern', () => {
+    const violations = check(`
+import enum
+
+class Color(str, enum.Enum):
+    RED = "red"
+    GREEN = "green"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/subclass-builtin-collection');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag class(int, Enum) — integer enum pattern', () => {
+    const violations = check(`
+from enum import Enum
+
+class Status(int, Enum):
+    ACTIVE = 1
+    DISABLED = 2
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/subclass-builtin-collection');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags class(dict) without Enum — real TP', () => {
+    const violations = check(`
+class MyDict(dict):
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/subclass-builtin-collection');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toContain('dict');
+  });
+
+  it('still flags class(list) without Enum — real TP', () => {
+    const violations = check(`
+class MyList(list):
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/subclass-builtin-collection');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toContain('list');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// boolean-trap — getattr/Field FP fix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/boolean-trap — getattr/Field FP fix', () => {
+  it('does NOT flag getattr(args, "flag", False)', () => {
+    const violations = check(`
+verbose = getattr(args, "verbose", False)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-trap');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag hasattr(obj, "name")', () => {
+    const violations = check(`
+result = hasattr(obj, "name")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-trap');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag setattr(obj, "active", True)', () => {
+    const violations = check(`
+setattr(obj, "active", True)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-trap');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag Field(False, description="...")', () => {
+    const violations = check(`
+enabled = Field(False, description="feature toggle")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-trap');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags custom_func(True) — real TP', () => {
+    const violations = check(`
+launch(True, config)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/boolean-trap');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toBe('Boolean positional argument');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redeclared-assigned-name — transform/init-before-try FP fix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/redeclared-assigned-name — transform/init-before-try FP fix', () => {
+  it('does NOT flag x = x.strip() — sequential transform', () => {
+    const violations = check(`
+value = raw_input
+value = value.strip()
+value = value.lower()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redeclared-assigned-name');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag init-before-try pattern', () => {
+    const violations = check(`
+result = None
+try:
+    result = compute()
+except Exception:
+    result = 0
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redeclared-assigned-name');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags x = 1; x = 2 — real TP (no use between assignments)', () => {
+    const violations = check(`
+x = compute_a()
+x = compute_b()
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/redeclared-assigned-name');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toBe('Variable redeclared without use');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// type-check-without-type-error — ValueError/HTTPException FP fix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/type-check-without-type-error — ValueError/HTTPException FP fix', () => {
+  it('does NOT flag isinstance check raising ValueError', () => {
+    const violations = check(`
+def validate(data):
+    if not isinstance(data, dict):
+        raise ValueError("Expected a dict")
+    return data
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-check-without-type-error');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag isinstance check raising HTTPException', () => {
+    const violations = check(`
+def validate_body(body):
+    if not isinstance(body, str):
+        raise HTTPException(status_code=400, detail="Body must be a string")
+    return body
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-check-without-type-error');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags isinstance check raising RuntimeError — real TP', () => {
+    const violations = check(`
+def check_input(value):
+    if not isinstance(value, int):
+        raise RuntimeError("Expected int")
+    return value
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/type-check-without-type-error');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toBe('Type check without TypeError');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// typing-only-import — function signature FP fix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/typing-only-import — function signature FP fix', () => {
+  it('does NOT flag Optional used in function return type', () => {
+    const violations = check(`
+from typing import Optional
+
+def find_user(user_id: int) -> Optional[str]:
+    if user_id == 0:
+        return None
+    return "user"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/typing-only-import');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag List used in function parameter type', () => {
+    const violations = check(`
+from typing import List
+
+def process(items: List[int]) -> int:
+    return sum(items)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/typing-only-import');
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// future-annotations-import — PEP 604/585 FP fix
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/future-annotations-import — PEP 604/585 FP fix', () => {
+  it('does NOT flag file using PEP 585 lowercase generics', () => {
+    const violations = check(`
+def process(items: list[int]) -> dict[str, int]:
+    return {str(i): i for i in items}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/future-annotations-import');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag file using PEP 604 union syntax alongside PEP 585', () => {
+    const violations = check(`
+def process(value: int | str) -> list[str]:
+    return [str(value)]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/future-annotations-import');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags PEP 604 union syntax in pre-3.10 file (no lowercase generics) — real TP', () => {
+    const violations = check(`
+from typing import List
+
+def process(value: List[int]) -> int | None:
+    if not value:
+        return None
+    return value[0]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/future-annotations-import');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toBe('Future annotations import needed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// self-first-argument (Python FP fix)
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/self-first-argument', () => {
+  it('does NOT flag @staticmethod methods that omit self', () => {
+    const violations = check(`
+class Helper:
+    @staticmethod
+    def compute(data):
+        return len(data)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/self-first-argument')).toHaveLength(0);
+  });
+
+  it('does NOT flag @classmethod methods using cls', () => {
+    const violations = check(`
+class Helper:
+    @classmethod
+    def from_config(cls, config):
+        return cls()
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/self-first-argument')).toHaveLength(0);
+  });
+
+  it('flags instance method with wrong first argument name (true positive)', () => {
+    const violations = check(`
+class BadService:
+    def do_work(this):
+        pass
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/self-first-argument')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// aws-custom-polling (Python FP fix)
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/aws-custom-polling', () => {
+  it('does NOT flag polling loops in files without AWS SDK import', () => {
+    const violations = check(`
+import time
+
+def poll_device(device_id):
+    while True:
+        response = get_device_status(device_id)
+        status = response.get("status")
+        if status == "ready":
+            return response
+        time.sleep(5)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/aws-custom-polling')).toHaveLength(0);
+  });
+
+  it('flags polling loop in file that imports boto3 (true positive)', () => {
+    const violations = check(`
+import time
+import boto3
+
+def wait_for_instance(ec2_client, instance_id):
+    while True:
+        response = ec2_client.describe_instances(InstanceIds=[instance_id])
+        state = response["Reservations"][0]["Instances"][0]["State"]["Name"]
+        status = state
+        if status == "running":
+            break
+        time.sleep(10)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/aws-custom-polling')).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// async-unused-async (Python FP fix)
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/async-unused-async', () => {
+  it('does NOT flag FastAPI PUT route handler without await', () => {
+    const violations = check(`
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.put("/items/{item_id}")
+async def update_item(item_id: int, data: dict):
+    return {"item_id": item_id}
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-unused-async')).toHaveLength(0);
+  });
+
+  it('does NOT flag FastAPI DELETE route handler without await', () => {
+    const violations = check(`
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.delete("/items/{item_id}")
+async def delete_item(item_id: int):
+    return {"deleted": item_id}
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-unused-async')).toHaveLength(0);
+  });
+
+  it('flags plain async function without await (true positive)', () => {
+    const violations = check(`
+async def format_name(first, last):
+    return f"{first} {last}"
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-unused-async')).toHaveLength(1);
   });
 });

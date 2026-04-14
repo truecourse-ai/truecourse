@@ -127,6 +127,37 @@ describe('database/deterministic/missing-migration', () => {
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-migration')
     expect(matches.length).toBeGreaterThanOrEqual(1)
   })
+
+  it('FP skip: ALTER TABLE inside Alembic migration file', () => {
+    const code = `
+def upgrade():
+    op.execute("ALTER TABLE users ADD COLUMN age INTEGER")
+`
+    const tree = parseCode(code, 'python')
+    const violations = checkCodeRules(tree, '/app/alembic/versions/001_add_age.py', code, enabledRules, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-migration')
+    expect(matches).toHaveLength(0)
+  })
+
+  it('FP skip: ALTER TABLE inside generic migration path', () => {
+    const code = `
+def upgrade():
+    op.execute("ALTER TABLE users ADD COLUMN age INTEGER")
+`
+    const tree = parseCode(code, 'python')
+    const violations = checkCodeRules(tree, '/app/db/migrations/001_add_age.py', code, enabledRules, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-migration')
+    expect(matches).toHaveLength(0)
+  })
+
+  it('TP: ALTER TABLE in application code (Python)', () => {
+    const violations = check(`
+def apply_schema_change(cursor):
+    cursor.execute("ALTER TABLE users ADD COLUMN age INTEGER")
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-migration')
+    expect(matches.length).toBeGreaterThanOrEqual(1)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -247,6 +278,30 @@ posts = user.post_set.all()
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/orm-lazy-load-in-loop')
     expect(matches).toHaveLength(0)
   })
+
+  it('FP skip: JSONB column attribute access in loop is not lazy loading', () => {
+    const violations = check(`
+def process_items(items):
+    for item in items:
+        val = item.metrics.get("cpu_usage")
+        data = item.payload.get("size", 0)
+        cfg = item.config.get("timeout")
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/orm-lazy-load-in-loop')
+    expect(matches).toHaveLength(0)
+  })
+
+  it('TP: real relationship lazy loading in loop', () => {
+    const violations = check(`
+from sqlalchemy.orm import Session
+def get_order_items(orders):
+    for order in orders:
+        for item in order.items.all():
+            results.append(item.name)
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/orm-lazy-load-in-loop')
+    expect(matches.length).toBeGreaterThanOrEqual(1)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -307,6 +362,33 @@ def transfer():
 `, 'python')
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-transaction')
     expect(matches).toHaveLength(0)
+  })
+
+  it('FP skip: set.add() and dict[key]=value are not DB writes', () => {
+    const violations = check(`
+def process_batch(items):
+    seen = set()
+    result = {}
+    for item in items:
+        seen.add(item.id)
+        result[item.id] = item.name
+        seen.add(item.parent_id)
+        result[item.parent_id] = item.parent_name
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-transaction')
+    expect(matches).toHaveLength(0)
+  })
+
+  it('TP: multiple session.add() calls without transaction', () => {
+    const violations = check(`
+def transfer(session, from_id, to_id, amount):
+    debit = Payment(account_id=from_id, amount=-amount)
+    session.add(debit)
+    credit = Payment(account_id=to_id, amount=amount)
+    session.add(credit)
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-transaction')
+    expect(matches.length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -428,5 +510,42 @@ def get_user(email):
 `, 'python')
     const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-unique-constraint')
     expect(matches).toHaveLength(0)
+  })
+
+  it('FP skip: .first() lookup by primary key (id) is not a uniqueness check', () => {
+    const violations = check(`
+from sqlalchemy.orm import Session
+
+def get_load(session, load_id):
+    if session.query(Load).filter(Load.id == load_id).first():
+        session.merge(existing)
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-unique-constraint')
+    expect(matches).toHaveLength(0)
+  })
+
+  it('FP skip: .first() lookup by uuid', () => {
+    const violations = check(`
+from sqlalchemy.orm import Session
+
+def get_entity(session, entity_uuid):
+    if session.query(Entity).filter(Entity.uuid == entity_uuid).first():
+        session.merge(existing)
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-unique-constraint')
+    expect(matches).toHaveLength(0)
+  })
+
+  it('TP: .first() by non-PK column (email) in check-then-act', () => {
+    const violations = check(`
+from sqlalchemy.orm import Session
+
+def create_user_if_not_exists(session, email):
+    if not session.query(User).filter(User.email == email).first():
+        new_user = User(email=email)
+        session.add(new_user)
+`, 'python')
+    const matches = violations.filter((v) => v.ruleKey === 'database/deterministic/missing-unique-constraint')
+    expect(matches.length).toBeGreaterThanOrEqual(1)
   })
 })

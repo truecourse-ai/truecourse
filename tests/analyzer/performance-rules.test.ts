@@ -650,3 +650,55 @@ for item in items:
     expect(violations).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// batch-writes-in-loop (Python FP fix)
+// ---------------------------------------------------------------------------
+
+describe('performance/deterministic/batch-writes-in-loop', () => {
+  const KEY = 'performance/deterministic/batch-writes-in-loop';
+
+  it('does NOT flag set.add() in a loop (local collection)', () => {
+    const code = `
+def collect_ids(items):
+    seen = set()
+    for item in items:
+        seen.add(item["id"])
+    return seen
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does NOT flag dict.update() in a loop (local collection)', () => {
+    const code = `
+def merge_records(records):
+    combined = {}
+    for record in records:
+        combined.update(record)
+    return combined
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('flags session.add() in a loop (true positive — ORM write)', () => {
+    const code = `
+def save_users(session, users):
+    for user in users:
+        session.add(user)
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(1);
+  });
+
+  it('flags db.insert() in a loop (true positive — ORM write)', () => {
+    const code = `
+def insert_records(db, records):
+    for record in records:
+        db.insert(record)
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(1);
+  });
+});

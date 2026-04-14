@@ -144,6 +144,22 @@ describe('security/deterministic/eval-usage', () => {
     const violations = check(`compile(source, "file.py", "exec")`, 'python');
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
+
+  it('FP skip: re.compile() is regex, not code evaluation', () => {
+    const violations = check(`
+import re
+PATTERN = re.compile(r"^\\d{4}-\\d{2}-\\d{2}$")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('FP skip: redis.eval() runs Lua, not Python', () => {
+    const violations = check(`
+def run_script(redis, keys):
+    return redis.eval("return redis.call('get', KEYS[1])", 1, *keys)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
 });
 
 // ===========================================================================
@@ -383,6 +399,22 @@ describe('security/deterministic/insecure-cookie', () => {
 
   it('does not flag set_cookie with secure=True in Python', () => {
     const violations = check(`response.set_cookie("session", value, secure=True)`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('FP skip: secure=function_call(request) is accepted', () => {
+    const violations = check(`
+def set_cookie(response, request, token):
+    response.set_cookie("session", token, secure=cookie_secure_flag(request), httponly=True)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('FP skip: secure=variable is accepted', () => {
+    const violations = check(`
+def set_cookie(response, token, is_secure):
+    response.set_cookie("auth", token, secure=is_secure, httponly=True)
+`, 'python');
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });

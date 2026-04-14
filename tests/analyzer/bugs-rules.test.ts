@@ -7911,6 +7911,15 @@ def foo(x: Optional[int] = None):
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/implicit-optional');
     expect(matches).toHaveLength(0);
   });
+
+  it('does NOT flag param: Any = None', () => {
+    const violations = check(`
+def process(data: Any = None):
+    pass
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/implicit-optional');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -7952,6 +7961,35 @@ msg = f"Hello {name}"
 `, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-fstring-syntax');
     expect(matches).toHaveLength(0);
+  });
+
+  it('skips Jinja/Mustache template strings with {{}}', () => {
+    const violations = check(`
+TEMPLATE = "Hello {{name}}, welcome to {{site}}"
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-fstring-syntax')).toHaveLength(0);
+  });
+
+  it('skips docstrings describing API paths', () => {
+    const violations = check(`
+def get_user(user_id):
+    """Fetch user by ID.
+
+    GET /api/users/{user_id}
+    Returns the user object.
+    """
+    pass
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-fstring-syntax')).toHaveLength(0);
+  });
+
+  it('skips format-spec placeholders like {0} and {name!r}', () => {
+    const violations = check(`
+FMT_POS = "Hello {0}, you have {1} messages"
+FMT_CONV = "Value is {name!r} with {count!s}"
+FMT_SPEC = "Price: {price:.2f}"
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-fstring-syntax')).toHaveLength(0);
   });
 });
 
@@ -9089,3 +9127,497 @@ describe('bugs/deterministic/type-stub-annotation-error', () => {
     expect(matches).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// argument-type-mismatch-python
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/argument-type-mismatch-python', () => {
+  const RULE = 'bugs/deterministic/argument-type-mismatch-python';
+
+  it('does NOT flag correct calls with default params', () => {
+    const violations = check(`
+def greet(name, greeting="Hello"):
+    return f"{greeting}, {name}!"
+
+result = greet("World")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag correct calls with keyword args', () => {
+    const violations = check(`
+def connect(host, port, timeout=30):
+    pass
+
+connect("localhost", port=8080)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag calls to methods defined in a class', () => {
+    const violations = check(`
+class Service:
+    def process(self, data, callback=None):
+        pass
+
+# Even if called as bare name, we skip method definitions
+process("some_data")
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags calls with too few arguments (TP)', () => {
+    const violations = check(`
+def compute(a, b, c):
+    return a + b + c
+
+compute(1)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].title).toBe('Argument count mismatch');
+  });
+
+  it('still flags calls with too many arguments (TP)', () => {
+    const violations = check(`
+def add(a, b):
+    return a + b
+
+add(1, 2, 3)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// confusing-implicit-concat
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/confusing-implicit-concat', () => {
+  const RULE = 'bugs/deterministic/confusing-implicit-concat';
+
+  it('does NOT flag implicit concat with f-strings', () => {
+    const violations = check(`
+items = [
+    "prefix text "
+    f"{variable} more text"
+]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag f-string concat in function args', () => {
+    const violations = check(`
+print(
+    "Hello "
+    f"{name}!"
+)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags plain implicit concat in a list (TP)', () => {
+    const violations = check(`
+items = [
+    "first"
+    "second"
+]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fstring-missing-placeholders
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/fstring-missing-placeholders', () => {
+  const RULE = 'bugs/deterministic/fstring-missing-placeholders';
+
+  it('does NOT flag f-string in concat where sibling has placeholders', () => {
+    const violations = check(`
+msg = (
+    f"prefix text "
+    f"{variable} more text"
+)
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags standalone f-string with no placeholders (TP)', () => {
+    const violations = check(`
+msg = f"no placeholders here"
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// duplicate-dict-key
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/duplicate-dict-key', () => {
+  const RULE = 'bugs/deterministic/duplicate-dict-key';
+
+  it('does NOT flag dict comprehension with tuple-unpacked loop var as key', () => {
+    const violations = check(`
+result = {k: v for k, v in items.items()}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag dict comprehension with simple loop var as key', () => {
+    const violations = check(`
+result = {x: x * 2 for x in range(10)}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags dict comprehension with constant string key (TP)', () => {
+    const violations = check(`
+result = {"key": v for v in items}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// import-self
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/import-self', () => {
+  const RULE = 'bugs/deterministic/import-self';
+
+  it('does NOT flag importing a top-level package from a nested module with same basename', () => {
+    const code = `import requests\n`;
+    const tree = parseCode(code, 'python');
+    const violations = checkCodeRules(tree, '/project/brain/api/requests.py', code, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does NOT flag from-import of a different top-level package', () => {
+    const code = `from requests import Session\n`;
+    const tree = parseCode(code, 'python');
+    const violations = checkCodeRules(tree, '/project/myapp/requests.py', code, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags true self-import at top level (TP)', () => {
+    const code = `import mymodule\n`;
+    const tree = parseCode(code, 'python');
+    const violations = checkCodeRules(tree, '/mymodule.py', code, enabledRules, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shared-mutable-module-state
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/shared-mutable-module-state', () => {
+  const RULE = 'bugs/deterministic/shared-mutable-module-state';
+
+  it('does NOT flag __all__ = [...]', () => {
+    const violations = check(`
+__all__ = ["foo", "bar", "baz"]
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still flags module-level mutable list (TP)', () => {
+    const violations = check(`
+cache = []
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(1);
+  });
+
+  it('still skips ALL_CAPS constants', () => {
+    const violations = check(`
+DEFAULTS = {"key": "value"}
+`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === RULE);
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unintentional-type-annotation
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/unintentional-type-annotation', () => {
+  const RULE = 'bugs/deterministic/unintentional-type-annotation';
+
+  it('skips forward declaration when variable is assigned later in scope', () => {
+    const violations = check(`
+def process(mode):
+    result: int
+    if mode == "sum":
+        result = 10
+    else:
+        result = 20
+    return result
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('skips forward declaration with augmented assignment later', () => {
+    const violations = check(`
+def compute(data):
+    total: int
+    total = 0
+    for item in data:
+        total += item
+    return total
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('still flags bare annotation with no subsequent assignment', () => {
+    const violations = check(`
+def bad():
+    result: int
+    return None
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loop-at-most-one-iteration
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/loop-at-most-one-iteration', () => {
+  const RULE = 'bugs/deterministic/loop-at-most-one-iteration';
+
+  it('skips search loop with continue inside if block', () => {
+    const violations = check(`
+def find_valid(items):
+    for item in items:
+        if not item.get("valid"):
+            continue
+        return item
+    return None
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('skips loop with multiple continue branches', () => {
+    const violations = check(`
+def find_handler(handlers, event_type):
+    for handler in handlers:
+        if handler.event_type != event_type:
+            continue
+        if not handler.is_active:
+            continue
+        return handler
+    raise ValueError("No handler")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('still flags unconditional return with no continue', () => {
+    const violations = check(`
+def first(items):
+    for item in items:
+        return item
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// async-busy-wait
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/async-busy-wait', () => {
+  const RULE = 'bugs/deterministic/async-busy-wait';
+
+  it('skips loop with properly awaited asyncio.sleep', () => {
+    const violations = check(`
+import asyncio
+
+async def poll(check_fn, timeout=30.0):
+    elapsed = 0.0
+    while elapsed < timeout:
+        if await check_fn():
+            return True
+        await asyncio.sleep(1.0)
+        elapsed += 1.0
+    return False
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('skips loop with await sleep in try/except', () => {
+    const violations = check(`
+import asyncio
+
+async def retry(fn, max_retries=5):
+    delay = 1.0
+    while max_retries > 0:
+        try:
+            return await fn()
+        except Exception:
+            max_retries -= 1
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise RuntimeError("fail")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('still flags time.sleep (not awaited) in async loop', () => {
+    const violations = check(`
+import time
+
+async def busy(check_fn):
+    while True:
+        if check_fn():
+            return True
+        time.sleep(1)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cancellation-exception-not-reraised
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/cancellation-exception-not-reraised', () => {
+  const RULE = 'bugs/deterministic/cancellation-exception-not-reraised';
+
+  it('skips when enclosing function calls .cancel() on a task', () => {
+    const violations = check(`
+import asyncio
+
+async def cancel_task(task):
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        print("cancelled")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('still flags swallowed CancelledError without .cancel() in scope', () => {
+    const violations = check(`
+import asyncio
+
+async def swallow():
+    try:
+        await asyncio.sleep(10)
+    except asyncio.CancelledError:
+        print("swallowed")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nonlocal-without-binding
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/nonlocal-without-binding', () => {
+  const RULE = 'bugs/deterministic/nonlocal-without-binding';
+
+  it('skips when variable is defined in enclosing function scope', () => {
+    const violations = check(`
+def make_counter(start=0):
+    count = start
+    def increment(n=1):
+        nonlocal count
+        count += n
+        return count
+    return increment
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('skips when variable is assigned inside conditional in enclosing scope', () => {
+    const violations = check(`
+def outer():
+    total = 0
+    items = []
+    def add(value):
+        nonlocal total
+        total += value
+        items.append(value)
+    return add
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('still flags nonlocal when variable is not in enclosing scope', () => {
+    const violations = check(`
+def outer():
+    def inner():
+        nonlocal missing_var
+        missing_var = 42
+    return inner
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// logging-exception-outside-handler
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/logging-exception-outside-handler', () => {
+  const RULE = 'bugs/deterministic/logging-exception-outside-handler';
+
+  it('skips Future.exception() — not a logging call', () => {
+    const violations = check(`
+import asyncio
+
+async def check_task(task):
+    exc = task.exception()
+    if exc is not None:
+        print(exc)
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('skips retry_state.outcome.exception() — not a logging call', () => {
+    const violations = check(`
+def on_retry(retry_state):
+    exc = retry_state.outcome.exception()
+    if exc:
+        print(f"Retry failed: {exc}")
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(0);
+  });
+
+  it('still flags logger.exception() outside except block', () => {
+    const violations = check(`
+import logging
+logger = logging.getLogger(__name__)
+
+def process(data):
+    logger.exception("Something went wrong")
+    return data
+`, 'python');
+    expect(violations.filter((v) => v.ruleKey === RULE)).toHaveLength(1);
+  });
+});
+
