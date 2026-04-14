@@ -97,6 +97,13 @@ run(
     '--format=esm',
     '--outfile=dist/cli.mjs',
     '--external:node-windows',
+    '--external:tree-sitter',
+    '--external:tree-sitter-typescript',
+    '--external:tree-sitter-javascript',
+    '--external:tree-sitter-python',
+    '--external:pyright',
+    '--external:embedded-postgres',
+    '--external:postgres',
     '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
   ].join(' '),
 );
