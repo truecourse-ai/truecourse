@@ -104,7 +104,7 @@ run(
     '--external:pyright',
     '--external:embedded-postgres',
     '--external:postgres',
-    '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
+    '--banner:js="import { createRequire as __cR } from \'node:module\'; const require = __cR(import.meta.url);"',
   ].join(' '),
 );
 
