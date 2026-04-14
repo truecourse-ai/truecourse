@@ -119,7 +119,7 @@ copyDir(skillsSrc, skillsDest);
 
 // 7. Copy postinstall script (rebuilds tree-sitter with C++20 on Node 24+)
 console.log('Copying postinstall script...');
-fs.copyFileSync(path.join(ROOT, 'scripts/postinstall.js'), path.join(DIST, 'postinstall.js'));
+fs.copyFileSync(path.join(ROOT, 'scripts/postinstall.cjs'), path.join(DIST, 'postinstall.cjs'));
 
 // 7b. Copy README and README assets used by npm package page rendering
 console.log('Copying README and assets...');
@@ -141,7 +141,7 @@ const publishPkg = {
     truecourse: './cli.mjs',
   },
   scripts: {
-    postinstall: 'node postinstall.js',
+    postinstall: 'node postinstall.cjs',
   },
   engines: {
     node: '>=20',
