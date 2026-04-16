@@ -33,7 +33,7 @@ import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network, Lo
 import * as api from '@/lib/api';
 import { useCollapseState } from '@/hooks/useCollapseState';
 import { applyCollapseState } from '@/lib/collapse';
-import type { DepthLevel, SemanticZoomLevel } from '@/types/graph';
+import type { DepthLevel } from '@/types/graph';
 import type { DiffCheckResponse } from '@/lib/api';
 
 

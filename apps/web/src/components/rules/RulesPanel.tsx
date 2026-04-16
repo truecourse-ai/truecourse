@@ -1,5 +1,6 @@
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search } from 'lucide-react';
 import { getRules, type RuleResponse } from '@/lib/api';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
@@ -67,12 +68,19 @@ export function RulesPanel() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'deterministic' | 'llm'>('all');
   const [search, setSearch] = useState('');
 
+  const listRef = useRef<VirtuosoHandle>(null);
+
   useEffect(() => {
     getRules()
       .then(setRules)
       .catch(() => setRules([]))
       .finally(() => setLoading(false));
   }, []);
+
+  // Reset scroll when the active filter set changes.
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: 0 });
+  }, [filter, severityFilter, typeFilter, search]);
 
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
@@ -190,51 +198,59 @@ export function RulesPanel() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <Shield className="mb-3 h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            {search ? 'No rules match your search' : 'No rules found'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((rule) => {
-            const domain = getDomain(rule);
-            return (
-              <div
-                key={rule.key}
-                className="rounded-lg border border-border bg-card p-3"
-              >
-                <div className="mb-1.5 flex items-start justify-between gap-2">
-                  <h4 className="text-sm font-medium text-foreground">{rule.name}</h4>
-                  <div className="flex shrink-0 gap-1.5">
-                    <span
-                      className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${severityColors[rule.severity] || ''}`}
-                    >
-                      {rule.severity}
-                    </span>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <Shield className="mb-3 h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              {search ? 'No rules match your search' : 'No rules found'}
+            </p>
+          </div>
+        ) : (
+          <Virtuoso
+            ref={listRef}
+            data={filtered}
+            computeItemKey={(_, rule) => rule.key}
+            initialTopMostItemIndex={0}
+            increaseViewportBy={400}
+            components={{
+              Header: () => <div className="h-3" />,
+              Footer: () => <div className="h-3" />,
+            }}
+            itemContent={(_, rule) => {
+              const domain = getDomain(rule);
+              return (
+                <div className="px-3 pb-2">
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <div className="mb-1.5 flex items-start justify-between gap-2">
+                      <h4 className="text-sm font-medium text-foreground">{rule.name}</h4>
+                      <div className="flex shrink-0 gap-1.5">
+                        <span
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${severityColors[rule.severity] || ''}`}
+                        >
+                          {rule.severity}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">{rule.description}</p>
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span
+                        className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${domainColors[domain] || ''}`}
+                      >
+                        {domainLabels[domain] || domain}
+                      </span>
+                      <span
+                        className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${typeColors[rule.type] || ''}`}
+                      >
+                        {rule.type === 'deterministic' ? 'Deterministic' : 'LLM'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">{rule.description}</p>
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${domainColors[domain] || ''}`}
-                  >
-                    {domainLabels[domain] || domain}
-                  </span>
-                  <span
-                    className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${typeColors[rule.type] || ''}`}
-                  >
-                    {rule.type === 'deterministic' ? 'Deterministic' : 'LLM'}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            }}
+          />
+        )}
       </div>
     </div>
   );

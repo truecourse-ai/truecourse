@@ -1,5 +1,6 @@
 
-import { useCallback, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
@@ -82,6 +83,16 @@ export function ViolationsPanel({
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [search, setSearch] = useState('');
+
+  const normalListRef = useRef<VirtuosoHandle>(null);
+  const diffListRef = useRef<VirtuosoHandle>(null);
+
+  // Reset scroll to top whenever the active filter set changes — otherwise the
+  // user is left at an offset that no longer maps to meaningful content.
+  useEffect(() => {
+    normalListRef.current?.scrollTo({ top: 0 });
+    diffListRef.current?.scrollTo({ top: 0 });
+  }, [categoryFilter, severityFilter, typeFilter, search, selectedPath, isDiffMode]);
 
   // Resizable ER panel
   const [erHeight, setErHeight] = useState(264);
@@ -328,11 +339,11 @@ export function ViolationsPanel({
           </div>
         </div>
 
-        <div className="overflow-y-auto p-3 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col">
           {isDiffMode && filteredDiffCards !== null ? (
             <>
               {diffResult?.isStale && (
-                <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                <div className="mx-3 mt-3 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   Baseline analysis has changed. Click Analyze to refresh.
                 </div>
@@ -348,24 +359,34 @@ export function ViolationsPanel({
                   </p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {filteredDiffCards.map(({ violation, diffStatus }) => (
-                    <ViolationCard
-                      key={violation.id}
-                      violation={violation}
-                      onLocateNode={onLocateNode}
-                      onOpenFile={onOpenFile}
-                      isResolved={diffStatus === 'resolved'}
-                      diffStatus={diffStatus}
-                    />
-                  ))}
-                </div>
+                <Virtuoso
+                  ref={diffListRef}
+                  data={filteredDiffCards}
+                  computeItemKey={(_, item) => item.violation.id}
+                  initialTopMostItemIndex={0}
+                  increaseViewportBy={400}
+                  components={{
+                    Header: () => <div className="h-3" />,
+                    Footer: () => <div className="h-3" />,
+                  }}
+                  itemContent={(_, { violation, diffStatus }) => (
+                    <div className="px-3 pb-3">
+                      <ViolationCard
+                        violation={violation}
+                        onLocateNode={onLocateNode}
+                        onOpenFile={onOpenFile}
+                        isResolved={diffStatus === 'resolved'}
+                        diffStatus={diffStatus}
+                      />
+                    </div>
+                  )}
+                />
               )}
             </>
           ) : (
             <>
               {selectedService && (
-                <div className="mb-3 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+                <div className="mx-3 mt-3 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
                   <span className="truncate flex-1">
                     Filtered by:{' '}
                     <span className="font-medium text-foreground">
@@ -403,16 +424,26 @@ export function ViolationsPanel({
                   </p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {fullyFilteredViolations.map((violation) => (
-                    <ViolationCard
-                      key={violation.id}
-                      violation={violation}
-                      onLocateNode={onLocateNode}
-                      onOpenFile={onOpenFile}
-                    />
-                  ))}
-                </div>
+                <Virtuoso
+                  ref={normalListRef}
+                  data={fullyFilteredViolations}
+                  computeItemKey={(_, item) => item.id}
+                  initialTopMostItemIndex={0}
+                  increaseViewportBy={400}
+                  components={{
+                    Header: () => <div className="h-3" />,
+                    Footer: () => <div className="h-3" />,
+                  }}
+                  itemContent={(_, violation) => (
+                    <div className="px-3 pb-3">
+                      <ViolationCard
+                        violation={violation}
+                        onLocateNode={onLocateNode}
+                        onOpenFile={onOpenFile}
+                      />
+                    </div>
+                  )}
+                />
               )}
             </>
           )}
