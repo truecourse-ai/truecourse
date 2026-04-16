@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readConfig, getServerUrl, openInBrowser } from "./helpers.js";
@@ -80,8 +81,17 @@ export function getServerProcess() {
 function startConsoleMode(openBrowser: boolean): void {
   const serverPath = getServerPath();
   const url = getServerUrl();
+  const logDir = getLogDir();
+  const logPath = getLogPath();
 
-  p.log.step("Starting server (embedded PostgreSQL starts automatically)...");
+  // Rotate and open log file
+  fs.mkdirSync(logDir, { recursive: true });
+  rotateLogs(logDir);
+  rotateErrorLogs(logDir);
+  const logStream = fs.createWriteStream(logPath, { flags: "a" });
+  logStream.write(`\n--- Server started at ${new Date().toISOString()} ---\n`);
+
+  p.log.step("Starting server...");
 
   const serverProcess = _serverProcess = spawn(
     process.execPath,
@@ -92,24 +102,28 @@ function startConsoleMode(openBrowser: boolean): void {
     }
   );
 
-  // Server output is piped so we can coordinate with the CLI spinner.
-  // Before printing each log line, clear the spinner's current line with
-  // ANSI escapes (\r = start of line, \x1b[K = clear to end of line).
-  // The spinner redraws itself on its next animation tick (~80ms).
-  const forwardOutput = (data: Buffer) => {
-    process.stdout.write("\r\x1b[K");  // clear spinner line
-    process.stderr.write(data);         // print server log
+  // Write server output to log file with timestamps
+  const writeWithTimestamp = (data: Buffer) => {
+    const lines = data.toString().split("\n");
+    for (const line of lines) {
+      if (line.trim()) {
+        logStream.write(`[${new Date().toISOString()}] ${line}\n`);
+      }
+    }
   };
-  serverProcess.stdout?.on("data", forwardOutput);
-  serverProcess.stderr?.on("data", forwardOutput);
+  serverProcess.stdout?.on("data", writeWithTimestamp);
+  serverProcess.stderr?.on("data", writeWithTimestamp);
 
   serverProcess.on("error", (error) => {
     p.log.error(`Failed to start server: ${error.message}`);
+    p.log.info(`Logs: ${logPath}`);
     process.exit(1);
   });
 
   serverProcess.on("close", (code) => {
+    logStream.end();
     if (code !== null && code !== 0) {
+      p.log.error(`Server exited with code ${code}. Check logs: ${logPath}`);
       process.exit(code);
     }
   });
@@ -123,11 +137,16 @@ function startConsoleMode(openBrowser: boolean): void {
 
   healthcheck().then((healthy) => {
     if (healthy) {
+      p.log.success(`Server is running at ${url}`);
+      p.log.info(`Logs: ${logPath}`);
       if (openBrowser) {
         openInBrowser(url);
       } else {
         p.log.info("Open the dashboard with: truecourse dashboard");
       }
+    } else {
+      p.log.warn("Server hasn't responded yet.");
+      p.log.info(`Check logs: ${logPath}`);
     }
   });
 }

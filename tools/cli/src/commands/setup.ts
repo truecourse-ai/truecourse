@@ -258,12 +258,5 @@ export async function runSetup(): Promise<void> {
   const { writeConfig } = await import("./helpers.js");
   writeConfig({ runMode, enabledCategories: categories as string[], enableLlmRules: enableLlm });
 
-  if (runMode === "service") {
-    p.log.info("Background service selected. Run `truecourse start` to install and start the service.");
-  }
-
-  p.log.info("Embedded PostgreSQL will start automatically when the server runs.");
-  p.log.info("Database migrations are applied on server startup.");
-
-  p.outro("Setup complete!");
+  p.outro("Setup complete! Run `truecourse start` to start TrueCourse.");
 }
