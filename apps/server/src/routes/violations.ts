@@ -1,355 +1,175 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc, and, sql, count } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
-import { db } from '../config/database.js';
-import {
-  analyses,
-  services,
-  serviceDependencies,
-  databases,
-  modules,
-  methods,
-  violations,
-} from '../db/schema.js';
-import { createAppError } from '../middleware/error.js';
-import { generateViolations } from '../services/violation.service.js';
-import { emitViolationsReady } from '../socket/handlers.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
-
-/** SQL filter to exclude diff analyses */
-const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
+import { readAnalysis, readLatest } from '../lib/analysis-store.js';
+import type { ViolationStatus, ViolationWithNames } from '../types/snapshot.js';
 
 const router: Router = Router();
 
-// POST /api/repos/:id/violations - Generate LLM violations
-router.post(
-  '/:id/violations',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      resolveProjectForRequest(id);
+const SEVERITY_ORDER: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
+};
 
-      // Get latest non-diff analysis
-      const latestAnalysis = await db
-        .select()
-        .from(analyses)
-        .where(notDiffAnalysis)
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
+// ---------------------------------------------------------------------------
+// GET /api/repos/:id/violations
+// Filter + sort + paginate the active LATEST violation set in JS.
+// ---------------------------------------------------------------------------
 
-      if (latestAnalysis.length === 0) {
-        throw createAppError('No analysis found. Run analysis first.', 400);
-      }
-
-      const analysis = latestAnalysis[0];
-
-      // Get services, dependencies, and databases for the analysis
-      const analysisServices = await db
-        .select()
-        .from(services)
-        .where(eq(services.analysisId, analysis.id));
-
-      const analysisDatabases = await db
-        .select()
-        .from(databases)
-        .where(eq(databases.analysisId, analysis.id));
-
-      const analysisDeps = await db
-        .select()
-        .from(serviceDependencies)
-        .where(eq(serviceDependencies.analysisId, analysis.id));
-
-      // Build service name map for dependency lookup
-      const serviceNameMap = new Map(
-        analysisServices.map((s) => [s.id, s.name])
-      );
-
-      // Generate violations via LLM
-      const generatedViolations = await generateViolations({
-        architecture: analysis.architecture,
-        services: analysisServices.map((s) => ({
-          id: s.id,
-          name: s.name,
-          type: s.type,
-          framework: s.framework || undefined,
-          fileCount: s.fileCount || 0,
-          layerSummary: s.layerSummary,
-        })),
-        dependencies: analysisDeps.map((d) => ({
-          sourceServiceName: serviceNameMap.get(d.sourceServiceId) || 'unknown',
-          targetServiceName: serviceNameMap.get(d.targetServiceId) || 'unknown',
-          dependencyCount: d.dependencyCount,
-          dependencyType: d.dependencyType,
-        })),
-        databases: analysisDatabases.map((d) => ({
-          id: d.id,
-          name: d.name,
-          type: d.type,
-          driver: d.driver,
-          tableCount: (d.tables as unknown[])?.length || 0,
-          connectedServices: (d.connectedServices as string[]) || [],
-          tables: d.tables as { name: string; columns: { name: string; type: string; isNullable?: boolean; isPrimaryKey?: boolean; isForeignKey?: boolean; referencesTable?: string }[] }[],
-          relations: d.dbRelations as { sourceTable: string; targetTable: string; foreignKeyColumn: string }[],
-        })),
-      });
-
-      const { violations: generatedViolationsList, serviceDescriptions } = generatedViolations;
-
-      // Save violations to database
-      const savedViolations = [];
-      for (const violation of generatedViolationsList) {
-        const [saved] = await db
-          .insert(violations)
-          .values({
-            id: randomUUID(),
-            analysisId: analysis.id,
-            type: violation.type,
-            title: violation.title,
-            content: violation.content,
-            severity: violation.severity,
-            targetServiceId: violation.targetServiceId || null,
-            targetDatabaseId: violation.targetDatabaseId || null,
-            targetTable: violation.targetTable || null,
-            fixPrompt: violation.fixPrompt || null,
-            ruleKey: violation.ruleKey || 'unknown',
-          })
-          .returning();
-
-        savedViolations.push(saved);
-      }
-
-      // Save service descriptions
-      for (const desc of serviceDescriptions) {
-        if (desc.id) {
-          await db
-            .update(services)
-            .set({ description: desc.description })
-            .where(eq(services.id, desc.id));
-        }
-      }
-
-      emitViolationsReady(id, analysis.id);
-
-      res.status(201).json(savedViolations);
-    } catch (error) {
-      next(error);
-    }
-  }
-);
-
-// GET /api/repos/:id/violations - Get violations
 router.get(
   '/:id/violations',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-      const branch = req.query.branch as string | undefined;
-      const analysisIdParam = req.query.analysisId as string | undefined;
       const repo = resolveProjectForRequest(id);
 
-      let analysis;
-
-      if (analysisIdParam) {
-        const [specific] = await db
-          .select()
-          .from(analyses)
-          .where(eq(analyses.id, analysisIdParam))
-          .limit(1);
-        if (!specific) {
-          res.json([]);
-          return;
-        }
-        analysis = specific;
-      } else {
-        // Find the latest non-diff analysis
-        const conditions = [notDiffAnalysis];
-        if (branch) {
-          conditions.push(eq(analyses.branch, branch));
-        }
-
-        const latestAnalysis = await db
-          .select()
-          .from(analyses)
-          .where(and(...conditions))
-          .orderBy(desc(analyses.createdAt))
-          .limit(1);
-
-        if (latestAnalysis.length === 0) {
-          res.json([]);
-          return;
-        }
-        analysis = latestAnalysis[0];
-      }
-
-      // Build query conditions
-      const queryConditions: ReturnType<typeof eq>[] = [eq(violations.analysisId, analysis.id)];
-
-      // Optional file filter
+      const analysisIdParam = req.query.analysisId as string | undefined;
       const fileParam = req.query.file as string | undefined;
-      if (fileParam) {
-        const absPath = fileParam.startsWith('/') ? fileParam : `${repo.path}/${fileParam}`;
-        queryConditions.push(eq(violations.filePath, absPath));
-      }
-
-      // Status filter: default to active violations only
       const statusParam = req.query.status as string | undefined;
-      if (statusParam === 'resolved') {
-        queryConditions.push(eq(violations.status, 'resolved'));
-      } else if (statusParam === 'all') {
-        // No status filter — return all
-      } else {
-        // Default: active violations only (new + unchanged)
-        queryConditions.push(
-          sql`${violations.status} IN ('new', 'unchanged')`,
-        );
-      }
-
-      // Severity ordering for consistent sort
-      const severityOrder = sql`CASE ${violations.severity}
-        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
-        WHEN 'low' THEN 3 WHEN 'info' THEN 4 ELSE 5 END`;
-
-      const selectFields = {
-        id: violations.id,
-        type: violations.type,
-        title: violations.title,
-        content: violations.content,
-        severity: violations.severity,
-        status: violations.status,
-        targetServiceId: violations.targetServiceId,
-        targetServiceName: services.name,
-        targetDatabaseId: violations.targetDatabaseId,
-        targetDatabaseName: databases.name,
-        targetModuleId: violations.targetModuleId,
-        targetModuleName: modules.name,
-        targetMethodId: violations.targetMethodId,
-        targetMethodName: methods.name,
-        targetTable: violations.targetTable,
-        fixPrompt: violations.fixPrompt,
-        firstSeenAt: violations.firstSeenAt,
-        createdAt: violations.createdAt,
-        ruleKey: violations.ruleKey,
-        filePath: violations.filePath,
-        lineStart: violations.lineStart,
-        lineEnd: violations.lineEnd,
-        columnStart: violations.columnStart,
-        columnEnd: violations.columnEnd,
-        snippet: violations.snippet,
-      };
-
-      // Pagination
       const limitParam = parseInt(req.query.limit as string) || 0;
       const offsetParam = parseInt(req.query.offset as string) || 0;
 
-      let query = db
-        .select(selectFields)
-        .from(violations)
-        .leftJoin(services, eq(violations.targetServiceId, services.id))
-        .leftJoin(databases, eq(violations.targetDatabaseId, databases.id))
-        .leftJoin(modules, eq(violations.targetModuleId, modules.id))
-        .leftJoin(methods, eq(violations.targetMethodId, methods.id))
-        .where(and(...queryConditions))
-        .orderBy(severityOrder, desc(violations.createdAt))
-        .$dynamic();
+      let violations: ViolationWithNames[];
 
-      if (limitParam > 0) {
-        query = query.limit(limitParam).offset(offsetParam);
+      if (analysisIdParam) {
+        const latest = readLatest(repo.path);
+        if (latest && latest.analysis.id === analysisIdParam) {
+          violations = latest.violations;
+        } else {
+          res.json(limitParam > 0 ? { violations: [], total: 0 } : []);
+          return;
+        }
+      } else {
+        const latest = readLatest(repo.path);
+        if (!latest) {
+          res.json(limitParam > 0 ? { violations: [], total: 0 } : []);
+          return;
+        }
+        violations = latest.violations;
       }
 
-      const [analysisViolations, totalResult] = await Promise.all([
-        query,
-        db.select({ count: count() }).from(violations).where(and(...queryConditions)),
-      ]);
-
-      const total = totalResult[0]?.count ?? 0;
-
-      // If pagination requested, return object with total; otherwise return array for backward compat
-      if (limitParam > 0 || offsetParam > 0) {
-        res.json({ violations: analysisViolations, total });
+      // Status filter — default to active (new + unchanged)
+      let filtered: ViolationWithNames[];
+      if (statusParam === 'resolved') {
+        filtered = violations.filter((v) => v.status === 'resolved');
+      } else if (statusParam === 'all') {
+        filtered = violations;
       } else {
-        res.json(analysisViolations);
+        const active: ViolationStatus[] = ['new', 'unchanged'];
+        filtered = violations.filter((v) => active.includes(v.status));
+      }
+
+      // Optional file filter (accepts absolute or relative). When scoped to a
+      // file, return only code-level rows — arch-AST violations (type module /
+      // function / service) can carry a filePath for graph linkage but have
+      // no line/column range, which would crash the CodeViewer.
+      if (fileParam) {
+        const absPath = fileParam.startsWith('/') ? fileParam : `${repo.path}/${fileParam}`;
+        filtered = filtered.filter(
+          (v) =>
+            v.type === 'code' &&
+            v.lineStart != null &&
+            (v.filePath === absPath || v.filePath === fileParam),
+        );
+      }
+
+      // Severity order → createdAt desc
+      filtered.sort((a, b) => {
+        const sa = SEVERITY_ORDER[a.severity] ?? 5;
+        const sb = SEVERITY_ORDER[b.severity] ?? 5;
+        if (sa !== sb) return sa - sb;
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+
+      const total = filtered.length;
+
+      const paged = limitParam > 0 ? filtered.slice(offsetParam, offsetParam + limitParam) : filtered;
+
+      if (limitParam > 0 || offsetParam > 0) {
+        res.json({ violations: paged, total });
+      } else {
+        res.json(paged);
       }
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
-// GET /api/repos/:id/violations/summary - Summary counts by severity and file
+// ---------------------------------------------------------------------------
+// GET /api/repos/:id/violations/summary
+// ---------------------------------------------------------------------------
+
 router.get(
   '/:id/violations/summary',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
+      const repo = resolveProjectForRequest(id);
       const analysisIdParam = req.query.analysisId as string | undefined;
-      resolveProjectForRequest(id);
+      const latest = readLatest(repo.path);
 
-      let analysisId: string;
-
-      if (analysisIdParam) {
-        const [specific] = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(eq(analyses.id, analysisIdParam))
-          .limit(1);
-        if (!specific) {
-          res.json({ total: 0, byFile: {}, bySeverity: {} });
-          return;
-        }
-        analysisId = specific.id;
-      } else {
-        const [latest] = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(notDiffAnalysis)
-          .orderBy(desc(analyses.createdAt))
-          .limit(1);
-
-        if (!latest) {
-          res.json({ total: 0, byFile: {}, bySeverity: {} });
-          return;
-        }
-        analysisId = latest.id;
-      }
-
-      const rows = await db
-        .select({
-          filePath: violations.filePath,
-          severity: violations.severity,
-          count: count(),
-        })
-        .from(violations)
-        .where(and(
-          eq(violations.analysisId, analysisId),
-          sql`${violations.status} IN ('new', 'unchanged')`,
-        ))
-        .groupBy(violations.filePath, violations.severity);
-
-      const byFile: Record<string, number> = {};
-      const bySeverity: Record<string, number> = {};
-      const highestSeverityByFile: Record<string, string> = {};
-      const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
-      let total = 0;
-
-      for (const row of rows) {
-        const c = Number(row.count);
-        total += c;
-        bySeverity[row.severity] = (bySeverity[row.severity] || 0) + c;
-
-        if (row.filePath) {
-          byFile[row.filePath] = (byFile[row.filePath] || 0) + c;
-          const current = highestSeverityByFile[row.filePath];
-          if (!current || severityOrder.indexOf(row.severity) < severityOrder.indexOf(current)) {
-            highestSeverityByFile[row.filePath] = row.severity;
+      if (!latest || (analysisIdParam && latest.analysis.id !== analysisIdParam)) {
+        // When asking for a non-LATEST historical analysis, fall back to its file.
+        if (analysisIdParam) {
+          // Walk history in reverse to find the matching analysis file.
+          const file = await findAnalysisFilename(repo.path, analysisIdParam);
+          if (file) {
+            const snap = readAnalysis(repo.path, file);
+            if (snap) {
+              res.json(summarizeViolations(snap.violations.added));
+              return;
+            }
           }
         }
+        res.json({ total: 0, byFile: {}, bySeverity: {}, highestSeverityByFile: {} });
+        return;
       }
 
-      res.json({ total, byFile, bySeverity, highestSeverityByFile });
+      res.json(summarizeViolations(latest.violations));
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
+
+function summarizeViolations(violations: { filePath: string | null; severity: string; status?: string }[]): {
+  total: number;
+  byFile: Record<string, number>;
+  bySeverity: Record<string, number>;
+  highestSeverityByFile: Record<string, string>;
+} {
+  const byFile: Record<string, number> = {};
+  const bySeverity: Record<string, number> = {};
+  const highestSeverityByFile: Record<string, string> = {};
+  const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
+  let total = 0;
+
+  for (const v of violations) {
+    if (v.status && v.status !== 'new' && v.status !== 'unchanged') continue;
+    total++;
+    bySeverity[v.severity] = (bySeverity[v.severity] || 0) + 1;
+    if (v.filePath) {
+      byFile[v.filePath] = (byFile[v.filePath] || 0) + 1;
+      const current = highestSeverityByFile[v.filePath];
+      if (!current || severityOrder.indexOf(v.severity) < severityOrder.indexOf(current)) {
+        highestSeverityByFile[v.filePath] = v.severity;
+      }
+    }
+  }
+  return { total, byFile, bySeverity, highestSeverityByFile };
+}
+
+async function findAnalysisFilename(repoPath: string, analysisId: string): Promise<string | null> {
+  // Minimal stub — in a future iteration, consult history.json for O(1) lookup.
+  const { listAnalyses, readAnalysis } = await import('../lib/analysis-store.js');
+  for (const name of listAnalyses(repoPath).reverse()) {
+    const snap = readAnalysis(repoPath, name);
+    if (snap?.id === analysisId) return name;
+  }
+  return null;
+}
 
 export default router;

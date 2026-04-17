@@ -109,9 +109,9 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
     return makeViolation(
       this.ruleKey, expr, filePath, 'high',
       'Floating promise',
-      `${funcName}() likely returns a Promise that is not awaited or .catch()-ed.`,
+      `\`${funcName}()\` likely returns a Promise that is not awaited or \`.catch()\`-ed.`,
       sourceCode,
-      'Either await the promise or add .catch() to handle rejections.',
+      'Either `await` the promise or add `.catch()` to handle rejections.',
     )
   },
 }

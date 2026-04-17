@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TRUECOURSE_DIR = '.truecourse';
-const GITIGNORE_CONTENTS = 'db/\nui-state.json\nlogs/\n';
+const GITIGNORE_CONTENTS = 'analyses/\nLATEST.json\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\n';
 
 // ---------------------------------------------------------------------------
 // Global paths (user-level)

@@ -19,7 +19,7 @@ export type AnalysisProgress = {
 };
 
 export type LlmEstimate = {
-  analysisId: string;
+  repoId: string;
   estimate: {
     totalEstimatedTokens: number;
     tiers: Array<{ tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }>;
@@ -119,9 +119,9 @@ export function useSocket(repoId?: string) {
 
   const clearProgress = useCallback(() => setAnalysisProgress(null), []);
 
-  const respondToLlmEstimate = useCallback((analysisId: string, proceed: boolean) => {
+  const respondToLlmEstimate = useCallback((repoIdArg: string, proceed: boolean) => {
     const socket = connectSocket();
-    socket.emit('analysis:llm-proceed', { analysisId, proceed });
+    socket.emit('analysis:llm-proceed', { repoId: repoIdArg, proceed });
     setLlmEstimate(null);
   }, []);
 

@@ -31,7 +31,7 @@ import {
   CodeViolationLifecycleOutputSchema,
   FlowEnrichmentOutputSchema,
 } from './schemas.js';
-import { recordUsageBatch, type UsageData } from '../usage.service.js';
+import type { UsageData } from '../usage.service.js';
 import type {
   LLMProvider,
   UsageRecord,
@@ -106,14 +106,11 @@ export abstract class BaseCLIProvider implements LLMProvider {
     this._repoPath = path;
   }
 
-  async flushUsage(): Promise<void> {
-    if (!this._analysisId || this._usageRecords.length === 0) return;
-    const records: UsageData[] = this._usageRecords.map((r) => ({
-      ...r,
-      analysisId: this._analysisId!,
-    }));
-    await recordUsageBatch(records);
+  flushUsage(): UsageData[] {
+    if (this._usageRecords.length === 0) return [];
+    const records = this._usageRecords.slice();
     this._usageRecords = [];
+    return records;
   }
 
   private collectUsage(callType: string, cliUsage: CLIUsage | undefined, durationMs: number): void {

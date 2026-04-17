@@ -5,7 +5,6 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config } from './config/index.js';
-import { autoConfigureMigrations, closeAllProjectDbs } from './config/database.js';
 import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import { projectResolver } from './middleware/project.js';
@@ -33,14 +32,11 @@ async function main() {
     tee: process.env.TRUECOURSE_DEV === '1',
   });
 
-  // 1. One-time cleanup of the pre-PGlite embedded-postgres data dir
+  // 1. One-time cleanup of the pre-0.4 embedded-postgres data dir
   if (wipeLegacyPostgresData()) {
     log.info('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
   }
 
-  // 2. Resolve the migrations folder. Per-project PGlite instances are
-  //    opened lazily on first request and migrated on open.
-  autoConfigureMigrations();
   log.info(`[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}`);
 
   // 2. Setup Express app
@@ -52,16 +48,15 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
-  // Home page / registry routes run without a project DB.
+  // Home page / registry routes run without a project.
   app.use('/api/repos', reposRouter);
-  // Analyze trigger routes create the DB on first run, so they cannot be
-  // guarded by `projectResolver` (which requires the DB to already exist).
-  // Mount first so Express matches these before the resolver-guarded routes.
+  // Analyze trigger routes create `.truecourse/` on first run, so they run
+  // without the resolver so a brand-new project (no LATEST.json yet) can
+  // still bootstrap. Mount first.
   app.use('/api/repos', analyzeRouter);
   // Project-scoped routes. Each router's patterns declare their own `:id`
   // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
-  // matches the `:id` segment itself. The resolver opens the project's
-  // PGlite and binds it to the request's async context.
+  // matches the `:id` segment itself. The resolver validates the slug.
   app.use('/api/repos', projectResolver, analysisRouter);
   app.use('/api/repos', projectResolver, violationsRouter);
   app.use('/api/repos', projectResolver, databasesRouter);
@@ -127,7 +122,6 @@ async function main() {
     stopAllWatchers();
     httpServer.closeAllConnections();
     httpServer.close();
-    await closeAllProjectDbs();
     log.info('[Server] Closed');
     await closeLogger();
     process.exit(0);

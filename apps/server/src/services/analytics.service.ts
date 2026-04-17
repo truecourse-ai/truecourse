@@ -1,245 +1,134 @@
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import {
-  violations,
-  analyses,
-  services,
-  modules,
-} from '../db/schema.js';
 import type {
-  TrendDataPoint,
-  TrendResponse,
   BreakdownResponse,
+  ResolutionResponse,
   TopOffender,
   TopOffendersResponse,
-  ResolutionResponse,
+  TrendDataPoint,
+  TrendResponse,
 } from '@truecourse/shared';
+import {
+  listAnalyses,
+  readAnalysis,
+  readHistory,
+  readLatest,
+} from '../lib/analysis-store.js';
+import type { HistoryEntry, ViolationWithNames } from '../types/snapshot.js';
 
-/** SQL filter to exclude diff analyses */
-const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
-
-// ---------------------------------------------------------------------------
-// Helper: find latest non-diff analysis for a repo
-// ---------------------------------------------------------------------------
-
-async function findLatestAnalysisId(branch?: string): Promise<string | null> {
-  const conditions = [notDiffAnalysis];
-  if (branch) conditions.push(eq(analyses.branch, branch));
-
-  const [row] = await db
-    .select({ id: analyses.id })
-    .from(analyses)
-    .where(and(...conditions))
-    .orderBy(desc(analyses.createdAt))
-    .limit(1);
-
-  return row?.id ?? null;
-}
+const STALE_DAYS = 7;
 
 // ---------------------------------------------------------------------------
-// Trend: violation counts per full analysis over time
+// Trend
 // ---------------------------------------------------------------------------
 
-export async function getTrend(
-  branch?: string,
-  limit = 20,
-): Promise<TrendResponse> {
-  const conditions = [notDiffAnalysis];
-  if (branch) conditions.push(eq(analyses.branch, branch));
+export function getTrend(repoPath: string, branch?: string, limit = 20): TrendResponse {
+  const history = readHistory(repoPath);
+  const entries = history.analyses
+    .filter((e) => (!branch || e.branch === branch) && !isDiff(e))
+    .slice(-limit);
 
-  // Get recent full analyses (newest first, then reverse for chronological)
-  const recentAnalyses = await db
-    .select({ id: analyses.id, createdAt: analyses.createdAt, branch: analyses.branch })
-    .from(analyses)
-    .where(and(...conditions))
-    .orderBy(desc(analyses.createdAt))
-    .limit(limit);
-
-  if (recentAnalyses.length === 0) return { points: [] };
-
-  const analysisIds = recentAnalyses.map((a) => a.id);
-
-  // Count all violations per analysis, grouped by status and severity
-  const allRows = await db
-    .select({
-      analysisId: violations.analysisId,
-      status: violations.status,
-      severity: violations.severity,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(violations)
-    .where(inArray(violations.analysisId, analysisIds))
-    .groupBy(violations.analysisId, violations.status, violations.severity);
-
-  // Build counts map
-  const countMap = new Map<string, Map<string, number>>();
-  for (const row of allRows) {
-    const key = row.analysisId;
-    if (!countMap.has(key)) countMap.set(key, new Map());
-    const m = countMap.get(key)!;
-    // Accumulate by status
-    m.set(`status:${row.status}`, (m.get(`status:${row.status}`) ?? 0) + row.count);
-    // Accumulate by severity
-    m.set(`severity:${row.severity}`, (m.get(`severity:${row.severity}`) ?? 0) + row.count);
-    // Total
-    m.set('total', (m.get('total') ?? 0) + row.count);
-  }
-
-  // Build points in chronological order (oldest first)
-  const points: TrendDataPoint[] = recentAnalyses
-    .reverse()
-    .map((a) => {
-      const m = countMap.get(a.id) ?? new Map<string, number>();
-      return {
-        analysisId: a.id,
-        date: a.createdAt.toISOString(),
-        branch: a.branch,
-        total: m.get('total') ?? 0,
-        new: m.get('status:new') ?? 0,
-        unchanged: m.get('status:unchanged') ?? 0,
-        resolved: m.get('status:resolved') ?? 0,
-        critical: m.get('severity:critical') ?? 0,
-        high: m.get('severity:high') ?? 0,
-        medium: m.get('severity:medium') ?? 0,
-        low: m.get('severity:low') ?? 0,
-        info: m.get('severity:info') ?? 0,
-      };
-    });
+  const points: TrendDataPoint[] = entries.map((e) => {
+    const sev = e.counts.violations.bySeverity;
+    const total = e.counts.violations.new + e.counts.violations.unchanged;
+    return {
+      analysisId: e.id,
+      date: e.createdAt,
+      branch: e.branch,
+      total,
+      new: e.counts.violations.new,
+      unchanged: e.counts.violations.unchanged,
+      resolved: e.counts.violations.resolved,
+      critical: sev.critical ?? 0,
+      high: sev.high ?? 0,
+      medium: sev.medium ?? 0,
+      low: sev.low ?? 0,
+      info: sev.info ?? 0,
+    };
+  });
 
   return { points };
 }
 
 // ---------------------------------------------------------------------------
-// Breakdown: type & severity distribution for latest analysis
+// Breakdown — category × severity
 // ---------------------------------------------------------------------------
 
-export async function getBreakdown(
+export function getBreakdown(
+  repoPath: string,
   branch?: string,
   specificAnalysisId?: string,
-): Promise<BreakdownResponse> {
-  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(branch);
-  if (!analysisId) return { byCategory: {}, bySeverity: {}, total: 0 };
-
-  // Category is the first segment of ruleKey (e.g. 'security/deterministic/foo' → 'security').
-  // Done in SQL via split_part so we can GROUP BY directly.
-  const allByCategory = await db
-    .select({
-      category: sql<string>`split_part(${violations.ruleKey}, '/', 1)`,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(violations)
-    .where(
-      and(
-        eq(violations.analysisId, analysisId),
-        inArray(violations.status, ['new', 'unchanged']),
-      ),
-    )
-    .groupBy(sql`split_part(${violations.ruleKey}, '/', 1)`);
-
-  const allBySeverity = await db
-    .select({
-      severity: violations.severity,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(violations)
-    .where(
-      and(
-        eq(violations.analysisId, analysisId),
-        inArray(violations.status, ['new', 'unchanged']),
-      ),
-    )
-    .groupBy(violations.severity);
-
+): BreakdownResponse {
+  const violations = loadActiveViolations(repoPath, branch, specificAnalysisId);
   const byCategory: Record<string, number> = {};
-  for (const row of allByCategory) {
-    if (!row.category) continue;
-    byCategory[row.category] = (byCategory[row.category] ?? 0) + row.count;
-  }
-
   const bySeverity: Record<string, number> = {};
-  for (const row of allBySeverity) {
-    bySeverity[row.severity] = (bySeverity[row.severity] ?? 0) + row.count;
-  }
+  let total = 0;
 
-  const total = Object.values(byCategory).reduce((a, b) => a + b, 0);
+  for (const v of violations) {
+    const category = v.ruleKey.split('/')[0] || 'unknown';
+    byCategory[category] = (byCategory[category] ?? 0) + 1;
+    bySeverity[v.severity] = (bySeverity[v.severity] ?? 0) + 1;
+    total++;
+  }
 
   return { byCategory, bySeverity, total };
 }
 
 // ---------------------------------------------------------------------------
-// Top Offenders: services/modules ranked by violation count
+// Top offenders
 // ---------------------------------------------------------------------------
 
-export async function getTopOffenders(
+export function getTopOffenders(
+  repoPath: string,
   branch?: string,
   specificAnalysisId?: string,
-): Promise<TopOffendersResponse> {
-  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(branch);
-  if (!analysisId) return { offenders: [], analysisId: '' };
+): TopOffendersResponse {
+  const latest = readLatest(repoPath);
+  const analysisId = specificAnalysisId
+    ? specificAnalysisId
+    : latest?.analysis.id ?? '';
+  const violations = loadActiveViolations(repoPath, branch, specificAnalysisId);
 
-  // Services with most violations
-  const serviceRows = await db
-    .select({
-      id: services.id,
-      name: services.name,
-      violationCount: sql<number>`count(${violations.id})::int`,
-      criticalCount: sql<number>`count(*) filter (where ${violations.severity} = 'critical')::int`,
-      highCount: sql<number>`count(*) filter (where ${violations.severity} = 'high')::int`,
-    })
-    .from(services)
-    .innerJoin(violations, eq(violations.targetServiceId, services.id))
-    .where(
-      and(
-        eq(services.analysisId, analysisId),
-        eq(violations.analysisId, analysisId),
-        inArray(violations.status, ['new', 'unchanged']),
-      ),
-    )
-    .groupBy(services.id, services.name)
-    .orderBy(sql`count(${violations.id}) desc`)
-    .limit(10);
+  const byService = new Map<string, { name: string; total: number; critical: number; high: number }>();
+  const byModule = new Map<string, { name: string; total: number; critical: number; high: number }>();
 
-  // Modules with most violations
-  const moduleRows = await db
-    .select({
-      id: modules.id,
-      name: modules.name,
-      violationCount: sql<number>`count(${violations.id})::int`,
-      criticalCount: sql<number>`count(*) filter (where ${violations.severity} = 'critical')::int`,
-      highCount: sql<number>`count(*) filter (where ${violations.severity} = 'high')::int`,
-    })
-    .from(modules)
-    .innerJoin(violations, eq(violations.targetModuleId, modules.id))
-    .where(
-      and(
-        eq(modules.analysisId, analysisId),
-        eq(violations.analysisId, analysisId),
-        inArray(violations.status, ['new', 'unchanged']),
-      ),
-    )
-    .groupBy(modules.id, modules.name)
-    .orderBy(sql`count(${violations.id}) desc`)
-    .limit(10);
+  for (const v of violations) {
+    if (v.targetServiceId && v.targetServiceName) {
+      const key = v.targetServiceId;
+      const entry = byService.get(key) ?? { name: v.targetServiceName, total: 0, critical: 0, high: 0 };
+      entry.total++;
+      if (v.severity === 'critical') entry.critical++;
+      if (v.severity === 'high') entry.high++;
+      byService.set(key, entry);
+    }
+    if (v.targetModuleId && v.targetModuleName) {
+      const key = v.targetModuleId;
+      const entry = byModule.get(key) ?? { name: v.targetModuleName, total: 0, critical: 0, high: 0 };
+      entry.total++;
+      if (v.severity === 'critical') entry.critical++;
+      if (v.severity === 'high') entry.high++;
+      byModule.set(key, entry);
+    }
+  }
 
-  // Combine, sort by violation count, take top 10
-  const offenders: TopOffender[] = [
-    ...serviceRows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      kind: 'service' as const,
-      violationCount: r.violationCount,
-      criticalCount: r.criticalCount,
-      highCount: r.highCount,
-    })),
-    ...moduleRows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      kind: 'module' as const,
-      violationCount: r.violationCount,
-      criticalCount: r.criticalCount,
-      highCount: r.highCount,
-    })),
-  ]
+  const toOffender = (kind: 'service' | 'module') =>
+    ([id, v]: [string, { name: string; total: number; critical: number; high: number }]): TopOffender => ({
+      kind,
+      id,
+      name: v.name,
+      violationCount: v.total,
+      criticalCount: v.critical,
+      highCount: v.high,
+    });
+
+  const services = [...byService.entries()]
+    .map(toOffender('service'))
+    .sort((a, b) => b.violationCount - a.violationCount)
+    .slice(0, 10);
+  const modules = [...byModule.entries()]
+    .map(toOffender('module'))
+    .sort((a, b) => b.violationCount - a.violationCount)
+    .slice(0, 10);
+
+  const offenders = [...services, ...modules]
     .sort((a, b) => b.violationCount - a.violationCount)
     .slice(0, 10);
 
@@ -247,101 +136,109 @@ export async function getTopOffenders(
 }
 
 // ---------------------------------------------------------------------------
-// Resolution: velocity metrics across all analyses
+// Resolution
 // ---------------------------------------------------------------------------
 
-export async function getResolution(branch?: string): Promise<ResolutionResponse> {
-  const conditions = [notDiffAnalysis];
-  if (branch) conditions.push(eq(analyses.branch, branch));
+export function getResolution(repoPath: string, branch?: string): ResolutionResponse {
+  const files = listAnalyses(repoPath);
+  const staleThresholdMs = Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000;
 
-  // Get all analysis IDs (non-diff)
-  const repoAnalyses = await db
-    .select({ id: analyses.id })
-    .from(analyses)
-    .where(and(...conditions));
+  let totalResolved = 0;
+  let totalActive = 0;
+  let staleCount = 0;
+  let timeSum = 0;
+  let timeCount = 0;
 
-  if (repoAnalyses.length === 0) {
-    return {
-      avgTimeToResolveMs: null,
-      totalResolved: 0,
-      totalActive: 0,
-      resolutionRate: 0,
-      staleCount: 0,
-      staleDays: 7,
-    };
+  // Walk snapshot files once to count resolved + compute avg time-to-resolve
+  // from (resolvedAt - firstSeenAt) on each resolved row.
+  const firstSeenByViolationId = new Map<string, string>();
+  for (const name of files) {
+    const snap = readAnalysis(repoPath, name);
+    if (!snap) continue;
+    if (branch && snap.branch !== branch) continue;
+    if (isDiff({ metadata: snap.metadata })) continue;
+
+    for (const v of snap.violations.added) {
+      if (v.firstSeenAt) firstSeenByViolationId.set(v.id, v.firstSeenAt);
+    }
+    for (const r of snap.violations.resolved) {
+      totalResolved++;
+      const firstSeen = firstSeenByViolationId.get(r.id);
+      if (firstSeen) {
+        const delta = Date.parse(r.resolvedAt) - Date.parse(firstSeen);
+        if (delta > 0) {
+          timeSum += delta;
+          timeCount++;
+        }
+      }
+    }
   }
 
-  // Find the latest analysis to count active violations
-  const latestAnalysisId = await findLatestAnalysisId(branch);
-  if (!latestAnalysisId) {
-    return {
-      avgTimeToResolveMs: null,
-      totalResolved: 0,
-      totalActive: 0,
-      resolutionRate: 0,
-      staleCount: 0,
-      staleDays: 7,
-    };
+  const latest = readLatest(repoPath);
+  if (latest) {
+    for (const v of latest.violations) {
+      if (v.status === 'new' || v.status === 'unchanged') {
+        totalActive++;
+        if (v.firstSeenAt && Date.parse(v.firstSeenAt) < staleThresholdMs) staleCount++;
+      }
+    }
   }
 
-  const analysisIds = repoAnalyses.map((a) => a.id);
-
-  // Average resolution time for all resolved violations
-  const [resolution] = await db
-    .select({
-      avgMs: sql<number>`avg(extract(epoch from (${violations.resolvedAt} - ${violations.firstSeenAt})) * 1000)::float`,
-      totalResolved: sql<number>`count(*) filter (where ${violations.status} = 'resolved')::int`,
-    })
-    .from(violations)
-    .where(
-      and(
-        inArray(violations.analysisId, analysisIds),
-        eq(violations.status, 'resolved'),
-        sql`${violations.firstSeenAt} is not null`,
-        sql`${violations.resolvedAt} is not null`,
-      ),
-    );
-
-  // Active violations in latest analysis
-  const [activeResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(violations)
-    .where(
-      and(
-        eq(violations.analysisId, latestAnalysisId),
-        inArray(violations.status, ['new', 'unchanged']),
-      ),
-    );
-
-  // Stale violations: active in latest analysis with firstSeenAt > 7 days ago
-  const staleDays = 7;
-  const staleThreshold = sql`now() - interval '${sql.raw(String(staleDays))} days'`;
-
-  const [staleResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(violations)
-    .where(
-      and(
-        eq(violations.analysisId, latestAnalysisId),
-        inArray(violations.status, ['new', 'unchanged']),
-        sql`${violations.firstSeenAt} < ${staleThreshold}`,
-      ),
-    );
-
-  const totalResolved = resolution?.totalResolved ?? 0;
-  const totalActive = activeResult?.count ?? 0;
-  const staleCount = staleResult?.count ?? 0;
-  const avgTimeToResolveMs = totalResolved > 0 ? (resolution?.avgMs ?? null) : null;
-
-  const totalEver = totalResolved + totalActive;
-  const resolutionRate = totalEver > 0 ? totalResolved / totalEver : 0;
+  const resolutionRate =
+    totalResolved + totalActive > 0 ? totalResolved / (totalResolved + totalActive) : 0;
 
   return {
-    avgTimeToResolveMs,
+    avgTimeToResolveMs: timeCount > 0 ? Math.round(timeSum / timeCount) : null,
     totalResolved,
     totalActive,
     resolutionRate,
     staleCount,
-    staleDays,
+    staleDays: STALE_DAYS,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function isDiff(entry: { metadata: Record<string, unknown> | null }): boolean {
+  return entry.metadata?.isDiffAnalysis === true;
+}
+
+function loadActiveViolations(
+  repoPath: string,
+  branch?: string,
+  specificAnalysisId?: string,
+): ViolationWithNames[] {
+  const latest = readLatest(repoPath);
+  if (!latest) return [];
+
+  if (specificAnalysisId && latest.analysis.id !== specificAnalysisId) {
+    for (const name of listAnalyses(repoPath).reverse()) {
+      const snap = readAnalysis(repoPath, name);
+      if (snap?.id === specificAnalysisId) {
+        const serviceById = new Map(snap.graph.services.map((s) => [s.id, s.name]));
+        const moduleById = new Map(snap.graph.modules.map((m) => [m.id, m.name]));
+        const methodById = new Map(snap.graph.methods.map((m) => [m.id, m.name]));
+        const databaseById = new Map(snap.graph.databases.map((d) => [d.id, d.name]));
+        return snap.violations.added.map((v) => ({
+          ...v,
+          targetServiceName: v.targetServiceId ? serviceById.get(v.targetServiceId) ?? null : null,
+          targetModuleName: v.targetModuleId ? moduleById.get(v.targetModuleId) ?? null : null,
+          targetMethodName: v.targetMethodId ? methodById.get(v.targetMethodId) ?? null : null,
+          targetDatabaseName: v.targetDatabaseId ? databaseById.get(v.targetDatabaseId) ?? null : null,
+        }));
+      }
+    }
+    return [];
+  }
+
+  if (branch && latest.analysis.branch !== branch) return [];
+
+  return latest.violations.filter((v) => v.status === 'new' || v.status === 'unchanged');
+}
+
+export function listHistoryEntries(repoPath: string): HistoryEntry[] {
+  const h = readHistory(repoPath);
+  return [...h.analyses].reverse();
 }

@@ -1,12 +1,16 @@
 {
   "name": "@truecourse/server",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "exports": {
     "./analyze": {
       "types": "./dist/commands/analyze-in-process.d.ts",
       "import": "./dist/commands/analyze-in-process.js"
+    },
+    "./diff": {
+      "types": "./dist/commands/diff-in-process.d.ts",
+      "import": "./dist/commands/diff-in-process.js"
     },
     "./progress": {
       "types": "./dist/socket/handlers.d.ts",
@@ -24,10 +28,6 @@
       "types": "./dist/config/project-config.d.ts",
       "import": "./dist/config/project-config.js"
     },
-    "./config/database": {
-      "types": "./dist/config/database.d.ts",
-      "import": "./dist/config/database.js"
-    },
     "./lib/logger": {
       "types": "./dist/lib/logger.d.ts",
       "import": "./dist/lib/logger.js"
@@ -35,22 +35,17 @@
   },
   "scripts": {
     "dev": "TRUECOURSE_DEV=1 tsx watch src/index.ts",
-    "build": "tsc && node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "build": "tsc",
     "start": "node dist/index.js",
-    "clean": "rm -rf dist",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.4.4",
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "chokidar": "^4.0.0",
     "cors": "^2.8.5",
     "dagre": "^0.8.5",
     "dotenv": "^16.4.0",
-    "drizzle-orm": "^0.38.0",
     "express": "^4.21.0",
     "posthog-node": "^4.0.0",
     "simple-git": "^3.27.0",
@@ -63,7 +58,6 @@
     "@types/dagre": "^0.7.52",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
-    "drizzle-kit": "^0.30.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

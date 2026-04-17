@@ -1,10 +1,10 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import {
-  getTrend,
   getBreakdown,
-  getTopOffenders,
   getResolution,
+  getTopOffenders,
+  getTrend,
 } from '../services/analytics.service.js';
 
 const router: Router = Router();
@@ -17,8 +17,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-      resolveProjectForRequest(id);
-      res.json(await getTrend(branch, limit));
+      const repo = resolveProjectForRequest(id);
+      res.json(getTrend(repo.path, branch, limit));
     } catch (err) {
       next(err);
     }
@@ -33,8 +33,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const analysisId = req.query.analysisId as string | undefined;
-      resolveProjectForRequest(id);
-      res.json(await getBreakdown(branch, analysisId));
+      const repo = resolveProjectForRequest(id);
+      res.json(getBreakdown(repo.path, branch, analysisId));
     } catch (err) {
       next(err);
     }
@@ -49,8 +49,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const analysisId = req.query.analysisId as string | undefined;
-      resolveProjectForRequest(id);
-      res.json(await getTopOffenders(branch, analysisId));
+      const repo = resolveProjectForRequest(id);
+      res.json(getTopOffenders(repo.path, branch, analysisId));
     } catch (err) {
       next(err);
     }
@@ -64,8 +64,8 @@ router.get(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
-      resolveProjectForRequest(id);
-      res.json(await getResolution(branch));
+      const repo = resolveProjectForRequest(id);
+      res.json(getResolution(repo.path, branch));
     } catch (err) {
       next(err);
     }

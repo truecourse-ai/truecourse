@@ -1,12 +1,9 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq } from 'drizzle-orm';
+import path from 'node:path';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
-import { getGit } from '../lib/git.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import { readProjectConfig } from '../config/project-config.js';
-import { db, initializeProjectDb, withProjectDb } from '../config/database.js';
-import { analyses } from '../db/schema.js';
 import { analyzeInProcess } from '../commands/analyze-in-process.js';
 import {
   buildAnalysisSteps,
@@ -25,15 +22,7 @@ import {
 import { createLLMProvider } from '../services/llm/provider.js';
 import { trackEvent, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
 import { log, popLogger, pushLogger } from '../lib/logger.js';
-import path from 'node:path';
 
-/**
- * Routes that trigger or cancel analysis. Mounted WITHOUT `projectResolver`
- * because POST /analyze creates the project's PGlite on first run —
- * `projectResolver` would reject with NO_PROJECT_DB before the handler could
- * bootstrap it. Everything inside the handler that reads/writes the DB is
- * scoped via its own `withProjectDb`.
- */
 const router: Router = Router();
 
 // POST /api/repos/:id/analyze
@@ -53,44 +42,15 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
       : (projectConfig.enabledCategories ?? undefined);
     const effectiveLlmRules = projectConfig.enableLlmRules ?? enableLlmRules;
 
-    let branch: string | null = null;
-    let commitHash: string | null = null;
-    if (!skipGit) {
-      const git = await getGit(repo.path);
-      branch = (await git.branch()).current || null;
-      commitHash = (await git.revparse(['HEAD'])).trim();
-    }
-
-    // Bootstrap .truecourse/db/ on first run so the subsequent `withProjectDb`
-    // can open it. Also invalidates any stale cache entry if the user
-    // deleted the DB dir while the server was running.
-    await initializeProjectDb(repo);
-
-    // Insert the `running` row synchronously so the client gets a real
-    // analysisId in the 202. `analyzeInProcess` reuses it via
-    // `existingAnalysisId`.
-    const runningAnalysisId = await withProjectDb(repo, async () => {
-      const [row] = await db
-        .insert(analyses)
-        .values({
-          id: crypto.randomUUID(),
-          branch,
-          status: 'running',
-          architecture: 'unknown',
-          commitHash,
-        })
-        .returning();
-      return row.id;
-    });
+    // Register for cancellation before we start so the `cancel` route can
+    // find this run. The analysisId is assigned inside `analyzeInProcess`,
+    // so we correlate by repo id on the socket events.
+    const abortController = registerAnalysis(id, 'pending');
 
     res.status(202).json({
       message: 'Analysis started',
       repoId: id,
-      branch,
-      analysisId: runningAnalysisId,
     });
-
-    const abortController = registerAnalysis(id, runningAnalysisId);
 
     const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
     const tracker = createSocketTracker(id, trackerSteps);
@@ -102,9 +62,6 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
       provider.setAbortSignal(abortController.signal);
     }
 
-    // Route the pipeline's internal logs into the target repo's analyze.log
-    // for the duration of this request. Route-level events (above) stay in
-    // the dashboard log. popLogger in finally restores the dashboard sink.
     pushLogger({
       filePath: path.join(repo.path, '.truecourse/logs/analyze.log'),
       tee: process.env.TRUECOURSE_DEV === '1',
@@ -112,9 +69,6 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
 
     try {
       const outcome = await analyzeInProcess(repo, {
-        existingAnalysisId: runningAnalysisId,
-        branch,
-        commitHash,
         skipGit,
         enabledCategoriesOverride: effectiveCategories,
         enableLlmRulesOverride: effectiveLlmRules,
@@ -128,7 +82,6 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
 
             io.to(room).emit('analysis:llm-estimate', {
               repoId: id,
-              analysisId: runningAnalysisId,
               estimate: {
                 totalEstimatedTokens: estimate.totalEstimatedTokens,
                 tiers: estimate.tiers,
@@ -142,13 +95,10 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
               resolve(true);
             }, 60_000);
 
-            function onProceed(data: { analysisId: string; proceed: boolean }) {
-              if (data.analysisId !== runningAnalysisId) return;
+            function onProceed(data: { repoId: string; proceed: boolean }) {
+              if (data.repoId !== id) return;
               cleanup();
-              io.to(room).emit('analysis:llm-resolved', {
-                analysisId: runningAnalysisId,
-                proceed: data.proceed,
-              });
+              io.to(room).emit('analysis:llm-resolved', { repoId: id, proceed: data.proceed });
               resolve(data.proceed);
             }
 
@@ -200,13 +150,7 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
 router.post('/:id/analyze/cancel', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const repo = resolveProjectForRequest(id);
     const canceled = cancelAnalysis(id);
-    if (canceled) {
-      await withProjectDb(repo, async () => {
-        await db.update(analyses).set({ status: 'cancelling' }).where(eq(analyses.status, 'running'));
-      });
-    }
     res.json({ message: canceled ? 'Analysis cancelling' : 'No active analysis' });
   } catch (error) {
     next(error);

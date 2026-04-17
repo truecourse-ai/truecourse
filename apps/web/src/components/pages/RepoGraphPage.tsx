@@ -143,11 +143,10 @@ export default function RepoGraphPage() {
     if (tab && tab !== 'home') {
       url.searchParams.set('tab', tab);
     } else {
-      // Home is the default landing. Strip every tab-scoped query param so the
-      // URL is just /repos/:id. In-memory state (depthLevel, scope IDs, open
-      // files/flows, diff mode) is preserved and re-serialized to the URL
-      // when the user navigates back to the owning tab.
-      for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'view']) {
+      // Home is the default landing. Strip tab-scoped params so the URL
+      // shortens to /repos/:id, but keep `view=diff` — diff mode is a
+      // page-level mode that home now renders alongside the default view.
+      for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
         url.searchParams.delete(key);
       }
     }
@@ -883,6 +882,31 @@ export default function RepoGraphPage() {
         currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
       />
 
+      {/* Page-level banners — span full width above both sidebar and main. */}
+      {!showingCodeViewer && isViewingHistory && selectedAnalysis && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <span>
+            Viewing analysis from{' '}
+            {new Date(selectedAnalysis.createdAt).toLocaleString([], {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            })}{' '}
+            — not the latest
+          </span>
+          <button
+            className="underline hover:text-amber-400 transition-colors"
+            onClick={() => setSelectedAnalysisId(null)}
+          >
+            Return to latest
+          </button>
+        </div>
+      )}
+      {isDiffMode && diffResult?.diffAnalysisId && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <span>Showing working tree state (uncommitted changes)</span>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
         <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} badgeCounts={{
@@ -1049,33 +1073,6 @@ export default function RepoGraphPage() {
                   </div>
                 );
               })}
-            </div>
-          )}
-
-          {/* Historical analysis banner — only on graph tab */}
-          {!showingCodeViewer && isViewingHistory && selectedAnalysis && (
-            <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
-              <span>
-                Viewing analysis from{' '}
-                {new Date(selectedAnalysis.createdAt).toLocaleString([], {
-                  dateStyle: 'medium',
-                  timeStyle: 'short',
-                })}{' '}
-                — not the latest
-              </span>
-              <button
-                className="underline hover:text-amber-400 transition-colors"
-                onClick={() => setSelectedAnalysisId(null)}
-              >
-                Return to latest
-              </button>
-            </div>
-          )}
-
-          {/* Diff mode banner */}
-          {isDiffMode && diffResult?.diffAnalysisId && (
-            <div className="flex shrink-0 items-center justify-center gap-2 bg-blue-500/10 border-b border-blue-500/30 px-4 py-1.5 text-xs text-blue-400">
-              <span>Showing working tree state (uncommitted changes)</span>
             </div>
           )}
 
@@ -1311,13 +1308,13 @@ export default function RepoGraphPage() {
           <div className="flex gap-2">
             <button
               className="flex-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
-              onClick={() => respondToLlmEstimate(llmEstimate.analysisId, true)}
+              onClick={() => respondToLlmEstimate(llmEstimate.repoId, true)}
             >
               Run LLM rules
             </button>
             <button
               className="flex-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-              onClick={() => respondToLlmEstimate(llmEstimate.analysisId, false)}
+              onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
             >
               Skip
             </button>

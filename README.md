@@ -18,8 +18,6 @@
 
 TrueCourse analyzes your codebase architecture and code to detect violations that traditional linters miss — circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, and more. It combines tree-sitter static analysis with LLM-powered review to surface findings with fix suggestions.
 
-Everything runs locally on your machine. Your code never leaves your environment.
-
 <p align="center">
   <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
 </p>
@@ -45,39 +43,32 @@ Everything runs locally on your machine. Your code never leaves your environment
 ## Quick Start
 
 ```bash
-npx truecourse setup     # One-time: configure LLM provider
-npx truecourse start     # Start the server (embedded Postgres, no Docker)
+cd <your-repo>
+npx truecourse analyze      # Runs the full analysis in-process
+npx truecourse dashboard    # Opens the web UI in your browser
 ```
 
-Then `cd` into any repo and:
+No setup step. TrueCourse creates `.truecourse/` in your repo on first analyze and stores everything there as plain JSON files — no database, no daemon.
 
-```bash
-npx truecourse analyze   # Analyze repo, print violations
-```
-
-On first run, the setup wizard configures your LLM provider:
-
-- **Claude Code CLI** (Recommended) — uses your Claude Code subscription, no API key needed
-- **Anthropic API** — requires an Anthropic API key
-- **OpenAI API** — requires an OpenAI API key
+TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for LLM-powered rules. If `claude` isn't on your PATH, deterministic rules still run and LLM rules are skipped.
 
 ## CLI Commands
 
 ```bash
-# Core
-truecourse setup                      # Configure LLM provider
-truecourse start                      # Start server (embedded Postgres)
-truecourse stop                       # Stop background service
-truecourse dashboard                  # Open web UI in browser
-
 # Analysis
-truecourse analyze                    # Analyze current repo
-truecourse analyze --diff             # New/resolved violations from uncommitted changes
+truecourse analyze                    # Analyze current repo (in-process, no server required)
+truecourse analyze --diff             # New/resolved violations from your uncommitted changes
 truecourse list                       # Show violations from latest analysis
 truecourse list --all                 # Show all violations (no pagination)
 truecourse list --diff                # Show diff check results
 truecourse add                        # Register repo without analyzing
 
+# Dashboard (web UI)
+truecourse dashboard                  # Start + open the dashboard
+truecourse dashboard stop             # Stop the dashboard
+truecourse dashboard status           # Show dashboard status
+truecourse dashboard logs             # Tail dashboard logs (service mode only)
+truecourse dashboard uninstall        # Remove the background service
 ```
 
 ### Rules
@@ -104,19 +95,6 @@ TrueCourse can install a pre-commit hook that blocks commits with critical viola
 truecourse hooks install              # Install pre-commit hook
 truecourse hooks uninstall            # Remove pre-commit hook
 truecourse hooks status               # Show hook installation status
-```
-
-### Managing the Background Service
-
-When you choose "Background service" during setup, TrueCourse runs as a system service (launchd on macOS, systemd on Linux). These commands let you manage it directly:
-
-```bash
-truecourse service status             # Show service status
-truecourse service start              # Start the service
-truecourse service stop               # Stop the service
-truecourse service install            # Install as background service
-truecourse service uninstall          # Remove background service
-truecourse service logs               # Tail service logs
 ```
 
 ### Telemetry
@@ -186,11 +164,7 @@ Run `truecourse add` to install skills to `.claude/skills/truecourse/` in your p
 ## Prerequisites
 
 - Node.js >= 20
-- One of:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed (recommended, no API key needed)
-  - An Anthropic or OpenAI API key
-
-No database setup, no Docker. Everything runs locally.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH. Deterministic rules run without it, LLM-powered rules need it.
 
 ## Development
 
@@ -198,11 +172,12 @@ No database setup, no Docker. Everything runs locally.
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-cp .env.example .env    # Add your API key
-pnpm dev                # Start all services
+pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
 pnpm test               # Run tests
 pnpm build              # Build all packages
 ```
+
+`pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
 ## Telemetry
 

@@ -1,12 +1,6 @@
-import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { db } from '../config/database.js';
-import {
-  services,
-  violations,
-} from '../db/schema.js';
 import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
@@ -17,10 +11,12 @@ import { createLLMProvider, type LLMProvider, type CodeViolationContext, type Co
 import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
-  persistViolationsWithLifecycle,
-  persistFileViolationsWithLifecycle,
+  computeFileViolationLifecycle,
+  computeViolationLifecycle,
+  type ActiveViolation,
 } from './violation-lifecycle.service.js';
 import { log } from '../lib/logger.js';
+import type { ResolvedViolationRef, ViolationRecord } from '../types/snapshot.js';
 
 /** Throw if the abort signal has been triggered. */
 function throwIfAborted(signal?: AbortSignal) {
@@ -34,37 +30,15 @@ function throwIfAborted(signal?: AbortSignal) {
 export interface ViolationPipelineInput {
   repoPath: string;
   analysisId: string;
+  /** ISO timestamp to stamp on every violation created this run. */
+  now: string;
   result: AnalysisResult;
   serviceIdMap: Map<string, string>;
   moduleIdMap: Map<string, string>;
   methodIdMap: Map<string, string>;
   dbIdMap: Map<string, string>;
-  /** Previous active violations for lifecycle tracking (both arch and code) */
-  previousActiveViolations: {
-    id: string;
-    type: string;
-    title: string;
-    content: string;
-    severity: string;
-    targetServiceId: string | null;
-    targetServiceName: string | null;
-    targetDatabaseId: string | null;
-    targetModuleId: string | null;
-    targetModuleName: string | null;
-    targetMethodId: string | null;
-    targetMethodName: string | null;
-    targetTable: string | null;
-    fixPrompt: string | null;
-    ruleKey: string;
-    firstSeenAnalysisId: string | null;
-    firstSeenAt: Date | null;
-    filePath: string | null;
-    lineStart: number | null;
-    lineEnd: number | null;
-    columnStart: number | null;
-    columnEnd: number | null;
-    snippet: string | null;
-  }[];
+  /** Previous active violations loaded from the prior LATEST snapshot. */
+  previousActiveViolations: ActiveViolation[];
   /** If set, only run code rules on these files (for diff mode performance) */
   changedFileSet?: Set<string>;
   /** Progress callback (legacy — prefer tracker) */
@@ -84,15 +58,16 @@ export interface ViolationPipelineInput {
 }
 
 export interface ViolationPipelineResult {
+  /** Descriptions generated for services — orchestrator applies these to graph.services. */
   serviceDescriptions: { id: string; description: string }[];
-  /** For diff mode: new violations from LLM + deterministic */
-  newViolations?: DiffViolationItem[];
-  /** For diff mode: resolved violation IDs */
-  resolvedViolationIds?: string[];
-  /** All new code violations (deterministic + LLM) */
-  codeViolations: CodeViolation[];
-  /** Number of resolved code violations (for badge counts) */
-  codeResolvedCount: number;
+  /** Full violation rows to go into AnalysisSnapshot.violations.added + LATEST.violations. */
+  added: ViolationRecord[];
+  /** Full violation rows to go into AnalysisSnapshot.violations.resolved (for per-analysis history). */
+  resolved: ViolationRecord[];
+  /** Carried-forward rows — go into LATEST.violations only (not the per-analysis delta). */
+  unchanged: ViolationRecord[];
+  /** Compact refs for AnalysisSnapshot.violations.resolved (saves space in delta). */
+  resolvedRefs: ResolvedViolationRef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -126,17 +101,12 @@ export function compareDeterministicViolations<
 
   for (const [key, cur] of currentByKey) {
     const prev = previousByKey.get(key);
-    if (prev) {
-      unchangedDetections.push({ current: cur, previous: prev });
-    } else {
-      newDetections.push(cur);
-    }
+    if (prev) unchangedDetections.push({ current: cur, previous: prev });
+    else newDetections.push(cur);
   }
 
   for (const [key, prev] of previousByKey) {
-    if (!currentByKey.has(key)) {
-      resolvedDetections.push(prev);
-    }
+    if (!currentByKey.has(key)) resolvedDetections.push(prev);
   }
 
   return { newDetections, unchangedDetections, resolvedDetections };
@@ -146,15 +116,9 @@ export function compareDeterministicViolations<
 // Pipeline
 // ---------------------------------------------------------------------------
 
-/**
- * Shared violation pipeline used by both normal and diff analysis routes.
- * Two separate flows:
- * 1. Deterministic: code-handled lifecycle (compare programmatically, persist new)
- * 2. LLM rules: LLM-handled lifecycle (only LLM-discovered previous violations)
- */
 export async function runViolationPipeline(input: ViolationPipelineInput): Promise<ViolationPipelineResult> {
   const {
-    repoPath, analysisId, result,
+    repoPath, analysisId, now, result,
     serviceIdMap, moduleIdMap, methodIdMap, dbIdMap,
     previousActiveViolations,
     changedFileSet, onProgress, tracker,
@@ -164,12 +128,28 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     signal,
   } = input;
 
-  // Derive code violations from the unified previousActiveViolations list
-  const previousActiveCodeViolations = previousActiveViolations.filter(
-    (v) => v.filePath != null,
-  );
+  const added: ViolationRecord[] = [];
+  const unchanged: ViolationRecord[] = [];
+  const resolved: ViolationRecord[] = [];
+  const resolvedRefs: ResolvedViolationRef[] = [];
 
-  // 1. Load rules (filter to enabled categories/domains, and filter out LLM rules if disabled)
+  // Accumulate names alongside the target IDs — the orchestrator needs them
+  // to write LATEST.violations (denormalized) and they help downstream
+  // debugging.
+  const serviceIdToName = new Map<string, string>();
+  const moduleIdToName = new Map<string, string>();
+  const methodIdToName = new Map<string, string>();
+  const databaseIdToName = new Map<string, string>();
+  for (const [name, id] of serviceIdMap) serviceIdToName.set(id, name);
+  for (const [key, id] of moduleIdMap) moduleIdToName.set(id, key.split('::')[1]);
+  for (const [key, id] of methodIdMap) methodIdToName.set(id, key.split('::')[2]);
+  for (const [name, id] of dbIdMap) databaseIdToName.set(id, name);
+
+  const previousActiveCodeViolations = previousActiveViolations.filter((v) => v.filePath != null);
+
+  // ---------------------------------------------------------------------------
+  // 1. Load rules
+  // ---------------------------------------------------------------------------
   let allRules = (await getEnabledRules())
     .filter((r) => !enabledCategories || enabledCategories.includes(r.domain ?? r.category))
     .filter((r) => enableLlmRules !== false || r.type !== 'llm');
@@ -196,7 +176,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     : (result.fileAnalyses || []).map((fa) => ({ filePath: fa.filePath, resolve: !path.isAbsolute(fa.filePath) }));
 
   // ---------------------------------------------------------------------------
-  // 2. Scan files + build TypeQuery (always, once)
+  // 2. Scan files + build TypeQuery
   // ---------------------------------------------------------------------------
   const hasLlm = enabledLlm.length > 0;
   if (hasLlm) tracker?.start('scan', 'Reading files...');
@@ -230,10 +210,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  // Build schema index from the analyzer's existing databaseResult.
-  // Wraps Drizzle/Prisma/SQLAlchemy parser output in a fast lookup so visitors
-  // (currently missing-unique-constraint) can answer "is users.email unique?"
-  // with real schema data instead of name-based heuristics.
   let schemaIndex: SchemaIndex | undefined;
   if (hasSchemaAwareVisitors(enabledCodeKeys)) {
     schemaIndex = buildSchemaIndex(result.databaseResult);
@@ -242,7 +218,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (hasLlm) tracker?.done('scan', `${fileContents.size} files`);
 
   // ---------------------------------------------------------------------------
-  // 3. LLM estimate + confirmation (only when LLM enabled)
+  // 3. LLM estimate + confirmation
   // ---------------------------------------------------------------------------
   if (hasLlm && input.onLlmEstimate) {
     const codeEstimate = enabledLlmCodeRules.length > 0 && fileContents.size > 0
@@ -284,7 +260,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   throwIfAborted(signal);
 
   // ---------------------------------------------------------------------------
-  // 4. Run deterministic checks per domain
+  // 4. Deterministic checks per domain
   // ---------------------------------------------------------------------------
   onProgress?.({ step: 'analyzing', percent: 80, detail: 'Running deterministic checks...' });
   const serviceViolationResults: ServiceViolation[] = [];
@@ -294,10 +270,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   for (const domain of DOMAIN_ORDER) {
     const stepKey = `${domain}`;
     const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
-    if (domainRules.length === 0) {
-      tracker?.done(stepKey);
-      continue;
-    }
+    if (domainRules.length === 0) { tracker?.done(stepKey); continue; }
 
     tracker?.start(stepKey);
 
@@ -308,28 +281,22 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
       tracker?.detail(stepKey, 'Method checks...');
       methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
-      // Architecture count is finalized further down, after arch-domain
-      // code rules are merged into moduleViolationResults. Logged there so
-      // the numbers match the persisted total.
       tracker?.detail(stepKey, 'Deterministic checks done');
     }
   }
 
   // ---------------------------------------------------------------------------
-  // 5. Run code-level deterministic rules (files already scanned)
+  // 5. Code-level deterministic rules
   // ---------------------------------------------------------------------------
-  let allCodeViolations: CodeViolation[] = [];
+  const allCodeViolations: CodeViolation[] = [];
 
   if (enabledCodeRules.length > 0 && filesToScan.length > 0) {
     for (const domain of DOMAIN_ORDER) {
       if (domain === 'architecture') continue;
       const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
-      if (domainRules.length > 0) {
-        tracker?.start(`${domain}`);
-      }
+      if (domainRules.length > 0) tracker?.start(`${domain}`);
     }
 
-    // Yield so socket events (domain step starts) flush before the sync scanning loop
     await new Promise((r) => setImmediate(r));
 
     for (const { filePath, resolve } of filesToScan) {
@@ -352,7 +319,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   log.info(`[Pipeline] Code scan: ${allCodeViolations.length} violations from ${filesToScan.length} files (${enabledCodeRules.length} det rules, ${enabledLlmCodeRules.length} LLM rules)`);
 
-  // Check pyproject.toml if the rule is enabled
   if (enabledCodeRules.some(r => r.key === 'bugs/deterministic/invalid-pyproject-toml')) {
     const pyprojectPath = path.join(repoPath, 'pyproject.toml');
     if (fs.existsSync(pyprojectPath)) {
@@ -362,19 +328,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         const tomlViolations = checkPyprojectToml(pyprojectPath, content);
         allCodeViolations.push(...tomlViolations);
       } catch {
-        // smol-toml not available or import failed — skip
+        // smol-toml not available or import failed
       }
     }
   }
 
   throwIfAborted(signal);
 
-  // Architecture-domain code violations (rules that fire from within
-  // `checkCodeRules` but carry `architecture/*` ruleKey) stay as file-level
-  // `code` violations — they have a filePath and should always be
-  // persisted. When we can match the file back to a module/service we
-  // enrich the violation with graph-node target IDs so it also shows up on
-  // the architecture graph; unmatched ones persist with just filePath.
+  // Enrich arch-code violations with graph-node target IDs when we can
+  // match the file back to a module/service.
   let archEnrichedCount = 0;
   for (const cv of allCodeViolations) {
     if (!cv.ruleKey.startsWith('architecture/')) continue;
@@ -382,36 +344,26 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       (m) => cv.filePath.endsWith(m.filePath) || m.filePath.endsWith(cv.filePath),
     );
     if (module) {
-      const moduleId = moduleIdMap.get(module.name);
+      const moduleKey = `${module.serviceName}::${module.name}::${module.filePath}`;
+      const moduleId = moduleIdMap.get(moduleKey);
       const serviceId = serviceIdMap.get(module.serviceName);
-      (cv as CodeViolation & { targetServiceId?: string; targetModuleId?: string }).targetServiceId =
-        serviceId;
-      (cv as CodeViolation & { targetServiceId?: string; targetModuleId?: string }).targetModuleId =
-        moduleId;
+      (cv as CodeViolation & { targetServiceId?: string; targetModuleId?: string }).targetServiceId = serviceId;
+      (cv as CodeViolation & { targetServiceId?: string; targetModuleId?: string }).targetModuleId = moduleId;
       archEnrichedCount++;
     }
   }
 
-  // Per-domain counts. Architecture splits across two sources:
-  //   - AST-based checks (serviceViolationResults / moduleViolationResults /
-  //     methodViolationResults) — run against the already-parsed graph.
-  //   - File-scan rules that happen to live in the `architecture/` domain —
-  //     counted directly from allCodeViolations ruleKey prefixes below.
+  // Per-domain counts
   const violationsByDomain = new Map<string, number>();
   for (const v of allCodeViolations) {
     const domain = v.ruleKey.split('/')[0];
     violationsByDomain.set(domain, (violationsByDomain.get(domain) ?? 0) + 1);
   }
-  const archAstCount =
-    serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
+  const archAstCount = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
   if (archAstCount > 0) {
-    violationsByDomain.set(
-      'architecture',
-      (violationsByDomain.get('architecture') ?? 0) + archAstCount,
-    );
+    violationsByDomain.set('architecture', (violationsByDomain.get('architecture') ?? 0) + archAstCount);
   }
 
-  // Count arch-code violations (from file scan) for the enrichment log line.
   const archFileScanCount = (violationsByDomain.get('architecture') ?? 0) - archAstCount;
   const archTotal = violationsByDomain.get('architecture') ?? 0;
   log.info(
@@ -431,37 +383,29 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       .join(', ')} (${totalDet})`,
   );
 
-  // Mark every domain done with its deterministic count. If LLM runs it
-  // will overwrite these entries with richer det+LLM totals (same pattern
-  // for every domain — architecture is not special).
   for (const domain of DOMAIN_ORDER) {
     const count = violationsByDomain.get(domain) ?? 0;
     tracker?.done(domain, count > 0 ? `${count} violations` : 'Clean');
   }
 
-  const totalDetections = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
   onProgress?.({ step: 'analyzing', percent: 84, detail: 'Code checks done' });
 
-  // 4. Build LLM code violation batches using context-routed approach
-  // Build a lookup of previous LLM code violations by file path
+  // ---------------------------------------------------------------------------
+  // 6. Build LLM code batches
+  // ---------------------------------------------------------------------------
   const prevLlmCodeByFile = new Map<string, typeof previousActiveCodeViolations>();
   for (const cv of previousActiveCodeViolations) {
-    // Only include LLM-generated code violations (not deterministic ones)
     if (!cv.ruleKey.includes('/llm/') || !cv.filePath) continue;
     if (!prevLlmCodeByFile.has(cv.filePath)) prevLlmCodeByFile.set(cv.filePath, []);
     prevLlmCodeByFile.get(cv.filePath)!.push(cv);
   }
 
-  // Build per-domain LLM code batches
   const domainCodeBatches = new Map<string, CodeViolationContext[]>();
 
   if (enabledLlmCodeRules.length > 0 && fileContents.size > 0 && !llmSkipped) {
-    // Build context-routed batches
     const contextBatches = routeContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents);
 
-    // Split each batch by domain
     for (const batch of contextBatches) {
-      // Collect previous violations for all files referenced in this batch content
       const existing = [...prevLlmCodeByFile.entries()]
         .filter(([fp]) => batch.content.includes(fp))
         .flatMap(([, violations]) => violations)
@@ -476,7 +420,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
           content: v.content,
         }));
 
-      // Group rules by domain
       const rulesByDomain = new Map<string, typeof batch.rules>();
       for (const rule of batch.rules) {
         const domain = rule.key.split('/')[0];
@@ -484,9 +427,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         rulesByDomain.get(domain)!.push(rule);
       }
 
-      // Create per-domain sub-batches
-      // For full-file batches with real file paths, pass paths so CLI mode can use Read tool.
-      // For metadata/targeted batches, content is pre-built (summaries/extracts) — send inline.
       const hasRealPaths = batch.filePaths && batch.filePaths.length > 0;
       const files = hasRealPaths
         ? batch.filePaths!.map((fp) => ({ path: fp, content: fileContents.get(fp)?.content ?? '' }))
@@ -494,7 +434,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
       for (const [domain, rules] of rulesByDomain) {
         if (!domainCodeBatches.has(domain)) domainCodeBatches.set(domain, []);
-        const domainExisting = existing.filter(v => v.ruleKey.startsWith(`${domain}/`));
+        const domainExisting = existing.filter((v) => v.ruleKey.startsWith(`${domain}/`));
         domainCodeBatches.get(domain)!.push({
           files,
           llmRules: rules,
@@ -513,24 +453,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   const validFilePaths = new Set(fileContents.keys());
 
-  // =========================================================================
-  // 5. FLOW 1: Deterministic lifecycle (code-handled)
-  // =========================================================================
-
-  // Monotonic progress: parallel tasks can finish in any order, so we
-  // track the highest percent emitted and never go backwards.
-  let highWaterMark = 84;
-  const emitProgress = (percent: number, detail: string) => {
-    const prev = highWaterMark;
-    if (percent > highWaterMark) highWaterMark = percent;
-    const emitted = highWaterMark;
-    onProgress?.({ step: 'analyzing', percent: emitted, detail });
-  };
-
-  throwIfAborted(signal);
-  emitProgress(85, 'Enriching & analyzing violations...');
-
-  // Build flat list of all current deterministic violations with resolved target IDs
+  // ---------------------------------------------------------------------------
+  // 7. Deterministic violation lifecycle (arch/service/module/method)
+  // ---------------------------------------------------------------------------
   interface DetEntry {
     ruleKey: string;
     category: string;
@@ -545,22 +470,17 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     targetMethodId: string | null;
     relatedServiceId: string | null;
     relatedModuleId: string | null;
-    violationType: string; // 'service' | 'module' | 'function'
-    // Code location fields — populated from ModuleViolation.filePath.
-    // Pre-Phase-4 these were dropped during conversion, causing all
-    // architecture-checker violations to show filePath: null in the API.
+    violationType: string;
     filePath?: string | null;
     lineStart?: number | null;
     lineEnd?: number | null;
     snippet?: string | null;
   }
 
-  // Build a name-based lookup for modules (moduleName → moduleId)
   const moduleNameToId = new Map<string, string>();
   for (const [key, id] of moduleIdMap) {
     const parts = key.split('::');
-    const modName = parts[1]; // serviceName::moduleName::filePath
-    moduleNameToId.set(modName, id); // last one wins (fine for same-service lookups)
+    moduleNameToId.set(parts[1], id);
   }
 
   const allDetEntries: DetEntry[] = [];
@@ -594,13 +514,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     });
   }
 
-  // Build lookup: previous deterministic violations by comparison key
-  // Deterministic violations have a non-LLM ruleKey (they don't contain '/llm/')
+  // Scope: arch-AST lifecycle compares service/module/function type violations
+  // only. File-level violations ('code' type) go through the separate
+  // `computeFileViolationLifecycle` pass below — including them here would
+  // double-resolve them (no match in `allDetEntries` → marked resolved here +
+  // marked unchanged in the file pass).
   const previousDetViolations = previousActiveViolations.filter(
-    (v) => !v.ruleKey.includes('/llm/'),
+    (v) => !v.ruleKey.includes('/llm/') && v.type !== 'code',
   );
-  // Map from comparison key to previous violation row
-  const prevViolationByKey = new Map<string, typeof previousActiveViolations[0]>();
+  const prevViolationByKey = new Map<string, ActiveViolation>();
   for (const v of previousDetViolations) {
     const key = getDetComparisonKey({
       ruleKey: v.ruleKey,
@@ -614,146 +536,141 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   const provider = externalProvider ?? createLLMProvider();
   provider.setRepoPath(repoPath);
-  const now = new Date();
-  const allNewViolations: DiffViolationItem[] = [];
-  const allResolvedViolationIds: string[] = [];
+  const allNewLlmItems: DiffViolationItem[] = [];
+  const allResolvedLlmIds: string[] = [];
 
-  // Re-activate domains that have LLM work
   const hasArchLlm = enableLlmRules !== false && !llmSkipped;
-  if (hasArchLlm) {
-    tracker?.start('architecture', 'Running LLM analysis...');
-  }
+  if (hasArchLlm) tracker?.start('architecture', 'Running LLM analysis...');
   for (const [domain] of domainCodeBatches) {
     const detCount = violationsByDomain.get(domain) ?? 0;
     tracker?.start(domain, detCount > 0 ? `${detCount} det, running LLM...` : 'Running LLM...');
   }
 
-  // Deterministic lifecycle tracking — persist new, carry forward unchanged, mark resolved
-  // Compare current deterministic entries against previous violations (from the violations table)
-  // using the same comparison key (ruleKey::serviceName::moduleName::methodName::title).
   const previousDetForComparison = previousDetViolations.map((v) => ({
     ruleKey: v.ruleKey,
     serviceName: v.targetServiceName || '',
     title: v.title,
     moduleName: v.targetModuleName || null,
     methodName: v.targetMethodName || null,
-    _violationId: v.id, // carry the violation ID for lookup
+    _violationId: v.id,
   }));
 
-  const deterministicPromise: Promise<{ newCount: number; unchangedCount: number; resolvedCount: number }> = (async () => {
+  // Run deterministic lifecycle — produces added + unchanged + resolved
+  // ViolationRecord[] rather than db inserts.
+  const archDetCounts = (() => {
     let newDetections: DetEntry[];
     let unchangedArchCount = 0;
     let resolvedArchCount = 0;
 
     if (previousDetForComparison.length > 0) {
-      // 2nd+ run: compare programmatically
       const comparison = compareDeterministicViolations(allDetEntries, previousDetForComparison);
       newDetections = comparison.newDetections;
       unchangedArchCount = comparison.unchangedDetections.length;
       resolvedArchCount = comparison.resolvedDetections.length;
 
-      // Carry forward unchanged deterministic violations
       for (const { current: curEntry, previous } of comparison.unchangedDetections) {
         const prevKey = getDetComparisonKey(previous);
-        const prevViolation = prevViolationByKey.get(prevKey);
-        if (!prevViolation) continue;
-
-        await db.insert(violations).values({
+        const prev = prevViolationByKey.get(prevKey);
+        if (!prev) continue;
+        unchanged.push({
           id: randomUUID(),
-          analysisId,
-          type: prevViolation.type,
-          title: prevViolation.title,
-          content: prevViolation.content,
-          severity: prevViolation.severity,
+          type: prev.type,
+          title: prev.title,
+          content: prev.content,
+          severity: prev.severity,
           status: 'unchanged',
           targetServiceId: curEntry.targetServiceId,
+          targetDatabaseId: null,
           targetModuleId: curEntry.targetModuleId,
           targetMethodId: curEntry.targetMethodId,
+          targetTable: prev.targetTable,
           relatedServiceId: curEntry.relatedServiceId,
           relatedModuleId: curEntry.relatedModuleId,
-          targetTable: prevViolation.targetTable,
-          fixPrompt: prevViolation.fixPrompt,
+          fixPrompt: prev.fixPrompt,
           ruleKey: curEntry.ruleKey,
-          firstSeenAnalysisId: prevViolation.firstSeenAnalysisId,
-          firstSeenAt: prevViolation.firstSeenAt,
-          previousViolationId: prevViolation.id,
+          firstSeenAnalysisId: prev.firstSeenAnalysisId,
+          firstSeenAt: prev.firstSeenAt,
+          previousViolationId: prev.id,
+          resolvedAt: null,
+          filePath: prev.filePath,
+          lineStart: prev.lineStart,
+          lineEnd: prev.lineEnd,
+          columnStart: prev.columnStart,
+          columnEnd: prev.columnEnd,
+          snippet: prev.snippet,
+          createdAt: now,
         });
       }
 
-      // Mark resolved deterministic violations
-      for (const resolved of comparison.resolvedDetections) {
-        const prevKey = getDetComparisonKey(resolved);
-        const prevViolation = prevViolationByKey.get(prevKey);
-        if (!prevViolation) continue;
-        allResolvedViolationIds.push(prevViolation.id);
-
-        await db.insert(violations).values({
+      for (const r of comparison.resolvedDetections) {
+        const prevKey = getDetComparisonKey(r);
+        const prev = prevViolationByKey.get(prevKey);
+        if (!prev) continue;
+        resolved.push({
           id: randomUUID(),
-          analysisId,
-          type: prevViolation.type,
-          title: prevViolation.title,
-          content: prevViolation.content,
-          severity: prevViolation.severity,
+          type: prev.type,
+          title: prev.title,
+          content: prev.content,
+          severity: prev.severity,
           status: 'resolved',
-          targetServiceId: prevViolation.targetServiceId,
-          targetModuleId: prevViolation.targetModuleId,
-          targetMethodId: prevViolation.targetMethodId,
-          targetTable: prevViolation.targetTable,
-          fixPrompt: prevViolation.fixPrompt,
-          ruleKey: prevViolation.ruleKey,
-          firstSeenAnalysisId: prevViolation.firstSeenAnalysisId,
-          firstSeenAt: prevViolation.firstSeenAt,
-          previousViolationId: prevViolation.id,
+          targetServiceId: prev.targetServiceId,
+          targetDatabaseId: null,
+          targetModuleId: prev.targetModuleId,
+          targetMethodId: prev.targetMethodId,
+          targetTable: prev.targetTable,
+          relatedServiceId: null,
+          relatedModuleId: null,
+          fixPrompt: prev.fixPrompt,
+          ruleKey: prev.ruleKey,
+          firstSeenAnalysisId: prev.firstSeenAnalysisId,
+          firstSeenAt: prev.firstSeenAt,
+          previousViolationId: prev.id,
           resolvedAt: now,
+          filePath: prev.filePath,
+          lineStart: prev.lineStart,
+          lineEnd: prev.lineEnd,
+          columnStart: prev.columnStart,
+          columnEnd: prev.columnEnd,
+          snippet: prev.snippet,
+          createdAt: now,
         });
+        resolvedRefs.push({ id: prev.id, resolvedAt: now });
       }
-
     } else {
-      // 1st run: persist all
       newDetections = allDetEntries;
     }
 
-    // Persist new deterministic violations
     for (const det of newDetections) {
-      const violationId = randomUUID();
-      await db.insert(violations).values({
-        id: violationId,
-        analysisId,
+      added.push({
+        id: randomUUID(),
         type: det.violationType,
         title: det.title,
         content: det.description,
-        severity: det.severity,
+        severity: det.severity as ViolationRecord['severity'],
         status: 'new',
         targetServiceId: det.targetServiceId,
+        targetDatabaseId: null,
         targetModuleId: det.targetModuleId,
         targetMethodId: det.targetMethodId,
+        targetTable: null,
         relatedServiceId: det.relatedServiceId,
         relatedModuleId: det.relatedModuleId,
         fixPrompt: null,
         ruleKey: det.ruleKey,
         firstSeenAnalysisId: analysisId,
         firstSeenAt: now,
-        filePath: det.filePath || null,
-        lineStart: det.lineStart || null,
-        lineEnd: det.lineEnd || null,
-        snippet: det.snippet || null,
-      });
-
-      allNewViolations.push({
-        type: det.violationType,
-        title: det.title,
-        content: det.description,
-        severity: det.severity,
-        targetServiceId: det.targetServiceId,
-        targetModuleId: det.targetModuleId,
-        targetMethodId: det.targetMethodId,
-        targetServiceName: det.serviceName || null,
-        targetModuleName: det.moduleName || null,
-        targetMethodName: det.methodName || null,
-        fixPrompt: null,
-        ruleKey: det.ruleKey,
+        previousViolationId: null,
+        resolvedAt: null,
+        filePath: det.filePath ?? null,
+        lineStart: det.lineStart ?? null,
+        lineEnd: det.lineEnd ?? null,
+        columnStart: null,
+        columnEnd: null,
+        snippet: det.snippet ?? null,
+        createdAt: now,
       });
     }
+
     return {
       newCount: newDetections.length,
       unchangedCount: unchangedArchCount,
@@ -761,10 +678,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     };
   })();
 
-  // =========================================================================
-  // 6. FLOW 2: LLM rule analysis (LLM-handled lifecycle)
-  // =========================================================================
-
+  // ---------------------------------------------------------------------------
+  // 8. LLM architecture / database / module rules
+  // ---------------------------------------------------------------------------
   const analysisServices = result.services.map((s) => ({
     id: serviceIdMap.get(s.name)!,
     name: s.name,
@@ -818,10 +734,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     };
   });
 
-  // Filter previous violations to LLM-only (ruleKey contains '/llm/')
   const llmOnlyPreviousViolations = previousActiveViolations.filter((v) => v.ruleKey.includes('/llm/'));
-
-  // Partition LLM-only existing violations by category
   const existingServiceViolations = llmOnlyPreviousViolations
     .filter((v) => v.type === 'service')
     .map((v) => ({ id: v.id, type: v.type, title: v.title, content: v.content, severity: v.severity }));
@@ -834,7 +747,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   const hasLlmOnlyExistingViolations = llmOnlyPreviousViolations.length > 0;
 
-  // Build database schema context for direct database LLM call
   const dbSchemaContext = (dbSchemaLlmRules.length > 0 && result.databaseResult?.databases.length)
     ? {
         databases: result.databaseResult.databases.map((d) => ({
@@ -866,12 +778,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       }
     : undefined;
 
-  // Architecture violation input (service + module only, no database)
   const violationInput = {
     architecture: result.architecture,
     services: analysisServices,
     dependencies: analysisDeps,
-    databases: undefined, // database schema LLM handled separately in database domain
+    databases: undefined,
     llmRules: archLlmRules,
     modules: violationModules,
     methods: violationMethods,
@@ -884,11 +795,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       callCount: d.callCount,
     })),
     existingServiceViolations: hasLlmOnlyExistingViolations ? existingServiceViolations : undefined,
-    existingDatabaseViolations: undefined, // database handled separately
+    existingDatabaseViolations: undefined,
     existingModuleViolations: hasLlmOnlyExistingViolations ? existingModuleViolations : undefined,
   };
 
-  // Per-domain LLM code violation promises
   type DomainLlmResult = { domain: string; violations: CodeViolation[]; resolvedIds: string[]; unchangedIds: string[] };
   const domainLlmPromises: Promise<DomainLlmResult>[] = [];
 
@@ -899,7 +809,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const t0 = Date.now();
 
       const codeResults = await Promise.allSettled(
-        batches.map(b => provider.generateCodeViolations(b))
+        batches.map((b) => provider.generateCodeViolations(b)),
       );
 
       const rawViolations: CodeViolationRaw[] = [];
@@ -926,9 +836,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     })());
   }
 
-  // Database schema LLM — runs as part of the database domain (separate from code batches)
+  // Database schema LLM (separate from code batches)
+  let dbSchemaViolations: ViolationRecord[] = [];
   if (dbSchemaContext && !llmSkipped) {
-    // If database domain wasn't already activated by code batches, activate it now
     if (!domainCodeBatches.has('database')) {
       const detCount = violationsByDomain.get('database') ?? 0;
       tracker?.start('database', detCount > 0 ? `${detCount} det, running LLM...` : 'Running LLM...');
@@ -942,26 +852,37 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         const dur = Date.now() - t0;
         log.info(`[LLM] database-schema: done in ${dur}ms — ${dbResult.violations.length} violations`);
 
-        // Persist database schema violations directly (they have targetDatabaseId, not filePath)
         for (const v of dbResult.violations) {
-          await db.insert(violations).values({
+          dbSchemaViolations.push({
             id: randomUUID(),
-            analysisId,
             type: 'database',
             title: v.title,
             content: v.content,
-            severity: v.severity,
+            severity: v.severity as ViolationRecord['severity'],
             status: 'new',
+            targetServiceId: null,
             targetDatabaseId: v.targetDatabaseId || null,
+            targetModuleId: null,
+            targetMethodId: null,
             targetTable: v.targetTable || null,
+            relatedServiceId: null,
+            relatedModuleId: null,
             fixPrompt: v.fixPrompt || null,
             ruleKey: v.ruleKey || 'unknown',
             firstSeenAnalysisId: analysisId,
             firstSeenAt: now,
+            previousViolationId: null,
+            resolvedAt: null,
+            filePath: null,
+            lineStart: null,
+            lineEnd: null,
+            columnStart: null,
+            columnEnd: null,
+            snippet: null,
+            createdAt: now,
           });
         }
 
-        // Don't mark database done here — let the code batches do it, or mark if no code batches
         if (!domainCodeBatches.has('database')) {
           const detCount = violationsByDomain.get('database') ?? 0;
           const total = detCount + dbResult.violations.length;
@@ -972,9 +893,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       } catch (err) {
         const dur = Date.now() - t0;
         log.warn(`[LLM] database-schema: failed in ${dur}ms — ${err instanceof Error ? err.message : String(err)}`);
-        if (!domainCodeBatches.has('database')) {
-          tracker?.error('database', `Schema LLM failed`);
-        }
+        if (!domainCodeBatches.has('database')) tracker?.error('database', `Schema LLM failed`);
         return { domain: 'database-schema', violations: [], resolvedIds: [], unchangedIds: [] };
       }
     })());
@@ -982,162 +901,197 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   let serviceDescriptions: { id: string; description: string }[] = [];
 
-  emitProgress(86, 'Analyzing architecture & modules...');
+  onProgress?.({ step: 'analyzing', percent: 86, detail: 'Analyzing architecture & modules...' });
 
-  // LLM rule analysis promise (runs in parallel with deterministic enrichment)
-  let llmStepCount = 0;
   const llmRulePromise = (async () => {
-    if (enableLlmRules === false || llmSkipped) return; // LLM disabled or skipped by user
+    if (enableLlmRules === false || llmSkipped) return;
     if (hasLlmOnlyExistingViolations) {
-      const archResult = await generateViolationsWithLifecycle(violationInput, (step) => {
-        llmStepCount++;
-        tracker?.detail('architecture', step);
-        emitProgress(87 + llmStepCount * 2, step);
-      }, provider);
+      const archResult = await generateViolationsWithLifecycle(
+        violationInput,
+        (step) => tracker?.detail('architecture', step),
+        provider,
+      );
       serviceDescriptions = archResult.serviceDescriptions;
-      allResolvedViolationIds.push(...archResult.resolvedViolationIds);
-      allNewViolations.push(...archResult.newViolations);
+      allResolvedLlmIds.push(...archResult.resolvedViolationIds);
+      allNewLlmItems.push(...archResult.newViolations);
 
       const serviceNameToId = new Map(result.services.map((s) => [s.name, serviceIdMap.get(s.name)!]));
-      const moduleNameToId = new Map([...moduleIdMap.entries()].map(([key, mid]) => {
-        const parts = key.split('::');
-        return [parts[1], mid] as [string, string];
-      }));
-      const methodNameToId = new Map([...methodIdMap.entries()].map(([key, mid]) => {
-        const parts = key.split('::');
-        return [parts[2], mid] as [string, string];
-      }));
+      const moduleNameToIdLocal = new Map(
+        [...moduleIdMap.entries()].map(([key, mid]) => [key.split('::')[1], mid] as [string, string]),
+      );
+      const methodNameToId = new Map(
+        [...methodIdMap.entries()].map(([key, mid]) => [key.split('::')[2], mid] as [string, string]),
+      );
 
-      await persistViolationsWithLifecycle({
+      const lifecycle = computeViolationLifecycle({
         analysisId,
+        now,
         newViolations: archResult.newViolations,
         resolvedViolationIds: archResult.resolvedViolationIds,
         previousActiveViolations: llmOnlyPreviousViolations,
         serviceNameToId,
-        moduleNameToId,
+        moduleNameToId: moduleNameToIdLocal,
         methodNameToId,
       });
+      added.push(...lifecycle.added);
+      unchanged.push(...lifecycle.unchanged);
+      resolved.push(...lifecycle.resolved);
+      resolvedRefs.push(...lifecycle.resolvedRefs);
     } else {
-      const archResult = await generateViolations(violationInput, (step) => {
-        llmStepCount++;
-        tracker?.detail('architecture', step);
-        emitProgress(87 + llmStepCount * 2, step);
-      }, provider);
+      const archResult = await generateViolations(
+        violationInput,
+        (step) => tracker?.detail('architecture', step),
+        provider,
+      );
       serviceDescriptions = archResult.serviceDescriptions;
 
-      // LLM first-run violations
-      for (const violation of archResult.violations) {
-        await db.insert(violations).values({
+      for (const v of archResult.violations) {
+        added.push({
           id: randomUUID(),
-          analysisId,
-          type: violation.type,
-          title: violation.title,
-          content: violation.content,
-          severity: violation.severity,
+          type: v.type,
+          title: v.title,
+          content: v.content,
+          severity: v.severity as ViolationRecord['severity'],
           status: 'new',
-          targetServiceId: violation.targetServiceId || null,
-          targetDatabaseId: violation.targetDatabaseId || null,
-          targetModuleId: violation.targetModuleId || null,
-          targetMethodId: violation.targetMethodId || null,
-          targetTable: violation.targetTable || null,
-          fixPrompt: violation.fixPrompt || null,
-          ruleKey: violation.ruleKey || 'unknown',
+          targetServiceId: v.targetServiceId || null,
+          targetDatabaseId: v.targetDatabaseId || null,
+          targetModuleId: v.targetModuleId || null,
+          targetMethodId: v.targetMethodId || null,
+          targetTable: v.targetTable || null,
+          relatedServiceId: null,
+          relatedModuleId: null,
+          fixPrompt: v.fixPrompt || null,
+          ruleKey: v.ruleKey || 'unknown',
           firstSeenAnalysisId: analysisId,
           firstSeenAt: now,
-        });
-
-        allNewViolations.push({
-          type: violation.type,
-          title: violation.title,
-          content: violation.content,
-          severity: violation.severity,
-          targetServiceId: violation.targetServiceId ?? null,
-          targetModuleId: violation.targetModuleId ?? null,
-          targetMethodId: violation.targetMethodId ?? null,
-          targetServiceName: null,
-          targetModuleName: null,
-          targetMethodName: null,
-          fixPrompt: violation.fixPrompt ?? null,
-          ruleKey: violation.ruleKey || 'unknown',
+          previousViolationId: null,
+          resolvedAt: null,
+          filePath: null,
+          lineStart: null,
+          lineEnd: null,
+          columnStart: null,
+          columnEnd: null,
+          snippet: null,
+          createdAt: now,
         });
       }
     }
 
-    // Mark architecture done with count — other LLM domains update after llmCodePromise
     const archCount = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
     tracker?.done('architecture', archCount > 0 ? `${archCount} violations` : 'Clean');
   })();
 
-  // Await all: deterministic lifecycle + architecture LLM + per-domain code LLM
   const [detResult, llmResult, ...domainLlmResults] = await Promise.allSettled([
-    deterministicPromise,
+    Promise.resolve(archDetCounts),
     llmRulePromise,
     ...domainLlmPromises,
   ]);
 
   if (detResult.status === 'rejected') {
-    const msg = detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason);
-    log.error(`[Violations] Deterministic lifecycle tracking failed: ${msg}`);
+    log.error(`[Violations] Deterministic lifecycle tracking failed: ${detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason)}`);
   }
-  // Arch det counts held here; combined with code det counts after code
-  // persistence finishes (further down), then logged as a single line.
-  const archDetCounts =
-    detResult.status === 'fulfilled'
-      ? detResult.value
-      : { newCount: 0, unchangedCount: 0, resolvedCount: 0 };
   if (llmResult.status === 'rejected') {
     const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
     log.error(`[Violations] LLM architecture analysis failed: ${msg}`);
     tracker?.error('architecture', `LLM failed: ${msg.slice(0, 80)}`);
   }
-  // Per-domain errors are already handled inside each promise (tracker?.done with fallback count)
+
+  // Merge database schema LLM violations into the main lists.
+  added.push(...dbSchemaViolations);
 
   throwIfAborted(signal);
   tracker?.start('persist');
-  emitProgress(95, 'Analysis complete');
+  onProgress?.({ step: 'analyzing', percent: 95, detail: 'Analysis complete' });
 
-  // 7. Save service descriptions
-  for (const desc of serviceDescriptions) {
-    if (desc.id) {
-      await db
-        .update(services)
-        .set({ description: desc.description })
-        .where(eq(services.id, desc.id));
-    }
-  }
-
-  // 8. Persist code violations with lifecycle tracking
-  // Deterministic code violations are persisted now (groups b + c).
-  // LLM code violations (group a) are processed after deterministic ones.
-
+  // ---------------------------------------------------------------------------
+  // 9. File-level (code) violation lifecycle
+  // ---------------------------------------------------------------------------
   const scannedFilePaths = new Set(fileContents.keys());
-  let codeResolvedCount = 0;
 
-  // b) Deterministic matching for code violations in scanned files
-  // (No LLM lifecycle IDs yet — those will be handled in the background)
+  // Deterministic code violations — match by ruleKey+filePath against scanned files.
+  // Only `type: 'code'` entries came from the file-scan pass; arch-AST-detected
+  // rules (type: 'module' / 'function' / 'service') also carry a filePath but
+  // they're handled by the arch-AST lifecycle above — including them here
+  // would mark them resolved a second time.
   const prevForDeterministicMatching = previousActiveCodeViolations.filter(
-    (v) => v.filePath && scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
+    (v) =>
+      v.type === 'code' &&
+      v.filePath &&
+      scannedFilePaths.has(v.filePath) &&
+      !v.ruleKey.includes('/llm/'),
   );
 
   let codeDetCounts = { newCount: 0, unchangedCount: 0, resolvedCount: 0 };
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
-    codeDetCounts = await persistFileViolationsWithLifecycle({
+    const lifecycle = computeFileViolationLifecycle({
       analysisId,
-      currentViolations: allCodeViolations,
+      now,
+      currentViolations: allCodeViolations.map((cv) => ({
+        filePath: cv.filePath,
+        lineStart: cv.lineStart,
+        lineEnd: cv.lineEnd,
+        columnStart: cv.columnStart,
+        columnEnd: cv.columnEnd,
+        ruleKey: cv.ruleKey,
+        severity: cv.severity,
+        title: cv.title,
+        content: cv.content,
+        snippet: cv.snippet,
+        fixPrompt: cv.fixPrompt,
+        targetServiceId: (cv as CodeViolation & { targetServiceId?: string }).targetServiceId ?? null,
+        targetModuleId: (cv as CodeViolation & { targetModuleId?: string }).targetModuleId ?? null,
+      })),
       previousViolations: prevForDeterministicMatching,
     });
-
-    const currentKeys = new Set(allCodeViolations.map((cv) =>
-      `${cv.filePath}::${cv.ruleKey}::${cv.lineStart}::${cv.lineEnd}`
-    ));
-    for (const prev of prevForDeterministicMatching) {
-      const key = `${prev.filePath}::${prev.ruleKey}::${prev.lineStart}::${prev.lineEnd}`;
-      if (!currentKeys.has(key)) codeResolvedCount++;
-    }
+    added.push(...lifecycle.added);
+    unchanged.push(...lifecycle.unchanged);
+    resolved.push(...lifecycle.resolved);
+    resolvedRefs.push(...lifecycle.resolvedRefs);
+    codeDetCounts = lifecycle.counts;
   }
 
-  // Combined deterministic tally (architecture + code, which are just
-  // separate domains of the same flow). Single line, real totals.
+  // Auto carry forward code violations for unchanged files (non-LLM).
+  // Scope to type: 'code' for the same reason as the deterministic matching
+  // filter above — arch-AST entries are handled elsewhere.
+  const prevInUnchangedFiles = previousActiveCodeViolations.filter(
+    (v) =>
+      v.type === 'code' &&
+      v.filePath &&
+      !scannedFilePaths.has(v.filePath) &&
+      !v.ruleKey.includes('/llm/'),
+  );
+  for (const prev of prevInUnchangedFiles) {
+    unchanged.push({
+      id: randomUUID(),
+      type: 'code',
+      title: prev.title,
+      content: prev.content,
+      severity: prev.severity,
+      status: 'unchanged',
+      targetServiceId: null,
+      targetDatabaseId: null,
+      targetModuleId: null,
+      targetMethodId: null,
+      targetTable: null,
+      relatedServiceId: null,
+      relatedModuleId: null,
+      fixPrompt: prev.fixPrompt,
+      ruleKey: prev.ruleKey,
+      firstSeenAnalysisId: prev.firstSeenAnalysisId,
+      firstSeenAt: prev.firstSeenAt,
+      previousViolationId: prev.id,
+      resolvedAt: null,
+      filePath: prev.filePath,
+      lineStart: prev.lineStart,
+      lineEnd: prev.lineEnd,
+      columnStart: prev.columnStart,
+      columnEnd: prev.columnEnd,
+      snippet: prev.snippet,
+      createdAt: now,
+    });
+  }
+
+  // Combined deterministic tally
   {
     const totalNew = archDetCounts.newCount + codeDetCounts.newCount;
     const totalUnchanged = archDetCounts.unchangedCount + codeDetCounts.unchangedCount;
@@ -1149,98 +1103,124 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  // c) Auto carry forward violations for unchanged files (non-LLM only now)
-  const prevInUnchangedFiles = previousActiveCodeViolations.filter(
-    (v) => v.filePath && !scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
-  );
-
-  for (const prev of prevInUnchangedFiles) {
-    await db.insert(violations).values({
-      id: randomUUID(),
-      analysisId,
-      type: 'code',
-      filePath: prev.filePath,
-      lineStart: prev.lineStart,
-      lineEnd: prev.lineEnd,
-      columnStart: prev.columnStart,
-      columnEnd: prev.columnEnd,
-      ruleKey: prev.ruleKey,
-      severity: prev.severity,
-      status: 'unchanged',
-      title: prev.title,
-      content: prev.content,
-      snippet: prev.snippet,
-      fixPrompt: prev.fixPrompt,
-      firstSeenAnalysisId: prev.firstSeenAnalysisId,
-      firstSeenAt: prev.firstSeenAt,
-      previousViolationId: prev.id,
-    });
-  }
-
-  // Collect all per-domain LLM code violations
+  // LLM code violations
   const allLlmCodeViolations: CodeViolation[] = [];
   const allLlmResolvedIds: string[] = [];
   const allLlmUnchangedIds: string[] = [];
-
-  for (const result of domainLlmResults) {
-    if (result.status === 'fulfilled') {
-      const r = result.value as DomainLlmResult;
-      allLlmCodeViolations.push(...r.violations);
-      allLlmResolvedIds.push(...r.resolvedIds);
-      allLlmUnchangedIds.push(...r.unchangedIds);
+  for (const r of domainLlmResults) {
+    if (r.status === 'fulfilled') {
+      const v = r.value as DomainLlmResult;
+      allLlmCodeViolations.push(...v.violations);
+      allLlmResolvedIds.push(...v.resolvedIds);
+      allLlmUnchangedIds.push(...v.unchangedIds);
     }
-    // Failures already logged and tracker updated inside each domain promise
   }
 
   if (allLlmCodeViolations.length > 0 || allLlmResolvedIds.length > 0) {
     log.info(`[Pipeline] LLM code totals: ${allLlmCodeViolations.length} new, ${allLlmResolvedIds.length} resolved, ${allLlmUnchangedIds.length} unchanged`);
 
-    // LLM lifecycle: carry forward unchanged, mark resolved
     for (const prevId of allLlmUnchangedIds) {
       const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
       if (!prev) continue;
-      await db.insert(violations).values({
+      unchanged.push({
         id: randomUUID(),
-        analysisId, type: 'code',
-        filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-        columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-        ruleKey: prev.ruleKey, severity: prev.severity, status: 'unchanged',
-        title: prev.title, content: prev.content, snippet: prev.snippet,
-        fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-        firstSeenAt: prev.firstSeenAt, previousViolationId: prev.id,
+        type: 'code',
+        title: prev.title,
+        content: prev.content,
+        severity: prev.severity,
+        status: 'unchanged',
+        targetServiceId: null,
+        targetDatabaseId: null,
+        targetModuleId: null,
+        targetMethodId: null,
+        targetTable: null,
+        relatedServiceId: null,
+        relatedModuleId: null,
+        fixPrompt: prev.fixPrompt,
+        ruleKey: prev.ruleKey,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousViolationId: prev.id,
+        resolvedAt: null,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        snippet: prev.snippet,
+        createdAt: now,
       });
     }
 
     for (const prevId of allLlmResolvedIds) {
       const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
       if (!prev) continue;
-      await db.insert(violations).values({
+      resolved.push({
         id: randomUUID(),
-        analysisId, type: 'code',
-        filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-        columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-        ruleKey: prev.ruleKey, severity: prev.severity, status: 'resolved',
-        title: prev.title, content: prev.content, snippet: prev.snippet,
-        fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-        firstSeenAt: prev.firstSeenAt, previousViolationId: prev.id, resolvedAt: now,
+        type: 'code',
+        title: prev.title,
+        content: prev.content,
+        severity: prev.severity,
+        status: 'resolved',
+        targetServiceId: null,
+        targetDatabaseId: null,
+        targetModuleId: null,
+        targetMethodId: null,
+        targetTable: null,
+        relatedServiceId: null,
+        relatedModuleId: null,
+        fixPrompt: prev.fixPrompt,
+        ruleKey: prev.ruleKey,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousViolationId: prev.id,
+        resolvedAt: now,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        snippet: prev.snippet,
+        createdAt: now,
       });
+      resolvedRefs.push({ id: prev.id, resolvedAt: now });
     }
 
-    // Persist new LLM code violations
+    // New LLM code violations (already-handled IDs excluded)
     const handledIds = new Set([...allLlmUnchangedIds, ...allLlmResolvedIds]);
     const llmPrevForMatching = previousActiveCodeViolations.filter(
-      (v) => v.ruleKey.includes('/llm/') && v.filePath && scannedFilePaths.has(v.filePath)
-        && !handledIds.has(v.id),
+      (v) =>
+        v.ruleKey.includes('/llm/') &&
+        v.filePath &&
+        scannedFilePaths.has(v.filePath) &&
+        !handledIds.has(v.id),
     );
 
     if (allLlmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-      const counts = await persistFileViolationsWithLifecycle({
+      const lifecycle = computeFileViolationLifecycle({
         analysisId,
-        currentViolations: allLlmCodeViolations,
+        now,
+        currentViolations: allLlmCodeViolations.map((cv) => ({
+          filePath: cv.filePath,
+          lineStart: cv.lineStart,
+          lineEnd: cv.lineEnd,
+          columnStart: cv.columnStart,
+          columnEnd: cv.columnEnd,
+          ruleKey: cv.ruleKey,
+          severity: cv.severity,
+          title: cv.title,
+          content: cv.content,
+          snippet: cv.snippet,
+          fixPrompt: cv.fixPrompt,
+        })),
         previousViolations: llmPrevForMatching,
       });
+      added.push(...lifecycle.added);
+      unchanged.push(...lifecycle.unchanged);
+      resolved.push(...lifecycle.resolved);
+      resolvedRefs.push(...lifecycle.resolvedRefs);
       log.info(
-        `[Pipeline] Persisted code (LLM): ${counts.newCount} new, ${counts.unchangedCount} unchanged, ${counts.resolvedCount} resolved`,
+        `[Pipeline] Persisted code (LLM): ${lifecycle.counts.newCount} new, ${lifecycle.counts.unchangedCount} unchanged, ${lifecycle.counts.resolvedCount} resolved`,
       );
     }
 
@@ -1248,17 +1228,34 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     const llmPrevUnchangedFiles = previousActiveCodeViolations.filter(
       (v) => v.ruleKey.includes('/llm/') && v.filePath && !scannedFilePaths.has(v.filePath),
     );
-
     for (const prev of llmPrevUnchangedFiles) {
-      await db.insert(violations).values({
+      unchanged.push({
         id: randomUUID(),
-        analysisId, type: 'code',
-        filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
-        columnStart: prev.columnStart, columnEnd: prev.columnEnd,
-        ruleKey: prev.ruleKey, severity: prev.severity, status: 'unchanged',
-        title: prev.title, content: prev.content, snippet: prev.snippet,
-        fixPrompt: prev.fixPrompt, firstSeenAnalysisId: prev.firstSeenAnalysisId,
-        firstSeenAt: prev.firstSeenAt, previousViolationId: prev.id,
+        type: 'code',
+        title: prev.title,
+        content: prev.content,
+        severity: prev.severity,
+        status: 'unchanged',
+        targetServiceId: null,
+        targetDatabaseId: null,
+        targetModuleId: null,
+        targetMethodId: null,
+        targetTable: null,
+        relatedServiceId: null,
+        relatedModuleId: null,
+        fixPrompt: prev.fixPrompt,
+        ruleKey: prev.ruleKey,
+        firstSeenAnalysisId: prev.firstSeenAnalysisId,
+        firstSeenAt: prev.firstSeenAt,
+        previousViolationId: prev.id,
+        resolvedAt: null,
+        filePath: prev.filePath,
+        lineStart: prev.lineStart,
+        lineEnd: prev.lineEnd,
+        columnStart: prev.columnStart,
+        columnEnd: prev.columnEnd,
+        snippet: prev.snippet,
+        createdAt: now,
       });
     }
   }
@@ -1267,10 +1264,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   return {
     serviceDescriptions,
-    newViolations: allNewViolations,
-    resolvedViolationIds: allResolvedViolationIds,
-    codeViolations: allCodeViolations,
-    codeResolvedCount,
+    added,
+    unchanged,
+    resolved,
+    resolvedRefs,
   };
 }
 
@@ -1289,7 +1286,6 @@ function processLlmCodeViolations(
 
   let skippedPaths = 0;
   for (const v of codeResult.violations) {
-    // LLM may return relative or absolute paths — resolve to match validFilePaths
     let filePath = v.filePath;
     if (!validFilePaths.has(filePath)) {
       const resolved = path.resolve(repoPath, filePath);
@@ -1308,10 +1304,8 @@ function processLlmCodeViolations(
     const lineEnd = Math.max(lineStart, Math.min(v.lineEnd, fileInfo.lineCount));
     const lines = fileInfo.content.split('\n');
     const snippet = lines.slice(lineStart - 1, lineEnd).join('\n');
-    const ruleKey = v.ruleKey;
-
     allCodeViolations.push({
-      ruleKey,
+      ruleKey: v.ruleKey,
       filePath,
       lineStart,
       lineEnd,
@@ -1325,5 +1319,3 @@ function processLlmCodeViolations(
     });
   }
 }
-
-

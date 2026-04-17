@@ -26,7 +26,7 @@ export const unvalidatedExternalDataVisitor: CodeRuleVisitor = {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Unvalidated external data used in database write',
-          `External data (e.g., req.body, request.params) passed directly to ${methodName}() without schema validation. Validate input with a schema library (e.g., zod, joi) before writing to the database.`,
+          `External data (e.g., \`req.body\`, \`request.params\`) passed directly to \`${methodName}()\` without schema validation. Validate input with a schema library (e.g., \`zod\`, \`joi\`) before writing to the database.`,
           sourceCode,
           'Parse and validate external data with a schema library before using it in database operations.',
         )

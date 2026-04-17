@@ -3,15 +3,9 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import { analyzeInProcess } from "@truecourse/server/analyze";
 import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/server/progress";
-import { ensureRepoTruecourseDir, resolveRepoDir } from "@truecourse/server/config/paths";
+import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/server/config/paths";
 import { registerProject, type RegistryEntry } from "@truecourse/server/config/registry";
 import { readProjectConfig } from "@truecourse/server/config/project-config";
-import {
-  autoConfigureMigrations,
-  closeAllProjectDbs,
-  getOrOpenProjectDb,
-  initializeProjectDb,
-} from "@truecourse/server/config/database";
 import { closeLogger, configureLogger } from "@truecourse/server/lib/logger";
 import { renderViolationsSummary } from "./helpers.js";
 import { showFirstRunNotice } from "../telemetry.js";
@@ -144,11 +138,10 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
   // flips to 'post-llm' once the user answers.
   renderPhase = enableLlmRules ? "pre-llm" : "all";
 
-  // Bootstrap .truecourse/ + db/ on first analyze, then open PGlite and run
-  // migrations up-front so the checklist starts clean.
-  autoConfigureMigrations();
-  await initializeProjectDb(project);
-  await getOrOpenProjectDb(project);
+  // One-time cleanup of pre-0.4 embedded-postgres data dir.
+  if (wipeLegacyPostgresData()) {
+    p.log.info("Legacy Postgres data wiped. Re-analyze to repopulate.");
+  }
 
   const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
   const tracker = new StepTracker((payload) => {
@@ -198,22 +191,63 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
     process.exit(1);
   } finally {
     process.removeListener("SIGINT", onSigint);
-    // PGlite runs in WASM and holds event-loop handles; close it explicitly
-    // so the CLI exits as soon as analysis finishes instead of waiting for
-    // the loop to drain.
-    await closeAllProjectDbs();
     await closeLogger();
   }
 }
 
 // ---------------------------------------------------------------------------
-// Diff analyze — still served by the dashboard. Terminal diff command will be
-// reintroduced in a follow-up that routes through analyzeInProcess.
+// Diff analyze — parses the working tree, compares against LATEST, writes diff.json.
+// Shares `diffInProcess` with POST /api/repos/:id/diff-check.
 // ---------------------------------------------------------------------------
 
 export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): Promise<void> {
-  p.log.error(
-    "`truecourse analyze --diff` is currently available only from the dashboard's Git Diff mode.",
-  );
-  process.exit(1);
+  const { diffInProcess } = await import("@truecourse/server/diff");
+  const { renderDiffResultsSummary } = await import("./helpers.js");
+
+  p.intro("Running diff check");
+  ensureClaudeCli();
+  showFirstRunNotice();
+
+  const project = resolveOrInitProject();
+  p.log.step(`Repository: ${project.name}`);
+
+  configureLogger({
+    filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
+  });
+
+  const spinner = p.spinner();
+  spinner.start("Checking changes...");
+
+  const abortController = new AbortController();
+  const onSigint = () => abortController.abort();
+  process.on("SIGINT", onSigint);
+
+  try {
+    const { diff } = await diffInProcess(project, {
+      signal: abortController.signal,
+      onProgress: ({ detail }) => {
+        if (detail) spinner.message(detail);
+      },
+    });
+    spinner.stop("Diff check complete");
+    renderDiffResultsSummary({
+      changedFiles: diff.changedFiles,
+      newViolations: diff.newViolations as never,
+      resolvedViolations: diff.resolvedViolations as never,
+      summary: diff.summary,
+      isStale: false,
+    });
+    p.outro("Diff complete — view results with: truecourse dashboard");
+  } catch (err) {
+    spinner.stop("Diff check failed");
+    if (err instanceof DOMException && err.name === "AbortError") {
+      p.outro("Diff cancelled");
+      process.exit(130);
+    }
+    p.log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  } finally {
+    process.removeListener("SIGINT", onSigint);
+    await closeLogger();
+  }
 }

@@ -1,6 +1,7 @@
 import type { Violation } from '@truecourse/shared';
 import { ClaudeCodeProvider } from './cli-provider.js';
 import type { FlowEnrichmentContext } from './prompts.js';
+import type { UsageData } from '../usage.service.js';
 
 // ---------------------------------------------------------------------------
 // Focused violation context types (one per LLM call)
@@ -235,7 +236,12 @@ export interface LLMProvider {
   setRepoId(repoId: string): void;
   setRepoPath(path: string): void;
   setAbortSignal(signal: AbortSignal): void;
-  flushUsage(): Promise<void>;
+  /**
+   * Return the usage records accumulated since the last `setAnalysisId`
+   * call and clear the internal buffer. The orchestrator puts these on
+   * the analysis snapshot.
+   */
+  flushUsage(): UsageData[];
 }
 
 // ---------------------------------------------------------------------------

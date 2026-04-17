@@ -11,11 +11,11 @@ TrueCourse is a local web app that helps developers understand AI-generated code
 | Component | Choice |
 |---|---|
 | Monorepo | Turborepo + pnpm workspaces |
-| Frontend | Next.js (App Router) + React Flow + Tailwind + shadcn/ui |
+| Frontend | Vite + React Router + React Flow + Tailwind + shadcn/ui |
 | Backend | Express + Socket.io |
-| Database | Embedded PostgreSQL (`embedded-postgres`) + Drizzle ORM |
-| Code analysis | tree-sitter (JS/TS first) |
-| LLM | Vercel AI SDK (`ai` + `@ai-sdk/openai` + `@ai-sdk/anthropic`), Langfuse tracing |
+| Storage | File-based JSON store under `<repo>/.truecourse/` (no database) |
+| Code analysis | tree-sitter (JS/TS/Python) + TypeScript Compiler for type-aware rules |
+| LLM | Claude Code CLI (spawned subprocess) |
 | File watching | chokidar |
 | Graph layout | dagre |
 | CLI | commander + @clack/prompts |
@@ -2666,7 +2666,7 @@ truecourse rules reprocess                   # Re-extract rules from stored sour
 
 ---
 
-## Phase 24: CLI Ergonomics & Composability `STATUS: TODO`
+## Phase 24: CLI Ergonomics & Composability `STATUS: CANCELLED`
 
 Make the CLI output machine-readable and add power-user features for daily workflows.
 

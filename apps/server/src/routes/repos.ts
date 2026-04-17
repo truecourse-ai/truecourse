@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
-import { closeProjectDb } from '../config/database.js';
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { readProjectConfig, updateProjectConfig } from '../config/project-config.js';
 import {
@@ -115,9 +114,6 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
     if (!entry) {
       throw createAppError('Project not found', 404);
     }
-
-    // Release the DB handle first so `.truecourse/db/` is no longer held open.
-    await closeProjectDb(entry.path);
 
     const tcDir = getRepoTruecourseDir(entry.path);
     if (fs.existsSync(tcDir)) {

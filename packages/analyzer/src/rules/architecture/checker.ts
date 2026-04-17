@@ -59,7 +59,7 @@ export function checkServiceRules(
 
     for (const cycle of cycles) {
       const severity = cycle.isTypeOnly ? 'info' : cycle.isDynamic ? 'low' : 'high'
-      const chainDisplay = cycle.chain.join(' \u2192 ')
+      const chainDisplay = cycle.chain.map((s) => `\`${s}\``).join(' \u2192 ')
       const qualifier = cycle.isTypeOnly
         ? ' (type-only imports \u2014 no runtime impact)'
         : cycle.isDynamic
@@ -91,8 +91,8 @@ export function checkServiceRules(
         }
         violations.push({
           ruleKey: 'architecture/deterministic/god-service',
-          title: `God service: ${svc.name}`,
-          description: `${svc.name} has ${reasons.join(' and ')}, suggesting too many responsibilities. Consider splitting into smaller, focused services.`,
+          title: `God service: \`${svc.name}\``,
+          description: `\`${svc.name}\` has ${reasons.join(' and ')}, suggesting too many responsibilities. Consider splitting into smaller, focused services.`,
           severity: 'medium',
           serviceName: svc.name,
         })
@@ -244,10 +244,13 @@ export function checkModuleRules(
       if (allModels) continue
 
       const severity = cycle.isTypeOnly ? 'info' : 'high'
-      // Extract readable module names from "service::module" keys
+      // Extract readable module names from "service::module" keys. Wrap each
+      // identifier in backticks so `renderInlineCode` styles them as inline
+      // code spans (matches the convention used by all other rules + LLM).
       const readableChain = cycle.chain.map(key => {
         const parts = key.split('::')
-        return parts.length > 1 ? parts[1] : key
+        const name = parts.length > 1 ? parts[1] : key
+        return `\`${name}\``
       })
       const chainDisplay = readableChain.join(' \u2192 ')
       const qualifier = cycle.isTypeOnly
@@ -281,8 +284,8 @@ export function checkModuleRules(
       if (mod.methodCount > GOD_MODULE_THRESHOLD) {
         violations.push({
           ruleKey: 'architecture/deterministic/god-module',
-          title: `God module: ${mod.name}`,
-          description: `${mod.name} has ${mod.methodCount} methods (threshold: ${GOD_MODULE_THRESHOLD}). Consider splitting into smaller, focused modules.`,
+          title: `God module: \`${mod.name}\``,
+          description: `\`${mod.name}\` has ${mod.methodCount} methods (threshold: ${GOD_MODULE_THRESHOLD}). Consider splitting into smaller, focused modules.`,
           severity: 'medium',
           serviceName: mod.serviceName,
           moduleName: mod.name,
@@ -417,8 +420,8 @@ export function checkModuleRules(
 
         violations.push({
           ruleKey: 'architecture/deterministic/unused-export',
-          title: `Unused export: ${method.name}`,
-          description: `${method.name} is exported from ${method.moduleName} but never imported elsewhere in the codebase.`,
+          title: `Unused export: \`${method.name}\``,
+          description: `\`${method.name}\` is exported from \`${method.moduleName}\` but never imported elsewhere in the codebase.`,
           severity: 'low',
           serviceName: method.serviceName,
           moduleName: method.moduleName,
@@ -437,8 +440,8 @@ export function checkModuleRules(
 
         violations.push({
           ruleKey: 'architecture/deterministic/unused-export',
-          title: `Unused export: ${mod.name}`,
-          description: `Class ${mod.name} appears exported but is never imported elsewhere in the codebase.`,
+          title: `Unused export: \`${mod.name}\``,
+          description: `Class \`${mod.name}\` appears exported but is never imported elsewhere in the codebase.`,
           severity: 'low',
           serviceName: mod.serviceName,
           moduleName: mod.name,
@@ -496,8 +499,8 @@ export function checkModuleRules(
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-module',
-          title: `Dead module: ${mod.name}`,
-          description: `${mod.name} in ${mod.serviceName} has no incoming or outgoing dependencies — it may be unused.`,
+          title: `Dead module: \`${mod.name}\``,
+          description: `\`${mod.name}\` in \`${mod.serviceName}\` has no incoming or outgoing dependencies — it may be unused.`,
           severity: 'low',
           serviceName: mod.serviceName,
           moduleName: mod.name,
@@ -529,8 +532,8 @@ export function checkModuleRules(
 
       violations.push({
         ruleKey: 'architecture/deterministic/orphan-file',
-        title: `Orphan file: ${fileName}`,
-        description: `${fa.filePath} is never imported by any other file in the codebase. It may be an unused module or a missing entry point.`,
+        title: `Orphan file: \`${fileName}\``,
+        description: `\`${fa.filePath}\` is never imported by any other file in the codebase. It may be an unused module or a missing entry point.`,
         severity: 'low',
         serviceName,
         filePath: fa.filePath,
@@ -564,8 +567,8 @@ export function checkModuleRules(
                 /\/(?:orchestrators|services|modules|serverless)\//.test(srcMod.filePath)) continue
             violations.push({
               ruleKey,
-              title: `Layer violation: ${srcMod.name} → ${tgtMod.name}`,
-              description: `${srcMod.name} (${srcLayer} layer) imports from ${tgtMod.name} (${tgtLayer} layer) in ${srcMod.serviceName}. ${srcLayer} layer should not depend on ${tgtLayer} layer.`,
+              title: `Layer violation: \`${srcMod.name}\` → \`${tgtMod.name}\``,
+              description: `\`${srcMod.name}\` (${srcLayer} layer) imports from \`${tgtMod.name}\` (${tgtLayer} layer) in \`${srcMod.serviceName}\`. ${srcLayer} layer should not depend on ${tgtLayer} layer.`,
               severity: ruleKey === 'architecture/deterministic/data-layer-depends-on-api' ? 'high' : 'medium',
               serviceName: srcMod.serviceName,
               moduleName: srcMod.name,
@@ -640,8 +643,8 @@ export function checkModuleRules(
 
         violations.push({
           ruleKey: 'architecture/deterministic/cross-service-internal-import',
-          title: `Cross-service internal import: ${srcMod.name} → ${tgtMod.name}`,
-          description: `${srcMod.name} in ${srcMod.serviceName} imports ${tgtMod.name} from ${tgtMod.serviceName}'s ${tgtMod.layerName} layer. Services should only depend on each other's API layer, not internal modules.`,
+          title: `Cross-service internal import: \`${srcMod.name}\` → \`${tgtMod.name}\``,
+          description: `\`${srcMod.name}\` in \`${srcMod.serviceName}\` imports \`${tgtMod.name}\` from \`${tgtMod.serviceName}\`'s ${tgtMod.layerName} layer. Services should only depend on each other's API layer, not internal modules.`,
           severity: 'high',
           serviceName: srcMod.serviceName,
           moduleName: srcMod.name,
@@ -691,8 +694,8 @@ export function checkMethodRules(
       if (method.statementCount != null && method.statementCount > LONG_METHOD_STATEMENTS) {
         violations.push({
           ruleKey: 'architecture/deterministic/long-method',
-          title: `Long method: ${method.moduleName}.${method.name}`,
-          description: `${method.name} has ${method.statementCount} statements (threshold: ${LONG_METHOD_STATEMENTS}). Extract sub-routines to improve readability.`,
+          title: `Long method: \`${method.moduleName}.${method.name}\``,
+          description: `\`${method.name}\` has ${method.statementCount} statements (threshold: ${LONG_METHOD_STATEMENTS}). Extract sub-routines to improve readability.`,
           severity: 'low',
           serviceName: method.serviceName,
           moduleName: method.moduleName,
@@ -710,8 +713,8 @@ export function checkMethodRules(
       if (method.paramCount > paramThreshold) {
         violations.push({
           ruleKey: 'architecture/deterministic/too-many-parameters',
-          title: `Too many parameters: ${method.moduleName}.${method.name}`,
-          description: `${method.name} has ${method.paramCount} parameters (threshold: ${paramThreshold}). Consider using an options object or splitting the function.`,
+          title: `Too many parameters: \`${method.moduleName}.${method.name}\``,
+          description: `\`${method.name}\` has ${method.paramCount} parameters (threshold: ${paramThreshold}). Consider using an options object or splitting the function.`,
           severity: 'low',
           serviceName: method.serviceName,
           moduleName: method.moduleName,
@@ -728,8 +731,8 @@ export function checkMethodRules(
       if (method.maxNestingDepth != null && method.maxNestingDepth > DEEP_NESTING_THRESHOLD) {
         violations.push({
           ruleKey: 'architecture/deterministic/deeply-nested-logic',
-          title: `Deeply nested: ${method.moduleName}.${method.name}`,
-          description: `${method.name} has nesting depth ${method.maxNestingDepth} (threshold: ${DEEP_NESTING_THRESHOLD}). Use early returns or extract helper functions to flatten the logic.`,
+          title: `Deeply nested: \`${method.moduleName}.${method.name}\``,
+          description: `\`${method.name}\` has nesting depth ${method.maxNestingDepth} (threshold: ${DEEP_NESTING_THRESHOLD}). Use early returns or extract helper functions to flatten the logic.`,
           severity: 'medium',
           serviceName: method.serviceName,
           moduleName: method.moduleName,
@@ -929,8 +932,8 @@ export function checkMethodRules(
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-method',
-          title: `Dead method: ${method.moduleName}.${method.name}`,
-          description: `${method.name} in ${method.moduleName} (${method.serviceName}) has no incoming or outgoing calls — it may be unused.`,
+          title: `Dead method: \`${method.moduleName}.${method.name}\``,
+          description: `\`${method.name}\` in \`${method.moduleName}\` (\`${method.serviceName}\`) has no incoming or outgoing calls — it may be unused.`,
           severity: 'low',
           serviceName: method.serviceName,
           moduleName: method.moduleName,

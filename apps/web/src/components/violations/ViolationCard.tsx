@@ -209,7 +209,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
             </div>
             {showFix && (
               <pre className="mt-1.5 rounded-md bg-muted px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
-                {violation.fixPrompt}
+                {renderInlineCode(violation.fixPrompt)}
               </pre>
             )}
           </div>
