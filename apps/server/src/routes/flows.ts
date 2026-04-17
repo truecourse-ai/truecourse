@@ -1,9 +1,10 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { analyses, flows } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
 import { getFlowsForAnalysis, getFlowWithSteps, enrichFlowWithLLM, getFlowSeverities } from '../services/flow.service.js';
+import { resolveProjectForRequest } from '../config/current-project.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -16,12 +17,13 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
+      resolveProjectForRequest(id);
 
       // Find latest non-diff analysis
       const [latestAnalysis] = await db
         .select({ id: analyses.id })
         .from(analyses)
-        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+        .where(notDiffAnalysis)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 

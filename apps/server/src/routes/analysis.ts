@@ -17,7 +17,6 @@ import {
   idsToUuid,
 } from '../services/stable-keys.js';
 import {
-  repos,
   analyses,
   services,
   serviceDependencies,
@@ -34,6 +33,9 @@ import {
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
+import { resolveProjectForRequest } from '../config/current-project.js';
+import { readProjectConfig } from '../config/project-config.js';
+import { touchProject } from '../config/registry.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runAnalysis, runDiffAnalysis } from '../services/analyzer.service.js';
@@ -79,15 +81,8 @@ router.post(
       }
       const { enabledCategories: globalEnabledCategories, enableLlmRules, skipGit } = parsed.data;
 
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      const repo = resolveProjectForRequest(id);
+      const projectConfig = readProjectConfig(repo.path);
 
       // Detect current branch and commit hash (never checkout — analyze what's on disk)
       let branch: string | null = null;
@@ -103,7 +98,6 @@ router.post(
         .insert(analyses)
         .values({
           id: randomUUID(),
-          repoId: id,
           branch,
           status: 'running',
           architecture: 'unknown',
@@ -122,10 +116,10 @@ router.post(
         // Resolve effective enabled categories
         const effectiveCategories = globalEnabledCategories?.length
           ? globalEnabledCategories
-          : (repo.enabledCategories ?? undefined);
+          : (projectConfig.enabledCategories ?? undefined);
 
         // Resolve effective LLM toggle: per-repo override > request param
-        const effectiveLlmRules = repo.enableLlmRules ?? enableLlmRules;
+        const effectiveLlmRules = projectConfig.enableLlmRules ?? enableLlmRules;
 
         const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
         const tracker = new StepTracker(id, trackerSteps);
@@ -138,14 +132,11 @@ router.post(
           tracker.detail('parse', progress.detail ?? 'Analyzing...');
         }, { signal: abortController.signal });
 
-        // Clean up old diff analyses and legacy diff checks for this repo
+        // Clean up old diff analyses and legacy diff checks
         const oldDiffAnalyses = await db
           .select({ id: analyses.id })
           .from(analyses)
-          .where(and(
-            eq(analyses.repoId, id),
-            sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`,
-          ));
+          .where(sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`);
         for (const da of oldDiffAnalyses) {
           await db.delete(analyses).where(eq(analyses.id, da.id));
         }
@@ -160,14 +151,14 @@ router.post(
 
         // Persist analysis using shared service
         const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ repoId: id, branch, result, commitHash: commitHash ?? undefined, metadata: {}, existingAnalysisId: runningAnalysis.id });
+          await persistAnalysisResult({ branch, result, commitHash: commitHash ?? undefined, metadata: {}, existingAnalysisId: runningAnalysis.id });
 
         const analysis = { id: newAnalysisId };
 
         // Load previous active violations for lifecycle tracking.
         // The new analysis we just created has no violations yet, so we fetch the 2 latest
         // non-diff analyses and use the second one (the one before this run).
-        const prevConditionsForLifecycle = [eq(analyses.repoId, id), notDiffAnalysis];
+        const prevConditionsForLifecycle = [notDiffAnalysis];
         if (branch) prevConditionsForLifecycle.push(eq(analyses.branch, branch));
         const prevAnalysesForLifecycle = await db
           .select({ id: analyses.id })
@@ -232,11 +223,8 @@ router.post(
         // keyed by stable service/module/method names, so they carry across
         // analyses automatically — no migration step needed here.
 
-        // Update repo lastAnalyzedAt
-        await db
-          .update(repos)
-          .set({ lastAnalyzedAt: new Date(), updatedAt: new Date() })
-          .where(eq(repos.id, id));
+        // Touch registry so the dashboard's last-opened ordering reflects this run.
+        touchProject(repo.slug);
 
         // Incremental file detection: only review changed files if previous commit hash exists
         let changedFileSet: Set<string> | undefined;
@@ -272,7 +260,6 @@ router.post(
         }
         try {
           await runViolationPipeline({
-            repoId: id,
             repoPath: repo.path,
             analysisId: newAnalysisId,
             result,
@@ -399,12 +386,13 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
+      resolveProjectForRequest(id);
       const canceled = cancelAnalysis(id);
       if (canceled) {
         // Set status to 'cancelling' — analysis:canceled event fires when it actually stops
         await db.update(analyses)
           .set({ status: 'cancelling' })
-          .where(and(eq(analyses.repoId, id), eq(analyses.status, 'running')));
+          .where(eq(analyses.status, 'running'));
       }
       res.json({ message: canceled ? 'Analysis cancelling' : 'No active analysis' });
     } catch (error) {
@@ -419,16 +407,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      resolveProjectForRequest(id);
 
       const analysisList = await db
         .select({
@@ -441,7 +420,7 @@ router.get(
           createdAt: analyses.createdAt,
         })
         .from(analyses)
-        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+        .where(notDiffAnalysis)
         .orderBy(desc(analyses.createdAt))
         .limit(20);
 
@@ -516,17 +495,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
 
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
+      const repo = resolveProjectForRequest(id);
 
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
-
-      // If analysisId is provided, load that specific analysis (verify it belongs to repo)
       const analysisId = req.query.analysisId as string | undefined;
       let analysis;
 
@@ -534,7 +504,7 @@ router.get(
         const [specific] = await db
           .select()
           .from(analyses)
-          .where(and(eq(analyses.id, analysisId), eq(analyses.repoId, id)))
+          .where(eq(analyses.id, analysisId))
           .limit(1);
         if (!specific) {
           res.json({ nodes: [], edges: [] });
@@ -543,7 +513,7 @@ router.get(
         analysis = specific;
       } else {
         // Find the latest non-diff analysis for the branch
-        const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
+        const conditions = [notDiffAnalysis];
         if (branch) {
           conditions.push(eq(analyses.branch, branch));
         }
@@ -680,16 +650,15 @@ async function resolveKeyMap(
   branch: string | undefined,
 ): Promise<
   | {
-      repo: typeof repos.$inferSelect;
+      repo: ReturnType<typeof resolveProjectForRequest>;
       analysis: typeof analyses.$inferSelect;
       keyMap: ReturnType<typeof buildStableKeyMap>;
     }
   | null
 > {
-  const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
-  if (!repo) return null;
+  const repo = resolveProjectForRequest(id);
 
-  const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
+  const conditions = [notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
   const [latest] = await db
@@ -763,9 +732,7 @@ router.delete(
       const branch = req.query.branch as string | undefined;
       const level = (req.query.level as string) || 'services';
 
-      const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
+      const repo = resolveProjectForRequest(id);
       clearPositions(repo.path, branch ?? null, level);
 
       res.json({ ok: true });
@@ -829,16 +796,7 @@ router.get(
     try {
       const id = req.params.id as string;
       const ref = req.query.ref as string | undefined;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      const repo = resolveProjectForRequest(id);
 
       const git = await getGit(repo.path);
       // Use git ls-files to get tracked files (respects .gitignore)
@@ -869,16 +827,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      const repo = resolveProjectForRequest(id);
 
       const git = await getGit(repo.path);
       const statusResult = await git.status();
@@ -908,7 +857,7 @@ router.get(
       const latestAnalysis = await db
         .select()
         .from(analyses)
-        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+        .where(notDiffAnalysis)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -944,22 +893,13 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      const repo = resolveProjectForRequest(id);
 
       // Find latest normal analysis (exclude diff analyses)
       const [latestAnalysis] = await db
         .select({ id: analyses.id })
         .from(analyses)
-        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+        .where(notDiffAnalysis)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -1035,10 +975,7 @@ router.post(
       const oldDiffAnalyses = await db
         .select({ id: analyses.id })
         .from(analyses)
-        .where(and(
-          eq(analyses.repoId, id),
-          sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`,
-        ));
+        .where(sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`);
       for (const da of oldDiffAnalyses) {
         await db.delete(analyses).where(eq(analyses.id, da.id));
       }
@@ -1046,7 +983,6 @@ router.post(
       // Persist the diff analysis — get real DB IDs
       const { analysisId: diffAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
         await persistAnalysisResult({
-          repoId: id,
           branch: branch || null,
           result,
           metadata: { isDiffAnalysis: true },
@@ -1059,7 +995,6 @@ router.post(
       const diffProvider = createLLMProvider();
       diffProvider.setAnalysisId(diffAnalysisId);
       const pipelineResult = await runViolationPipeline({
-        repoId: id,
         repoPath: repo.path,
         analysisId: diffAnalysisId,
         result,
@@ -1230,25 +1165,13 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      resolveProjectForRequest(id);
 
       // Find latest diff analysis (metadata.isDiffAnalysis = true)
       const [diffAnalysis] = await db
         .select()
         .from(analyses)
-        .where(and(
-          eq(analyses.repoId, id),
-          sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`,
-        ))
+        .where(sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -1263,7 +1186,7 @@ router.get(
       const [latestAnalysis] = await db
         .select({ id: analyses.id })
         .from(analyses)
-        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+        .where(notDiffAnalysis)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -1410,15 +1333,7 @@ router.get(
         throw createAppError('Missing "path" query parameter', 400);
       }
 
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      const repo = resolveProjectForRequest(id);
 
       // Resolve and validate path is within repo
       const resolved = path.resolve(repo.path, filePath);

@@ -1,15 +1,42 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { randomUUID } from 'node:crypto';
-import { eq, desc } from 'drizzle-orm';
+import { desc } from 'drizzle-orm';
+import * as fs from 'fs';
 import { db } from '../config/database.js';
-import { repos, analyses, services, serviceDependencies, violations } from '../db/schema.js';
+import { analyses } from '../db/schema.js';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
-import * as fs from 'fs';
-import * as path from 'path';
+import { getCurrentProject } from '../config/current-project.js';
+import { readProjectConfig, updateProjectConfig } from '../config/project-config.js';
+import {
+  readRegistry,
+  getProjectBySlug,
+  registerProject,
+  unregisterProject,
+} from '../config/registry.js';
 
 const router: Router = Router();
+
+/**
+ * The server (until Chunk 6) is bound to exactly one project resolved from
+ * cwd at startup. Every route that takes `:id` validates it matches the
+ * currently-bound project's slug.
+ */
+function requireCurrentProject(slug: string) {
+  const current = getCurrentProject();
+  if (current.slug !== slug) {
+    throw createAppError(
+      `Project "${slug}" is not currently served. This server is bound to "${current.slug}".`,
+      404,
+    );
+  }
+  return current;
+}
+
+async function latestAnalyzedAt(): Promise<Date | null> {
+  const [row] = await db.select().from(analyses).orderBy(desc(analyses.createdAt)).limit(1);
+  return row?.createdAt ?? null;
+}
 
 // POST /api/repos - Register a new repo
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -21,112 +48,63 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const repoPath = parsed.data.path;
 
-    // Validate that the path exists on the filesystem
     if (!fs.existsSync(repoPath)) {
       throw createAppError(`Path does not exist: ${repoPath}`, 400);
     }
-
-    const stat = fs.statSync(repoPath);
-    if (!stat.isDirectory()) {
+    if (!fs.statSync(repoPath).isDirectory()) {
       throw createAppError(`Path is not a directory: ${repoPath}`, 400);
     }
 
-    // Extract name from path
-    const name = path.basename(repoPath);
-
-    // Check if repo already exists
-    const existing = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.path, repoPath))
-      .limit(1);
-
-    if (existing.length > 0) {
-      res.status(200).json(existing[0]);
-      return;
-    }
-
-    const [repo] = await db
-      .insert(repos)
-      .values({ id: randomUUID(), name, path: repoPath })
-      .returning();
-
-    res.status(201).json(repo);
+    const entry = registerProject(repoPath);
+    res.status(201).json({
+      id: entry.slug,
+      name: entry.name,
+      path: entry.path,
+      lastAnalyzed: null,
+    });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/repos - List all repos
+// GET /api/repos - List all registered projects
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const allRepos = await db.select().from(repos).orderBy(desc(repos.createdAt));
-    res.json(allRepos.map((r) => ({
-      id: r.id,
-      name: r.name,
-      path: r.path,
-      lastAnalyzed: r.lastAnalyzedAt?.toISOString() ?? null,
-    })));
+    const entries = readRegistry();
+    res.json(
+      entries.map((e) => ({
+        id: e.slug,
+        name: e.name,
+        path: e.path,
+        lastAnalyzed: e.lastOpened ?? null,
+      })),
+    );
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/repos/:id - Get repo details with latest analysis
+// GET /api/repos/:id - Get project details with latest analysis
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
+    const slug = req.params.id as string;
+    const entry = getProjectBySlug(slug);
+    if (!entry) throw createAppError('Project not found', 404);
 
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
+    // Only the currently-bound project has a live DB to read analyses from.
+    const current = getCurrentProject();
+    const lastAnalyzedAt = current.slug === slug ? await latestAnalyzedAt() : null;
 
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    // Get latest analysis
-    const latestAnalysis = await db
-      .select()
-      .from(analyses)
-      .where(eq(analyses.repoId, id))
-      .orderBy(desc(analyses.createdAt))
-      .limit(1);
-
-    let analysisData = null;
-    if (latestAnalysis.length > 0) {
-      const analysis = latestAnalysis[0];
-
-      const analysisServices = await db
-        .select()
-        .from(services)
-        .where(eq(services.analysisId, analysis.id));
-
-      const analysisDeps = await db
-        .select()
-        .from(serviceDependencies)
-        .where(eq(serviceDependencies.analysisId, analysis.id));
-
-      analysisData = {
-        ...analysis,
-        services: analysisServices,
-        dependencies: analysisDeps,
-      };
-    }
-
-    // Get git branch info
-    const git = await getGit(repo.path);
+    const git = await getGit(entry.path);
     const branchSummary = await git.branch();
-    const branches = branchSummary.all;
-    const defaultBranch = branchSummary.current;
 
     res.json({
-      ...repo,
-      branches,
-      defaultBranch,
-      latestAnalysis: analysisData,
+      id: entry.slug,
+      name: entry.name,
+      path: entry.path,
+      lastAnalyzed: lastAnalyzedAt?.toISOString() ?? null,
+      branches: branchSummary.all,
+      defaultBranch: branchSummary.current,
     });
   } catch (error) {
     next(error);
@@ -136,21 +114,12 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 // GET /api/repos/:id/branches - List git branches
 router.get('/:id/branches', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
+    const slug = req.params.id as string;
+    const entry = getProjectBySlug(slug);
+    if (!entry) throw createAppError('Project not found', 404);
 
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    const git = await getGit(repo.path);
+    const git = await getGit(entry.path);
     const branchSummary = await git.branch();
-
     res.json({
       branches: branchSummary.all,
       defaultBranch: branchSummary.current,
@@ -160,64 +129,27 @@ router.get('/:id/branches', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
-// DELETE /api/repos/:id - Remove repo and related data
+// DELETE /api/repos/:id - Unregister the project (filesystem + DB untouched)
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
-
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
+    const slug = req.params.id as string;
+    if (!unregisterProject(slug)) {
+      throw createAppError('Project not found', 404);
     }
-
-    // Delete in correct order to respect foreign keys
-    const repoAnalyses = await db
-      .select()
-      .from(analyses)
-      .where(eq(analyses.repoId, id));
-
-    for (const analysis of repoAnalyses) {
-      await db.delete(violations).where(eq(violations.analysisId, analysis.id));
-      await db.delete(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id));
-      await db.delete(services).where(eq(services.analysisId, analysis.id));
-    }
-
-    await db.delete(analyses).where(eq(analyses.repoId, id));
-    await db.delete(repos).where(eq(repos.id, id));
-
     res.status(204).send();
   } catch (error) {
     next(error);
   }
 });
 
-// PUT /api/repos/:id/categories - Update per-repo disabled rule categories
+// PUT /api/repos/:id/categories - Update per-repo enabled categories
 router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
+    const slug = req.params.id as string;
     const { enabledCategories } = req.body as { enabledCategories: string[] | null };
-
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    await db
-      .update(repos)
-      .set({ enabledCategories, updatedAt: new Date() })
-      .where(eq(repos.id, id));
-
-    res.json({ enabledCategories });
+    const entry = requireCurrentProject(slug);
+    const next = updateProjectConfig(entry.path, { enabledCategories });
+    res.json({ enabledCategories: next.enabledCategories ?? null });
   } catch (error) {
     next(error);
   }
@@ -226,25 +158,23 @@ router.put('/:id/categories', async (req: Request, res: Response, next: NextFunc
 // PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
 router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
+    const slug = req.params.id as string;
     const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
+    const entry = requireCurrentProject(slug);
+    const next = updateProjectConfig(entry.path, { enableLlmRules });
+    res.json({ enableLlmRules: next.enableLlmRules ?? null });
+  } catch (error) {
+    next(error);
+  }
+});
 
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    await db
-      .update(repos)
-      .set({ enableLlmRules, updatedAt: new Date() })
-      .where(eq(repos.id, id));
-
-    res.json({ enableLlmRules });
+// GET /api/repos/:id/config - Read per-repo config.json (used by analyze/dashboard)
+router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const slug = req.params.id as string;
+    const entry = getProjectBySlug(slug);
+    if (!entry) throw createAppError('Project not found', 404);
+    res.json(readProjectConfig(entry.path));
   } catch (error) {
     next(error);
   }

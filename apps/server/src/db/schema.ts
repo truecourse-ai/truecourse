@@ -10,36 +10,17 @@ import {
 import { relations } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
-// repos
-// ---------------------------------------------------------------------------
-
-export const repos = pgTable('repos', {
-  id: uuid('id').primaryKey(),
-  name: text('name').notNull(),
-  path: text('path').notNull().unique(),
-  lastAnalyzedAt: timestamp('last_analyzed_at', { mode: 'date', withTimezone: true }),
-  /** Per-repo enabled rule categories (null = use global default) */
-  enabledCategories: jsonb('enabled_categories').$type<string[] | null>(),
-  /** Per-repo LLM rules toggle (null = use global default) */
-  enableLlmRules: boolean('enable_llm_rules'),
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
-export const reposRelations = relations(repos, ({ many }) => ({
-  analyses: many(analyses),
-  violations: many(violations),
-}));
-
-// ---------------------------------------------------------------------------
 // analyses
+//
+// Project identity (name, path, last-analyzed-at, enabled categories, LLM
+// toggle) lives outside the DB — in the global registry at
+// `~/.truecourse/registry.json` and per-repo `<repo>/.truecourse/config.json`.
+// Each PGlite file belongs to exactly one project so no `repoId` scoping is
+// needed inside the DB.
 // ---------------------------------------------------------------------------
 
 export const analyses = pgTable('analyses', {
   id: uuid('id').primaryKey(),
-  repoId: uuid('repo_id')
-    .notNull()
-    .references(() => repos.id, { onDelete: 'cascade' }),
   branch: text('branch'),
   status: text('status').notNull().default('completed'), // 'running' | 'cancelling' | 'completed' | 'cancelled' | 'failed'
   architecture: text('architecture').notNull(), // 'monolith' | 'microservices'
@@ -48,11 +29,7 @@ export const analyses = pgTable('analyses', {
   createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
 });
 
-export const analysesRelations = relations(analyses, ({ one, many }) => ({
-  repo: one(repos, {
-    fields: [analyses.repoId],
-    references: [repos.id],
-  }),
+export const analysesRelations = relations(analyses, ({ many }) => ({
   services: many(services),
   serviceDependencies: many(serviceDependencies),
   layers: many(layers),
@@ -171,9 +148,6 @@ export const layersRelations = relations(layers, ({ one }) => ({
 
 export const violations = pgTable('violations', {
   id: uuid('id').primaryKey(),
-  repoId: uuid('repo_id')
-    .notNull()
-    .references(() => repos.id, { onDelete: 'cascade' }),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -216,10 +190,6 @@ export const violations = pgTable('violations', {
 });
 
 export const violationsRelations = relations(violations, ({ one }) => ({
-  repo: one(repos, {
-    fields: [violations.repoId],
-    references: [repos.id],
-  }),
   analysis: one(analyses, {
     fields: [violations.analysisId],
     references: [analyses.id],

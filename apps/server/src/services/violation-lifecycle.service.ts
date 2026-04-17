@@ -52,11 +52,10 @@ export type ActiveCodeViolation = ActiveViolation;
 // ---------------------------------------------------------------------------
 
 export async function loadActiveViolations(
-  repoId: string,
   branch?: string | null,
 ): Promise<ActiveViolation[]> {
   // Find latest non-diff analysis
-  const conditions = [eq(analyses.repoId, repoId), notDiffAnalysis];
+  const conditions = [notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
   const [latestAnalysis] = await db
@@ -110,10 +109,9 @@ export async function loadActiveViolations(
 }
 
 export async function loadActiveCodeViolations(
-  repoId: string,
   branch?: string | null,
 ): Promise<ActiveViolation[]> {
-  const conditions = [eq(analyses.repoId, repoId), notDiffAnalysis];
+  const conditions = [notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
   const [latestAnalysis] = await db
@@ -173,7 +171,6 @@ export async function loadActiveCodeViolations(
 
 export interface PersistViolationsParams {
   analysisId: string;
-  repoId: string;
   newViolations: DiffViolationItem[];
   resolvedViolationIds: string[];
   previousActiveViolations: ActiveViolation[];
@@ -188,7 +185,6 @@ export async function persistViolationsWithLifecycle(
 ): Promise<void> {
   const {
     analysisId,
-    repoId,
     newViolations,
     resolvedViolationIds,
     previousActiveViolations,
@@ -229,7 +225,6 @@ export async function persistViolationsWithLifecycle(
       // Resolved
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId,
         analysisId,
         type: prev.type,
         title: prev.title,
@@ -252,7 +247,6 @@ export async function persistViolationsWithLifecycle(
       // Unchanged — carry forward
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId,
         analysisId,
         type: prev.type,
         title: prev.title,
@@ -293,7 +287,6 @@ export async function persistViolationsWithLifecycle(
 
     await db.insert(violations).values({
       id: randomUUID(),
-      repoId,
       analysisId,
       type: v.type,
       title: v.title,
@@ -317,7 +310,6 @@ export async function persistViolationsWithLifecycle(
 
 export interface PersistFileViolationsParams {
   analysisId: string;
-  repoId: string;
   currentViolations: {
     filePath: string;
     lineStart: number;
@@ -337,7 +329,7 @@ export interface PersistFileViolationsParams {
 export async function persistFileViolationsWithLifecycle(
   params: PersistFileViolationsParams,
 ): Promise<void> {
-  const { analysisId, repoId, currentViolations, previousViolations } = params;
+  const { analysisId, currentViolations, previousViolations } = params;
   const now = new Date();
 
   // Build lookup key: ruleKey + filePath
@@ -358,7 +350,6 @@ export async function persistFileViolationsWithLifecycle(
     if (!currentKeys.has(key)) {
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId,
         analysisId,
         type: 'code',
         title: prev.title,
@@ -390,7 +381,6 @@ export async function persistFileViolationsWithLifecycle(
       // Unchanged — carry lineage
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId,
         analysisId,
         type: 'code',
         title: cv.title,
@@ -413,7 +403,6 @@ export async function persistFileViolationsWithLifecycle(
       // New
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId,
         analysisId,
         type: 'code',
         title: cv.title,

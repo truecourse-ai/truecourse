@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import { createServer } from 'http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { drizzle } from 'drizzle-orm/pglite';
+import { migrate } from 'drizzle-orm/pglite/migrator';
 import { config } from './config/index.js';
 import { initDatabase, closeDatabase, getClient } from './config/database.js';
-import { migratePGlite } from './config/migrate.js';
 import {
   resolveRepoDir,
   ensureRepoTruecourseDir,
@@ -24,12 +25,17 @@ import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { seedRules } from './services/rules.service.js';
+import { setCurrentProject } from './config/current-project.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function resolveDataDir(): string {
+function resolveRepoAndDataDir(): { repoDir: string; dataDir: string } {
   if (process.env.TRUECOURSE_DATA_DIR) {
-    return process.env.TRUECOURSE_DATA_DIR;
+    // Env-var mode: we still need a repo dir for registry/config/ui-state.
+    // Fall back to cwd if it has a .truecourse/; otherwise treat cwd as the repo.
+    const resolved = resolveRepoDir(process.cwd()) ?? process.cwd();
+    ensureRepoTruecourseDir(resolved);
+    return { repoDir: resolved, dataDir: process.env.TRUECOURSE_DATA_DIR };
   }
   const repoDir = resolveRepoDir(process.cwd());
   if (!repoDir) {
@@ -40,7 +46,7 @@ function resolveDataDir(): string {
     );
   }
   ensureRepoTruecourseDir(repoDir);
-  return getRepoDbDir(repoDir);
+  return { repoDir, dataDir: getRepoDbDir(repoDir) };
 }
 
 async function main() {
@@ -49,11 +55,13 @@ async function main() {
     console.log('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
   }
 
-  // 1. Initialize PGlite at the per-repo data directory
-  const dataDir = resolveDataDir();
+  // 1. Initialize PGlite at the per-repo data directory + register in registry
+  const { repoDir, dataDir } = resolveRepoAndDataDir();
   fs.mkdirSync(dataDir, { recursive: true });
+  const project = setCurrentProject(repoDir);
   await initDatabase(dataDir);
   console.log(`[Database] PGlite ready at ${dataDir}`);
+  console.log(`[Project] Serving "${project.name}" (slug: ${project.slug})`);
 
   // 2. Run migrations
   // In dev: migrations are at ../src/db/migrations relative to src/
@@ -61,7 +69,7 @@ async function main() {
   const devMigrations = path.join(__dirname, '../src/db/migrations');
   const distMigrations = path.join(__dirname, 'db/migrations');
   const migrationsFolder = fs.existsSync(distMigrations) ? distMigrations : devMigrations;
-  await migratePGlite(getClient(), migrationsFolder);
+  await migrate(drizzle(getClient()), { migrationsFolder });
   console.log('[Database] Migrations complete');
 
   // 3. Seed default rules (upserts — safe to run every startup)

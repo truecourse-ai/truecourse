@@ -20,7 +20,6 @@ describe('flow.service (integration)', () => {
   let db: TestDb;
   let analysisResult: AnalysisResult;
   let analysisId: string;
-  let repoId: string;
 
   beforeAll(async () => {
     ({ db } = await setupTestDb());
@@ -28,25 +27,10 @@ describe('flow.service (integration)', () => {
     // Run analysis on the fixture project
     analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true, skipGit: true });
 
-    // Create a repo record in DB (use unique path suffix to avoid conflicts with routes.test.ts)
-    // Clean up any leftover from a previous crashed run
-    const uniquePath = `${FIXTURE_PATH}#flow-test`;
-    const existing = await db.select().from(schema.repos).where(eq(schema.repos.path, uniquePath));
-    if (existing.length > 0) {
-      await db.delete(schema.analyses).where(eq(schema.analyses.repoId, existing[0].id));
-      await db.delete(schema.repos).where(eq(schema.repos.id, existing[0].id));
-    }
-    const [repo] = await db
-      .insert(schema.repos)
-      .values({ id: randomUUID(), name: 'flow-test-repo', path: uniquePath })
-      .returning();
-    repoId = repo.id;
-
     const [analysis] = await db
       .insert(schema.analyses)
       .values({
         id: randomUUID(),
-        repoId: repo.id,
         architecture: analysisResult.architecture,
         metadata: {},
       })
@@ -149,7 +133,6 @@ describe('flow.service (integration)', () => {
     // Insert a violation targeting this method
     await db.insert(schema.violations).values({
       id: randomUUID(),
-      repoId,
       analysisId,
       type: 'function',
       title: 'Test violation',

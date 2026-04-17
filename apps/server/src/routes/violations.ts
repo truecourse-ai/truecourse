@@ -1,9 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc, and, sql, count, inArray } from 'drizzle-orm';
+import { eq, desc, and, sql, count } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { db } from '../config/database.js';
 import {
-  repos,
   analyses,
   services,
   serviceDependencies,
@@ -15,6 +14,7 @@ import {
 import { createAppError } from '../middleware/error.js';
 import { generateViolations } from '../services/violation.service.js';
 import { emitViolationsReady } from '../socket/handlers.js';
+import { resolveProjectForRequest } from '../config/current-project.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
@@ -27,22 +27,13 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      resolveProjectForRequest(id);
 
       // Get latest non-diff analysis
       const latestAnalysis = await db
         .select()
         .from(analyses)
-        .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+        .where(notDiffAnalysis)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 
@@ -111,7 +102,6 @@ router.post(
           .insert(violations)
           .values({
             id: randomUUID(),
-            repoId: id,
             analysisId: analysis.id,
             type: violation.type,
             title: violation.title,
@@ -155,16 +145,7 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const analysisIdParam = req.query.analysisId as string | undefined;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      const repo = resolveProjectForRequest(id);
 
       let analysis;
 
@@ -172,7 +153,7 @@ router.get(
         const [specific] = await db
           .select()
           .from(analyses)
-          .where(and(eq(analyses.id, analysisIdParam), eq(analyses.repoId, id)))
+          .where(eq(analyses.id, analysisIdParam))
           .limit(1);
         if (!specific) {
           res.json([]);
@@ -181,7 +162,7 @@ router.get(
         analysis = specific;
       } else {
         // Find the latest non-diff analysis
-        const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
+        const conditions = [notDiffAnalysis];
         if (branch) {
           conditions.push(eq(analyses.branch, branch));
         }
@@ -301,16 +282,7 @@ router.get(
     try {
       const id = req.params.id as string;
       const analysisIdParam = req.query.analysisId as string | undefined;
-
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
+      resolveProjectForRequest(id);
 
       let analysisId: string;
 
@@ -318,7 +290,7 @@ router.get(
         const [specific] = await db
           .select({ id: analyses.id })
           .from(analyses)
-          .where(and(eq(analyses.id, analysisIdParam), eq(analyses.repoId, id)))
+          .where(eq(analyses.id, analysisIdParam))
           .limit(1);
         if (!specific) {
           res.json({ total: 0, byFile: {}, bySeverity: {} });
@@ -329,7 +301,7 @@ router.get(
         const [latest] = await db
           .select({ id: analyses.id })
           .from(analyses)
-          .where(and(eq(analyses.repoId, id), notDiffAnalysis))
+          .where(notDiffAnalysis)
           .orderBy(desc(analyses.createdAt))
           .limit(1);
 

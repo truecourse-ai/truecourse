@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../config/database.js';
-import { config } from '../config/index.js';
 import {
   services,
   violations,
@@ -12,9 +11,9 @@ import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, 
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
-import { DOMAIN_ORDER, DOMAIN_LABELS, LLM_DOMAINS, CODE_DOMAINS } from '../socket/handlers.js';
+import { DOMAIN_ORDER, CODE_DOMAINS } from '../socket/handlers.js';
 import { getEnabledRules } from './rules.service.js';
-import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationsResult, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
+import { createLLMProvider, type LLMProvider, type CodeViolationContext, type CodeViolationRaw, type DiffViolationItem } from './llm/provider.js';
 import { routeContext, estimateContext } from './llm/context-router.js';
 import { generateViolations, generateViolationsWithLifecycle } from './violation.service.js';
 import {
@@ -37,7 +36,6 @@ function throwIfAborted(signal?: AbortSignal) {
 // ---------------------------------------------------------------------------
 
 export interface ViolationPipelineInput {
-  repoId: string;
   repoPath: string;
   analysisId: string;
   result: AnalysisResult;
@@ -160,7 +158,7 @@ export function compareDeterministicViolations<
  */
 export async function runViolationPipeline(input: ViolationPipelineInput): Promise<ViolationPipelineResult> {
   const {
-    repoId, repoPath, analysisId, result,
+    repoPath, analysisId, result,
     serviceIdMap, moduleIdMap, methodIdMap, dbIdMap,
     previousActiveViolations,
     changedFileSet, onProgress, tracker,
@@ -641,7 +639,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
         await db.insert(violations).values({
           id: randomUUID(),
-          repoId,
           analysisId,
           type: prevViolation.type,
           title: prevViolation.title,
@@ -671,7 +668,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
         await db.insert(violations).values({
           id: randomUUID(),
-          repoId,
           analysisId,
           type: prevViolation.type,
           title: prevViolation.title,
@@ -702,7 +698,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const violationId = randomUUID();
       await db.insert(violations).values({
         id: violationId,
-        repoId,
         analysisId,
         type: det.violationType,
         title: det.title,
@@ -929,7 +924,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         for (const v of dbResult.violations) {
           await db.insert(violations).values({
             id: randomUUID(),
-            repoId, analysisId,
+            analysisId,
             type: 'database',
             title: v.title,
             content: v.content,
@@ -993,7 +988,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
       await persistViolationsWithLifecycle({
         analysisId,
-        repoId,
         newViolations: archResult.newViolations,
         resolvedViolationIds: archResult.resolvedViolationIds,
         previousActiveViolations: llmOnlyPreviousViolations,
@@ -1013,7 +1007,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       for (const violation of archResult.violations) {
         await db.insert(violations).values({
           id: randomUUID(),
-          repoId,
           analysisId,
           type: violation.type,
           title: violation.title,
@@ -1101,7 +1094,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
     await persistFileViolationsWithLifecycle({
       analysisId,
-      repoId,
       currentViolations: allCodeViolations,
       previousViolations: prevForDeterministicMatching,
     });
@@ -1123,7 +1115,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   for (const prev of prevInUnchangedFiles) {
     await db.insert(violations).values({
       id: randomUUID(),
-      repoId,
       analysisId,
       type: 'code',
       filePath: prev.filePath,
@@ -1168,7 +1159,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       if (!prev) continue;
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId, analysisId, type: 'code',
+        analysisId, type: 'code',
         filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
         columnStart: prev.columnStart, columnEnd: prev.columnEnd,
         ruleKey: prev.ruleKey, severity: prev.severity, status: 'unchanged',
@@ -1183,7 +1174,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       if (!prev) continue;
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId, analysisId, type: 'code',
+        analysisId, type: 'code',
         filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
         columnStart: prev.columnStart, columnEnd: prev.columnEnd,
         ruleKey: prev.ruleKey, severity: prev.severity, status: 'resolved',
@@ -1202,7 +1193,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     if (allLlmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
       await persistFileViolationsWithLifecycle({
-        analysisId, repoId,
+        analysisId,
         currentViolations: allLlmCodeViolations,
         previousViolations: llmPrevForMatching,
       });
@@ -1216,7 +1207,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     for (const prev of llmPrevUnchangedFiles) {
       await db.insert(violations).values({
         id: randomUUID(),
-        repoId, analysisId, type: 'code',
+        analysisId, type: 'code',
         filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
         columnStart: prev.columnStart, columnEnd: prev.columnEnd,
         ruleKey: prev.ruleKey, severity: prev.severity, status: 'unchanged',

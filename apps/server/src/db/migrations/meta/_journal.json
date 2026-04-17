@@ -134,6 +134,13 @@
       "when": 1776401936087,
       "tag": "0018_productive_black_panther",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1776403892134,
+      "tag": "0019_slim_champions",
+      "breakpoints": true
     }
   ]
 }

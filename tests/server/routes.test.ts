@@ -3,9 +3,9 @@ import express from 'express';
 import request from 'supertest';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
-import { eq } from 'drizzle-orm';
 import * as schema from '../../apps/server/src/db/schema';
 import { setupTestDb, teardownTestDb, type TestDb } from '../helpers/test-db';
+import { setCurrentProject } from '../../apps/server/src/config/current-project';
 
 // ---------------------------------------------------------------------------
 // Mock the socket handlers so analysis doesn't crash on getIO()
@@ -75,6 +75,9 @@ describe('API routes (integration)', () => {
 
   beforeAll(async () => {
     ({ db } = await setupTestDb());
+    // Bind the test's fixture directory as the server's current project so
+    // route handlers that call resolveProjectForRequest() can validate the slug.
+    setCurrentProject(FIXTURE_PATH);
   });
 
   afterAll(async () => {
@@ -98,14 +101,14 @@ describe('API routes (integration)', () => {
   });
 
   // -----------------------------------------------------------------------
-  // POST /api/repos — duplicate returns 200 (idempotent)
+  // POST /api/repos — duplicate returns 201 with the same slug (idempotent)
   // -----------------------------------------------------------------------
 
-  it('POST /api/repos — duplicate path returns 200', async () => {
+  it('POST /api/repos — duplicate path returns the same slug', async () => {
     const res = await request(app)
       .post('/api/repos')
       .send({ path: FIXTURE_PATH })
-      .expect(200);
+      .expect(201);
 
     expect(res.body.id).toBe(createdRepoId);
   });
@@ -161,7 +164,7 @@ describe('API routes (integration)', () => {
     expect(res.body.name).toBe('sample-js-project-negative');
     expect(res.body).toHaveProperty('branches');
     expect(res.body).toHaveProperty('defaultBranch');
-    expect(res.body.latestAnalysis).toBeNull();
+    expect(res.body.lastAnalyzed).toBeNull();
   });
 
   // -----------------------------------------------------------------------
@@ -203,30 +206,21 @@ describe('API routes (integration)', () => {
     }
 
     // Verify analysis was actually saved
-    const analysisRows = await db
-      .select()
-      .from(schema.analyses)
-      .where(eq(schema.analyses.repoId, createdRepoId));
-
+    const analysisRows = await db.select().from(schema.analyses);
     expect(analysisRows.length).toBeGreaterThan(0);
-    expect(analysisRows[0].repoId).toBe(createdRepoId);
   }, 90_000);
 
   // -----------------------------------------------------------------------
-  // GET /api/repos/:id — returns repo with latest analysis (after analyze)
+  // GET /api/repos/:id — surfaces lastAnalyzed timestamp after analyze
   // -----------------------------------------------------------------------
 
-  it('GET /api/repos/:id — includes latest analysis after analyze', async () => {
+  it('GET /api/repos/:id — surfaces lastAnalyzed timestamp after analyze', async () => {
     const res = await request(app)
       .get(`/api/repos/${createdRepoId}`)
       .expect(200);
 
-    expect(res.body.latestAnalysis).not.toBeNull();
-    expect(res.body.latestAnalysis).toHaveProperty('id');
-    expect(res.body.latestAnalysis).toHaveProperty('architecture');
-    expect(res.body.latestAnalysis).toHaveProperty('services');
-    expect(res.body.latestAnalysis.services.length).toBeGreaterThan(0);
-    expect(res.body.latestAnalysis).toHaveProperty('dependencies');
+    expect(res.body.lastAnalyzed).not.toBeNull();
+    expect(typeof res.body.lastAnalyzed).toBe('string');
   });
 
   // -----------------------------------------------------------------------
@@ -369,28 +363,15 @@ describe('API routes (integration)', () => {
   // DELETE /api/repos/:id — removes repo and cascades
   // -----------------------------------------------------------------------
 
-  it('DELETE /api/repos/:id — removes repo, returns 204', async () => {
+  it('DELETE /api/repos/:id — unregisters the project, returns 204', async () => {
     await request(app)
       .delete(`/api/repos/${createdRepoId}`)
       .expect(204);
 
-    // Verify repo is gone
-    const rows = await db
-      .select()
-      .from(schema.repos)
-      .where(eq(schema.repos.id, createdRepoId));
+    // Verify it's gone from the registry (project data on disk is untouched).
+    const listRes = await request(app).get('/api/repos').expect(200);
+    expect(listRes.body.find((r: { id: string }) => r.id === createdRepoId)).toBeUndefined();
 
-    expect(rows).toHaveLength(0);
-
-    // Verify cascaded data is also gone
-    const analysisRows = await db
-      .select()
-      .from(schema.analyses)
-      .where(eq(schema.analyses.repoId, createdRepoId));
-
-    expect(analysisRows).toHaveLength(0);
-
-    // Mark as deleted so afterAll cleanup doesn't try again
     createdRepoId = '';
   });
 

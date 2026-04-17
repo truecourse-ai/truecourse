@@ -18,7 +18,6 @@ import type { AnalysisResult } from './analyzer.service.js';
 import type { CodeViolation } from '@truecourse/shared';
 
 export interface PersistAnalysisParams {
-  repoId: string;
   branch: string | null;
   result: AnalysisResult;
   metadata?: Record<string, unknown>;
@@ -36,7 +35,7 @@ export interface PersistAnalysisOutput {
 }
 
 export async function persistAnalysisResult(params: PersistAnalysisParams): Promise<PersistAnalysisOutput> {
-  const { repoId, branch, result, metadata, commitHash, existingAnalysisId } = params;
+  const { branch, result, metadata, commitHash, existingAnalysisId } = params;
 
   let analysis: typeof analyses.$inferSelect;
 
@@ -58,7 +57,6 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       .insert(analyses)
       .values({
         id: randomUUID(),
-        repoId,
         branch: branch || null,
         status: 'completed',
         architecture: result.architecture,
@@ -264,7 +262,6 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
  */
 export async function persistFileViolations(
   analysisId: string,
-  repoId: string,
   codeViolations: CodeViolation[],
 ): Promise<void> {
   if (codeViolations.length === 0) return;
@@ -278,7 +275,6 @@ export async function persistFileViolations(
     await db.insert(violations).values(
       batch.map((v) => ({
         id: randomUUID(),
-        repoId,
         analysisId,
         type: 'code' as const,
         title: v.title,

@@ -22,11 +22,8 @@ const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean I
 // Helper: find latest non-diff analysis for a repo
 // ---------------------------------------------------------------------------
 
-async function findLatestAnalysisId(
-  repoId: string,
-  branch?: string,
-): Promise<string | null> {
-  const conditions = [eq(analyses.repoId, repoId), notDiffAnalysis];
+async function findLatestAnalysisId(branch?: string): Promise<string | null> {
+  const conditions = [notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
   const [row] = await db
@@ -44,11 +41,10 @@ async function findLatestAnalysisId(
 // ---------------------------------------------------------------------------
 
 export async function getTrend(
-  repoId: string,
   branch?: string,
   limit = 20,
 ): Promise<TrendResponse> {
-  const conditions = [eq(analyses.repoId, repoId), notDiffAnalysis];
+  const conditions = [notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
   // Get recent full analyses (newest first, then reverse for chronological)
@@ -118,11 +114,10 @@ export async function getTrend(
 // ---------------------------------------------------------------------------
 
 export async function getBreakdown(
-  repoId: string,
   branch?: string,
   specificAnalysisId?: string,
 ): Promise<BreakdownResponse> {
-  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(repoId, branch);
+  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(branch);
   if (!analysisId) return { byCategory: {}, bySeverity: {}, total: 0 };
 
   // Category is the first segment of ruleKey (e.g. 'security/deterministic/foo' → 'security').
@@ -176,11 +171,10 @@ export async function getBreakdown(
 // ---------------------------------------------------------------------------
 
 export async function getTopOffenders(
-  repoId: string,
   branch?: string,
   specificAnalysisId?: string,
 ): Promise<TopOffendersResponse> {
-  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(repoId, branch);
+  const analysisId = specificAnalysisId ?? await findLatestAnalysisId(branch);
   if (!analysisId) return { offenders: [], analysisId: '' };
 
   // Services with most violations
@@ -256,14 +250,11 @@ export async function getTopOffenders(
 // Resolution: velocity metrics across all analyses
 // ---------------------------------------------------------------------------
 
-export async function getResolution(
-  repoId: string,
-  branch?: string,
-): Promise<ResolutionResponse> {
-  const conditions = [eq(analyses.repoId, repoId), notDiffAnalysis];
+export async function getResolution(branch?: string): Promise<ResolutionResponse> {
+  const conditions = [notDiffAnalysis];
   if (branch) conditions.push(eq(analyses.branch, branch));
 
-  // Get all analysis IDs for this repo (non-diff)
+  // Get all analysis IDs (non-diff)
   const repoAnalyses = await db
     .select({ id: analyses.id })
     .from(analyses)
@@ -281,7 +272,7 @@ export async function getResolution(
   }
 
   // Find the latest analysis to count active violations
-  const latestAnalysisId = await findLatestAnalysisId(repoId, branch);
+  const latestAnalysisId = await findLatestAnalysisId(branch);
   if (!latestAnalysisId) {
     return {
       avgTimeToResolveMs: null,

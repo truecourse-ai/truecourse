@@ -1,8 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { repos } from '../db/schema.js';
-import { createAppError } from '../middleware/error.js';
+import { resolveProjectForRequest } from '../config/current-project.js';
 import {
   getTrend,
   getBreakdown,
@@ -20,12 +17,8 @@ router.get(
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
-
-      const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
-      const result = await getTrend(id, branch, limit);
-      res.json(result);
+      resolveProjectForRequest(id);
+      res.json(await getTrend(branch, limit));
     } catch (err) {
       next(err);
     }
@@ -39,13 +32,9 @@ router.get(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
-
-      const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
       const analysisId = req.query.analysisId as string | undefined;
-      const result = await getBreakdown(id, branch, analysisId);
-      res.json(result);
+      resolveProjectForRequest(id);
+      res.json(await getBreakdown(branch, analysisId));
     } catch (err) {
       next(err);
     }
@@ -59,13 +48,9 @@ router.get(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
-
-      const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
       const analysisId = req.query.analysisId as string | undefined;
-      const result = await getTopOffenders(id, branch, analysisId);
-      res.json(result);
+      resolveProjectForRequest(id);
+      res.json(await getTopOffenders(branch, analysisId));
     } catch (err) {
       next(err);
     }
@@ -79,12 +64,8 @@ router.get(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
-
-      const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
-      if (!repo) throw createAppError('Repo not found', 404);
-
-      const result = await getResolution(id, branch);
-      res.json(result);
+      resolveProjectForRequest(id);
+      res.json(await getResolution(branch));
     } catch (err) {
       next(err);
     }

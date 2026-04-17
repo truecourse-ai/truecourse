@@ -1,8 +1,9 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { eq, desc, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { repos, analyses, databases, databaseConnections } from '../db/schema.js';
+import { analyses, databases, databaseConnections } from '../db/schema.js';
 import { createAppError } from '../middleware/error.js';
+import { resolveProjectForRequest } from '../config/current-project.js';
 
 const router: Router = Router();
 
@@ -13,18 +14,9 @@ router.get(
     try {
       const id = req.params.id as string;
       const branch = req.query.branch as string | undefined;
+      resolveProjectForRequest(id);
 
-      const [repo] = await db
-        .select()
-        .from(repos)
-        .where(eq(repos.id, id))
-        .limit(1);
-
-      if (!repo) {
-        throw createAppError('Repo not found', 404);
-      }
-
-      const conditions = [eq(analyses.repoId, id)];
+      const conditions = [] as ReturnType<typeof eq>[];
       if (branch) {
         conditions.push(eq(analyses.branch, branch));
       }
@@ -32,7 +24,7 @@ router.get(
       const latestAnalysis = await db
         .select()
         .from(analyses)
-        .where(and(...conditions))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(analyses.createdAt))
         .limit(1);
 

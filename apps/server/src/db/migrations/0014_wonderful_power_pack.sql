@@ -2,9 +2,8 @@ ALTER TABLE "code_violations" DISABLE ROW LEVEL SECURITY;--> statement-breakpoin
 ALTER TABLE "deterministic_violations" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP TABLE "code_violations" CASCADE;--> statement-breakpoint
 DROP TABLE "deterministic_violations" CASCADE;--> statement-breakpoint
-ALTER TABLE "violations" DROP CONSTRAINT IF EXISTS "violations_deterministic_violation_id_deterministic_violations_id_fk";
-ALTER TABLE "violations" DROP CONSTRAINT IF EXISTS "violations_deterministic_violation_id_deterministic_violations_";
---> statement-breakpoint
+ALTER TABLE "violations" DROP CONSTRAINT IF EXISTS "violations_deterministic_violation_id_deterministic_violations_id_fk";--> statement-breakpoint
+ALTER TABLE "violations" DROP CONSTRAINT IF EXISTS "violations_deterministic_violation_id_deterministic_violations_";--> statement-breakpoint
 ALTER TABLE "violations" ADD COLUMN "related_service_id" uuid;--> statement-breakpoint
 ALTER TABLE "violations" ADD COLUMN "related_module_id" uuid;--> statement-breakpoint
 ALTER TABLE "violations" ADD COLUMN "file_path" text;--> statement-breakpoint
