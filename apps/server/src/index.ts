@@ -1,15 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
+import os from 'node:os';
 import { createServer } from 'http';
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config } from './config/index.js';
-import { startEmbeddedPostgres, stopEmbeddedPostgres } from './config/embedded-postgres.js';
-import { initDatabase, closeDatabase } from './config/database.js';
+import { initDatabase, closeDatabase, getClient } from './config/database.js';
+import { migratePGlite } from './config/migrate.js';
 import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import reposRouter from './routes/repos.js';
@@ -24,26 +22,27 @@ import { seedRules } from './services/rules.service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function resolveDataDir(): string {
+  return process.env.TRUECOURSE_DATA_DIR || path.join(os.homedir(), '.truecourse', 'pglite');
+}
+
 async function main() {
-  // 1. Start embedded PostgreSQL (no-op if DATABASE_URL is set)
-  const databaseUrl = await startEmbeddedPostgres();
-  console.log(`[Database] Connected: ${databaseUrl.replace(/\/\/.*@/, '//<credentials>@')}`);
+  // 1. Initialize PGlite at the local data directory
+  const dataDir = resolveDataDir();
+  fs.mkdirSync(dataDir, { recursive: true });
+  await initDatabase(dataDir);
+  console.log(`[Database] PGlite ready at ${dataDir}`);
 
-  // 2. Initialize database connection
-  initDatabase(databaseUrl);
-
-  // 3. Run migrations
+  // 2. Run migrations
   // In dev: migrations are at ../src/db/migrations relative to src/
   // In packaged mode: migrations are at ./db/migrations relative to dist/server.mjs
   const devMigrations = path.join(__dirname, '../src/db/migrations');
   const distMigrations = path.join(__dirname, 'db/migrations');
   const migrationsFolder = fs.existsSync(distMigrations) ? distMigrations : devMigrations;
-  const migrationClient = postgres(databaseUrl, { max: 1, onnotice: () => {} });
-  await migrate(drizzle(migrationClient), { migrationsFolder });
-  await migrationClient.end();
+  await migratePGlite(getClient(), migrationsFolder);
   console.log('[Database] Migrations complete');
 
-  // 3b. Seed default rules (upserts — safe to run every startup)
+  // 3. Seed default rules (upserts — safe to run every startup)
   await seedRules();
   console.log('[Database] Rules seeded');
   console.log(`[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}`);
@@ -122,7 +121,6 @@ async function main() {
     httpServer.closeAllConnections();
     httpServer.close();
     await closeDatabase();
-    await stopEmbeddedPostgres();
     console.log('[Server] Closed');
     process.exit(0);
   }

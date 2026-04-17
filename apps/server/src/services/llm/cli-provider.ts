@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { registerChildProcess, unregisterChildProcess } from '../analysis-registry.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ZodType } from 'zod';
@@ -346,7 +346,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
     return {
       violations: object.violations.map((v) => ({
-        id: uuidv4(),
+        id: randomUUID(),
         type: v.type,
         title: v.title,
         content: v.content,
@@ -378,7 +378,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
     return {
       violations: object.violations.map((v) => ({
-        id: uuidv4(),
+        id: randomUUID(),
         type: v.type,
         title: v.title,
         content: v.content,
@@ -417,7 +417,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         const targetModuleId = resolveId(v.targetModuleId, idMap) ?? undefined;
         const targetServiceId = targetModuleId ? moduleIdToServiceId.get(targetModuleId) : undefined;
         return {
-          id: uuidv4(),
+          id: randomUUID(),
           type: v.type,
           title: v.title,
           content: v.content,

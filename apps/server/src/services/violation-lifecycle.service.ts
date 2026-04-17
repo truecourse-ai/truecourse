@@ -1,5 +1,5 @@
 import { eq, and, inArray, desc, sql, isNotNull } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { db } from '../config/database.js';
 import {
   violations,
@@ -228,7 +228,7 @@ export async function persistViolationsWithLifecycle(
     if (resolvedSet.has(prev.id)) {
       // Resolved
       await db.insert(violations).values({
-        id: uuidv4(),
+        id: randomUUID(),
         repoId,
         analysisId,
         type: prev.type,
@@ -251,7 +251,7 @@ export async function persistViolationsWithLifecycle(
     } else if (!newTitles.has(prev.title.toLowerCase().trim())) {
       // Unchanged — carry forward
       await db.insert(violations).values({
-        id: uuidv4(),
+        id: randomUUID(),
         repoId,
         analysisId,
         type: prev.type,
@@ -292,7 +292,7 @@ export async function persistViolationsWithLifecycle(
     }
 
     await db.insert(violations).values({
-      id: uuidv4(),
+      id: randomUUID(),
       repoId,
       analysisId,
       type: v.type,
@@ -357,7 +357,7 @@ export async function persistFileViolationsWithLifecycle(
     const key = `${prev.ruleKey}::${prev.filePath}`;
     if (!currentKeys.has(key)) {
       await db.insert(violations).values({
-        id: uuidv4(),
+        id: randomUUID(),
         repoId,
         analysisId,
         type: 'code',
@@ -389,7 +389,7 @@ export async function persistFileViolationsWithLifecycle(
     if (prev) {
       // Unchanged — carry lineage
       await db.insert(violations).values({
-        id: uuidv4(),
+        id: randomUUID(),
         repoId,
         analysisId,
         type: 'code',
@@ -412,7 +412,7 @@ export async function persistFileViolationsWithLifecycle(
     } else {
       // New
       await db.insert(violations).values({
-        id: uuidv4(),
+        id: randomUUID(),
         repoId,
         analysisId,
         type: 'code',

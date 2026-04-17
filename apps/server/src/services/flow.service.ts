@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { flows, flowSteps, violations, methods as methodsTable, modules as modulesTable } from '../db/schema.js';
@@ -109,6 +110,7 @@ export async function detectAndPersistFlows(
     const [inserted] = await db
       .insert(flows)
       .values({
+        id: randomUUID(),
         analysisId,
         name: flow.name,
         entryService: flow.entryService,
@@ -122,6 +124,7 @@ export async function detectAndPersistFlows(
     if (flow.steps.length > 0) {
       await db.insert(flowSteps).values(
         flow.steps.map((step) => ({
+          id: randomUUID(),
           flowId: inserted.id,
           stepOrder: step.stepOrder,
           sourceService: step.sourceService,

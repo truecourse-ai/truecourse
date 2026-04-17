@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { db } from '../config/database.js';
@@ -640,7 +640,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         if (!prevViolation) continue;
 
         await db.insert(violations).values({
-          id: uuidv4(),
+          id: randomUUID(),
           repoId,
           analysisId,
           type: prevViolation.type,
@@ -670,7 +670,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         allResolvedViolationIds.push(prevViolation.id);
 
         await db.insert(violations).values({
-          id: uuidv4(),
+          id: randomUUID(),
           repoId,
           analysisId,
           type: prevViolation.type,
@@ -699,7 +699,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     // Persist new deterministic violations
     for (const det of newDetections) {
-      const violationId = uuidv4();
+      const violationId = randomUUID();
       await db.insert(violations).values({
         id: violationId,
         repoId,
@@ -928,7 +928,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         // Persist database schema violations directly (they have targetDatabaseId, not filePath)
         for (const v of dbResult.violations) {
           await db.insert(violations).values({
-            id: uuidv4(),
+            id: randomUUID(),
             repoId, analysisId,
             type: 'database',
             title: v.title,
@@ -1012,7 +1012,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       // LLM first-run violations
       for (const violation of archResult.violations) {
         await db.insert(violations).values({
-          id: uuidv4(),
+          id: randomUUID(),
           repoId,
           analysisId,
           type: violation.type,
@@ -1122,6 +1122,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   for (const prev of prevInUnchangedFiles) {
     await db.insert(violations).values({
+      id: randomUUID(),
       repoId,
       analysisId,
       type: 'code',
@@ -1166,6 +1167,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
       if (!prev) continue;
       await db.insert(violations).values({
+        id: randomUUID(),
         repoId, analysisId, type: 'code',
         filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
         columnStart: prev.columnStart, columnEnd: prev.columnEnd,
@@ -1180,6 +1182,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const prev = previousActiveCodeViolations.find((v) => v.id === prevId);
       if (!prev) continue;
       await db.insert(violations).values({
+        id: randomUUID(),
         repoId, analysisId, type: 'code',
         filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
         columnStart: prev.columnStart, columnEnd: prev.columnEnd,
@@ -1212,6 +1215,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     for (const prev of llmPrevUnchangedFiles) {
       await db.insert(violations).values({
+        id: randomUUID(),
         repoId, analysisId, type: 'code',
         filePath: prev.filePath, lineStart: prev.lineStart, lineEnd: prev.lineEnd,
         columnStart: prev.columnStart, columnEnd: prev.columnEnd,

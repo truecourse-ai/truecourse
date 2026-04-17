@@ -3,10 +3,9 @@ import express from 'express';
 import request from 'supertest';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
 import { eq } from 'drizzle-orm';
 import * as schema from '../../apps/server/src/db/schema';
+import { setupTestDb, teardownTestDb, type TestDb } from '../helpers/test-db';
 
 // ---------------------------------------------------------------------------
 // Mock the socket handlers so analysis doesn't crash on getIO()
@@ -35,7 +34,6 @@ vi.mock('../../apps/server/src/socket/handlers', async () => {
 
 // Import routes AFTER mocks are set up
 import { errorHandler } from '../../apps/server/src/middleware/error';
-import { initDatabase, closeDatabase } from '../../apps/server/src/config/database';
 import reposRouter from '../../apps/server/src/routes/repos';
 import analysisRouter from '../../apps/server/src/routes/analysis';
 import flowsRouter from '../../apps/server/src/routes/flows';
@@ -48,15 +46,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
 // ---------------------------------------------------------------------------
-// Database setup (same connection as the real server)
+// Shared PGlite instance (created in beforeAll via setupTestDb)
 // ---------------------------------------------------------------------------
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  'postgresql://postgres:postgres@localhost:5435/truecourse_test';
-
-const client = postgres(DATABASE_URL);
-const db = drizzle(client, { schema });
+let db: TestDb;
 
 // ---------------------------------------------------------------------------
 // Build a standalone Express app for testing (avoids socket.io and server.listen)
@@ -73,47 +66,6 @@ function createTestApp(): express.Express {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Remove any repo with the fixture path from the database (cleanup from prior runs). */
-async function cleanupFixtureRepo(): Promise<void> {
-  const existing = await db
-    .select()
-    .from(schema.repos)
-    .where(eq(schema.repos.path, FIXTURE_PATH));
-
-  for (const repo of existing) {
-    const repoAnalyses = await db
-      .select()
-      .from(schema.analyses)
-      .where(eq(schema.analyses.repoId, repo.id));
-
-    for (const analysis of repoAnalyses) {
-      await db
-        .delete(schema.violations)
-        .where(eq(schema.violations.analysisId, analysis.id));
-      await db
-        .delete(schema.serviceDependencies)
-        .where(eq(schema.serviceDependencies.analysisId, analysis.id));
-      await db
-        .delete(schema.services)
-        .where(eq(schema.services.analysisId, analysis.id));
-      // Flows and flow_steps cascade from analyses, but clean up explicitly just in case
-      await db
-        .delete(schema.flows)
-        .where(eq(schema.flows.analysisId, analysis.id));
-    }
-
-    await db
-      .delete(schema.analyses)
-      .where(eq(schema.analyses.repoId, repo.id));
-
-    await db.delete(schema.repos).where(eq(schema.repos.id, repo.id));
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -122,25 +74,11 @@ describe('API routes (integration)', () => {
   let createdRepoId: string;
 
   beforeAll(async () => {
-    // Initialize the server's database connection (used by route handlers)
-    initDatabase(DATABASE_URL);
-
-    // Remove any leftover fixture repo from prior test runs
-    await cleanupFixtureRepo();
+    ({ db } = await setupTestDb());
   });
 
   afterAll(async () => {
-    // Clean up any repos created during tests
-    if (createdRepoId) {
-      try {
-        await cleanupFixtureRepo();
-      } catch {
-        // Repo may already have been deleted by the DELETE test
-      }
-    }
-
-    await closeDatabase();
-    await client.end();
+    await teardownTestDb();
   });
 
   // -----------------------------------------------------------------------

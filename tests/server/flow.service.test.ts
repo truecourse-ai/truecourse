@@ -1,11 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
 import { eq } from 'drizzle-orm';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 import * as schema from '../../apps/server/src/db/schema';
-import { initDatabase, closeDatabase } from '../../apps/server/src/config/database';
+import { setupTestDb, teardownTestDb, type TestDb } from '../helpers/test-db';
 import { runAnalysis, type AnalysisResult } from '../../apps/server/src/services/analyzer.service';
 import {
   detectAndPersistFlows,
@@ -17,20 +15,14 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
 
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  'postgresql://postgres:postgres@localhost:5435/truecourse_test';
-
-const client = postgres(DATABASE_URL);
-const db = drizzle(client, { schema });
-
 describe('flow.service (integration)', () => {
+  let db: TestDb;
   let analysisResult: AnalysisResult;
   let analysisId: string;
   let repoId: string;
 
   beforeAll(async () => {
-    initDatabase(DATABASE_URL);
+    ({ db } = await setupTestDb());
 
     // Run analysis on the fixture project
     analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, { skipStash: true, skipGit: true });
@@ -71,13 +63,7 @@ describe('flow.service (integration)', () => {
   }, 60_000);
 
   afterAll(async () => {
-    // Cleanup: delete repo (cascades to analyses, flows, etc.)
-    if (repoId) {
-      await db.delete(schema.analyses).where(eq(schema.analyses.repoId, repoId));
-      await db.delete(schema.repos).where(eq(schema.repos.id, repoId));
-    }
-    await closeDatabase();
-    await client.end();
+    await teardownTestDb();
   });
 
   it('detectAndPersistFlows creates flows and steps in DB', async () => {

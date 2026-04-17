@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import {
@@ -87,6 +88,7 @@ router.post(
       const [runningAnalysis] = await db
         .insert(analyses)
         .values({
+          id: randomUUID(),
           repoId: id,
           branch,
           status: 'running',

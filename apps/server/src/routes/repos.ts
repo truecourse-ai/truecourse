@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
 import { eq, desc } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { repos, analyses, services, serviceDependencies, violations } from '../db/schema.js';
@@ -47,7 +48,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     const [repo] = await db
       .insert(repos)
-      .values({ name, path: repoPath })
+      .values({ id: randomUUID(), name, path: repoPath })
       .returning();
 
     res.status(201).json(repo);

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { analysisUsage } from '../db/schema.js';
@@ -54,6 +55,7 @@ export async function recordUsageBatch(records: UsageData[]): Promise<void> {
   if (records.length === 0) return;
   await db.insert(analysisUsage).values(
     records.map((r) => ({
+      id: randomUUID(),
       analysisId: r.analysisId,
       provider: r.provider,
       callType: r.callType,

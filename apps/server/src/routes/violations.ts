@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { eq, desc, and, sql, count, inArray } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { db } from '../config/database.js';
 import {
   repos,
@@ -110,7 +110,7 @@ router.post(
         const [saved] = await db
           .insert(violations)
           .values({
-            id: uuidv4(),
+            id: randomUUID(),
             repoId: id,
             analysisId: analysis.id,
             type: violation.type,

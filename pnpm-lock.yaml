@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.4.4
+        version: 0.4.4
       '@types/cors':
         specifier: ^2.8.17
         version: 2.8.19
@@ -25,19 +28,13 @@ importers:
         version: 2.8.6
       drizzle-orm:
         specifier: ^0.38.0
-        version: 0.38.4(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4)
-      embedded-postgres:
-        specifier: 18.3.0-beta.16
-        version: 18.3.0-beta.16
+        version: 0.38.4(@electric-sql/pglite@0.4.4)(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4)
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
       express:
         specifier: ^4.22.1
         version: 4.22.1
-      postgres:
-        specifier: ^3.4.0
-        version: 3.4.8
       simple-git:
         specifier: ^3.27.0
         version: 3.33.0
@@ -59,6 +56,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.4.4
+        version: 0.4.4
       '@truecourse/analyzer':
         specifier: workspace:*
         version: link:../../packages/analyzer
@@ -79,16 +79,10 @@ importers:
         version: 16.6.1
       drizzle-orm:
         specifier: ^0.38.0
-        version: 0.38.4(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4)
-      embedded-postgres:
-        specifier: 18.3.0-beta.16
-        version: 18.3.0-beta.16
+        version: 0.38.4(@electric-sql/pglite@0.4.4)(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4)
       express:
         specifier: ^4.21.0
         version: 4.22.1
-      postgres:
-        specifier: ^3.4.0
-        version: 3.4.8
       posthog-node:
         specifier: ^4.0.0
         version: 4.18.0
@@ -98,9 +92,6 @@ importers:
       socket.io:
         specifier: ^4.8.0
         version: 4.8.3
-      uuid:
-        specifier: ^11.0.0
-        version: 11.1.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -120,9 +111,6 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15
-      '@types/uuid':
-        specifier: ^10.0.0
-        version: 10.0.0
       drizzle-kit:
         specifier: ^0.30.0
         version: 0.30.6
@@ -540,53 +528,8 @@ packages:
     peerDependencies:
       '@noble/ciphers': ^1.0.0
 
-  '@embedded-postgres/darwin-arm64@18.3.0-beta.16':
-    resolution: {integrity: sha512-VBZ/xRS9Qdzq7MQnus9ScgO+89Ri2mHHqvbSVG3AOFY6xYne65Y9Br+6X1OcKOBWGR/mURBIFfe7CIqVp0Uf3Q==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@embedded-postgres/darwin-x64@18.3.0-beta.16':
-    resolution: {integrity: sha512-ZoS5GpvPWMtijusa+znxT7nMjz535LHi+8VX7CSCPhDi3IyPE5jcebedboyW6fHjUdtnpkTpfCBMwBRYXJL5tA==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@embedded-postgres/linux-arm64@18.3.0-beta.16':
-    resolution: {integrity: sha512-FJqXZX3heEcTeusXLt6VuPxR//7x2ETtlapNfPfKyanjGrRHEriVFEhEy2nYkcqTecEtdUfUXTbZ1mPTVXEDBw==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [linux]
-
-  '@embedded-postgres/linux-arm@18.3.0-beta.16':
-    resolution: {integrity: sha512-9DlgGPcSq6IrfZoUK8n0omG2HPFTSeWaF2FBrs8RG6Mjs4dMZcWKsViWFKHbZIHH3ikbZAc3pu3c6lHa4cyuDw==}
-    engines: {node: '>=16'}
-    cpu: [arm]
-    os: [linux]
-
-  '@embedded-postgres/linux-ia32@18.3.0-beta.16':
-    resolution: {integrity: sha512-BL0PH7u/t4dfUPU1foggHtbeQZFz5gaedTXGXduze3j46o9Fjyym2afkkLqmgMGBjZXdoo3IFEdiqyFmZsFMzg==}
-    engines: {node: '>=16'}
-    cpu: [ia32]
-    os: [linux]
-
-  '@embedded-postgres/linux-ppc64@18.3.0-beta.16':
-    resolution: {integrity: sha512-VndcTVmzhEsGWDiJza0j8FiifnX9/lYUEizDB/+/r8BBz45f02XxdLJwaUc+9Y72kLgnfUGYbN9+fyNMQoMPyg==}
-    engines: {node: '>=16'}
-    cpu: [ppc64]
-    os: [linux]
-
-  '@embedded-postgres/linux-x64@18.3.0-beta.16':
-    resolution: {integrity: sha512-SRnH75c2PenxtlJPAdDz3ckVA6/3AB6g/wOJiK33LsR55a2AWjoLrUkPqS0x8PlVAOaQHCzgnq8EDRxrbP1+Dg==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [linux]
-
-  '@embedded-postgres/windows-x64@18.3.0-beta.16':
-    resolution: {integrity: sha512-REupF2FhJMEsXqdeUG+wVWSKpykbruh9Ro5bHG/7RCBuSa/ncJ/8qhtVSI71RTJn1Cb9Shqa/gbnorz+8hat9Q==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [win32]
+  '@electric-sql/pglite@0.4.4':
+    resolution: {integrity: sha512-g/6CWAJ4XOkObWCWAQ2IReZD8VvsDy3poRHSKvpRR2F96F8WJ3HVbjpso3gN7l0q6QPPgvxSSpl/qo5k8a7mkQ==}
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
@@ -1850,9 +1793,6 @@ packages:
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
 
-  '@types/uuid@10.0.0':
-    resolution: {integrity: sha512-7gqG38EyHgyP1S+7+xomFtL+ZNHcKv6DwNaCZmJmo1vgMugyF3TCnXVg4t1uk89mLNwnLtnY3TpOpCOyp1/xHQ==}
-
   '@types/validate-npm-package-name@4.0.2':
     resolution: {integrity: sha512-lrpDziQipxCEeK5kWxvljWYhUvOiB2A9izZd9B2AFarYAkqZshb4lPbRs7zKEic6eGtH8V/2qJW+dPp9OtF6bw==}
 
@@ -1971,10 +1911,6 @@ packages:
   ast-types@0.16.1:
     resolution: {integrity: sha512-6t10qk83GOG8p0vKmaCr8eiilZwO171AvbROMtvvNiwrTly62t+7XkA8RdIIVbpMhCASAsxgAzdRSwh6nw/5Dg==}
     engines: {node: '>=4'}
-
-  async-exit-hook@2.0.1:
-    resolution: {integrity: sha512-NW2cX8m1Q7KPA7a5M2ULQeZ2wR5qI5PAbw5L0UOMxdioVk9PMZ0h1TmyZEkPYrCvYjDlFICusOu1dlEKAAeXBw==}
-    engines: {node: '>=0.12.0'}
 
   asynckit@0.4.0:
     resolution: {integrity: sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q==}
@@ -2473,10 +2409,6 @@ packages:
 
   electron-to-chromium@1.5.313:
     resolution: {integrity: sha512-QBMrTWEf00GXZmJyx2lbYD45jpI3TUFnNIzJ5BBc8piGUDwMPa1GV6HJWTZVvY/eiN3fSopl7NRbgGp9sZ9LTA==}
-
-  embedded-postgres@18.3.0-beta.16:
-    resolution: {integrity: sha512-iCe14miQhWUr1MqER2NUnFlylXk2+8cILCqTCo7gvi2tKq4jZM0Mofy+e7ZXOy5mILh+8EdvJ1USobFK33SJow==}
-    engines: {node: '>=16'}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -4115,10 +4047,6 @@ packages:
     resolution: {integrity: sha512-pMZTvIkT1d+TFGvDOqodOclx0QWkkgi6Tdoa8gC8ffGAAqz9pzPTZWAybbsHHoED/ztMtkv/VoYTYyShUn81hA==}
     engines: {node: '>= 0.4.0'}
 
-  uuid@11.1.0:
-    resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
-    hasBin: true
-
   validate-npm-package-name@7.0.2:
     resolution: {integrity: sha512-hVDIBwsRruT73PbK7uP5ebUt+ezEtCmzZz3F59BSr2F6OVFnJ/6h8liuvdLrQ88Xmnk6/+xGGuq+pG9WwTuy3A==}
     engines: {node: ^20.17.0 || >=22.9.0}
@@ -4676,29 +4604,7 @@ snapshots:
     dependencies:
       '@noble/ciphers': 1.3.0
 
-  '@embedded-postgres/darwin-arm64@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/darwin-x64@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/linux-arm64@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/linux-arm@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/linux-ia32@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/linux-ppc64@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/linux-x64@18.3.0-beta.16':
-    optional: true
-
-  '@embedded-postgres/windows-x64@18.3.0-beta.16':
-    optional: true
+  '@electric-sql/pglite@0.4.4': {}
 
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:
@@ -5563,8 +5469,6 @@ snapshots:
 
   '@types/unist@3.0.3': {}
 
-  '@types/uuid@10.0.0': {}
-
   '@types/validate-npm-package-name@4.0.2': {}
 
   '@types/ws@8.18.1':
@@ -5709,8 +5613,6 @@ snapshots:
   ast-types@0.16.1:
     dependencies:
       tslib: 2.8.1
-
-  async-exit-hook@2.0.1: {}
 
   asynckit@0.4.0: {}
 
@@ -6057,8 +5959,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.38.4(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4):
+  drizzle-orm@0.38.4(@electric-sql/pglite@0.4.4)(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4):
     optionalDependencies:
+      '@electric-sql/pglite': 0.4.4
       '@opentelemetry/api': 1.9.0
       '@types/react': 19.2.14
       pg: 8.20.0
@@ -6081,22 +5984,6 @@ snapshots:
   ee-first@1.1.1: {}
 
   electron-to-chromium@1.5.313: {}
-
-  embedded-postgres@18.3.0-beta.16:
-    dependencies:
-      async-exit-hook: 2.0.1
-      pg: 8.20.0
-    optionalDependencies:
-      '@embedded-postgres/darwin-arm64': 18.3.0-beta.16
-      '@embedded-postgres/darwin-x64': 18.3.0-beta.16
-      '@embedded-postgres/linux-arm': 18.3.0-beta.16
-      '@embedded-postgres/linux-arm64': 18.3.0-beta.16
-      '@embedded-postgres/linux-ia32': 18.3.0-beta.16
-      '@embedded-postgres/linux-ppc64': 18.3.0-beta.16
-      '@embedded-postgres/linux-x64': 18.3.0-beta.16
-      '@embedded-postgres/windows-x64': 18.3.0-beta.16
-    transitivePeerDependencies:
-      - pg-native
 
   emoji-regex@10.6.0: {}
 
@@ -7290,15 +7177,19 @@ snapshots:
   pg-cloudflare@1.3.0:
     optional: true
 
-  pg-connection-string@2.12.0: {}
+  pg-connection-string@2.12.0:
+    optional: true
 
-  pg-int8@1.0.1: {}
+  pg-int8@1.0.1:
+    optional: true
 
   pg-pool@3.13.0(pg@8.20.0):
     dependencies:
       pg: 8.20.0
+    optional: true
 
-  pg-protocol@1.13.0: {}
+  pg-protocol@1.13.0:
+    optional: true
 
   pg-types@2.2.0:
     dependencies:
@@ -7307,6 +7198,7 @@ snapshots:
       postgres-bytea: 1.0.1
       postgres-date: 1.0.7
       postgres-interval: 1.2.0
+    optional: true
 
   pg@8.20.0:
     dependencies:
@@ -7317,10 +7209,12 @@ snapshots:
       pgpass: 1.0.5
     optionalDependencies:
       pg-cloudflare: 1.3.0
+    optional: true
 
   pgpass@1.0.5:
     dependencies:
       split2: 4.2.0
+    optional: true
 
   picocolors@1.1.1: {}
 
@@ -7341,17 +7235,22 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postgres-array@2.0.0: {}
+  postgres-array@2.0.0:
+    optional: true
 
-  postgres-bytea@1.0.1: {}
+  postgres-bytea@1.0.1:
+    optional: true
 
-  postgres-date@1.0.7: {}
+  postgres-date@1.0.7:
+    optional: true
 
   postgres-interval@1.2.0:
     dependencies:
       xtend: 4.0.2
+    optional: true
 
-  postgres@3.4.8: {}
+  postgres@3.4.8:
+    optional: true
 
   posthog-node@4.18.0:
     dependencies:
@@ -7804,7 +7703,8 @@ snapshots:
 
   space-separated-tokens@2.0.2: {}
 
-  split2@4.2.0: {}
+  split2@4.2.0:
+    optional: true
 
   stackback@0.0.2: {}
 
@@ -8095,8 +7995,6 @@ snapshots:
 
   utils-merge@1.0.1: {}
 
-  uuid@11.1.0: {}
-
   validate-npm-package-name@7.0.2: {}
 
   vary@1.1.2: {}
@@ -8266,7 +8164,8 @@ snapshots:
 
   xmlhttprequest-ssl@2.1.2: {}
 
-  xtend@4.0.2: {}
+  xtend@4.0.2:
+    optional: true
 
   y18n@5.0.8: {}
 

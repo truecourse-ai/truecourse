@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import {
@@ -56,6 +57,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
     const [created] = await db
       .insert(analyses)
       .values({
+        id: randomUUID(),
         repoId,
         branch: branch || null,
         status: 'completed',
@@ -73,6 +75,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
     const [saved] = await db
       .insert(services)
       .values({
+        id: randomUUID(),
         analysisId: analysis.id,
         name: svc.name,
         rootPath: svc.rootPath,
@@ -93,6 +96,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       const depType = dep.httpCalls && dep.httpCalls.length > 0 ? 'http' : 'import';
       const depCount = dep.dependencies.length + (dep.httpCalls?.length || 0);
       await db.insert(serviceDependencies).values({
+        id: randomUUID(),
         analysisId: analysis.id,
         sourceServiceId: sourceId,
         targetServiceId: targetId,
@@ -108,6 +112,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       const serviceId = serviceIdMap.get(detail.serviceName);
       if (serviceId) {
         await db.insert(layers).values({
+          id: randomUUID(),
           analysisId: analysis.id,
           serviceId,
           serviceName: detail.serviceName,
@@ -126,6 +131,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
   if (result.databaseResult && result.databaseResult.databases.length > 0) {
     for (const dbInfo of result.databaseResult.databases) {
       const [saved] = await db.insert(databases).values({
+        id: randomUUID(),
         analysisId: analysis.id,
         name: dbInfo.name,
         type: dbInfo.type,
@@ -143,6 +149,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       const databaseId = dbIdMap.get(conn.databaseName);
       if (serviceId && databaseId) {
         await db.insert(databaseConnections).values({
+          id: randomUUID(),
           analysisId: analysis.id,
           serviceId,
           databaseId,
@@ -170,6 +177,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       if (!serviceId || !layerId) continue;
 
       const [saved] = await db.insert(modules).values({
+        id: randomUUID(),
         analysisId: analysis.id,
         layerId,
         serviceId,
@@ -196,6 +204,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       if (!moduleId) continue;
 
       const [saved] = await db.insert(methods).values({
+        id: randomUUID(),
         analysisId: analysis.id,
         moduleId,
         name: method.name,
@@ -220,6 +229,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       if (!srcId || !tgtId) continue;
 
       await db.insert(moduleDeps).values({
+        id: randomUUID(),
         analysisId: analysis.id,
         sourceModuleId: srcId,
         targetModuleId: tgtId,
@@ -237,6 +247,7 @@ export async function persistAnalysisResult(params: PersistAnalysisParams): Prom
       if (!srcId || !tgtId) continue;
 
       await db.insert(methodDeps).values({
+        id: randomUUID(),
         analysisId: analysis.id,
         sourceMethodId: srcId,
         targetMethodId: tgtId,
@@ -266,6 +277,7 @@ export async function persistFileViolations(
     const batch = codeViolations.slice(i, i + BATCH_SIZE);
     await db.insert(violations).values(
       batch.map((v) => ({
+        id: randomUUID(),
         repoId,
         analysisId,
         type: 'code' as const,

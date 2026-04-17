@@ -14,7 +14,7 @@ import { relations } from 'drizzle-orm';
 // ---------------------------------------------------------------------------
 
 export const repos = pgTable('repos', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   name: text('name').notNull(),
   path: text('path').notNull().unique(),
   lastAnalyzedAt: timestamp('last_analyzed_at', { mode: 'date', withTimezone: true }),
@@ -36,7 +36,7 @@ export const reposRelations = relations(repos, ({ many }) => ({
 // ---------------------------------------------------------------------------
 
 export const analyses = pgTable('analyses', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   repoId: uuid('repo_id')
     .notNull()
     .references(() => repos.id, { onDelete: 'cascade' }),
@@ -71,7 +71,7 @@ export const analysesRelations = relations(analyses, ({ one, many }) => ({
 // ---------------------------------------------------------------------------
 
 export const services = pgTable('services', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -101,7 +101,7 @@ export const servicesRelations = relations(services, ({ one, many }) => ({
 // ---------------------------------------------------------------------------
 
 export const serviceDependencies = pgTable('service_dependencies', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -140,7 +140,7 @@ export const serviceDependenciesRelations = relations(
 // ---------------------------------------------------------------------------
 
 export const layers = pgTable('layers', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -171,7 +171,7 @@ export const layersRelations = relations(layers, ({ one }) => ({
 // ---------------------------------------------------------------------------
 
 export const violations = pgTable('violations', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   repoId: uuid('repo_id')
     .notNull()
     .references(() => repos.id, { onDelete: 'cascade' }),
@@ -248,7 +248,7 @@ export const violationsRelations = relations(violations, ({ one }) => ({
 // ---------------------------------------------------------------------------
 
 export const databases = pgTable('databases', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -275,7 +275,7 @@ export const databasesRelations = relations(databases, ({ one, many }) => ({
 // ---------------------------------------------------------------------------
 
 export const databaseConnections = pgTable('database_connections', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -311,7 +311,7 @@ export const databaseConnectionsRelations = relations(
 // ---------------------------------------------------------------------------
 
 export const modules = pgTable('modules', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -353,7 +353,7 @@ export const modulesRelations = relations(modules, ({ one, many }) => ({
 // ---------------------------------------------------------------------------
 
 export const methods = pgTable('methods', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -387,7 +387,7 @@ export const methodsRelations = relations(methods, ({ one }) => ({
 // ---------------------------------------------------------------------------
 
 export const moduleDeps = pgTable('module_dependencies', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -423,7 +423,7 @@ export const moduleDepsRelations = relations(moduleDeps, ({ one }) => ({
 // ---------------------------------------------------------------------------
 
 export const methodDeps = pgTable('method_dependencies', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -477,7 +477,7 @@ export const rules = pgTable('rules', {
 // ---------------------------------------------------------------------------
 
 export const flows = pgTable('flows', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
@@ -504,7 +504,7 @@ export const flowsRelations = relations(flows, ({ one, many }) => ({
 // ---------------------------------------------------------------------------
 
 export const flowSteps = pgTable('flow_steps', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   flowId: uuid('flow_id')
     .notNull()
     .references(() => flows.id, { onDelete: 'cascade' }),
@@ -533,7 +533,7 @@ export const flowStepsRelations = relations(flowSteps, ({ one }) => ({
 // ---------------------------------------------------------------------------
 
 export const analysisUsage = pgTable('analysis_usage', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').primaryKey(),
   analysisId: uuid('analysis_id')
     .notNull()
     .references(() => analyses.id, { onDelete: 'cascade' }),
