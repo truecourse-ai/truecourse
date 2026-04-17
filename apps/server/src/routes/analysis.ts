@@ -219,11 +219,6 @@ router.post(
           console.error('[Flows] Detection failed:', flowError instanceof Error ? flowError.message : String(flowError));
         }
 
-        // Node positions + collapse state live in <repo>/.truecourse/ui-state.json
-        // keyed by stable service/module/method names, so they carry across
-        // analyses automatically — no migration step needed here.
-
-        // Touch registry so the dashboard's last-opened ordering reflects this run.
         touchProject(repo.slug);
 
         // Incremental file detection: only review changed files if previous commit hash exists

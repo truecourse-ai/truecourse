@@ -47,10 +47,6 @@ async function openProjectDb(project: RegistryEntry): Promise<ProjectDb> {
   await client.waitReady;
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: migrationsFolder() });
-  // Seed the rule catalogue into this repo's DB. Lazy import to avoid a
-  // bootstrapping cycle (rules.service imports `db` from this module).
-  const { seedRules } = await import('../services/rules.service.js');
-  await seedRules(db);
   return { project, client, db };
 }
 

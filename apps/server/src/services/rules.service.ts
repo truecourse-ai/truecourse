@@ -1,61 +1,5 @@
-import { eq, notInArray } from 'drizzle-orm';
-import { db as requestDb } from '../config/database.js';
-import { rules } from '../db/schema.js';
 import { getAllDefaultRules } from '@truecourse/analyzer';
 import { type AnalysisRule, DOMAIN_ORDER } from '@truecourse/shared';
-
-type DbHandle = typeof requestDb;
-
-/**
- * Seed default rules into the database.
- * Uses upsert — new rules are inserted, existing rules get their
- * name/description/prompt/severity updated (preserving user's `enabled` toggle).
- * Removes rules that are no longer in the defaults.
- *
- * Accepts an explicit DB handle so it can be called from
- * `openProjectDb()` before the request's async-local store is set up.
- */
-export async function seedRules(database: DbHandle = requestDb): Promise<void> {
-  const defaults = getAllDefaultRules();
-
-  for (const rule of defaults) {
-    await database
-      .insert(rules)
-      .values({
-        key: rule.key,
-        category: rule.category,
-        name: rule.name,
-        description: rule.description,
-        prompt: rule.prompt ?? null,
-        enabled: rule.enabled,
-        severity: rule.severity,
-        type: rule.type,
-        contextRequirement: rule.contextRequirement ?? null,
-      })
-      .onConflictDoUpdate({
-        target: rules.key,
-        set: {
-          category: rule.category,
-          name: rule.name,
-          description: rule.description,
-          prompt: rule.prompt ?? null,
-          severity: rule.severity,
-          type: rule.type,
-          contextRequirement: rule.contextRequirement ?? null,
-          updatedAt: new Date(),
-        },
-      });
-  }
-
-  // Remove rules that are no longer in the defaults
-  const defaultKeys = defaults.map((r) => r.key);
-  const deleted = await database.delete(rules).where(notInArray(rules.key, defaultKeys)).returning({ key: rules.key });
-  if (deleted.length > 0) {
-    console.log(`[Rules] Removed ${deleted.length} obsolete rule(s): ${deleted.map((r) => r.key).join(', ')}`);
-  }
-}
-
-const db = requestDb; // alias used by the remaining getters below
 
 /** Derive domain from rule key (e.g., 'architecture/deterministic/foo' → 'architecture'). */
 function deriveDomain(key: string): AnalysisRule['domain'] {
@@ -66,40 +10,34 @@ function deriveDomain(key: string): AnalysisRule['domain'] {
   return validDomains.has(prefix) ? (prefix as AnalysisRule['domain']) : undefined;
 }
 
-/**
- * Get all rules from the database.
- */
-export async function getRulesFromDb(): Promise<AnalysisRule[]> {
-  const rows = await db.select().from(rules);
-  return rows.map((r) => ({
-    key: r.key,
-    category: r.category as AnalysisRule['category'],
-    domain: deriveDomain(r.key),
-    name: r.name,
-    description: r.description,
-    prompt: r.prompt ?? undefined,
-    enabled: r.enabled,
-    severity: r.severity as AnalysisRule['severity'],
-    type: r.type as AnalysisRule['type'],
-    contextRequirement: r.contextRequirement as AnalysisRule['contextRequirement'],
-  }));
+function toAnalysisRule(rule: ReturnType<typeof getAllDefaultRules>[number]): AnalysisRule {
+  return {
+    key: rule.key,
+    category: rule.category,
+    domain: deriveDomain(rule.key),
+    name: rule.name,
+    description: rule.description,
+    prompt: rule.prompt ?? undefined,
+    enabled: rule.enabled,
+    severity: rule.severity,
+    type: rule.type,
+    contextRequirement: rule.contextRequirement,
+  };
 }
 
 /**
- * Get enabled rules from the database.
+ * Return the full rule catalogue. Rules are now TypeScript constants in the
+ * analyzer package — no DB persistence, no seed step. Per-repo on/off
+ * preferences will be overlaid via `<repo>/.truecourse/config.json` when
+ * that feature lands; for now every shipped rule is enabled.
  */
+export async function getRules(): Promise<AnalysisRule[]> {
+  return getAllDefaultRules().map(toAnalysisRule);
+}
+
+/** Return the subset of rules with `enabled: true`. */
 export async function getEnabledRules(): Promise<AnalysisRule[]> {
-  const rows = await db.select().from(rules).where(eq(rules.enabled, true));
-  return rows.map((r) => ({
-    key: r.key,
-    category: r.category as AnalysisRule['category'],
-    domain: deriveDomain(r.key),
-    name: r.name,
-    description: r.description,
-    prompt: r.prompt ?? undefined,
-    enabled: r.enabled,
-    severity: r.severity as AnalysisRule['severity'],
-    type: r.type as AnalysisRule['type'],
-    contextRequirement: r.contextRequirement as AnalysisRule['contextRequirement'],
-  }));
+  return getAllDefaultRules()
+    .filter((r) => r.enabled)
+    .map(toAnalysisRule);
 }

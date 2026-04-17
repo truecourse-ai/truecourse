@@ -11,12 +11,6 @@ import { relations } from 'drizzle-orm';
 
 // ---------------------------------------------------------------------------
 // analyses
-//
-// Project identity (name, path, last-analyzed-at, enabled categories, LLM
-// toggle) lives outside the DB — in the global registry at
-// `~/.truecourse/registry.json` and per-repo `<repo>/.truecourse/config.json`.
-// Each PGlite file belongs to exactly one project so no `repoId` scoping is
-// needed inside the DB.
 // ---------------------------------------------------------------------------
 
 export const analyses = pgTable('analyses', {
@@ -425,21 +419,6 @@ export const methodDepsRelations = relations(methodDeps, ({ one }) => ({
 // ---------------------------------------------------------------------------
 // rules (analysis rules — seeded from defaults, configurable per instance)
 // ---------------------------------------------------------------------------
-
-export const rules = pgTable('rules', {
-  key: text('key').primaryKey(),
-  category: text('category').notNull(), // 'service' | 'module' | 'database'
-  name: text('name').notNull(),
-  description: text('description').notNull(),
-  prompt: text('prompt'),
-  enabled: boolean('enabled').notNull().default(true),
-  severity: text('severity').notNull(), // 'info' | 'low' | 'medium' | 'high' | 'critical'
-  type: text('type').notNull(), // 'deterministic' | 'llm'
-  contextRequirement: jsonb('context_requirement'),
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
 
 // ---------------------------------------------------------------------------
 // flows (execution paths from entry points through call graph)
