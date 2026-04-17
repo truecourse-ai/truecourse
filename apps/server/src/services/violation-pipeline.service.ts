@@ -251,9 +251,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // 3. LLM estimate + confirmation (only when LLM enabled)
   // ---------------------------------------------------------------------------
   if (hasLlm && input.onLlmEstimate) {
-    const isCLI = config.llmProvider === 'claude-code';
     const codeEstimate = enabledLlmCodeRules.length > 0 && fileContents.size > 0
-      ? estimateContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents, { useFilePaths: isCLI })
+      ? estimateContext(enabledLlmCodeRules, result.fileAnalyses || [], fileContents, { useFilePaths: true })
       : { tiers: [], totalEstimatedTokens: 0 };
 
     const archRuleCount = archLlmRules.length;

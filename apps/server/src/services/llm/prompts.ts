@@ -1,5 +1,3 @@
-import { Langfuse } from 'langfuse';
-import { config } from '../../config/index.js';
 import type {
   ServiceViolationContext,
   DatabaseViolationContext,
@@ -663,82 +661,18 @@ export function buildFlowTemplateVars(context: FlowEnrichmentContext): Record<st
 }
 
 // ---------------------------------------------------------------------------
-// Langfuse prompt fetching (with local fallback)
+// Prompt compilation
 // ---------------------------------------------------------------------------
 
-let langfuseInstance: Langfuse | null = null;
-let langfuseChecked = false;
-let langfuseAvailable = false;
-
-async function getLangfuse(): Promise<Langfuse | null> {
-  if (!(config.langfuse.publicKey && config.langfuse.secretKey)) {
-    return null;
-  }
-
-  // Check connectivity once per session to avoid noisy SDK error logs
-  if (!langfuseChecked) {
-    langfuseChecked = true;
-    try {
-      const res = await fetch(`${config.langfuse.baseUrl || 'http://localhost:3001'}/api/public/health`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      langfuseAvailable = res.ok;
-    } catch {
-      langfuseAvailable = false;
-    }
-    if (!langfuseAvailable) {
-      console.log('[Langfuse] Unavailable — using local prompts for this session.');
-      return null;
-    }
-  }
-
-  if (!langfuseAvailable) return null;
-
-  if (!langfuseInstance) {
-    langfuseInstance = new Langfuse({
-      publicKey: config.langfuse.publicKey,
-      secretKey: config.langfuse.secretKey,
-      baseUrl: config.langfuse.baseUrl,
-    });
-  }
-  return langfuseInstance;
-}
-
-export interface PromptResult {
-  text: string;
-  /** Langfuse prompt JSON string for telemetry linkage (null when using local fallback). */
-  langfusePrompt: string | null;
-}
-
-/**
- * Get a compiled prompt string from Langfuse (falls back to local definition).
- * Returns the compiled text and optional Langfuse prompt metadata for trace linkage.
- */
-export async function getPrompt(
+export function getPrompt(
   name: PromptName,
   variables?: Record<string, string>
-): Promise<PromptResult> {
-  const langfuse = await getLangfuse();
-  const localDef = PROMPT_DEFINITIONS[name];
-
-  if (langfuse) {
-    try {
-      const prompt = await langfuse.getPrompt(name, undefined, {
-        type: 'text',
-      });
-      const compiled = prompt.compile(variables || {});
-      return { text: compiled, langfusePrompt: prompt.toJSON() };
-    } catch {
-      // Prompt fetch failed — fall through to local definition
-    }
-  }
-
-  // Local fallback: manually replace {{var}} placeholders
-  let text = localDef.prompt as string;
+): string {
+  let text = PROMPT_DEFINITIONS[name].prompt as string;
   if (variables) {
     for (const [key, value] of Object.entries(variables)) {
       text = text.replaceAll(`{{${key}}}`, value);
     }
   }
-  return { text, langfusePrompt: null };
+  return text;
 }

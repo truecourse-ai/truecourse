@@ -13,8 +13,7 @@
     "start": "turbo start",
     "build:dist": "tsx scripts/build.ts",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "prompts:push": "pnpm dlx tsx apps/server/src/services/llm/push-prompts.ts"
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

@@ -333,7 +333,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   async generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult> {
     const { vars, idMap } = buildServiceTemplateVars(context);
-    const { text: prompt } = await getPrompt('violations-service', vars);
+    const prompt = getPrompt('violations-service', vars);
 
     log('[CLI] Service violations call starting...');
     const t0 = Date.now();
@@ -365,7 +365,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   async generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult> {
     const { vars, idMap } = buildDatabaseTemplateVars(context);
-    const { text: prompt } = await getPrompt('violations-database', vars);
+    const prompt = getPrompt('violations-database', vars);
 
     log('[CLI] Database violations call starting...');
     const t0 = Date.now();
@@ -394,7 +394,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   async generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult> {
     const { vars, idMap } = buildModuleTemplateVars(context);
-    const { text: prompt } = await getPrompt('violations-module', vars);
+    const prompt = getPrompt('violations-module', vars);
 
     const moduleIdToServiceId = new Map(
       context.modules.filter((m) => m.serviceId).map((m) => [m.id, m.serviceId!]),
@@ -489,7 +489,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         promises.push(['service', (async () => {
           const { vars, idMap } = buildServiceTemplateVars(ctx);
           idMaps.service = idMap;
-          const { text: prompt } = await getPrompt('violations-service-lifecycle', vars);
+          const prompt = getPrompt('violations-service-lifecycle', vars);
           log('[CLI] Lifecycle service call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, LifecycleServiceOutputSchema, {
@@ -512,7 +512,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         promises.push(['database', (async () => {
           const { vars, idMap } = buildDatabaseTemplateVars(ctx);
           idMaps.database = idMap;
-          const { text: prompt } = await getPrompt('violations-database-lifecycle', vars);
+          const prompt = getPrompt('violations-database-lifecycle', vars);
           log('[CLI] Lifecycle database call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
@@ -538,7 +538,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         promises.push(['module', (async () => {
           const { vars, idMap } = buildModuleTemplateVars(ctx);
           idMaps.module = idMap;
-          const { text: prompt } = await getPrompt('violations-module-lifecycle', vars);
+          const prompt = getPrompt('violations-module-lifecycle', vars);
           log('[CLI] Lifecycle module call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
@@ -676,7 +676,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     // from the context router (which uses synthetic path 'context' for metadata/targeted tiers)
     const hasRealPaths = context.files.length > 0 && context.files.every((f) => f.path !== 'context');
     const { vars, idMap } = buildCodeTemplateVars(context, { useFilePaths: hasRealPaths });
-    const { text: prompt } = await getPrompt(promptName, vars);
+    const prompt = getPrompt(promptName, vars);
 
     log(`[CLI] Code violations call starting (${context.files.length} files, ${hasExisting ? 'lifecycle' : 'first-run'})...`);
     const t0 = Date.now();
@@ -762,7 +762,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   }
 
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {
-    const { text: prompt } = await getPrompt('flow-enrichment', buildFlowTemplateVars(context));
+    const prompt = getPrompt('flow-enrichment', buildFlowTemplateVars(context));
 
     log(`[CLI] Flow enrichment call starting for ${context.flowName}...`);
     const t0 = Date.now();

@@ -21,14 +21,10 @@ import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { seedRules } from './services/rules.service.js';
-import { initTelemetry, shutdownTelemetry } from './services/llm/telemetry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
-  // 0. Initialize OTel telemetry (Langfuse)
-  initTelemetry();
-
   // 1. Start embedded PostgreSQL (no-op if DATABASE_URL is set)
   const databaseUrl = await startEmbeddedPostgres();
   console.log(`[Database] Connected: ${databaseUrl.replace(/\/\/.*@/, '//<credentials>@')}`);
@@ -50,10 +46,7 @@ async function main() {
   // 3b. Seed default rules (upserts — safe to run every startup)
   await seedRules();
   console.log('[Database] Rules seeded');
-  const llmModel = config.llmProvider === 'claude-code'
-    ? (config.claudeCodeModel || 'default')
-    : (config.llmModel || (config.llmProvider === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-5-mini'));
-  console.log(`[LLM] Provider: ${config.llmProvider}, model: ${llmModel}`);
+  console.log(`[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}`);
 
   // 4. Setup Express app
   const app: express.Express = express();
@@ -126,7 +119,6 @@ async function main() {
   async function shutdown() {
     console.log('\n[Server] Shutting down...');
     stopAllWatchers();
-    await shutdownTelemetry();
     httpServer.closeAllConnections();
     httpServer.close();
     await closeDatabase();

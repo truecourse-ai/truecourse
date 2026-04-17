@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { execSync } from "node:child_process";
 import type { Violation, DiffResult } from "./helpers.js";
 import {
   ensureServer,
@@ -10,6 +11,18 @@ import {
   renderDiffResultsSummary,
 } from "./helpers.js";
 import { showFirstRunNotice } from "../telemetry.js";
+
+function ensureClaudeCli(): void {
+  try {
+    execSync("which claude", { stdio: "ignore" });
+  } catch {
+    p.log.error(
+      "Claude Code CLI not found on PATH. TrueCourse requires the `claude` binary to run analysis.\n" +
+        "Install it from https://docs.anthropic.com/en/docs/claude-code and try again.",
+    );
+    process.exit(1);
+  }
+}
 
 const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
@@ -91,6 +104,7 @@ function stopSpinner(): void {
 
 export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
   p.intro("Analyzing repository");
+  ensureClaudeCli();
   showFirstRunNotice();
 
   if (noAutostart) {
@@ -318,6 +332,7 @@ export async function runAnalyze({ noAutostart = false } = {}): Promise<void> {
 
 export async function runAnalyzeDiff({ noAutostart = false } = {}): Promise<void> {
   p.intro("Running diff check");
+  ensureClaudeCli();
   showFirstRunNotice();
 
   if (noAutostart) {

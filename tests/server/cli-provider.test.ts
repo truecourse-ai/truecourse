@@ -188,7 +188,7 @@ describe('Schema conversion via toJsonSchema', () => {
 // ---------------------------------------------------------------------------
 
 describe('createLLMProvider factory', () => {
-  it('returns ClaudeCodeProvider when LLM_PROVIDER is claude-code', async () => {
+  it('returns ClaudeCodeProvider from the factory', async () => {
     // We can't easily change config at runtime since it's read-only,
     // so we test the provider class directly
     const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');

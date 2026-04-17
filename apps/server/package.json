@@ -13,14 +13,8 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.58",
-    "@ai-sdk/openai": "^3.0.41",
-    "@langfuse/otel": "^5.0.1",
-    "@langfuse/tracing": "^5.0.1",
-    "@opentelemetry/sdk-node": "^0.213.0",
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "ai": "^6.0.116",
     "chokidar": "^4.0.0",
     "cors": "^2.8.5",
     "dagre": "^0.8.5",
@@ -28,7 +22,6 @@
     "drizzle-orm": "^0.38.0",
     "embedded-postgres": "18.3.0-beta.16",
     "express": "^4.21.0",
-    "langfuse": "^3.32.0",
     "posthog-node": "^4.0.0",
     "postgres": "^3.4.0",
     "simple-git": "^3.27.0",
