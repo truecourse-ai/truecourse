@@ -34,47 +34,6 @@ function useChart() {
   return context
 }
 
-/**
- * Measures its own size synchronously before first paint and injects explicit
- * pixel `width`/`height` into the chart child. Replaces Recharts'
- * `ResponsiveContainer`, whose ResizeObserver fires asynchronously — causing
- * charts to mount against 0×0 dimensions on fresh page loads and skip their
- * mount animation.
- */
-function SynchronousResponsiveContainer({
-  children,
-}: {
-  children: React.ReactElement<{ width?: number; height?: number }>
-}) {
-  const ref = React.useRef<HTMLDivElement>(null)
-  const [dim, setDim] = React.useState<{ w: number; h: number } | null>(null)
-
-  React.useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const measure = () => {
-      const rect = el.getBoundingClientRect()
-      setDim((prev) =>
-        prev && prev.w === rect.width && prev.h === rect.height
-          ? prev
-          : { w: rect.width, h: rect.height },
-      )
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  return (
-    <div ref={ref} className="h-full w-full">
-      {dim && dim.w > 0 && dim.h > 0
-        ? React.cloneElement(children, { width: dim.w, height: dim.h })
-        : null}
-    </div>
-  )
-}
-
 function ChartContainer({
   id,
   className,
@@ -102,9 +61,9 @@ function ChartContainer({
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <SynchronousResponsiveContainer>
-          {children as React.ReactElement<{ width?: number; height?: number }>}
-        </SynchronousResponsiveContainer>
+        <RechartsPrimitive.ResponsiveContainer width="100%" height="100%">
+          {children}
+        </RechartsPrimitive.ResponsiveContainer>
       </div>
     </ChartContext.Provider>
   )

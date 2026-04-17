@@ -511,6 +511,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       relatedModuleId: v.relatedModuleName ? moduleNameToId.get(v.relatedModuleName) || null : null,
       violationType: v.methodName ? 'function' : 'module',
       filePath: v.filePath || null,
+      lineStart: v.lineStart ?? null,
+      lineEnd: v.lineEnd ?? null,
     });
   }
 

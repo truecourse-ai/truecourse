@@ -268,12 +268,11 @@ export function CodeViewer({ content, language, violations, scrollToLine }: Code
   }, [dark]);
 
   // Group violations by the END line of their range (widget goes after the last affected line).
-  // Skip any without a valid lineStart — arch-level rows can carry a filePath
-  // without line info and would crash EditorState.doc.line(null).
+  // Invariant: every violation with a filePath also has lineStart+lineEnd
+  // (enforced at the checker layer), so no null guards here.
   const violationsByEndLine = useMemo(() => {
     const map = new Map<number, CodeViolationResponse[]>();
     for (const v of violations) {
-      if (v.lineStart == null) continue;
       const endLine = v.lineEnd ?? v.lineStart;
       let list = map.get(endLine);
       if (!list) {
@@ -289,7 +288,6 @@ export function CodeViewer({ content, language, violations, scrollToLine }: Code
   const violationLineSet = useMemo(() => {
     const set = new Set<number>();
     for (const v of violations) {
-      if (v.lineStart == null) continue;
       const end = v.lineEnd ?? v.lineStart;
       for (let line = v.lineStart; line <= end; line++) {
         set.add(line);

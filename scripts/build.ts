@@ -66,9 +66,6 @@ run(
     '--external:tree-sitter-javascript',
     '--external:tree-sitter-python',
     '--external:pyright',
-    '--external:@electric-sql/pglite',
-    // drizzle-kit is dev only
-    '--external:drizzle-kit',
     '--banner:js="import { createRequire } from \'node:module\'; import { fileURLToPath as __esm_fileURLToPath } from \'node:url\'; import { dirname as __esm_dirname } from \'node:path\'; const require = createRequire(import.meta.url); const __filename = __esm_fileURLToPath(import.meta.url); const __dirname = __esm_dirname(__filename);"',
   ].join(' '),
 );
@@ -79,13 +76,7 @@ const webOut = path.join(ROOT, 'apps/web/dist');
 const distPublic = path.join(DIST, 'public');
 copyDir(webOut, distPublic);
 
-// 5. Copy migrations
-console.log('Copying migrations...');
-const migrationsDir = path.join(ROOT, 'apps/server/src/db/migrations');
-const distMigrations = path.join(DIST, 'db/migrations');
-copyDir(migrationsDir, distMigrations);
-
-// 6. Build CLI entry
+// 5. Build CLI entry
 console.log('\n=== Bundling CLI ===');
 run(
   [
@@ -101,7 +92,6 @@ run(
     '--external:tree-sitter-javascript',
     '--external:tree-sitter-python',
     '--external:pyright',
-    '--external:@electric-sql/pglite',
     '--banner:js="import { createRequire as __cR } from \'node:module\'; const require = __cR(import.meta.url);"',
   ].join(' '),
 );
@@ -146,7 +136,6 @@ const publishPkg = {
   },
   dependencies: {
     'pyright': analyzerPkg.dependencies['pyright'],
-    '@electric-sql/pglite': serverPkg.dependencies['@electric-sql/pglite'],
     'dotenv': serverPkg.dependencies['dotenv'],
     'commander': cliPkg.dependencies['commander'],
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],

@@ -72,7 +72,12 @@ export function discoverFiles(dir: string): string[] {
 
   function traverse(currentPath: string) {
     try {
-      const entries = readdirSync(currentPath)
+      // Sort so traversal order is deterministic across filesystems — ext4
+      // returns entries in creation order, APFS in insertion/alphabetical
+      // order. Downstream steps (service detection, layer classification)
+      // have order-sensitive decisions, so leaving this unsorted gives
+      // different results on macOS vs Linux CI.
+      const entries = readdirSync(currentPath).sort()
 
       for (const entry of entries) {
         const fullPath = join(currentPath, entry)

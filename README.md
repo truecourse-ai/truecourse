@@ -56,7 +56,7 @@ TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-
 
 ```bash
 # Analysis
-truecourse analyze                    # Analyze current repo (in-process, no server required)
+truecourse analyze                    # Analyze current repo
 truecourse analyze --diff             # New/resolved violations from your uncommitted changes
 truecourse list                       # Show violations from latest analysis
 truecourse list --all                 # Show all violations (no pagination)

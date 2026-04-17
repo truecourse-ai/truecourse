@@ -8,9 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@electric-sql/pglite':
-        specifier: ^0.4.4
-        version: 0.4.4
       '@types/cors':
         specifier: ^2.8.17
         version: 2.8.19
@@ -26,9 +23,6 @@ importers:
       cors:
         specifier: ^2.8.5
         version: 2.8.6
-      drizzle-orm:
-        specifier: ^0.38.0
-        version: 0.38.4(@electric-sql/pglite@0.4.4)(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4)
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
@@ -512,9 +506,6 @@ packages:
     engines: {bun: '>=1', deno: '>=2', node: '>=16'}
     peerDependencies:
       '@noble/ciphers': ^1.0.0
-
-  '@electric-sql/pglite@0.4.4':
-    resolution: {integrity: sha512-g/6CWAJ4XOkObWCWAQ2IReZD8VvsDy3poRHSKvpRR2F96F8WJ3HVbjpso3gN7l0q6QPPgvxSSpl/qo5k8a7mkQ==}
 
   '@esbuild/aix-ppc64@0.24.2':
     resolution: {integrity: sha512-thpVCb/rhxE/BnMLQ7GReQLLN8q9qbHmI55F4489/ByVg2aQaQ6kbcLb6FHkocZzQhxc4gx0sCk0tJkKBFzDhA==}
@@ -1117,10 +1108,6 @@ packages:
 
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
-
-  '@opentelemetry/api@1.9.0':
-    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
-    engines: {node: '>=8.0.0'}
 
   '@paralleldrive/cuid2@2.3.1':
     resolution: {integrity: sha512-XO7cAxhnTZl0Yggq6jOgjiOHhbgcO4NqFqwSmQpjK3b6TEE6Uj/jfSk6wzYyemh3+I0sHirKSetjQwn5cZktFw==}
@@ -2000,98 +1987,6 @@ packages:
   dotenv@17.3.1:
     resolution: {integrity: sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA==}
     engines: {node: '>=12'}
-
-  drizzle-orm@0.38.4:
-    resolution: {integrity: sha512-s7/5BpLKO+WJRHspvpqTydxFob8i1vo2rEx4pY6TGY7QSMuUfWUuzaY0DIpXCkgHOo37BaFC+SJQb99dDUXT3Q==}
-    peerDependencies:
-      '@aws-sdk/client-rds-data': '>=3'
-      '@cloudflare/workers-types': '>=4'
-      '@electric-sql/pglite': '>=0.2.0'
-      '@libsql/client': '>=0.10.0'
-      '@libsql/client-wasm': '>=0.10.0'
-      '@neondatabase/serverless': '>=0.10.0'
-      '@op-engineering/op-sqlite': '>=2'
-      '@opentelemetry/api': ^1.4.1
-      '@planetscale/database': '>=1'
-      '@prisma/client': '*'
-      '@tidbcloud/serverless': '*'
-      '@types/better-sqlite3': '*'
-      '@types/pg': '*'
-      '@types/react': '>=18'
-      '@types/sql.js': '*'
-      '@vercel/postgres': '>=0.8.0'
-      '@xata.io/client': '*'
-      better-sqlite3: '>=7'
-      bun-types: '*'
-      expo-sqlite: '>=14.0.0'
-      knex: '*'
-      kysely: '*'
-      mysql2: '>=2'
-      pg: '>=8'
-      postgres: '>=3'
-      prisma: '*'
-      react: '>=18'
-      sql.js: '>=1'
-      sqlite3: '>=5'
-    peerDependenciesMeta:
-      '@aws-sdk/client-rds-data':
-        optional: true
-      '@cloudflare/workers-types':
-        optional: true
-      '@electric-sql/pglite':
-        optional: true
-      '@libsql/client':
-        optional: true
-      '@libsql/client-wasm':
-        optional: true
-      '@neondatabase/serverless':
-        optional: true
-      '@op-engineering/op-sqlite':
-        optional: true
-      '@opentelemetry/api':
-        optional: true
-      '@planetscale/database':
-        optional: true
-      '@prisma/client':
-        optional: true
-      '@tidbcloud/serverless':
-        optional: true
-      '@types/better-sqlite3':
-        optional: true
-      '@types/pg':
-        optional: true
-      '@types/react':
-        optional: true
-      '@types/sql.js':
-        optional: true
-      '@vercel/postgres':
-        optional: true
-      '@xata.io/client':
-        optional: true
-      better-sqlite3:
-        optional: true
-      bun-types:
-        optional: true
-      expo-sqlite:
-        optional: true
-      knex:
-        optional: true
-      kysely:
-        optional: true
-      mysql2:
-        optional: true
-      pg:
-        optional: true
-      postgres:
-        optional: true
-      prisma:
-        optional: true
-      react:
-        optional: true
-      sql.js:
-        optional: true
-      sqlite3:
-        optional: true
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -3034,40 +2929,6 @@ packages:
     resolution: {integrity: sha512-//nshmD55c46FuFw26xV/xFAaB5HF9Xdap7HJBBnrKdAd6/GxDBaNA1870O79+9ueg61cZLSVc+OaFlfmObYVQ==}
     engines: {node: '>= 14.16'}
 
-  pg-cloudflare@1.3.0:
-    resolution: {integrity: sha512-6lswVVSztmHiRtD6I8hw4qP/nDm1EJbKMRhf3HCYaqud7frGysPv7FYJ5noZQdhQtN2xJnimfMtvQq21pdbzyQ==}
-
-  pg-connection-string@2.12.0:
-    resolution: {integrity: sha512-U7qg+bpswf3Cs5xLzRqbXbQl85ng0mfSV/J0nnA31MCLgvEaAo7CIhmeyrmJpOr7o+zm0rXK+hNnT5l9RHkCkQ==}
-
-  pg-int8@1.0.1:
-    resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
-    engines: {node: '>=4.0.0'}
-
-  pg-pool@3.13.0:
-    resolution: {integrity: sha512-gB+R+Xud1gLFuRD/QgOIgGOBE2KCQPaPwkzBBGC9oG69pHTkhQeIuejVIk3/cnDyX39av2AxomQiyPT13WKHQA==}
-    peerDependencies:
-      pg: '>=8.0'
-
-  pg-protocol@1.13.0:
-    resolution: {integrity: sha512-zzdvXfS6v89r6v7OcFCHfHlyG/wvry1ALxZo4LqgUoy7W9xhBDMaqOuMiF3qEV45VqsN6rdlcehHrfDtlCPc8w==}
-
-  pg-types@2.2.0:
-    resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
-    engines: {node: '>=4'}
-
-  pg@8.20.0:
-    resolution: {integrity: sha512-ldhMxz2r8fl/6QkXnBD3CR9/xg694oT6DZQ2s6c/RI28OjtSOpxnPrUCGOBJ46RCUxcWdx3p6kw/xnDHjKvaRA==}
-    engines: {node: '>= 16.0.0'}
-    peerDependencies:
-      pg-native: '>=3.0.1'
-    peerDependenciesMeta:
-      pg-native:
-        optional: true
-
-  pgpass@1.0.5:
-    resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
-
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -3090,26 +2951,6 @@ packages:
   postcss@8.5.8:
     resolution: {integrity: sha512-OW/rX8O/jXnm82Ey1k44pObPtdblfiuWnrd8X7GJ7emImCOstunGbXUpp7HdBrFQX6rJzn3sPT397Wp5aCwCHg==}
     engines: {node: ^10 || ^12 || >=14}
-
-  postgres-array@2.0.0:
-    resolution: {integrity: sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA==}
-    engines: {node: '>=4'}
-
-  postgres-bytea@1.0.1:
-    resolution: {integrity: sha512-5+5HqXnsZPE65IJZSMkZtURARZelel2oXUEO8rH83VS/hxH5vv1uHquPg5wZs8yMAfdv971IU+kcPUczi7NVBQ==}
-    engines: {node: '>=0.10.0'}
-
-  postgres-date@1.0.7:
-    resolution: {integrity: sha512-suDmjLVQg78nMK2UZ454hAG+OAW+HQPZ6n++TNDUX+L0+uUlLywnoxJKDou51Zm+zTCjrCl0Nq6J9C5hP9vK/Q==}
-    engines: {node: '>=0.10.0'}
-
-  postgres-interval@1.2.0:
-    resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
-    engines: {node: '>=0.10.0'}
-
-  postgres@3.4.8:
-    resolution: {integrity: sha512-d+JFcLM17njZaOLkv6SCev7uoLaBtfK86vMUXhW1Z4glPWh4jozno9APvW/XKFJ3CCxVoC7OL38BqRydtu5nGg==}
-    engines: {node: '>=12'}
 
   posthog-node@4.18.0:
     resolution: {integrity: sha512-XROs1h+DNatgKh/AlIlCtDxWzwrKdYDb2mOs58n4yN8BkGN9ewqeQwG5ApS4/IzwCb7HPttUkOVulkYatd2PIw==}
@@ -3402,10 +3243,6 @@ packages:
 
   space-separated-tokens@2.0.2:
     resolution: {integrity: sha512-PEGlAwrG8yXGXRjW32fGbg66JAlOAwbObuqVoJpv/mRgoWDQfgH1wDPvtzWyUSNAXBGSk8h755YDbbcEy3SH2Q==}
-
-  split2@4.2.0:
-    resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
-    engines: {node: '>= 10.x'}
 
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
@@ -3894,10 +3731,6 @@ packages:
     resolution: {integrity: sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==}
     engines: {node: '>=0.4.0'}
 
-  xtend@4.0.2:
-    resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
-    engines: {node: '>=0.4'}
-
   y18n@5.0.8:
     resolution: {integrity: sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==}
     engines: {node: '>=10'}
@@ -4262,8 +4095,6 @@ snapshots:
   '@ecies/ciphers@0.2.5(@noble/ciphers@1.3.0)':
     dependencies:
       '@noble/ciphers': 1.3.0
-
-  '@electric-sql/pglite@0.4.4': {}
 
   '@esbuild/aix-ppc64@0.24.2':
     optional: true
@@ -4649,9 +4480,6 @@ snapshots:
       outvariant: 1.4.3
 
   '@open-draft/until@2.1.0': {}
-
-  '@opentelemetry/api@1.9.0':
-    optional: true
 
   '@paralleldrive/cuid2@2.3.1':
     dependencies:
@@ -5458,15 +5286,6 @@ snapshots:
   dotenv@16.6.1: {}
 
   dotenv@17.3.1: {}
-
-  drizzle-orm@0.38.4(@electric-sql/pglite@0.4.4)(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(pg@8.20.0)(postgres@3.4.8)(react@19.2.4):
-    optionalDependencies:
-      '@electric-sql/pglite': 0.4.4
-      '@opentelemetry/api': 1.9.0
-      '@types/react': 19.2.14
-      pg: 8.20.0
-      postgres: 3.4.8
-      react: 19.2.4
 
   dunder-proto@1.0.1:
     dependencies:
@@ -6603,48 +6422,6 @@ snapshots:
 
   pathval@2.0.1: {}
 
-  pg-cloudflare@1.3.0:
-    optional: true
-
-  pg-connection-string@2.12.0:
-    optional: true
-
-  pg-int8@1.0.1:
-    optional: true
-
-  pg-pool@3.13.0(pg@8.20.0):
-    dependencies:
-      pg: 8.20.0
-    optional: true
-
-  pg-protocol@1.13.0:
-    optional: true
-
-  pg-types@2.2.0:
-    dependencies:
-      pg-int8: 1.0.1
-      postgres-array: 2.0.0
-      postgres-bytea: 1.0.1
-      postgres-date: 1.0.7
-      postgres-interval: 1.2.0
-    optional: true
-
-  pg@8.20.0:
-    dependencies:
-      pg-connection-string: 2.12.0
-      pg-pool: 3.13.0(pg@8.20.0)
-      pg-protocol: 1.13.0
-      pg-types: 2.2.0
-      pgpass: 1.0.5
-    optionalDependencies:
-      pg-cloudflare: 1.3.0
-    optional: true
-
-  pgpass@1.0.5:
-    dependencies:
-      split2: 4.2.0
-    optional: true
-
   picocolors@1.1.1: {}
 
   picomatch@2.3.1: {}
@@ -6663,23 +6440,6 @@ snapshots:
       nanoid: 3.3.11
       picocolors: 1.1.1
       source-map-js: 1.2.1
-
-  postgres-array@2.0.0:
-    optional: true
-
-  postgres-bytea@1.0.1:
-    optional: true
-
-  postgres-date@1.0.7:
-    optional: true
-
-  postgres-interval@1.2.0:
-    dependencies:
-      xtend: 4.0.2
-    optional: true
-
-  postgres@3.4.8:
-    optional: true
 
   posthog-node@4.18.0:
     dependencies:
@@ -7122,9 +6882,6 @@ snapshots:
   source-map@0.6.1: {}
 
   space-separated-tokens@2.0.2: {}
-
-  split2@4.2.0:
-    optional: true
 
   stackback@0.0.2: {}
 
@@ -7583,9 +7340,6 @@ snapshots:
     optional: true
 
   xmlhttprequest-ssl@2.1.2: {}
-
-  xtend@4.0.2:
-    optional: true
 
   y18n@5.0.8: {}
 

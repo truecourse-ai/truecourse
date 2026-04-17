@@ -223,6 +223,14 @@ export async function analyzeInProcess(
     // Drain LLM usage before we build the snapshot so it's included.
     const usage = provider ? toUsageRecords(provider.flushUsage()) : [];
 
+    // Enforce the location invariant on every violation: a `filePath` must
+    // come with `lineStart` + `lineEnd`, or all three must be null. Any rule
+    // that slips (new or future) gets normalized here so consumers can
+    // trust the contract — CodeViewer can drop its null-guards, etc.
+    enforceLocationInvariant(pipelineResult.added);
+    enforceLocationInvariant(pipelineResult.unchanged);
+    enforceLocationInvariant(pipelineResult.resolved);
+
     // ------------------------------------------------------------
     // Assemble AnalysisSnapshot
     // ------------------------------------------------------------
@@ -383,3 +391,25 @@ function buildHistoryEntry(
 
 // Re-export so the route can detect and remove a specific analysis's history entry.
 export { removeFromHistory };
+
+/**
+ * Normalize the filePath / lineStart / lineEnd triple on every violation in
+ * place. The invariant: a filePath always comes with a line range, or none
+ * of the three are set. If a rule produces one without the others, we log
+ * and drop the partial location so downstream consumers never see filePath
+ * without lines (or vice versa).
+ */
+function enforceLocationInvariant(violations: ViolationRecord[]): void {
+  for (const v of violations) {
+    const hasFile = v.filePath != null;
+    const hasRange = v.lineStart != null && v.lineEnd != null;
+    if (hasFile === hasRange) continue;
+
+    log.warn(
+      `[Violations] ${v.ruleKey}: partial location (filePath=${v.filePath}, lineStart=${v.lineStart}, lineEnd=${v.lineEnd}) — dropping to uphold the location invariant`,
+    );
+    v.filePath = null;
+    v.lineStart = null;
+    v.lineEnd = null;
+  }
+}

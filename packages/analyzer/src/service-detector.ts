@@ -86,7 +86,7 @@ function detectMonorepoServices(rootPath: string, allFiles: string[]): Service[]
     if (!existsSync(dirPath)) continue
 
     try {
-      const entries = readdirSync(dirPath)
+      const entries = readdirSync(dirPath).sort()
       for (const entry of entries) {
         const servicePath = join(dirPath, entry)
         const stats = statSync(servicePath)

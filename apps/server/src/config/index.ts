@@ -2,8 +2,6 @@ import './env.js';
 
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
-  // DATABASE_URL is optional — if not set, embedded PostgreSQL is used
-  databaseUrl: process.env.DATABASE_URL || '',
   llmProvider: 'claude-code' as const,
   // Claude Code CLI provider settings
   claudeCodeBinary: process.env.CLAUDE_CODE_BINARY || 'claude',

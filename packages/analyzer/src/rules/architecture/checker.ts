@@ -25,6 +25,12 @@ export interface ModuleViolation {
   moduleName?: string
   methodName?: string
   filePath: string
+  /** 1-based source span — only set for method-level violations where we
+   *  know the exact function (`long-method`, `dead-method`, `unused-export`
+   *  on a method, `too-many-parameters`, `deeply-nested-logic`). Whole-module
+   *  rules (`dead-module`, `god-module`, `circular-*`) leave these unset. */
+  lineStart?: number
+  lineEnd?: number
   /** For dependency violations: the module on the other end of the edge */
   relatedModuleName?: string
 }
@@ -273,6 +279,8 @@ export function checkModuleRules(
         serviceName: firstMod?.serviceName || 'unknown',
         moduleName: firstMod?.name,
         filePath: firstMod?.filePath || '',
+        lineStart: firstMod?.startLine,
+        lineEnd: firstMod?.endLine,
         relatedModuleName: secondMod?.name,
       })
     }
@@ -290,6 +298,8 @@ export function checkModuleRules(
           serviceName: mod.serviceName,
           moduleName: mod.name,
           filePath: mod.filePath,
+          lineStart: mod.startLine,
+          lineEnd: mod.endLine,
         })
       }
     }
@@ -427,6 +437,8 @@ export function checkModuleRules(
           moduleName: method.moduleName,
           methodName: method.name,
           filePath: method.filePath,
+          lineStart: method.startLine,
+          lineEnd: method.endLine,
         })
       }
     }
@@ -446,6 +458,8 @@ export function checkModuleRules(
           serviceName: mod.serviceName,
           moduleName: mod.name,
           filePath: mod.filePath,
+          lineStart: mod.startLine,
+          lineEnd: mod.endLine,
         })
       }
     }
@@ -505,6 +519,8 @@ export function checkModuleRules(
           serviceName: mod.serviceName,
           moduleName: mod.name,
           filePath: mod.filePath,
+          lineStart: mod.startLine,
+          lineEnd: mod.endLine,
         })
       }
     }
@@ -537,6 +553,8 @@ export function checkModuleRules(
         severity: 'low',
         serviceName,
         filePath: fa.filePath,
+        lineStart: 1,
+        lineEnd: 1,
       })
     }
   }
@@ -565,6 +583,12 @@ export function checkModuleRules(
             // interact with both DB models and external clients. Only for .py files.
             if (srcLayer === 'data' && srcMod.filePath.endsWith('.py') &&
                 /\/(?:orchestrators|services|modules|serverless)\//.test(srcMod.filePath)) continue
+
+            // Point at the top of the source module. Ideally we'd highlight
+            // the specific `import` line, but `ImportStatement` in the shared
+            // schema doesn't carry a location today — extending it is a
+            // separate concern. `srcMod.startLine` keeps the invariant
+            // (filePath always comes with lineStart/lineEnd).
             violations.push({
               ruleKey,
               title: `Layer violation: \`${srcMod.name}\` → \`${tgtMod.name}\``,
@@ -573,6 +597,8 @@ export function checkModuleRules(
               serviceName: srcMod.serviceName,
               moduleName: srcMod.name,
               filePath: srcMod.filePath,
+              lineStart: srcMod.startLine,
+              lineEnd: srcMod.startLine,
               relatedModuleName: tgtMod.name,
             })
           }
@@ -649,6 +675,8 @@ export function checkModuleRules(
           serviceName: srcMod.serviceName,
           moduleName: srcMod.name,
           filePath: srcMod.filePath,
+          lineStart: srcMod.startLine,
+          lineEnd: srcMod.startLine,
           relatedModuleName: tgtMod.name,
         })
       }
@@ -701,6 +729,8 @@ export function checkMethodRules(
           moduleName: method.moduleName,
           methodName: method.name,
           filePath: method.filePath,
+          lineStart: method.startLine,
+          lineEnd: method.endLine,
         })
       }
     }
@@ -720,6 +750,8 @@ export function checkMethodRules(
           moduleName: method.moduleName,
           methodName: method.name,
           filePath: method.filePath,
+          lineStart: method.startLine,
+          lineEnd: method.endLine,
         })
       }
     }
@@ -738,6 +770,8 @@ export function checkMethodRules(
           moduleName: method.moduleName,
           methodName: method.name,
           filePath: method.filePath,
+          lineStart: method.startLine,
+          lineEnd: method.endLine,
         })
       }
     }
@@ -939,6 +973,8 @@ export function checkMethodRules(
           moduleName: method.moduleName,
           methodName: method.name,
           filePath: method.filePath,
+          lineStart: method.startLine,
+          lineEnd: method.endLine,
         })
       }
     }

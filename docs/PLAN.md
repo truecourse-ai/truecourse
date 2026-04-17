@@ -325,6 +325,33 @@ A minimal but realistic monorepo with:
 - LLM returns structured JSON via tool_use/function_calling
 - **Service descriptions** — After analysis completes, the LLM generates a one-line description for each service (e.g. "Public API gateway that routes requests to internal services"). Stored in the `services` table, returned in the graph endpoint, displayed in the ServiceNode
 
+### 1.10 AI Agent Chat Panel `STATUS: DONE`
+
+**UX:**
+- Right-side panel with a persistent chat interface (always one "Agent" tab)
+- Click "Explain" button on any graph node → opens panel with node context auto-injected into the conversation
+- User can ask follow-up questions, ask about relationships, request deeper analysis
+- Clicking a different node injects that node's context into the ongoing conversation (not a new chat)
+- Agent has full project context: architecture, services, dependencies, layers
+
+**How context injection works:**
+- When user clicks "Explain" on a node, a system message is appended with that node's data (service metadata, file list, dependencies, layer info)
+- Conversation history is maintained per repo session
+- Agent can reference previous questions and answers
+
+**Backend:**
+- `POST /api/repos/:id/chat` — send message `{ message, nodeContext?, conversationId }`
+- `GET /api/repos/:id/chat/:conversationId` — get conversation history
+- Streaming responses via SSE or WebSocket for real-time token output
+
+**Database additions:**
+- `conversations` — id, repoId, branch, createdAt, updatedAt
+- `messages` — id, conversationId, role ('user'|'assistant'|'system'), content, nodeContext (jsonb), createdAt
+
+**LLM conversation management:**
+- Use Anthropic Agent SDK / OpenAI SDK conversation features directly
+- Langfuse traces each conversation turn (optional)
+
 ### 1.11 CLI & Distribution (`tools/cli`) `STATUS: DONE`
 
 **User experience:**

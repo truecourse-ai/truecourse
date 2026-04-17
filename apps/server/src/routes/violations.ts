@@ -61,17 +61,14 @@ router.get(
         filtered = violations.filter((v) => active.includes(v.status));
       }
 
-      // Optional file filter (accepts absolute or relative). When scoped to a
-      // file, return only code-level rows — arch-AST violations (type module /
-      // function / service) can carry a filePath for graph linkage but have
-      // no line/column range, which would crash the CodeViewer.
+      // Optional file filter (accepts absolute or relative). Scoped to code
+      // violations only — arch-AST rows (type module/function/service) can
+      // also carry a filePath for graph linkage, but the per-file code view
+      // is for line-anchored findings.
       if (fileParam) {
         const absPath = fileParam.startsWith('/') ? fileParam : `${repo.path}/${fileParam}`;
         filtered = filtered.filter(
-          (v) =>
-            v.type === 'code' &&
-            v.lineStart != null &&
-            (v.filePath === absPath || v.filePath === fileParam),
+          (v) => v.type === 'code' && (v.filePath === absPath || v.filePath === fileParam),
         );
       }
 

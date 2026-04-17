@@ -51,6 +51,18 @@ The server walks up from `cwd` looking for `.truecourse/`. Set `TRUECOURSE_HOME`
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
 - **Storage.** The store is file-based. Writes go through `apps/server/src/lib/analysis-store.ts` via `atomicWriteJson` (write-to-tmp + rename for atomicity). Reads are mtime-cached on `LATEST.json`. Concurrent analyses are prevented by `.analyze.lock` (O_EXCL).
 
+## Releasing
+
+When bumping the package version, update all three places — `package.json` alone is not enough because `commander` reads the version from code:
+
+1. `tools/cli/package.json` — the `truecourse` CLI published to npm.
+2. `apps/server/package.json` — the `@truecourse/server` workspace package (kept in sync even though it's not published separately).
+3. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call on the commander program. This is what `truecourse --version` prints.
+
+The three internal packages (`@truecourse/web`, `@truecourse/analyzer`, `@truecourse/shared`) are marked `private: true` and never published — leave their versions at `0.1.0`.
+
+npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and the GitHub Actions workflow publishes `truecourse` to npm. Never `npm publish` manually.
+
 ## Testing
 
 - When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
