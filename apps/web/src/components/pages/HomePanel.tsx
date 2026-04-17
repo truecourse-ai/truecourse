@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { BarChart3, FileText, GitCompare, Plus, Minus, Shield } from 'lucide-react';
+import { Activity, BarChart3, CheckCircle2, FileText, GitCompare, PlusCircle, Shield } from 'lucide-react';
 import { TrendChart } from '@/components/analytics/TrendChart';
 import { TypePieChart } from '@/components/analytics/TypePieChart';
 import { SeverityBarChart } from '@/components/analytics/SeverityBarChart';
@@ -297,6 +297,7 @@ function DiffAside({
   }
 
   const newCount = diffResult.summary.newCount;
+  const unchangedCount = diffResult.summary.unchangedCount;
   const resolvedCount = diffResult.summary.resolvedCount;
   const changedFiles = diffResult.changedFiles;
 
@@ -317,14 +318,21 @@ function DiffAside({
       {/* Summary pills — same chip pattern as ResolutionMetrics in normal mode */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="group relative flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1">
-          <Plus className="h-3.5 w-3.5 shrink-0 text-rose-400" />
+          <PlusCircle className="h-3.5 w-3.5 shrink-0 text-rose-400" />
           <span className="text-xs font-semibold">{newCount}</span>
           <span className="text-[10px] text-muted-foreground">new</span>
           <span className={tooltipClass}>Violations introduced by your uncommitted changes</span>
         </div>
 
         <div className="group relative flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1">
-          <Minus className="h-3.5 w-3.5 shrink-0 text-green-400" />
+          <Activity className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+          <span className="text-xs font-semibold">{unchangedCount}</span>
+          <span className="text-[10px] text-muted-foreground">unchanged</span>
+          <span className={tooltipClass}>Baseline violations your changes haven't touched</span>
+        </div>
+
+        <div className="group relative flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-400" />
           <span className="text-xs font-semibold">{resolvedCount}</span>
           <span className="text-[10px] text-muted-foreground">resolved</span>
           <span className={tooltipClass}>Baseline violations your changes have fixed</span>

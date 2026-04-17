@@ -114,16 +114,18 @@ export async function diffInProcess(
   const diff = buildDiffSnapshot({
     latest,
     graph,
+    analysisId,
     now,
     branch: latest.analysis.branch,
     commitHash,
     changedFiles,
     pipelineResult,
+    repoPath: project.path,
   });
 
   writeDiff(project.path, diff);
   log.info(
-    `[Diff] Done — ${diff.summary.newCount} new, ${diff.summary.resolvedCount} resolved across ${diff.changedFiles.length} changed files`,
+    `[Diff] Done — ${diff.summary.newCount} new, ${diff.summary.unchangedCount} unchanged, ${diff.summary.resolvedCount} resolved across ${diff.changedFiles.length} changed files`,
   );
 
   return { diff, isStale: false };
@@ -136,13 +138,15 @@ export async function diffInProcess(
 function buildDiffSnapshot(params: {
   latest: LatestSnapshot;
   graph: ReturnType<typeof buildGraph>['graph'];
+  analysisId: string;
   now: string;
   branch: string | null;
   commitHash: string | null;
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
   pipelineResult: Awaited<ReturnType<typeof runViolationPipeline>>;
+  repoPath: string;
 }): DiffSnapshot {
-  const { latest, graph, branch, commitHash, changedFiles, pipelineResult } = params;
+  const { latest, graph, analysisId, branch, commitHash, changedFiles, pipelineResult, repoPath } = params;
 
   const serviceById = new Map(graph.services.map((s) => [s.id, s.name]));
   const moduleById = new Map(graph.modules.map((m) => [m.id, m.name]));
@@ -165,34 +169,74 @@ function buildDiffSnapshot(params: {
     .map((r) => latestById.get(r.id))
     .filter((v): v is ViolationWithNames => !!v);
 
-  const changedAbs = new Set(changedFiles.map((c) => path.resolve(c.path)));
+  // Compute affected node IDs as NAME-based keys (what the dashboard looks up).
+  // Shapes match `packages/shared/src/types/entity.ts`:
+  //   services: "<serviceName>"
+  //   layers:   "<serviceName>::<layerName>"
+  //   modules:  "<serviceName>::<moduleName>"
+  //   methods:  "<serviceName>::<moduleName>::<methodName>"
+  // git status returns paths relative to the target repo root. Resolve
+  // against `repoPath`, not the server's cwd (which would be the monorepo
+  // root in dev mode). Module filePaths are absolute inside the target repo.
+  const changedAbs = new Set(
+    changedFiles.map((c) => path.resolve(repoPath, c.path)),
+  );
   const matchesChanged = (p: string | null | undefined) =>
-    !!p && (changedAbs.has(p) || changedAbs.has(path.resolve(p)));
+    !!p && (changedAbs.has(p) || changedAbs.has(path.resolve(repoPath, p)));
 
-  const affectedModules = latest.graph.modules.filter((m) => matchesChanged(m.filePath));
-  const affectedModuleIds = new Set(affectedModules.map((m) => m.id));
-  const affectedServiceIds = new Set(affectedModules.map((m) => m.serviceId));
-  const affectedLayerIds = new Set(affectedModules.map((m) => m.layerId));
-  const affectedMethodIds = latest.graph.methods
-    .filter((m) => affectedModuleIds.has(m.moduleId))
-    .map((m) => m.id);
+  // Use the working-tree graph (not the baseline) so newly-added modules and
+  // methods get highlighted. A module only in the baseline (deleted file)
+  // won't render as a node anyway, so missing it here is fine.
+  const affectedModules = graph.modules.filter((m) => matchesChanged(m.filePath));
+  const affectedModuleIdSet = new Set(affectedModules.map((m) => m.id));
+
+  const serviceNameById = new Map(graph.services.map((s) => [s.id, s.name]));
+  const layerKeyById = new Map(
+    graph.layers.map((l) => [l.id, `${l.serviceName}::${l.layer}`]),
+  );
+
+  const affectedServices = new Set<string>();
+  const affectedLayers = new Set<string>();
+  const affectedModuleKeys = new Set<string>();
+  for (const mod of affectedModules) {
+    const svcName = serviceNameById.get(mod.serviceId);
+    if (svcName) {
+      affectedServices.add(svcName);
+      affectedModuleKeys.add(`${svcName}::${mod.name}`);
+    }
+    const layerKey = layerKeyById.get(mod.layerId);
+    if (layerKey) affectedLayers.add(layerKey);
+  }
+
+  const moduleNameById = new Map(graph.modules.map((m) => [m.id, m.name]));
+  const affectedMethodKeys: string[] = [];
+  for (const method of graph.methods) {
+    if (!affectedModuleIdSet.has(method.moduleId)) continue;
+    const modName = moduleNameById.get(method.moduleId);
+    const mod = graph.modules.find((m) => m.id === method.moduleId);
+    const svcName = mod ? serviceNameById.get(mod.serviceId) : undefined;
+    if (svcName && modName) affectedMethodKeys.push(`${svcName}::${modName}::${method.name}`);
+  }
 
   return {
+    id: analysisId,
     baseAnalysisId: latest.analysis.id,
     createdAt: params.now,
     branch,
     commitHash,
+    graph,
     changedFiles,
     newViolations,
     resolvedViolations,
     affectedNodeIds: {
-      services: [...affectedServiceIds],
-      layers: [...affectedLayerIds],
-      modules: [...affectedModuleIds],
-      methods: affectedMethodIds,
+      services: [...affectedServices],
+      layers: [...affectedLayers],
+      modules: [...affectedModuleKeys],
+      methods: affectedMethodKeys,
     },
     summary: {
       newCount: newViolations.length,
+      unchangedCount: pipelineResult.unchanged.length,
       resolvedCount: resolvedViolations.length,
     },
   };

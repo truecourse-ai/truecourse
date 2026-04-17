@@ -312,10 +312,18 @@ export interface History {
  * or when the baseline analysis is deleted.
  */
 export interface DiffSnapshot {
-  baseAnalysisId: string;               // must equal LATEST.analysis.id
+  /** Id of this diff analysis — distinct from `baseAnalysisId`. Used by the
+   *  dashboard to fetch the working-tree graph via the `/graph` endpoint so
+   *  newly-added methods/modules actually appear (rather than rendering the
+   *  stale baseline graph). */
+  id: string;
+  /** Id of the LATEST baseline this diff was computed against. */
+  baseAnalysisId: string;
   createdAt: string;
   branch: string | null;
   commitHash: string | null;
+  /** Full graph assembled from the working-tree analysis. */
+  graph: Graph;
   /** Changed files with working-tree status, ready for UI rendering. */
   changedFiles: Array<{ path: string; status: 'new' | 'modified' | 'deleted' }>;
   /** Full violation rows (with denormalized names) introduced by the diff. */
@@ -330,6 +338,7 @@ export interface DiffSnapshot {
   };
   summary: {
     newCount: number;
+    unchangedCount: number;
     resolvedCount: number;
   };
 }

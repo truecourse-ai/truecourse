@@ -3,6 +3,8 @@ import { memo } from 'react';
 import { Handle, Position, useNodeConnections, type NodeProps } from '@xyflow/react';
 import { Zap, AlertTriangle } from 'lucide-react';
 
+type DiffBadge = { newCount: number; resolvedCount: number };
+
 type MethodNodeData = {
   label: string;
   signature: string;
@@ -14,13 +16,14 @@ type MethodNodeData = {
   statementCount?: number;
   maxNestingDepth?: number;
   isDead?: boolean;
+  diffBadge?: DiffBadge;
 };
 
 const DOT_CLASS = '!bg-muted-foreground !border-none !w-[4px] !h-[4px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function MethodNodeComponent({ data, selected }: NodeProps & { data: MethodNodeData }) {
-  const { label, isAsync, isExported, paramCount, statementCount, maxNestingDepth, isDead } = data;
+  const { label, isAsync, isExported, paramCount, statementCount, maxNestingDepth, isDead, diffBadge } = data;
 
   const hasWarning =
     (statementCount != null && statementCount > 30) ||
@@ -68,6 +71,26 @@ function MethodNodeComponent({ data, selected }: NodeProps & { data: MethodNodeD
         <span className="ml-auto shrink-0" />
         {deadTooltip}
         {hasWarning && !isDead && <AlertTriangle className="h-2.5 w-2.5 text-amber-500" />}
+        {diffBadge && (diffBadge.newCount > 0 || diffBadge.resolvedCount > 0) && (
+          <div className="flex flex-shrink-0 gap-1">
+            {diffBadge.newCount > 0 && (
+              <span className="group/diff relative inline-flex items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-500">
+                +{diffBadge.newCount}
+                <span className="pointer-events-none absolute left-1/2 bottom-full mb-1 -translate-x-1/2 z-[9999] hidden group-hover/diff:block whitespace-nowrap rounded bg-popover border border-border px-2 py-1 text-[10px] text-popover-foreground shadow-lg">
+                  {diffBadge.newCount} new violation{diffBadge.newCount !== 1 ? 's' : ''} from pending changes
+                </span>
+              </span>
+            )}
+            {diffBadge.resolvedCount > 0 && (
+              <span className="group/diff relative inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-500">
+                -{diffBadge.resolvedCount}
+                <span className="pointer-events-none absolute left-1/2 bottom-full mb-1 -translate-x-1/2 z-[9999] hidden group-hover/diff:block whitespace-nowrap rounded bg-popover border border-border px-2 py-1 text-[10px] text-popover-foreground shadow-lg">
+                  {diffBadge.resolvedCount} violation{diffBadge.resolvedCount !== 1 ? 's' : ''} resolved by pending changes
+                </span>
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

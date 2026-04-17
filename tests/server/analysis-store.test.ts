@@ -307,18 +307,28 @@ describe('history.json round-trip', () => {
 
 function makeDiff(baseAnalysisId: string): DiffSnapshot {
   return {
+    id: randomUUID(),
     baseAnalysisId,
     createdAt: '2026-04-17T14:45:10.000Z',
     branch: 'feature',
     commitHash: 'xyz',
-    changedFiles: ['src/foo.ts'],
+    graph: {
+      services: [],
+      serviceDependencies: [],
+      layers: [],
+      modules: [],
+      methods: [],
+      moduleDeps: [],
+      methodDeps: [],
+      databases: [],
+      databaseConnections: [],
+      flows: [],
+    },
+    changedFiles: [{ path: 'src/foo.ts', status: 'modified' }],
     newViolations: [],
     resolvedViolations: [],
     affectedNodeIds: { services: [], layers: [], modules: [], methods: [] },
-    summary: {
-      newBySeverity: { info: 0, low: 0, medium: 0, high: 0, critical: 0 },
-      resolvedCount: 0,
-    },
+    summary: { newCount: 0, unchangedCount: 0, resolvedCount: 0 },
   };
 }
 

@@ -123,34 +123,54 @@ router.get(
 
       let snapshot = readLatest(repo.path);
       if (analysisIdParam && (!snapshot || snapshot.analysis.id !== analysisIdParam)) {
-        const filename = await findAnalysisFilename(repo.path, analysisIdParam);
-        if (!filename) {
-          res.json({ nodes: [], edges: [] });
-          return;
+        // Diff view: serve the working-tree graph from diff.json so newly-added
+        // modules/methods render as nodes instead of being missing from the baseline.
+        const diff = readDiff(repo.path);
+        if (diff && diff.id === analysisIdParam) {
+          snapshot = {
+            head: `diff-${diff.id}`,
+            analysis: {
+              id: diff.id,
+              createdAt: diff.createdAt,
+              branch: diff.branch,
+              commitHash: diff.commitHash,
+              architecture: snapshot?.analysis.architecture ?? 'monolith',
+              metadata: null,
+              status: 'completed',
+            },
+            graph: diff.graph,
+            violations: diff.newViolations,
+          };
+        } else {
+          const filename = await findAnalysisFilename(repo.path, analysisIdParam);
+          if (!filename) {
+            res.json({ nodes: [], edges: [] });
+            return;
+          }
+          const snap = readAnalysis(repo.path, filename);
+          if (!snap) {
+            res.json({ nodes: [], edges: [] });
+            return;
+          }
+          // Build a minimal LatestSnapshot view for the historical file so the
+          // graph builder can operate on the same shape. Use the snapshot's
+          // own graph; violations are not needed for graph rendering except
+          // for dependency-violation decoration.
+          snapshot = {
+            head: filename,
+            analysis: {
+              id: snap.id,
+              createdAt: snap.createdAt,
+              branch: snap.branch,
+              commitHash: snap.commitHash,
+              architecture: snap.architecture,
+              metadata: snap.metadata,
+              status: 'completed',
+            },
+            graph: snap.graph,
+            violations: [],
+          };
         }
-        const snap = readAnalysis(repo.path, filename);
-        if (!snap) {
-          res.json({ nodes: [], edges: [] });
-          return;
-        }
-        // Build a minimal LatestSnapshot view for the historical file so the
-        // graph builder can operate on the same shape. Use the snapshot's
-        // own graph; violations are not needed for graph rendering except
-        // for dependency-violation decoration.
-        snapshot = {
-          head: filename,
-          analysis: {
-            id: snap.id,
-            createdAt: snap.createdAt,
-            branch: snap.branch,
-            commitHash: snap.commitHash,
-            architecture: snap.architecture,
-            metadata: snap.metadata,
-            status: 'completed',
-          },
-          graph: snap.graph,
-          violations: [],
-        };
       }
       if (!snapshot) {
         res.json({ nodes: [], edges: [] });
@@ -510,7 +530,7 @@ router.post(
         summary: diff.summary,
         changedFiles: diff.changedFiles,
         isStale: false,
-        diffAnalysisId: diff.baseAnalysisId,
+        diffAnalysisId: diff.id,
       });
     } catch (error) {
       if (error instanceof Error && error.message.includes('Run a full analysis first')) {
@@ -547,7 +567,7 @@ router.get(
         summary: diff.summary,
         changedFiles: diff.changedFiles,
         isStale,
-        diffAnalysisId: diff.baseAnalysisId,
+        diffAnalysisId: diff.id,
       });
     } catch (error) {
       next(error);

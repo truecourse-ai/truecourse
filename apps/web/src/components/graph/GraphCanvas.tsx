@@ -582,16 +582,6 @@ function GraphCanvasInner({
         </div>
       )}
 
-      {isDiffMode && diffResult && !isDiffChecking && (
-        <div className={`absolute ${hasProgressBar ? 'bottom-24' : 'bottom-4'} left-1/2 z-20 -translate-x-1/2 rounded-lg border border-amber-500/30 bg-card px-4 py-2 shadow-lg flex items-center gap-3 text-xs`}>
-          <span className="text-amber-500 font-medium">+{diffResult.summary.newCount} new</span>
-          <span className="text-emerald-500 font-medium">-{diffResult.summary.resolvedCount} resolved</span>
-          <span className="border-l border-border pl-3 text-muted-foreground">
-            {diffResult.changedFiles.length} file{diffResult.changedFiles.length !== 1 ? 's' : ''} changed
-          </span>
-        </div>
-      )}
-
     </div>
   );
 }

@@ -38,7 +38,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleNodeData }) {
-  const { label, moduleKind, methodCount, isDead, isContainer, isCollapsed, onToggleCollapse, violations } = data;
+  const { label, moduleKind, methodCount, isDead, isContainer, isCollapsed, onToggleCollapse, violations, diffBadge } = data;
   const Icon = KIND_ICONS[moduleKind] || FileCode;
   const { setEdges } = useReactFlow();
 
@@ -78,6 +78,27 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
           ))}
         </div>
       </div>
+    </div>
+  );
+
+  const diffBadges = diffBadge && (diffBadge.newCount > 0 || diffBadge.resolvedCount > 0) && (
+    <div className="flex flex-shrink-0 gap-1">
+      {diffBadge.newCount > 0 && (
+        <span className="group/diff relative inline-flex items-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-500">
+          +{diffBadge.newCount}
+          <span className="pointer-events-none absolute left-1/2 bottom-full mb-1 -translate-x-1/2 z-[9999] hidden group-hover/diff:block whitespace-nowrap rounded bg-popover border border-border px-2 py-1 text-[10px] text-popover-foreground shadow-lg">
+            {diffBadge.newCount} new violation{diffBadge.newCount !== 1 ? 's' : ''} from pending changes
+          </span>
+        </span>
+      )}
+      {diffBadge.resolvedCount > 0 && (
+        <span className="group/diff relative inline-flex items-center rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-500">
+          -{diffBadge.resolvedCount}
+          <span className="pointer-events-none absolute left-1/2 bottom-full mb-1 -translate-x-1/2 z-[9999] hidden group-hover/diff:block whitespace-nowrap rounded bg-popover border border-border px-2 py-1 text-[10px] text-popover-foreground shadow-lg">
+            {diffBadge.resolvedCount} violation{diffBadge.resolvedCount !== 1 ? 's' : ''} resolved by pending changes
+          </span>
+        </span>
+      )}
     </div>
   );
 
@@ -122,6 +143,7 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
           <span className="text-[10px] font-medium text-muted-foreground truncate">{label}</span>
           {violationTooltip}
           {deadTooltip}
+          {diffBadges}
           <span className="ml-auto shrink-0 text-[9px] text-muted-foreground/60">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
         </div>
       </div>
@@ -147,6 +169,7 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
         <span className="text-xs font-medium text-foreground truncate">{label}</span>
         {violationTooltip}
         {deadTooltip}
+        {diffBadges}
         <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
       </div>
     </div>

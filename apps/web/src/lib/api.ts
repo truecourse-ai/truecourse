@@ -382,6 +382,7 @@ export type DiffCheckResponse = {
   newViolations: DiffViolationItem[];
   summary: {
     newCount: number;
+    unchangedCount: number;
     resolvedCount: number;
   };
   affectedNodeIds: {
