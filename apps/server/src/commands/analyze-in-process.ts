@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { db, withProjectDb } from '../config/database.js';
+import { db, initializeProjectDb, withProjectDb } from '../config/database.js';
+import { log } from '../lib/logger.js';
 import { analyses, services, violations, modules, methods } from '../db/schema.js';
 import { getGit } from '../lib/git.js';
 import { readProjectConfig } from '../config/project-config.js';
-import { touchProject } from '../config/registry.js';
+import { setLastAnalyzed, touchProject } from '../config/registry.js';
 import type { RegistryEntry } from '../config/registry.js';
 import { runAnalysis, type AnalysisResult } from '../services/analyzer.service.js';
 import { persistAnalysisResult } from '../services/analysis-persistence.service.js';
@@ -66,6 +67,10 @@ export async function analyzeInProcess(
   project: RegistryEntry,
   options: AnalyzeInProcessOptions = {},
 ): Promise<AnalyzeInProcessResult> {
+  // First-ever analyze creates `.truecourse/db/` so openProjectDb can open it.
+  // Also invalidates any stale cache entry if the user deleted the DB dir
+  // while the server was running.
+  await initializeProjectDb(project);
   return withProjectDb(project, async () => {
     const start = Date.now();
     const { skipGit, signal } = options;
@@ -189,10 +194,7 @@ export async function analyzeInProcess(
       try {
         await detectAndPersistFlows(analysisId, result);
       } catch (flowError) {
-        console.error(
-          '[Flows] Detection failed:',
-          flowError instanceof Error ? flowError.message : String(flowError),
-        );
+        log.error(`[Flows] Detection failed: ${flowError instanceof Error ? flowError.message : String(flowError)}`);
       }
 
       touchProject(project.slug);
@@ -278,6 +280,12 @@ export async function analyzeInProcess(
         bySeverity[row.severity] = (bySeverity[row.severity] ?? 0) + c;
         total += c;
       }
+
+      // Record successful completion in the registry so the Home list and
+      // detail endpoint can both surface the timestamp without opening the
+      // project DB. This is the only place in the codebase that writes
+      // `lastAnalyzed`.
+      setLastAnalyzed(project.slug, new Date().toISOString());
 
       return {
         analysisId,

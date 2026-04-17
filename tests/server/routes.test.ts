@@ -36,6 +36,7 @@ vi.mock('../../apps/server/src/socket/handlers', async () => {
 // Import routes AFTER mocks are set up
 import { errorHandler } from '../../apps/server/src/middleware/error';
 import reposRouter from '../../apps/server/src/routes/repos';
+import analyzeRouter from '../../apps/server/src/routes/analyze';
 import analysisRouter from '../../apps/server/src/routes/analysis';
 import flowsRouter from '../../apps/server/src/routes/flows';
 
@@ -60,6 +61,7 @@ function createTestApp(): express.Express {
   const app = express();
   app.use(express.json());
   app.use('/api/repos', reposRouter);
+  app.use('/api/repos', analyzeRouter);
   app.use('/api/repos', analysisRouter);
   app.use('/api/repos', flowsRouter);
   app.use(errorHandler);

@@ -3,17 +3,16 @@ import { getProjectBySlug, touchProject } from '../config/registry.js';
 import { withProjectDb } from '../config/database.js';
 
 /**
- * Middleware for routes mounted under `/api/repos/:id/...`. Resolves the
- * slug in `req.params.id` against the registry, opens (or reuses) that
- * project's PGlite instance, and binds it to the request's async context so
- * handlers can use the shared `db` proxy.
+ * Middleware for project-scoped routers mounted at `/api/repos`. Each router's
+ * own patterns declare the `:id` segment (e.g. `/:id/violations`), so at the
+ * time this middleware runs Express hasn't parsed route params yet — we pull
+ * the slug from the first path segment directly.
  *
- * Routes that don't need a DB (e.g. the home-page registry list) should NOT
- * use this middleware.
+ * Opens (or reuses) the project's PGlite instance and binds it to the
+ * request's async context so handlers can use the shared `db` proxy.
  */
 export function projectResolver(req: Request, res: Response, next: NextFunction): void {
-  const slugParam = req.params.id;
-  const slug = Array.isArray(slugParam) ? slugParam[0] : slugParam;
+  const slug = req.path.split('/').filter(Boolean)[0];
   if (!slug) {
     res.status(400).json({ error: 'Missing project slug' });
     return;
@@ -31,5 +30,11 @@ export function projectResolver(req: Request, res: Response, next: NextFunction)
       res.on('close', resolve);
       next();
     });
-  }).catch(next);
+  }).catch((err: Error & { code?: string; statusCode?: number }) => {
+    if (err.code === 'NO_PROJECT_DB') {
+      res.status(404).json({ error: err.message, code: 'NO_PROJECT_DB' });
+      return;
+    }
+    next(err);
+  });
 }

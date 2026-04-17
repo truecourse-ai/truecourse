@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getGlobalDir, getRegistryPath, getRepoTruecourseDir } from './paths.js';
+import { ensureRepoTruecourseDir, getGlobalDir, getRegistryPath, getRepoTruecourseDir } from './paths.js';
 
 export interface RegistryEntry {
   /** Stable URL-safe identifier derived from the project name. */
@@ -9,8 +9,18 @@ export interface RegistryEntry {
   name: string;
   /** Absolute path to the repo root that contains `.truecourse/`. */
   path: string;
-  /** ISO timestamp of the last dashboard open (optional). */
+  /**
+   * ISO timestamp of the last dashboard interaction (add / open / any
+   * project-scoped request). Used purely for "recent projects" UX — never
+   * surfaced as an analysis timestamp.
+   */
   lastOpened?: string;
+  /**
+   * ISO timestamp of the last SUCCESSFUL analysis completion. Written only
+   * by `analyzeInProcess` at the end of a completed run. `null`/undefined
+   * means "never analyzed".
+   */
+  lastAnalyzed?: string;
 }
 
 interface RegistryFile {
@@ -75,6 +85,7 @@ export function getProjectByPath(repoPath: string): RegistryEntry | null {
  */
 export function registerProject(repoPath: string, displayName?: string): RegistryEntry {
   const normalized = path.resolve(repoPath);
+  ensureRepoTruecourseDir(normalized);
   const file = loadRaw();
   const name = displayName || path.basename(normalized);
   const existing = file.projects.find((p) => p.path === normalized);
@@ -111,6 +122,19 @@ export function touchProject(slug: string): void {
   const entry = file.projects.find((p) => p.slug === slug);
   if (!entry) return;
   entry.lastOpened = new Date().toISOString();
+  persist(file);
+}
+
+/**
+ * Record a successful analysis completion for `slug`. Called once per
+ * analyze run from `analyzeInProcess`. This is the ONLY write path for
+ * `lastAnalyzed` — everything else treats it as read-only.
+ */
+export function setLastAnalyzed(slug: string, isoTimestamp: string): void {
+  const file = loadRaw();
+  const entry = file.projects.find((p) => p.slug === slug);
+  if (!entry) return;
+  entry.lastAnalyzed = isoTimestamp;
   persist(file);
 }
 

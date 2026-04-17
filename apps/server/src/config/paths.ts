@@ -53,12 +53,21 @@ export function getRepoUiStatePath(repoDir: string): string {
  * Walk up from `startDir` looking for a `.truecourse/` directory. Returns the
  * directory that contains it, or `null` if none is found before the filesystem
  * root.
+ *
+ * Skips the global `~/.truecourse/` directory — that one is a per-user
+ * registry, not a project marker. Walking into it would wrongly treat
+ * `$HOME` as an analyzable project.
  */
 export function resolveRepoDir(startDir: string): string | null {
+  const globalDir = path.resolve(getGlobalDir());
   let current = path.resolve(startDir);
   while (true) {
     const candidate = path.join(current, TRUECOURSE_DIR);
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+    if (
+      path.resolve(candidate) !== globalDir &&
+      fs.existsSync(candidate) &&
+      fs.statSync(candidate).isDirectory()
+    ) {
       return current;
     }
     const parent = path.dirname(current);

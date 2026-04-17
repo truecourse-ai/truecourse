@@ -458,13 +458,16 @@ export default function RepoGraphPage() {
       refetchAnalyses();
       refetchCodeViolationSummary();
       refetchFlows();
+      // Refresh repo so `lastAnalyzed` updates — this drives the transition
+      // out of the welcome empty state.
+      api.getRepo(repoId).then(setRepo).catch(() => {});
     });
     const unsub2 = onEvent('analysis:canceled', () => {
       setIsAnalyzing(false);
       setIsCancelling(false);
     });
     return () => { unsub1(); unsub2(); };
-  }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows]);
+  }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -487,6 +490,15 @@ export default function RepoGraphPage() {
         setIsAnalyzing(true);
         setAnalysisError(null);
         await api.analyzeRepo(repoId);
+        // POST /analyze returns 202 once the DB has been bootstrapped.
+        // Refetch the read endpoints so any NO_PROJECT_DB 404s from
+        // before this click clear out and the layout shows the progress
+        // overlay instead of the stale error state.
+        refetchGraph();
+        refetchAnalyses();
+        refetchViolations();
+        refetchCodeViolationSummary();
+        refetchFlows();
       } catch (error) {
         setIsAnalyzing(false);
         setAnalysisError(error instanceof Error ? error.message : 'Analysis failed');
@@ -840,6 +852,8 @@ export default function RepoGraphPage() {
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
 
+  const hasAnalysis = repo?.lastAnalyzed != null;
+
   // Update flow names when flow list loads
   useEffect(() => {
     if (flowList.length === 0) return;
@@ -1066,129 +1080,6 @@ export default function RepoGraphPage() {
           )}
 
           <div className="relative flex-1 overflow-hidden">
-          {/* Analysis error banner */}
-          {analysisError && (
-            <div className="absolute bottom-4 left-1/2 z-20 w-96 -translate-x-1/2 rounded-lg border border-destructive/50 bg-card p-3 shadow-lg">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-medium text-destructive">Analysis failed</span>
-                <button
-                  onClick={() => setAnalysisError(null)}
-                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Dismiss"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <div className="flex items-start gap-2">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
-                <span className="text-[11px] text-muted-foreground">{analysisError}</span>
-              </div>
-            </div>
-          )}
-          {/* LLM estimate confirmation */}
-          {llmEstimate && (
-            <div className="absolute bottom-4 left-1/2 z-30 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-4 shadow-lg">
-              <div className="mb-3">
-                <span className="text-xs font-medium text-foreground">LLM Analysis</span>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  {(() => {
-                    const totalRules = llmEstimate.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
-                    const totalFiles = llmEstimate.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-                    return `${totalFiles} files, ${totalRules} rules (~${Math.round(llmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens)`;
-                  })()}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  className="flex-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
-                  onClick={() => respondToLlmEstimate(llmEstimate.analysisId, true)}
-                >
-                  Run LLM rules
-                </button>
-                <button
-                  className="flex-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-                  onClick={() => respondToLlmEstimate(llmEstimate.analysisId, false)}
-                >
-                  Skip
-                </button>
-              </div>
-            </div>
-          )}
-          {/* Analysis progress — step checklist */}
-          {analysisProgress && (
-            <div className={`absolute bottom-4 left-1/2 z-20 w-80 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${
-              analysisProgress.step === 'error' ? 'border-destructive/50' : 'border-border'
-            }`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className={`text-[11px] font-medium ${
-                  analysisProgress.step === 'error' ? 'text-destructive' : 'text-foreground'
-                }`}>{analysisProgress.step === 'error' ? 'Analysis failed' : isCancelling ? 'Cancelling...' : 'Analyzing...'}</span>
-                {analysisProgress.step === 'error' ? (
-                  <button
-                    onClick={() => { clearProgress(); setIsAnalyzing(false); }}
-                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title="Dismiss"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                ) : isCancelling ? (
-                  <span className="shrink-0 px-1.5 py-0.5 text-[10px] text-amber-500">
-                    Cancelling...
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => {
-                      if (repoId) {
-                        api.cancelAnalysis(repoId).catch(() => {});
-                        setIsCancelling(true);
-                      }
-                    }}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-              {analysisProgress.step === 'error' ? (
-                <div className="flex items-start gap-2">
-                  <CircleX className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
-                  <span className="text-[11px] text-muted-foreground">{analysisProgress.detail || 'An error occurred'}</span>
-                </div>
-              ) : analysisProgress.steps && analysisProgress.steps.length > 0 ? (
-                <div className="space-y-1">
-                  {analysisProgress.steps.map((s) => (
-                    <div key={s.key} className="flex items-center gap-2">
-                      <div className="shrink-0 translate-y-px">
-                        {s.status === 'done' && <Check className="h-3.5 w-3.5 text-emerald-500" />}
-                        {s.status === 'active' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
-                        {s.status === 'error' && <CircleX className="h-3.5 w-3.5 text-destructive" />}
-                        {s.status === 'pending' && <div className="h-2.5 w-2.5 rounded-full border border-muted-foreground/30" />}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className={`text-[11px] leading-[18px] ${
-                          s.status === 'active' ? 'font-medium text-foreground' :
-                          s.status === 'done' ? 'text-muted-foreground' :
-                          s.status === 'error' ? 'text-destructive' :
-                          'text-muted-foreground/60'
-                        }`}>
-                          {s.label}
-                          {s.detail && s.status !== 'pending' && (
-                            <span className="ml-1.5 font-normal text-[10px] text-muted-foreground/70">{s.detail}</span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-                  <span className="text-[11px] text-muted-foreground">{analysisProgress.detail || analysisProgress.step}</span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Code viewer */}
           {showingCodeViewer && activeFilePath ? (
             <CodeViewerPanel
@@ -1231,17 +1122,25 @@ export default function RepoGraphPage() {
               repoId={repoId}
             />
           ) : leftTab === 'home' ? (
-            <HomePanel
-              repoId={repoId}
-              branch={currentBranch}
-              analysisId={graphAnalysisId}
-              violations={violations}
-              violationsLoading={violationsLoading}
-              isDiffMode={isDiffMode}
-              diffResult={diffResult}
-              onLocateNode={handleLocateNodeFromHome}
-              onOpenFile={handleOpenFile}
-            />
+            repo == null ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <HomePanel
+                key={repo.lastAnalyzed ?? 'unanalyzed'}
+                repoId={repoId}
+                branch={currentBranch}
+                analysisId={graphAnalysisId}
+                hasAnalysis={hasAnalysis}
+                violations={violations}
+                violationsLoading={violationsLoading}
+                isDiffMode={isDiffMode}
+                diffResult={diffResult}
+                onLocateNode={handleLocateNodeFromHome}
+                onOpenFile={handleOpenFile}
+              />
+            )
           ) : leftTab === 'graphs' ? (
           <>
 
@@ -1267,7 +1166,7 @@ export default function RepoGraphPage() {
                 <p className="text-sm text-muted-foreground">Loading graph...</p>
               </div>
             </div>
-          ) : graphError ? (
+          ) : graphError && !isAnalyzing ? (
             <div className="flex h-full items-center justify-center">
               <div className="flex flex-col items-center gap-3 text-center">
                 <AlertCircle className="h-10 w-10 text-destructive" />
@@ -1377,6 +1276,151 @@ export default function RepoGraphPage() {
         </div>
 
       </div>
+
+      {/* Global analysis overlays — float over any tab. */}
+      {analysisError && (
+        <div className="fixed bottom-4 left-1/2 z-40 w-96 -translate-x-1/2 rounded-lg border border-destructive/50 bg-card p-3 shadow-lg">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-medium text-destructive">Analysis failed</span>
+            <button
+              onClick={() => setAnalysisError(null)}
+              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              title="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
+            <span className="text-[11px] text-muted-foreground">{analysisError}</span>
+          </div>
+        </div>
+      )}
+      {llmEstimate && (
+        <div className="fixed bottom-4 left-1/2 z-50 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-4 shadow-lg">
+          <div className="mb-3">
+            <span className="text-xs font-medium text-foreground">LLM Analysis</span>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {(() => {
+                const totalRules = llmEstimate.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
+                const totalFiles = llmEstimate.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
+                return `${totalFiles} files, ${totalRules} rules (~${Math.round(llmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens)`;
+              })()}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="flex-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+              onClick={() => respondToLlmEstimate(llmEstimate.analysisId, true)}
+            >
+              Run LLM rules
+            </button>
+            <button
+              className="flex-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+              onClick={() => respondToLlmEstimate(llmEstimate.analysisId, false)}
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+      {analysisProgress && (
+        <div
+          className={`fixed bottom-4 left-1/2 z-40 w-80 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${
+            analysisProgress.step === 'error' ? 'border-destructive/50' : 'border-border'
+          }`}
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <span
+              className={`text-[11px] font-medium ${
+                analysisProgress.step === 'error' ? 'text-destructive' : 'text-foreground'
+              }`}
+            >
+              {analysisProgress.step === 'error'
+                ? 'Analysis failed'
+                : isCancelling
+                  ? 'Cancelling...'
+                  : 'Analyzing...'}
+            </span>
+            {analysisProgress.step === 'error' ? (
+              <button
+                onClick={() => {
+                  clearProgress();
+                  setIsAnalyzing(false);
+                }}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : isCancelling ? (
+              <span className="shrink-0 px-1.5 py-0.5 text-[10px] text-amber-500">Cancelling...</span>
+            ) : (
+              <button
+                onClick={() => {
+                  if (repoId) {
+                    api.cancelAnalysis(repoId).catch(() => {});
+                    setIsCancelling(true);
+                  }
+                }}
+                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          {analysisProgress.step === 'error' ? (
+            <div className="flex items-start gap-2">
+              <CircleX className="h-3.5 w-3.5 shrink-0 translate-y-px text-destructive" />
+              <span className="text-[11px] text-muted-foreground">
+                {analysisProgress.detail || 'An error occurred'}
+              </span>
+            </div>
+          ) : analysisProgress.steps && analysisProgress.steps.length > 0 ? (
+            <div className="space-y-1">
+              {analysisProgress.steps.map((s) => (
+                <div key={s.key} className="flex items-center gap-2">
+                  <div className="shrink-0 translate-y-px">
+                    {s.status === 'done' && <Check className="h-3.5 w-3.5 text-emerald-500" />}
+                    {s.status === 'active' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                    {s.status === 'error' && <CircleX className="h-3.5 w-3.5 text-destructive" />}
+                    {s.status === 'pending' && (
+                      <div className="h-2.5 w-2.5 rounded-full border border-muted-foreground/30" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span
+                      className={`text-[11px] leading-[18px] ${
+                        s.status === 'active'
+                          ? 'font-medium text-foreground'
+                          : s.status === 'done'
+                            ? 'text-muted-foreground'
+                            : s.status === 'error'
+                              ? 'text-destructive'
+                              : 'text-muted-foreground/60'
+                      }`}
+                    >
+                      {s.label}
+                      {s.detail && s.status !== 'pending' && (
+                        <span className="ml-1.5 text-[10px] font-normal text-muted-foreground/70">
+                          {s.detail}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+              <span className="text-[11px] text-muted-foreground">
+                {analysisProgress.detail || analysisProgress.step}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

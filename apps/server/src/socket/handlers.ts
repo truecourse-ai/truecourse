@@ -1,6 +1,7 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { getIO } from './index.js';
 import { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS } from '@truecourse/shared';
+import { log } from '../lib/logger.js';
 
 export { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS };
 
@@ -64,12 +65,12 @@ const activeAnalyses = new Map<string, AnalysisProgressPayload>();
 
 export function setupHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
-    console.error(`[Socket] Client connected: ${socket.id}`);
+    log.info(`[Socket] Client connected: ${socket.id}`);
 
     socket.on('joinRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.join(room);
-      console.error(`[Socket] ${socket.id} joined room ${room}`);
+      log.info(`[Socket] ${socket.id} joined room ${room}`);
 
       // If analysis is already running for this repo, send current progress
       const progress = activeAnalyses.get(repoId);
@@ -83,11 +84,11 @@ export function setupHandlers(io: SocketServer): void {
     socket.on('leaveRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.leave(room);
-      console.error(`[Socket] ${socket.id} left room ${room}`);
+      log.info(`[Socket] ${socket.id} left room ${room}`);
     });
 
     socket.on('disconnect', () => {
-      console.error(`[Socket] Client disconnected: ${socket.id}`);
+      log.info(`[Socket] Client disconnected: ${socket.id}`);
     });
   });
 }

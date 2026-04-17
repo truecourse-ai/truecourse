@@ -182,7 +182,7 @@ export interface PersistViolationsParams {
 
 export async function persistViolationsWithLifecycle(
   params: PersistViolationsParams,
-): Promise<void> {
+): Promise<LifecycleCounts> {
   const {
     analysisId,
     newViolations,
@@ -195,6 +195,9 @@ export async function persistViolationsWithLifecycle(
 
   const resolvedSet = new Set(resolvedViolationIds);
   const now = new Date();
+  let newCount = 0;
+  let unchangedCount = 0;
+  let resolvedCount = 0;
 
 
 
@@ -223,6 +226,7 @@ export async function persistViolationsWithLifecycle(
     const remapped = remapTargetIds(prev);
     if (resolvedSet.has(prev.id)) {
       // Resolved
+      resolvedCount++;
       await db.insert(violations).values({
         id: randomUUID(),
         analysisId,
@@ -245,6 +249,7 @@ export async function persistViolationsWithLifecycle(
       });
     } else if (!newTitles.has(prev.title.toLowerCase().trim())) {
       // Unchanged — carry forward
+      unchangedCount++;
       await db.insert(violations).values({
         id: randomUUID(),
         analysisId,
@@ -285,6 +290,7 @@ export async function persistViolationsWithLifecycle(
       targetMethodId = methodNameToId.get(v.targetMethodName) ?? null;
     }
 
+    newCount++;
     await db.insert(violations).values({
       id: randomUUID(),
       analysisId,
@@ -302,6 +308,8 @@ export async function persistViolationsWithLifecycle(
       firstSeenAt: now,
     });
   }
+
+  return { newCount, unchangedCount, resolvedCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -322,15 +330,32 @@ export interface PersistFileViolationsParams {
     content: string;
     snippet: string;
     fixPrompt?: string;
+    /**
+     * Optional graph-node links. Set when the code violation could be
+     * resolved to a service/module in the architecture graph (e.g. an
+     * `architecture/*` rule firing in a file that belongs to a known
+     * module). Null / unset for code-only violations.
+     */
+    targetServiceId?: string | null;
+    targetModuleId?: string | null;
   }[];
   previousViolations: ActiveViolation[];
 }
 
+export interface LifecycleCounts {
+  newCount: number;
+  unchangedCount: number;
+  resolvedCount: number;
+}
+
 export async function persistFileViolationsWithLifecycle(
   params: PersistFileViolationsParams,
-): Promise<void> {
+): Promise<LifecycleCounts> {
   const { analysisId, currentViolations, previousViolations } = params;
   const now = new Date();
+  let newCount = 0;
+  let unchangedCount = 0;
+  let resolvedCount = 0;
 
   // Build lookup key: ruleKey + filePath
   const currentKeys = new Set(
@@ -348,6 +373,7 @@ export async function persistFileViolationsWithLifecycle(
     if (!prev.filePath) continue;
     const key = `${prev.ruleKey}::${prev.filePath}`;
     if (!currentKeys.has(key)) {
+      resolvedCount++;
       await db.insert(violations).values({
         id: randomUUID(),
         analysisId,
@@ -379,6 +405,7 @@ export async function persistFileViolationsWithLifecycle(
 
     if (prev) {
       // Unchanged — carry lineage
+      unchangedCount++;
       await db.insert(violations).values({
         id: randomUUID(),
         analysisId,
@@ -395,12 +422,15 @@ export async function persistFileViolationsWithLifecycle(
         columnEnd: cv.columnEnd,
         snippet: cv.snippet,
         fixPrompt: cv.fixPrompt || null,
+        targetServiceId: cv.targetServiceId ?? null,
+        targetModuleId: cv.targetModuleId ?? null,
         firstSeenAnalysisId: prev.firstSeenAnalysisId,
         firstSeenAt: prev.firstSeenAt,
         previousViolationId: prev.id,
       });
     } else {
       // New
+      newCount++;
       await db.insert(violations).values({
         id: randomUUID(),
         analysisId,
@@ -417,9 +447,13 @@ export async function persistFileViolationsWithLifecycle(
         columnEnd: cv.columnEnd,
         snippet: cv.snippet,
         fixPrompt: cv.fixPrompt || null,
+        targetServiceId: cv.targetServiceId ?? null,
+        targetModuleId: cv.targetModuleId ?? null,
         firstSeenAnalysisId: analysisId,
         firstSeenAt: now,
       });
     }
   }
+
+  return { newCount, unchangedCount, resolvedCount };
 }

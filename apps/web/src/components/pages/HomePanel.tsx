@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Shield } from 'lucide-react';
+import { BarChart3, Shield } from 'lucide-react';
 import { TrendChart } from '@/components/analytics/TrendChart';
 import { TypePieChart } from '@/components/analytics/TypePieChart';
 import { SeverityBarChart } from '@/components/analytics/SeverityBarChart';
@@ -22,6 +22,9 @@ type HomePanelProps = {
   repoId: string;
   branch?: string;
   analysisId?: string;
+  /** Whether this repo has at least one completed analysis. Drives the
+   * placeholder-vs-panel decision on first render so there's no flash. */
+  hasAnalysis: boolean;
   violations: ViolationResponse[];
   violationsLoading: boolean;
   isDiffMode?: boolean;
@@ -41,6 +44,7 @@ export function HomePanel({
   repoId,
   branch,
   analysisId,
+  hasAnalysis,
   violations,
   violationsLoading,
   isDiffMode,
@@ -107,6 +111,23 @@ export function HomePanel({
       setSelectedPath(null);
     }
   }, []);
+
+  if (!hasAnalysis) {
+    return (
+      <div className="flex h-full w-full items-center justify-center p-6">
+        <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+          <BarChart3 className="h-10 w-10 text-muted-foreground/60" />
+          <p className="text-sm font-medium text-foreground">No analysis data yet</p>
+          <p className="text-xs text-muted-foreground">
+            Click <span className="font-medium text-foreground">Analyze</span> above, or run{' '}
+            <code className="rounded bg-muted px-1 font-mono">truecourse analyze</code> from the
+            project directory. Violations and analytics will appear here once the first analysis
+            completes.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full w-full">

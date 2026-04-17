@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { getGit } from '../lib/git.js';
+import { log } from '../lib/logger.js';
 import type {
   FileAnalysis,
   ModuleDependency,
@@ -153,7 +154,7 @@ export async function runAnalysis(
       // git stash push prints "No local changes to save" if nothing to stash
       didStash = !stashResult.includes('No local changes');
     } catch (error) {
-      console.warn('[Analyzer] Failed to stash changes, analyzing current state:', error instanceof Error ? error.message : String(error));
+      log.warn(`[Analyzer] Failed to stash changes, analyzing current state: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -183,10 +184,7 @@ export async function runAnalysis(
           fileAnalyses.push(analysis);
         }
       } catch (error) {
-        console.warn(
-          `[Analyzer] Failed to analyze ${file}:`,
-          error instanceof Error ? error.message : String(error)
-        );
+        log.warn(`[Analyzer] Failed to analyze ${file}: ${error instanceof Error ? error.message : String(error)}`);
       }
 
       if (i % 10 === 0 || i === totalFiles - 1) {
@@ -263,10 +261,7 @@ export async function runAnalysis(
 
         await lspClient.stop();
       } catch (error) {
-        console.warn(
-          `[Analyzer] ${serverConfig.name} LSP analysis failed, using tree-sitter heuristics:`,
-          error instanceof Error ? error.message : String(error)
-        );
+        log.warn(`[Analyzer] ${serverConfig.name} LSP analysis failed, using tree-sitter heuristics: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -316,7 +311,7 @@ export async function runAnalysis(
       try {
         await git.stash(['pop']);
       } catch (error) {
-        console.error('[Analyzer] Failed to restore stashed changes. Run "git stash pop" manually.', error instanceof Error ? error.message : String(error));
+        log.error(`[Analyzer] Failed to restore stashed changes. Run "git stash pop" manually. ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }

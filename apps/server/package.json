@@ -27,11 +27,15 @@
     "./config/database": {
       "types": "./dist/config/database.d.ts",
       "import": "./dist/config/database.js"
+    },
+    "./lib/logger": {
+      "types": "./dist/lib/logger.d.ts",
+      "import": "./dist/lib/logger.js"
     }
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "dev": "TRUECOURSE_DEV=1 tsx watch src/index.ts",
+    "build": "tsc && node -e \"require('fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "db:generate": "drizzle-kit generate",

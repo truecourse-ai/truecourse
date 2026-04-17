@@ -20,11 +20,7 @@ import {
   persistViolationsWithLifecycle,
   persistFileViolationsWithLifecycle,
 } from './violation-lifecycle.service.js';
-
-// Clear spinner line before logging so messages don't collide with clack spinner
-function log(msg: string) {
-  process.stderr.write(`${msg}\n`);
-}
+import { log } from '../lib/logger.js';
 
 /** Throw if the abort signal has been triggered. */
 function throwIfAborted(signal?: AbortSignal) {
@@ -181,7 +177,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   let llmSkipped = false;
   const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');
   const enabledLlm = allRules.filter((r) => r.type === 'llm');
-  log(`[Pipeline] ${allRules.length} rules loaded (${enabledDeterministic.length} det, ${enabledLlm.length} LLM)`);
+  log.info(`[Pipeline] ${allRules.length} rules loaded (${enabledDeterministic.length} det, ${enabledLlm.length} LLM)`);
 
   const codeDomains = new Set<string>(CODE_DOMAINS);
   const enabledCodeRules = allRules.filter((r) => (r.domain ? (codeDomains.has(r.domain) || (r.domain === 'architecture' && r.category === 'code')) : r.category === 'code') && r.type === 'deterministic');
@@ -273,13 +269,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     const uniqueFileCount = 'uniqueFileCount' in codeEstimate ? codeEstimate.uniqueFileCount : fileContents.size;
     const uniqueRuleCount = ('uniqueRuleCount' in codeEstimate ? codeEstimate.uniqueRuleCount : 0) + archRuleCount + dbSchemaRuleCount;
     const estimate = { tiers: allTiers, totalEstimatedTokens: totalEstimated, uniqueFileCount, uniqueRuleCount };
-    log(`[LLM] Pre-flight: ${estimate.totalEstimatedTokens} estimated tokens across ${estimate.tiers.length} tiers`);
+    log.info(`[LLM] Pre-flight: ${estimate.totalEstimatedTokens} estimated tokens across ${estimate.tiers.length} tiers`);
     for (const t of estimate.tiers) {
-      log(`[LLM]   ${t.tier}: ${t.ruleCount} rules × ${t.fileCount} files → ~${t.estimatedTokens} tokens`);
+      log.info(`[LLM]   ${t.tier}: ${t.ruleCount} rules × ${t.fileCount} files → ~${t.estimatedTokens} tokens`);
     }
     const proceed = await input.onLlmEstimate(estimate);
     if (!proceed) {
-      log(`[LLM] Skipped by user`);
+      log.info(`[LLM] Skipped by user`);
       llmSkipped = true;
       allRules = allRules.filter((r) => r.type !== 'llm');
     }
@@ -312,13 +308,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
       tracker?.detail(stepKey, 'Method checks...');
       methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
-      log(`[Pipeline] Architecture det: ${serviceViolationResults.length} service, ${moduleViolationResults.length} module, ${methodViolationResults.length} method`);
-      if (enableLlmRules === false || llmSkipped) {
-        const archCount = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
-        tracker?.done(stepKey, archCount > 0 ? `${archCount} violations` : 'Clean');
-      } else {
-        tracker?.detail(stepKey, 'Deterministic checks done');
-      }
+      // Architecture count is finalized further down, after arch-domain
+      // code rules are merged into moduleViolationResults. Logged there so
+      // the numbers match the persisted total.
+      tracker?.detail(stepKey, 'Deterministic checks done');
     }
   }
 
@@ -357,7 +350,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
   }
 
-  log(`[Pipeline] Code scan: ${allCodeViolations.length} violations from ${filesToScan.length} files (${enabledCodeRules.length} det rules, ${enabledLlmCodeRules.length} LLM rules)`);
+  log.info(`[Pipeline] Code scan: ${allCodeViolations.length} violations from ${filesToScan.length} files (${enabledCodeRules.length} det rules, ${enabledLlmCodeRules.length} LLM rules)`);
 
   // Check pyproject.toml if the rule is enabled
   if (enabledCodeRules.some(r => r.key === 'bugs/deterministic/invalid-pyproject-toml')) {
@@ -376,50 +369,74 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   throwIfAborted(signal);
 
-  // Convert architecture-domain code violations into ModuleViolation format so they
-  // get persisted to the violations table with targetServiceId/targetModuleId context.
-  const archCodeViolations = allCodeViolations.filter((v) => v.ruleKey.startsWith('architecture/'));
-  if (archCodeViolations.length > 0) {
-    const convertedArchViolations: ModuleViolation[] = [];
-    for (const cv of archCodeViolations) {
-      const module = result.modules?.find(
-        (m) => cv.filePath.endsWith(m.filePath) || m.filePath.endsWith(cv.filePath),
-      );
-      if (module) {
-        convertedArchViolations.push({
-          ruleKey: cv.ruleKey,
-          title: cv.title,
-          description: cv.content,
-          severity: cv.severity,
-          serviceName: module.serviceName,
-          moduleName: module.name,
-          filePath: cv.filePath,
-        });
-      }
+  // Architecture-domain code violations (rules that fire from within
+  // `checkCodeRules` but carry `architecture/*` ruleKey) stay as file-level
+  // `code` violations — they have a filePath and should always be
+  // persisted. When we can match the file back to a module/service we
+  // enrich the violation with graph-node target IDs so it also shows up on
+  // the architecture graph; unmatched ones persist with just filePath.
+  let archEnrichedCount = 0;
+  for (const cv of allCodeViolations) {
+    if (!cv.ruleKey.startsWith('architecture/')) continue;
+    const module = result.modules?.find(
+      (m) => cv.filePath.endsWith(m.filePath) || m.filePath.endsWith(cv.filePath),
+    );
+    if (module) {
+      const moduleId = moduleIdMap.get(module.name);
+      const serviceId = serviceIdMap.get(module.serviceName);
+      (cv as CodeViolation & { targetServiceId?: string; targetModuleId?: string }).targetServiceId =
+        serviceId;
+      (cv as CodeViolation & { targetServiceId?: string; targetModuleId?: string }).targetModuleId =
+        moduleId;
+      archEnrichedCount++;
     }
-
-    // Add to moduleViolationResults so they flow into allDetEntries with proper target IDs.
-    moduleViolationResults.push(...convertedArchViolations);
-
-    // Remove arch violations from code violations — they now flow through the
-    // deterministic_violations → violations path with proper target IDs.
-    allCodeViolations = allCodeViolations.filter((v) => !v.ruleKey.startsWith('architecture/'));
   }
 
-  // Mark non-architecture domain steps done with per-domain violation counts
-  const codeViolationsByDomain = new Map<string, number>();
+  // Per-domain counts. Architecture splits across two sources:
+  //   - AST-based checks (serviceViolationResults / moduleViolationResults /
+  //     methodViolationResults) — run against the already-parsed graph.
+  //   - File-scan rules that happen to live in the `architecture/` domain —
+  //     counted directly from allCodeViolations ruleKey prefixes below.
+  const violationsByDomain = new Map<string, number>();
   for (const v of allCodeViolations) {
     const domain = v.ruleKey.split('/')[0];
-    codeViolationsByDomain.set(domain, (codeViolationsByDomain.get(domain) ?? 0) + 1);
+    violationsByDomain.set(domain, (violationsByDomain.get(domain) ?? 0) + 1);
+  }
+  const archAstCount =
+    serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
+  if (archAstCount > 0) {
+    violationsByDomain.set(
+      'architecture',
+      (violationsByDomain.get('architecture') ?? 0) + archAstCount,
+    );
   }
 
-  log(`[Pipeline] Det violations by domain: ${[...codeViolationsByDomain.entries()].map(([d, c]) => `${d}=${c}`).join(', ')}`);
+  // Count arch-code violations (from file scan) for the enrichment log line.
+  const archFileScanCount = (violationsByDomain.get('architecture') ?? 0) - archAstCount;
+  const archTotal = violationsByDomain.get('architecture') ?? 0;
+  log.info(
+    `[Pipeline] Architecture det: ${archAstCount} (service=${serviceViolationResults.length}, module=${moduleViolationResults.length}, method=${methodViolationResults.length})`,
+  );
+  if (archFileScanCount > 0) {
+    log.info(
+      `[Pipeline] Enriched ${archEnrichedCount} arch-code rules with module link (${archFileScanCount - archEnrichedCount} unmatched, persisted as file-only) → architecture=${archTotal}`,
+    );
+  }
 
+  const totalDet = [...violationsByDomain.values()].reduce((a, b) => a + b, 0);
+  log.info(
+    `[Pipeline] Totals: ${DOMAIN_ORDER
+      .filter((d) => violationsByDomain.has(d))
+      .map((d) => `${d}=${violationsByDomain.get(d)}`)
+      .join(', ')} (${totalDet})`,
+  );
+
+  // Mark every domain done with its deterministic count. If LLM runs it
+  // will overwrite these entries with richer det+LLM totals (same pattern
+  // for every domain — architecture is not special).
   for (const domain of DOMAIN_ORDER) {
-    if (domain === 'architecture') continue; // already done above
-    const stepKey = `${domain}`;
-    const count = codeViolationsByDomain.get(domain) ?? 0;
-    tracker?.done(stepKey, count > 0 ? `${count} violations` : 'Clean');
+    const count = violationsByDomain.get(domain) ?? 0;
+    tracker?.done(domain, count > 0 ? `${count} violations` : 'Clean');
   }
 
   const totalDetections = serviceViolationResults.length + moduleViolationResults.length + methodViolationResults.length;
@@ -488,9 +505,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     }
 
     const totalBatches = [...domainCodeBatches.values()].reduce((s, b) => s + b.length, 0);
-    log(`[LLM] Context router: ${totalBatches} batches across ${domainCodeBatches.size} domains (from ${contextBatches.length} context groups)`);
+    log.info(`[LLM] Context router: ${totalBatches} batches across ${domainCodeBatches.size} domains (from ${contextBatches.length} context groups)`);
     for (const [domain, batches] of domainCodeBatches) {
-      log(`[LLM]   ${domain}: ${batches.length} batch(es)`);
+      log.info(`[LLM]   ${domain}: ${batches.length} batch(es)`);
     }
   }
 
@@ -607,7 +624,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     tracker?.start('architecture', 'Running LLM analysis...');
   }
   for (const [domain] of domainCodeBatches) {
-    const detCount = codeViolationsByDomain.get(domain) ?? 0;
+    const detCount = violationsByDomain.get(domain) ?? 0;
     tracker?.start(domain, detCount > 0 ? `${detCount} det, running LLM...` : 'Running LLM...');
   }
 
@@ -623,13 +640,17 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     _violationId: v.id, // carry the violation ID for lookup
   }));
 
-  const deterministicPromise = (async () => {
+  const deterministicPromise: Promise<{ newCount: number; unchangedCount: number; resolvedCount: number }> = (async () => {
     let newDetections: DetEntry[];
+    let unchangedArchCount = 0;
+    let resolvedArchCount = 0;
 
     if (previousDetForComparison.length > 0) {
       // 2nd+ run: compare programmatically
       const comparison = compareDeterministicViolations(allDetEntries, previousDetForComparison);
       newDetections = comparison.newDetections;
+      unchangedArchCount = comparison.unchangedDetections.length;
+      resolvedArchCount = comparison.resolvedDetections.length;
 
       // Carry forward unchanged deterministic violations
       for (const { current: curEntry, previous } of comparison.unchangedDetections) {
@@ -687,7 +708,6 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         });
       }
 
-      console.log(`[Pipeline] Deterministic comparison: ${comparison.newDetections.length} new, ${comparison.unchangedDetections.length} unchanged, ${comparison.resolvedDetections.length} resolved`);
     } else {
       // 1st run: persist all
       newDetections = allDetEntries;
@@ -734,9 +754,11 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         ruleKey: det.ruleKey,
       });
     }
-    if (newDetections.length > 0) {
-      log(`[Pipeline] Persisted ${newDetections.length} new deterministic violations`);
-    }
+    return {
+      newCount: newDetections.length,
+      unchangedCount: unchangedArchCount,
+      resolvedCount: resolvedArchCount,
+    };
   })();
 
   // =========================================================================
@@ -872,8 +894,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   for (const [domain, batches] of domainCodeBatches) {
     domainLlmPromises.push((async (): Promise<DomainLlmResult> => {
-      const detCount = codeViolationsByDomain.get(domain) ?? 0;
-      log(`[LLM] ${domain}: starting (${batches.length} code batches)`);
+      const detCount = violationsByDomain.get(domain) ?? 0;
+      log.info(`[LLM] ${domain}: starting (${batches.length} code batches)`);
       const t0 = Date.now();
 
       const codeResults = await Promise.allSettled(
@@ -889,7 +911,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
           if (r.value.resolvedViolationIds) resolvedIds.push(...r.value.resolvedViolationIds);
           if (r.value.unchangedViolationIds) unchangedIds.push(...r.value.unchangedViolationIds);
         } else {
-          log(`[LLM] ${domain}: batch failed — ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
+          log.warn(`[LLM] ${domain}: batch failed — ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
         }
       }
 
@@ -897,7 +919,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const processed: CodeViolation[] = [];
       processLlmCodeViolations({ violations: rawViolations }, validFilePaths, fileContents, processed, repoPath);
       const total = detCount + processed.length;
-      log(`[LLM] ${domain}: done in ${dur}ms — ${processed.length} LLM violations (${total} total)`);
+      log.info(`[LLM] ${domain}: done in ${dur}ms — ${processed.length} LLM violations (${total} total)`);
       tracker?.done(domain, total > 0 ? `${total} violations` : 'Clean');
 
       return { domain, violations: processed, resolvedIds, unchangedIds };
@@ -908,17 +930,17 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (dbSchemaContext && !llmSkipped) {
     // If database domain wasn't already activated by code batches, activate it now
     if (!domainCodeBatches.has('database')) {
-      const detCount = codeViolationsByDomain.get('database') ?? 0;
+      const detCount = violationsByDomain.get('database') ?? 0;
       tracker?.start('database', detCount > 0 ? `${detCount} det, running LLM...` : 'Running LLM...');
     }
 
     domainLlmPromises.push((async (): Promise<DomainLlmResult> => {
-      log(`[LLM] database-schema: starting`);
+      log.info(`[LLM] database-schema: starting`);
       const t0 = Date.now();
       try {
         const dbResult = await provider.generateDatabaseViolations(dbSchemaContext);
         const dur = Date.now() - t0;
-        log(`[LLM] database-schema: done in ${dur}ms — ${dbResult.violations.length} violations`);
+        log.info(`[LLM] database-schema: done in ${dur}ms — ${dbResult.violations.length} violations`);
 
         // Persist database schema violations directly (they have targetDatabaseId, not filePath)
         for (const v of dbResult.violations) {
@@ -941,7 +963,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
         // Don't mark database done here — let the code batches do it, or mark if no code batches
         if (!domainCodeBatches.has('database')) {
-          const detCount = codeViolationsByDomain.get('database') ?? 0;
+          const detCount = violationsByDomain.get('database') ?? 0;
           const total = detCount + dbResult.violations.length;
           tracker?.done('database', total > 0 ? `${total} violations` : 'Clean');
         }
@@ -949,7 +971,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         return { domain: 'database-schema', violations: [], resolvedIds: [], unchangedIds: [] };
       } catch (err) {
         const dur = Date.now() - t0;
-        log(`[LLM] database-schema: failed in ${dur}ms — ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`[LLM] database-schema: failed in ${dur}ms — ${err instanceof Error ? err.message : String(err)}`);
         if (!domainCodeBatches.has('database')) {
           tracker?.error('database', `Schema LLM failed`);
         }
@@ -1055,11 +1077,17 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   if (detResult.status === 'rejected') {
     const msg = detResult.reason instanceof Error ? detResult.reason.message : String(detResult.reason);
-    log(`[Violations] Deterministic lifecycle tracking failed: ${msg}`);
+    log.error(`[Violations] Deterministic lifecycle tracking failed: ${msg}`);
   }
+  // Arch det counts held here; combined with code det counts after code
+  // persistence finishes (further down), then logged as a single line.
+  const archDetCounts =
+    detResult.status === 'fulfilled'
+      ? detResult.value
+      : { newCount: 0, unchangedCount: 0, resolvedCount: 0 };
   if (llmResult.status === 'rejected') {
     const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
-    log(`[Violations] LLM architecture analysis failed: ${msg}`);
+    log.error(`[Violations] LLM architecture analysis failed: ${msg}`);
     tracker?.error('architecture', `LLM failed: ${msg.slice(0, 80)}`);
   }
   // Per-domain errors are already handled inside each promise (tracker?.done with fallback count)
@@ -1091,8 +1119,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     (v) => v.filePath && scannedFilePaths.has(v.filePath) && !v.ruleKey.includes('/llm/'),
   );
 
+  let codeDetCounts = { newCount: 0, unchangedCount: 0, resolvedCount: 0 };
   if (allCodeViolations.length > 0 || prevForDeterministicMatching.length > 0) {
-    await persistFileViolationsWithLifecycle({
+    codeDetCounts = await persistFileViolationsWithLifecycle({
       analysisId,
       currentViolations: allCodeViolations,
       previousViolations: prevForDeterministicMatching,
@@ -1104,6 +1133,19 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     for (const prev of prevForDeterministicMatching) {
       const key = `${prev.filePath}::${prev.ruleKey}::${prev.lineStart}::${prev.lineEnd}`;
       if (!currentKeys.has(key)) codeResolvedCount++;
+    }
+  }
+
+  // Combined deterministic tally (architecture + code, which are just
+  // separate domains of the same flow). Single line, real totals.
+  {
+    const totalNew = archDetCounts.newCount + codeDetCounts.newCount;
+    const totalUnchanged = archDetCounts.unchangedCount + codeDetCounts.unchangedCount;
+    const totalResolved = archDetCounts.resolvedCount + codeDetCounts.resolvedCount;
+    if (totalNew + totalUnchanged + totalResolved > 0) {
+      log.info(
+        `[Pipeline] Persisted deterministic violations: ${totalNew} new, ${totalUnchanged} unchanged, ${totalResolved} resolved`,
+      );
     }
   }
 
@@ -1151,7 +1193,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   if (allLlmCodeViolations.length > 0 || allLlmResolvedIds.length > 0) {
-    log(`[Pipeline] LLM code totals: ${allLlmCodeViolations.length} new, ${allLlmResolvedIds.length} resolved, ${allLlmUnchangedIds.length} unchanged`);
+    log.info(`[Pipeline] LLM code totals: ${allLlmCodeViolations.length} new, ${allLlmResolvedIds.length} resolved, ${allLlmUnchangedIds.length} unchanged`);
 
     // LLM lifecycle: carry forward unchanged, mark resolved
     for (const prevId of allLlmUnchangedIds) {
@@ -1192,11 +1234,14 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     );
 
     if (allLlmCodeViolations.length > 0 || llmPrevForMatching.length > 0) {
-      await persistFileViolationsWithLifecycle({
+      const counts = await persistFileViolationsWithLifecycle({
         analysisId,
         currentViolations: allLlmCodeViolations,
         previousViolations: llmPrevForMatching,
       });
+      log.info(
+        `[Pipeline] Persisted code (LLM): ${counts.newCount} new, ${counts.unchangedCount} unchanged, ${counts.resolvedCount} resolved`,
+      );
     }
 
     // Carry forward LLM violations for unchanged files
@@ -1253,7 +1298,7 @@ function processLlmCodeViolations(
       } else {
         skippedPaths++;
         if (skippedPaths <= 3) {
-          log(`[LLM] Skipping violation: path "${v.filePath}" not in validFilePaths (sample: ${[...validFilePaths].slice(0, 2).join(', ')})`);
+          log.info(`[LLM] Skipping violation: path "${v.filePath}" not in validFilePaths (sample: ${[...validFilePaths].slice(0, 2).join(', ')})`);
         }
         continue;
       }

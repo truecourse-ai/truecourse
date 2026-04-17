@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
+import { log } from '../lib/logger.js';
 import { flows, flowSteps, violations, methods as methodsTable, modules as modulesTable } from '../db/schema.js';
 import { traceFlows, normalizeUrl, AnalysisGraph, type CrossServiceCall, type RouteHandler } from '@truecourse/analyzer';
 import type { AnalysisResult } from './analyzer.service.js';
@@ -141,7 +142,7 @@ export async function detectAndPersistFlows(
     }
   }
 
-  console.error(`[Flows] Detected and persisted ${traced.length} flows for analysis ${analysisId}`);
+  log.info(`[Flows] Detected and persisted ${traced.length} flows for analysis ${analysisId}`);
   return { flowCount: traced.length };
 }
 
