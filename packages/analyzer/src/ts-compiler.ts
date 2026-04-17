@@ -43,7 +43,7 @@ export function buildScopedCompilerOptions(rootPath: string): ScopedCompilerOpti
     const dirPath = join(rootPath, pattern)
     if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) continue
     try {
-      for (const entry of readdirSync(dirPath)) {
+      for (const entry of readdirSync(dirPath).sort()) {
         candidates.push(join(dirPath, entry, 'tsconfig.json'))
       }
     } catch { /* skip */ }

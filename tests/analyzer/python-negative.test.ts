@@ -38,7 +38,7 @@ function parseExpectedViolations(rootPath: string): ExpectedViolation[] {
   const expected: ExpectedViolation[] = [];
 
   function walk(dir: string) {
-    for (const entry of readdirSync(dir)) {
+    for (const entry of readdirSync(dir).sort()) {
       const fullPath = join(dir, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
@@ -75,7 +75,7 @@ function runCodeRules(rootPath: string): CodeViolation[] {
 
   function collectFiles(dir: string): string[] {
     const files: string[] = [];
-    for (const entry of readdirSync(dir)) {
+    for (const entry of readdirSync(dir).sort()) {
       const full = join(dir, entry);
       if (statSync(full).isDirectory()) {
         if (entry === 'node_modules' || entry === '.git' || entry === '__pycache__' || entry === '.venv') continue;

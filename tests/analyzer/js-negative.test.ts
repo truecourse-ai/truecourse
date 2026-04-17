@@ -43,7 +43,7 @@ function parseExpectedViolations(rootPath: string): ExpectedViolation[] {
   const expected: ExpectedViolation[] = [];
 
   function walk(dir: string) {
-    for (const entry of readdirSync(dir)) {
+    for (const entry of readdirSync(dir).sort()) {
       const fullPath = join(dir, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
@@ -86,7 +86,7 @@ function runCodeRules(
   const filePaths: string[] = [];
 
   function collectFiles(dir: string) {
-    for (const entry of readdirSync(dir)) {
+    for (const entry of readdirSync(dir).sort()) {
       const fullPath = join(dir, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
