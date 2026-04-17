@@ -2,77 +2,88 @@
 
 import { Command } from "commander";
 import * as p from "@clack/prompts";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { runSetup } from "./commands/setup.js";
-import { runStart } from "./commands/start.js";
 import { runAdd } from "./commands/add.js";
 import { runAnalyze, runAnalyzeDiff } from "./commands/analyze.js";
+import {
+  runDashboard,
+  runDashboardStop,
+  runDashboardStatus,
+  runDashboardLogs,
+  runDashboardUninstall,
+} from "./commands/dashboard.js";
 import { runList, runListDiff } from "./commands/list.js";
-import { registerServiceCommand } from "./commands/service/index.js";
-import { readConfig } from "./commands/helpers.js";
-import { getPlatform } from "./commands/service/platform.js";
+import {
+  getServerUrl,
+  requireDashboard,
+  requireRegisteredRepo,
+} from "./commands/helpers.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
-import { runHooksInstall, runHooksUninstall, runHooksStatus, runHooksRun } from "./commands/hooks.js";
+import {
+  runHooksInstall,
+  runHooksUninstall,
+  runHooksStatus,
+  runHooksRun,
+} from "./commands/hooks.js";
 
 const program = new Command();
 
 program
   .name("truecourse")
   .version("0.3.3")
-  .description("TrueCourse CLI - Setup and manage your TrueCourse instance");
+  .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
-program
-  .command("setup")
-  .description("Run the setup wizard to configure TrueCourse")
-  .action(async () => {
-    await runSetup();
-  });
-
-program
-  .command("start")
-  .description("Start TrueCourse services")
-  .action(async () => {
-    await runStart();
-  });
-
-program
+const dashboardCmd = program
   .command("dashboard")
-  .description("Open the TrueCourse dashboard in your browser")
+  .description("Start the TrueCourse dashboard and open it in your browser")
   .action(async () => {
-    const { getServerUrl, openInBrowser } = await import("./commands/helpers.js");
-    const url = getServerUrl();
-    try {
-      const res = await fetch(`${url}/api/health`);
-      if (!res.ok) throw new Error();
-    } catch {
-      p.log.error("TrueCourse server is not running.");
-      p.log.info("Start it first with: truecourse start");
-      process.exit(1);
-    }
-    openInBrowser(url);
-    p.log.success(`Dashboard opened at ${url}`);
+    await runDashboard();
   });
 
-program
-  .command("add")
-  .description("Add the current directory as a repository")
+dashboardCmd
+  .command("stop")
+  .description("Stop the dashboard")
   .action(async () => {
-    await runAdd();
+    await runDashboardStop();
+  });
+
+dashboardCmd
+  .command("status")
+  .description("Show dashboard status")
+  .action(async () => {
+    await runDashboardStatus();
+  });
+
+dashboardCmd
+  .command("logs")
+  .description("Tail dashboard logs (service mode only)")
+  .action(() => {
+    runDashboardLogs();
+  });
+
+dashboardCmd
+  .command("uninstall")
+  .description("Remove the background service and revert to console mode")
+  .action(async () => {
+    await runDashboardUninstall();
   });
 
 program
   .command("analyze")
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
-  .option("--no-autostart", "Don't auto-start the server (for use from Claude Code skills)")
   .action(async (options) => {
     if (options.diff) {
-      await runAnalyzeDiff({ noAutostart: !options.autostart });
+      await runAnalyzeDiff();
     } else {
-      await runAnalyze({ noAutostart: !options.autostart });
+      await runAnalyze();
     }
+  });
+
+program
+  .command("add")
+  .description("Register the current directory with TrueCourse")
+  .action(async () => {
+    await runAdd();
   });
 
 program
@@ -86,11 +97,14 @@ program
     if (options.diff) {
       await runListDiff();
     } else {
-      await runList({ limit: options.all ? Infinity : (options.limit ?? 20), offset: options.offset ?? 0 });
+      await runList({
+        limit: options.all ? Infinity : (options.limit ?? 20),
+        offset: options.offset ?? 0,
+      });
     }
   });
 
-// Rules management
+// Rules management — talks to the dashboard API.
 const rulesCmd = program
   .command("rules")
   .description("Manage analysis rules");
@@ -98,13 +112,12 @@ const rulesCmd = program
 rulesCmd
   .command("categories")
   .description("View or override rule categories for this repository")
-  .option("--enable <category>", "Enable a category (architecture, security, bugs, code-quality, style, performance, reliability, database)")
-  .option("--disable <category>", "Disable a category (architecture, security, bugs, code-quality, style, performance, reliability, database)")
+  .option("--enable <category>", "Enable a category")
+  .option("--disable <category>", "Disable a category")
   .option("--reset", "Reset to global default")
   .action(async (options) => {
-    const { getServerUrl, ensureServer, ensureRepo } = await import("./commands/helpers.js");
-    await ensureServer();
-    const repo = await ensureRepo();
+    await requireDashboard();
+    const repo = requireRegisteredRepo();
     const serverUrl = getServerUrl();
 
     const { DOMAIN_ORDER } = await import("@truecourse/shared");
@@ -127,19 +140,16 @@ rulesCmd
         process.exit(1);
       }
 
-      // Fetch current repo state — start from per-repo override or global config
-      const { readConfig } = await import("./commands/helpers.js");
-      const globalConfig = readConfig();
       const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
       const repoData = (await repoRes.json()) as { enabledCategories?: string[] | null };
-      const hasOverride = repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
-      const current = new Set<string>(hasOverride ? repoData.enabledCategories! : (globalConfig.enabledCategories ?? allCategories));
+      const hasOverride =
+        repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
+      const current = new Set<string>(
+        hasOverride ? repoData.enabledCategories! : allCategories,
+      );
 
-      if (options.enable) {
-        current.add(cat);
-      } else {
-        current.delete(cat);
-      }
+      if (options.enable) current.add(cat);
+      else current.delete(cat);
 
       await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
         method: "PUT",
@@ -150,25 +160,23 @@ rulesCmd
       return;
     }
 
-    // Show current state — per-repo override > global config
-    const { readConfig } = await import("./commands/helpers.js");
-    const globalConfig = readConfig();
     const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
     const repoData = (await repoRes.json()) as { enabledCategories?: string[] | null };
-    const isOverride = repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
-    const enabled = new Set<string>(isOverride ? repoData.enabledCategories! : (globalConfig.enabledCategories ?? allCategories));
+    const isOverride =
+      repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
+    const enabled = new Set<string>(
+      isOverride ? repoData.enabledCategories! : allCategories,
+    );
 
-    const status = (cat: string) => enabled.has(cat) ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
+    const status = (cat: string) =>
+      enabled.has(cat) ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
 
-    p.log.info(`Rule categories for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}:`);
-    console.log(`  security       ${status("security")}`);
-    console.log(`  bugs           ${status("bugs")}`);
-    console.log(`  architecture   ${status("architecture")}`);
-    console.log(`  performance    ${status("performance")}`);
-    console.log(`  reliability    ${status("reliability")}`);
-    console.log(`  code-quality   ${status("code-quality")}`);
-    console.log(`  database       ${status("database")}`);
-    console.log(`  style          ${status("style")}`);
+    p.log.info(
+      `Rule categories for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}:`,
+    );
+    for (const cat of allCategories) {
+      console.log(`  ${cat.padEnd(14)} ${status(cat)}`);
+    }
     console.log("");
     if (!isOverride) {
       p.log.info("Override with: truecourse rules categories --enable/--disable <name>");
@@ -182,9 +190,8 @@ rulesCmd
   .option("--disable", "Disable LLM rules")
   .option("--reset", "Reset to global default")
   .action(async (options) => {
-    const { getServerUrl, ensureServer, ensureRepo } = await import("./commands/helpers.js");
-    await ensureServer();
-    const repo = await ensureRepo();
+    await requireDashboard();
+    const repo = requireRegisteredRepo();
     const serverUrl = getServerUrl();
 
     if (options.reset) {
@@ -208,44 +215,17 @@ rulesCmd
       return;
     }
 
-    // Show current state
-    const { readConfig: readExistingConfig } = await import("./commands/helpers.js");
-    const globalConfig = readExistingConfig();
     const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
     const repoData = (await repoRes.json()) as { enableLlmRules?: boolean | null };
-    const isOverride = repoData.enableLlmRules !== null && repoData.enableLlmRules !== undefined;
-    const effective = isOverride ? repoData.enableLlmRules! : (globalConfig.enableLlmRules ?? true);
-
+    const isOverride =
+      repoData.enableLlmRules !== null && repoData.enableLlmRules !== undefined;
+    const effective = isOverride ? repoData.enableLlmRules! : true;
     const status = effective ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
-    p.log.info(`LLM rules for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}: ${status}`);
+    p.log.info(
+      `LLM rules for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}: ${status}`,
+    );
     if (!isOverride) {
       p.log.info("Override with: truecourse rules llm --enable/--disable");
-    }
-  });
-
-// Register service subcommands
-registerServiceCommand(program);
-
-// Top-level stop command
-program
-  .command("stop")
-  .description("Stop the TrueCourse background service")
-  .action(async () => {
-    const config = readConfig();
-
-    if (config.runMode === "service") {
-      const platform = getPlatform();
-      const { running } = await platform.status();
-      if (running) {
-        p.log.step("Stopping background service...");
-        await platform.stop();
-        p.log.success("Service stopped.");
-      } else {
-        p.log.info("Service is not running.");
-      }
-    } else {
-      p.log.info("TrueCourse is running in console mode.");
-      p.log.info("Press Ctrl+C in the terminal where TrueCourse is running.");
     }
   });
 
@@ -317,23 +297,8 @@ hooksCmd
     await runHooksRun();
   });
 
-program
-  .action(async (_, cmd) => {
-    // If user passed unknown arguments (e.g. `tc foo`), show help
-    if (cmd.args.length > 0) {
-      console.error(`Unknown command: ${cmd.args.join(" ")}\n`);
-      program.outputHelp();
-      process.exit(1);
-    }
-
-    const configDir = path.join(os.homedir(), ".truecourse");
-    const envPath = path.join(configDir, ".env");
-    const isFirstRun = !fs.existsSync(envPath);
-
-    if (isFirstRun) {
-      await runSetup();
-    }
-    await runStart();
-  });
+program.action(() => {
+  program.outputHelp();
+});
 
 program.parse();

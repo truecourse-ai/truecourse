@@ -3,6 +3,32 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./analyze": {
+      "types": "./dist/commands/analyze-in-process.d.ts",
+      "import": "./dist/commands/analyze-in-process.js"
+    },
+    "./progress": {
+      "types": "./dist/socket/handlers.d.ts",
+      "import": "./dist/socket/handlers.js"
+    },
+    "./config/paths": {
+      "types": "./dist/config/paths.d.ts",
+      "import": "./dist/config/paths.js"
+    },
+    "./config/registry": {
+      "types": "./dist/config/registry.d.ts",
+      "import": "./dist/config/registry.js"
+    },
+    "./config/project-config": {
+      "types": "./dist/config/project-config.d.ts",
+      "import": "./dist/config/project-config.js"
+    },
+    "./config/database": {
+      "types": "./dist/config/database.d.ts",
+      "import": "./dist/config/database.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",

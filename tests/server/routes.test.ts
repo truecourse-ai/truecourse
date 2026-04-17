@@ -12,6 +12,13 @@ import { setupTestDb, teardownTestDb, type TestDb } from '../helpers/test-db';
 
 vi.mock('../../apps/server/src/socket/handlers', async () => {
   const actual = await vi.importActual('../../apps/server/src/socket/handlers');
+  class NoopTracker {
+    constructor() {}
+    start() {}
+    done() {}
+    error() {}
+    detail() {}
+  }
   return {
     ...actual,
     emitAnalysisProgress: vi.fn(),
@@ -21,13 +28,8 @@ vi.mock('../../apps/server/src/socket/handlers', async () => {
     emitAnalysisCanceled: vi.fn(),
     emitCodeReviewProgress: vi.fn(),
     emitCodeReviewReady: vi.fn(),
-    StepTracker: class StepTracker {
-      constructor() {}
-      start() {}
-      done() {}
-      error() {}
-      detail() {}
-    },
+    StepTracker: NoopTracker,
+    createSocketTracker: () => new NoopTracker(),
   };
 });
 
@@ -179,7 +181,7 @@ describe('API routes (integration)', () => {
   it('POST /api/repos/:id/analyze — triggers analysis, returns 202', async () => {
     const res = await request(app)
       .post(`/api/repos/${createdRepoId}/analyze`)
-      .send({ skipGit: true })
+      .send({ skipGit: true, enableLlmRules: false })
       .expect(202);
 
     expect(res.body.message).toBe('Analysis started');

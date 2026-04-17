@@ -1,12 +1,13 @@
 import * as p from "@clack/prompts";
-import { io, type Socket } from "socket.io-client";
 import { exec } from "node:child_process";
 import { cpSync, existsSync } from "node:fs";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
+import { resolveRepoDir } from "@truecourse/server/config/paths";
+import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
 
 const DEFAULT_PORT = 3001;
 
@@ -14,8 +15,6 @@ const DEFAULT_PORT = 3001;
 
 export type TrueCourseConfig = {
   runMode: "console" | "service";
-  enabledCategories?: string[];
-  enableLlmRules?: boolean;
 };
 
 const DEFAULT_CONFIG: TrueCourseConfig = { runMode: "console" };
@@ -37,8 +36,7 @@ export function readConfig(): TrueCourseConfig {
 
 export function writeConfig(partial: Partial<TrueCourseConfig>): void {
   const configPath = getConfigPath();
-  const dir = path.dirname(configPath);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
   const current = readConfig();
   const merged = { ...current, ...partial };
   fs.writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
@@ -49,101 +47,35 @@ export function getServerUrl(): string {
   return `http://localhost:${port}`;
 }
 
-/** Returns true if the server was just started (first run). */
-export async function ensureServer(): Promise<boolean> {
+/** Fail fast if the dashboard server isn't responding. */
+export async function requireDashboard(): Promise<void> {
   const url = getServerUrl();
   try {
     const res = await fetch(`${url}/api/health`);
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    return false;
+    if (!res.ok) throw new Error();
   } catch {
-    // Run setup if not configured yet
-    const envPath = path.join(os.homedir(), ".truecourse", ".env");
-    if (!fs.existsSync(envPath)) {
-      const { runSetup } = await import("./setup.js");
-      await runSetup();
-    }
-
-    // Server not running — auto-start it
-    const { runStart, getServerProcess } = await import("./start.js");
-    await runStart({ openBrowser: false });
-
-    // Kill server subprocess when this process exits (console mode only)
-    const killServer = () => {
-      const proc = getServerProcess();
-      if (proc && !proc.killed) proc.kill("SIGTERM");
-    };
-    process.on("exit", killServer);
-
-    // Wait for server to be ready (may take time on first run for Postgres download)
-    for (let i = 0; i < 120; i++) {
-      try {
-        const res = await fetch(`${url}/api/health`);
-        if (res.ok) return true;
-      } catch {
-        // Not ready yet
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    p.log.error("Server failed to start. Check logs with: truecourse service logs");
+    p.log.error(
+      `TrueCourse dashboard is not running at ${url}.\n` +
+        `Start it first with: truecourse dashboard`,
+    );
     process.exit(1);
   }
 }
 
-export async function ensureRepo(): Promise<{ id: string; name: string }> {
-  const url = getServerUrl();
-  const repoPath = process.cwd();
-
-  const res = await fetch(`${url}/api/repos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: repoPath }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    let message = `Server returned ${res.status}`;
-    try {
-      const json = JSON.parse(body);
-      if (json.error) message = json.error;
-    } catch {
-      if (body) message = body;
-    }
-    p.log.error(message);
+/**
+ * Resolve the current directory's registered project from the local registry.
+ * Registers the repo on first use. Exits if no `.truecourse/` is found.
+ */
+export function requireRegisteredRepo(): { id: string; name: string; path: string } {
+  const repoDir = resolveRepoDir(process.cwd());
+  if (!repoDir) {
+    p.log.error(
+      "No TrueCourse project found here. Run `truecourse analyze` to set one up.",
+    );
     process.exit(1);
   }
-
-  const repo = (await res.json()) as { id: string; name: string };
-
-  // First time adding this repo — ask about Claude Code skills
-  if (res.status === 201) {
-    await promptInstallSkills(process.cwd());
-  }
-
-  return repo;
-}
-
-export function connectSocket(repoId: string): Socket {
-  const url = getServerUrl();
-  const socket = io(url, {
-    autoConnect: false,
-    reconnection: true,
-    reconnectionAttempts: 5,
-    transports: ["websocket", "polling"],
-  });
-
-  socket.connect();
-
-  socket.on("connect", () => {
-    socket.emit("joinRepo", repoId);
-  });
-
-  if (socket.connected) {
-    socket.emit("joinRepo", repoId);
-  }
-
-  return socket;
+  const entry = getProjectByPath(repoDir) ?? registerProject(repoDir);
+  return { id: entry.slug, name: entry.name, path: entry.path };
 }
 
 type Severity = string;

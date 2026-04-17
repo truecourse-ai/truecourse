@@ -1,5 +1,4 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { randomUUID } from 'node:crypto';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import {
@@ -35,19 +34,17 @@ import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import { readProjectConfig } from '../config/project-config.js';
-import { touchProject } from '../config/registry.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runAnalysis, runDiffAnalysis } from '../services/analyzer.service.js';
-import { persistAnalysisResult } from '../services/analysis-persistence.service.js';
-import { detectAndPersistFlows } from '../services/flow.service.js';
+import { analyzeInProcess } from '../commands/analyze-in-process.js';
+import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
 import {
+  buildAnalysisSteps,
+  createSocketTracker,
   emitAnalysisProgress,
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
-  StepTracker,
-  buildAnalysisSteps,
 } from '../socket/handlers.js';
 import { getIO } from '../socket/index.js';
 import {
@@ -55,20 +52,15 @@ import {
   unregisterAnalysis,
   cancelAnalysis,
 } from '../services/analysis-registry.js';
-import { buildUnifiedGraph, type GraphLevel } from '../services/graph.service.js';
-import {
-  loadActiveViolations,
-} from '../services/violation-lifecycle.service.js';
-import { runViolationPipeline } from '../services/violation-pipeline.service.js';
 import { createLLMProvider } from '../services/llm/provider.js';
-import { trackEvent, detectLanguages, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
+import { trackEvent, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
 
 /** SQL filter to exclude diff analyses */
 const notDiffAnalysis = sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS NOT TRUE`;
 
 const router: Router = Router();
 
-// POST /api/repos/:id/analyze - Trigger analysis
+// POST /api/repos/:id/analyze - Trigger analysis (delegates to analyzeInProcess)
 router.post(
   '/:id/analyze',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -84,7 +76,11 @@ router.post(
       const repo = resolveProjectForRequest(id);
       const projectConfig = readProjectConfig(repo.path);
 
-      // Detect current branch and commit hash (never checkout — analyze what's on disk)
+      const effectiveCategories = globalEnabledCategories?.length
+        ? globalEnabledCategories
+        : (projectConfig.enabledCategories ?? undefined);
+      const effectiveLlmRules = projectConfig.enableLlmRules ?? enableLlmRules;
+
       let branch: string | null = null;
       let commitHash: string | null = null;
       if (!skipGit) {
@@ -93,11 +89,12 @@ router.post(
         commitHash = (await git.revparse(['HEAD'])).trim();
       }
 
-      // Create analysis row with 'running' status
+      // Insert the 'running' row here so the client gets a real analysisId
+      // in the 202. `analyzeInProcess` will reuse it via `existingAnalysisId`.
       const [runningAnalysis] = await db
         .insert(analyses)
         .values({
-          id: randomUUID(),
+          id: crypto.randomUUID(),
           branch,
           status: 'running',
           architecture: 'unknown',
@@ -105,274 +102,112 @@ router.post(
         })
         .returning();
 
-      // Respond immediately, run analysis asynchronously
-      res.status(202).json({ message: 'Analysis started', repoId: id, branch, analysisId: runningAnalysis.id });
+      res.status(202).json({
+        message: 'Analysis started',
+        repoId: id,
+        branch,
+        analysisId: runningAnalysis.id,
+      });
 
-      // Register analysis for cancellation support
       const abortController = registerAnalysis(id, runningAnalysis.id);
 
-      // Run analysis in the background
+      const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+      const tracker = createSocketTracker(id, trackerSteps);
+
+      const provider = effectiveLlmRules ? createLLMProvider() : undefined;
+      if (provider) {
+        provider.setRepoId(id);
+        provider.setRepoPath(repo.path);
+        provider.setAbortSignal(abortController.signal);
+      }
+
       try {
-        // Resolve effective enabled categories
-        const effectiveCategories = globalEnabledCategories?.length
-          ? globalEnabledCategories
-          : (projectConfig.enabledCategories ?? undefined);
+        const outcome = await analyzeInProcess(repo, {
+          existingAnalysisId: runningAnalysis.id,
+          branch,
+          commitHash,
+          skipGit,
+          enabledCategoriesOverride: effectiveCategories,
+          enableLlmRulesOverride: effectiveLlmRules,
+          tracker,
+          signal: abortController.signal,
+          provider,
+          onLlmEstimate: (estimate) =>
+            new Promise<boolean>((resolve) => {
+              const io = getIO();
+              const room = `repo:${id}`;
 
-        // Resolve effective LLM toggle: per-repo override > request param
-        const effectiveLlmRules = projectConfig.enableLlmRules ?? enableLlmRules;
-
-        const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
-        const tracker = new StepTracker(id, trackerSteps);
-
-        const analysisStartTime = Date.now();
-        tracker.start('parse', 'Starting analysis...');
-
-        const result = await runAnalysis(repo.path, branch ?? undefined, (progress) => {
-          // Forward analyzer progress as detail on the 'parse' step
-          tracker.detail('parse', progress.detail ?? 'Analyzing...');
-        }, { signal: abortController.signal });
-
-        // Clean up old diff analyses and legacy diff checks
-        const oldDiffAnalyses = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`);
-        for (const da of oldDiffAnalyses) {
-          await db.delete(analyses).where(eq(analyses.id, da.id));
-        }
-
-        // Check if cancelled before persisting
-        if (abortController.signal.aborted) {
-          await db.update(analyses).set({ status: 'cancelled' }).where(eq(analyses.id, runningAnalysis.id));
-          emitAnalysisCanceled(id);
-          unregisterAnalysis(id);
-          return;
-        }
-
-        // Persist analysis using shared service
-        const { analysisId: newAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-          await persistAnalysisResult({ branch, result, commitHash: commitHash ?? undefined, metadata: {}, existingAnalysisId: runningAnalysis.id });
-
-        const analysis = { id: newAnalysisId };
-
-        // Load previous active violations for lifecycle tracking.
-        // The new analysis we just created has no violations yet, so we fetch the 2 latest
-        // non-diff analyses and use the second one (the one before this run).
-        const prevConditionsForLifecycle = [notDiffAnalysis];
-        if (branch) prevConditionsForLifecycle.push(eq(analyses.branch, branch));
-        const prevAnalysesForLifecycle = await db
-          .select({ id: analyses.id })
-          .from(analyses)
-          .where(and(...prevConditionsForLifecycle))
-          .orderBy(desc(analyses.createdAt))
-          .limit(2);
-        // The first one is the analysis we just created; get the second if it exists
-        const previousAnalysisId = prevAnalysesForLifecycle.length > 1 ? prevAnalysesForLifecycle[1].id : null;
-
-        let previousActiveViolations: Awaited<ReturnType<typeof loadActiveViolations>> = [];
-
-        if (previousAnalysisId) {
-          // Load violations from previous analysis directly
-          const prevViolationRows = await db
-            .select({
-              id: violations.id,
-              type: violations.type,
-              title: violations.title,
-              content: violations.content,
-              severity: violations.severity,
-              status: violations.status,
-              targetServiceId: violations.targetServiceId,
-              targetServiceName: services.name,
-              targetDatabaseId: violations.targetDatabaseId,
-              targetModuleId: violations.targetModuleId,
-              targetModuleName: modules.name,
-              targetMethodId: violations.targetMethodId,
-              targetMethodName: methods.name,
-              targetTable: violations.targetTable,
-              fixPrompt: violations.fixPrompt,
-              ruleKey: violations.ruleKey,
-              firstSeenAnalysisId: violations.firstSeenAnalysisId,
-              firstSeenAt: violations.firstSeenAt,
-              filePath: violations.filePath,
-              lineStart: violations.lineStart,
-              lineEnd: violations.lineEnd,
-              columnStart: violations.columnStart,
-              columnEnd: violations.columnEnd,
-              snippet: violations.snippet,
-            })
-            .from(violations)
-            .leftJoin(services, eq(violations.targetServiceId, services.id))
-            .leftJoin(modules, eq(violations.targetModuleId, modules.id))
-            .leftJoin(methods, eq(violations.targetMethodId, methods.id))
-            .where(eq(violations.analysisId, previousAnalysisId));
-
-          previousActiveViolations = prevViolationRows.filter(
-            (v) => v.status === 'new' || v.status === 'unchanged'
-          );
-
-        }
-
-        // Detect and persist flows
-        try {
-          await detectAndPersistFlows(newAnalysisId, result);
-        } catch (flowError) {
-          console.error('[Flows] Detection failed:', flowError instanceof Error ? flowError.message : String(flowError));
-        }
-
-        touchProject(repo.slug);
-
-        // Incremental file detection: only review changed files if previous commit hash exists
-        let changedFileSet: Set<string> | undefined;
-        if (previousAnalysisId) {
-          const [prevAnalysisRow] = await db
-            .select({ commitHash: analyses.commitHash })
-            .from(analyses)
-            .where(eq(analyses.id, previousAnalysisId))
-            .limit(1);
-          if (prevAnalysisRow?.commitHash) {
-            try {
-              const gitForDiff = await getGit(repo.path);
-              const diffOutput = await gitForDiff.diff([prevAnalysisRow.commitHash, 'HEAD', '--name-only']);
-              const changedFiles = diffOutput.trim().split('\n').filter(Boolean);
-              if (changedFiles.length > 0) {
-                changedFileSet = new Set(changedFiles);
-                console.log(`[Analysis] Incremental: ${changedFiles.length} changed files since ${prevAnalysisRow.commitHash.slice(0, 8)}`);
-              }
-            } catch (diffError) {
-              console.log(`[Analysis] Could not compute diff, reviewing all files: ${diffError instanceof Error ? diffError.message : String(diffError)}`);
-            }
-          }
-        }
-
-        // Run violation pipeline (deterministic + LLM + code rules + persistence)
-        tracker.done('parse', `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`);
-
-        const provider = enableLlmRules ? createLLMProvider() : undefined;
-        if (provider) {
-          provider.setAnalysisId(newAnalysisId);
-          provider.setRepoId(id);
-          provider.setAbortSignal(abortController.signal);
-        }
-        try {
-          await runViolationPipeline({
-            repoPath: repo.path,
-            analysisId: newAnalysisId,
-            result,
-            serviceIdMap,
-            moduleIdMap,
-            methodIdMap,
-            dbIdMap,
-            previousActiveViolations,
-            changedFileSet,
-            tracker,
-            enabledCategories: effectiveCategories,
-            enableLlmRules: effectiveLlmRules,
-            provider,
-            signal: abortController.signal,
-            onLlmEstimate: effectiveLlmRules ? (estimate) => {
-              return new Promise<boolean>((resolve) => {
-                const io = getIO();
-                const room = `repo:${id}`;
-
-                // Emit estimate to all clients in the room
-                io.to(room).emit('analysis:llm-estimate', {
-                  repoId: id,
-                  analysisId: newAnalysisId,
-                  estimate: {
-                    totalEstimatedTokens: estimate.totalEstimatedTokens,
-                    tiers: estimate.tiers,
-                    uniqueFileCount: estimate.uniqueFileCount,
-                    uniqueRuleCount: estimate.uniqueRuleCount,
-                  },
-                });
-
-                // Listen for response from any client in the room
-                const timeout = setTimeout(() => {
-                  // Auto-proceed after 60s if no response (e.g. no UI connected)
-                  cleanup();
-                  resolve(true);
-                }, 60_000);
-
-                function onProceed(data: { analysisId: string; proceed: boolean }) {
-                  if (data.analysisId !== newAnalysisId) return;
-                  cleanup();
-                  // Notify all clients to dismiss their confirmation UI
-                  io.to(room).emit('analysis:llm-resolved', { analysisId: newAnalysisId, proceed: data.proceed });
-                  resolve(data.proceed);
-                }
-
-                function cleanup() {
-                  clearTimeout(timeout);
-                  for (const [, socket] of io.sockets.sockets) {
-                    socket.removeListener('analysis:llm-proceed', onProceed);
-                  }
-                }
-
-                // Attach listener to all connected sockets
-                for (const [, socket] of io.sockets.sockets) {
-                  socket.on('analysis:llm-proceed', onProceed);
-                }
+              io.to(room).emit('analysis:llm-estimate', {
+                repoId: id,
+                analysisId: runningAnalysis.id,
+                estimate: {
+                  totalEstimatedTokens: estimate.totalEstimatedTokens,
+                  tiers: estimate.tiers,
+                  uniqueFileCount: estimate.uniqueFileCount,
+                  uniqueRuleCount: estimate.uniqueRuleCount,
+                },
               });
-            } : undefined,
-          });
 
-          emitViolationsReady(id, analysis.id);
-        } catch (violationError) {
-          // Don't log AbortError as a failure — it's expected on cancel
-          if (violationError instanceof DOMException && violationError.name === 'AbortError') {
-            console.log(`[Violations] Cancelled for repo ${id}`);
-          } else {
-            console.error(
-              `[Violations] Failed for repo ${id}:`,
-              violationError instanceof Error ? violationError.message : String(violationError)
-            );
-          }
-          // Still emit violations:ready so clients don't hang waiting
-          emitViolationsReady(id, analysis.id);
-        }
+              const timeout = setTimeout(() => {
+                cleanup();
+                resolve(true);
+              }, 60_000);
 
-        // Flush LLM usage records for flows 1+2
-        try {
-          await provider?.flushUsage();
-        } catch (usageError) {
-          console.error('[Usage] Failed to record usage:', usageError instanceof Error ? usageError.message : String(usageError));
-        }
+              function onProceed(data: { analysisId: string; proceed: boolean }) {
+                if (data.analysisId !== runningAnalysis.id) return;
+                cleanup();
+                io.to(room).emit('analysis:llm-resolved', {
+                  analysisId: runningAnalysis.id,
+                  proceed: data.proceed,
+                });
+                resolve(data.proceed);
+              }
 
-        emitAnalysisComplete(id, analysis.id);
+              function cleanup() {
+                clearTimeout(timeout);
+                for (const [, socket] of io.sockets.sockets) {
+                  socket.removeListener('analysis:llm-proceed', onProceed);
+                }
+              }
 
-        // Anonymous usage telemetry
-        trackEvent('analyze', {
-          serviceCount: result.services.length,
-          fileCountRange: bucketFileCount(result.fileAnalyses?.length ?? 0),
-          languages: detectLanguages(result),
-          architecture: result.architecture,
-          durationRange: bucketDuration(Date.now() - analysisStartTime),
+              for (const [, socket] of io.sockets.sockets) {
+                socket.on('analysis:llm-proceed', onProceed);
+              }
+            }),
         });
 
-        unregisterAnalysis(id);
+        emitViolationsReady(id, outcome.analysisId);
+        emitAnalysisComplete(id, outcome.analysisId);
+
+        trackEvent('analyze', {
+          serviceCount: outcome.serviceCount,
+          fileCountRange: bucketFileCount(outcome.fileCount),
+          languages: [],
+          architecture: outcome.architecture,
+          durationRange: bucketDuration(outcome.durationMs),
+        });
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
           console.log(`[Analysis] Cancelled for repo ${id}`);
-          await db.update(analyses).set({ status: 'cancelled' }).where(eq(analyses.id, runningAnalysis.id));
           emitAnalysisCanceled(id);
         } else {
           console.error(
             `[Analysis] Failed for repo ${id}:`,
-            error instanceof Error ? error.message : String(error)
+            error instanceof Error ? error.message : String(error),
           );
-          await db.update(analyses).set({ status: 'failed' }).where(eq(analyses.id, runningAnalysis.id));
           emitAnalysisProgress(id, {
             step: 'error',
             percent: -1,
             detail: error instanceof Error ? error.message : 'Analysis failed',
           });
         }
+      } finally {
         unregisterAnalysis(id);
       }
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 // POST /api/repos/:id/analyze/cancel - Cancel in-progress analysis
@@ -384,7 +219,6 @@ router.post(
       resolveProjectForRequest(id);
       const canceled = cancelAnalysis(id);
       if (canceled) {
-        // Set status to 'cancelling' — analysis:canceled event fires when it actually stops
         await db.update(analyses)
           .set({ status: 'cancelling' })
           .where(eq(analyses.status, 'running'));
@@ -393,7 +227,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 // GET /api/repos/:id/analyses - List past analyses (enhanced with counts)
@@ -882,277 +716,6 @@ router.get(
   }
 );
 
-// POST /api/repos/:id/diff-check - Run diff analysis with LLM diffing
-router.post(
-  '/:id/diff-check',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const id = req.params.id as string;
-      const repo = resolveProjectForRequest(id);
-
-      // Find latest normal analysis (exclude diff analyses)
-      const [latestAnalysis] = await db
-        .select({ id: analyses.id })
-        .from(analyses)
-        .where(notDiffAnalysis)
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
-
-      if (!latestAnalysis) {
-        res.status(409).json({ error: 'Switch to Normal mode and run an analysis first' });
-        return;
-      }
-
-      // Load previous active violations for lifecycle tracking (unified — includes code violations)
-      const prevViolationRows = await db
-        .select({
-          id: violations.id,
-          type: violations.type,
-          title: violations.title,
-          content: violations.content,
-          severity: violations.severity,
-          status: violations.status,
-          targetServiceId: violations.targetServiceId,
-          targetServiceName: services.name,
-          targetDatabaseId: violations.targetDatabaseId,
-          targetModuleId: violations.targetModuleId,
-          targetModuleName: modules.name,
-          targetMethodId: violations.targetMethodId,
-          targetMethodName: methods.name,
-          targetTable: violations.targetTable,
-          fixPrompt: violations.fixPrompt,
-          ruleKey: violations.ruleKey,
-          firstSeenAnalysisId: violations.firstSeenAnalysisId,
-          firstSeenAt: violations.firstSeenAt,
-          filePath: violations.filePath,
-          lineStart: violations.lineStart,
-          lineEnd: violations.lineEnd,
-          columnStart: violations.columnStart,
-          columnEnd: violations.columnEnd,
-          snippet: violations.snippet,
-        })
-        .from(violations)
-        .leftJoin(services, eq(violations.targetServiceId, services.id))
-        .leftJoin(modules, eq(violations.targetModuleId, modules.id))
-        .leftJoin(methods, eq(violations.targetMethodId, methods.id))
-        .where(eq(violations.analysisId, latestAnalysis.id));
-
-      const previousActiveViolations = prevViolationRows.filter(
-        (v) => v.status === 'new' || v.status === 'unchanged'
-      );
-
-      const git = await getGit(repo.path);
-      const branch = (await git.branch()).current || undefined;
-
-      // Phase 1: Run analysis on dirty tree + get changed files
-      const diffStartTime = Date.now();
-      const diffTracker = new StepTracker(id, [
-        { key: 'parse', label: 'Parsing working tree' },
-        { key: 'detect', label: 'Deterministic checks' },
-        { key: 'enrich', label: 'Enriching detections' },
-        { key: 'architecture', label: 'Architecture analysis' },
-        { key: 'persist', label: 'Saving results' },
-      ]);
-
-      diffTracker.start('parse');
-      const diffAnalysis = await runDiffAnalysis({
-        repoPath: repo.path,
-        branch,
-        onProgress: (progress) => {
-          diffTracker.detail('parse', progress.detail ?? 'Analyzing...');
-        },
-      });
-
-      const result = diffAnalysis.analysisResult;
-      const changedFiles = diffAnalysis.changedFiles;
-
-      // Delete old diff analyses (cascade deletes their violations)
-      const oldDiffAnalyses = await db
-        .select({ id: analyses.id })
-        .from(analyses)
-        .where(sql`(${analyses.metadata}->>'isDiffAnalysis')::boolean IS TRUE`);
-      for (const da of oldDiffAnalyses) {
-        await db.delete(analyses).where(eq(analyses.id, da.id));
-      }
-
-      // Persist the diff analysis — get real DB IDs
-      const { analysisId: diffAnalysisId, serviceIdMap, moduleIdMap, methodIdMap, dbIdMap } =
-        await persistAnalysisResult({
-          branch: branch || null,
-          result,
-          metadata: { isDiffAnalysis: true },
-        });
-
-      const changedFileSet = new Set(changedFiles.filter((f) => f.status !== 'deleted').map((f) => f.path));
-
-      // Run violation pipeline
-      diffTracker.done('parse', `${result.services.length} services, ${changedFiles.length} changed files`);
-      const diffProvider = createLLMProvider();
-      diffProvider.setAnalysisId(diffAnalysisId);
-      const pipelineResult = await runViolationPipeline({
-        repoPath: repo.path,
-        analysisId: diffAnalysisId,
-        result,
-        serviceIdMap,
-        moduleIdMap,
-        methodIdMap,
-        dbIdMap,
-        previousActiveViolations,
-        changedFileSet,
-        tracker: diffTracker,
-        provider: diffProvider,
-      });
-      try { await diffProvider.flushUsage(); } catch { /* best-effort */ }
-      // Compute affected node IDs from changed files + new violations
-      const affectedServices = new Set<string>();
-      for (const svc of result.services) {
-        const relRoot = path.relative(repo.path, svc.rootPath);
-        for (const file of changedFiles) {
-          if (file.path.startsWith(relRoot + '/') || file.path === relRoot) {
-            affectedServices.add(svc.name);
-          }
-        }
-      }
-
-      const affectedModules = new Set<string>();
-      const affectedMethods = new Set<string>();
-      for (const v of (pipelineResult.newViolations || [])) {
-        if (v.targetServiceName) affectedServices.add(v.targetServiceName);
-        if (v.targetModuleName && v.targetServiceName) {
-          affectedModules.add(`${v.targetServiceName}::${v.targetModuleName}`);
-        }
-        if (v.targetMethodName && v.targetModuleName && v.targetServiceName) {
-          affectedMethods.add(`${v.targetServiceName}::${v.targetModuleName}::${v.targetMethodName}`);
-        }
-      }
-
-      const affectedNodeIds = {
-        services: [...affectedServices],
-        layers: [] as string[],
-        modules: [...affectedModules],
-        methods: [...affectedMethods],
-      };
-
-      // Build resolved arch violations for the response
-      const resolvedSet = new Set(pipelineResult.resolvedViolationIds || []);
-      const resolvedArchViolations = previousActiveViolations
-        .filter((v) => resolvedSet.has(v.id))
-        .map((v) => ({
-          id: v.id,
-          type: v.type,
-          title: v.title,
-          content: v.content,
-          severity: v.severity,
-          targetServiceId: v.targetServiceId,
-          targetServiceName: v.targetServiceName,
-          targetDatabaseId: v.targetDatabaseId ?? null,
-          targetDatabaseName: null,
-          targetModuleId: v.targetModuleId,
-          targetModuleName: v.targetModuleName,
-          targetMethodId: v.targetMethodId,
-          targetMethodName: v.targetMethodName,
-          targetTable: v.targetTable ?? null,
-          fixPrompt: v.fixPrompt,
-          createdAt: v.firstSeenAt?.toISOString() ?? new Date().toISOString(),
-        }));
-
-      // Load code violations from DB (pipeline persisted them to the unified violations table)
-      const diffCodeViolationRows = await db
-        .select()
-        .from(violations)
-        .where(and(eq(violations.analysisId, diffAnalysisId), sql`${violations.filePath} IS NOT NULL`));
-
-      const newCodeViolationItems = diffCodeViolationRows
-        .filter((cv) => cv.status === 'new')
-        .map((cv) => ({
-          type: 'code' as const,
-          title: cv.title,
-          content: cv.content,
-          severity: cv.severity,
-          targetServiceId: null as string | null,
-          targetModuleId: null as string | null,
-          targetMethodId: null as string | null,
-          targetServiceName: null as string | null,
-          targetModuleName: null as string | null,
-          targetMethodName: null as string | null,
-          fixPrompt: cv.fixPrompt,
-          filePath: cv.filePath,
-          lineStart: cv.lineStart,
-        }));
-
-      const resolvedCodeViolations = diffCodeViolationRows
-        .filter((cv) => cv.status === 'resolved')
-        .map((cv) => ({
-          id: cv.id,
-          type: 'code' as const,
-          title: cv.title,
-          content: cv.content,
-          severity: cv.severity,
-          targetServiceId: null,
-          targetServiceName: null,
-          targetDatabaseId: null,
-          targetDatabaseName: null,
-          targetModuleId: null,
-          targetModuleName: null,
-          targetMethodId: null,
-          targetMethodName: null,
-          targetTable: null,
-          fixPrompt: cv.fixPrompt,
-          filePath: cv.filePath,
-          lineStart: cv.lineStart,
-          createdAt: cv.createdAt.toISOString(),
-        }));
-
-      const allNewViolations = [...(pipelineResult.newViolations || []), ...newCodeViolationItems];
-      const allResolvedViolations = [...resolvedArchViolations, ...resolvedCodeViolations];
-
-      // Compute summary once — single source of truth
-      const summary = {
-        newCount: allNewViolations.length,
-        resolvedCount: allResolvedViolations.length,
-      };
-
-      // Store metadata in diff analysis (after all data is ready)
-      await db
-        .update(analyses)
-        .set({
-          metadata: {
-            isDiffAnalysis: true,
-            changedFiles,
-            affectedNodeIds,
-            summary,
-            baselineAnalysisId: latestAnalysis.id,
-          },
-        })
-        .where(eq(analyses.id, diffAnalysisId));
-
-      // Clear progress bar
-      emitAnalysisProgress(id, { step: 'complete', percent: 100, detail: 'Diff check complete' });
-
-      // Anonymous usage telemetry
-      trackEvent('diff-check', {
-        changedFileCount: changedFiles.length,
-        newViolationCount: summary.newCount,
-        resolvedViolationCount: summary.resolvedCount,
-        durationRange: bucketDuration(Date.now() - diffStartTime),
-      });
-
-      res.json({
-        changedFiles,
-        resolvedViolations: allResolvedViolations,
-        newViolations: allNewViolations,
-        affectedNodeIds,
-        summary,
-        isStale: false,
-        diffAnalysisId,
-      });
-    } catch (error) {
-      const repoId = req.params.id as string;
-      emitAnalysisProgress(repoId, { step: 'error', percent: -1, detail: error instanceof Error ? error.message : 'Diff check failed' });
-      next(error);
-    }
-  }
-);
 
 // GET /api/repos/:id/diff-check - Load saved diff check from DB
 router.get(
