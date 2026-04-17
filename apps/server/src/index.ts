@@ -1,13 +1,18 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
-import os from 'node:os';
 import { createServer } from 'http';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config } from './config/index.js';
 import { initDatabase, closeDatabase, getClient } from './config/database.js';
 import { migratePGlite } from './config/migrate.js';
+import {
+  resolveRepoDir,
+  ensureRepoTruecourseDir,
+  getRepoDbDir,
+  wipeLegacyPostgresData,
+} from './config/paths.js';
 import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import reposRouter from './routes/repos.js';
@@ -23,11 +28,28 @@ import { seedRules } from './services/rules.service.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function resolveDataDir(): string {
-  return process.env.TRUECOURSE_DATA_DIR || path.join(os.homedir(), '.truecourse', 'pglite');
+  if (process.env.TRUECOURSE_DATA_DIR) {
+    return process.env.TRUECOURSE_DATA_DIR;
+  }
+  const repoDir = resolveRepoDir(process.cwd());
+  if (!repoDir) {
+    throw new Error(
+      `No .truecourse/ directory found walking up from ${process.cwd()}.\n` +
+        `Run \`truecourse analyze\` from inside a project to initialize storage, ` +
+        `or set TRUECOURSE_DATA_DIR to point at an explicit PGlite directory.`,
+    );
+  }
+  ensureRepoTruecourseDir(repoDir);
+  return getRepoDbDir(repoDir);
 }
 
 async function main() {
-  // 1. Initialize PGlite at the local data directory
+  // 0. One-time cleanup of the pre-PGlite embedded-postgres data dir
+  if (wipeLegacyPostgresData()) {
+    console.log('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
+  }
+
+  // 1. Initialize PGlite at the per-repo data directory
   const dataDir = resolveDataDir();
   fs.mkdirSync(dataDir, { recursive: true });
   await initDatabase(dataDir);

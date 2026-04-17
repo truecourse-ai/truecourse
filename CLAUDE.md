@@ -18,18 +18,30 @@
 ## Development Commands
 
 ```bash
-pnpm dev          # Start all services (turbo) — embedded Postgres starts automatically, migrations run on boot
+pnpm dev          # Start all services (turbo) — PGlite opens at <cwd>/.truecourse/db/, migrations run on boot
 pnpm build        # Build all packages
 pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
 pnpm test         # Run all tests (vitest)
 pnpm db:generate  # Generate migration SQL files after schema changes (drizzle-kit generate)
 ```
 
+## Storage
+
+- Per-repo storage lives in `<repo>/.truecourse/`:
+  - `db/` — PGlite data directory (gitignored)
+  - `config.json` — per-repo settings (committable)
+  - `ui-state.json` — node positions + UI state (gitignored)
+- Global config lives in `~/.truecourse/`:
+  - `config.json` — LLM keys, provider
+  - `registry.json` — known project paths
+  - `logs/` — runtime logs
+- The server walks up from `cwd` looking for `.truecourse/`. Set `TRUECOURSE_DATA_DIR` to override. `pnpm dev` needs a `.truecourse/` dir at the repo root (auto-created on first analyze).
+
 ## Rules
 
 - **No workarounds.** Always find and fix the root cause. Do not use hacks, fallbacks, or temporary patches to bypass issues. If something isn't working, investigate why and fix it properly.
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
-- **Database.** Uses embedded Postgres (not Docker). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
+- **Database.** Uses PGlite (pure JS/WASM, no daemon). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
 
 ## Testing
 
