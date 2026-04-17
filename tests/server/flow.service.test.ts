@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
@@ -37,13 +38,14 @@ describe('flow.service (integration)', () => {
     }
     const [repo] = await db
       .insert(schema.repos)
-      .values({ name: 'flow-test-repo', path: uniquePath })
+      .values({ id: randomUUID(), name: 'flow-test-repo', path: uniquePath })
       .returning();
     repoId = repo.id;
 
     const [analysis] = await db
       .insert(schema.analyses)
       .values({
+        id: randomUUID(),
         repoId: repo.id,
         architecture: analysisResult.architecture,
         metadata: {},
@@ -54,6 +56,7 @@ describe('flow.service (integration)', () => {
     // Persist services so violations can reference them
     for (const svc of analysisResult.services) {
       await db.insert(schema.services).values({
+        id: randomUUID(),
         analysisId,
         name: svc.name,
         type: svc.type,
@@ -145,11 +148,14 @@ describe('flow.service (integration)', () => {
 
     // Insert a violation targeting this method
     await db.insert(schema.violations).values({
+      id: randomUUID(),
+      repoId,
       analysisId,
       type: 'function',
       title: 'Test violation',
       content: 'Test violation content',
       severity: 'high',
+      ruleKey: 'test/violation',
       targetMethodId: method.id,
     });
 

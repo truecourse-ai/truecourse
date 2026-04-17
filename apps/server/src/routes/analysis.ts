@@ -3,6 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import {
+  setPositions,
+  clearPositions,
+  setCollapsed,
+  getScopedPositions,
+  getScopedCollapsed,
+} from '../config/ui-state.js';
+import {
+  buildStableKeyMap,
+  positionsToStable,
+  positionsToUuid,
+  idsToStable,
+  idsToUuid,
+} from '../services/stable-keys.js';
+import {
   repos,
   analyses,
   services,
@@ -124,34 +138,6 @@ router.post(
           tracker.detail('parse', progress.detail ?? 'Analyzing...');
         }, { signal: abortController.signal });
 
-        // Get previous analysis positions (mapped by service name)
-        const prevConditions = [eq(analyses.repoId, id), notDiffAnalysis];
-        if (branch) prevConditions.push(eq(analyses.branch, branch));
-        const prevAnalyses = await db
-          .select()
-          .from(analyses)
-          .where(and(...prevConditions))
-          .orderBy(desc(analyses.createdAt))
-          .limit(1);
-
-        let prevPositionsByName: Record<string, { x: number; y: number }> = {};
-        let prevLayerPositions: Record<string, { x: number; y: number }> | null = null;
-        if (prevAnalyses.length > 0 && prevAnalyses[0].nodePositions) {
-          const allPrev = prevAnalyses[0].nodePositions as Record<string, unknown>;
-          // Support both namespaced and legacy flat formats
-          const prevServicePositions = (allPrev.services || allPrev) as Record<string, { x: number; y: number }>;
-          prevLayerPositions = (allPrev.layers as Record<string, { x: number; y: number }>) || null;
-          const prevServices = await db
-            .select()
-            .from(services)
-            .where(eq(services.analysisId, prevAnalyses[0].id));
-          for (const svc of prevServices) {
-            if (prevServicePositions[svc.id]) {
-              prevPositionsByName[svc.name] = prevServicePositions[svc.id];
-            }
-          }
-        }
-
         // Clean up old diff analyses and legacy diff checks for this repo
         const oldDiffAnalyses = await db
           .select({ id: analyses.id })
@@ -242,44 +228,9 @@ router.post(
           console.error('[Flows] Detection failed:', flowError instanceof Error ? flowError.message : String(flowError));
         }
 
-        // Carry over node positions from previous analysis (namespaced)
-        const carryOver: Record<string, unknown> = {};
-        if (Object.keys(prevPositionsByName).length > 0) {
-          const newServicePositions: Record<string, { x: number; y: number }> = {};
-          for (const [name, newId] of serviceIdMap) {
-            if (prevPositionsByName[name]) {
-              newServicePositions[newId] = prevPositionsByName[name];
-            }
-          }
-          if (Object.keys(newServicePositions).length > 0) {
-            carryOver.services = newServicePositions;
-          }
-        }
-        if (prevLayerPositions) {
-          const newLayerPositions: Record<string, { x: number; y: number }> = {};
-          const prevServices = prevAnalyses.length > 0
-            ? await db.select().from(services).where(eq(services.analysisId, prevAnalyses[0].id))
-            : [];
-          const prevIdToName = new Map(prevServices.map((s) => [s.id, s.name]));
-          for (const [key, pos] of Object.entries(prevLayerPositions)) {
-            const name = prevIdToName.get(key);
-            if (name) {
-              const newId = serviceIdMap.get(name);
-              if (newId) newLayerPositions[newId] = pos;
-            } else {
-              newLayerPositions[key] = pos;
-            }
-          }
-          if (Object.keys(newLayerPositions).length > 0) {
-            carryOver.layers = newLayerPositions;
-          }
-        }
-        if (Object.keys(carryOver).length > 0) {
-          await db
-            .update(analyses)
-            .set({ nodePositions: carryOver })
-            .where(eq(analyses.id, analysis.id));
-        }
+        // Node positions + collapse state live in <repo>/.truecourse/ui-state.json
+        // keyed by stable service/module/method names, so they carry across
+        // analyses automatically — no migration step needed here.
 
         // Update repo lastAnalyzedAt
         await db
@@ -694,21 +645,23 @@ router.get(
       const graphLevel = level.replace(/s$/, '') as GraphLevel;
       const graphData = buildUnifiedGraph(graphLevel, unifiedInput);
 
-      // Include saved node positions if any (namespaced by level)
-      const allPositions = analysis.nodePositions as Record<string, unknown> | null;
-      const savedPositions = allPositions?.[level] as Record<string, { x: number; y: number }> | undefined;
-      if (savedPositions) {
-        for (const node of graphData.nodes) {
-          const pos = savedPositions[node.id];
-          if (pos) {
-            node.position = pos;
-          }
-        }
+      // Apply saved positions + collapsed state from <repo>/.truecourse/ui-state.json.
+      // Stored by stable name-based keys so they survive re-analysis.
+      const keyMap = buildStableKeyMap({
+        services: analysisServices,
+        layers: layerData,
+        modules: analysisModules,
+        methods: analysisMethods,
+      });
+      const savedStablePositions = getScopedPositions(repo.path, analysis.branch, level);
+      const savedPositions = positionsToUuid(keyMap, savedStablePositions);
+      for (const node of graphData.nodes) {
+        const pos = savedPositions[node.id];
+        if (pos) node.position = pos;
       }
 
-      // Include collapsed IDs for this level
-      const collapsed = (allPositions?.collapsedIds as Record<string, string[]>) || {};
-      const collapsedIds = collapsed[level] || [];
+      const savedStableCollapsed = getScopedCollapsed(repo.path, analysis.branch, level);
+      const collapsedIds = idsToUuid(keyMap, savedStableCollapsed);
 
       res.set('Cache-Control', 'no-store');
       res.json({ ...graphData, collapsedIds });
@@ -717,6 +670,62 @@ router.get(
     }
   }
 );
+
+/**
+ * Load the analysis + enough row data to build a stable-key map. Returns
+ * `{ repo, analysis, keyMap }` or null if no analysis exists for the repo/branch.
+ */
+async function resolveKeyMap(
+  id: string,
+  branch: string | undefined,
+): Promise<
+  | {
+      repo: typeof repos.$inferSelect;
+      analysis: typeof analyses.$inferSelect;
+      keyMap: ReturnType<typeof buildStableKeyMap>;
+    }
+  | null
+> {
+  const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
+  if (!repo) return null;
+
+  const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
+  if (branch) conditions.push(eq(analyses.branch, branch));
+
+  const [latest] = await db
+    .select()
+    .from(analyses)
+    .where(and(...conditions))
+    .orderBy(desc(analyses.createdAt))
+    .limit(1);
+
+  if (!latest) return null;
+
+  const [analysisServices, analysisLayers, analysisModules, analysisMethods] = await Promise.all([
+    db.select().from(services).where(eq(services.analysisId, latest.id)),
+    db.select().from(layers).where(eq(layers.analysisId, latest.id)),
+    db.select().from(modules).where(eq(modules.analysisId, latest.id)),
+    db.select().from(methods).where(eq(methods.analysisId, latest.id)),
+  ]);
+
+  const keyMap = buildStableKeyMap({
+    services: analysisServices,
+    layers: analysisLayers.map((l) => ({
+      id: l.id,
+      serviceName: l.serviceName,
+      serviceId: l.serviceId,
+      layer: l.layer,
+      fileCount: l.fileCount,
+      filePaths: l.filePaths as string[],
+      confidence: l.confidence,
+      evidence: l.evidence as string[],
+    })),
+    modules: analysisModules,
+    methods: analysisMethods,
+  });
+
+  return { repo, analysis: latest, keyMap };
+}
 
 // PUT /api/repos/:id/graph/positions - Save node positions
 router.put(
@@ -732,29 +741,11 @@ router.put(
         throw createAppError('Invalid positions data', 400);
       }
 
-      const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
-      if (branch) {
-        conditions.push(eq(analyses.branch, branch));
-      }
+      const resolved = await resolveKeyMap(id, branch);
+      if (!resolved) throw createAppError('No analysis found', 404);
 
-      const latestAnalysis = await db
-        .select()
-        .from(analyses)
-        .where(and(...conditions))
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
-
-      if (latestAnalysis.length === 0) {
-        throw createAppError('No analysis found', 404);
-      }
-
-      const existing = (latestAnalysis[0].nodePositions as Record<string, unknown>) || {};
-      const merged = { ...existing, [level]: positions };
-
-      await db
-        .update(analyses)
-        .set({ nodePositions: merged })
-        .where(eq(analyses.id, latestAnalysis[0].id));
+      const stablePositions = positionsToStable(resolved.keyMap, positions);
+      setPositions(resolved.repo.path, resolved.analysis.branch, level, stablePositions);
 
       res.json({ ok: true });
     } catch (error) {
@@ -772,30 +763,10 @@ router.delete(
       const branch = req.query.branch as string | undefined;
       const level = (req.query.level as string) || 'services';
 
-      const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
-      if (branch) {
-        conditions.push(eq(analyses.branch, branch));
-      }
+      const [repo] = await db.select().from(repos).where(eq(repos.id, id)).limit(1);
+      if (!repo) throw createAppError('Repo not found', 404);
 
-      const latestAnalysis = await db
-        .select()
-        .from(analyses)
-        .where(and(...conditions))
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
-
-      if (latestAnalysis.length === 0) {
-        throw createAppError('No analysis found', 404);
-      }
-
-      const existing = (latestAnalysis[0].nodePositions as Record<string, unknown>) || {};
-      delete existing[level];
-      const merged = Object.keys(existing).length > 0 ? existing : null;
-
-      await db
-        .update(analyses)
-        .set({ nodePositions: merged })
-        .where(eq(analyses.id, latestAnalysis[0].id));
+      clearPositions(repo.path, branch ?? null, level);
 
       res.json({ ok: true });
     } catch (error) {
@@ -838,30 +809,11 @@ router.put(
         throw createAppError('Invalid collapsedIds data', 400);
       }
 
-      const conditions = [eq(analyses.repoId, id), notDiffAnalysis];
-      if (branch) {
-        conditions.push(eq(analyses.branch, branch));
-      }
+      const resolved = await resolveKeyMap(id, branch);
+      if (!resolved) throw createAppError('No analysis found', 404);
 
-      const latestAnalysis = await db
-        .select()
-        .from(analyses)
-        .where(and(...conditions))
-        .orderBy(desc(analyses.createdAt))
-        .limit(1);
-
-      if (latestAnalysis.length === 0) {
-        throw createAppError('No analysis found', 404);
-      }
-
-      const existing = (latestAnalysis[0].nodePositions as Record<string, unknown>) || {};
-      const existingCollapsed = (existing.collapsedIds as Record<string, string[]>) || {};
-      const merged = { ...existing, collapsedIds: { ...existingCollapsed, [level]: ids } };
-
-      await db
-        .update(analyses)
-        .set({ nodePositions: merged })
-        .where(eq(analyses.id, latestAnalysis[0].id));
+      const stableIds = idsToStable(resolved.keyMap, ids);
+      setCollapsed(resolved.repo.path, resolved.analysis.branch, level, stableIds);
 
       res.json({ ok: true });
     } catch (error) {
