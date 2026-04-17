@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
@@ -7,23 +7,36 @@ import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
-type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
-type TypeFilter = 'all' | 'deterministic' | 'llm';
+export type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
+export type TypeFilter = 'all' | 'deterministic' | 'llm';
+
 type ViolationsPanelProps = {
   violations: ViolationResponse[];
   isLoading: boolean;
   repoId: string;
+
+  categoryFilter: CategoryFilter;
+  onCategoryFilterChange: (c: CategoryFilter) => void;
+  severityFilter: SeverityFilter;
+  onSeverityFilterChange: (s: SeverityFilter) => void;
+  typeFilter: TypeFilter;
+  onTypeFilterChange: (t: TypeFilter) => void;
+  search: string;
+  onSearchChange: (s: string) => void;
+
   selectedService?: string | null;
   selectedServiceName?: string | null;
   selectedDatabaseId?: string | null;
   isDiffMode?: boolean;
   diffResult?: DiffCheckResponse | null;
-  onLocateNode?: (nodeId: string, requiredDepth?: string) => void;
+  onLocateNode?: (nodeId: string, requiredDepth?: string, hints?: { serviceId?: string | null; moduleId?: string | null }) => void;
   onOpenFile?: (path: string, pinned: boolean, scrollToLine?: number) => void;
-  onClearFilter?: () => void;
+  onClearFilter?: (target?: 'service' | 'path') => void;
   selectedPath?: string | null;
   nodeFilePathMap?: Map<string, string>;
   onOpenDatabaseInTab?: (dbId: string, dbName: string) => void;
+  /** Slot at the right edge of the search/filter row — used by Home for the Browse Rules button. */
+  headerRight?: React.ReactNode;
 };
 
 const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
@@ -67,6 +80,14 @@ export function ViolationsPanel({
   violations,
   isLoading,
   repoId,
+  categoryFilter,
+  onCategoryFilterChange,
+  severityFilter,
+  onSeverityFilterChange,
+  typeFilter,
+  onTypeFilterChange,
+  search,
+  onSearchChange,
   selectedService,
   selectedServiceName,
   selectedDatabaseId,
@@ -78,12 +99,8 @@ export function ViolationsPanel({
   selectedPath,
   nodeFilePathMap,
   onOpenDatabaseInTab,
+  headerRight,
 }: ViolationsPanelProps) {
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [search, setSearch] = useState('');
-
   const normalListRef = useRef<VirtuosoHandle>(null);
   const diffListRef = useRef<VirtuosoHandle>(null);
 
@@ -174,9 +191,11 @@ export function ViolationsPanel({
     return cards;
   }, [isDiffMode, diffResult]);
 
-  // Filter violations by selected file path
+  // Filter violations by selected file path.
+  // Works without nodeFilePathMap for code violations (which carry filePath directly);
+  // non-code violations fall through (show) when the map isn't available.
   const pathFilteredViolations = useMemo(() => {
-    if (!selectedPath || !nodeFilePathMap) return violations;
+    if (!selectedPath) return violations;
     return violations.filter((violation) => {
       // Code violations: match by filePath directly
       if (violation.type === 'code' && violation.filePath) {
@@ -190,10 +209,13 @@ export function ViolationsPanel({
         return false;
       }
 
+      // Without nodeFilePathMap we can't resolve a non-code violation's file —
+      // hide it rather than falsely showing it under an active file filter.
+      if (!nodeFilePathMap) return false;
       const targetId = violation.targetMethodId || violation.targetModuleId || violation.targetServiceId;
-      if (!targetId) return true;
+      if (!targetId) return false;
       const fp = nodeFilePathMap.get(targetId);
-      if (!fp) return true;
+      if (!fp) return false;
       if (fp.includes(selectedPath)) return true;
       const parts = fp.split('/');
       for (let i = parts.length - 1; i >= 1; i--) {
@@ -204,7 +226,7 @@ export function ViolationsPanel({
     });
   }, [violations, selectedPath, nodeFilePathMap]);
 
-  // Pre-category filtered: applies search + severity + type but not category
+  // Pre-category filtered: applies search + severity + type + violationType but not category
   const preCategoryFiltered = useMemo(() => {
     let result = pathFilteredViolations;
     if (severityFilter !== 'all') result = result.filter((v) => v.severity === severityFilter);
@@ -288,16 +310,16 @@ export function ViolationsPanel({
                 type="text"
                 placeholder="Search violations..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => onSearchChange(e.target.value)}
                 className="w-full rounded-md border border-border bg-background py-1.5 pl-7 pr-2 text-xs outline-none focus:border-primary/50"
               />
             </div>
-            <SeverityDropdown value={severityFilter} onChange={setSeverityFilter} counts={activeSeverityCounts} />
+            <SeverityDropdown value={severityFilter} onChange={onSeverityFilterChange} counts={activeSeverityCounts} />
             <div className="flex rounded-md border border-border">
               {(['all', 'deterministic', 'llm'] as TypeFilter[]).map((t) => (
                 <button
                   key={t}
-                  onClick={() => setTypeFilter(t)}
+                  onClick={() => onTypeFilterChange(t)}
                   className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
                     typeFilter === t
                       ? 'bg-accent text-accent-foreground'
@@ -308,6 +330,7 @@ export function ViolationsPanel({
                 </button>
               ))}
             </div>
+            {headerRight}
           </div>
         </div>
 
@@ -321,7 +344,7 @@ export function ViolationsPanel({
               return (
                 <button
                   key={cat.value}
-                  onClick={() => setCategoryFilter(cat.value)}
+                  onClick={() => onCategoryFilterChange(cat.value)}
                   className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                     categoryFilter === cat.value
                       ? 'bg-accent text-accent-foreground'
@@ -385,21 +408,101 @@ export function ViolationsPanel({
             </>
           ) : (
             <>
-              {selectedService && (
-                <div className="mx-3 mt-3 flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-xs text-muted-foreground">
-                  <span className="truncate flex-1">
-                    Filtered by:{' '}
-                    <span className="font-medium text-foreground">
-                      {selectedServiceName || selectedService}
+              {(selectedService ||
+                selectedPath ||
+                severityFilter !== 'all' ||
+                categoryFilter !== 'all' ||
+                typeFilter !== 'all' ||
+                search) && (
+                <div className="mx-3 mt-3 flex flex-wrap items-center gap-1.5 rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <span className="shrink-0">Filtered by:</span>
+                  {selectedService && (
+                    <span className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase opacity-70">service</span>
+                      <span className="font-medium text-foreground">
+                        {selectedServiceName || selectedService}
+                      </span>
+                      {onClearFilter && (
+                        <button
+                          onClick={() => onClearFilter('service')}
+                          className="rounded p-0.5 hover:bg-muted"
+                          title="Clear service filter"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
                     </span>
-                  </span>
-                  {onClearFilter && (
-                    <button
-                      onClick={onClearFilter}
-                      className="shrink-0 rounded p-0.5 hover:bg-background/50"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                  )}
+                  {selectedPath && (
+                    <span className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase opacity-70">file</span>
+                      <span className="font-medium text-foreground truncate max-w-48" title={selectedPath}>
+                        {selectedPath.split('/').pop() || selectedPath}
+                      </span>
+                      {onClearFilter && (
+                        <button
+                          onClick={() => onClearFilter('path')}
+                          className="rounded p-0.5 hover:bg-muted"
+                          title="Clear file filter"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </span>
+                  )}
+                  {severityFilter !== 'all' && (
+                    <span className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase opacity-70">severity</span>
+                      <span className="font-medium text-foreground">{severityFilter}</span>
+                      <button
+                        onClick={() => onSeverityFilterChange('all')}
+                        className="rounded p-0.5 hover:bg-muted"
+                        title="Clear severity filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                  {categoryFilter !== 'all' && (
+                    <span className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase opacity-70">category</span>
+                      <span className="font-medium text-foreground">{categoryFilter}</span>
+                      <button
+                        onClick={() => onCategoryFilterChange('all')}
+                        className="rounded p-0.5 hover:bg-muted"
+                        title="Clear category filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                  {typeFilter !== 'all' && (
+                    <span className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase opacity-70">detection</span>
+                      <span className="font-medium text-foreground">{typeFilter}</span>
+                      <button
+                        onClick={() => onTypeFilterChange('all')}
+                        className="rounded p-0.5 hover:bg-muted"
+                        title="Clear detection type filter"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                  {search && (
+                    <span className="inline-flex items-center gap-1 rounded bg-background/60 px-1.5 py-0.5">
+                      <span className="text-[10px] uppercase opacity-70">search</span>
+                      <span className="font-medium text-foreground truncate max-w-48" title={search}>
+                        {search}
+                      </span>
+                      <button
+                        onClick={() => onSearchChange('')}
+                        className="rounded p-0.5 hover:bg-muted"
+                        title="Clear search"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
                   )}
                 </div>
               )}
@@ -412,15 +515,18 @@ export function ViolationsPanel({
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <AlertTriangle className="mb-3 h-8 w-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
-                    {search
-                      ? 'No violations match your search'
-                      : selectedPath
-                        ? 'No violations in this path'
-                        : selectedService
-                          ? 'No violations for this service'
-                          : categoryFilter !== 'all' || severityFilter !== 'all'
-                            ? 'No violations match the selected filters'
-                            : 'No violations yet. Run an analysis to detect violations.'}
+                    {(() => {
+                      const hasFilter =
+                        !!search ||
+                        !!selectedPath ||
+                        !!selectedService ||
+                        categoryFilter !== 'all' ||
+                        severityFilter !== 'all' ||
+                        typeFilter !== 'all';
+                      return hasFilter
+                        ? 'No violations match the active filters'
+                        : 'No violations yet. Run an analysis to detect violations.';
+                    })()}
                   </p>
                 </div>
               ) : (

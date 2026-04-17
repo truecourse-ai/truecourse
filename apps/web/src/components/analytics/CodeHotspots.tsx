@@ -19,10 +19,12 @@ const SEVERITY_COLORS: Record<string, string> = {
 
 export function CodeHotspots({
   data,
-  onOpenFile,
+  onFileClick,
+  activeFilePath,
 }: {
   data: CodeViolationSummary;
-  onOpenFile?: (filePath: string) => void;
+  onFileClick?: (filePath: string) => void;
+  activeFilePath?: string | null;
 }) {
   const entries = Object.entries(data.byFile)
     .map(([filePath, count]) => ({
@@ -68,11 +70,12 @@ export function CodeHotspots({
           <tbody>
             {entries.map((entry, i) => {
               const fileName = entry.filePath.split('/').pop() || entry.filePath;
+              const isActive = activeFilePath === entry.filePath;
               return (
                 <tr
                   key={entry.filePath}
-                  className={`border-b border-border/50 transition-colors hover:bg-muted/50 ${onOpenFile ? 'cursor-pointer' : ''}`}
-                  onClick={() => onOpenFile?.(entry.filePath)}
+                  className={`border-b border-border/50 transition-colors ${onFileClick ? 'cursor-pointer hover:bg-muted/50' : ''} ${isActive ? 'bg-accent/50' : ''}`}
+                  onClick={() => onFileClick?.(entry.filePath)}
                   title={entry.filePath}
                 >
                   <td className="px-4 py-1.5 text-xs text-muted-foreground">{i + 1}</td>

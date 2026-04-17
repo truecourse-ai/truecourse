@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { eq, desc } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { repos, analyses, services, serviceDependencies, violations, conversations, messages } from '../db/schema.js';
+import { repos, analyses, services, serviceDependencies, violations } from '../db/schema.js';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
@@ -175,19 +175,6 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     // Delete in correct order to respect foreign keys
-    // Get all conversations for this repo
-    const repoConversations = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.repoId, id));
-
-    for (const conv of repoConversations) {
-      await db.delete(messages).where(eq(messages.conversationId, conv.id));
-    }
-
-    await db.delete(conversations).where(eq(conversations.repoId, id));
-
-    // Get all analyses for this repo
     const repoAnalyses = await db
       .select()
       .from(analyses)

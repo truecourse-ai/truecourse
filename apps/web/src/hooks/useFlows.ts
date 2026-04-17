@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
 import type { FlowResponse } from '@/lib/api';
 
-export function useFlows(repoId: string) {
+export function useFlows(repoId: string, options: { enabled?: boolean } = {}) {
+  const { enabled = true } = options;
   const [flows, setFlows] = useState<FlowResponse[]>([]);
   const [severities, setSeverities] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -10,6 +11,10 @@ export function useFlows(repoId: string) {
 
   const refetch = useCallback(async () => {
     if (!repoId) return;
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -21,7 +26,7 @@ export function useFlows(repoId: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoId]);
+  }, [repoId, enabled]);
 
   useEffect(() => {
     refetch();

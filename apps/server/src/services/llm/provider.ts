@@ -199,11 +199,6 @@ export interface DiffViolationsResult {
 // Common types
 // ---------------------------------------------------------------------------
 
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
 export interface ServiceDescription {
   id: string;
   description: string;
@@ -274,7 +269,6 @@ export interface LLMProvider {
   generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
-  chat(messages: ChatMessage[], systemPrompt: string): AsyncGenerator<string>;
   setAnalysisId(id: string): void;
   setRepoId(repoId: string): void;
   setRepoPath(path: string): void;
@@ -860,28 +854,6 @@ class AISDKProvider implements LLMProvider {
       description: object.description,
       stepDescriptions: object.stepDescriptions,
     };
-  }
-
-  async *chat(
-    messages: ChatMessage[],
-    systemPrompt: string
-  ): AsyncGenerator<string> {
-    const model = getModel();
-
-    const { textStream } = streamText({
-      model,
-      system: systemPrompt,
-      messages: messages.map((m) => ({
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content,
-      })),
-      abortSignal: this._abortSignal ?? undefined,
-      experimental_telemetry: telemetry('chat'),
-    });
-
-    for await (const chunk of textStream) {
-      yield chunk;
-    }
   }
 }
 

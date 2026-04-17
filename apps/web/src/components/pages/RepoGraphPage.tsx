@@ -3,21 +3,16 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
-import { Sidebar } from '@/components/layout/Sidebar';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
-import { ViolationsPanel } from '@/components/violations/ViolationsPanel';
-import { RulesPanel } from '@/components/rules/RulesPanel';
+import { HomePanel } from '@/components/pages/HomePanel';
 import { FileTree } from '@/components/files/FileTree';
 import { FlowList } from '@/components/flows/FlowList';
 import { FlowDiagramPanel } from '@/components/flows/FlowDiagramPanel';
-import { ChatPanel } from '@/components/chat/ChatPanel';
 import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
-import { AnalyticsDashboard } from '@/components/analytics/AnalyticsDashboard';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
-import { FilterPanel, type FilterState } from '@/components/graph/controls/FilterPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
@@ -25,7 +20,6 @@ import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { useAnalysisList } from '@/hooks/useAnalysisList';
 import { useCodeViolationSummary } from '@/hooks/useCodeViolationSummary';
 import { useFlows } from '@/hooks/useFlows';
-import { getRules } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
@@ -53,19 +47,17 @@ type OpenDatabase = {
 };
 
 const VALID_LEFT_TABS = new Set<LeftTab>([
-  'violations',
-  'rules',
+  'home',
+  'graphs',
   'files',
   'flows',
   'databases',
-  'analytics',
   'analyses',
 ]);
 
 const MAIN_CONTENT_TABS = new Set<LeftTab>([
-  'violations',
-  'rules',
-  'analytics',
+  'home',
+  'graphs',
   'analyses',
 ]);
 
@@ -83,41 +75,84 @@ export default function RepoGraphPage() {
   const initialMode = urlToDepth[modeFromUrl] || 'services';
   const [depthLevel, setDepthLevelState] = useState<DepthLevel>(initialMode);
 
+  const [scopedServiceId, setScopedServiceIdState] = useState<string | null>(
+    () => searchParams?.get('scopeService') || null,
+  );
+  const [scopedModuleId, setScopedModuleIdState] = useState<string | null>(
+    () => searchParams?.get('scopeModule') || null,
+  );
+
+  const setScopedServiceId = useCallback((id: string | null) => {
+    setScopedServiceIdState(id);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('scopeService', id);
+    else url.searchParams.delete('scopeService');
+    navigate(url.pathname + url.search);
+  }, [navigate]);
+
+  const setScopedModuleId = useCallback((id: string | null) => {
+    setScopedModuleIdState(id);
+    const url = new URL(window.location.href);
+    if (id) url.searchParams.set('scopeModule', id);
+    else url.searchParams.delete('scopeModule');
+    navigate(url.pathname + url.search);
+  }, [navigate]);
+
   const setDepthLevel = useCallback((level: DepthLevel) => {
     setDepthLevelState(level);
     const url = new URL(window.location.href);
     if (level === 'services') {
       url.searchParams.delete('mode');
+      // Services depth doesn't consume scope params — strip them from the URL
+      // but keep them in memory so returning to modules/methods restores the
+      // user's last picks.
+      url.searchParams.delete('scopeService');
+      url.searchParams.delete('scopeModule');
+    } else if (level === 'modules') {
+      url.searchParams.set('mode', 'modules');
+      // Modules depth uses `scopeService` but not `scopeModule` — keep the
+      // module id in memory for when the user returns to methods.
+      url.searchParams.delete('scopeModule');
+      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
     } else {
       url.searchParams.set('mode', depthToUrl[level]);
+      // Methods depth: restore both scope params to URL from memory if present.
+      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
+      if (scopedModuleId) url.searchParams.set('scopeModule', scopedModuleId);
     }
-    navigate(url.pathname + url.search, { replace: true });
-  }, [navigate]);
-  const [filteredNodes, setFilteredNodes] = useState<Node[]>([]);
-  const [filteredEdges, setFilteredEdges] = useState<Edge[]>([]);
+    navigate(url.pathname + url.search);
+  }, [navigate, scopedServiceId, scopedModuleId]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  const [explainRequest, setExplainRequest] = useState<{ nodeId: string; nodeName: string; nodeType?: string; nodeContext?: Record<string, unknown> } | null>(null);
-  const [isChatOpen, setIsChatOpen] = useState(false);
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
     const tabParam = searchParams?.get('tab');
+    // Legacy URL compat: ?tab=violations now maps to the Graphs tab.
+    if (tabParam === 'violations') return 'graphs';
+    // Legacy URL compat: the Analytics tab was folded into Home.
+    if (tabParam === 'analytics') return 'home';
     if (tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)) {
       return tabParam as LeftTab;
     }
     if (searchParams?.get('flow')) return 'flows';
     if (searchParams?.get('file')) return 'files';
-    return 'violations';
+    return 'home';
   });
   const setLeftTab = useCallback((tab: LeftTab | null) => {
     setLeftTabState(tab);
     const url = new URL(window.location.href);
-    if (tab && tab !== 'violations') {
+    if (tab && tab !== 'home') {
       url.searchParams.set('tab', tab);
     } else {
-      url.searchParams.delete('tab');
+      // Home is the default landing. Strip every tab-scoped query param so the
+      // URL is just /repos/:id. In-memory state (depthLevel, scope IDs, open
+      // files/flows, diff mode) is preserved and re-serialized to the URL
+      // when the user navigates back to the owning tab.
+      for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow', 'view']) {
+        url.searchParams.delete(key);
+      }
     }
-    window.history.replaceState({}, '', url.toString());
-  }, []);
+    navigate(url.pathname + url.search);
+  }, [navigate]);
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
   const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -138,7 +173,7 @@ export default function RepoGraphPage() {
     } else {
       url.searchParams.delete('file');
     }
-    navigate(url.pathname + url.search, { replace: true });
+    navigate(url.pathname + url.search);
   }, [navigate]);
 
   const handleOpenFile = useCallback((path: string, pinned: boolean, scrollToLine?: number) => {
@@ -191,7 +226,7 @@ export default function RepoGraphPage() {
     } else {
       url.searchParams.delete('flow');
     }
-    navigate(url.pathname + url.search, { replace: true });
+    navigate(url.pathname + url.search);
   }, [navigate]);
 
   const handleCloseFlow = useCallback((flowId: string) => {
@@ -209,6 +244,36 @@ export default function RepoGraphPage() {
   const setActiveDbId = useCallback((id: string | null) => {
     setActiveDbIdState(id);
   }, []);
+
+  // Sync React state from the URL on every location change. This covers
+  // browser Back / Forward (and deep-linked reloads) — without it, the URL
+  // changes but in-memory state stays frozen at whatever the user last set.
+  // Setters are idempotent, so running this on our own navigations is a no-op.
+  useEffect(() => {
+    const tabParam = searchParams?.get('tab') ?? null;
+    const nextTab: LeftTab =
+      tabParam === 'violations'
+        ? 'graphs'
+        : tabParam === 'analytics'
+          ? 'home'
+          : tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)
+            ? (tabParam as LeftTab)
+            : searchParams?.get('flow')
+              ? 'flows'
+              : searchParams?.get('file')
+                ? 'files'
+                : 'home';
+    setLeftTabState(nextTab);
+
+    const modeParam = searchParams?.get('mode') ?? '';
+    setDepthLevelState(urlToDepth[modeParam] ?? 'services');
+
+    setScopedServiceIdState(searchParams?.get('scopeService') ?? null);
+    setScopedModuleIdState(searchParams?.get('scopeModule') ?? null);
+    setActiveFilePathState(searchParams?.get('file') ?? null);
+    setActiveFlowIdState(searchParams?.get('flow') ?? null);
+    setIsDiffModeState(searchParams?.get('view') === 'diff');
+  }, [searchParams]);
 
   const clearActiveDetailView = useCallback(() => {
     setActiveFilePath(null);
@@ -238,28 +303,30 @@ export default function RepoGraphPage() {
     setActiveFlowId(null);
   }, [setActiveDbId, setActiveFilePath, setActiveFlowId]);
 
+  // Home is the default + locked tab. Clicking an active rail icon (which the
+  // sidebar signals as `null`) falls back to Home instead of nulling out.
+  // Active file/flow/db IDs persist across tab switches — their detail views
+  // are gated on `leftTab`, so returning to Files/Flows/Databases reopens the
+  // last-viewed item.
   const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
-    setLeftTab(tab);
+    setLeftTab(tab ?? 'home');
+  }, [setLeftTab]);
 
-    if (tab && MAIN_CONTENT_TABS.has(tab)) {
-      clearActiveDetailView();
-    }
-  }, [setLeftTab, clearActiveDetailView]);
-
-  const handleOpenFlow = useCallback((flowId: string, pinned: boolean) => {
+  const handleOpenFlow = useCallback((flowId: string, flowName: string, pinned: boolean) => {
     setOpenFlows((prev) => {
       const existing = prev.find((f) => f.id === flowId);
       if (existing) {
-        return prev.map((f) => f.id === flowId ? { ...f, pinned: pinned || f.pinned } : f);
+        // Update name too — it may have been 'Flow' placeholder from a URL restore.
+        return prev.map((f) => f.id === flowId ? { ...f, name: flowName, pinned: pinned || f.pinned } : f);
       }
       if (pinned) {
-        return [...prev, { id: flowId, name: 'Flow', pinned: true }];
+        return [...prev, { id: flowId, name: flowName, pinned: true }];
       }
       const hasUnpinned = prev.find((f) => !f.pinned);
       if (hasUnpinned) {
-        return prev.map((f) => !f.pinned ? { id: flowId, name: 'Flow', pinned: false } : f);
+        return prev.map((f) => !f.pinned ? { id: flowId, name: flowName, pinned: false } : f);
       }
-      return [...prev, { id: flowId, name: 'Flow', pinned: false }];
+      return [...prev, { id: flowId, name: flowName, pinned: false }];
     });
     showFlowView(flowId);
   }, [showFlowView]);
@@ -292,10 +359,11 @@ export default function RepoGraphPage() {
 
   const currentBranch = repo?.defaultBranch;
   const { isConnected, analysisProgress, clearProgress, onEvent, llmEstimate, respondToLlmEstimate } = useSocket(repoId);
-  const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, selectedService ?? undefined, selectedAnalysisId ?? undefined);
+  // Note: graph node clicks store into `selectedService` for visual highlight only —
+  // we deliberately don't pass it to useViolations so the violations list is never
+  // filtered as a side effect of clicking a graph node.
+  const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, undefined, selectedAnalysisId ?? undefined);
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
-  const [rulesCount, setRulesCount] = useState(0);
-  useEffect(() => { getRules().then((r) => setRulesCount(r.length)).catch(() => {}); }, []);
 
   // In diff mode with no diff result yet, show no violations
   const emptyViolations = isDiffMode && !diffResult;
@@ -305,12 +373,44 @@ export default function RepoGraphPage() {
   const graphAnalysisId = isDiffMode && diffResult?.diffAnalysisId
     ? diffResult.diffAnalysisId
     : selectedAnalysisId ?? undefined;
-  const { nodes, edges, savedCollapsedIds, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
-    useGraph(repoId, currentBranch, depthLevel, graphAnalysisId);
+  // Defer heavy tab-specific fetches so Home doesn't compete with the analytics
+  // and violations calls on repo-page mount. Graph data is only needed by tabs
+  // that actually render the graph or derive lists from its nodes.
+  const graphNeededForTab =
+    leftTab === 'graphs' || leftTab === 'files' || leftTab === 'databases';
 
-  const { summary: rawCodeViolationSummary, refetch: refetchCodeViolationSummary } = useCodeViolationSummary(repoId, graphAnalysisId);
+  const { nodes, edges, savedCollapsedIds, scopes: graphScopes, isLoading: graphLoading, error: graphError, refetch: refetchGraph } =
+    useGraph(repoId, {
+      branch: currentBranch,
+      level: depthLevel,
+      analysisId: graphAnalysisId,
+      scopedServiceId,
+      scopedModuleId,
+      enabled: graphNeededForTab,
+    });
+
+  // Auto-select when exactly one option is available for the current depth.
+  useEffect(() => {
+    if (depthLevel === 'modules' && !scopedServiceId && graphScopes.services.length === 1) {
+      setScopedServiceId(graphScopes.services[0].id);
+    }
+  }, [depthLevel, scopedServiceId, graphScopes.services, setScopedServiceId]);
+
+  useEffect(() => {
+    if (depthLevel !== 'methods' || scopedModuleId) return;
+    const candidates = scopedServiceId
+      ? graphScopes.modules.filter((m) => m.serviceId === scopedServiceId)
+      : graphScopes.modules;
+    if (candidates.length === 1) {
+      setScopedModuleId(candidates[0].id);
+    }
+  }, [depthLevel, scopedModuleId, scopedServiceId, graphScopes.modules, setScopedModuleId]);
+
+  const { summary: rawCodeViolationSummary, refetch: refetchCodeViolationSummary } =
+    useCodeViolationSummary(repoId, graphAnalysisId, { enabled: leftTab === 'files' });
   const codeViolationSummary = emptyViolations ? undefined : rawCodeViolationSummary;
-  const { flows: flowList, severities: rawFlowSeverities, isLoading: flowsLoading, refetch: refetchFlows } = useFlows(repoId);
+  const { flows: flowList, severities: rawFlowSeverities, isLoading: flowsLoading, refetch: refetchFlows } =
+    useFlows(repoId, { enabled: leftTab === 'flows' });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
   const isViewingHistory = !!selectedAnalysisId;
@@ -339,12 +439,6 @@ export default function RepoGraphPage() {
   useEffect(() => {
     if (isDiffMode) loadDiffCheck();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Initialize filtered data
-  useEffect(() => {
-    setFilteredNodes(nodes);
-    setFilteredEdges(edges);
-  }, [nodes, edges]);
 
   // Sync isAnalyzing with server-side progress (handles page refresh mid-analysis)
   // Skip in diff mode — diff check uses isDiffChecking instead
@@ -400,7 +494,6 @@ export default function RepoGraphPage() {
     }
   };
 
-  const [selectedDatabaseId, setSelectedDatabaseId] = useState<string | null>(null);
 
   const handleNodeSelect = useCallback((nodeId: string | null) => {
     setSelectedService(nodeId);
@@ -408,172 +501,13 @@ export default function RepoGraphPage() {
     if (nodeId) {
       const clickedNode = nodes.find((n) => n.id === nodeId);
       if (clickedNode && clickedNode.type === 'database') {
-        setSelectedDatabaseId(nodeId);
-        setLeftTab('violations');
+        const dbName = (clickedNode.data as { label?: string })?.label ?? 'Database';
+        handleOpenDatabase(nodeId, dbName, true);
         return;
       }
     }
-    setSelectedDatabaseId(null);
-  }, [nodes]);
+  }, [nodes, handleOpenDatabase]);
 
-  const handleExplainNode = useCallback((nodeId: string) => {
-    const node = nodes.find((n) => n.id === nodeId);
-    const data = node?.data as Record<string, unknown> | undefined;
-    const nodeName = (data?.label as string) || nodeId;
-
-    // Build context from node data and its connections
-    const nodeContext: Record<string, unknown> = {};
-    if (data) {
-      const { onExplain, onToggleCollapse, isCollapsed, isContainer, ...relevant } = data as Record<string, unknown>;
-      Object.assign(nodeContext, relevant);
-    }
-
-    // Add parent info
-    if (node?.parentId) {
-      const parent = nodes.find((n) => n.id === node.parentId);
-      if (parent) {
-        nodeContext.parentName = (parent.data as Record<string, unknown>)?.label;
-        nodeContext.parentType = parent.type;
-      }
-    }
-
-    // Add dependencies (edges to/from this node)
-    const inbound = edges.filter((e) => e.target === nodeId).map((e) => {
-      const source = nodes.find((n) => n.id === e.source);
-      return { from: (source?.data as Record<string, unknown>)?.label, type: (e.data as Record<string, unknown>)?.dependencyType };
-    });
-    const outbound = edges.filter((e) => e.source === nodeId).map((e) => {
-      const target = nodes.find((n) => n.id === e.target);
-      return { to: (target?.data as Record<string, unknown>)?.label, type: (e.data as Record<string, unknown>)?.dependencyType };
-    });
-    if (inbound.length) nodeContext.dependedOnBy = inbound;
-    if (outbound.length) nodeContext.dependsOn = outbound;
-
-    setSelectedService(nodeId);
-    setIsChatOpen(true);
-    setExplainRequest({ nodeId, nodeName, nodeType: node?.type, nodeContext });
-  }, [nodes, edges]);
-
-  const handleFilterChange = useCallback(
-    (filters: FilterState) => {
-      const hiddenIds = new Set<string>();
-
-      if (depthLevel === 'services') {
-        for (const n of nodes) {
-          const d = n.data as Record<string, unknown>;
-          const info = d.serviceInfo as { type: string; framework: string | null } | undefined;
-          if (info && filters.excludedTypes.size > 0 && filters.excludedTypes.has(info.type)) {
-            hiddenIds.add(n.id);
-          }
-          if (info?.framework && filters.excludedFrameworks.size > 0 && filters.excludedFrameworks.has(info.framework)) {
-            hiddenIds.add(n.id);
-          }
-          if (filters.searchQuery) {
-            const label = (d.label as string) || '';
-            if (!label.toLowerCase().includes(filters.searchQuery.toLowerCase())) {
-              hiddenIds.add(n.id);
-            }
-          }
-          if (!filters.showDatabases && n.type === 'database') {
-            hiddenIds.add(n.id);
-          }
-        }
-      } else {
-        const parentMap = new Map<string, string>();
-        for (const n of nodes) {
-          const pid = (n as Record<string, unknown>).parentId as string | undefined;
-          if (pid) parentMap.set(n.id, pid);
-        }
-
-        if (!filters.showDatabases) {
-          for (const n of nodes) {
-            if (n.type === 'database') hiddenIds.add(n.id);
-          }
-        }
-
-        for (const n of nodes) {
-          if (n.type !== 'serviceGroup') continue;
-          const d = n.data as Record<string, unknown>;
-          if (filters.excludedTypes.size > 0 && filters.excludedTypes.has(d.serviceType as string)) {
-            hiddenIds.add(n.id);
-          }
-          if (d.framework && filters.excludedFrameworks.size > 0 && filters.excludedFrameworks.has(d.framework as string)) {
-            hiddenIds.add(n.id);
-          }
-        }
-
-        if (filters.excludedLayers.size > 0) {
-          for (const n of nodes) {
-            if (n.type !== 'layer') continue;
-            const d = n.data as Record<string, unknown>;
-            if (filters.excludedLayers.has(d.label as string)) {
-              hiddenIds.add(n.id);
-            }
-          }
-        }
-
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const n of nodes) {
-            if (hiddenIds.has(n.id)) continue;
-            const pid = parentMap.get(n.id);
-            if (pid && hiddenIds.has(pid)) {
-              hiddenIds.add(n.id);
-              changed = true;
-            }
-          }
-        }
-
-        if (filters.searchQuery) {
-          const query = filters.searchQuery.toLowerCase();
-          const matchingIds = new Set<string>();
-
-          for (const n of nodes) {
-            if (hiddenIds.has(n.id)) continue;
-            const label = ((n.data as Record<string, unknown>).label as string) || '';
-            if (label.toLowerCase().includes(query)) {
-              matchingIds.add(n.id);
-              let pid = parentMap.get(n.id);
-              while (pid) { matchingIds.add(pid); pid = parentMap.get(pid); }
-            }
-          }
-
-          let expandChanged = true;
-          while (expandChanged) {
-            expandChanged = false;
-            for (const n of nodes) {
-              if (matchingIds.has(n.id)) continue;
-              const pid = parentMap.get(n.id);
-              if (pid && matchingIds.has(pid)) {
-                matchingIds.add(n.id);
-                expandChanged = true;
-              }
-            }
-          }
-
-          for (const n of nodes) {
-            if (n.type === 'database') continue;
-            if (!matchingIds.has(n.id)) hiddenIds.add(n.id);
-          }
-        }
-
-        for (const n of nodes) {
-          if (n.type !== 'serviceGroup' || hiddenIds.has(n.id)) continue;
-          const hasChild = nodes.some((c) => parentMap.get(c.id) === n.id && !hiddenIds.has(c.id));
-          if (!hasChild) hiddenIds.add(n.id);
-        }
-      }
-
-      const visible = nodes.filter((n) => !hiddenIds.has(n.id));
-      const visibleIds = new Set(visible.map((n) => n.id));
-      const visibleEdges = edges.filter((e) => visibleIds.has(e.source) && visibleIds.has(e.target));
-
-      setFilteredNodes(visible);
-      setFilteredEdges(visibleEdges);
-    },
-    [nodes, edges, depthLevel],
-  );
 
   const setIsDiffMode = useCallback((diff: boolean) => {
     setIsDiffModeState(diff);
@@ -583,7 +517,7 @@ export default function RepoGraphPage() {
     } else {
       url.searchParams.delete('view');
     }
-    navigate(url.pathname + url.search, { replace: true });
+    navigate(url.pathname + url.search);
   }, [navigate]);
 
   const handleEnterDiffMode = useCallback(() => {
@@ -597,7 +531,7 @@ export default function RepoGraphPage() {
 
   // Transform nodes when diff mode is active with results
   const diffFilteredNodes = useMemo(() => {
-    if (!isDiffMode || !diffResult) return filteredNodes;
+    if (!isDiffMode || !diffResult) return nodes;
 
     const affectedServiceSet = new Set(diffResult.affectedNodeIds.services);
     const affectedLayerSet = new Set(diffResult.affectedNodeIds.layers);
@@ -644,7 +578,7 @@ export default function RepoGraphPage() {
       while (true) {
         const pid = (current as Record<string, unknown>).parentId as string | undefined;
         if (!pid) return '';
-        const parent = filteredNodes.find((n) => n.id === pid);
+        const parent = nodes.find((n) => n.id === pid);
         if (!parent) return '';
         if (parent.type === 'serviceGroup') {
           return (parent.data as Record<string, unknown>).label as string;
@@ -653,7 +587,7 @@ export default function RepoGraphPage() {
       }
     };
 
-    return filteredNodes.map((node) => {
+    return nodes.map((node) => {
       const d = node.data as Record<string, unknown>;
       const label = d.label as string;
 
@@ -675,7 +609,7 @@ export default function RepoGraphPage() {
 
       if (node.type === 'layer') {
         const parentId = (node as Record<string, unknown>).parentId as string | undefined;
-        const parent = parentId ? filteredNodes.find((n) => n.id === parentId) : undefined;
+        const parent = parentId ? nodes.find((n) => n.id === parentId) : undefined;
         const serviceName = parent ? (parent.data as Record<string, unknown>).label as string : '';
         const layerKey = `${serviceName}::${label}`;
         const isAffected = affectedLayerSet.has(layerKey);
@@ -709,7 +643,7 @@ export default function RepoGraphPage() {
       if (node.type === 'method') {
         const serviceName = getServiceName(node);
         const pid = (node as Record<string, unknown>).parentId as string | undefined;
-        const parentModule = pid ? filteredNodes.find((n) => n.id === pid) : undefined;
+        const parentModule = pid ? nodes.find((n) => n.id === pid) : undefined;
         const moduleName = parentModule ? (parentModule.data as Record<string, unknown>).label as string : '';
         const methodKey = `${serviceName}::${moduleName}::${label}`;
         const isAffected = affectedMethodSet.has(methodKey);
@@ -731,7 +665,7 @@ export default function RepoGraphPage() {
         style: { ...node.style, opacity: 0.4 },
       };
     });
-  }, [filteredNodes, isDiffMode, diffResult]);
+  }, [nodes, isDiffMode, diffResult]);
 
   // Check if a node's absolute file path relates to the selected relative path.
   const pathMatches = useCallback((absPath: string, relSelected: string): boolean => {
@@ -747,7 +681,7 @@ export default function RepoGraphPage() {
 
   // Path-based filtering: dim nodes not matching selectedPath
   const pathFilteredNodes = useMemo(() => {
-    const base = isDiffMode ? diffFilteredNodes : filteredNodes;
+    const base = isDiffMode ? diffFilteredNodes : nodes;
     if (!selectedPath) return base;
 
     const parentMap = new Map<string, string>();
@@ -814,7 +748,7 @@ export default function RepoGraphPage() {
     return base.map((n) =>
       matchingIds.has(n.id) ? n : { ...n, style: { ...n.style, opacity: 0.15 } }
     );
-  }, [filteredNodes, diffFilteredNodes, isDiffMode, selectedPath, pathMatches]);
+  }, [nodes, diffFilteredNodes, isDiffMode, selectedPath, pathMatches]);
 
   // Set of node IDs that are highlighted (not dimmed) by path filter
   const highlightedNodeIds = useMemo(() => {
@@ -848,48 +782,63 @@ export default function RepoGraphPage() {
     return <Navigate to="/" replace />;
   }
 
-  const selectedServiceName = selectedService
-    ? ((nodes.find((n) => n.id === selectedService)?.data as Record<string, unknown>)?.label as string) ?? null
-    : null;
+  const handleLocateNode = useCallback((
+    nodeId: string,
+    requiredDepth?: string,
+    hints?: { serviceId?: string | null; moduleId?: string | null },
+  ) => {
+    const targetDepth = (requiredDepth ?? depthLevel) as DepthLevel;
 
-  const hasDatabases = nodes.some((n) => n.type === 'database');
-  const typeSet = new Set<string>();
-  const fwSet = new Set<string>();
-  const layerSet = new Set<string>();
-
-  for (const n of nodes) {
-    const d = n.data as Record<string, unknown>;
-    if (n.type === 'service') {
-      const info = d.serviceInfo as { type: string; framework: string | null } | undefined;
-      if (info?.type) typeSet.add(info.type);
-      if (info?.framework) fwSet.add(info.framework);
+    // Derive next scope from hints + target depth. Hints win when provided;
+    // otherwise we preserve existing scope (e.g. a repeat Locate on the same service).
+    let nextServiceId: string | null = scopedServiceId;
+    let nextModuleId: string | null = scopedModuleId;
+    if (targetDepth === 'services') {
+      nextServiceId = null;
+      nextModuleId = null;
+    } else if (targetDepth === 'modules') {
+      if (hints?.serviceId !== undefined) nextServiceId = hints.serviceId ?? null;
+      nextModuleId = null;
+    } else {
+      if (hints?.serviceId !== undefined) nextServiceId = hints.serviceId ?? null;
+      if (hints?.moduleId !== undefined) nextModuleId = hints.moduleId ?? null;
     }
-    if (n.type === 'serviceGroup') {
-      if (d.serviceType) typeSet.add(d.serviceType as string);
-      if (d.framework) fwSet.add(d.framework as string);
-    }
-    if (n.type === 'layer') {
-      layerSet.add(d.label as string);
-    }
-  }
 
-  const serviceTypes = [...typeSet];
-  const frameworks = [...fwSet];
-  const layerTypes = [...layerSet];
+    setDepthLevelState(targetDepth);
+    setScopedServiceIdState(nextServiceId);
+    setScopedModuleIdState(nextModuleId);
 
-  const handleLocateNode = useCallback((nodeId: string, requiredDepth?: string) => {
+    const url = new URL(window.location.href);
+    if (targetDepth === 'services') url.searchParams.delete('mode');
+    else url.searchParams.set('mode', depthToUrl[targetDepth]);
+    if (nextServiceId) url.searchParams.set('scopeService', nextServiceId);
+    else url.searchParams.delete('scopeService');
+    if (nextModuleId) url.searchParams.set('scopeModule', nextModuleId);
+    else url.searchParams.delete('scopeModule');
+    navigate(url.pathname + url.search);
+
     if (requiredDepth && requiredDepth !== depthLevel) {
-      setDepthLevel(requiredDepth as DepthLevel);
       setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
     } else {
       setFocusRequest({ nodeId, key: Date.now() });
     }
-  }, [depthLevel]);
+  }, [depthLevel, scopedServiceId, scopedModuleId, navigate]);
+
+  const handleLocateNodeFromHome = useCallback((
+    nodeId: string,
+    requiredDepth?: string,
+    hints?: { serviceId?: string | null; moduleId?: string | null },
+  ) => {
+    setLeftTab('graphs');
+    handleLocateNode(nodeId, requiredDepth, hints);
+  }, [setLeftTab, handleLocateNode]);
 
   // Whether we're showing a file tab (code viewer), flow diagram, or database tab instead of graph
-  const showingCodeViewer = activeFilePath !== null;
-  const showingFlow = activeFlowId !== null && !showingCodeViewer;
-  const showingDatabase = activeDbId !== null && !showingCodeViewer && !showingFlow;
+  // Each detail view is gated on its owning tab. Active IDs persist across tab
+  // switches so returning to Files/Flows/Databases reopens the last-viewed item.
+  const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
+  const showingFlow = activeFlowId !== null && leftTab === 'flows';
+  const showingDatabase = activeDbId !== null && leftTab === 'databases';
 
   // Update flow names when flow list loads
   useEffect(() => {
@@ -911,8 +860,6 @@ export default function RepoGraphPage() {
         isAnalyzing={isAnalyzing || isDiffChecking}
         showBack
         backHref="/"
-        isChatOpen={isChatOpen}
-        onToggleChat={() => setIsChatOpen((v) => !v)}
         isDiffMode={isDiffMode}
         onEnterDiffMode={isViewingHistory ? undefined : handleEnterDiffMode}
         onExitDiffMode={isViewingHistory ? undefined : handleExitDiffMode}
@@ -925,33 +872,11 @@ export default function RepoGraphPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
         <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} badgeCounts={{
-          violations: isDiffMode && diffResult
-            ? { newCount: diffResult.summary.newCount, resolvedCount: diffResult.summary.resolvedCount }
-            : allViolations.length,
-          rules: rulesCount,
+          home: allViolations.length,
           flows: flowList.length,
           databases: nodes.filter((n) => n.type === 'database').length,
           analyses: analyses.length,
         }}>
-          {leftTab === 'violations' && (
-            <ViolationsPanel
-              violations={violations}
-              isLoading={violationsLoading}
-              repoId={repoId}
-              selectedService={selectedService}
-              selectedServiceName={selectedServiceName}
-              selectedDatabaseId={selectedDatabaseId}
-              isDiffMode={isDiffMode}
-              diffResult={diffResult}
-              onLocateNode={handleLocateNode}
-              onOpenFile={handleOpenFile}
-              onClearFilter={() => { handleNodeSelect(null); setSelectedPath(null); }}
-              selectedPath={selectedPath}
-              nodeFilePathMap={nodeFilePathMap}
-              onOpenDatabaseInTab={(dbId, dbName) => handleOpenDatabase(dbId, dbName, true)}
-            />
-          )}
-          {leftTab === 'rules' && <RulesPanel />}
           {leftTab === 'flows' && (
             <FlowList
               flows={flowList}
@@ -1016,20 +941,10 @@ export default function RepoGraphPage() {
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar when files or flows are open */}
-          {(openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases) */}
+          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
+            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
-              {/* Home tab */}
-              <button
-                onClick={clearActiveDetailView}
-                className={`shrink-0 px-3 py-1.5 border-r border-border transition-colors ${
-                  !showingCodeViewer && !showingFlow && !showingDatabase
-                    ? 'bg-background text-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-              >
-                Home
-              </button>
               {/* File tabs */}
               {openFiles.map((file) => {
                 const fileName = file.path.split('/').pop() || file.path;
@@ -1296,19 +1211,6 @@ export default function RepoGraphPage() {
               violations={violations}
               isTab
             />
-          ) : leftTab === 'analytics' ? (
-            <AnalyticsDashboard
-              repoId={repoId}
-              branch={currentBranch}
-              analysisId={graphAnalysisId}
-              onNavigateToNode={(nodeId, kind) => {
-                setLeftTab('violations');
-                handleLocateNode(nodeId, kind === 'module' ? 'modules' : 'services');
-              }}
-              onOpenFile={(filePath) => {
-                handleOpenFile(filePath, true);
-              }}
-            />
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
@@ -1328,7 +1230,19 @@ export default function RepoGraphPage() {
               }}
               repoId={repoId}
             />
-          ) : (
+          ) : leftTab === 'home' ? (
+            <HomePanel
+              repoId={repoId}
+              branch={currentBranch}
+              analysisId={graphAnalysisId}
+              violations={violations}
+              violationsLoading={violationsLoading}
+              isDiffMode={isDiffMode}
+              diffResult={diffResult}
+              onLocateNode={handleLocateNodeFromHome}
+              onOpenFile={handleOpenFile}
+            />
+          ) : leftTab === 'graphs' ? (
           <>
 
           {/* Connection status */}
@@ -1379,7 +1293,9 @@ export default function RepoGraphPage() {
                 </Alert>
               </div>
             </div>
-          ) : filteredNodes.length === 0 && nodes.length === 0 ? (
+          ) : nodes.length === 0 && nodes.length === 0 &&
+              !(depthLevel === 'modules' && !scopedServiceId) &&
+              !(depthLevel === 'methods' && !scopedModuleId) ? (
             <div className="flex h-full items-center justify-center">
               <div className="flex flex-col items-center gap-3 text-center">
                 <AlertCircle className="h-10 w-10 text-muted-foreground" />
@@ -1407,19 +1323,10 @@ export default function RepoGraphPage() {
             </div>
           ) : (
             <>
-              <FilterPanel
-                depthLevel={depthLevel}
-                serviceTypes={serviceTypes}
-                frameworks={frameworks}
-                layerTypes={layerTypes}
-                hasDatabases={hasDatabases}
-                onFilterChange={handleFilterChange}
-              />
               <GraphCanvas
                 initialNodes={pathFilteredNodes}
-                initialEdges={filteredEdges}
+                initialEdges={edges}
                 onNodeSelect={handleNodeSelect}
-                onExplainNode={handleExplainNode}
                 selectedNodeId={selectedService}
                 repoId={repoId}
                 branch={currentBranch}
@@ -1436,24 +1343,39 @@ export default function RepoGraphPage() {
                 onExitDiffMode={handleExitDiffMode}
                 highlightedNodeIds={highlightedNodeIds}
                 savedCollapsedIds={savedCollapsedIds}
-
+                scopes={graphScopes}
+                scopedServiceId={scopedServiceId}
+                scopedModuleId={scopedModuleId}
+                onScopedServiceChange={setScopedServiceId}
+                onScopedModuleChange={(id) => {
+                  setScopedModuleId(id);
+                  if (id) {
+                    const mod = graphScopes.modules.find((m) => m.id === id);
+                    if (mod && mod.serviceId && mod.serviceId !== scopedServiceId) {
+                      setScopedServiceId(mod.serviceId);
+                    }
+                  }
+                }}
               />
             </>
           )}
           </>
+          ) : (
+            <div className="flex h-full items-center justify-center text-center">
+              <p className="max-w-xs text-sm text-muted-foreground">
+                {leftTab === 'files'
+                  ? 'Pick a file from the tree to preview it here.'
+                  : leftTab === 'flows'
+                    ? 'Pick a flow to view its sequence diagram here.'
+                    : leftTab === 'databases'
+                      ? 'Pick a database to view its schema here.'
+                      : null}
+              </p>
+            </div>
           )}
           </div>
         </div>
 
-        {/* Right sidebar: Chat only */}
-        <Sidebar isOpen={isChatOpen}>
-          <ChatPanel
-            repoId={repoId}
-            selectedService={selectedService}
-            explainRequest={explainRequest}
-            onExplainHandled={() => setExplainRequest(null)}
-          />
-        </Sidebar>
       </div>
     </div>
   );

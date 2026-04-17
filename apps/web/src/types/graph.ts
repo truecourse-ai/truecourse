@@ -15,7 +15,6 @@ export type ServiceNodeData = {
   serviceInfo: ServiceNodeInfo;
   violationCount: number;
   hasHighSeverity: boolean;
-  onExplain?: (nodeId: string) => void;
 };
 
 export type GraphNode = Node<ServiceNodeData, 'service'>;

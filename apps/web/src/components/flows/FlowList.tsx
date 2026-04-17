@@ -20,7 +20,7 @@ const triggerColors: Record<string, string> = {
 type FlowListProps = {
   flows: FlowResponse[];
   isLoading: boolean;
-  onSelectFlow: (flowId: string, pinned: boolean) => void;
+  onSelectFlow: (flowId: string, flowName: string, pinned: boolean) => void;
   activeFlowId: string | null;
   flowSeverities?: Record<string, string>;
 };
@@ -98,8 +98,8 @@ export function FlowList({ flows, isLoading, onSelectFlow, activeFlowId, flowSev
               return (
                 <button
                   key={flow.id}
-                  onClick={() => onSelectFlow(flow.id, false)}
-                  onDoubleClick={() => onSelectFlow(flow.id, true)}
+                  onClick={() => onSelectFlow(flow.id, flow.name, false)}
+                  onDoubleClick={() => onSelectFlow(flow.id, flow.name, true)}
                   className={`group flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
                     isActive
                       ? 'bg-accent text-accent-foreground'

@@ -51,10 +51,9 @@ truecourse/
           repo/RepoSelector.tsx, RepoList.tsx
           insights/InsightsPanel.tsx, InsightCard.tsx, WarningCard.tsx
           graph/panels/DiffPanel.tsx
-          chat/ChatPanel.tsx, ChatMessage.tsx, ChatInput.tsx
           schema/SchemaPanel.tsx     # Database schema review panel
           layout/Header.tsx, Sidebar.tsx
-        hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useChat.ts, useDiffCheck.ts
+        hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useDiffCheck.ts
         lib/api.ts, socket.ts
         types/graph.ts
 
@@ -62,7 +61,7 @@ truecourse/
       src/
         index.ts
         config/index.ts, database.ts
-        routes/repos.ts, analysis.ts, insights.ts, chat.ts, databases.ts
+        routes/repos.ts, analysis.ts, insights.ts, databases.ts
         services/
           analyzer.service.ts
           graph.service.ts
@@ -70,7 +69,6 @@ truecourse/
           watcher.service.ts
           diff-check.service.ts       # Git diff violation comparison
           llm/provider.ts, tracing.ts, prompts.ts, push-prompts.ts
-          chat.service.ts
         socket/index.ts, handlers.ts
         db/schema.ts, migrations/
         middleware/error.ts
@@ -166,8 +164,6 @@ truecourse/
 - `services` — id, analysisId, name, rootPath, type, framework, fileCount, layerSummary (jsonb)
 - `service_dependencies` — id, analysisId, sourceServiceId, targetServiceId, dependencyCount, dependencyType
 - `insights` — id, repoId, analysisId, type, title, content, severity, targetServiceId, fixPrompt, createdAt
-- `conversations` — id, repoId, branch, createdAt, updatedAt
-- `messages` — id, conversationId, role ('user'|'assistant'|'system'), content, nodeContext (jsonb), createdAt
 
 ### 1.3 Analysis Pipeline (packages/analyzer) `STATUS: DONE`
 
@@ -245,7 +241,7 @@ A minimal but realistic monorepo with:
 #### 1.8.1 `packages/shared` — Schema validation tests
 - **Zod schemas parse valid data correctly** — each schema (FileAnalysis, ServiceInfo, Insight, etc.) accepts well-formed input
 - **Zod schemas reject invalid data** — missing required fields, wrong types, invalid enum values
-- **API schemas validate correctly** — CreateRepoSchema, AnalyzeRepoSchema, ChatMessageSchema with valid/invalid input
+- **API schemas validate correctly** — CreateRepoSchema, AnalyzeRepoSchema with valid/invalid input
 
 #### 1.8.2 `packages/analyzer` — Analysis engine tests
 
@@ -328,35 +324,6 @@ A minimal but realistic monorepo with:
 - Send only metadata to LLM (service names, types, dep counts, violations), not raw file content
 - LLM returns structured JSON via tool_use/function_calling
 - **Service descriptions** — After analysis completes, the LLM generates a one-line description for each service (e.g. "Public API gateway that routes requests to internal services"). Stored in the `services` table, returned in the graph endpoint, displayed in the ServiceNode
-
-### 1.10 AI Agent Chat Panel `STATUS: DONE`
-
-**UX:**
-- Right-side panel with a persistent chat interface (always one "Agent" tab)
-- Click "Explain" button on any graph node → opens panel with node context auto-injected into the conversation
-- User can ask follow-up questions, ask about relationships, request deeper analysis
-- Clicking a different node injects that node's context into the ongoing conversation (not a new chat)
-- Agent has full project context: architecture, services, dependencies, layers
-
-**How context injection works:**
-- When user clicks "Explain" on a node, a system message is appended with that node's data (service metadata, file list, dependencies, layer info)
-- Conversation history is maintained per repo session
-- Agent can reference previous questions and answers
-
-**Backend:**
-- `POST /api/repos/:id/chat` — send message `{ message, nodeContext?, conversationId }`
-- `GET /api/repos/:id/chat/:conversationId` — get conversation history
-- Streaming responses via SSE or WebSocket for real-time token output
-
-**Database additions:**
-- `conversations` — id, repoId, branch, createdAt, updatedAt
-- `messages` — id, conversationId, role ('user'|'assistant'|'system'), content, nodeContext (jsonb), createdAt
-
-**LLM conversation management:**
-- Use Anthropic Agent SDK / OpenAI SDK conversation features directly
-- Langfuse traces each conversation turn (optional)
-- System prompt includes: project architecture summary, current branch, analysis metadata
-- Node context injected as user message with structured data when "Explain" is clicked
 
 ### 1.11 CLI & Distribution (`tools/cli`) `STATUS: DONE`
 

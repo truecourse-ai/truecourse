@@ -15,7 +15,6 @@ import { errorHandler } from './middleware/error.js';
 import reposRouter from './routes/repos.js';
 import analysisRouter from './routes/analysis.js';
 import violationsRouter from './routes/violations.js';
-import chatRouter from './routes/chat.js';
 import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
 import flowsRouter from './routes/flows.js';
@@ -68,7 +67,6 @@ async function main() {
   app.use('/api/repos', reposRouter);
   app.use('/api/repos', analysisRouter);
   app.use('/api/repos', violationsRouter);
-  app.use('/api/repos', chatRouter);
   app.use('/api/repos', databasesRouter);
   app.use('/api/repos', flowsRouter);
   app.use('/api/repos', analyticsRouter);

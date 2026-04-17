@@ -6,10 +6,12 @@ type SortKey = 'violationCount' | 'criticalCount' | 'highCount';
 
 export function TopOffendersTable({
   data,
-  onNavigate,
+  onOffenderClick,
+  activeOffenderId,
 }: {
   data: TopOffendersResponse;
-  onNavigate?: (offender: TopOffender) => void;
+  onOffenderClick?: (offender: TopOffender) => void;
+  activeOffenderId?: string | null;
 }) {
   const [sortBy, setSortBy] = useState<SortKey>('violationCount');
 
@@ -55,11 +57,13 @@ export function TopOffendersTable({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((offender, i) => (
+            {sorted.map((offender, i) => {
+              const isActive = activeOffenderId === offender.id;
+              return (
               <tr
                 key={offender.id}
-                className={`border-b border-border/50 transition-colors hover:bg-muted/50 ${onNavigate ? 'cursor-pointer' : ''}`}
-                onClick={() => onNavigate?.(offender)}
+                className={`border-b border-border/50 transition-colors ${onOffenderClick ? 'cursor-pointer hover:bg-muted/50' : ''} ${isActive ? 'bg-accent/50' : ''}`}
+                onClick={() => onOffenderClick?.(offender)}
               >
                 <td className="px-4 py-1.5 text-xs text-muted-foreground">{i + 1}</td>
                 <td className="px-2 py-1.5">
@@ -86,7 +90,8 @@ export function TopOffendersTable({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </CardContent>

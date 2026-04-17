@@ -29,7 +29,6 @@ export const repos = pgTable('repos', {
 export const reposRelations = relations(repos, ({ many }) => ({
   analyses: many(analyses),
   violations: many(violations),
-  conversations: many(conversations),
 }));
 
 // ---------------------------------------------------------------------------
@@ -241,53 +240,6 @@ export const violationsRelations = relations(violations, ({ one }) => ({
   targetMethod: one(methods, {
     fields: [violations.targetMethodId],
     references: [methods.id],
-  }),
-}));
-
-// ---------------------------------------------------------------------------
-// conversations
-// ---------------------------------------------------------------------------
-
-export const conversations = pgTable('conversations', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  repoId: uuid('repo_id')
-    .notNull()
-    .references(() => repos.id, { onDelete: 'cascade' }),
-  branch: text('branch'),
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
-export const conversationsRelations = relations(
-  conversations,
-  ({ one, many }) => ({
-    repo: one(repos, {
-      fields: [conversations.repoId],
-      references: [repos.id],
-    }),
-    messages: many(messages),
-  })
-);
-
-// ---------------------------------------------------------------------------
-// messages
-// ---------------------------------------------------------------------------
-
-export const messages = pgTable('messages', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  conversationId: uuid('conversation_id')
-    .notNull()
-    .references(() => conversations.id, { onDelete: 'cascade' }),
-  role: text('role').notNull(), // 'user' | 'assistant' | 'system'
-  content: text('content').notNull(),
-  nodeContext: jsonb('node_context'),
-  createdAt: timestamp('created_at', { mode: 'date', withTimezone: true }).defaultNow().notNull(),
-});
-
-export const messagesRelations = relations(messages, ({ one }) => ({
-  conversation: one(conversations, {
-    fields: [messages.conversationId],
-    references: [conversations.id],
   }),
 }));
 

@@ -29,19 +29,20 @@ import { IntraLayerEdge } from '@/components/graph/edges/IntraLayerEdge';
 import { DatabaseEdge } from '@/components/graph/edges/DatabaseEdge';
 import { ZoomControls } from '@/components/graph/controls/ZoomControls';
 import { DepthToggle } from '@/components/graph/controls/DepthToggle';
-import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network, Loader2 } from 'lucide-react';
+import { ScopeSelector } from '@/components/graph/controls/ScopeSelector';
+import { Spline, CornerDownRight, Maximize2, Minimize2, Zap, ZapOff, Network, Loader2, Folder, Boxes } from 'lucide-react';
 import * as api from '@/lib/api';
 import { useCollapseState } from '@/hooks/useCollapseState';
 import { applyCollapseState } from '@/lib/collapse';
 import type { DepthLevel } from '@/types/graph';
 import type { DiffCheckResponse } from '@/lib/api';
+import type { GraphScopes } from '@/hooks/useGraph';
 
 
 type GraphCanvasProps = {
   initialNodes: Node[];
   initialEdges: Edge[];
   onNodeSelect?: (nodeId: string | null) => void;
-  onExplainNode?: (nodeId: string) => void;
   selectedNodeId?: string | null;
   repoId: string;
   branch?: string;
@@ -58,6 +59,11 @@ type GraphCanvasProps = {
   onExitDiffMode?: () => void;
   highlightedNodeIds?: Set<string> | null;
   savedCollapsedIds?: string[];
+  scopes?: GraphScopes;
+  scopedServiceId?: string | null;
+  scopedModuleId?: string | null;
+  onScopedServiceChange?: (id: string | null) => void;
+  onScopedModuleChange?: (id: string | null) => void;
 };
 
 const nodeTypes: NodeTypes = {
@@ -81,7 +87,6 @@ function GraphCanvasInner({
   initialNodes,
   initialEdges,
   onNodeSelect,
-  onExplainNode,
   selectedNodeId,
   repoId,
   branch,
@@ -98,6 +103,11 @@ function GraphCanvasInner({
   onExitDiffMode,
   highlightedNodeIds,
   savedCollapsedIds,
+  scopes,
+  scopedServiceId,
+  scopedModuleId,
+  onScopedServiceChange,
+  onScopedModuleChange,
 }: GraphCanvasProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [animationsEnabled, setAnimationsEnabled] = useState(() => {
@@ -167,15 +177,19 @@ function GraphCanvasInner({
     return counts;
   }, [initialNodes]);
 
-  // Update when initial data changes
+  // Update when initial data changes.
+  // Selection is driven purely by `selectedNodeId` (parent's click-tracked
+  // state). Locate also funnels through that same state by calling
+  // `onNodeSelect(focusNodeId)` in the focus effect below — so clicking
+  // elsewhere/outside naturally clears a located node, same as any other
+  // selection.
   useMemo(() => {
-    const isSelected = (id: string) => id === selectedNodeId || id === focusNodeId;
+    const isSelected = (id: string) => id === selectedNodeId;
     let processedNodes: Node[];
     if (depthLevel === 'services') {
       processedNodes = initialNodes.map((node) => ({
         ...node,
         selected: isSelected(node.id),
-        data: { ...node.data, onExplain: onExplainNode },
       }));
     } else {
       processedNodes = initialNodes.map((node) => {
@@ -199,14 +213,10 @@ function GraphCanvasInner({
             selected: isSelected(node.id),
             data: {
               ...node.data,
-              onExplain: onExplainNode,
               isCollapsed: collapsedIds.has(node.id),
               onToggleCollapse: toggleCollapse,
             },
           };
-        }
-        if (node.type === 'module' || node.type === 'method') {
-          return { ...node, selected: isSelected(node.id), data: { ...node.data, onExplain: onExplainNode } };
         }
         return { ...node, selected: isSelected(node.id) };
       });
@@ -242,7 +252,7 @@ function GraphCanvasInner({
 
     setNodes(processedNodes);
     setEdges(processedEdges);
-  }, [initialNodes, initialEdges, setNodes, setEdges, onExplainNode, selectedNodeId, focusNodeId, depthLevel, edgeStyle, collapsedIds, toggleCollapse, moduleCountByLayer, focusMode, highlightedNodeIds]);
+  }, [initialNodes, initialEdges, setNodes, setEdges, selectedNodeId, depthLevel, edgeStyle, collapsedIds, toggleCollapse, moduleCountByLayer, focusMode, highlightedNodeIds]);
 
 
   const animDuration = animationsEnabled ? 300 : 0;
@@ -281,14 +291,17 @@ function GraphCanvasInner({
     return () => cancelAnimationFrame(raf);
   }, [collapsedIds, fitView, animDuration, isBulkAction]);
 
-  // Focus on a specific node when requested from violations panel
+  // Focus on a specific node when Locate fires. Behaves exactly like a click
+  // on that node: routes through `onNodeSelect` so the parent's selection
+  // state updates (which in turn clears on any subsequent click outside or on
+  // another node), then zooms to center the target.
   useEffect(() => {
     if (!focusNodeId) return;
 
     const node = nodesRef.current.find((n) => n.id === focusNodeId);
     if (!node) return;
 
-    setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === focusNodeId })));
+    onNodeSelect?.(focusNodeId);
 
     setTimeout(() => {
       if (node.type === 'serviceGroup') {
@@ -297,22 +310,11 @@ function GraphCanvasInner({
           .map((n) => n.id);
         const nodeIds = [node.id, ...childNodeIds];
         fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: animDuration });
-      } else if (node.type === 'module' || node.type === 'method') {
-        // For module/method nodes, also show sibling nodes in the same parent
-        const parentId = (node as Record<string, unknown>).parentId as string | undefined;
-        if (parentId) {
-          const siblingIds = nodesRef.current
-            .filter((n) => (n as Record<string, unknown>).parentId === parentId)
-            .map((n) => n.id);
-          fitView({ nodes: [{ id: parentId }, ...siblingIds.map((id) => ({ id }))], padding: 0.3, duration: animDuration });
-        } else {
-          fitView({ nodes: [{ id: focusNodeId }], padding: 1, duration: animDuration });
-        }
       } else {
         fitView({ nodes: [{ id: focusNodeId }], padding: 1.5, duration: animDuration });
       }
     }, 50);
-  }, [focusKey, focusNodeId, fitView, setNodes]);
+  }, [focusKey, focusNodeId, fitView, onNodeSelect, animDuration]);
 
   const onNodeDragStop = useCallback(
     () => {
@@ -354,6 +356,12 @@ function GraphCanvasInner({
         setTimeout(() => {
           fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.5, duration: animDuration });
         }, 50);
+      } else if (node.type === 'module' || node.type === 'method') {
+        // Zoom in on the clicked node alone — same behavior as a service click
+        // in services depth. fitView centers the target in the viewport.
+        setTimeout(() => {
+          fitView({ nodes: [{ id: node.id }], padding: 1.5, duration: animDuration });
+        }, 50);
       } else if (node.type === 'database') {
         // Zoom to database node
         setTimeout(() => {
@@ -364,8 +372,12 @@ function GraphCanvasInner({
     [onNodeSelect, depthLevel, fitView, animDuration],
   );
 
+  // Hover-filter-edges is only useful at services depth where the node-to-node
+  // map fits in the viewport. At modules/methods depth the hierarchy already
+  // implies the scope, so we skip the hover effect entirely there.
   const onNodeMouseEnter: NodeMouseHandler = useCallback(
     (_event, node) => {
+      if (depthLevel !== 'services') return;
       setEdges((eds) => {
         const connectedIds = new Set<string>();
         for (const e of eds) {
@@ -394,11 +406,12 @@ function GraphCanvasInner({
         }));
       });
     },
-    [setEdges, focusMode],
+    [depthLevel, setEdges, focusMode],
   );
 
   const onNodeMouseLeave: NodeMouseHandler = useCallback(
     () => {
+      if (depthLevel !== 'services') return;
       setEdges((eds) =>
         eds.map((e) => ({
           ...e,
@@ -410,7 +423,7 @@ function GraphCanvasInner({
         })),
       );
     },
-    [setEdges, focusMode],
+    [depthLevel, setEdges, focusMode],
   );
 
   const onPaneClick = useCallback(() => {
@@ -427,52 +440,73 @@ function GraphCanvasInner({
 
   return (
     <div className={`h-full w-full${animationsEnabled ? '' : ' no-animations'}`}>
-      <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 flex items-center gap-2">
-        <DepthToggle level={depthLevel} onChange={onDepthChange} />
-        {depthLevel !== 'services' && (
+      {/* Top-center controls: permanent row that stays fixed so DepthToggle
+          never shifts when depth-dependent controls appear/disappear. */}
+      <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 flex flex-col items-center gap-2">
+        <div className="flex items-center gap-2">
+          <DepthToggle level={depthLevel} onChange={onDepthChange} />
           <button
-            onClick={() => { collapsedIds.size > 0 ? expandAll() : collapseAll(); }}
+            onClick={() => setFocusMode((v) => {
+              const next = !v;
+              localStorage.setItem('truecourse:focusMode', next ? 'on' : 'off');
+              return next;
+            })}
             className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
-            title={collapsedIds.size > 0 ? 'Expand All' : 'Collapse All'}
+            title={focusMode ? 'Show all edges' : 'Show edges on hover only'}
           >
-            {collapsedIds.size > 0 ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
+            <Network className={`h-3.5 w-3.5 ${focusMode ? 'opacity-40' : ''}`} />
           </button>
+          <button
+            onClick={() => setEdgeStyle((s) => {
+              const next = s === 'bezier' ? 'step' : 'bezier';
+              localStorage.setItem('truecourse:edgeStyle', next);
+              return next;
+            })}
+            className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+            title={edgeStyle === 'bezier' ? 'Switch to L-shaped edges' : 'Switch to curved edges'}
+          >
+            {edgeStyle === 'bezier' ? <CornerDownRight className="h-3.5 w-3.5" /> : <Spline className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={() => setAnimationsEnabled((v) => {
+              const next = !v;
+              localStorage.setItem('truecourse:animations', next ? 'on' : 'off');
+              return next;
+            })}
+            className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+            title={animationsEnabled ? 'Disable animations' : 'Enable animations'}
+          >
+            {animationsEnabled ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+
+        {/* Depth-dependent controls live on a second row so showing/hiding them
+            never pushes the DepthToggle around. */}
+        {depthLevel !== 'services' && (
+          <div className="flex items-center gap-2">
+            {scopes && onScopedServiceChange && onScopedModuleChange && (
+              <ScopeSelector
+                depth={depthLevel}
+                services={scopes.services}
+                modules={scopes.modules}
+                scopedServiceId={scopedServiceId ?? null}
+                scopedModuleId={scopedModuleId ?? null}
+                onScopeServiceChange={onScopedServiceChange}
+                onScopeModuleChange={onScopedModuleChange}
+              />
+            )}
+            <button
+              onClick={() => { collapsedIds.size > 0 ? expandAll() : collapseAll(); }}
+              className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
+              title={collapsedIds.size > 0 ? 'Expand All' : 'Collapse All'}
+            >
+              {collapsedIds.size > 0 ? <Maximize2 className="h-3.5 w-3.5" /> : <Minimize2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         )}
-        <button
-          onClick={() => setFocusMode((v) => {
-            const next = !v;
-            localStorage.setItem('truecourse:focusMode', next ? 'on' : 'off');
-            return next;
-          })}
-          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
-          title={focusMode ? 'Show all edges' : 'Show edges on hover only'}
-        >
-          <Network className={`h-3.5 w-3.5 ${focusMode ? 'opacity-40' : ''}`} />
-        </button>
-        <button
-          onClick={() => setEdgeStyle((s) => {
-            const next = s === 'bezier' ? 'step' : 'bezier';
-            localStorage.setItem('truecourse:edgeStyle', next);
-            return next;
-          })}
-          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
-          title={edgeStyle === 'bezier' ? 'Switch to L-shaped edges' : 'Switch to curved edges'}
-        >
-          {edgeStyle === 'bezier' ? <CornerDownRight className="h-3.5 w-3.5" /> : <Spline className="h-3.5 w-3.5" />}
-        </button>
-        <button
-          onClick={() => setAnimationsEnabled((v) => {
-            const next = !v;
-            localStorage.setItem('truecourse:animations', next ? 'on' : 'off');
-            return next;
-          })}
-          className="flex items-center justify-center rounded-md border border-border bg-card p-1.5 shadow-sm text-muted-foreground hover:text-foreground transition-colors"
-          title={animationsEnabled ? 'Disable animations' : 'Enable animations'}
-        >
-          {animationsEnabled ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
-        </button>
+
         {isSaving && (
-          <div className="mt-2 rounded-md border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm text-center">
+          <div className="rounded-md border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-sm">
             Saving...
           </div>
         )}
@@ -495,6 +529,7 @@ function GraphCanvasInner({
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
+        onlyRenderVisibleElements
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
         <MiniMap
@@ -504,6 +539,34 @@ function GraphCanvasInner({
         />
         <ZoomControls onAutoLayout={handleAutoLayout} panMode={panMode} onTogglePanMode={() => setPanMode((v) => !v)} />
       </ReactFlow>
+
+      {/* Scope required — empty state overlay */}
+      {((depthLevel === 'modules' && !scopedServiceId) ||
+        (depthLevel === 'methods' && !scopedModuleId)) && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="pointer-events-auto flex flex-col items-center gap-2 rounded-lg border border-border bg-card px-6 py-5 text-center shadow-lg">
+            {depthLevel === 'modules' ? (
+              <Folder className="h-6 w-6 text-muted-foreground" />
+            ) : (
+              <Boxes className="h-6 w-6 text-muted-foreground" />
+            )}
+            <p className="text-sm font-medium text-foreground">
+              {depthLevel === 'modules'
+                ? 'Select a service'
+                : scopedServiceId
+                  ? 'Select a module'
+                  : 'Select a service, then a module'}
+            </p>
+            <p className="max-w-sm text-xs text-muted-foreground">
+              {depthLevel === 'modules'
+                ? 'Choose a service above to explore its modules. Viewing every module at once is hidden for performance.'
+                : scopedServiceId
+                  ? 'Choose a module above to explore its functions. Viewing every function at once is hidden for performance.'
+                  : 'Pick a service first to narrow the module list, then pick the module whose functions you want to explore.'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Diff mode banner */}
       {isDiffMode && !diffResult && !isDiffChecking && (

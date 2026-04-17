@@ -123,12 +123,13 @@ export async function getBreakdown(
   specificAnalysisId?: string,
 ): Promise<BreakdownResponse> {
   const analysisId = specificAnalysisId ?? await findLatestAnalysisId(repoId, branch);
-  if (!analysisId) return { byType: {}, bySeverity: {}, total: 0 };
+  if (!analysisId) return { byCategory: {}, bySeverity: {}, total: 0 };
 
-  // All violations: group by type and severity (only active)
-  const allByType = await db
+  // Category is the first segment of ruleKey (e.g. 'security/deterministic/foo' → 'security').
+  // Done in SQL via split_part so we can GROUP BY directly.
+  const allByCategory = await db
     .select({
-      type: violations.type,
+      category: sql<string>`split_part(${violations.ruleKey}, '/', 1)`,
       count: sql<number>`count(*)::int`,
     })
     .from(violations)
@@ -138,7 +139,7 @@ export async function getBreakdown(
         inArray(violations.status, ['new', 'unchanged']),
       ),
     )
-    .groupBy(violations.type);
+    .groupBy(sql`split_part(${violations.ruleKey}, '/', 1)`);
 
   const allBySeverity = await db
     .select({
@@ -154,9 +155,10 @@ export async function getBreakdown(
     )
     .groupBy(violations.severity);
 
-  const byType: Record<string, number> = {};
-  for (const row of allByType) {
-    byType[row.type] = (byType[row.type] ?? 0) + row.count;
+  const byCategory: Record<string, number> = {};
+  for (const row of allByCategory) {
+    if (!row.category) continue;
+    byCategory[row.category] = (byCategory[row.category] ?? 0) + row.count;
   }
 
   const bySeverity: Record<string, number> = {};
@@ -164,9 +166,9 @@ export async function getBreakdown(
     bySeverity[row.severity] = (bySeverity[row.severity] ?? 0) + row.count;
   }
 
-  const total = Object.values(byType).reduce((a, b) => a + b, 0);
+  const total = Object.values(byCategory).reduce((a, b) => a + b, 0);
 
-  return { byType, bySeverity, total };
+  return { byCategory, bySeverity, total };
 }
 
 // ---------------------------------------------------------------------------

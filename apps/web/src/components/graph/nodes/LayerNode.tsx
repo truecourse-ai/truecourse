@@ -1,7 +1,7 @@
 
 import { memo, useCallback } from 'react';
 import { Handle, Position, useNodeConnections, useReactFlow, type NodeProps } from '@xyflow/react';
-import { MessageCircle, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
+import { AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 import { LAYER_LABELS } from '@/types/graph';
 import type { Layer } from '@truecourse/shared';
 
@@ -25,7 +25,6 @@ type LayerNodeData = {
   onToggleCollapse?: (nodeId: string) => void;
   moduleCount?: number;
   violations?: LayerViolation[];
-  onExplain?: (nodeId: string) => void;
   diffBadge?: DiffBadge;
 };
 
@@ -35,7 +34,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
-  const { label, fileCount, layerColor, fileNames = [], isContainer, isCollapsed, onToggleCollapse, moduleCount, violations = [], onExplain, diffBadge } = data;
+  const { label, fileCount, layerColor, fileNames = [], isContainer, isCollapsed, onToggleCollapse, moduleCount, violations = [], diffBadge } = data;
   const layerLabel = LAYER_LABELS[label as Layer] || label;
   const { setEdges } = useReactFlow();
 
@@ -183,15 +182,6 @@ function LayerNodeComponent({ id, data }: NodeProps & { data: LayerNodeData }) {
             </>
           )}
           <span className="text-[10px] text-muted-foreground">{fileCount} files</span>
-          {onExplain && (
-            <button
-              className="flex items-center justify-center rounded-sm border border-border bg-muted p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); onExplain(id); }}
-              title="Explain"
-            >
-              <MessageCircle className="h-2.5 w-2.5" />
-            </button>
-          )}
         </div>
       </div>
 

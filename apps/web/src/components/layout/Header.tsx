@@ -1,5 +1,5 @@
 
-import { Sun, Moon, ArrowLeft, Loader2, MessageCircle, Info, ChevronDown } from 'lucide-react';
+import { Sun, Moon, ArrowLeft, Loader2, Info, ChevronDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -12,8 +12,6 @@ type HeaderProps = {
   isAnalyzing?: boolean;
   showBack?: boolean;
   backHref?: string;
-  isChatOpen?: boolean;
-  onToggleChat?: () => void;
   isDiffMode?: boolean;
   onEnterDiffMode?: () => void;
   onExitDiffMode?: () => void;
@@ -30,8 +28,6 @@ export function Header({
   isAnalyzing,
   showBack,
   backHref = '/',
-  isChatOpen,
-  onToggleChat,
   isDiffMode,
   onEnterDiffMode,
   onExitDiffMode,
@@ -183,17 +179,6 @@ export function Header({
       </div>
 
       <div className="flex items-center gap-1">
-        {onToggleChat && (
-          <Button
-            variant={isChatOpen ? 'default' : 'outline'}
-            size="sm"
-            onClick={onToggleChat}
-            aria-label="Toggle Chat"
-          >
-            <MessageCircle className="h-4 w-4" />
-            Chat
-          </Button>
-        )}
         <Button
           variant="ghost"
           size="icon-sm"

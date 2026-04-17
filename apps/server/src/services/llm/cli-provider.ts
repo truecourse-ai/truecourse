@@ -50,7 +50,6 @@ import type {
   DiffViolationItem,
   DiffViolationsResult,
   ServiceDescription,
-  ChatMessage,
 } from './provider.js';
 
 // ---------------------------------------------------------------------------
@@ -779,67 +778,6 @@ export abstract class BaseCLIProvider implements LLMProvider {
       description: object.description,
       stepDescriptions: object.stepDescriptions,
     };
-  }
-
-  async *chat(
-    messages: ChatMessage[],
-    systemPrompt: string,
-  ): AsyncGenerator<string> {
-    const args = [
-      '--print',
-      '--output-format', 'stream-json',
-      '--dangerously-skip-permissions',
-      '--no-session-persistence',
-      '--system-prompt', systemPrompt,
-      ...this.modelFlag,
-    ];
-
-    // Flatten messages into a single prompt for --print mode
-    const prompt = messages.map((m) => `${m.role}: ${m.content}`).join('\n\n');
-
-    const child = spawn(this.binaryName, args, {
-      env: this.getCleanEnv(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      ...(this._repoPath ? { cwd: this._repoPath } : {}),
-    });
-
-    child.stdin!.write(prompt);
-    child.stdin!.end();
-
-    // Parse stream-json events line by line
-    let buffer = '';
-    for await (const chunk of child.stdout!) {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop()!; // keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          // Yield assistant text content from stream events
-          if (event.type === 'assistant' && event.message) {
-            yield event.message;
-          } else if (event.type === 'result' && event.result) {
-            yield event.result;
-          }
-        } catch {
-          // Skip non-JSON lines
-        }
-      }
-    }
-
-    // Process remaining buffer
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer);
-        if (event.type === 'result' && event.result) {
-          yield event.result;
-        }
-      } catch {
-        // Skip
-      }
-    }
   }
 }
 

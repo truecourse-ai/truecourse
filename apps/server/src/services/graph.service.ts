@@ -573,7 +573,7 @@ function placeModulesInGrid(
           superClass: mod.superClass,
           layerColor: LAYER_COLORS[layer.layer] || '#6b7280',
         },
-        style: { width: MODULE_NODE_WIDTH },
+        style: { width: MODULE_NODE_WIDTH, height: MODULE_NODE_HEIGHT },
       } as GraphNode);
     } else {
       // Method level: module is a container for methods
@@ -651,7 +651,7 @@ function placeModulesInGrid(
             statementCount: mth.statementCount,
             maxNestingDepth: mth.maxNestingDepth,
           },
-          style: { width: methodColWidth },
+          style: { width: methodColWidth, height: METHOD_NODE_HEIGHT },
         } as GraphNode);
       }
     }

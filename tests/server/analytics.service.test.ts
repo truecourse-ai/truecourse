@@ -97,7 +97,7 @@ describe('Analytics shared types (Zod schemas)', () => {
   describe('BreakdownResponseSchema', () => {
     it('accepts valid breakdown', () => {
       const data = {
-        byType: { service: 3, module: 2, code: 5 },
+        byCategory: { security: 3, bugs: 2, 'code-quality': 5 },
         bySeverity: { critical: 1, high: 2, medium: 4, low: 3 },
         total: 10,
       };
@@ -105,7 +105,7 @@ describe('Analytics shared types (Zod schemas)', () => {
     });
 
     it('accepts empty breakdown', () => {
-      const data = { byType: {}, bySeverity: {}, total: 0 };
+      const data = { byCategory: {}, bySeverity: {}, total: 0 };
       expect(BreakdownResponseSchema.parse(data)).toEqual(data);
     });
   });
@@ -201,6 +201,7 @@ describe('Analytics computation logic (unit)', () => {
     status: string;
     severity: string;
     type: string;
+    ruleKey?: string;
   }
 
   function computeTrendPoints(
@@ -237,13 +238,15 @@ describe('Analytics computation logic (unit)', () => {
 
   function computeBreakdown(violations: ViolationRow[]) {
     const active = violations.filter((v) => v.status === 'new' || v.status === 'unchanged');
-    const byType: Record<string, number> = {};
+    const byCategory: Record<string, number> = {};
     const bySeverity: Record<string, number> = {};
     for (const v of active) {
-      byType[v.type] = (byType[v.type] ?? 0) + 1;
+      // Category is the first segment of ruleKey (e.g. 'security/deterministic/foo' → 'security').
+      const category = (v.ruleKey ?? '').split('/')[0];
+      if (category) byCategory[category] = (byCategory[category] ?? 0) + 1;
       bySeverity[v.severity] = (bySeverity[v.severity] ?? 0) + 1;
     }
-    return { byType, bySeverity, total: active.length };
+    return { byCategory, bySeverity, total: active.length };
   }
 
   function computeResolutionRate(resolved: number, active: number) {
@@ -305,19 +308,19 @@ describe('Analytics computation logic (unit)', () => {
 
   it('breakdown: only active violations counted', () => {
     const result = computeBreakdown([
-      { analysisId: 'a1', status: 'new', severity: 'high', type: 'service' },
-      { analysisId: 'a1', status: 'unchanged', severity: 'medium', type: 'module' },
-      { analysisId: 'a1', status: 'resolved', severity: 'low', type: 'code' },
+      { analysisId: 'a1', status: 'new', severity: 'high', type: 'service', ruleKey: 'security/deterministic/foo' },
+      { analysisId: 'a1', status: 'unchanged', severity: 'medium', type: 'module', ruleKey: 'bugs/deterministic/bar' },
+      { analysisId: 'a1', status: 'resolved', severity: 'low', type: 'code', ruleKey: 'code-quality/llm/baz' },
     ]);
     expect(result.total).toBe(2); // resolved excluded
-    expect(result.byType).toEqual({ service: 1, module: 1 });
+    expect(result.byCategory).toEqual({ security: 1, bugs: 1 });
     expect(result.bySeverity).toEqual({ high: 1, medium: 1 });
   });
 
   it('breakdown: empty when no violations', () => {
     const result = computeBreakdown([]);
     expect(result.total).toBe(0);
-    expect(result.byType).toEqual({});
+    expect(result.byCategory).toEqual({});
   });
 
   it('resolution rate: basic calculation', () => {

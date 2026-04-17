@@ -1,7 +1,7 @@
 
 import { memo, useCallback } from 'react';
 import { Handle, Position, useNodeConnections, useReactFlow, type NodeProps } from '@xyflow/react';
-import { Box, FileCode, Braces, MessageCircle, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
+import { Box, FileCode, Braces, AlertTriangle, ChevronRight, ChevronDown } from 'lucide-react';
 
 type ModuleViolation = {
   targetLayer: string;
@@ -25,7 +25,6 @@ type ModuleNodeData = {
   isCollapsed?: boolean;
   onToggleCollapse?: (nodeId: string) => void;
   violations?: ModuleViolation[];
-  onExplain?: (nodeId: string) => void;
   diffBadge?: DiffBadge;
 };
 
@@ -39,7 +38,7 @@ const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
 function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleNodeData }) {
-  const { label, moduleKind, methodCount, isDead, isContainer, isCollapsed, onToggleCollapse, violations, onExplain } = data;
+  const { label, moduleKind, methodCount, isDead, isContainer, isCollapsed, onToggleCollapse, violations } = data;
   const Icon = KIND_ICONS[moduleKind] || FileCode;
   const { setEdges } = useReactFlow();
 
@@ -132,9 +131,11 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
   // Card mode: compact node (used in modules depth level)
   return (
     <div
-      className={`w-full overflow-hidden rounded-md shadow-sm transition-all border ${
-        violations?.length ? 'border-red-500/60' : isDead ? 'border-dashed border-amber-500/60 bg-card/60' : 'bg-card/80'
-      } ${selected ? 'animate-border-pulse' : ''}`}
+      className={`h-full w-full overflow-hidden rounded-md shadow-sm transition-all ${
+        selected
+          ? 'ring-1 ring-primary/30 bg-card'
+          : `border ${violations?.length ? 'border-red-500/60' : isDead ? 'border-dashed border-amber-500/60 bg-card/60' : 'bg-card/80'}`
+      }`}
     >
       <Handle type="target" position={Position.Top} id="top" className={topConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} />
       <Handle type="source" position={Position.Bottom} id="bottom" className={bottomConnections.length > 0 ? DOT_CLASS : HIDDEN_CLASS} />
@@ -147,15 +148,6 @@ function ModuleNodeComponent({ id, data, selected }: NodeProps & { data: ModuleN
         {violationTooltip}
         {deadTooltip}
         <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{methodCount} {methodCount === 1 ? 'method' : 'methods'}</span>
-        {onExplain && (
-          <button
-            className="flex items-center justify-center rounded-sm border border-border bg-muted p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={(e) => { e.stopPropagation(); onExplain(id); }}
-            title="Explain"
-          >
-            <MessageCircle className="h-2.5 w-2.5" />
-          </button>
-        )}
       </div>
     </div>
   );

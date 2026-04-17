@@ -2,12 +2,17 @@ import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
 import type { CodeViolationSummary } from '@/lib/api';
 
-export function useCodeViolationSummary(repoId: string, analysisId?: string) {
+export function useCodeViolationSummary(
+  repoId: string,
+  analysisId?: string,
+  options: { enabled?: boolean } = {},
+) {
+  const { enabled = true } = options;
   const [summary, setSummary] = useState<CodeViolationSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const fetch = useCallback(async () => {
-    if (!repoId) return;
+    if (!repoId || !enabled) return;
     setIsLoading(true);
     try {
       const data = await api.getCodeViolationSummary(repoId, analysisId);
@@ -17,7 +22,7 @@ export function useCodeViolationSummary(repoId: string, analysisId?: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, analysisId]);
+  }, [repoId, analysisId, enabled]);
 
   useEffect(() => {
     fetch();

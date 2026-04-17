@@ -3,7 +3,6 @@ import {
   CreateRepoSchema,
   AnalyzeRepoSchema,
   GenerateViolationsSchema,
-  ChatMessageSchema,
 } from '../../packages/shared/src/schemas/index';
 import {
   FileAnalysisSchema,
@@ -86,26 +85,6 @@ describe('GenerateViolationsSchema', () => {
     const result = GenerateViolationsSchema.safeParse({
       analysisId: 'not-a-uuid',
     });
-    expect(result.success).toBe(false);
-  });
-});
-
-describe('ChatMessageSchema', () => {
-  it('accepts { message: "hello" }', () => {
-    const result = ChatMessageSchema.safeParse({ message: 'hello' });
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts { message: "hello", conversationId: valid-uuid }', () => {
-    const result = ChatMessageSchema.safeParse({
-      message: 'hello',
-      conversationId: '550e8400-e29b-41d4-a716-446655440000',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects { message: "" }', () => {
-    const result = ChatMessageSchema.safeParse({ message: '' });
     expect(result.success).toBe(false);
   });
 });

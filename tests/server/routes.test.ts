@@ -109,22 +109,6 @@ async function cleanupFixtureRepo(): Promise<void> {
       .delete(schema.analyses)
       .where(eq(schema.analyses.repoId, repo.id));
 
-    // Delete conversations and messages
-    const repoConversations = await db
-      .select()
-      .from(schema.conversations)
-      .where(eq(schema.conversations.repoId, repo.id));
-
-    for (const conv of repoConversations) {
-      await db
-        .delete(schema.messages)
-        .where(eq(schema.messages.conversationId, conv.id));
-    }
-
-    await db
-      .delete(schema.conversations)
-      .where(eq(schema.conversations.repoId, repo.id));
-
     await db.delete(schema.repos).where(eq(schema.repos.id, repo.id));
   }
 }
