@@ -1,12 +1,11 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { desc } from 'drizzle-orm';
 import * as fs from 'fs';
-import { db } from '../config/database.js';
+import { db, withProjectDb } from '../config/database.js';
 import { analyses } from '../db/schema.js';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
-import { getCurrentProject } from '../config/current-project.js';
 import { readProjectConfig, updateProjectConfig } from '../config/project-config.js';
 import {
   readRegistry,
@@ -17,20 +16,10 @@ import {
 
 const router: Router = Router();
 
-/**
- * The server (until Chunk 6) is bound to exactly one project resolved from
- * cwd at startup. Every route that takes `:id` validates it matches the
- * currently-bound project's slug.
- */
-function requireCurrentProject(slug: string) {
-  const current = getCurrentProject();
-  if (current.slug !== slug) {
-    throw createAppError(
-      `Project "${slug}" is not currently served. This server is bound to "${current.slug}".`,
-      404,
-    );
-  }
-  return current;
+function requireRegistryEntry(slug: string) {
+  const entry = getProjectBySlug(slug);
+  if (!entry) throw createAppError('Project not found', 404);
+  return entry;
 }
 
 async function latestAnalyzedAt(): Promise<Date | null> {
@@ -47,7 +36,6 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     }
 
     const repoPath = parsed.data.path;
-
     if (!fs.existsSync(repoPath)) {
       throw createAppError(`Path does not exist: ${repoPath}`, 400);
     }
@@ -67,7 +55,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// GET /api/repos - List all registered projects
+// GET /api/repos - List all registered projects (home page)
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const entries = readRegistry();
@@ -84,16 +72,12 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// GET /api/repos/:id - Get project details with latest analysis
+// GET /api/repos/:id - Project details (opens the project's PGlite to read
+// the latest analysis timestamp).
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.id as string;
-    const entry = getProjectBySlug(slug);
-    if (!entry) throw createAppError('Project not found', 404);
-
-    // Only the currently-bound project has a live DB to read analyses from.
-    const current = getCurrentProject();
-    const lastAnalyzedAt = current.slug === slug ? await latestAnalyzedAt() : null;
+    const entry = requireRegistryEntry(req.params.id as string);
+    const lastAnalyzedAtValue = await withProjectDb(entry, () => latestAnalyzedAt());
 
     const git = await getGit(entry.path);
     const branchSummary = await git.branch();
@@ -102,7 +86,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       id: entry.slug,
       name: entry.name,
       path: entry.path,
-      lastAnalyzed: lastAnalyzedAt?.toISOString() ?? null,
+      lastAnalyzed: lastAnalyzedAtValue?.toISOString() ?? null,
       branches: branchSummary.all,
       defaultBranch: branchSummary.current,
     });
@@ -114,10 +98,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 // GET /api/repos/:id/branches - List git branches
 router.get('/:id/branches', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.id as string;
-    const entry = getProjectBySlug(slug);
-    if (!entry) throw createAppError('Project not found', 404);
-
+    const entry = requireRegistryEntry(req.params.id as string);
     const git = await getGit(entry.path);
     const branchSummary = await git.branch();
     res.json({
@@ -145,11 +126,10 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
 // PUT /api/repos/:id/categories - Update per-repo enabled categories
 router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.id as string;
+    const entry = requireRegistryEntry(req.params.id as string);
     const { enabledCategories } = req.body as { enabledCategories: string[] | null };
-    const entry = requireCurrentProject(slug);
-    const next = updateProjectConfig(entry.path, { enabledCategories });
-    res.json({ enabledCategories: next.enabledCategories ?? null });
+    const updated = updateProjectConfig(entry.path, { enabledCategories });
+    res.json({ enabledCategories: updated.enabledCategories ?? null });
   } catch (error) {
     next(error);
   }
@@ -158,22 +138,19 @@ router.put('/:id/categories', async (req: Request, res: Response, next: NextFunc
 // PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
 router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.id as string;
+    const entry = requireRegistryEntry(req.params.id as string);
     const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
-    const entry = requireCurrentProject(slug);
-    const next = updateProjectConfig(entry.path, { enableLlmRules });
-    res.json({ enableLlmRules: next.enableLlmRules ?? null });
+    const updated = updateProjectConfig(entry.path, { enableLlmRules });
+    res.json({ enableLlmRules: updated.enableLlmRules ?? null });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/repos/:id/config - Read per-repo config.json (used by analyze/dashboard)
+// GET /api/repos/:id/config - Read per-repo config.json
 router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.id as string;
-    const entry = getProjectBySlug(slug);
-    if (!entry) throw createAppError('Project not found', 404);
+    const entry = requireRegistryEntry(req.params.id as string);
     res.json(readProjectConfig(entry.path));
   } catch (error) {
     next(error);

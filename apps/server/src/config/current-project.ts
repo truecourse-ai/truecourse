@@ -1,51 +1,27 @@
-import { type RegistryEntry, registerProject, getProjectBySlug } from './registry.js';
+import { type RegistryEntry, getProjectBySlug } from './registry.js';
+import { getCurrentProjectDb } from './database.js';
 
 /**
- * The server (Chunk 3–5 state) binds to a single project resolved at startup.
- * Chunk 6 will make the server fully multi-project; this module is the
- * intermediate single-project accessor.
+ * Return the `RegistryEntry` for the project currently bound to the request's
+ * async context. Throws if called outside a projectResolver-guarded request.
  */
-let _current: RegistryEntry | null = null;
-
-/**
- * Register `repoPath` in the global registry (if not already present) and
- * stash the resulting entry as the server's active project. Safe to call
- * multiple times — re-registering refreshes `lastOpened`.
- */
-export function setCurrentProject(repoPath: string): RegistryEntry {
-  _current = registerProject(repoPath);
-  return _current;
-}
-
 export function getCurrentProject(): RegistryEntry {
-  if (!_current) {
-    throw new Error('Current project not initialized. Call setCurrentProject() first.');
+  const handle = getCurrentProjectDb();
+  if (!handle) {
+    throw new Error('No active project. Route is missing the projectResolver middleware.');
   }
-  return _current;
-}
-
-export function maybeGetCurrentProject(): RegistryEntry | null {
-  return _current;
+  return handle.project;
 }
 
 /**
- * Resolve a `:id` URL param to a `RegistryEntry`. Throws NotFound if the slug
- * is unknown. Throws Forbidden-style error if the slug is not the currently
- * bound project (intermediate state until Chunk 6 makes the server
- * fully multi-project).
+ * Look up a project by `:id` slug. Used for routes that need project metadata
+ * without opening its PGlite (e.g. git-only endpoints, config.json writers).
+ * Throws a 404-style error if the slug is unknown.
  */
 export function resolveProjectForRequest(slug: string): RegistryEntry {
   const entry = getProjectBySlug(slug);
   if (!entry) {
     const err = new Error(`Project "${slug}" not found in registry`) as Error & { statusCode?: number };
-    err.statusCode = 404;
-    throw err;
-  }
-  const current = getCurrentProject();
-  if (entry.slug !== current.slug) {
-    const err = new Error(
-      `Project "${slug}" is not served by this server instance (bound to "${current.slug}").`,
-    ) as Error & { statusCode?: number };
     err.statusCode = 404;
     throw err;
   }

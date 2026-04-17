@@ -1,20 +1,25 @@
 import { eq, notInArray } from 'drizzle-orm';
-import { db } from '../config/database.js';
+import { db as requestDb } from '../config/database.js';
 import { rules } from '../db/schema.js';
 import { getAllDefaultRules } from '@truecourse/analyzer';
 import { type AnalysisRule, DOMAIN_ORDER } from '@truecourse/shared';
+
+type DbHandle = typeof requestDb;
 
 /**
  * Seed default rules into the database.
  * Uses upsert — new rules are inserted, existing rules get their
  * name/description/prompt/severity updated (preserving user's `enabled` toggle).
  * Removes rules that are no longer in the defaults.
+ *
+ * Accepts an explicit DB handle so it can be called from
+ * `openProjectDb()` before the request's async-local store is set up.
  */
-export async function seedRules(): Promise<void> {
+export async function seedRules(database: DbHandle = requestDb): Promise<void> {
   const defaults = getAllDefaultRules();
 
   for (const rule of defaults) {
-    await db
+    await database
       .insert(rules)
       .values({
         key: rule.key,
@@ -44,11 +49,13 @@ export async function seedRules(): Promise<void> {
 
   // Remove rules that are no longer in the defaults
   const defaultKeys = defaults.map((r) => r.key);
-  const deleted = await db.delete(rules).where(notInArray(rules.key, defaultKeys)).returning({ key: rules.key });
+  const deleted = await database.delete(rules).where(notInArray(rules.key, defaultKeys)).returning({ key: rules.key });
   if (deleted.length > 0) {
     console.log(`[Rules] Removed ${deleted.length} obsolete rule(s): ${deleted.map((r) => r.key).join(', ')}`);
   }
 }
+
+const db = requestDb; // alias used by the remaining getters below
 
 /** Derive domain from rule key (e.g., 'architecture/deterministic/foo' → 'architecture'). */
 function deriveDomain(key: string): AnalysisRule['domain'] {

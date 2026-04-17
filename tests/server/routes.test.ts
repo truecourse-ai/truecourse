@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 import * as schema from '../../apps/server/src/db/schema';
 import { setupTestDb, teardownTestDb, type TestDb } from '../helpers/test-db';
-import { setCurrentProject } from '../../apps/server/src/config/current-project';
 
 // ---------------------------------------------------------------------------
 // Mock the socket handlers so analysis doesn't crash on getIO()
@@ -74,10 +73,7 @@ describe('API routes (integration)', () => {
   let createdRepoId: string;
 
   beforeAll(async () => {
-    ({ db } = await setupTestDb());
-    // Bind the test's fixture directory as the server's current project so
-    // route handlers that call resolveProjectForRequest() can validate the slug.
-    setCurrentProject(FIXTURE_PATH);
+    ({ db } = await setupTestDb(FIXTURE_PATH));
   });
 
   afterAll(async () => {
