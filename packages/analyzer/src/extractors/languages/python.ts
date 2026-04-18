@@ -535,9 +535,19 @@ export function extractPythonImports(tree: Tree, filePath: string): ImportStatem
       const source = extractImportFromSource(node)
       const specifiers: ImportSpecifier[] = []
 
-      // Find the imported names
+      // The first dotted_name is the module source (X in `from X import ...`).
+      // Named imports are the dotted_name children AFTER the `import` keyword.
+      // Referential equality on tree-sitter node wrappers is unreliable across
+      // platforms — use keyword-position instead.
+      let seenImportKeyword = false
       for (const child of node.children) {
-        if (child.type === 'dotted_name' && child !== node.children.find((c) => c.type === 'dotted_name')) {
+        if (child.type === 'import') {
+          seenImportKeyword = true
+          continue
+        }
+        if (!seenImportKeyword) continue
+
+        if (child.type === 'dotted_name') {
           // Named import
           specifiers.push({
             name: child.text,
@@ -559,34 +569,6 @@ export function extractPythonImports(tree: Tree, filePath: string): ImportStatem
             isDefault: false,
             isNamespace: true,
           })
-        }
-      }
-
-      // If no specifiers found yet, look for identifier children after 'import' keyword
-      if (specifiers.length === 0) {
-        let foundImport = false
-        for (const child of node.children) {
-          if (child.type === 'import') {
-            foundImport = true
-            continue
-          }
-          if (foundImport && child.type === 'dotted_name') {
-            specifiers.push({
-              name: child.text,
-              isDefault: false,
-              isNamespace: false,
-            })
-          }
-          if (foundImport && child.type === 'aliased_import') {
-            const name = child.childForFieldName('name')?.text || ''
-            const alias = child.childForFieldName('alias')?.text
-            specifiers.push({
-              name,
-              alias,
-              isDefault: false,
-              isNamespace: false,
-            })
-          }
         }
       }
 
