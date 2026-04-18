@@ -29,14 +29,15 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.4.2")
+  .version("0.4.3")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
   .command("dashboard")
   .description("Start the TrueCourse dashboard and open it in your browser")
-  .action(async () => {
-    await runDashboard();
+  .option("--reconfigure", "Re-prompt for console vs background service mode")
+  .action(async (options) => {
+    await runDashboard({ reconfigure: options.reconfigure });
   });
 
 dashboardCmd

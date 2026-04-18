@@ -65,6 +65,7 @@ truecourse add                        # Register repo without analyzing
 
 # Dashboard (web UI)
 truecourse dashboard                  # Start + open the dashboard
+truecourse dashboard --reconfigure    # Re-prompt for console vs background service mode
 truecourse dashboard stop             # Stop the dashboard
 truecourse dashboard status           # Show dashboard status
 truecourse dashboard logs             # Tail dashboard logs (service mode only)
