@@ -107,17 +107,6 @@ truecourse telemetry disable          # Opt out of anonymous telemetry
 truecourse telemetry enable           # Opt back in
 ```
 
-## Web Dashboard
-
-Run `truecourse dashboard` to open the web UI:
-
-- **Home** — Analytics (violation trends, hotspots, category breakdowns) and a browser for all 1,180+ rules enabled on this repo
-- **Dependency graph** — Interactive service/module/method visualization with React Flow
-- **Code viewer** — Inline violations with severity markers and fix suggestions
-- **Flow tracing** — End-to-end request flows across service boundaries
-- **Database ER diagrams** — Auto-detected from ORM usage (Prisma, Drizzle, SQLAlchemy, etc.)
-- **Diff mode** — See which violations your uncommitted changes introduce or fix
-
 ## Analysis Rules
 
 TrueCourse ships with **1,200+ deterministic rules** and **100 LLM rules** across 8 categories:
