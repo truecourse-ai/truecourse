@@ -27,7 +27,7 @@ export const pythonUnusedLoopVariableVisitor: CodeRuleVisitor = {
     function isUsedInBody(n: import('tree-sitter').SyntaxNode): boolean {
       if (n.type === 'identifier' && n.text === varName) {
         // Make sure it's not the loop variable definition itself
-        if (n.id !== left.id) return true
+        if (n.id !== left?.id) return true
       }
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
