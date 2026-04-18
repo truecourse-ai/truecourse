@@ -35,6 +35,10 @@
     "./lib/analysis-store": {
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
+    },
+    "./services/violation-query": {
+      "types": "./dist/services/violation-query.service.d.ts",
+      "import": "./dist/services/violation-query.service.js"
     }
   },
   "scripts": {

@@ -1,68 +1,45 @@
 import * as p from "@clack/prompts";
-import { readLatest, readDiff } from "@truecourse/server/lib/analysis-store";
-import type { Violation, DiffResult } from "./helpers.js";
 import {
-  requireRegisteredRepo,
-  renderViolations,
-  renderDiffResults,
-} from "./helpers.js";
-
-const SEVERITY_ORDER: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  info: 4,
-};
+  listViolations,
+  getDiffResult,
+} from "@truecourse/server/services/violation-query";
+import type { Violation, DiffResult } from "./helpers.js";
+import { requireRegisteredRepo, renderViolations, renderDiffResults } from "./helpers.js";
 
 export async function runList({ limit = 20, offset = 0 } = {}): Promise<void> {
   p.intro("Violations");
 
   const repo = requireRegisteredRepo();
-  const latest = readLatest(repo.path);
+  const { violations, total } = listViolations(repo.path, {
+    limit: isFinite(limit) ? limit : 0,
+    offset,
+  });
 
-  if (!latest) {
-    p.log.info("No analysis found. Run `truecourse analyze` first.");
+  if (total === 0 && violations.length === 0) {
+    p.log.info("No violations. Run `truecourse analyze` if you haven't yet.");
     return;
   }
 
-  // Active set: new + unchanged. Matches the default filter on
-  // GET /api/repos/:id/violations so CLI and dashboard agree.
-  const active = latest.violations
-    .filter((v) => v.status === "new" || v.status === "unchanged")
-    .sort((a, b) => {
-      const sa = SEVERITY_ORDER[a.severity] ?? 5;
-      const sb = SEVERITY_ORDER[b.severity] ?? 5;
-      if (sa !== sb) return sa - sb;
-      return b.createdAt.localeCompare(a.createdAt);
-    });
-
-  const total = active.length;
-  const showAll = !isFinite(limit);
-  const paged = showAll ? active : active.slice(offset, offset + limit);
-
-  renderViolations(paged as unknown as Violation[], { total, offset });
+  renderViolations(violations as unknown as Violation[], { total, offset });
 }
 
 export async function runListDiff(): Promise<void> {
   p.intro("Diff check results");
 
   const repo = requireRegisteredRepo();
-  const diff = readDiff(repo.path);
+  const result = getDiffResult(repo.path);
 
-  if (!diff) {
+  if (!result) {
     p.log.info("No diff check found. Run `truecourse analyze --diff` first.");
     return;
   }
 
-  const latest = readLatest(repo.path);
-  const isStale = latest ? latest.analysis.id !== diff.baseAnalysisId : false;
-
+  const { diff, isStale } = result;
   if (isStale) {
     p.log.warn("Results may be stale — baseline analysis has changed.");
   }
 
-  const result: DiffResult = {
+  const rendered: DiffResult = {
     isStale,
     changedFiles: diff.changedFiles,
     newViolations: diff.newViolations as unknown as DiffResult["newViolations"],
@@ -70,5 +47,5 @@ export async function runListDiff(): Promise<void> {
     summary: { newCount: diff.summary.newCount, resolvedCount: diff.summary.resolvedCount },
   };
 
-  renderDiffResults(result);
+  renderDiffResults(rendered);
 }
