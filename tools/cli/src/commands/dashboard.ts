@@ -46,7 +46,7 @@ function targetUrlFor(baseUrl: string): string {
   const repoDir = resolveRepoDir(process.cwd());
   if (!repoDir) return baseUrl;
   const entry = getProjectByPath(repoDir) ?? registerProject(repoDir);
-  return `${baseUrl}/projects/${entry.slug}`;
+  return `${baseUrl}/repos/${entry.slug}`;
 }
 
 async function promptRunMode(): Promise<TrueCourseConfig["runMode"]> {
@@ -135,7 +135,7 @@ async function runServiceMode(serverEntry: string): Promise<void> {
   p.log.info("Stop the dashboard with: truecourse dashboard stop");
 }
 
-export async function runDashboard(): Promise<void> {
+export async function runDashboard(options: { reconfigure?: boolean } = {}): Promise<void> {
   p.intro("Opening TrueCourse dashboard");
 
   const serverEntry = resolveServerEntry();
@@ -147,8 +147,9 @@ export async function runDashboard(): Promise<void> {
   }
 
   const configured = fs.existsSync(getConfigPath());
-  const runMode = configured ? readConfig().runMode : await promptRunMode();
-  if (!configured) writeConfig({ runMode });
+  const shouldPrompt = !configured || options.reconfigure;
+  const runMode = shouldPrompt ? await promptRunMode() : readConfig().runMode;
+  if (shouldPrompt) writeConfig({ runMode });
 
   if (runMode === "service") {
     try {

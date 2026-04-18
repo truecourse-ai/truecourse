@@ -1,21 +1,13 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import { readAnalysis, readLatest } from '../lib/analysis-store.js';
-import type { ViolationStatus, ViolationWithNames } from '../types/snapshot.js';
+import { listViolations } from '../services/violation-query.service.js';
 
 const router: Router = Router();
 
-const SEVERITY_ORDER: Record<string, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-  info: 4,
-};
-
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/violations
-// Filter + sort + paginate the active LATEST violation set in JS.
+// Filter + sort + paginate lives in violation-query.service (shared with CLI).
 // ---------------------------------------------------------------------------
 
 router.get(
@@ -25,69 +17,24 @@ router.get(
       const id = req.params.id as string;
       const repo = resolveProjectForRequest(id);
 
-      const analysisIdParam = req.query.analysisId as string | undefined;
-      const fileParam = req.query.file as string | undefined;
-      const statusParam = req.query.status as string | undefined;
       const limitParam = parseInt(req.query.limit as string) || 0;
       const offsetParam = parseInt(req.query.offset as string) || 0;
+      const statusParam = req.query.status as string | undefined;
+      const status =
+        statusParam === 'resolved' ? 'resolved' : statusParam === 'all' ? 'all' : 'active';
 
-      let violations: ViolationWithNames[];
-
-      if (analysisIdParam) {
-        const latest = readLatest(repo.path);
-        if (latest && latest.analysis.id === analysisIdParam) {
-          violations = latest.violations;
-        } else {
-          res.json(limitParam > 0 ? { violations: [], total: 0 } : []);
-          return;
-        }
-      } else {
-        const latest = readLatest(repo.path);
-        if (!latest) {
-          res.json(limitParam > 0 ? { violations: [], total: 0 } : []);
-          return;
-        }
-        violations = latest.violations;
-      }
-
-      // Status filter — default to active (new + unchanged)
-      let filtered: ViolationWithNames[];
-      if (statusParam === 'resolved') {
-        filtered = violations.filter((v) => v.status === 'resolved');
-      } else if (statusParam === 'all') {
-        filtered = violations;
-      } else {
-        const active: ViolationStatus[] = ['new', 'unchanged'];
-        filtered = violations.filter((v) => active.includes(v.status));
-      }
-
-      // Optional file filter (accepts absolute or relative). Scoped to code
-      // violations only — arch-AST rows (type module/function/service) can
-      // also carry a filePath for graph linkage, but the per-file code view
-      // is for line-anchored findings.
-      if (fileParam) {
-        const absPath = fileParam.startsWith('/') ? fileParam : `${repo.path}/${fileParam}`;
-        filtered = filtered.filter(
-          (v) => v.type === 'code' && (v.filePath === absPath || v.filePath === fileParam),
-        );
-      }
-
-      // Severity order → createdAt desc
-      filtered.sort((a, b) => {
-        const sa = SEVERITY_ORDER[a.severity] ?? 5;
-        const sb = SEVERITY_ORDER[b.severity] ?? 5;
-        if (sa !== sb) return sa - sb;
-        return b.createdAt.localeCompare(a.createdAt);
+      const { violations, total } = listViolations(repo.path, {
+        analysisId: req.query.analysisId as string | undefined,
+        filePath: req.query.file as string | undefined,
+        status,
+        limit: limitParam,
+        offset: offsetParam,
       });
 
-      const total = filtered.length;
-
-      const paged = limitParam > 0 ? filtered.slice(offsetParam, offsetParam + limitParam) : filtered;
-
       if (limitParam > 0 || offsetParam > 0) {
-        res.json({ violations: paged, total });
+        res.json({ violations, total });
       } else {
-        res.json(paged);
+        res.json(violations);
       }
     } catch (error) {
       next(error);

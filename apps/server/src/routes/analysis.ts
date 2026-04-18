@@ -33,6 +33,7 @@ import {
   removeFromHistory,
   writeLatest,
 } from '../lib/analysis-store.js';
+import { getDiffResult } from '../services/violation-query.service.js';
 
 const router: Router = Router();
 
@@ -552,13 +553,12 @@ router.get(
     try {
       const id = req.params.id as string;
       const repo = resolveProjectForRequest(id);
-      const diff = readDiff(repo.path);
-      if (!diff) {
+      const result = getDiffResult(repo.path);
+      if (!result) {
         res.json(null);
         return;
       }
-      const latest = readLatest(repo.path);
-      const isStale = latest ? latest.analysis.id !== diff.baseAnalysisId : false;
+      const { diff, isStale } = result;
 
       res.json({
         resolvedViolations: diff.resolvedViolations,
