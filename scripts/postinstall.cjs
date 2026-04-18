@@ -42,30 +42,26 @@ try {
 
   const { execSync } = require('child_process');
 
-  // Read versions from our own package.json to pin exact ranges
-  let packages;
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'));
-    const opt = pkg.optionalDependencies || {};
-    packages = ['tree-sitter', 'tree-sitter-typescript', 'tree-sitter-javascript', 'tree-sitter-python']
-      .map(name => opt[name] ? `${name}@"${opt[name]}"` : name)
-      .join(' ');
-  } catch {
-    packages = 'tree-sitter tree-sitter-typescript tree-sitter-javascript tree-sitter-python';
-  }
+  // The optional-dep install already extracted tree-sitter's source into
+  // node_modules/tree-sitter/ — only its native .node binary failed to build
+  // (Node 24 needs C++20, default is C++17). `npm rebuild` runs the build
+  // scripts on the existing install with our CXXFLAGS, leaving manifests
+  // untouched so the install survives later `npm exec` integrity passes
+  // that would prune an `npm install --no-save` addition as extraneous.
+  const packages = ['tree-sitter', 'tree-sitter-typescript', 'tree-sitter-javascript', 'tree-sitter-python'];
 
-  log('Installing tree-sitter with CXXFLAGS="-std=c++20"...');
+  log('Rebuilding tree-sitter with CXXFLAGS="-std=c++20"...');
 
   try {
-    execSync(`npm install --no-save ${packages}`, {
+    execSync(`npm rebuild ${packages.join(' ')}`, {
       stdio: 'inherit',
       env: { ...process.env, CXXFLAGS: '-std=c++20' },
     });
-    log('tree-sitter: installed OK');
+    log('tree-sitter: rebuilt OK');
   } catch {
-    log('tree-sitter: install failed');
+    log('tree-sitter: rebuild failed');
     console.warn(
-      '\n[TrueCourse] Could not install tree-sitter automatically.\n' +
+      '\n[TrueCourse] Could not rebuild tree-sitter automatically.\n' +
       'Fix: set the C++20 flag manually and reinstall:\n' +
       '  export CXXFLAGS="-std=c++20"\n' +
       '  npx truecourse\n\n' +
