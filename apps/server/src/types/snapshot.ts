@@ -341,4 +341,8 @@ export interface DiffSnapshot {
     unchangedCount: number;
     resolvedCount: number;
   };
+  /** LLM provider usage recorded during the diff run. Optional for
+   *  backwards compat — diff.json files written before v0.4.4 omit this
+   *  field. Useful for cost transparency; not materialized into history. */
+  usage?: UsageRecord[];
 }

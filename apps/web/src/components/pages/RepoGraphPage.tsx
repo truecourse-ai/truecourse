@@ -362,7 +362,7 @@ export default function RepoGraphPage() {
   // we deliberately don't pass it to useViolations so the violations list is never
   // filtered as a side effect of clicking a graph node.
   const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, undefined, selectedAnalysisId ?? undefined);
-  const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId);
+  const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId, onEvent);
 
   // In diff mode with no diff result yet, show no violations
   const emptyViolations = isDiffMode && !diffResult;

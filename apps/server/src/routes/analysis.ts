@@ -5,7 +5,21 @@ import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import { diffInProcess } from '../commands/diff-in-process.js';
-import { createSocketLlmEstimateHandler } from '../socket/handlers.js';
+import {
+  buildAnalysisSteps,
+  createSocketLlmEstimateHandler,
+  createSocketTracker,
+  emitAnalysisCanceled,
+  emitAnalysisComplete,
+  emitAnalysisProgress,
+  emitViolationsReady,
+} from '../socket/handlers.js';
+import {
+  registerAnalysis,
+  unregisterAnalysis,
+} from '../services/analysis-registry.js';
+import { readProjectConfig } from '../config/project-config.js';
+import { log, popLogger, pushLogger } from '../lib/logger.js';
 import type { LatestSnapshot } from '../types/snapshot.js';
 import {
   setPositions,
@@ -523,24 +537,60 @@ router.post(
       const id = req.params.id as string;
       const repo = resolveProjectForRequest(id);
 
-      const { diff } = await diffInProcess(repo, {
-        onLlmEstimate: createSocketLlmEstimateHandler(id),
+      // Short-circuit: diff requires a baseline. Fail fast with a clear 400
+      // before the 202 accept — otherwise the client would wait on sockets
+      // that never come.
+      if (!readLatest(repo.path)) {
+        throw createAppError('Run a full analysis first before checking a diff.', 400);
+      }
+
+      const projectConfig = readProjectConfig(repo.path);
+      const effectiveCategories = projectConfig.enabledCategories ?? undefined;
+      const effectiveLlmRules = projectConfig.enableLlmRules ?? true;
+
+      const abortController = registerAnalysis(id, 'pending');
+
+      res.status(202).json({
+        message: 'Diff check started',
+        repoId: id,
       });
 
-      res.json({
-        resolvedViolations: diff.resolvedViolations,
-        newViolations: diff.newViolations,
-        affectedNodeIds: diff.affectedNodeIds,
-        summary: diff.summary,
-        changedFiles: diff.changedFiles,
-        isStale: false,
-        diffAnalysisId: diff.id,
+      const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+      const tracker = createSocketTracker(id, trackerSteps);
+
+      pushLogger({
+        filePath: path.join(repo.path, '.truecourse/logs/analyze.log'),
+        tee: process.env.TRUECOURSE_DEV === '1',
       });
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('Run a full analysis first')) {
-        next(createAppError(error.message, 400));
-        return;
+
+      try {
+        const { diff } = await diffInProcess(repo, {
+          tracker,
+          signal: abortController.signal,
+          onLlmEstimate: createSocketLlmEstimateHandler(id),
+        });
+
+        emitViolationsReady(id, diff.id);
+        emitAnalysisComplete(id, diff.id);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          log.info(`[Diff] Cancelled for repo ${id}`);
+          emitAnalysisCanceled(id);
+        } else {
+          log.error(
+            `[Diff] Failed for repo ${id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          emitAnalysisProgress(id, {
+            step: 'error',
+            percent: -1,
+            detail: error instanceof Error ? error.message : 'Diff check failed',
+          });
+        }
+      } finally {
+        unregisterAnalysis(id);
+        popLogger();
       }
+    } catch (error) {
       next(error);
     }
   },

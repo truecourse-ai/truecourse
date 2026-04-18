@@ -211,8 +211,15 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
   const enabledCategories = config.enabledCategories ?? undefined;
   const enableLlmRules = config.enableLlmRules ?? true;
 
-  const spinner = p.spinner();
-  spinner.start("Checking changes...");
+  // Reset module-level renderer state between runs. runAnalyze and
+  // runAnalyzeDiff share the same `renderPhase`, `spinnerFrame`, and
+  // `renderedLineCount` globals.
+  renderPhase = enableLlmRules ? "pre-llm" : "all";
+
+  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const tracker = new StepTracker((payload) => {
+    if (payload.steps) renderSteps(payload.steps);
+  }, stepDefs);
 
   const abortController = new AbortController();
   const onSigint = () => abortController.abort();
@@ -220,20 +227,20 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
 
   try {
     const { diff } = await diffInProcess(project, {
+      tracker,
       signal: abortController.signal,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
-      onProgress: ({ detail }) => {
-        if (detail) spinner.message(detail);
-      },
       onLlmEstimate: async (estimate) => {
-        spinner.stop("Ready for LLM rules");
+        stopSpinner();
         const proceed = await promptLlmEstimate(estimate);
-        spinner.start("Checking changes...");
+        renderPhase = "post-llm";
         return proceed;
       },
     });
-    spinner.stop("Diff check complete");
+
+    stopSpinner();
+    p.log.success("Diff check complete");
     renderDiffResultsSummary({
       changedFiles: diff.changedFiles,
       newViolations: diff.newViolations as never,
@@ -243,7 +250,7 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
     });
     p.outro("Diff complete — view results with: truecourse dashboard");
   } catch (err) {
-    spinner.stop("Diff check failed");
+    stopSpinner();
     if (err instanceof DOMException && err.name === "AbortError") {
       p.outro("Diff cancelled");
       process.exit(130);

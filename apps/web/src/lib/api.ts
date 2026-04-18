@@ -395,10 +395,14 @@ export type DiffCheckResponse = {
   diffAnalysisId?: string;
 };
 
-export function runDiffCheck(repoId: string): Promise<DiffCheckResponse> {
-  return fetchApi<DiffCheckResponse>(`/api/repos/${repoId}/diff-check`, {
-    method: 'POST',
-  });
+export function runDiffCheck(repoId: string): Promise<{ message: string; repoId: string }> {
+  // POST returns 202 immediately; the actual diff result is streamed via
+  // sockets (analysis:progress, analysis:llm-estimate, analysis:complete)
+  // and then fetched via `getDiffCheck`.
+  return fetchApi<{ message: string; repoId: string }>(
+    `/api/repos/${repoId}/diff-check`,
+    { method: 'POST' },
+  );
 }
 
 export function getDiffCheck(repoId: string): Promise<DiffCheckResponse | null> {
