@@ -60,13 +60,16 @@ run(
     '--target=node20',
     '--format=esm',
     '--outfile=dist/server.mjs',
-    // Only externalize native/binary deps that can't be bundled
+    // Externalize native/binary deps that can't be bundled, plus typescript —
+    // it relies on CJS-only `__filename` in its bundled internals and works
+    // cleanly when resolved from node_modules at runtime.
     '--external:tree-sitter',
     '--external:tree-sitter-typescript',
     '--external:tree-sitter-javascript',
     '--external:tree-sitter-python',
     '--external:pyright',
-    '--banner:js="import { createRequire } from \'node:module\'; import { fileURLToPath as __esm_fileURLToPath } from \'node:url\'; import { dirname as __esm_dirname } from \'node:path\'; const require = createRequire(import.meta.url); const __filename = __esm_fileURLToPath(import.meta.url); const __dirname = __esm_dirname(__filename);"',
+    '--external:typescript',
+    '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
   ].join(' '),
 );
 
@@ -92,6 +95,7 @@ run(
     '--external:tree-sitter-javascript',
     '--external:tree-sitter-python',
     '--external:pyright',
+    '--external:typescript',
     '--banner:js="import { createRequire as __cR } from \'node:module\'; const require = __cR(import.meta.url);"',
   ].join(' '),
 );
@@ -139,6 +143,7 @@ const publishPkg = {
     'dotenv': serverPkg.dependencies['dotenv'],
     'commander': cliPkg.dependencies['commander'],
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
+    'typescript': analyzerPkg.dependencies['typescript'],
   },
   optionalDependencies: {
     // tree-sitter is optional so npm continues if native compilation fails
