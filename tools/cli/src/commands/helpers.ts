@@ -47,21 +47,6 @@ export function getServerUrl(): string {
   return `http://localhost:${port}`;
 }
 
-/** Fail fast if the dashboard server isn't responding. */
-export async function requireDashboard(): Promise<void> {
-  const url = getServerUrl();
-  try {
-    const res = await fetch(`${url}/api/health`);
-    if (!res.ok) throw new Error();
-  } catch {
-    p.log.error(
-      `TrueCourse dashboard is not running at ${url}.\n` +
-        `Start it first with: truecourse dashboard`,
-    );
-    process.exit(1);
-  }
-}
-
 /**
  * Resolve the current directory's registered project from the local registry.
  * Registers the repo on first use. Exits if no `.truecourse/` is found.

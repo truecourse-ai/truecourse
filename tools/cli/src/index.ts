@@ -12,11 +12,7 @@ import {
   runDashboardUninstall,
 } from "./commands/dashboard.js";
 import { runList, runListDiff } from "./commands/list.js";
-import {
-  getServerUrl,
-  requireDashboard,
-  requireRegisteredRepo,
-} from "./commands/helpers.js";
+import { runRulesCategories, runRulesLlm } from "./commands/rules.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -105,7 +101,7 @@ program
     }
   });
 
-// Rules management — talks to the dashboard API.
+// Rules management — reads/writes per-repo config.json directly. No server needed.
 const rulesCmd = program
   .command("rules")
   .description("Manage analysis rules");
@@ -117,71 +113,7 @@ rulesCmd
   .option("--disable <category>", "Disable a category")
   .option("--reset", "Reset to global default")
   .action(async (options) => {
-    await requireDashboard();
-    const repo = requireRegisteredRepo();
-    const serverUrl = getServerUrl();
-
-    const { DOMAIN_ORDER } = await import("@truecourse/shared");
-    const allCategories = [...DOMAIN_ORDER] as string[];
-
-    if (options.reset) {
-      await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabledCategories: null }),
-      });
-      p.log.success("Reset to global default categories.");
-      return;
-    }
-
-    if (options.enable || options.disable) {
-      const cat = options.enable || options.disable;
-      if (!allCategories.includes(cat)) {
-        p.log.error(`Invalid category: ${cat}. Valid: ${allCategories.join(", ")}`);
-        process.exit(1);
-      }
-
-      const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
-      const repoData = (await repoRes.json()) as { enabledCategories?: string[] | null };
-      const hasOverride =
-        repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
-      const current = new Set<string>(
-        hasOverride ? repoData.enabledCategories! : allCategories,
-      );
-
-      if (options.enable) current.add(cat);
-      else current.delete(cat);
-
-      await fetch(`${serverUrl}/api/repos/${repo.id}/categories`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabledCategories: [...current] }),
-      });
-      p.log.success(`${options.enable ? "Enabled" : "Disabled"} ${cat} rules for ${repo.name}.`);
-      return;
-    }
-
-    const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
-    const repoData = (await repoRes.json()) as { enabledCategories?: string[] | null };
-    const isOverride =
-      repoData.enabledCategories !== null && repoData.enabledCategories !== undefined;
-    const enabled = new Set<string>(
-      isOverride ? repoData.enabledCategories! : allCategories,
-    );
-
-    const status = (cat: string) =>
-      enabled.has(cat) ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
-
-    p.log.info(
-      `Rule categories for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}:`,
-    );
-    for (const cat of allCategories) {
-      console.log(`  ${cat.padEnd(14)} ${status(cat)}`);
-    }
-    console.log("");
-    if (!isOverride) {
-      p.log.info("Override with: truecourse rules categories --enable/--disable <name>");
-    }
+    await runRulesCategories(options);
   });
 
 rulesCmd
@@ -191,43 +123,7 @@ rulesCmd
   .option("--disable", "Disable LLM rules")
   .option("--reset", "Reset to global default")
   .action(async (options) => {
-    await requireDashboard();
-    const repo = requireRegisteredRepo();
-    const serverUrl = getServerUrl();
-
-    if (options.reset) {
-      await fetch(`${serverUrl}/api/repos/${repo.id}/llm`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enableLlmRules: null }),
-      });
-      p.log.success("Reset LLM rules to global default.");
-      return;
-    }
-
-    if (options.enable || options.disable) {
-      const enabled = !!options.enable;
-      await fetch(`${serverUrl}/api/repos/${repo.id}/llm`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enableLlmRules: enabled }),
-      });
-      p.log.success(`LLM rules ${enabled ? "enabled" : "disabled"} for ${repo.name}.`);
-      return;
-    }
-
-    const repoRes = await fetch(`${serverUrl}/api/repos/${repo.id}`);
-    const repoData = (await repoRes.json()) as { enableLlmRules?: boolean | null };
-    const isOverride =
-      repoData.enableLlmRules !== null && repoData.enableLlmRules !== undefined;
-    const effective = isOverride ? repoData.enableLlmRules! : true;
-    const status = effective ? "\x1b[32menabled\x1b[0m" : "\x1b[31mdisabled\x1b[0m";
-    p.log.info(
-      `LLM rules for ${repo.name}${isOverride ? " (per-repo override)" : " (global default)"}: ${status}`,
-    );
-    if (!isOverride) {
-      p.log.info("Override with: truecourse rules llm --enable/--disable");
-    }
+    await runRulesLlm(options);
   });
 
 // Telemetry management
