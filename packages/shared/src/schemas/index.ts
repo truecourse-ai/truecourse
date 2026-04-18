@@ -11,9 +11,12 @@ export const CreateRepoSchema = z.object({
 export type CreateRepoInput = z.infer<typeof CreateRepoSchema>
 
 export const AnalyzeRepoSchema = z.object({
-  branch: z.string().optional(),
-  enabledCategories: z.array(z.string()).optional().default([]),
-  enableLlmRules: z.boolean().optional().default(true),
+  /** Which mode to run — full analyze (HEAD committed state) or diff (working tree
+   *  vs LATEST). Required; no silent default. */
+  mode: z.enum(['full', 'diff']),
+  /** Skip git ops (branch detection, commit hash read, pre-parse stash). Useful
+   *  for non-git dirs or test environments. No per-repo-config equivalent —
+   *  only way to opt out for a single run. */
   skipGit: z.boolean().optional().default(false),
 })
 

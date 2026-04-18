@@ -162,10 +162,13 @@ export function deleteRepo(id: string): Promise<void> {
   return fetchApi<void>(`/api/repos/${id}`, { method: 'DELETE' });
 }
 
-export function analyzeRepo(id: string, options?: { branch?: string }): Promise<{ jobId: string }> {
-  return fetchApi<{ jobId: string }>(`/api/repos/${id}/analyze`, {
+export function analyzeRepo(
+  id: string,
+  options?: { skipGit?: boolean },
+): Promise<{ message: string; repoId: string; mode: 'full' }> {
+  return fetchApi(`/api/repos/${id}/analyses`, {
     method: 'POST',
-    body: JSON.stringify({ branch: options?.branch }),
+    body: JSON.stringify({ mode: 'full', ...(options?.skipGit != null ? { skipGit: options.skipGit } : {}) }),
   });
 }
 
@@ -214,7 +217,7 @@ export function deleteAnalysis(repoId: string, analysisId: string): Promise<{ ok
 }
 
 export function cancelAnalysis(repoId: string): Promise<{ message: string }> {
-  return fetchApi(`/api/repos/${repoId}/analyze/cancel`, { method: 'POST' });
+  return fetchApi(`/api/repos/${repoId}/analyses/cancel`, { method: 'POST' });
 }
 
 // Graph
@@ -395,18 +398,18 @@ export type DiffCheckResponse = {
   diffAnalysisId?: string;
 };
 
-export function runDiffCheck(repoId: string): Promise<{ message: string; repoId: string }> {
+export function runDiffCheck(repoId: string): Promise<{ message: string; repoId: string; mode: 'diff' }> {
   // POST returns 202 immediately; the actual diff result is streamed via
   // sockets (analysis:progress, analysis:llm-estimate, analysis:complete)
   // and then fetched via `getDiffCheck`.
-  return fetchApi<{ message: string; repoId: string }>(
-    `/api/repos/${repoId}/diff-check`,
-    { method: 'POST' },
-  );
+  return fetchApi(`/api/repos/${repoId}/analyses`, {
+    method: 'POST',
+    body: JSON.stringify({ mode: 'diff' }),
+  });
 }
 
 export function getDiffCheck(repoId: string): Promise<DiffCheckResponse | null> {
-  return fetchApi<DiffCheckResponse | null>(`/api/repos/${repoId}/diff-check`);
+  return fetchApi<DiffCheckResponse | null>(`/api/repos/${repoId}/analyses/diff`);
 }
 
 // Code Violations

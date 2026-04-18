@@ -1,11 +1,43 @@
 /**
- * CRUD over stored analysis files (history / per-analysis usage / delete).
+ * All endpoints under the `/api/repos/:id/analyses` noun:
+ *
+ *   POST   /analyses          — start a run (body: `{mode, skipGit?}`)
+ *   POST   /analyses/cancel   — abort the active run (either mode)
+ *   GET    /analyses          — history list
+ *   GET    /analyses/diff     — current diff.json contents
+ *   GET    /analyses/:id/usage
+ *   DELETE /analyses/:id
+ *
  * Mounted at `/api/repos` under `projectResolver`.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import path from 'node:path';
+import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
+import { readProjectConfig } from '../config/project-config.js';
+import type { RegistryEntry } from '../config/registry.js';
+import { analyzeInProcess } from '../commands/analyze-in-process.js';
+import { diffInProcess } from '../commands/diff-in-process.js';
+import {
+  buildAnalysisSteps,
+  createSocketLlmEstimateHandler,
+  createSocketTracker,
+  emitAnalysisProgress,
+  emitAnalysisComplete,
+  emitViolationsReady,
+  emitAnalysisCanceled,
+  type StepTracker,
+} from '../socket/handlers.js';
+import {
+  cancelAnalysis,
+  registerAnalysis,
+  unregisterAnalysis,
+} from '../services/analysis-registry.js';
+import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
+import { trackEvent, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
+import { getDiffResult } from '../services/violation-query.service.js';
 import {
   deleteAnalysis as deleteAnalysisFile,
   deleteDiff,
@@ -19,8 +51,97 @@ import {
   writeLatest,
 } from '../lib/analysis-store.js';
 import type { LatestSnapshot } from '../types/snapshot.js';
+import { log, popLogger, pushLogger } from '../lib/logger.js';
 
 const router: Router = Router();
+
+// ---------------------------------------------------------------------------
+// POST /api/repos/:id/analyses — start a run (mode: 'full' | 'diff')
+// ---------------------------------------------------------------------------
+
+router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const parsed = AnalyzeRepoSchema.safeParse(req.body);
+    if (!parsed.success) throw createAppError('Invalid request body', 400);
+    const { mode, skipGit } = parsed.data;
+
+    const repo = resolveProjectForRequest(id);
+
+    // Diff requires a baseline. Fail fast with 400 before the 202 accept
+    // so the client doesn't wait on sockets that never come.
+    if (mode === 'diff' && !readLatest(repo.path)) {
+      throw createAppError('Run a full analysis first before checking a diff.', 400);
+    }
+
+    const projectConfig = readProjectConfig(repo.path);
+    const effectiveCategories = projectConfig.enabledCategories ?? undefined;
+    const effectiveLlmRules = projectConfig.enableLlmRules ?? true;
+
+    // Register before the 202 so POST /analyses/cancel can find this run.
+    const abortController = registerAnalysis(id, 'pending');
+
+    res.status(202).json({ message: `${mode === 'diff' ? 'Diff check' : 'Analysis'} started`, repoId: id, mode });
+
+    const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+    const tracker = createSocketTracker(id, trackerSteps);
+
+    pushLogger({
+      filePath: path.join(repo.path, '.truecourse/logs/analyze.log'),
+      tee: process.env.TRUECOURSE_DEV === '1',
+    });
+
+    try {
+      if (mode === 'full') {
+        await runFullAnalyze(id, repo, {
+          skipGit,
+          effectiveCategories,
+          effectiveLlmRules,
+          tracker,
+          signal: abortController.signal,
+        });
+      } else {
+        await runDiffAnalyze(id, repo, {
+          tracker,
+          signal: abortController.signal,
+        });
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        log.info(`[${mode === 'diff' ? 'Diff' : 'Analysis'}] Cancelled for repo ${id}`);
+        emitAnalysisCanceled(id);
+      } else {
+        log.error(
+          `[${mode === 'diff' ? 'Diff' : 'Analysis'}] Failed for repo ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        emitAnalysisProgress(id, {
+          step: 'error',
+          percent: -1,
+          detail: error instanceof Error ? error.message : `${mode === 'diff' ? 'Diff check' : 'Analysis'} failed`,
+        });
+      }
+    } finally {
+      unregisterAnalysis(id);
+      popLogger();
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/repos/:id/analyses/cancel — abort active run (either mode)
+// ---------------------------------------------------------------------------
+
+router.post('/:id/analyses/cancel', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const canceled = cancelAnalysis(id);
+    res.json({ message: canceled ? 'Analysis cancelling' : 'No active analysis' });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/analyses — list (from history.json)
@@ -52,6 +173,35 @@ router.get('/:id/analyses', async (req: Request, res: Response, next: NextFuncti
         provider: e.usage.provider,
       })),
     );
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/repos/:id/analyses/diff — current diff.json contents
+// ---------------------------------------------------------------------------
+
+router.get('/:id/analyses/diff', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const repo = resolveProjectForRequest(id);
+    const result = getDiffResult(repo.path);
+    if (!result) {
+      res.json(null);
+      return;
+    }
+    const { diff, isStale } = result;
+
+    res.json({
+      resolvedViolations: diff.resolvedViolations,
+      newViolations: diff.newViolations,
+      affectedNodeIds: diff.affectedNodeIds,
+      summary: diff.summary,
+      changedFiles: diff.changedFiles,
+      isStale,
+      diffAnalysisId: diff.id,
+    });
   } catch (error) {
     next(error);
   }
@@ -118,7 +268,60 @@ router.delete('/:id/analyses/:analysisId', async (req: Request, res: Response, n
 });
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Mode-specific bodies
+// ---------------------------------------------------------------------------
+
+interface StartRunOptions {
+  skipGit?: boolean;
+  effectiveCategories?: string[];
+  effectiveLlmRules: boolean;
+  tracker: StepTracker;
+  signal: AbortSignal;
+}
+
+async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOptions): Promise<void> {
+  const provider: LLMProvider | undefined = opts.effectiveLlmRules ? createLLMProvider() : undefined;
+  if (provider) {
+    provider.setRepoId(id);
+    provider.setRepoPath(repo.path);
+    provider.setAbortSignal(opts.signal);
+  }
+
+  const outcome = await analyzeInProcess(repo, {
+    skipGit: opts.skipGit,
+    enabledCategoriesOverride: opts.effectiveCategories,
+    enableLlmRulesOverride: opts.effectiveLlmRules,
+    tracker: opts.tracker,
+    signal: opts.signal,
+    provider,
+    onLlmEstimate: createSocketLlmEstimateHandler(id),
+  });
+
+  emitViolationsReady(id, outcome.analysisId);
+  emitAnalysisComplete(id, outcome.analysisId);
+
+  trackEvent('analyze', {
+    serviceCount: outcome.serviceCount,
+    fileCountRange: bucketFileCount(outcome.fileCount),
+    languages: [],
+    architecture: outcome.architecture,
+    durationRange: bucketDuration(outcome.durationMs),
+  });
+}
+
+async function runDiffAnalyze(id: string, repo: RegistryEntry, opts: Pick<StartRunOptions, 'tracker' | 'signal'>): Promise<void> {
+  const { diff } = await diffInProcess(repo, {
+    tracker: opts.tracker,
+    signal: opts.signal,
+    onLlmEstimate: createSocketLlmEstimateHandler(id),
+  });
+
+  emitViolationsReady(id, diff.id);
+  emitAnalysisComplete(id, diff.id);
+}
+
+// ---------------------------------------------------------------------------
+// LATEST rebuild (used by DELETE when the deleted analysis was the head)
 // ---------------------------------------------------------------------------
 
 function rebuildLatestFromHistory(repoPath: string): void {
@@ -162,9 +365,6 @@ function rebuildLatestFromHistory(repoPath: string): void {
     violations: [],
   };
 
-  // Populate with denormalized rows from the snapshots that own each active id.
-  // Rows from older snapshots may reference graph ids that don't exist in the
-  // newest graph — we surface them with null names rather than dropping them.
   for (const snapshot of new Set(active.values())) {
     if (!snapshot) continue;
     for (const v of snapshot.violations.added) {

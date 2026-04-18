@@ -9,7 +9,6 @@ import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import { projectResolver } from './middleware/project.js';
 import reposRouter from './routes/repos.js';
-import analyzeRouter from './routes/analyze.js';
 import analysesRouter from './routes/analyses.js';
 import graphRouter from './routes/graph.js';
 import filesRouter from './routes/files.js';
@@ -56,7 +55,6 @@ async function main() {
   // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
   // matches the `:id` segment itself. The resolver validates the slug and
   // touches `lastAccessed`.
-  app.use('/api/repos', projectResolver, analyzeRouter);
   app.use('/api/repos', projectResolver, analysesRouter);
   app.use('/api/repos', projectResolver, graphRouter);
   app.use('/api/repos', projectResolver, filesRouter);

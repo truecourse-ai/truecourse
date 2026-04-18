@@ -62,14 +62,29 @@ describe('CreateRepoSchema', () => {
 });
 
 describe('AnalyzeRepoSchema', () => {
-  it('accepts { branch: "main" }', () => {
-    const result = AnalyzeRepoSchema.safeParse({ branch: 'main' });
+  it('accepts { mode: "full" }', () => {
+    const result = AnalyzeRepoSchema.safeParse({ mode: 'full' });
     expect(result.success).toBe(true);
   });
 
-  it('accepts {} (branch is optional)', () => {
-    const result = AnalyzeRepoSchema.safeParse({});
+  it('accepts { mode: "diff" }', () => {
+    const result = AnalyzeRepoSchema.safeParse({ mode: 'diff' });
     expect(result.success).toBe(true);
+  });
+
+  it('accepts { mode: "full", skipGit: true }', () => {
+    const result = AnalyzeRepoSchema.safeParse({ mode: 'full', skipGit: true });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects {} (mode is required)', () => {
+    const result = AnalyzeRepoSchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects { mode: "banana" }', () => {
+    const result = AnalyzeRepoSchema.safeParse({ mode: 'banana' });
+    expect(result.success).toBe(false);
   });
 });
 
