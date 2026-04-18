@@ -148,6 +148,15 @@ export function listAnalyses(repoPath: string): string[] {
     .sort();                              // ISO prefix makes lexical sort chronological
 }
 
+/** Find the filename for a given analysis id by scanning newest → oldest. */
+export function findAnalysisFilename(repoPath: string, analysisId: string): string | null {
+  for (const name of listAnalyses(repoPath).reverse()) {
+    const snap = readAnalysis(repoPath, name);
+    if (snap?.id === analysisId) return name;
+  }
+  return null;
+}
+
 export function deleteAnalysis(repoPath: string, filename: string): void {
   try {
     fs.unlinkSync(analysisFilePath(repoPath, filename));
