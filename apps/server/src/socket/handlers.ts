@@ -211,3 +211,59 @@ export function emitAnalysisCanceled(repoId: string): void {
   const io = getIO();
   io.to(`repo:${repoId}`).emit('analysis:canceled', { repoId });
 }
+
+/**
+ * Build an `onLlmEstimate` callback that prompts via sockets: emits
+ * `analysis:llm-estimate` to the repo room, waits for `analysis:llm-proceed`
+ * (60s timeout → default `true`), then emits `analysis:llm-resolved`.
+ *
+ * Shared by `POST /api/repos/:id/analyze` and `POST /api/repos/:id/diff-check`
+ * so dashboard-initiated analyze and diff both prompt identically — and the
+ * web `useSocket` listener handles both without any client-side branching.
+ */
+export function createSocketLlmEstimateHandler(repoId: string):
+  (estimate: {
+    totalEstimatedTokens: number;
+    tiers: { tier: string; ruleCount: number; fileCount: number; functionCount?: number; estimatedTokens: number }[];
+    uniqueFileCount?: number;
+    uniqueRuleCount?: number;
+  }) => Promise<boolean> {
+  return (estimate) =>
+    new Promise<boolean>((resolve) => {
+      const io = getIO();
+      const room = `repo:${repoId}`;
+
+      io.to(room).emit('analysis:llm-estimate', {
+        repoId,
+        estimate: {
+          totalEstimatedTokens: estimate.totalEstimatedTokens,
+          tiers: estimate.tiers,
+          uniqueFileCount: estimate.uniqueFileCount,
+          uniqueRuleCount: estimate.uniqueRuleCount,
+        },
+      });
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve(true);
+      }, 60_000);
+
+      function onProceed(data: { repoId: string; proceed: boolean }) {
+        if (data.repoId !== repoId) return;
+        cleanup();
+        io.to(room).emit('analysis:llm-resolved', { repoId, proceed: data.proceed });
+        resolve(data.proceed);
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        for (const [, socket] of io.sockets.sockets) {
+          socket.removeListener('analysis:llm-proceed', onProceed);
+        }
+      }
+
+      for (const [, socket] of io.sockets.sockets) {
+        socket.on('analysis:llm-proceed', onProceed);
+      }
+    });
+}

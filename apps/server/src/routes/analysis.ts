@@ -5,6 +5,7 @@ import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import { diffInProcess } from '../commands/diff-in-process.js';
+import { createSocketLlmEstimateHandler } from '../socket/handlers.js';
 import type { LatestSnapshot } from '../types/snapshot.js';
 import {
   setPositions,
@@ -522,7 +523,9 @@ router.post(
       const id = req.params.id as string;
       const repo = resolveProjectForRequest(id);
 
-      const { diff } = await diffInProcess(repo);
+      const { diff } = await diffInProcess(repo, {
+        onLlmEstimate: createSocketLlmEstimateHandler(id),
+      });
 
       res.json({
         resolvedViolations: diff.resolvedViolations,

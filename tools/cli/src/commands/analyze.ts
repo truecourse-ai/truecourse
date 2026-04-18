@@ -8,6 +8,7 @@ import { registerProject, type RegistryEntry } from "@truecourse/server/config/r
 import { readProjectConfig } from "@truecourse/server/config/project-config";
 import { closeLogger, configureLogger } from "@truecourse/server/lib/logger";
 import { renderViolationsSummary } from "./helpers.js";
+import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
 function ensureClaudeCli(): void {
@@ -160,20 +161,11 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
       enableLlmRulesOverride: enableLlmRules,
       onLlmEstimate: async (estimate) => {
         stopSpinner();
-        const totalRules = estimate.uniqueRuleCount ?? estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
-        const totalFiles = estimate.uniqueFileCount ?? estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-        const tokens = estimate.totalEstimatedTokens;
-        const tokenStr = tokens >= 1_000_000
-          ? `~${(tokens / 1_000_000).toFixed(1)}M tokens`
-          : `~${Math.round(tokens / 1000)}k tokens`;
-        p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (${tokenStr})`);
-        const proceed = await p.confirm({ message: "Run LLM-powered rules?", initialValue: true });
+        const proceed = await promptLlmEstimate(estimate);
         // Prompt answered — subsequent renders show domain + persist steps
         // below the prompt; parse + scan are already printed above it.
         renderPhase = "post-llm";
-        if (p.isCancel(proceed)) return false;
-        if (!proceed) p.log.info("Skipping LLM rules.");
-        return !!proceed;
+        return proceed;
       },
     });
 
@@ -215,6 +207,10 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
 
+  const config = readProjectConfig(project.path);
+  const enabledCategories = config.enabledCategories ?? undefined;
+  const enableLlmRules = config.enableLlmRules ?? true;
+
   const spinner = p.spinner();
   spinner.start("Checking changes...");
 
@@ -225,8 +221,16 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
   try {
     const { diff } = await diffInProcess(project, {
       signal: abortController.signal,
+      enabledCategoriesOverride: enabledCategories,
+      enableLlmRulesOverride: enableLlmRules,
       onProgress: ({ detail }) => {
         if (detail) spinner.message(detail);
+      },
+      onLlmEstimate: async (estimate) => {
+        spinner.stop("Ready for LLM rules");
+        const proceed = await promptLlmEstimate(estimate);
+        spinner.start("Checking changes...");
+        return proceed;
       },
     });
     spinner.stop("Diff check complete");

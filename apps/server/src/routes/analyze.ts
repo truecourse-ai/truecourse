@@ -7,13 +7,13 @@ import { readProjectConfig } from '../config/project-config.js';
 import { analyzeInProcess } from '../commands/analyze-in-process.js';
 import {
   buildAnalysisSteps,
+  createSocketLlmEstimateHandler,
   createSocketTracker,
   emitAnalysisProgress,
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
 } from '../socket/handlers.js';
-import { getIO } from '../socket/index.js';
 import {
   registerAnalysis,
   unregisterAnalysis,
@@ -75,44 +75,7 @@ router.post('/:id/analyze', async (req: Request, res: Response, next: NextFuncti
         tracker,
         signal: abortController.signal,
         provider,
-        onLlmEstimate: (estimate) =>
-          new Promise<boolean>((resolve) => {
-            const io = getIO();
-            const room = `repo:${id}`;
-
-            io.to(room).emit('analysis:llm-estimate', {
-              repoId: id,
-              estimate: {
-                totalEstimatedTokens: estimate.totalEstimatedTokens,
-                tiers: estimate.tiers,
-                uniqueFileCount: estimate.uniqueFileCount,
-                uniqueRuleCount: estimate.uniqueRuleCount,
-              },
-            });
-
-            const timeout = setTimeout(() => {
-              cleanup();
-              resolve(true);
-            }, 60_000);
-
-            function onProceed(data: { repoId: string; proceed: boolean }) {
-              if (data.repoId !== id) return;
-              cleanup();
-              io.to(room).emit('analysis:llm-resolved', { repoId: id, proceed: data.proceed });
-              resolve(data.proceed);
-            }
-
-            function cleanup() {
-              clearTimeout(timeout);
-              for (const [, socket] of io.sockets.sockets) {
-                socket.removeListener('analysis:llm-proceed', onProceed);
-              }
-            }
-
-            for (const [, socket] of io.sockets.sockets) {
-              socket.on('analysis:llm-proceed', onProceed);
-            }
-          }),
+        onLlmEstimate: createSocketLlmEstimateHandler(id),
       });
 
       emitViolationsReady(id, outcome.analysisId);

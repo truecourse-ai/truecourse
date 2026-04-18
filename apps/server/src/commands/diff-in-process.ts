@@ -33,6 +33,11 @@ export interface DiffInProcessOptions {
   /** Override the per-repo config's enableLlmRules flag. */
   enableLlmRulesOverride?: boolean;
   enabledCategoriesOverride?: string[];
+  /** Called before any LLM rule runs with a token/rule estimate. Return `true`
+   *  to proceed, `false` to skip LLM rules. Same contract as
+   *  `analyzeInProcess.onLlmEstimate` — CLI/dashboard prompt behaves identically
+   *  between analyze and diff. */
+  onLlmEstimate?: (estimate: import('./analyze-in-process.js').LlmEstimate) => Promise<boolean>;
 }
 
 export interface DiffInProcessResult {
@@ -55,7 +60,7 @@ export async function diffInProcess(
   const enabledCategories =
     options.enabledCategoriesOverride ?? projectConfig.enabledCategories ?? undefined;
   const enableLlmRules =
-    options.enableLlmRulesOverride ?? projectConfig.enableLlmRules ?? false;
+    options.enableLlmRulesOverride ?? projectConfig.enableLlmRules ?? true;
 
   const git = await getGit(project.path);
   const statusResult = await git.status();
@@ -109,6 +114,7 @@ export async function diffInProcess(
     enableLlmRules,
     tracker: options.tracker,
     signal: options.signal,
+    onLlmEstimate: options.onLlmEstimate,
   });
 
   const diff = buildDiffSnapshot({
