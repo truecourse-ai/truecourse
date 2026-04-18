@@ -65,7 +65,7 @@ export const pythonRedefinedArgumentFromLocalVisitor: CodeRuleVisitor = {
       }
 
       // Don't descend into nested function definitions
-      if (n !== body && (n.type === 'function_definition' || n.type === 'class_definition')) return null
+      if (n.id !== body.id && (n.type === 'function_definition' || n.type === 'class_definition')) return null
 
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

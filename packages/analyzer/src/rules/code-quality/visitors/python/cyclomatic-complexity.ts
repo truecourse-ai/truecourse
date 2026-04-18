@@ -15,7 +15,7 @@ export const pythonCyclomaticComplexityVisitor: CodeRuleVisitor = {
     const DECISION_TYPES = new Set(['if_statement', 'for_statement', 'while_statement', 'except_clause'])
 
     function walk(n: SyntaxNode) {
-      if (n.type === 'function_definition' && n !== node) return
+      if (n.type === 'function_definition' && n.id !== node.id) return
       if (DECISION_TYPES.has(n.type)) complexity++
       if (n.type === 'elif_clause') complexity++
       if (n.type === 'boolean_operator') complexity++

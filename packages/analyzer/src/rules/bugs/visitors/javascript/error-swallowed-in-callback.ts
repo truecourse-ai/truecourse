@@ -57,7 +57,7 @@ export const errorSwallowedInCallbackVisitor: CodeRuleVisitor = {
     function scanForUsage(n: import('tree-sitter').SyntaxNode): void {
       if (n.type === 'identifier' && n.text === errorName) {
         // Make sure it's not the parameter definition itself
-        if (n.parent?.type !== 'required_parameter' && n.parent !== params) {
+        if (n.parent?.type !== 'required_parameter' && n.parent?.id !== params?.id) {
           isUsed = true
         }
       }

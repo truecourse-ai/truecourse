@@ -41,7 +41,7 @@ export const unassignedVariableVisitor: CodeRuleVisitor = {
       }
 
       // Don't recurse into nested functions
-      if (n !== body && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return
+      if (n.id !== body.id && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return
 
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

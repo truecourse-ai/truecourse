@@ -144,7 +144,7 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
       }
       // Don't recurse into nested function bodies
       if (
-        n !== body &&
+        n.id !== body.id &&
         (n.type === 'function_declaration' || n.type === 'function' || n.type === 'arrow_function' || n.type === 'method_definition')
       ) return
 

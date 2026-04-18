@@ -23,7 +23,7 @@ export const unusedScopeDefinitionVisitor: CodeRuleVisitor = {
       // (e.g., function foo() {} → 'foo' identifier's parent is the function_declaration
       // which is the same node the function scope was created for).
       // These are effectively top-level declarations; skip them.
-      if (v.declarationNode.parent === v.scope.node) continue
+      if (v.declarationNode.parent?.id === v.scope.node.id) continue
       // Skip underscore-prefixed names (intentionally unused convention)
       if (v.name.startsWith('_')) continue
       // Skip parameters — handled by separate rule

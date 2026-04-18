@@ -31,8 +31,8 @@ export const contradictoryOptionalChainVisitor: CodeRuleVisitor = {
           // Check if the non_null_expression is structurally within the right operand
           if (right) {
             let n: import('tree-sitter').SyntaxNode | null = node
-            while (n && n !== parent) {
-              if (n === right) return null
+            while (n && n.id !== parent.id) {
+              if (n.id === right.id) return null
               n = n.parent
             }
           }

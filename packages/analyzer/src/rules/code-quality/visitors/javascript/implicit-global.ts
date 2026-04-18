@@ -21,7 +21,7 @@ export const implicitGlobalVisitor: CodeRuleVisitor = {
       // Must be on the left side of an assignment (not in augmented assignment which would throw anyway)
       const isAssignmentLeft =
         (parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression') &&
-        parent.childForFieldName('left') === ref.node
+        parent.childForFieldName('left')?.id === ref.node.id
       if (!isAssignmentLeft) continue
 
       return makeViolation(

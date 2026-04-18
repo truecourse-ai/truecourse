@@ -21,7 +21,7 @@ function collectTupleLengths(body: SyntaxNode): number[] {
       }
     }
     // Don't recurse into nested functions
-    if (n.type === 'function_definition' && n !== body) return
+    if (n.type === 'function_definition' && n.id !== body.id) return
     for (let i = 0; i < n.childCount; i++) {
       const child = n.child(i)
       if (child) walk(child)

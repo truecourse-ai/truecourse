@@ -39,11 +39,11 @@ export const indexedLoopOverForOfVisitor: CodeRuleVisitor = {
       if (usedOutsideIndex) return
       if (n.type === 'identifier' && n.text === indexName) {
         const parent = n.parent
-        if (parent?.type === 'subscript_expression' && parent.childForFieldName('index') === n) return
-        if (parent === condition || parent === increment) return
+        if (parent?.type === 'subscript_expression' && parent.childForFieldName('index')?.id === n.id) return
+        if (parent?.id === condition?.id || parent?.id === increment?.id) return
         let p: SyntaxNode | null = n.parent
         while (p) {
-          if (p === condition || p === increment || p === initializer) return
+          if (p.id === condition?.id || p.id === increment?.id || p.id === initializer?.id) return
           p = p.parent
         }
         usedOutsideIndex = true

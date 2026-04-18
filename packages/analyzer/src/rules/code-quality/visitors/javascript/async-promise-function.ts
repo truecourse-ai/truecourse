@@ -23,7 +23,7 @@ export const asyncPromiseFunctionVisitor: CodeRuleVisitor = {
         }
       }
       // Don't descend into nested functions
-      if (n !== body && (n.type === 'function_declaration' || n.type === 'function_expression'
+      if (n.id !== body.id && (n.type === 'function_declaration' || n.type === 'function_expression'
         || n.type === 'arrow_function' || n.type === 'method_definition')) return false
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

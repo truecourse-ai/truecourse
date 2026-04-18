@@ -26,7 +26,7 @@ export const pythonUndefinedNameVisitor: CodeRuleVisitor = {
       // Skip assignment left-hand side — these define the name
       const isAssignmentLeft =
         (parent.type === 'assignment' || parent.type === 'augmented_assignment') &&
-        parent.childForFieldName('left') === ref.node
+        parent.childForFieldName('left')?.id === ref.node.id
       if (isAssignmentLeft) continue
 
       // Skip names used as type annotations (often forward refs or typing constructs)

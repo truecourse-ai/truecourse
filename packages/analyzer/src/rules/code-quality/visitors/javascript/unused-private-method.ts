@@ -68,7 +68,7 @@ export const unusedPrivateMethodVisitor: CodeRuleVisitor = {
         const prop = n.childForFieldName('property')
         if ((obj?.text === 'this' || obj?.type === 'this') && prop) {
           // Check if parent is a call_expression — if not, still a "read"
-          if (n.parent?.type !== 'call_expression' || n.parent.childForFieldName('function') !== n) {
+          if (n.parent?.type !== 'call_expression' || n.parent.childForFieldName('function')?.id !== n.id) {
             calledNames.add(prop.text.replace(/^#/, ''))
           }
         }

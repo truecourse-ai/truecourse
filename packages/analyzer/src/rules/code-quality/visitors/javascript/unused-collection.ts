@@ -76,7 +76,7 @@ export const unusedCollectionVisitor: CodeRuleVisitor = {
 
     const reads = new Set<string>()
     function collectReads(n: SyntaxNode) {
-      if (JS_FUNCTION_TYPES.includes(n.type) && n !== node) {
+      if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) {
         function markAll(m: SyntaxNode) {
           if (m.type === 'identifier') reads.add(m.text)
           for (let i = 0; i < m.childCount; i++) {

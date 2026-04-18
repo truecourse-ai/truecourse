@@ -24,7 +24,7 @@ export const noUndefVisitor: CodeRuleVisitor = {
       // Skip assignment left-hand side (handled by implicit-global)
       const isAssignmentLeft =
         (parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression') &&
-        parent.childForFieldName('left') === ref.node
+        parent.childForFieldName('left')?.id === ref.node.id
       if (isAssignmentLeft) continue
 
       // Skip type positions (TypeScript type-only references)

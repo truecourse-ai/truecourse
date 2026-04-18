@@ -50,7 +50,7 @@ export const unreadPrivateAttributeVisitor: CodeRuleVisitor = {
           if (parent) {
             const isWriteLeft =
               (parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression') &&
-              parent.childForFieldName('left') === n
+              parent.childForFieldName('left')?.id === n.id
             if (isWriteLeft) {
               writtenNames.add(fieldName)
             } else {
