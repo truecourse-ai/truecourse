@@ -535,19 +535,11 @@ export function extractPythonImports(tree: Tree, filePath: string): ImportStatem
       const source = extractImportFromSource(node)
       const specifiers: ImportSpecifier[] = []
 
-      // The first dotted_name is the module source (X in `from X import ...`).
-      // Named imports are the dotted_name children AFTER the `import` keyword.
-      // Referential equality on tree-sitter node wrappers is unreliable across
-      // platforms — use keyword-position instead.
-      let seenImportKeyword = false
+      // The first dotted_name is the module source (X in `from X import ...`);
+      // skip it by id, not by reference — tree-sitter wrappers aren't stable.
+      const sourceNodeId = node.children.find((c) => c.type === 'dotted_name')?.id
       for (const child of node.children) {
-        if (child.type === 'import') {
-          seenImportKeyword = true
-          continue
-        }
-        if (!seenImportKeyword) continue
-
-        if (child.type === 'dotted_name') {
+        if (child.type === 'dotted_name' && child.id !== sourceNodeId) {
           // Named import
           specifiers.push({
             name: child.text,
