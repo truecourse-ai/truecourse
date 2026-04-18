@@ -23,7 +23,7 @@ export const pythonReturnInGeneratorVisitor: CodeRuleVisitor = {
         return
       }
       // Don't descend into nested function definitions
-      if (n !== body && (n.type === 'function_definition' || n.type === 'class_definition')) return
+      if (n.id !== body?.id && (n.type === 'function_definition' || n.type === 'class_definition')) return
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child && !hasYield) findYield(child)
@@ -42,7 +42,7 @@ export const pythonReturnInGeneratorVisitor: CodeRuleVisitor = {
         if (returnValue) return n
       }
       // Don't descend into nested function definitions
-      if (n !== body && (n.type === 'function_definition' || n.type === 'class_definition')) return null
+      if (n.id !== body?.id && (n.type === 'function_definition' || n.type === 'class_definition')) return null
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
         if (child) {

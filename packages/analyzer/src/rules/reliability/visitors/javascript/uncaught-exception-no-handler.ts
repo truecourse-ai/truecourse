@@ -34,10 +34,10 @@ export const uncaughtExceptionNoHandlerVisitor: CodeRuleVisitor = {
 
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
-      'No uncaughtException handler',
-      'Entry-point file does not register a process uncaughtException handler. Unhandled errors will crash the process.',
+      'No `uncaughtException` handler',
+      'Entry-point file does not register a process `uncaughtException` handler. Unhandled errors will crash the process.',
       sourceCode,
-      "Add process.on('uncaughtException', handler) to log and gracefully shut down.",
+      "Add `process.on('uncaughtException', handler)` to log and gracefully shut down.",
     )
   },
 }

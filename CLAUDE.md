@@ -8,37 +8,60 @@
 ## Project Layout
 
 - `apps/web/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
-- `apps/server/` — Express + Socket.io backend (Drizzle ORM, LLM providers)
+- `apps/server/` — Express + Socket.io backend (LLM providers, file-based analysis store)
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS only)
-- `tools/cli/` — CLI commands (setup, start, analyze, list, add)
+- `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules)
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
 - `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
 
 ## Development Commands
 
 ```bash
-pnpm dev          # Start all services (turbo) — embedded Postgres starts automatically, migrations run on boot
+pnpm dev          # Start all services (turbo) — file-based store under <repo>/.truecourse/
 pnpm build        # Build all packages
 pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
 pnpm test         # Run all tests (vitest)
-pnpm db:generate  # Generate migration SQL files after schema changes (drizzle-kit generate)
 ```
+
+## Storage
+
+Analyses are stored as JSON files. **No database.**
+
+Per-repo layout under `<repo>/.truecourse/`:
+- `analyses/` — per-analysis snapshot files, filenames `<iso>_<short-uuid>.json` (gitignored)
+- `LATEST.json` — materialized current-state view read by the dashboard (gitignored)
+- `history.json` — append-only summaries for cross-analysis queries (gitignored)
+- `diff.json` — optional current diff analysis, overwritten each diff run (gitignored)
+- `config.json` — per-repo settings (committable)
+- `ui-state.json` — graph positions + collapse state (gitignored)
+- `logs/` — per-repo analyze logs (gitignored)
+- `.analyze.lock` — transient, held for the duration of an analyze (gitignored)
+
+Global layout under `~/.truecourse/`:
+- `config.json` — LLM keys, provider
+- `registry.json` — known project paths + `lastAnalyzed`
+- `logs/` — dashboard + install logs
+
+The server walks up from `cwd` looking for `.truecourse/`. Set `TRUECOURSE_HOME` to relocate the user-level dir (tests do this).
 
 ## Rules
 
 - **No workarounds.** Always find and fix the root cause. Do not use hacks, fallbacks, or temporary patches to bypass issues. If something isn't working, investigate why and fix it properly.
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
-- **Database.** Uses embedded Postgres (not Docker). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
+- **Storage.** The store is file-based. Writes go through `apps/server/src/lib/analysis-store.ts` via `atomicWriteJson` (write-to-tmp + rename for atomicity). Reads are mtime-cached on `LATEST.json`. Concurrent analyses are prevented by `.analyze.lock` (O_EXCL).
 
-## Debugging LLM Behavior
+## Releasing
 
-When investigating LLM-related issues (wrong outputs, missing data, hallucinations), check the traces in the local Langfuse instance at `http://localhost:3002`. Use the Langfuse API to fetch traces and observations:
-- `GET /api/public/traces?limit=5&orderBy=timestamp.desc` — list recent traces
-- `GET /api/public/traces/{traceId}` — get trace details
-- `GET /api/public/observations?traceId={traceId}` — get LLM generation input/output
+When bumping the package version, update all three places — `package.json` alone is not enough because `commander` reads the version from code:
 
-Auth: Basic auth with `LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY` from `.env`.
+1. `tools/cli/package.json` — the `truecourse` CLI published to npm.
+2. `apps/server/package.json` — the `@truecourse/server` workspace package (kept in sync even though it's not published separately).
+3. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call on the commander program. This is what `truecourse --version` prints.
+
+The three internal packages (`@truecourse/web`, `@truecourse/analyzer`, `@truecourse/shared`) are marked `private: true` and never published — leave their versions at `0.1.0`.
+
+npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and the GitHub Actions workflow publishes `truecourse` to npm. Never `npm publish` manually.
 
 ## Testing
 
@@ -50,4 +73,4 @@ Auth: Basic auth with `LANGFUSE_PUBLIC_KEY:LANGFUSE_SECRET_KEY` from `.env`.
 - The analyzer only supports TypeScript and JavaScript (no Python/C# yet — that's Phase 6)
 - Detection patterns are TypeScript constants in `packages/analyzer/src/patterns/`, not JSON files
 - LLM providers implement the `LLMProvider` interface — add new providers there
-- Types shared between frontend and backend go in `packages/shared`
+- Types shared between frontend and backend go in `packages/shared`. The analysis-store's file format lives in `apps/server/src/types/snapshot.ts` (server-internal).

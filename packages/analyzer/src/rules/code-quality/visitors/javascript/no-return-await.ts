@@ -16,7 +16,7 @@ export const noReturnAwaitVisitor: CodeRuleVisitor = {
         const isAsync = parent.children.some((c) => c.type === 'async')
         if (isAsync) {
           let tryParent = node.parent
-          while (tryParent && tryParent !== parent) {
+          while (tryParent && tryParent.id !== parent.id) {
             if (tryParent.type === 'try_statement') return null
             tryParent = tryParent.parent
           }

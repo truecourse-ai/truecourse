@@ -242,6 +242,7 @@ function findFiles(dir: string, fileName: string, ignoreDirs: string[]): string[
   const results: string[] = []
   try {
     const entries = readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name))
     for (const entry of entries) {
       if (ignoreDirs.includes(entry.name)) continue
       const fullPath = join(dir, entry.name)

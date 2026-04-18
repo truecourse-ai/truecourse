@@ -16,7 +16,7 @@ const FIXTURE_PATH = new URL('../fixtures/sample-python-project-positive', impor
 
 function collectFiles(dir: string): string[] {
   const files: string[] = [];
-  for (const entry of readdirSync(dir)) {
+  for (const entry of readdirSync(dir).sort()) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       if (['node_modules', '.git', '__pycache__', '.venv'].includes(entry)) continue;

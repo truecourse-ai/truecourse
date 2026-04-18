@@ -17,7 +17,7 @@ const FIXTURE_PATH = new URL('../fixtures/sample-js-project-positive', import.me
 
 function collectFiles(dir: string): string[] {
   const files: string[] = [];
-  for (const entry of readdirSync(dir)) {
+  for (const entry of readdirSync(dir).sort()) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) {
       if (entry === 'node_modules' || entry === '.git') continue;

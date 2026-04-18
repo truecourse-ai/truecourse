@@ -66,6 +66,8 @@ export function extractModulesAndMethods(
         importCount: analysis.imports.length,
         exportCount: analysis.exports.length,
         superClass: cls.superClass,
+        startLine: cls.location.startLine,
+        endLine: cls.location.endLine,
         lineCount: cls.location.endLine - cls.location.startLine + 1,
       })
 
@@ -102,6 +104,11 @@ export function extractModulesAndMethods(
           propertyCount: 0,
           importCount: analysis.imports.length,
           exportCount: analysis.exports.length,
+          // Standalone modules span a whole file — but highlighting every
+          // line would wash out the code viewer. Point at the top of the
+          // file so the marker is informative without being overwhelming.
+          startLine: 1,
+          endLine: 1,
           lineCount: totalFileLines(analysis),
         })
 
@@ -130,6 +137,9 @@ export function extractModulesAndMethods(
         propertyCount: 0,
         importCount: analysis.imports.length,
         exportCount: analysis.exports.length,
+        // See comment above — point at top of file, not whole-file span.
+        startLine: 1,
+        endLine: 1,
         lineCount: totalFileLines(analysis),
       })
 
@@ -185,6 +195,8 @@ function toMethodInfo(
     returnType: fn.returnType,
     isAsync: fn.isAsync,
     isExported: fn.isExported,
+    startLine: fn.location.startLine,
+    endLine: fn.location.endLine,
     lineCount: fn.lineCount,
     statementCount: fn.statementCount,
     maxNestingDepth: fn.maxNestingDepth,

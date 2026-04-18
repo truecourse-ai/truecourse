@@ -81,12 +81,6 @@ function formatTokens(n?: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
-function formatCost(cost?: string | null): string {
-  if (!cost) return '-';
-  const n = parseFloat(cost);
-  if (isNaN(n)) return '-';
-  return `$${n.toFixed(4)}`;
-}
 
 function formatDateTime(dateStr: string): { date: string; time: string } {
   const d = new Date(dateStr);
@@ -152,7 +146,6 @@ export function AnalysesPanel({
               <th className="px-4 py-2.5 font-medium">Violations</th>
               <th className="px-4 py-2.5 font-medium text-right">Duration</th>
               <th className="px-4 py-2.5 font-medium text-right">Tokens</th>
-              <th className="px-4 py-2.5 font-medium text-right">Cost</th>
               <th className="px-4 py-2.5 font-medium text-center">Actions</th>
             </tr>
           </thead>
@@ -245,9 +238,6 @@ export function AnalysesPanel({
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs text-muted-foreground">
                     {formatTokens(a.totalTokens)}
-                  </td>
-                  <td className="px-4 py-2.5 text-right text-xs text-green-400">
-                    {a.provider === 'claude-code' ? '-' : formatCost(a.totalCost)}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-center gap-1">

@@ -1,8 +1,8 @@
 import * as p from "@clack/prompts";
 import type { Violation, DiffResult } from "./helpers.js";
 import {
-  ensureServer,
-  ensureRepo,
+  requireDashboard,
+  requireRegisteredRepo,
   getServerUrl,
   renderViolations,
   renderDiffResults,
@@ -11,8 +11,8 @@ import {
 export async function runList({ limit = 20, offset = 0 } = {}): Promise<void> {
   p.intro("Violations");
 
-  await ensureServer();
-  const repo = await ensureRepo();
+  await requireDashboard();
+  const repo = requireRegisteredRepo();
 
   const serverUrl = getServerUrl();
   const showAll = !isFinite(limit);
@@ -45,8 +45,8 @@ export async function runList({ limit = 20, offset = 0 } = {}): Promise<void> {
 export async function runListDiff(): Promise<void> {
   p.intro("Diff check results");
 
-  await ensureServer();
-  const repo = await ensureRepo();
+  await requireDashboard();
+  const repo = requireRegisteredRepo();
 
   const serverUrl = getServerUrl();
   const res = await fetch(`${serverUrl}/api/repos/${repo.id}/diff-check`);

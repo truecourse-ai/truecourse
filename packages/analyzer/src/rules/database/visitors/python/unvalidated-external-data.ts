@@ -42,7 +42,7 @@ export const pythonUnvalidatedExternalDataVisitor: CodeRuleVisitor = {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Unvalidated external data used in database write',
-          `External data (e.g., request.data, request.json) passed directly to ${methodName}() without schema validation. Validate input with a serializer or schema library before writing to the database.`,
+          `External data (e.g., \`request.data\`, \`request.json\`) passed directly to \`${methodName}()\` without schema validation. Validate input with a serializer or schema library before writing to the database.`,
           sourceCode,
           'Validate external data with a schema/serializer before using it in database operations.',
         )

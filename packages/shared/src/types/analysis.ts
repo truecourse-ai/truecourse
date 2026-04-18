@@ -206,6 +206,13 @@ export const ModuleInfoSchema = z.object({
   importCount: z.number(),
   exportCount: z.number(),
   superClass: z.string().optional(),
+  /** 1-based source span of the module. Class modules get the class's
+   *  `ClassDefinition.location` range; standalone/file modules span the
+   *  whole file (1..lineCount). Used by module-scope arch violations
+   *  (`god-module`, `unused-export` on a class, layer violations) so
+   *  every violation with a `filePath` can carry a line range. */
+  startLine: z.number().optional(),
+  endLine: z.number().optional(),
   lineCount: z.number().optional(),
 })
 
@@ -225,6 +232,11 @@ export const MethodInfoSchema = z.object({
   returnType: z.string().optional(),
   isAsync: z.boolean(),
   isExported: z.boolean(),
+  /** 1-based source position of the method/function. Preserved from
+   *  `FunctionDefinition.location` so downstream rules can emit violations
+   *  that point at the exact method rather than the whole file. */
+  startLine: z.number().optional(),
+  endLine: z.number().optional(),
   lineCount: z.number().optional(),
   statementCount: z.number().optional(),
   maxNestingDepth: z.number().optional(),

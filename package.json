@@ -7,14 +7,10 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "clean": "turbo clean",
-    "db:generate": "turbo db:generate --filter=@truecourse/server",
-    "db:migrate": "turbo db:migrate --filter=@truecourse/server",
-    "db:push": "turbo db:push --filter=@truecourse/server",
     "start": "turbo start",
     "build:dist": "tsx scripts/build.ts",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "prompts:push": "pnpm dlx tsx apps/server/src/services/llm/push-prompts.ts"
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -22,11 +18,8 @@
     "@types/node": "^22.0.0",
     "@types/supertest": "^7.2.0",
     "cors": "^2.8.5",
-    "drizzle-orm": "^0.38.0",
-    "embedded-postgres": "18.3.0-beta.16",
     "esbuild": "^0.24.0",
     "express": "^4.22.1",
-    "postgres": "^3.4.0",
     "simple-git": "^3.27.0",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",

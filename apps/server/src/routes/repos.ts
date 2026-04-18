@@ -1,14 +1,24 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { eq, desc } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { repos, analyses, services, serviceDependencies, violations, conversations, messages } from '../db/schema.js';
+import * as fs from 'fs';
 import { CreateRepoSchema } from '@truecourse/shared';
 import { createAppError } from '../middleware/error.js';
 import { getGit } from '../lib/git.js';
-import * as fs from 'fs';
-import * as path from 'path';
+import { getRepoTruecourseDir } from '../config/paths.js';
+import { readProjectConfig, updateProjectConfig } from '../config/project-config.js';
+import {
+  readRegistry,
+  getProjectBySlug,
+  registerProject,
+  unregisterProject,
+} from '../config/registry.js';
 
 const router: Router = Router();
+
+function requireRegistryEntry(slug: string) {
+  const entry = getProjectBySlug(slug);
+  if (!entry) throw createAppError('Project not found', 404);
+  return entry;
+}
 
 // POST /api/repos - Register a new repo
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -19,113 +29,60 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     }
 
     const repoPath = parsed.data.path;
-
-    // Validate that the path exists on the filesystem
     if (!fs.existsSync(repoPath)) {
       throw createAppError(`Path does not exist: ${repoPath}`, 400);
     }
-
-    const stat = fs.statSync(repoPath);
-    if (!stat.isDirectory()) {
+    if (!fs.statSync(repoPath).isDirectory()) {
       throw createAppError(`Path is not a directory: ${repoPath}`, 400);
     }
 
-    // Extract name from path
-    const name = path.basename(repoPath);
-
-    // Check if repo already exists
-    const existing = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.path, repoPath))
-      .limit(1);
-
-    if (existing.length > 0) {
-      res.status(200).json(existing[0]);
-      return;
-    }
-
-    const [repo] = await db
-      .insert(repos)
-      .values({ name, path: repoPath })
-      .returning();
-
-    res.status(201).json(repo);
+    const entry = registerProject(repoPath);
+    res.status(201).json({
+      id: entry.slug,
+      name: entry.name,
+      path: entry.path,
+      lastAnalyzed: null,
+    });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/repos - List all repos
+// GET /api/repos - List all registered projects (home page).
+// Reads `lastAnalyzed` straight from the registry so unanalyzed projects
+// don't surface a fake date and the list endpoint never opens any DB.
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const allRepos = await db.select().from(repos).orderBy(desc(repos.createdAt));
-    res.json(allRepos.map((r) => ({
-      id: r.id,
-      name: r.name,
-      path: r.path,
-      lastAnalyzed: r.lastAnalyzedAt?.toISOString() ?? null,
-    })));
+    const entries = readRegistry();
+    res.json(
+      entries.map((e) => ({
+        id: e.slug,
+        name: e.name,
+        path: e.path,
+        lastAnalyzed: e.lastAnalyzed ?? null,
+      })),
+    );
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/repos/:id - Get repo details with latest analysis
+// GET /api/repos/:id - Project details. Uses the same registry-backed
+// `lastAnalyzed` as the list endpoint — both views stay consistent and
+// neither opens PGlite just to read a timestamp.
 router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
-
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    // Get latest analysis
-    const latestAnalysis = await db
-      .select()
-      .from(analyses)
-      .where(eq(analyses.repoId, id))
-      .orderBy(desc(analyses.createdAt))
-      .limit(1);
-
-    let analysisData = null;
-    if (latestAnalysis.length > 0) {
-      const analysis = latestAnalysis[0];
-
-      const analysisServices = await db
-        .select()
-        .from(services)
-        .where(eq(services.analysisId, analysis.id));
-
-      const analysisDeps = await db
-        .select()
-        .from(serviceDependencies)
-        .where(eq(serviceDependencies.analysisId, analysis.id));
-
-      analysisData = {
-        ...analysis,
-        services: analysisServices,
-        dependencies: analysisDeps,
-      };
-    }
-
-    // Get git branch info
-    const git = await getGit(repo.path);
+    const entry = requireRegistryEntry(req.params.id as string);
+    const git = await getGit(entry.path);
     const branchSummary = await git.branch();
-    const branches = branchSummary.all;
-    const defaultBranch = branchSummary.current;
 
     res.json({
-      ...repo,
-      branches,
-      defaultBranch,
-      latestAnalysis: analysisData,
+      id: entry.slug,
+      name: entry.name,
+      path: entry.path,
+      lastAnalyzed: entry.lastAnalyzed ?? null,
+      branches: branchSummary.all,
+      defaultBranch: branchSummary.current,
     });
   } catch (error) {
     next(error);
@@ -135,21 +92,9 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
 // GET /api/repos/:id/branches - List git branches
 router.get('/:id/branches', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
-
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    const git = await getGit(repo.path);
+    const entry = requireRegistryEntry(req.params.id as string);
+    const git = await getGit(entry.path);
     const branchSummary = await git.branch();
-
     res.json({
       branches: branchSummary.all,
       defaultBranch: branchSummary.current,
@@ -159,77 +104,36 @@ router.get('/:id/branches', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
-// DELETE /api/repos/:id - Remove repo and related data
+// DELETE /api/repos/:id - Unregister the project, close its PGlite, and
+// remove `<repo>/.truecourse/` from disk. The repo source itself is never
+// touched.
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
-
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
+    const slug = req.params.id as string;
+    const entry = getProjectBySlug(slug);
+    if (!entry) {
+      throw createAppError('Project not found', 404);
     }
 
-    // Delete in correct order to respect foreign keys
-    // Get all conversations for this repo
-    const repoConversations = await db
-      .select()
-      .from(conversations)
-      .where(eq(conversations.repoId, id));
-
-    for (const conv of repoConversations) {
-      await db.delete(messages).where(eq(messages.conversationId, conv.id));
+    const tcDir = getRepoTruecourseDir(entry.path);
+    if (fs.existsSync(tcDir)) {
+      fs.rmSync(tcDir, { recursive: true, force: true });
     }
 
-    await db.delete(conversations).where(eq(conversations.repoId, id));
-
-    // Get all analyses for this repo
-    const repoAnalyses = await db
-      .select()
-      .from(analyses)
-      .where(eq(analyses.repoId, id));
-
-    for (const analysis of repoAnalyses) {
-      await db.delete(violations).where(eq(violations.analysisId, analysis.id));
-      await db.delete(serviceDependencies).where(eq(serviceDependencies.analysisId, analysis.id));
-      await db.delete(services).where(eq(services.analysisId, analysis.id));
-    }
-
-    await db.delete(analyses).where(eq(analyses.repoId, id));
-    await db.delete(repos).where(eq(repos.id, id));
-
+    unregisterProject(slug);
     res.status(204).send();
   } catch (error) {
     next(error);
   }
 });
 
-// PUT /api/repos/:id/categories - Update per-repo disabled rule categories
+// PUT /api/repos/:id/categories - Update per-repo enabled categories
 router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
+    const entry = requireRegistryEntry(req.params.id as string);
     const { enabledCategories } = req.body as { enabledCategories: string[] | null };
-
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    await db
-      .update(repos)
-      .set({ enabledCategories, updatedAt: new Date() })
-      .where(eq(repos.id, id));
-
-    res.json({ enabledCategories });
+    const updated = updateProjectConfig(entry.path, { enabledCategories });
+    res.json({ enabledCategories: updated.enabledCategories ?? null });
   } catch (error) {
     next(error);
   }
@@ -238,25 +142,20 @@ router.put('/:id/categories', async (req: Request, res: Response, next: NextFunc
 // PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
 router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const id = req.params.id as string;
+    const entry = requireRegistryEntry(req.params.id as string);
     const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
+    const updated = updateProjectConfig(entry.path, { enableLlmRules });
+    res.json({ enableLlmRules: updated.enableLlmRules ?? null });
+  } catch (error) {
+    next(error);
+  }
+});
 
-    const [repo] = await db
-      .select()
-      .from(repos)
-      .where(eq(repos.id, id))
-      .limit(1);
-
-    if (!repo) {
-      throw createAppError('Repo not found', 404);
-    }
-
-    await db
-      .update(repos)
-      .set({ enableLlmRules, updatedAt: new Date() })
-      .where(eq(repos.id, id));
-
-    res.json({ enableLlmRules });
+// GET /api/repos/:id/config - Read per-repo config.json
+router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const entry = requireRegistryEntry(req.params.id as string);
+    res.json(readProjectConfig(entry.path));
   } catch (error) {
     next(error);
   }

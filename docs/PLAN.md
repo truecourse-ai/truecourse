@@ -11,11 +11,11 @@ TrueCourse is a local web app that helps developers understand AI-generated code
 | Component | Choice |
 |---|---|
 | Monorepo | Turborepo + pnpm workspaces |
-| Frontend | Next.js (App Router) + React Flow + Tailwind + shadcn/ui |
+| Frontend | Vite + React Router + React Flow + Tailwind + shadcn/ui |
 | Backend | Express + Socket.io |
-| Database | Embedded PostgreSQL (`embedded-postgres`) + Drizzle ORM |
-| Code analysis | tree-sitter (JS/TS first) |
-| LLM | Vercel AI SDK (`ai` + `@ai-sdk/openai` + `@ai-sdk/anthropic`), Langfuse tracing |
+| Storage | File-based JSON store under `<repo>/.truecourse/` (no database) |
+| Code analysis | tree-sitter (JS/TS/Python) + TypeScript Compiler for type-aware rules |
+| LLM | Claude Code CLI (spawned subprocess) |
 | File watching | chokidar |
 | Graph layout | dagre |
 | CLI | commander + @clack/prompts |
@@ -51,10 +51,9 @@ truecourse/
           repo/RepoSelector.tsx, RepoList.tsx
           insights/InsightsPanel.tsx, InsightCard.tsx, WarningCard.tsx
           graph/panels/DiffPanel.tsx
-          chat/ChatPanel.tsx, ChatMessage.tsx, ChatInput.tsx
           schema/SchemaPanel.tsx     # Database schema review panel
           layout/Header.tsx, Sidebar.tsx
-        hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useChat.ts, useDiffCheck.ts
+        hooks/useGraph.ts, useSocket.ts, useInsights.ts, useRepo.ts, useDiffCheck.ts
         lib/api.ts, socket.ts
         types/graph.ts
 
@@ -62,7 +61,7 @@ truecourse/
       src/
         index.ts
         config/index.ts, database.ts
-        routes/repos.ts, analysis.ts, insights.ts, chat.ts, databases.ts
+        routes/repos.ts, analysis.ts, insights.ts, databases.ts
         services/
           analyzer.service.ts
           graph.service.ts
@@ -70,7 +69,6 @@ truecourse/
           watcher.service.ts
           diff-check.service.ts       # Git diff violation comparison
           llm/provider.ts, tracing.ts, prompts.ts, push-prompts.ts
-          chat.service.ts
         socket/index.ts, handlers.ts
         db/schema.ts, migrations/
         middleware/error.ts
@@ -166,8 +164,6 @@ truecourse/
 - `services` — id, analysisId, name, rootPath, type, framework, fileCount, layerSummary (jsonb)
 - `service_dependencies` — id, analysisId, sourceServiceId, targetServiceId, dependencyCount, dependencyType
 - `insights` — id, repoId, analysisId, type, title, content, severity, targetServiceId, fixPrompt, createdAt
-- `conversations` — id, repoId, branch, createdAt, updatedAt
-- `messages` — id, conversationId, role ('user'|'assistant'|'system'), content, nodeContext (jsonb), createdAt
 
 ### 1.3 Analysis Pipeline (packages/analyzer) `STATUS: DONE`
 
@@ -245,7 +241,7 @@ A minimal but realistic monorepo with:
 #### 1.8.1 `packages/shared` — Schema validation tests
 - **Zod schemas parse valid data correctly** — each schema (FileAnalysis, ServiceInfo, Insight, etc.) accepts well-formed input
 - **Zod schemas reject invalid data** — missing required fields, wrong types, invalid enum values
-- **API schemas validate correctly** — CreateRepoSchema, AnalyzeRepoSchema, ChatMessageSchema with valid/invalid input
+- **API schemas validate correctly** — CreateRepoSchema, AnalyzeRepoSchema with valid/invalid input
 
 #### 1.8.2 `packages/analyzer` — Analysis engine tests
 
@@ -355,8 +351,6 @@ A minimal but realistic monorepo with:
 **LLM conversation management:**
 - Use Anthropic Agent SDK / OpenAI SDK conversation features directly
 - Langfuse traces each conversation turn (optional)
-- System prompt includes: project architecture summary, current branch, analysis metadata
-- Node context injected as user message with structured data when "Explain" is clicked
 
 ### 1.11 CLI & Distribution (`tools/cli`) `STATUS: DONE`
 
@@ -2699,7 +2693,7 @@ truecourse rules reprocess                   # Re-extract rules from stored sour
 
 ---
 
-## Phase 24: CLI Ergonomics & Composability `STATUS: TODO`
+## Phase 24: CLI Ergonomics & Composability `STATUS: CANCELLED`
 
 Make the CLI output machine-readable and add power-user features for daily workflows.
 

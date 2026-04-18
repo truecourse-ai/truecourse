@@ -24,11 +24,3 @@ export const GenerateViolationsSchema = z.object({
 })
 
 export type GenerateViolationsInput = z.infer<typeof GenerateViolationsSchema>
-
-export const ChatMessageSchema = z.object({
-  message: z.string().min(1),
-  nodeContext: z.any().optional(),
-  conversationId: z.string().uuid().optional(),
-})
-
-export type ChatMessageInput = z.infer<typeof ChatMessageSchema>

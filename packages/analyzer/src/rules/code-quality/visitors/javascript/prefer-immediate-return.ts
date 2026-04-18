@@ -33,7 +33,7 @@ export const preferImmediateReturnVisitor: CodeRuleVisitor = {
     function countUsages(n: SyntaxNode) {
       if (n.type === 'identifier' && n.text === retName) {
         const parent = n.parent
-        if (parent?.type === 'variable_declarator' && parent.childForFieldName('name') === n) return
+        if (parent?.type === 'variable_declarator' && parent.childForFieldName('name')?.id === n.id) return
         usageCount++
       }
       for (let i = 0; i < n.childCount; i++) {

@@ -2,61 +2,44 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
 import { createServer } from 'http';
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { config } from './config/index.js';
-import { startEmbeddedPostgres, stopEmbeddedPostgres } from './config/embedded-postgres.js';
-import { initDatabase, closeDatabase } from './config/database.js';
 import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
+import { projectResolver } from './middleware/project.js';
 import reposRouter from './routes/repos.js';
+import analyzeRouter from './routes/analyze.js';
 import analysisRouter from './routes/analysis.js';
 import violationsRouter from './routes/violations.js';
-import chatRouter from './routes/chat.js';
 import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
 import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
 import { stopAllWatchers } from './services/watcher.service.js';
-import { seedRules } from './services/rules.service.js';
-import { initTelemetry, shutdownTelemetry } from './services/llm/telemetry.js';
+import { wipeLegacyPostgresData, getLogDir } from './config/paths.js';
+import { closeLogger, configureLogger, log } from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
-  // 0. Initialize OTel telemetry (Langfuse)
-  initTelemetry();
+  // 0. Route all internal diagnostics to the dashboard log file. When running
+  //    via `pnpm dev` the `TRUECOURSE_DEV=1` env var tees lines to stderr
+  //    too so the dev terminal still shows them. Packaged dashboard (console
+  //    or service) gets file-only output.
+  configureLogger({
+    filePath: path.join(getLogDir(), 'dashboard.log'),
+    tee: process.env.TRUECOURSE_DEV === '1',
+  });
 
-  // 1. Start embedded PostgreSQL (no-op if DATABASE_URL is set)
-  const databaseUrl = await startEmbeddedPostgres();
-  console.log(`[Database] Connected: ${databaseUrl.replace(/\/\/.*@/, '//<credentials>@')}`);
+  // 1. One-time cleanup of the pre-0.4 embedded-postgres data dir
+  if (wipeLegacyPostgresData()) {
+    log.info('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
+  }
 
-  // 2. Initialize database connection
-  initDatabase(databaseUrl);
+  log.info(`[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}`);
 
-  // 3. Run migrations
-  // In dev: migrations are at ../src/db/migrations relative to src/
-  // In packaged mode: migrations are at ./db/migrations relative to dist/server.mjs
-  const devMigrations = path.join(__dirname, '../src/db/migrations');
-  const distMigrations = path.join(__dirname, 'db/migrations');
-  const migrationsFolder = fs.existsSync(distMigrations) ? distMigrations : devMigrations;
-  const migrationClient = postgres(databaseUrl, { max: 1, onnotice: () => {} });
-  await migrate(drizzle(migrationClient), { migrationsFolder });
-  await migrationClient.end();
-  console.log('[Database] Migrations complete');
-
-  // 3b. Seed default rules (upserts — safe to run every startup)
-  await seedRules();
-  console.log('[Database] Rules seeded');
-  const llmModel = config.llmProvider === 'claude-code'
-    ? (config.claudeCodeModel || 'default')
-    : (config.llmModel || (config.llmProvider === 'anthropic' ? 'claude-haiku-4-5-20251001' : 'gpt-5-mini'));
-  console.log(`[LLM] Provider: ${config.llmProvider}, model: ${llmModel}`);
-
-  // 4. Setup Express app
+  // 2. Setup Express app
   const app: express.Express = express();
   const httpServer = createServer(app);
 
@@ -65,13 +48,20 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
+  // Home page / registry routes run without a project.
   app.use('/api/repos', reposRouter);
-  app.use('/api/repos', analysisRouter);
-  app.use('/api/repos', violationsRouter);
-  app.use('/api/repos', chatRouter);
-  app.use('/api/repos', databasesRouter);
-  app.use('/api/repos', flowsRouter);
-  app.use('/api/repos', analyticsRouter);
+  // Analyze trigger routes create `.truecourse/` on first run, so they run
+  // without the resolver so a brand-new project (no LATEST.json yet) can
+  // still bootstrap. Mount first.
+  app.use('/api/repos', analyzeRouter);
+  // Project-scoped routes. Each router's patterns declare their own `:id`
+  // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
+  // matches the `:id` segment itself. The resolver validates the slug.
+  app.use('/api/repos', projectResolver, analysisRouter);
+  app.use('/api/repos', projectResolver, violationsRouter);
+  app.use('/api/repos', projectResolver, databasesRouter);
+  app.use('/api/repos', projectResolver, flowsRouter);
+  app.use('/api/repos', projectResolver, analyticsRouter);
   app.use('/api/rules', rulesRouter);
 
   app.get('/api/health', (_req, res) => {
@@ -80,8 +70,7 @@ async function main() {
 
   app.use(errorHandler);
 
-  // 5. Serve static frontend (packaged mode)
-  // In bundled mode, public/ is a sibling of server.mjs
+  // 3. Serve static frontend (packaged mode)
   const staticDir = path.join(__dirname, 'public');
   if (fs.existsSync(staticDir)) {
     app.use(express.static(staticDir));
@@ -91,7 +80,7 @@ async function main() {
     });
   }
 
-  // 6. Start listening
+  // 4. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
@@ -104,36 +93,37 @@ async function main() {
       }
     });
     httpServer.listen(config.port, () => {
-      console.log('');
-      console.log('         _|_');
-      console.log('        /_|_\\');
-      console.log('          |');
-      console.log('         /|');
-      console.log('        / |');
-      console.log('       /  |');
-      console.log('      /   |');
-      console.log('     /    |');
-      console.log('    /_____|_____\\');
-      console.log('    \\__________|');
-      console.log('     \\_________/');
-      console.log('   ~~~~~~~~~~~~~~');
-      console.log('');
-      console.log(`   Charting your course...`);
-      console.log('');
+      log.banner([
+        '',
+        '         _|_',
+        '        /_|_\\',
+        '          |',
+        '         /|',
+        '        / |',
+        '       /  |',
+        '      /   |',
+        '     /    |',
+        '    /_____|_____\\',
+        '    \\__________|',
+        '     \\_________/',
+        '   ~~~~~~~~~~~~~~',
+        '',
+        '   Charting your course...',
+        '',
+      ]);
+      log.info(`[Server] Listening on port ${config.port}`);
       resolve();
     });
   });
 
   // Graceful shutdown
   async function shutdown() {
-    console.log('\n[Server] Shutting down...');
+    log.info('[Server] Shutting down...');
     stopAllWatchers();
-    await shutdownTelemetry();
     httpServer.closeAllConnections();
     httpServer.close();
-    await closeDatabase();
-    await stopEmbeddedPostgres();
-    console.log('[Server] Closed');
+    log.info('[Server] Closed');
+    await closeLogger();
     process.exit(0);
   }
 
@@ -142,6 +132,8 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
+  // Fatal boot failure — logger may not be configured; fall back to stderr so
+  // the operator always sees it. Then exit.
+  process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
   process.exit(1);
 });

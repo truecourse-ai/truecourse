@@ -1,13 +1,16 @@
-import { eq, sql } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { analysisUsage } from '../db/schema.js';
+import type { UsageRecord } from '../types/snapshot.js';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+/**
+ * LLM usage records for a single analyze run.
+ *
+ * Before the file-store refactor this module wrote usage rows into the DB;
+ * now usage lives inside the per-analysis snapshot. `flushUsage` on the
+ * provider returns the accumulated records and the orchestrator puts them
+ * on the snapshot.
+ */
 
+/** Input the provider emits at the end of an analyze run. */
 export interface UsageData {
-  analysisId: string;
   provider: string;
   callType: string;
   inputTokens: number;
@@ -19,19 +22,25 @@ export interface UsageData {
   durationMs: number;
 }
 
-export interface UsageRow {
-  id: string;
-  analysisId: string;
-  provider: string;
-  callType: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  costUsd: string | null;
-  durationMs: number;
-  createdAt: Date;
+/**
+ * Aggregate a batch of `UsageData` into fully-formed `UsageRecord[]`
+ * (fills `createdAt` + defaults the optional cache token fields to 0).
+ * Pure — the caller assigns the result to `snapshot.usage`.
+ */
+export function toUsageRecords(records: UsageData[]): UsageRecord[] {
+  const now = new Date().toISOString();
+  return records.map((r) => ({
+    provider: r.provider,
+    callType: r.callType,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    cacheReadTokens: r.cacheReadTokens ?? 0,
+    cacheWriteTokens: r.cacheWriteTokens ?? 0,
+    totalTokens: r.totalTokens,
+    costUsd: r.costUsd ?? null,
+    durationMs: r.durationMs,
+    createdAt: now,
+  }));
 }
 
 export interface UsageSummary {
@@ -46,50 +55,44 @@ export interface UsageSummary {
   provider: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// Functions
-// ---------------------------------------------------------------------------
+/** Compute the summary the UI displays from an analysis's usage records. */
+export function summarizeUsage(records: UsageRecord[]): UsageSummary {
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheReadTokens = 0;
+  let totalCacheWriteTokens = 0;
+  let totalTokens = 0;
+  let totalDurationMs = 0;
+  let costSum = 0;
+  let anyCost = false;
+  let provider: string | null = null;
 
-export async function recordUsageBatch(records: UsageData[]): Promise<void> {
-  if (records.length === 0) return;
-  await db.insert(analysisUsage).values(
-    records.map((r) => ({
-      analysisId: r.analysisId,
-      provider: r.provider,
-      callType: r.callType,
-      inputTokens: r.inputTokens,
-      outputTokens: r.outputTokens,
-      cacheReadTokens: r.cacheReadTokens ?? 0,
-      cacheWriteTokens: r.cacheWriteTokens ?? 0,
-      totalTokens: r.totalTokens,
-      costUsd: r.costUsd ?? null,
-      durationMs: r.durationMs,
-    })),
-  );
-}
+  for (const r of records) {
+    totalInputTokens += r.inputTokens;
+    totalOutputTokens += r.outputTokens;
+    totalCacheReadTokens += r.cacheReadTokens;
+    totalCacheWriteTokens += r.cacheWriteTokens;
+    totalTokens += r.totalTokens;
+    totalDurationMs += r.durationMs;
+    if (r.costUsd != null) {
+      const n = Number(r.costUsd);
+      if (!Number.isNaN(n)) {
+        costSum += n;
+        anyCost = true;
+      }
+    }
+    if (r.provider) provider = r.provider;   // last wins; records share one provider per run
+  }
 
-export async function getUsageByAnalysis(analysisId: string): Promise<UsageRow[]> {
-  return db
-    .select()
-    .from(analysisUsage)
-    .where(eq(analysisUsage.analysisId, analysisId));
-}
-
-export async function getUsageSummaryByAnalysis(analysisId: string): Promise<UsageSummary> {
-  const [row] = await db
-    .select({
-      totalInputTokens: sql<number>`coalesce(sum(${analysisUsage.inputTokens}), 0)::int`,
-      totalOutputTokens: sql<number>`coalesce(sum(${analysisUsage.outputTokens}), 0)::int`,
-      totalCacheReadTokens: sql<number>`coalesce(sum(${analysisUsage.cacheReadTokens}), 0)::int`,
-      totalCacheWriteTokens: sql<number>`coalesce(sum(${analysisUsage.cacheWriteTokens}), 0)::int`,
-      totalTokens: sql<number>`coalesce(sum(${analysisUsage.totalTokens}), 0)::int`,
-      totalCostUsd: sql<string | null>`case when sum(case when ${analysisUsage.costUsd} is not null then 1 else 0 end) > 0 then sum(${analysisUsage.costUsd}::numeric)::text else null end`,
-      totalDurationMs: sql<number>`coalesce(sum(${analysisUsage.durationMs}), 0)::int`,
-      callCount: sql<number>`count(*)::int`,
-      provider: sql<string | null>`max(${analysisUsage.provider})`,
-    })
-    .from(analysisUsage)
-    .where(eq(analysisUsage.analysisId, analysisId));
-
-  return row;
+  return {
+    totalInputTokens,
+    totalOutputTokens,
+    totalCacheReadTokens,
+    totalCacheWriteTokens,
+    totalTokens,
+    totalCostUsd: anyCost ? costSum.toFixed(6) : null,
+    totalDurationMs,
+    callCount: records.length,
+    provider,
+  };
 }

@@ -52,7 +52,7 @@ function buildWorkspacePackageMap(rootPath: string): Map<string, string> {
     const dirPath = join(rootPath, pattern)
     if (!existsSync(dirPath) || !statSync(dirPath).isDirectory()) continue
     try {
-      for (const entry of readdirSync(dirPath)) {
+      for (const entry of readdirSync(dirPath).sort()) {
         const pkgDir = join(dirPath, entry)
         const pkgJsonPath = join(pkgDir, 'package.json')
         if (!existsSync(pkgJsonPath)) continue

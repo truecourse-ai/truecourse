@@ -1,5 +1,3 @@
-import { Langfuse } from 'langfuse';
-import { config } from '../../config/index.js';
 import type {
   ServiceViolationContext,
   DatabaseViolationContext,
@@ -36,6 +34,8 @@ Only report violations that match one of the Analysis Rules listed above. Do NOT
 The fixPrompt should be specific and actionable, using human-readable names (service names, file paths) — never include internal ids in fixPrompt.
 
 Also provide a concise 1-2 sentence description for each service explaining what it does and its role in the architecture.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -90,6 +90,8 @@ Before returning the final answer, perform a completeness check:
 - Verify that no issue is represented in both unchangedViolationIds/resolvedViolationIds and newViolations.
 - If any item is missing, duplicated, or uses an invalid ID, correct it before returning.
 
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
@@ -111,6 +113,8 @@ Only report actionable issues — do NOT include positive observations, complime
 Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
 
 For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -142,6 +146,8 @@ DE-DUPLICATION AND LIFECYCLE RULES:
 
 For each issue, provide a fixPrompt that an external AI coding assistant could use to fix it. Use human-readable names (table names, column names) in fixPrompts — never include internal ids.
 
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
@@ -172,6 +178,8 @@ Only report actionable issues — do NOT include positive observations, complime
 Only report violations that match one of the Analysis Rules listed above. Do NOT invent new rule categories or report issues outside the provided rules. For each violation, set ruleKey to the exact key from the matching rule. Every violation MUST have a ruleKey.
 
 The fixPrompt should be specific and actionable, using human-readable names (service names, module names, method names, file paths) — never include internal ids in fixPrompt.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -229,6 +237,8 @@ Before returning the final answer, perform a completeness check:
 - Verify that no issue is represented in both unchangedViolationIds/resolvedViolationIds and newViolations.
 - If any item is missing, duplicated, or uses an invalid ID, correct it before returning.
 
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
@@ -249,6 +259,8 @@ IMPORTANT:
 - filePath must exactly match one of the file paths provided above.
 - Since you only see metadata (signatures, imports, calls), focus on structural patterns — missing capabilities, dependency issues, and configuration problems detectable without reading function bodies.
 - Only report genuine issues. Do not flag trivial style preferences.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -271,6 +283,8 @@ IMPORTANT:
 - Keep violations narrow and precise. Each violation should target the smallest relevant code range.
 - lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
 - Only report genuine issues. Do not flag trivial style preferences.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -300,6 +314,8 @@ DE-DUPLICATION AND LIFECYCLE RULES:
 - Create a newViolations item only when the current issue is not already covered by any previous code violation.
 - Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
 - Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -332,6 +348,8 @@ DE-DUPLICATION AND LIFECYCLE RULES:
 - Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
 - Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
 
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
@@ -354,6 +372,8 @@ IMPORTANT:
 - Keep violations narrow and precise. Each violation should target the smallest relevant code range — typically a single function, statement, or block.
 - lineStart and lineEnd should tightly wrap only the specific lines exhibiting the issue.
 - Only report genuine issues. Do not flag trivial style preferences.
+
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
 
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
@@ -386,6 +406,8 @@ DE-DUPLICATION AND LIFECYCLE RULES:
 - Never represent the same issue in both unchangedViolationIds/resolvedViolationIds and newViolations.
 - Only mark a previous violation as resolved when the code clearly shows the underlying issue is fixed.
 
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
@@ -402,22 +424,12 @@ Steps:
 For each step, describe what data flows between the source and target methods.
 Return a human-readable flow name, a description of the overall flow purpose, and a data description for each step.
 
+Markdown formatting — in title, content, and fixPrompt, wrap every code identifier (function/method names, class/type names, variable/constant names, module names, file paths, config keys, SQL identifiers, URL paths) in single backticks so they render as monospace. Leave prose untouched. Example: "Handler \`createUser\` in \`services/user-service/src/user.handler.ts\` bypasses \`validateInput\`."
+
 Return your findings as structured data using the provided schema.`,
     labels: ['production'],
   },
 
-  'chat-system': {
-    prompt: `You are TrueCourse, an AI assistant that helps developers understand their codebase architecture.
-
-You have deep knowledge about the project's architecture, services, dependencies, and layers.
-When a user asks about a specific service, module, function, or layer, use the context provided to give detailed, accurate answers.
-Messages may include a [Node Context] block with structured data about the node being discussed (signature, parameters, complexity metrics, parent module/service, dependencies, violations, etc.). Use this data to give specific, grounded answers rather than generic ones.
-
-Be concise but thorough. Reference specific services, dependencies, and architectural patterns when relevant.
-If you notice potential issues (circular dependencies, layer violations, tight coupling, high complexity), proactively mention them.
-When suggesting improvements, provide actionable advice that could be passed to an AI coding assistant.`,
-    labels: ['production'],
-  },
 } as const;
 
 export type PromptName = keyof typeof PROMPT_DEFINITIONS;
@@ -675,82 +687,18 @@ export function buildFlowTemplateVars(context: FlowEnrichmentContext): Record<st
 }
 
 // ---------------------------------------------------------------------------
-// Langfuse prompt fetching (with local fallback)
+// Prompt compilation
 // ---------------------------------------------------------------------------
 
-let langfuseInstance: Langfuse | null = null;
-let langfuseChecked = false;
-let langfuseAvailable = false;
-
-async function getLangfuse(): Promise<Langfuse | null> {
-  if (!(config.langfuse.publicKey && config.langfuse.secretKey)) {
-    return null;
-  }
-
-  // Check connectivity once per session to avoid noisy SDK error logs
-  if (!langfuseChecked) {
-    langfuseChecked = true;
-    try {
-      const res = await fetch(`${config.langfuse.baseUrl || 'http://localhost:3001'}/api/public/health`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      langfuseAvailable = res.ok;
-    } catch {
-      langfuseAvailable = false;
-    }
-    if (!langfuseAvailable) {
-      console.log('[Langfuse] Unavailable — using local prompts for this session.');
-      return null;
-    }
-  }
-
-  if (!langfuseAvailable) return null;
-
-  if (!langfuseInstance) {
-    langfuseInstance = new Langfuse({
-      publicKey: config.langfuse.publicKey,
-      secretKey: config.langfuse.secretKey,
-      baseUrl: config.langfuse.baseUrl,
-    });
-  }
-  return langfuseInstance;
-}
-
-export interface PromptResult {
-  text: string;
-  /** Langfuse prompt JSON string for telemetry linkage (null when using local fallback). */
-  langfusePrompt: string | null;
-}
-
-/**
- * Get a compiled prompt string from Langfuse (falls back to local definition).
- * Returns the compiled text and optional Langfuse prompt metadata for trace linkage.
- */
-export async function getPrompt(
+export function getPrompt(
   name: PromptName,
   variables?: Record<string, string>
-): Promise<PromptResult> {
-  const langfuse = await getLangfuse();
-  const localDef = PROMPT_DEFINITIONS[name];
-
-  if (langfuse) {
-    try {
-      const prompt = await langfuse.getPrompt(name, undefined, {
-        type: 'text',
-      });
-      const compiled = prompt.compile(variables || {});
-      return { text: compiled, langfusePrompt: prompt.toJSON() };
-    } catch {
-      // Prompt fetch failed — fall through to local definition
-    }
-  }
-
-  // Local fallback: manually replace {{var}} placeholders
-  let text = localDef.prompt as string;
+): string {
+  let text = PROMPT_DEFINITIONS[name].prompt as string;
   if (variables) {
     for (const [key, value] of Object.entries(variables)) {
       text = text.replaceAll(`{{${key}}}`, value);
     }
   }
-  return { text, langfusePrompt: null };
+  return text;
 }

@@ -1,4 +1,5 @@
 import { watch, type FSWatcher } from 'chokidar';
+import { log } from '../lib/logger.js';
 
 const watchers = new Map<string, FSWatcher>();
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -49,11 +50,11 @@ export function watchRepo(
   });
 
   watcher.on('error', (error: unknown) => {
-    console.error(`[Watcher] Error watching ${repoPath}:`, error instanceof Error ? error.message : String(error));
+    log.error(`[Watcher] Error watching ${repoPath}: ${error instanceof Error ? error.message : String(error)}`);
   });
 
   watchers.set(repoPath, watcher);
-  console.log(`[Watcher] Started watching ${repoPath}`);
+  log.info(`[Watcher] Started watching ${repoPath}`);
 }
 
 export function stopWatching(repoPath: string): void {
@@ -61,7 +62,7 @@ export function stopWatching(repoPath: string): void {
   if (watcher) {
     watcher.close();
     watchers.delete(repoPath);
-    console.log(`[Watcher] Stopped watching ${repoPath}`);
+    log.info(`[Watcher] Stopped watching ${repoPath}`);
   }
 
   const timer = debounceTimers.get(repoPath);

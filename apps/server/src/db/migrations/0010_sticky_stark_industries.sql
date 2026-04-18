@@ -1,1 +1,0 @@
-ALTER TABLE "analyses" ADD COLUMN "commit_hash" text;

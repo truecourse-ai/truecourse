@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "type": "module",
   "bin": {
     "truecourse": "./dist/index.js"
@@ -17,11 +17,10 @@
   "dependencies": {
     "@clack/prompts": "^1.2.0",
     "@truecourse/analyzer": "workspace:*",
+    "@truecourse/server": "workspace:*",
     "@truecourse/shared": "workspace:^",
     "commander": "^12.1.0",
-    "dotenv": "^16.4.0",
-    "js-yaml": "^4.1.0",
-    "socket.io-client": "^4.7.0"
+    "js-yaml": "^4.1.0"
   },
   "optionalDependencies": {
     "node-windows": "^1.0.0-beta.8"

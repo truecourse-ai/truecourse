@@ -9,8 +9,7 @@ type DatabaseNodeData = {
   databaseType: string;
   tableCount: number;
   connectedServices: string[];
-  framework?: string; // driver name
-  onExplain?: (nodeId: string) => void;
+  framework?: string;
 };
 
 const HIDDEN_CLASS = '!invisible';

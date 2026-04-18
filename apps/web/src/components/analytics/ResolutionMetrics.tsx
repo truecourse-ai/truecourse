@@ -18,7 +18,7 @@ export function ResolutionMetrics({ data }: { data: ResolutionResponse }) {
   const ratePercent = Math.round(data.resolutionRate * 100);
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-2">
       <div className="group relative flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 py-1">
         <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="text-xs font-semibold">{formatDuration(data.avgTimeToResolveMs)}</span>

@@ -1,20 +1,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Shield, FolderTree, Workflow, Database, BarChart3, ClipboardList } from 'lucide-react';
+import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network } from 'lucide-react';
 
-export type LeftTab = 'violations' | 'rules' | 'files' | 'flows' | 'databases' | 'analytics' | 'analyses';
+export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses';
 
 const TAB_LABELS: Record<LeftTab, string> = {
-  violations: 'Violations',
-  rules: 'Rules',
+  home: 'Home',
+  graphs: 'Graphs',
   files: 'Files',
   flows: 'Flows',
   databases: 'Databases',
-  analytics: 'Analytics',
   analyses: 'Analyses',
 };
 
-const TABS_WITHOUT_PANEL = new Set<LeftTab>(['analytics', 'analyses']);
+const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
 
 type LeftSidebarProps = {
   activeTab: LeftTab | null;
@@ -26,12 +25,11 @@ type LeftSidebarProps = {
 };
 
 const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
-  { id: 'violations', icon: AlertTriangle, label: 'Violations' },
-  { id: 'rules', icon: Shield, label: 'Rules' },
-  { id: 'files', icon: FolderTree, label: 'Files' },
+  { id: 'home', icon: Home, label: 'Home' },
+  { id: 'graphs', icon: Network, label: 'Graphs' },
   { id: 'flows', icon: Workflow, label: 'Flows' },
+  { id: 'files', icon: FolderTree, label: 'Files' },
   { id: 'databases', icon: Database, label: 'Databases' },
-  { id: 'analytics', icon: BarChart3, label: 'Analytics' },
   { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
 ];
 

@@ -1,6 +1,7 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { getIO } from './index.js';
 import { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS } from '@truecourse/shared';
+import { log } from '../lib/logger.js';
 
 export { DOMAIN_ORDER, CODE_DOMAINS, DEFAULT_DOMAINS };
 
@@ -64,12 +65,12 @@ const activeAnalyses = new Map<string, AnalysisProgressPayload>();
 
 export function setupHandlers(io: SocketServer): void {
   io.on('connection', (socket: Socket) => {
-    console.error(`[Socket] Client connected: ${socket.id}`);
+    log.info(`[Socket] Client connected: ${socket.id}`);
 
     socket.on('joinRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.join(room);
-      console.error(`[Socket] ${socket.id} joined room ${room}`);
+      log.info(`[Socket] ${socket.id} joined room ${room}`);
 
       // If analysis is already running for this repo, send current progress
       const progress = activeAnalyses.get(repoId);
@@ -83,44 +84,44 @@ export function setupHandlers(io: SocketServer): void {
     socket.on('leaveRepo', async (repoId: string) => {
       const room = `repo:${repoId}`;
       await socket.leave(room);
-      console.error(`[Socket] ${socket.id} left room ${room}`);
+      log.info(`[Socket] ${socket.id} left room ${room}`);
     });
 
     socket.on('disconnect', () => {
-      console.error(`[Socket] Client disconnected: ${socket.id}`);
+      log.info(`[Socket] Client disconnected: ${socket.id}`);
     });
   });
 }
 
 // ---------------------------------------------------------------------------
-// StepTracker — manages a checklist of analysis phases and emits progress
+// StepTracker — manages a checklist of analysis phases and emits progress.
+// The emitter is caller-provided so the CLI can render to stdout while the
+// server wires it through Socket.io via `createSocketTracker()`.
 // ---------------------------------------------------------------------------
+
+export type ProgressEmit = (payload: AnalysisProgressPayload) => void;
 
 export class StepTracker {
   private steps: AnalysisStep[];
-  private repoId: string;
+  private readonly emitFn: ProgressEmit;
 
-  constructor(repoId: string, stepDefs: { key: string; label: string }[]) {
-    this.repoId = repoId;
+  constructor(emit: ProgressEmit, stepDefs: { key: string; label: string }[]) {
     this.steps = stepDefs.map((s) => ({ ...s, status: 'pending' as StepStatus }));
+    this.emitFn = emit;
   }
 
-  /** Mark a step as active (in progress) with optional detail. */
   start(key: string, detail?: string): void {
     this.setStatus(key, 'active', detail);
   }
 
-  /** Mark a step as done with optional detail. */
   done(key: string, detail?: string): void {
     this.setStatus(key, 'done', detail);
   }
 
-  /** Mark a step as errored with optional detail. */
   error(key: string, detail?: string): void {
     this.setStatus(key, 'error', detail);
   }
 
-  /** Update detail text on a step without changing status. */
   detail(key: string, detail: string): void {
     const step = this.steps.find((s) => s.key === key);
     if (step) {
@@ -139,23 +140,29 @@ export class StepTracker {
   }
 
   private emit(): void {
-    // Compute percent from step completion
     const total = this.steps.length;
     const doneCount = this.steps.filter((s) => s.status === 'done' || s.status === 'error').length;
     const activeCount = this.steps.filter((s) => s.status === 'active').length;
     const percent = Math.round(((doneCount + activeCount * 0.5) / total) * 100);
 
-    // Current step label for the `step` field (backward compat)
     const activeStep = this.steps.find((s) => s.status === 'active');
     const stepLabel = activeStep?.label ?? 'Analyzing';
 
-    emitAnalysisProgress(this.repoId, {
+    this.emitFn({
       step: stepLabel,
       percent,
       detail: activeStep?.detail,
       steps: [...this.steps],
     });
   }
+}
+
+/** Build a StepTracker that emits into the repo's Socket.io room. */
+export function createSocketTracker(
+  repoId: string,
+  stepDefs: { key: string; label: string }[],
+): StepTracker {
+  return new StepTracker((payload) => emitAnalysisProgress(repoId, payload), stepDefs);
 }
 
 export function emitAnalysisProgress(

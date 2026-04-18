@@ -1,7 +1,7 @@
 
 import { memo } from 'react';
 import { Handle, Position, useNodeConnections, type NodeProps } from '@xyflow/react';
-import { Monitor, Server, Cog, Package, AlertTriangle, MessageCircle } from 'lucide-react';
+import { Monitor, Server, Cog, Package, AlertTriangle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import type { ServiceNodeData } from '@/types/graph';
 import { LAYER_COLORS } from '@/types/graph';
@@ -19,8 +19,8 @@ const typeIcons: Record<string, React.ElementType> = {
 const DOT_CLASS = '!bg-muted-foreground !border-none !w-[5px] !h-[5px] !z-10';
 const HIDDEN_CLASS = '!invisible';
 
-function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: ServiceNodeData & { diffBadge?: DiffBadge } }) {
-  const { label, description, serviceInfo, violationCount, hasHighSeverity, onExplain, diffBadge } = data;
+function ServiceNodeComponent({ data, selected }: NodeProps & { data: ServiceNodeData & { diffBadge?: DiffBadge } }) {
+  const { label, description, serviceInfo, violationCount, hasHighSeverity, diffBadge } = data;
   const Icon = typeIcons[serviceInfo.type] || Package;
 
   const topConnections = useNodeConnections({ handleType: 'target', handleId: 'top' });
@@ -120,15 +120,6 @@ function ServiceNodeComponent({ id, data, selected }: NodeProps & { data: Servic
           <span className="text-[9px] text-muted-foreground">
             {serviceInfo.fileCount} files
           </span>
-          {onExplain && (
-            <button
-              className="flex items-center gap-1 rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); onExplain(id); }}
-            >
-              <MessageCircle className="h-2.5 w-2.5" />
-              Explain
-            </button>
-          )}
         </div>
       </CardContent>
 

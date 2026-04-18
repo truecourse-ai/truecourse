@@ -14,11 +14,11 @@ function collectIdentifiers(node: SyntaxNode, skip: Set<string>): Set<string> {
       const parent = n.parent
       if (parent) {
         // Skip if it's a property key in an object
-        if (parent.type === 'pair' && parent.childForFieldName('key') === n) return
+        if (parent.type === 'pair' && parent.childForFieldName('key')?.id === n.id) return
         // Skip if it's a shorthand property name that's just being defined
         if (parent.type === 'shorthand_property_identifier') return
         // Skip function declarations' own name
-        if (parent.type === 'function_declaration' && parent.childForFieldName('name') === n) return
+        if (parent.type === 'function_declaration' && parent.childForFieldName('name')?.id === n.id) return
       }
       ids.add(n.text)
     }

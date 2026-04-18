@@ -93,6 +93,7 @@ export function TrendChart({ data }: { data: TrendResponse }) {
                 fillOpacity={0.15}
                 stroke="var(--color-total)"
                 strokeWidth={2}
+                isAnimationActive={false}
               />
               <Area
                 dataKey="new"
@@ -101,6 +102,7 @@ export function TrendChart({ data }: { data: TrendResponse }) {
                 fillOpacity={0.1}
                 stroke="var(--color-new)"
                 strokeWidth={2}
+                isAnimationActive={false}
               />
               <Area
                 dataKey="resolved"
@@ -109,6 +111,7 @@ export function TrendChart({ data }: { data: TrendResponse }) {
                 fillOpacity={0.1}
                 stroke="var(--color-resolved)"
                 strokeWidth={2}
+                isAnimationActive={false}
               />
             </AreaChart>
           </ChartContainer>

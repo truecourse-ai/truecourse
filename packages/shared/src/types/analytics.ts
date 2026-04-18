@@ -30,7 +30,7 @@ export type TrendResponse = z.infer<typeof TrendResponseSchema>
 // ---------------------------------------------------------------------------
 
 export const BreakdownResponseSchema = z.object({
-  byType: z.record(z.string(), z.number()),
+  byCategory: z.record(z.string(), z.number()),
   bySeverity: z.record(z.string(), z.number()),
   total: z.number(),
 })

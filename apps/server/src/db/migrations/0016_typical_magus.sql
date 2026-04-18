@@ -1,1 +1,0 @@
-ALTER TABLE "rules" ADD COLUMN "context_requirement" jsonb;

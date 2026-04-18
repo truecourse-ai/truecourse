@@ -1,21 +1,22 @@
-import { eq, inArray } from 'drizzle-orm';
-import { db } from '../config/database.js';
-import { flows, flowSteps, violations, methods as methodsTable, modules as modulesTable } from '../db/schema.js';
+import { randomUUID } from 'node:crypto';
+import { log } from '../lib/logger.js';
 import { traceFlows, normalizeUrl, AnalysisGraph, type CrossServiceCall, type RouteHandler } from '@truecourse/analyzer';
 import type { AnalysisResult } from './analyzer.service.js';
 import type { FileAnalysis, SupportedLanguage } from '@truecourse/shared';
+import type { FlowRecord, FlowStepRecord, LatestSnapshot } from '../types/snapshot.js';
+import { readLatest, writeLatest } from '../lib/analysis-store.js';
 
-export async function detectAndPersistFlows(
-  analysisId: string,
-  result: AnalysisResult,
-): Promise<{ flowCount: number }> {
-  // Build a name→type map from detected databases
+/**
+ * Trace the analyzer result into `FlowRecord[]` with steps nested. Pure —
+ * consumers put the result into `AnalysisSnapshot.graph.flows` (Phase 2
+ * orchestrator) or pass it through to the LATEST materialization.
+ */
+export function detectFlows(result: AnalysisResult): FlowRecord[] {
   const dbTypeMap = new Map<string, string>();
   for (const db of result.databaseResult.databases) {
     dbTypeMap.set(db.name, db.type);
   }
 
-  // Build function line-range lookup: filePath → [{ name, startLine, endLine }]
   const functionsByFile = new Map<string, { name: string; startLine: number; endLine: number }[]>();
   if (result.fileAnalyses) {
     for (const fa of result.fileAnalyses) {
@@ -32,15 +33,12 @@ export async function detectAndPersistFlows(
     }
   }
 
-  // Build cross-service HTTP calls from service dependencies
-  // ServiceDependencyInfo already has httpCalls matched to target services
   const crossServiceCalls: CrossServiceCall[] = [];
   const fileToModule = new Map<string, string>();
   for (const mod of result.modules) {
     fileToModule.set(mod.filePath, `${mod.serviceName}::${mod.name}`);
   }
 
-  // Map filePath → language for URL normalization
   const fileToLanguage = new Map<string, SupportedLanguage>();
   if (result.fileAnalyses) {
     for (const fa of result.fileAnalyses) {
@@ -55,7 +53,6 @@ export async function detectAndPersistFlows(
       if (!moduleKey) continue;
       const [sourceService, sourceModule] = moduleKey.split('::');
 
-      // Resolve sourceMethod from line numbers
       let sourceMethod: string | undefined;
       const fileFunctions = functionsByFile.get(call.location.filePath);
       if (fileFunctions) {
@@ -67,8 +64,6 @@ export async function detectAndPersistFlows(
         }
       }
 
-      // Normalize URL using language-aware config so the flow-tracer
-      // receives language-agnostic route patterns (e.g., /users/:param)
       const language = fileToLanguage.get(call.location.filePath);
       const normalizedUrl = language ? normalizeUrl(call.url, language) : call.url;
 
@@ -83,7 +78,6 @@ export async function detectAndPersistFlows(
     }
   }
 
-  // Build route handler lookup from file analyses
   const routeHandlers = buildRouteHandlerLookup(result);
 
   const graph = new AnalysisGraph({
@@ -102,84 +96,63 @@ export async function detectAndPersistFlows(
 
   const traced = traceFlows(graph);
 
-  if (traced.length === 0) return { flowCount: 0 };
+  const out: FlowRecord[] = traced.map((flow) => ({
+    id: randomUUID(),
+    name: flow.name,
+    description: null,
+    entryService: flow.entryService,
+    entryMethod: flow.entryMethod,
+    category: flow.category,
+    trigger: flow.trigger,
+    stepCount: flow.steps.length,
+    steps: flow.steps.map(
+      (step): FlowStepRecord => ({
+        stepOrder: step.stepOrder,
+        sourceService: step.sourceService,
+        sourceModule: step.sourceModule,
+        sourceMethod: step.sourceMethod,
+        targetService: step.targetService,
+        targetModule: step.targetModule,
+        targetMethod: step.targetMethod,
+        stepType: step.stepType,
+        dataDescription: null,
+        isAsync: step.isAsync,
+        isConditional: step.isConditional,
+      }),
+    ),
+  }));
 
-  // Insert flows and steps
-  for (const flow of traced) {
-    const [inserted] = await db
-      .insert(flows)
-      .values({
-        analysisId,
-        name: flow.name,
-        entryService: flow.entryService,
-        entryMethod: flow.entryMethod,
-        category: flow.category,
-        trigger: flow.trigger,
-        stepCount: flow.steps.length,
-      })
-      .returning();
-
-    if (flow.steps.length > 0) {
-      await db.insert(flowSteps).values(
-        flow.steps.map((step) => ({
-          flowId: inserted.id,
-          stepOrder: step.stepOrder,
-          sourceService: step.sourceService,
-          sourceModule: step.sourceModule,
-          sourceMethod: step.sourceMethod,
-          targetService: step.targetService,
-          targetModule: step.targetModule,
-          targetMethod: step.targetMethod,
-          stepType: step.stepType,
-          isAsync: step.isAsync,
-          isConditional: step.isConditional,
-        })),
-      );
-    }
-  }
-
-  console.error(`[Flows] Detected and persisted ${traced.length} flows for analysis ${analysisId}`);
-  return { flowCount: traced.length };
+  log.info(`[Flows] Detected ${out.length} flows`);
+  return out;
 }
 
-/**
- * Build a lookup map: `${serviceName}::${httpMethod}::${fullPath}` → RouteHandler
- * Composes mount prefixes with route paths.
- */
+// ---------------------------------------------------------------------------
+// Route handler lookup (unchanged — still pure)
+// ---------------------------------------------------------------------------
+
 function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandler> {
   const handlers = new Map<string, RouteHandler>();
   if (!result.fileAnalyses) return handlers;
 
-  // Map filePath → serviceName (from modules + layer details for full coverage)
   const fileToService = new Map<string, string>();
-  // Map filePath → moduleName
   const fileToModuleName = new Map<string, string>();
   for (const mod of result.modules) {
     fileToService.set(mod.filePath, mod.serviceName);
     fileToModuleName.set(mod.filePath, mod.name);
   }
-  // Some files (thin routers, barrels) don't have modules — use layerDetails for service mapping
   for (const ld of result.layerDetails) {
     for (const fp of ld.filePaths) {
       if (!fileToService.has(fp)) fileToService.set(fp, ld.serviceName);
     }
   }
 
-  // Build mount prefix lookup: filePath → mountPath
-  // Traces from the mount file (e.g., index.ts has app.use('/users', userRoutes))
-  // through imports to find which file defines the mounted router, then maps
-  // that file's path to the mount prefix.
   const fileMountPrefix = new Map<string, string>();
-
   for (const fa of result.fileAnalyses) {
     if (!fa.routerMounts || fa.routerMounts.length === 0) continue;
-
     for (const mount of fa.routerMounts) {
-      // Find which file the router variable was imported from
       for (const imp of fa.imports) {
         const spec = imp.specifiers.find((s) => s.name === mount.routerName || s.alias === mount.routerName);
         if (spec) {
-          // Find the resolved target file for this import
           for (const dep of result.moduleDependencies) {
             if (dep.source === fa.filePath && dep.importedNames.includes(spec.name)) {
               fileMountPrefix.set(dep.target, mount.path);
@@ -187,30 +160,21 @@ function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandl
           }
         }
       }
-
-      // Also check if the router is defined in the same file
       const hasLocal = fa.functions.some((f) => f.name === mount.routerName)
         || fa.exports.some((e) => e.name === mount.routerName);
-      if (hasLocal) {
-        fileMountPrefix.set(fa.filePath, mount.path);
-      }
+      if (hasLocal) fileMountPrefix.set(fa.filePath, mount.path);
     }
   }
 
-  // Collect routes and compose full paths
   for (const fa of result.fileAnalyses) {
     if (!fa.routeRegistrations || fa.routeRegistrations.length === 0) continue;
     const serviceName = fileToService.get(fa.filePath);
     if (!serviceName) continue;
-
     const mountPrefix = fileMountPrefix.get(fa.filePath) || '';
 
     for (const route of fa.routeRegistrations) {
       const fullPath = composePath(mountPrefix, route.path);
-
-      // Resolve which module the handler belongs to
       const moduleName = resolveHandlerModule(route.handlerName, fa, result.fileAnalyses, fileToModuleName);
-
       const key = `${serviceName}::${route.httpMethod}::${fullPath}`;
       handlers.set(key, { handlerName: route.handlerName, moduleName });
     }
@@ -219,14 +183,12 @@ function buildRouteHandlerLookup(result: AnalysisResult): Map<string, RouteHandl
   return handlers;
 }
 
-
 function resolveHandlerModule(
   handlerName: string,
   routeFile: FileAnalysis,
   allFiles: FileAnalysis[],
   fileToModuleName: Map<string, string>,
 ): string {
-  // Check if handler is defined in the route file itself (classes or functions)
   for (const cls of routeFile.classes) {
     for (const method of cls.methods) {
       if (method.name === handlerName) return fileToModuleName.get(routeFile.filePath) || handlerName;
@@ -236,9 +198,7 @@ function resolveHandlerModule(
     if (fn.name === handlerName) return fileToModuleName.get(routeFile.filePath) || handlerName;
   }
 
-  // Look up imports to trace to defining file
   for (const imp of routeFile.imports) {
-    // Direct import match: handler name matches an imported specifier
     const spec = imp.specifiers.find((s) => s.name === handlerName || s.alias === handlerName);
     if (spec) {
       for (const targetFile of allFiles) {
@@ -251,8 +211,6 @@ function resolveHandlerModule(
       }
     }
 
-    // Class method match: handler is a method on an imported class (e.g., controller.getAll)
-    // Check if any imported class in any file has this handler as a method
     for (const s of imp.specifiers) {
       for (const targetFile of allFiles) {
         for (const cls of targetFile.classes) {
@@ -264,7 +222,6 @@ function resolveHandlerModule(
     }
   }
 
-  // Fallback: use the route file's module
   return fileToModuleName.get(routeFile.filePath) || handlerName;
 }
 
@@ -272,104 +229,74 @@ function composePath(prefix: string, routePath: string): string {
   const p = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
   const r = routePath.startsWith('/') ? routePath : `/${routePath}`;
   const full = `${p}${r}`;
-  // Remove trailing slash (except root /) for consistent matching
   return full.length > 1 && full.endsWith('/') ? full.slice(0, -1) : full || '/';
 }
 
-export async function getFlowsForAnalysis(analysisId: string) {
-  return db
-    .select()
-    .from(flows)
-    .where(eq(flows.analysisId, analysisId))
-    .orderBy(flows.name);
+// ---------------------------------------------------------------------------
+// Read-side helpers backed by LATEST.json (used by routes)
+// ---------------------------------------------------------------------------
+
+export function getFlowsFromLatest(repoPath: string): FlowRecord[] {
+  const latest = readLatest(repoPath);
+  return latest?.graph.flows ?? [];
+}
+
+export function getFlowFromLatest(repoPath: string, flowId: string): FlowRecord | null {
+  const latest = readLatest(repoPath);
+  return latest?.graph.flows.find((f) => f.id === flowId) ?? null;
 }
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
-export async function getFlowSeverities(analysisId: string): Promise<Record<string, string>> {
-  const allFlows = await db.select().from(flows).where(eq(flows.analysisId, analysisId));
-  if (allFlows.length === 0) return {};
-
-  const flowIds = allFlows.map((f) => f.id);
-  const allSteps = await db.select().from(flowSteps).where(inArray(flowSteps.flowId, flowIds));
-  const allViolations = await db.select().from(violations).where(eq(violations.analysisId, analysisId));
-
-  // Resolve violation target IDs to names
-  const methodIds = allViolations.map((v) => v.targetMethodId).filter(Boolean) as string[];
-  const moduleIds = allViolations.map((v) => v.targetModuleId).filter(Boolean) as string[];
-
-  const methodRows = methodIds.length > 0
-    ? await db.select({ id: methodsTable.id, name: methodsTable.name }).from(methodsTable).where(inArray(methodsTable.id, methodIds))
-    : [];
-  const moduleRows = moduleIds.length > 0
-    ? await db.select({ id: modulesTable.id, name: modulesTable.name }).from(modulesTable).where(inArray(modulesTable.id, moduleIds))
-    : [];
-
-  const methodIdToName = new Map(methodRows.map((m) => [m.id, m.name]));
-  const moduleIdToName = new Map(moduleRows.map((m) => [m.id, m.name]));
-
-  // Build name → highest severity maps
+/** Compute per-flow highest severity from LATEST's active violations. */
+export function computeFlowSeverities(latest: LatestSnapshot): Record<string, string> {
   const nameSev = new Map<string, string>();
-  const updateSev = (key: string, sev: string) => {
+  const bump = (key: string, sev: string) => {
     const existing = nameSev.get(key);
     if (!existing || (SEVERITY_ORDER[sev] ?? 5) < (SEVERITY_ORDER[existing] ?? 5)) {
       nameSev.set(key, sev);
     }
   };
 
-  for (const v of allViolations) {
+  const moduleIdToName = new Map(latest.graph.modules.map((m) => [m.id, m.name]));
+  const methodIdToName = new Map(latest.graph.methods.map((m) => [m.id, m.name]));
+
+  for (const v of latest.violations) {
     if (v.targetMethodId) {
       const name = methodIdToName.get(v.targetMethodId);
-      if (name) updateSev(`method:${name}`, v.severity);
+      if (name) bump(`method:${name}`, v.severity);
     }
     if (v.targetModuleId) {
       const name = moduleIdToName.get(v.targetModuleId);
-      if (name) updateSev(`module:${name}`, v.severity);
+      if (name) bump(`module:${name}`, v.severity);
     }
   }
 
-  // Compute per-flow highest severity
-  const result: Record<string, string> = {};
-  for (const flow of allFlows) {
-    const steps = allSteps.filter((s) => s.flowId === flow.id);
+  const out: Record<string, string> = {};
+  for (const flow of latest.graph.flows) {
     let highest: string | null = null;
-    for (const step of steps) {
+    for (const step of flow.steps) {
       for (const sev of [nameSev.get(`method:${step.targetMethod}`), nameSev.get(`module:${step.targetModule}`)]) {
         if (sev && (!highest || (SEVERITY_ORDER[sev] ?? 5) < (SEVERITY_ORDER[highest] ?? 5))) {
           highest = sev;
         }
       }
     }
-    if (highest) result[flow.id] = highest;
+    if (highest) out[flow.id] = highest;
   }
-
-  return result;
+  return out;
 }
 
-export async function getFlowWithSteps(flowId: string) {
-  const [flow] = await db
-    .select()
-    .from(flows)
-    .where(eq(flows.id, flowId))
-    .limit(1);
+// ---------------------------------------------------------------------------
+// Flow enrichment (LLM) — mutates LATEST.json in place
+// ---------------------------------------------------------------------------
 
-  if (!flow) return null;
+export async function enrichFlowWithLLM(repoPath: string, flowId: string): Promise<void> {
+  const { createLLMProvider } = await import('./llm/provider.js');
 
-  const steps = await db
-    .select()
-    .from(flowSteps)
-    .where(eq(flowSteps.flowId, flowId))
-    .orderBy(flowSteps.stepOrder);
-
-  return { ...flow, steps };
-}
-
-export async function enrichFlowWithLLM(flowId: string): Promise<void> {
-  // LLM enrichment — import provider lazily to avoid circular deps
-  const { createLLMProvider } = await import('../services/llm/provider.js');
-  const { getPrompt, buildFlowTemplateVars } = await import('../services/llm/prompts.js');
-
-  const flow = await getFlowWithSteps(flowId);
+  const latest = readLatest(repoPath);
+  if (!latest) return;
+  const flow = latest.graph.flows.find((f) => f.id === flowId);
   if (!flow) return;
 
   const provider = createLLMProvider();
@@ -391,23 +318,12 @@ export async function enrichFlowWithLLM(flowId: string): Promise<void> {
     })),
   });
 
-  // Update flow with enriched data
-  await db
-    .update(flows)
-    .set({
-      name: enriched.name || flow.name,
-      description: enriched.description,
-    })
-    .where(eq(flows.id, flowId));
-
-  // Update step descriptions
-  for (const stepUpdate of enriched.stepDescriptions) {
-    const step = flow.steps.find((s) => s.stepOrder === stepUpdate.stepOrder);
-    if (step) {
-      await db
-        .update(flowSteps)
-        .set({ dataDescription: stepUpdate.dataDescription })
-        .where(eq(flowSteps.id, step.id));
-    }
+  flow.name = enriched.name || flow.name;
+  flow.description = enriched.description;
+  for (const upd of enriched.stepDescriptions) {
+    const step = flow.steps.find((s) => s.stepOrder === upd.stepOrder);
+    if (step) step.dataDescription = upd.dataDescription;
   }
+
+  writeLatest(repoPath, latest);
 }
