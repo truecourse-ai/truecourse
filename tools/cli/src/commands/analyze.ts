@@ -8,6 +8,7 @@ import { registerProject, type RegistryEntry } from "@truecourse/server/config/r
 import { readProjectConfig } from "@truecourse/server/config/project-config";
 import { closeLogger, configureLogger } from "@truecourse/server/lib/logger";
 import { renderViolationsSummary } from "./helpers.js";
+import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
 function ensureClaudeCli(): void {
@@ -160,20 +161,11 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
       enableLlmRulesOverride: enableLlmRules,
       onLlmEstimate: async (estimate) => {
         stopSpinner();
-        const totalRules = estimate.uniqueRuleCount ?? estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
-        const totalFiles = estimate.uniqueFileCount ?? estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-        const tokens = estimate.totalEstimatedTokens;
-        const tokenStr = tokens >= 1_000_000
-          ? `~${(tokens / 1_000_000).toFixed(1)}M tokens`
-          : `~${Math.round(tokens / 1000)}k tokens`;
-        p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (${tokenStr})`);
-        const proceed = await p.confirm({ message: "Run LLM-powered rules?", initialValue: true });
+        const proceed = await promptLlmEstimate(estimate);
         // Prompt answered — subsequent renders show domain + persist steps
         // below the prompt; parse + scan are already printed above it.
         renderPhase = "post-llm";
-        if (p.isCancel(proceed)) return false;
-        if (!proceed) p.log.info("Skipping LLM rules.");
-        return !!proceed;
+        return proceed;
       },
     });
 
@@ -215,8 +207,19 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
 
-  const spinner = p.spinner();
-  spinner.start("Checking changes...");
+  const config = readProjectConfig(project.path);
+  const enabledCategories = config.enabledCategories ?? undefined;
+  const enableLlmRules = config.enableLlmRules ?? true;
+
+  // Reset module-level renderer state between runs. runAnalyze and
+  // runAnalyzeDiff share the same `renderPhase`, `spinnerFrame`, and
+  // `renderedLineCount` globals.
+  renderPhase = enableLlmRules ? "pre-llm" : "all";
+
+  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const tracker = new StepTracker((payload) => {
+    if (payload.steps) renderSteps(payload.steps);
+  }, stepDefs);
 
   const abortController = new AbortController();
   const onSigint = () => abortController.abort();
@@ -224,12 +227,20 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
 
   try {
     const { diff } = await diffInProcess(project, {
+      tracker,
       signal: abortController.signal,
-      onProgress: ({ detail }) => {
-        if (detail) spinner.message(detail);
+      enabledCategoriesOverride: enabledCategories,
+      enableLlmRulesOverride: enableLlmRules,
+      onLlmEstimate: async (estimate) => {
+        stopSpinner();
+        const proceed = await promptLlmEstimate(estimate);
+        renderPhase = "post-llm";
+        return proceed;
       },
     });
-    spinner.stop("Diff check complete");
+
+    stopSpinner();
+    p.log.success("Diff check complete");
     renderDiffResultsSummary({
       changedFiles: diff.changedFiles,
       newViolations: diff.newViolations as never,
@@ -239,7 +250,7 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
     });
     p.outro("Diff complete — view results with: truecourse dashboard");
   } catch (err) {
-    spinner.stop("Diff check failed");
+    stopSpinner();
     if (err instanceof DOMException && err.name === "AbortError") {
       p.outro("Diff cancelled");
       process.exit(130);

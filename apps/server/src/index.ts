@@ -9,8 +9,9 @@ import { setupSocket } from './socket/index.js';
 import { errorHandler } from './middleware/error.js';
 import { projectResolver } from './middleware/project.js';
 import reposRouter from './routes/repos.js';
-import analyzeRouter from './routes/analyze.js';
-import analysisRouter from './routes/analysis.js';
+import analysesRouter from './routes/analyses.js';
+import graphRouter from './routes/graph.js';
+import filesRouter from './routes/files.js';
 import violationsRouter from './routes/violations.js';
 import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
@@ -50,14 +51,13 @@ async function main() {
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', reposRouter);
-  // Analyze trigger routes create `.truecourse/` on first run, so they run
-  // without the resolver so a brand-new project (no LATEST.json yet) can
-  // still bootstrap. Mount first.
-  app.use('/api/repos', analyzeRouter);
   // Project-scoped routes. Each router's patterns declare their own `:id`
   // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
-  // matches the `:id` segment itself. The resolver validates the slug.
-  app.use('/api/repos', projectResolver, analysisRouter);
+  // matches the `:id` segment itself. The resolver validates the slug and
+  // touches `lastAccessed`.
+  app.use('/api/repos', projectResolver, analysesRouter);
+  app.use('/api/repos', projectResolver, graphRouter);
+  app.use('/api/repos', projectResolver, filesRouter);
   app.use('/api/repos', projectResolver, violationsRouter);
   app.use('/api/repos', projectResolver, databasesRouter);
   app.use('/api/repos', projectResolver, flowsRouter);
