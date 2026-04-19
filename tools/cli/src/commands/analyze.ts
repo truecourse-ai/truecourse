@@ -7,7 +7,7 @@ import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from 
 import { registerProject, type RegistryEntry } from "@truecourse/server/config/registry";
 import { readProjectConfig } from "@truecourse/server/config/project-config";
 import { closeLogger, configureLogger } from "@truecourse/server/lib/logger";
-import { renderViolationsSummary } from "./helpers.js";
+import { promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
@@ -121,6 +121,11 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
 
   const project = resolveOrInitProject();
   p.log.step(`Repository: ${project.name}`);
+
+  // First-time setup convenience: offer to install Claude Code skills if
+  // they haven't been installed for this repo yet. No-op on repeat runs.
+  // `truecourse add` still exists as an explicit opt-in path.
+  await promptInstallSkills(project.path);
 
   // All internal pipeline logs (`[Pipeline]`, `[LLM]`, `[CLI]`, `[Analyzer]`,
   // `[Flows]`, `[Violations]`) go to this repo's analyze.log. The terminal

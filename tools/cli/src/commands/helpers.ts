@@ -333,8 +333,26 @@ export function openInBrowser(url: string): void {
   exec(`${cmd} ${url}`);
 }
 
-/** Prompt to install Claude Code skills into a repo directory. */
+/** Return the path where the `truecourse` skill would be installed for a repo. */
+function skillDestPath(repoPath: string): string {
+  return resolve(repoPath, ".claude", "skills", "truecourse");
+}
+
+/** True if the `truecourse` skill is already present in `<repoPath>/.claude/skills/`. */
+export function hasInstalledSkills(repoPath: string): boolean {
+  return existsSync(skillDestPath(repoPath));
+}
+
+/**
+ * Prompt to install Claude Code skills into a repo directory.
+ *
+ * No-op if the skills are already installed. Call this from any first-run
+ * path (`truecourse add`, first `truecourse analyze`) and it will prompt
+ * the user only once per repo.
+ */
 export async function promptInstallSkills(repoPath: string): Promise<void> {
+  if (hasInstalledSkills(repoPath)) return;
+
   const installSkills = await p.confirm({
     message: "Would you like to install Claude Code skills?",
   });
