@@ -53,8 +53,8 @@ dashboardCmd
 dashboardCmd
   .command("logs")
   .description("Tail dashboard logs (service mode only)")
-  .action(() => {
-    runDashboardLogs();
+  .action(async () => {
+    await runDashboardLogs();
   });
 
 dashboardCmd
