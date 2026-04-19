@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getPythonMethodName, PYTHON_WRITE_METHODS, getPythonEnclosingFunctionBody } from './_helpers.js'

@@ -24,7 +24,7 @@ export const pythonUnusedLoopVariableVisitor: CodeRuleVisitor = {
     if (varName === '_' || varName.startsWith('_')) return null
 
     // Check if the variable is used in the body
-    function isUsedInBody(n: import('tree-sitter').SyntaxNode): boolean {
+    function isUsedInBody(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'identifier' && n.text === varName) {
         // Make sure it's not the loop variable definition itself
         if (n.id !== left?.id) return true

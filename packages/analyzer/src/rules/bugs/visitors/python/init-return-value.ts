@@ -12,7 +12,7 @@ export const pythonInitReturnValueVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    function findReturnWithValue(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findReturnWithValue(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'return_statement') {
         const val = n.namedChildren[0]
         if (val && val.type !== 'none') return n

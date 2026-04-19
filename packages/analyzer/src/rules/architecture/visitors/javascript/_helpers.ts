@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const EXPRESS_ROUTE_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'use', 'all'])
 

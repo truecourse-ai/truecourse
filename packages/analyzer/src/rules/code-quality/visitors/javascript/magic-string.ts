@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 // Minimum string length to be considered "magic"
 const MIN_LENGTH = 4

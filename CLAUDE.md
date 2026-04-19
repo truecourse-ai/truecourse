@@ -10,7 +10,7 @@
 - `apps/web/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
 - `apps/server/` — Express + Socket.io backend (LLM providers, file-based analysis store)
 - `packages/shared/` — Shared Zod schemas and TypeScript types
-- `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS only)
+- `packages/analyzer/` — Tree-sitter (WASM via `web-tree-sitter`) + TypeScript Compiler analysis engine (TS/JS/Python)
 - `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules)
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
 - `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests

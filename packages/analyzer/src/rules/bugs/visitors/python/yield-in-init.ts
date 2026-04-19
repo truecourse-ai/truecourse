@@ -12,7 +12,7 @@ export const pythonYieldInInitVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    function findYield(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findYield(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'yield' || n.type === 'yield_statement') return n
       if (n.type === 'function_definition') return null // don't recurse
       for (let i = 0; i < n.childCount; i++) {

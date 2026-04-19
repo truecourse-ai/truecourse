@@ -12,7 +12,7 @@
  * The functions here detect the framework via the file's `import_statement`
  * sources — the most reliable signal — and cache the result per AST root.
  */
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export type WebFramework = 'express' | 'fastify' | 'koa' | 'hono' | 'next' | 'unknown'
 export type UiFramework = 'react' | 'vue' | 'svelte' | 'solid' | 'unknown'

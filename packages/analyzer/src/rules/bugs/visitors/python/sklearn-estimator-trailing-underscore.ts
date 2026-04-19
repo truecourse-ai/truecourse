@@ -40,7 +40,7 @@ export const pythonSklearnEstimatorTrailingUnderscoreVisitor: CodeRuleVisitor = 
       const funcBody = funcNode.childForFieldName('body')
       if (!funcBody) continue
 
-      function findTrailingUnderscoreAssignment(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+      function findTrailingUnderscoreAssignment(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
         if (n.type === 'assignment') {
           const left = n.childForFieldName('left')
           if (

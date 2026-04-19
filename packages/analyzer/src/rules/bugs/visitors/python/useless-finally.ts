@@ -11,7 +11,7 @@ export const pythonUselessFinallyVisitor: CodeRuleVisitor = {
   nodeTypes: ['try_statement'],
   visit(node, filePath, sourceCode) {
     // Find the finally clause
-    let finallyClause: import('tree-sitter').SyntaxNode | null = null
+    let finallyClause: import('web-tree-sitter').Node | null = null
 
     for (const child of node.namedChildren) {
       if (child.type === 'finally_clause') {

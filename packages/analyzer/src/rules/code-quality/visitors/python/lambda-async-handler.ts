@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 function isLambdaHandlerName(name: string): boolean {
   return name === 'handler' || name === 'lambda_handler' || name.endsWith('_handler')

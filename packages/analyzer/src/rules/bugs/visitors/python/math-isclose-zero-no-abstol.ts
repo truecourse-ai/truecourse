@@ -27,7 +27,7 @@ export const pythonMathIscloseZeroNoAbstolVisitor: CodeRuleVisitor = {
     const arg1 = positionalArgs[0]
     const arg2 = positionalArgs[1]
 
-    const isZero = (n: import('tree-sitter').SyntaxNode): boolean =>
+    const isZero = (n: import('web-tree-sitter').Node): boolean =>
       n.text === '0' || n.text === '0.0' || n.text === '0.'
 
     if (!isZero(arg1) && !isZero(arg2)) return null

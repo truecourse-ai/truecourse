@@ -1,5 +1,5 @@
-import type { SyntaxNode } from 'tree-sitter'
-import type { Tree } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
+import type { Tree } from 'web-tree-sitter'
 import type { CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { buildDataFlowContext } from '../data-flow/index.js'
 import type { DataFlowContext } from '../data-flow/index.js'

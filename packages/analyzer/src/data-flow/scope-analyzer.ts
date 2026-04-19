@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { SupportedLanguage } from '@truecourse/shared'
 import type { Scope, ScopeKind, Variable, DeclarationKind, DefSite, UseSite } from './types.js'
 

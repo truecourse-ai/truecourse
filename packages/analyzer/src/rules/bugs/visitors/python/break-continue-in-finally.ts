@@ -9,7 +9,7 @@ export const pythonBreakContinueInFinallyVisitor: CodeRuleVisitor = {
     const body = node.namedChildren.find((c) => c.type === 'block')
     if (!body) return null
 
-    function findBreakOrContinue(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findBreakOrContinue(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'break_statement' || n.type === 'continue_statement') return n
       // Don't recurse into nested loops — break/continue there is fine
       if (n.type === 'for_statement' || n.type === 'while_statement') return null

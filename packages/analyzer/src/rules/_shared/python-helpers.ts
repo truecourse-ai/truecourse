@@ -12,7 +12,7 @@
  * Mirrors the shape of `_shared/javascript-helpers.ts` — see that file for
  * the JS equivalents.
  */
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 /**
  * Returns true if `node` itself or any descendant is an `identifier` whose

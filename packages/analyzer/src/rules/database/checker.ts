@@ -3,7 +3,7 @@
  * LLM-based rules evaluated server-side.
  */
 
-import type { Tree } from 'tree-sitter'
+import type { Tree } from 'web-tree-sitter'
 import type { AnalysisRule, CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { walkAstWithVisitors } from '../types.js'
 import { DATABASE_JS_VISITORS } from './visitors/javascript/index.js'

@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import { MAGIC_NUMBER_WHITELIST } from './_helpers.js'
 
 // Time conversion factors: only skip when 2+ appear together in a multiplication chain

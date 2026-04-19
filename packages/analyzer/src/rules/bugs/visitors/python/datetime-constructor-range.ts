@@ -19,7 +19,7 @@ const DATETIME_RANGES: Record<string, [number, number]> = {
 // date(year, month, day)
 // time(hour=0, minute=0, second=0, microsecond=0)
 
-function extractIntLiteral(node: import('tree-sitter').SyntaxNode): number | null {
+function extractIntLiteral(node: import('web-tree-sitter').Node): number | null {
   if (node.type === 'integer') {
     const val = parseInt(node.text, 10)
     return isNaN(val) ? null : val

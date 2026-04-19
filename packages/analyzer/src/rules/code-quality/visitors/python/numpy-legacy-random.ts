@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 function getNpRandomMethod(node: SyntaxNode): string | null {
   // np.random.seed, np.random.RandomState, np.random.rand, etc.

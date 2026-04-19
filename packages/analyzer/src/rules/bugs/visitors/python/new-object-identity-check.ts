@@ -17,7 +17,7 @@ export const pythonNewObjectIdentityCheckVisitor: CodeRuleVisitor = {
     const [left, right] = namedChildren
 
     // One side is a call (new object creation), the other is NOT None
-    const isNewObject = (n: import('tree-sitter').SyntaxNode): boolean => {
+    const isNewObject = (n: import('web-tree-sitter').Node): boolean => {
       if (n.type !== 'call') return false
       const fn = n.childForFieldName('function')
       if (!fn) return false

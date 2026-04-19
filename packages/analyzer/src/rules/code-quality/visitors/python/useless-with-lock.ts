@@ -8,7 +8,7 @@ export const pythonUselessWithLockVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     // with threading.Lock(): or with Lock(): — creating new lock inline
     // tree-sitter wraps with items in: with_clause > with_item
-    const withItems: import('tree-sitter').SyntaxNode[] = []
+    const withItems: import('web-tree-sitter').Node[] = []
     for (const child of node.namedChildren) {
       if (child.type === 'with_item') {
         withItems.push(child)

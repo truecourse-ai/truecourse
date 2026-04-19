@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 const TEST_FUNCTION_NAMES = new Set(['it', 'test', 'describe'])
 

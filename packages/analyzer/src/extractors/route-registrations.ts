@@ -1,4 +1,4 @@
-import type Parser from 'tree-sitter'
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { RouteRegistration, RouterMount, SupportedLanguage } from '@truecourse/shared'
 import { extractPythonRoutes } from './routes/python.js'
 
@@ -9,7 +9,7 @@ const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
  * Dispatches to language-specific extractors.
  */
 export function extractRouteRegistrations(
-  tree: Parser.Tree,
+  tree: Tree,
   filePath: string,
   language: SupportedLanguage,
 ): { routes: RouteRegistration[]; mounts: RouterMount[] } {
@@ -26,7 +26,7 @@ export function extractRouteRegistrations(
 }
 
 function extractJsRoutes(
-  tree: Parser.Tree,
+  tree: Tree,
   filePath: string,
 ): { routes: RouteRegistration[]; mounts: RouterMount[] } {
   const routes: RouteRegistration[] = []
@@ -76,9 +76,9 @@ function extractJsRoutes(
 
 function extractRoute(
   methodName: string,
-  argsNode: Parser.SyntaxNode,
+  argsNode: SyntaxNode,
   filePath: string,
-  callNode: Parser.SyntaxNode,
+  callNode: SyntaxNode,
 ): RouteRegistration | null {
   // First arg must be a string path
   const firstArg = argsNode.namedChild(0)
@@ -112,9 +112,9 @@ function extractRoute(
 }
 
 function extractMount(
-  argsNode: Parser.SyntaxNode,
+  argsNode: SyntaxNode,
   filePath: string,
-  callNode: Parser.SyntaxNode,
+  callNode: SyntaxNode,
 ): RouterMount | null {
   // app.use('/prefix', routerRef)
   // Need at least 2 args: path string + identifier
@@ -150,7 +150,7 @@ function extractMount(
  * Extract the handler name from the last argument of a route registration.
  * Handles: identifier, member_expression (obj.method), arrow functions (skip).
  */
-function extractHandlerName(node: Parser.SyntaxNode): string | null {
+function extractHandlerName(node: SyntaxNode): string | null {
   if (node.type === 'identifier') {
     return node.text
   }
@@ -164,12 +164,12 @@ function extractHandlerName(node: Parser.SyntaxNode): string | null {
   return null
 }
 
-function extractIdentifierName(node: Parser.SyntaxNode): string | null {
+function extractIdentifierName(node: SyntaxNode): string | null {
   if (node.type === 'identifier') return node.text
   return null
 }
 
-function extractStringLiteral(node: Parser.SyntaxNode): string | null {
+function extractStringLiteral(node: SyntaxNode): string | null {
   if (node.type === 'string' || node.type === 'string_fragment') {
     return node.text.replace(/^["'`]|["'`]$/g, '')
   }

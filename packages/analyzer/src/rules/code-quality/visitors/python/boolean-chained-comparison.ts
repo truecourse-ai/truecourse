@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 function isSimpleComparison(node: SyntaxNode): { left: string; op: string; right: string } | null {
   if (node.type !== 'comparison_operator') return null

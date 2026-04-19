@@ -24,7 +24,7 @@ export const pythonExceptionReassignmentVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     // Find assignment to the exception variable
-    function findReassignment(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findReassignment(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'assignment') {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier' && left.text === exceptionVar) {

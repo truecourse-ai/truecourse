@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { isPythonTestFile, containsNodeOfType } from '../../../_shared/python-helpers.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 /** Walk for `self.assert*()` method calls (unittest-style assertions). */
 function containsAssertMethodCall(node: SyntaxNode): boolean {

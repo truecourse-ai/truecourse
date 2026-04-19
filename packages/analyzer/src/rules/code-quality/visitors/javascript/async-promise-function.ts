@@ -14,7 +14,7 @@ export const asyncPromiseFunctionVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     // Check if the function body contains a `return new Promise(...)` pattern
-    function hasReturnNewPromise(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasReturnNewPromise(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'return_statement') {
         const ret = n.namedChildren[0]
         if (ret?.type === 'new_expression') {

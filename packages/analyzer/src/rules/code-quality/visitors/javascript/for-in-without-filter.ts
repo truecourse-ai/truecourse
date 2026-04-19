@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const forInWithoutFilterVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/for-in-without-filter',

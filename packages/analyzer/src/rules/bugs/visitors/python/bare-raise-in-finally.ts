@@ -25,7 +25,7 @@ export const pythonBareRaiseInFinallyVisitor: CodeRuleVisitor = {
   },
 }
 
-function findBareRaiseOutsideExcept(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findBareRaiseOutsideExcept(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.namedChildren) {
     // Don't go into nested try/except (except_clause would be inside them)
     if (child.type === 'except_clause') continue

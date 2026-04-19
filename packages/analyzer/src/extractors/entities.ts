@@ -6,7 +6,7 @@
 import type { FileAnalysis, Entity, EntityField, EntityRelationship, SupportedLanguage } from '@truecourse/shared'
 import { dataLayerPatterns } from '../patterns/layer-patterns.js'
 import { matchesPattern } from '../patterns/index.js'
-import type Parser from 'tree-sitter'
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import { getParser } from '../parser.js'
 
 /**
@@ -101,8 +101,11 @@ function mapToSimpleType(type: string): string {
 }
 
 class TypeScriptEntityDetector {
-  private parser = getParser('typescript')
-
+  // Lazy: do not call getParser() at construction time — callers may
+  // instantiate this before initParsers() has completed.
+  private get parser() {
+    return getParser('typescript')
+  }
 
   shouldScanFile(filePath: string): boolean {
     if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {
@@ -124,6 +127,8 @@ class TypeScriptEntityDetector {
   detectEntities(sourceCode: string, filePath: string, service: string): Entity[] {
     const tree = this.parser.parse(sourceCode)
     const entities: Entity[] = []
+
+    if (!tree) return entities
 
     // Find all class declarations
     const classNodes = this.findClassDeclarations(tree.rootNode)
@@ -148,10 +153,10 @@ class TypeScriptEntityDetector {
     return entities
   }
 
-  private findClassDeclarations(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
-    const classes: Parser.SyntaxNode[] = []
+  private findClassDeclarations(node: SyntaxNode): SyntaxNode[] {
+    const classes: SyntaxNode[] = []
 
-    const traverse = (n: Parser.SyntaxNode) => {
+    const traverse = (n: SyntaxNode) => {
       if (n.type === 'export_statement') {
         const declaration = n.childForFieldName('declaration')
         if (declaration && declaration.type === 'class_declaration') {
@@ -171,7 +176,7 @@ class TypeScriptEntityDetector {
   }
 
   private detectEntityFromClass(
-    node: Parser.SyntaxNode,
+    node: SyntaxNode,
     sourceCode: string,
     filePath: string,
     service: string
@@ -240,7 +245,7 @@ class TypeScriptEntityDetector {
     }
   }
 
-  private hasDecorator(classNode: Parser.SyntaxNode, sourceCode: string, decoratorName: string): boolean {
+  private hasDecorator(classNode: SyntaxNode, sourceCode: string, decoratorName: string): boolean {
     const decorators = classNode.children.filter((child) => child.type === 'decorator')
 
     return decorators.some((decorator) => {
@@ -249,7 +254,7 @@ class TypeScriptEntityDetector {
     })
   }
 
-  private getExtendsClass(classNode: Parser.SyntaxNode, sourceCode: string): string | null {
+  private getExtendsClass(classNode: SyntaxNode, sourceCode: string): string | null {
     const heritageClause = classNode.children.find((child) => child.type === 'class_heritage')
     if (!heritageClause) return null
 
@@ -262,7 +267,7 @@ class TypeScriptEntityDetector {
     return sourceCode.substring(typeNode.startIndex, typeNode.endIndex)
   }
 
-  private extractFields(classNode: Parser.SyntaxNode, sourceCode: string): EntityField[] {
+  private extractFields(classNode: SyntaxNode, sourceCode: string): EntityField[] {
     const fields: EntityField[] = []
     const bodyNode = classNode.childForFieldName('body')
     if (!bodyNode) return fields
@@ -279,7 +284,7 @@ class TypeScriptEntityDetector {
     return fields
   }
 
-  private extractField(fieldNode: Parser.SyntaxNode, sourceCode: string): EntityField | null {
+  private extractField(fieldNode: SyntaxNode, sourceCode: string): EntityField | null {
     const nameNode = fieldNode.childForFieldName('name')
     if (!nameNode) return null
 
@@ -304,7 +309,7 @@ class TypeScriptEntityDetector {
     }
   }
 
-  private extractRelationships(classNode: Parser.SyntaxNode, sourceCode: string): EntityRelationship[] {
+  private extractRelationships(classNode: SyntaxNode, sourceCode: string): EntityRelationship[] {
     const relationships: EntityRelationship[] = []
     const bodyNode = classNode.childForFieldName('body')
     if (!bodyNode) return relationships
@@ -321,7 +326,7 @@ class TypeScriptEntityDetector {
     return relationships
   }
 
-  private extractRelationship(fieldNode: Parser.SyntaxNode, sourceCode: string): EntityRelationship | null {
+  private extractRelationship(fieldNode: SyntaxNode, sourceCode: string): EntityRelationship | null {
     const decorators = fieldNode.children.filter((child) => child.type === 'decorator')
     const nameNode = fieldNode.childForFieldName('name')
     const fieldName = nameNode ? sourceCode.substring(nameNode.startIndex, nameNode.endIndex) : 'unknown'
@@ -370,10 +375,10 @@ class TypeScriptEntityDetector {
     return null
   }
 
-  private findInterfaceDeclarations(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
-    const interfaces: Parser.SyntaxNode[] = []
+  private findInterfaceDeclarations(node: SyntaxNode): SyntaxNode[] {
+    const interfaces: SyntaxNode[] = []
 
-    const traverse = (n: Parser.SyntaxNode) => {
+    const traverse = (n: SyntaxNode) => {
       if (n.type === 'export_statement') {
         const declaration = n.childForFieldName('declaration')
         if (declaration && declaration.type === 'interface_declaration') {
@@ -393,7 +398,7 @@ class TypeScriptEntityDetector {
   }
 
   private detectEntityFromInterface(
-    interfaceNode: Parser.SyntaxNode,
+    interfaceNode: SyntaxNode,
     sourceCode: string,
     filePath: string,
     service: string
@@ -432,7 +437,7 @@ class TypeScriptEntityDetector {
     }
   }
 
-  private extractInterfaceFields(interfaceNode: Parser.SyntaxNode, sourceCode: string): EntityField[] {
+  private extractInterfaceFields(interfaceNode: SyntaxNode, sourceCode: string): EntityField[] {
     const fields: EntityField[] = []
     const bodyNode = interfaceNode.childForFieldName('body')
     if (!bodyNode) return fields
@@ -449,7 +454,7 @@ class TypeScriptEntityDetector {
     return fields
   }
 
-  private extractInterfaceField(fieldNode: Parser.SyntaxNode, sourceCode: string): EntityField | null {
+  private extractInterfaceField(fieldNode: SyntaxNode, sourceCode: string): EntityField | null {
     const nameNode = fieldNode.childForFieldName('name')
     if (!nameNode) return null
 

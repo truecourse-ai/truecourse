@@ -31,7 +31,7 @@ export const tryPromiseCatchVisitor: CodeRuleVisitor = {
   },
 }
 
-function findUnawaitedPromise(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findUnawaitedPromise(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.namedChildren) {
     if (child.type === 'expression_statement') {
       const expr = child.namedChildren[0]

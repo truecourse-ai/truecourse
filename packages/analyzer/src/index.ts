@@ -3,6 +3,7 @@ import { discoverFiles as _discoverFiles } from './file-discovery.js'
 import { analyzeFile as _analyzeFile } from './file-analyzer.js'
 import { buildDependencyGraph as _buildDependencyGraph } from './dependency-graph.js'
 import { performSplitAnalysis as _performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
+import { initParsers as _initParsers } from './parser.js'
 
 // Core analysis functions
 export { analyzeFile, analyzeFileContent } from './file-analyzer.js'
@@ -13,7 +14,7 @@ export { discoverFiles } from './file-discovery.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
 // Parser utilities
-export { parseCode, parseFile, getParser } from './parser.js'
+export { parseCode, parseFile, getParser, initParsers } from './parser.js'
 
 // Language configuration
 export { detectLanguage, getLanguageConfig, normalizeUrl, getAllFileExtensions, getAllIgnorePatterns, getAllTestPatterns, getAllPackageIndicatorFiles, getAllIndexBaseNames, isBootstrapEntry, getMaxParameters, type LanguageConfig } from './language-config.js'
@@ -127,6 +128,9 @@ export async function analyzeRepository(rootPath: string): Promise<{
   dependencies: ModuleDependency[]
   splitResult: SplitAnalysisResult
 }> {
+  // 0. Ensure tree-sitter WASM parsers are loaded (idempotent).
+  await _initParsers()
+
   // 1. Discover all source files
   const files = _discoverFiles(rootPath)
 

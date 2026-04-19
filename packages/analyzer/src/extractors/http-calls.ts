@@ -1,4 +1,4 @@
-import type Parser from 'tree-sitter'
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { HttpCall, SupportedLanguage, FunctionDefinition, ClassDefinition } from '@truecourse/shared'
 import { getLanguageConfig } from '../language-config.js'
 import { getHttpMatcher } from './http/matchers.js'
@@ -7,7 +7,7 @@ import { getHttpMatcher } from './http/matchers.js'
  * Extract HTTP calls from a parsed syntax tree
  */
 export function extractHttpCalls(
-  tree: Parser.Tree,
+  tree: Tree,
   filePath: string,
   language: SupportedLanguage,
   functions: FunctionDefinition[],
@@ -70,7 +70,7 @@ export function extractHttpCalls(
  * Extract details from an HTTP call expression
  */
 function extractHttpCallDetails(
-  node: Parser.SyntaxNode,
+  node: SyntaxNode,
   filePath: string,
   matcher: { getClientType(calleeName: string): string },
 ): HttpCall | null {
@@ -150,7 +150,7 @@ function extractHttpCallDetails(
 /**
  * Extract string value from a node (handles template strings, concatenation, etc.)
  */
-function extractStringValue(node: Parser.SyntaxNode): string {
+function extractStringValue(node: SyntaxNode): string {
   if (node.type === 'string' || node.type === 'string_fragment') {
     let text = node.text
     // Strip Python f-string prefix
@@ -186,7 +186,7 @@ function extractStringValue(node: Parser.SyntaxNode): string {
 /**
  * Find a property by name in an object literal
  */
-function findPropertyByName(objectNode: Parser.SyntaxNode, propName: string): Parser.SyntaxNode | null {
+function findPropertyByName(objectNode: SyntaxNode, propName: string): SyntaxNode | null {
   for (let i = 0; i < objectNode.namedChildCount; i++) {
     const child = objectNode.namedChild(i)
     if (child && child.type === 'pair') {

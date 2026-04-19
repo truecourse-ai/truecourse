@@ -7,7 +7,7 @@ export const pythonUndefinedExportVisitor: CodeRuleVisitor = {
   nodeTypes: ['module'],
   visit(node, filePath, sourceCode) {
     // Find __all__ = [...] assignment at the top level
-    let allList: import('tree-sitter').SyntaxNode | null = null
+    let allList: import('web-tree-sitter').Node | null = null
     const definedNames = new Set<string>()
 
     for (const child of node.namedChildren) {

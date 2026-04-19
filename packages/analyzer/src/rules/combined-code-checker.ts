@@ -1,4 +1,4 @@
-import type { Tree } from 'tree-sitter'
+import type { Tree } from 'web-tree-sitter'
 import type { AnalysisRule, CodeViolation, SupportedLanguage } from '@truecourse/shared'
 import { walkAstWithVisitors, type CodeRuleVisitor } from './types.js'
 import type { TypeQueryService } from '../ts-compiler.js'

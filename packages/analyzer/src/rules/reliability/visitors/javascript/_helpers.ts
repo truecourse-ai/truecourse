@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 /** Check if a node is inside a try block (direct child of try_statement body). */
 export function isInsideTryCatch(node: SyntaxNode): boolean {

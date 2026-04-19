@@ -45,7 +45,7 @@ export const noUndefVisitor: CodeRuleVisitor = {
   },
 }
 
-function isTypePosition(node: import('tree-sitter').SyntaxNode): boolean {
+function isTypePosition(node: import('web-tree-sitter').Node): boolean {
   let current = node.parent
   while (current) {
     if (

@@ -6,7 +6,7 @@ export const pythonNotImplementedInBoolContextVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['if_statement', 'assert_statement', 'while_statement'],
   visit(node, filePath, sourceCode) {
-    let condNode: import('tree-sitter').SyntaxNode | null = null
+    let condNode: import('web-tree-sitter').Node | null = null
     if (node.type === 'assert_statement') {
       condNode = node.namedChildren[0] ?? null
     } else {

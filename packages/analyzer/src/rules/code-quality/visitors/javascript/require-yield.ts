@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_FUNCTION_TYPES, getFunctionBody } from './_helpers.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const requireYieldVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/require-yield',

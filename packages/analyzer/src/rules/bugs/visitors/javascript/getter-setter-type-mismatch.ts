@@ -9,8 +9,8 @@ export const getterSetterTypeMismatchVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['class_body'],
   visit(node, filePath, sourceCode) {
-    const getters = new Map<string, { returnType: string; node: import('tree-sitter').SyntaxNode }>()
-    const setters = new Map<string, { paramType: string; node: import('tree-sitter').SyntaxNode }>()
+    const getters = new Map<string, { returnType: string; node: import('web-tree-sitter').Node }>()
+    const setters = new Map<string, { paramType: string; node: import('web-tree-sitter').Node }>()
 
     for (const member of node.namedChildren) {
       if (member.type !== 'method_definition') continue

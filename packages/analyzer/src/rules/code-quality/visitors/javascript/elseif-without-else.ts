@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const elseifWithoutElseVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/elseif-without-else',
@@ -18,10 +18,10 @@ export const elseifWithoutElseVisitor: CodeRuleVisitor = {
 
     let currentNode: SyntaxNode | null = node
     while (currentNode?.type === 'if_statement') {
-      const elseClause: import('tree-sitter').SyntaxNode | undefined = currentNode.children.find((c) => c.type === 'else_clause')
+      const elseClause: import('web-tree-sitter').Node | undefined = currentNode.children.find((c) => c.type === 'else_clause')
       if (!elseClause) break
 
-      const elseBody: import('tree-sitter').SyntaxNode | undefined = elseClause.namedChildren[0]
+      const elseBody: import('web-tree-sitter').Node | undefined = elseClause.namedChildren[0]
       if (!elseBody) break
 
       if (elseBody.type === 'if_statement') {

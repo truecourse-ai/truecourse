@@ -8,13 +8,13 @@ export const pythonRedefinedWhileUnusedVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     // Collect import bindings in order, detect if a name is imported again before being used
     // We do a simplified check: find duplicate imports of the same name at module level
-    const imported = new Map<string, import('tree-sitter').SyntaxNode>()
+    const imported = new Map<string, import('web-tree-sitter').Node>()
 
     for (const stmt of node.namedChildren) {
       if (stmt.type === 'import_statement') {
         for (const child of stmt.namedChildren) {
           let name: string | null = null
-          let aliasNode: import('tree-sitter').SyntaxNode | null = null
+          let aliasNode: import('web-tree-sitter').Node | null = null
 
           if (child.type === 'aliased_import') {
             // import foo as bar

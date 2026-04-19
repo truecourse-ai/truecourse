@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getPythonModuleNode } from '../../../_shared/python-helpers.js'
@@ -8,7 +8,7 @@ import { getPythonModuleNode } from '../../../_shared/python-helpers.js'
  * the given `name` that is NOT a descendant of `excludeNode`.
  */
 function hasIdentifierOutside(root: SyntaxNode, name: string, excludeNode: SyntaxNode): boolean {
-  if (root === excludeNode) return false
+  if (root.id === excludeNode.id) return false
   if (root.type === 'identifier' && root.text === name) return true
   for (const child of root.namedChildren) {
     if (hasIdentifierOutside(child, name, excludeNode)) return true

@@ -13,7 +13,7 @@ export const pythonIterNotReturningIteratorVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     // Check if there's a yield statement (makes it a generator — fine)
-    function hasYield(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasYield(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'yield' || n.type === 'yield_statement') return true
       if (n.type === 'function_definition') return false
       for (let i = 0; i < n.childCount; i++) {
@@ -25,7 +25,7 @@ export const pythonIterNotReturningIteratorVisitor: CodeRuleVisitor = {
     if (hasYield(body)) return null
 
     // Check if there's a return self statement
-    function hasReturnSelf(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasReturnSelf(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'return_statement') {
         const val = n.namedChildren[0]
         if (val?.type === 'identifier' && val.text === 'self') return true
@@ -38,7 +38,7 @@ export const pythonIterNotReturningIteratorVisitor: CodeRuleVisitor = {
       return false
     }
 
-    function hasAnyReturn(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasAnyReturn(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
       if (n.type === 'function_definition') return false
       for (let i = 0; i < n.childCount; i++) {

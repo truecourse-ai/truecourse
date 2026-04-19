@@ -12,7 +12,7 @@ export const pythonBadStaticmethodArgumentVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     // Check if it has @staticmethod decorator
     let hasStaticmethod = false
-    let funcDef: import('tree-sitter').SyntaxNode | null = null
+    let funcDef: import('web-tree-sitter').Node | null = null
 
     for (const child of node.namedChildren) {
       if (child.type === 'decorator') {

@@ -35,7 +35,7 @@ export const wrapperObjectTypeVisitor: CodeRuleVisitor = {
   },
 }
 
-function findWrapperType(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findWrapperType(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.namedChildren) {
     if (child.type === 'type_identifier' && WRAPPER_TYPES.has(child.text)) {
       return child

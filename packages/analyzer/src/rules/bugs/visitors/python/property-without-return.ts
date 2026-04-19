@@ -25,7 +25,7 @@ export const pythonPropertyWithoutReturnVisitor: CodeRuleVisitor = {
       (statements.length === 1 && (statements[0].type === 'pass_statement' || statements[0].type === 'expression_statement' && statements[0].text === '...'))
     if (isStubBody) return null // Stubs are intentional
 
-    function hasReturnValue(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasReturnValue(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
       if (n.type === 'function_definition') return false
       for (let i = 0; i < n.childCount; i++) {

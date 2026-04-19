@@ -17,7 +17,7 @@ export const pythonStarAssignmentErrorVisitor: CodeRuleVisitor = {
     if (!left) return null
 
     // Look for tuple/list pattern on the left side
-    function countStars(n: import('tree-sitter').SyntaxNode): number {
+    function countStars(n: import('web-tree-sitter').Node): number {
       if (n.type === 'list_splat_pattern' || n.type === 'dictionary_splat_pattern') return 1
       if (n.type === 'starred_expression') return 1
       let count = 0

@@ -14,8 +14,9 @@ export const fallthroughCaseVisitor: CodeRuleVisitor = {
 
     for (let i = 0; i < cases.length - 1; i++) {
       const caseNode = cases[i]
+      const valueNode = caseNode.childForFieldName('value')
       const statements = caseNode.namedChildren.filter(
-        (c) => c.type !== 'comment' && c !== caseNode.childForFieldName('value'),
+        (c) => c.type !== 'comment' && (!valueNode || c.id !== valueNode.id),
       )
 
       // Empty case body (intentional grouping) — skip

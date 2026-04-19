@@ -28,7 +28,7 @@ export const promiseAllNoErrorHandlingVisitor: CodeRuleVisitor = {
     if (/\/app\/.*(?:page|layout)\.[tj]sx?$/.test(filePath)) return null
 
     // Skip shutdown/teardown/cleanup functions — errors during shutdown are typically acceptable
-    let ancestor: import('tree-sitter').SyntaxNode | null = node.parent
+    let ancestor: import('web-tree-sitter').Node | null = node.parent
     while (ancestor) {
       if (
         ancestor.type === 'function_declaration' ||

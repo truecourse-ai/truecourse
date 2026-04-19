@@ -14,7 +14,7 @@ export const mixedTypeImportsVisitor: CodeRuleVisitor = {
     let hasValueSpecifier = false
 
     // Find named_imports by walking through import_clause
-    function checkSpecifiers(parent: import('tree-sitter').SyntaxNode) {
+    function checkSpecifiers(parent: import('web-tree-sitter').Node) {
       for (let i = 0; i < parent.childCount; i++) {
         const child = parent.child(i)
         if (!child) continue

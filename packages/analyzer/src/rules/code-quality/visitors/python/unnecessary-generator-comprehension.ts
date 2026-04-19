@@ -17,7 +17,7 @@ export const pythonUnnecessaryGeneratorComprehensionVisitor: CodeRuleVisitor = {
 
     // tree-sitter may parse list(x for x in ...) with generator_expression as
     // the arguments field itself (not inside argument_list)
-    let arg: import('tree-sitter').SyntaxNode | null = null
+    let arg: import('web-tree-sitter').Node | null = null
     if (args.type === 'generator_expression') {
       arg = args
     } else if (args.type === 'argument_list') {

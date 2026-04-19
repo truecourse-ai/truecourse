@@ -17,7 +17,7 @@ export const pythonInvalidSpecialMethodReturnTypeVisitor: CodeRuleVisitor = {
 
     const methodName = name.text
     // Find any return statements with a literal of the wrong type
-    function findBadReturn(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findBadReturn(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'return_statement') {
         const val = n.namedChildren[0]
         if (val && constraint.forbiddenTypes.includes(val.type)) {

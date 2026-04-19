@@ -16,7 +16,7 @@ export const pythonLoopVariableOverridesIteratorVisitor: CodeRuleVisitor = {
     const varName = loopVar.text
 
     // Check if the iterator expression contains the same identifier
-    function containsIdentifier(n: import('tree-sitter').SyntaxNode, name: string): boolean {
+    function containsIdentifier(n: import('web-tree-sitter').Node, name: string): boolean {
       if (n.type === 'identifier' && n.text === name) return true
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

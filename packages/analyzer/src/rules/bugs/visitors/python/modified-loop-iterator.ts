@@ -14,7 +14,7 @@ export const pythonModifiedLoopIteratorVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    function findMutation(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findMutation(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       // call_expression: coll.add(...), coll.remove(...)
       if (n.type === 'call') {
         const fn = n.childForFieldName('function')

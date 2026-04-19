@@ -15,7 +15,7 @@ export const pythonReuseGroupbyGeneratorVisitor: CodeRuleVisitor = {
     if (!iterExpr) return null
 
     // Check if iterating over groupby(...)
-    const isGroupbyCall = (n: import('tree-sitter').SyntaxNode): boolean => {
+    const isGroupbyCall = (n: import('web-tree-sitter').Node): boolean => {
       if (n.type === 'call') {
         const fn = n.childForFieldName('function')
         if (fn?.type === 'identifier' && fn.text === 'groupby') return true
@@ -41,7 +41,7 @@ export const pythonReuseGroupbyGeneratorVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     let usageCount = 0
-    function countUsages(n: import('tree-sitter').SyntaxNode): void {
+    function countUsages(n: import('web-tree-sitter').Node): void {
       if (n.type === 'for_statement') {
         const iterRight = n.childForFieldName('right')
         if (iterRight?.type === 'identifier' && iterRight.text === groupVarName) {

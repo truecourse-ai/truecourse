@@ -16,7 +16,7 @@
  * Mirrors `_shared/framework-detection.ts` (the JS equivalent) — see that
  * file for the JS shape.
  */
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import { getPythonModuleNode } from './python-helpers.js'
 
 export type PythonOrm =
@@ -48,7 +48,12 @@ export type PythonDataLib =
 // Import source extraction (cached per program root)
 // ---------------------------------------------------------------------------
 
-const importSourceCache = new WeakMap<SyntaxNode, Set<string>>()
+// Keyed on `Tree` rather than the root `SyntaxNode`: in web-tree-sitter, Node
+// wrappers are NOT reference-stable (walking up via `.parent` returns fresh
+// wrappers each call), so a WeakMap keyed on the walked-up module root misses
+// the cache across different descendant entry points. `Tree` IS stable — it's
+// the object returned from `parser.parse()`.
+const importSourceCache = new WeakMap<Tree, Set<string>>()
 
 /**
  * Extract all import sources (the module names) from a Python file's AST.
@@ -71,7 +76,8 @@ const importSourceCache = new WeakMap<SyntaxNode, Set<string>>()
  */
 export function getPythonImportSources(node: SyntaxNode): Set<string> {
   const program = getPythonModuleNode(node)
-  const cached = importSourceCache.get(program)
+  const tree = program.tree
+  const cached = importSourceCache.get(tree)
   if (cached) return cached
 
   const sources = new Set<string>()
@@ -118,7 +124,7 @@ export function getPythonImportSources(node: SyntaxNode): Set<string> {
   }
   walk(program)
 
-  importSourceCache.set(program, sources)
+  importSourceCache.set(tree, sources)
   return sources
 }
 

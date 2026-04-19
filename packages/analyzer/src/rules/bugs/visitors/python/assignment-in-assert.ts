@@ -6,7 +6,7 @@ export const pythonAssignmentInAssertVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['assert_statement'],
   visit(node, filePath, sourceCode) {
-    function hasWalrus(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function hasWalrus(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'named_expression') return n
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

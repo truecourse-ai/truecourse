@@ -49,7 +49,7 @@ export const pythonUnreliableSysVersionCheckVisitor: CodeRuleVisitor = {
   },
 }
 
-function isSysVersion(node: import('tree-sitter').SyntaxNode): boolean {
+function isSysVersion(node: import('web-tree-sitter').Node): boolean {
   if (node.type === 'attribute') {
     const obj = node.childForFieldName('object')
     const attr = node.childForFieldName('attribute')

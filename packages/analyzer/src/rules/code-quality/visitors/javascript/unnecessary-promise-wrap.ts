@@ -53,7 +53,7 @@ export const unnecessaryPromiseWrapVisitor: CodeRuleVisitor = {
 
     // Check: body is a single call_expression invoking `resolve(x)` or
     // body is a statement_block with a single expression_statement that calls resolve(x)
-    function isSimpleResolveCall(n: import('tree-sitter').SyntaxNode): boolean {
+    function isSimpleResolveCall(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'call_expression') {
         const fn = n.childForFieldName('function')
         return fn?.text === resolveName

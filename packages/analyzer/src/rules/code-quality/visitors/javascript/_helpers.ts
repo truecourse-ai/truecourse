@@ -2,7 +2,7 @@
  * Shared helpers for code-quality JS/TS visitors.
  */
 
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { SupportedLanguage } from '@truecourse/shared'
 
 export const JS_LANGUAGES: SupportedLanguage[] = ['typescript', 'tsx', 'javascript']

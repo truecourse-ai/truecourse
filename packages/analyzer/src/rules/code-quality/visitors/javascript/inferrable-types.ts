@@ -11,7 +11,7 @@ const LITERAL_TO_TYPE: Record<string, string> = {
   false: 'boolean',
 }
 
-function getLiteralType(node: import('tree-sitter').SyntaxNode): string | null {
+function getLiteralType(node: import('web-tree-sitter').Node): string | null {
   if (LITERAL_TO_TYPE[node.type]) return LITERAL_TO_TYPE[node.type]
   if (node.type === 'identifier' && (node.text === 'true' || node.text === 'false')) return 'boolean'
   return null
@@ -28,7 +28,7 @@ export const inferrableTypesVisitor: CodeRuleVisitor = {
 
     // The type annotation is a child of the name pattern in TS: name: type
     // In tree-sitter typescript, it's typically: identifier > type_annotation
-    let typeNode: import('tree-sitter').SyntaxNode | null = null
+    let typeNode: import('web-tree-sitter').Node | null = null
     for (let i = 0; i < nameNode.childCount; i++) {
       const child = nameNode.child(i)
       if (child && child.type === 'type_annotation') {

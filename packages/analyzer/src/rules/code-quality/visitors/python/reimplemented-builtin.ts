@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 // Detect: for x in iterable: if x: return True / return False → use any()
 // For simplicity, detect: for x in ...: result = result or/and x → use any()/all()

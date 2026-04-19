@@ -5,7 +5,7 @@ import {
   isFastApiDependsCall,
 } from '../../../_shared/python-framework-detection.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 function isAnnotatedType(annotation: SyntaxNode): boolean {
   // Annotated[type, Depends(...)]
