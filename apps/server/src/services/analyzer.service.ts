@@ -163,6 +163,9 @@ export async function runAnalysis(
 
     const analyzer = await import('@truecourse/analyzer');
 
+    // WASM parsers need one-time async init before any analyzeFile call.
+    await analyzer.initParsers();
+
     const files = await analyzer.discoverFiles(repoPath);
     onProgress({
       step: 'discover',

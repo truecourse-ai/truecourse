@@ -35,6 +35,11 @@ const edgeTypes: EdgeTypes = {
 type FlowDiagramPanelProps = {
   repoId: string;
   flowId: string;
+  analysisId?: string;
+  /** True when the current view is LATEST (dropdown unset AND diff toggle
+   *  off). Enrich button only makes sense for LATEST because the result
+   *  persists back to LATEST.json. */
+  canEnrich?: boolean;
 };
 
 const COLUMN_WIDTH = 240;
@@ -69,7 +74,7 @@ function FlowZoomControls() {
   );
 }
 
-function FlowDiagramInner({ repoId, flowId }: FlowDiagramPanelProps) {
+function FlowDiagramInner({ repoId, flowId, analysisId, canEnrich }: FlowDiagramPanelProps) {
   const [flow, setFlow] = useState<FlowDetailResponse | null>(null);
   const [violations, setViolations] = useState<ViolationResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -84,8 +89,8 @@ function FlowDiagramInner({ repoId, flowId }: FlowDiagramPanelProps) {
     setCurrentStep(0);
     setIsPlaying(false);
     Promise.all([
-      api.getFlow(repoId, flowId),
-      api.getViolations(repoId),
+      api.getFlow(repoId, flowId, analysisId),
+      api.getViolations(repoId, undefined, analysisId),
     ])
       .then(([flowData, violationData]) => {
         setFlow(flowData);
@@ -93,7 +98,7 @@ function FlowDiagramInner({ repoId, flowId }: FlowDiagramPanelProps) {
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load flow'))
       .finally(() => setIsLoading(false));
-  }, [repoId, flowId]);
+  }, [repoId, flowId, analysisId]);
 
   const handleEnrich = useCallback(async () => {
     if (!flow) return;
@@ -349,7 +354,7 @@ function FlowDiagramInner({ repoId, flowId }: FlowDiagramPanelProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!flow.description && (
+          {!flow.description && canEnrich && (
             <button
               onClick={handleEnrich}
               disabled={isEnriching}

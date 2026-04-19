@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 function hasPropertyDecorator(node: SyntaxNode): boolean {
   // In tree-sitter Python, decorators are siblings of function_definition in decorated_definition

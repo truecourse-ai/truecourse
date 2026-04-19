@@ -24,7 +24,7 @@ export const pythonExitReRaiseInExceptVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    function findReRaise(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findReRaise(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'raise_statement') {
         const raised = n.namedChildren[0]
         // raise exc_val or raise exc_type(...)

@@ -36,7 +36,7 @@ export const pythonDjangoReceiverDecoratorOrderVisitor: CodeRuleVisitor = {
   },
 }
 
-function getDecoratorName(decorator: import('tree-sitter').SyntaxNode): string {
+function getDecoratorName(decorator: import('web-tree-sitter').Node): string {
   for (const child of decorator.namedChildren) {
     if (child.type === 'identifier') return child.text
     if (child.type === 'attribute') {

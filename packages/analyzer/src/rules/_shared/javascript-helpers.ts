@@ -9,7 +9,7 @@
  * (`text.includes('<')`, `arg.includes(name)`) with proper AST checks that
  * don't leak across substrings, comments, or string literals.
  */
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { DataFlowContext, Variable } from '../../data-flow/types.js'
 
 /**

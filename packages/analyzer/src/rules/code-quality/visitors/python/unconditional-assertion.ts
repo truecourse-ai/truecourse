@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 const ALWAYS_TRUTHY_LITERALS = new Set(['True', '1', '"text"', "'text'"])
 const ALWAYS_FALSY_LITERALS = new Set(['False', '0', 'None', '""', "''"])

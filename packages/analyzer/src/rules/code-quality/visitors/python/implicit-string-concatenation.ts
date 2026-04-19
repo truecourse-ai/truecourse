@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 function isCollection(node: SyntaxNode): boolean {
   return node.type === 'list' || node.type === 'tuple' || node.type === 'set'

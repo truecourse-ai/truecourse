@@ -22,13 +22,13 @@
     "minimatch": "^10.0.3",
     "pyright": "^1.1.408",
     "smol-toml": "^1.6.1",
-    "tree-sitter": "^0.25.0",
-    "tree-sitter-javascript": "^0.25.0",
-    "tree-sitter-python": "^0.25.0",
-    "tree-sitter-typescript": "^0.23.2",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "web-tree-sitter": "^0.26.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2"
   }
 }

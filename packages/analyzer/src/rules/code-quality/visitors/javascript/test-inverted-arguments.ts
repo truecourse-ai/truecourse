@@ -12,7 +12,7 @@ const LITERAL_TYPES = new Set([
   'template_string',
 ])
 
-function isLiteral(node: import('tree-sitter').SyntaxNode): boolean {
+function isLiteral(node: import('web-tree-sitter').Node): boolean {
   return (
     LITERAL_TYPES.has(node.type) ||
     (node.type === 'identifier' && (node.text === 'true' || node.text === 'false' || node.text === 'null' || node.text === 'undefined')) ||

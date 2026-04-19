@@ -26,7 +26,7 @@ export const pythonAsyncBusyWaitVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    function hasSleepCall(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasSleepCall(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'call') {
         const func = n.childForFieldName('function')
         if (!func) return false
@@ -48,7 +48,7 @@ export const pythonAsyncBusyWaitVisitor: CodeRuleVisitor = {
      * Check if the loop body contains `await sleep(...)` — this means the
      * loop properly yields control and is NOT a busy wait.
      */
-    function hasAwaitedSleep(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasAwaitedSleep(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'await' || n.type === 'await_expression') {
         // The awaited expression should be a sleep call
         for (let i = 0; i < n.childCount; i++) {

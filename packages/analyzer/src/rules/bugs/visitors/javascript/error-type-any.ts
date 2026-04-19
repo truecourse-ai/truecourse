@@ -19,7 +19,7 @@ export const errorTypeAnyVisitor: CodeRuleVisitor = {
     if (!parameter) return null
 
     // Look for type annotation as a sibling of the parameter in the catch clause
-    let typeAnnotation: import('tree-sitter').SyntaxNode | null = null
+    let typeAnnotation: import('web-tree-sitter').Node | null = null
     for (let i = 0; i < node.childCount; i++) {
       const child = node.child(i)
       if (child?.type === 'type_annotation') {
@@ -49,7 +49,7 @@ export const errorTypeAnyVisitor: CodeRuleVisitor = {
     let hasPropertyAccess = false
     let hasTypeCheck = false
 
-    function scanBody(n: import('tree-sitter').SyntaxNode): void {
+    function scanBody(n: import('web-tree-sitter').Node): void {
       if (
         n.type === 'member_expression' &&
         n.childForFieldName('object')?.text === paramName

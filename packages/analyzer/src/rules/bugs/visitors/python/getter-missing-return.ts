@@ -32,7 +32,7 @@ export const pythonGetterMissingReturnVisitor: CodeRuleVisitor = {
       )
     }
 
-    function hasReturn(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasReturn(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'return_statement' && n.namedChildren.length > 0) return true
       if (n.type === 'function_definition') return false
       for (let i = 0; i < n.childCount; i++) {

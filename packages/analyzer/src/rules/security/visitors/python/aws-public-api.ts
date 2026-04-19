@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import { containsPythonIdentifierExact } from '../../../_shared/python-helpers.js'
 
 /** Check if a node (possibly a dict) contains a "NONE" value — as identifier, string, or dict entry. */

@@ -9,17 +9,17 @@
  *   bp.route("/path", methods=["GET"])(handler)
  */
 
-import type Parser from 'tree-sitter'
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { RouteRegistration, RouterMount } from '@truecourse/shared'
 
 export function extractPythonRoutes(
-  tree: Parser.Tree,
+  tree: Tree,
   filePath: string,
 ): { routes: RouteRegistration[]; mounts: RouterMount[] } {
   const routes: RouteRegistration[] = []
   const mounts: RouterMount[] = []
 
-  function traverse(node: Parser.SyntaxNode): void {
+  function traverse(node: SyntaxNode): void {
     // Decorator-based routes: @app.get('/path') or @bp.route('/path')
     if (node.type === 'decorated_definition') {
       for (const child of node.children) {
@@ -58,8 +58,8 @@ export function extractPythonRoutes(
 }
 
 function extractDecoratorRoute(
-  decorator: Parser.SyntaxNode,
-  definition: Parser.SyntaxNode,
+  decorator: SyntaxNode,
+  definition: SyntaxNode,
   filePath: string,
 ): RouteRegistration | null {
   const decoratorText = decorator.text
@@ -99,7 +99,7 @@ function extractDecoratorRoute(
 }
 
 function extractRouterMount(
-  callNode: Parser.SyntaxNode,
+  callNode: SyntaxNode,
   filePath: string,
 ): RouterMount | null {
   const argsNode = callNode.childForFieldName('arguments')
@@ -136,7 +136,7 @@ function extractRouterMount(
 }
 
 function extractChainedRoute(
-  outerCall: Parser.SyntaxNode,
+  outerCall: SyntaxNode,
   filePath: string,
 ): RouteRegistration | null {
   const innerCall = outerCall.childForFieldName('function')

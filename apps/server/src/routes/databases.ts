@@ -1,31 +1,36 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { createAppError } from '../middleware/error.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
-import { readLatest } from '../lib/analysis-store.js';
+import { resolveGraphForAnalysisId } from '../services/violation-query.service.js';
 
 const router: Router = Router();
 
-// GET /api/repos/:id/databases — databases in LATEST
+// GET /api/repos/:id/databases?analysisId=
+// Honors analysisId so historical analyses and diff mode render the
+// databases that existed in that analysis's graph (not stale LATEST).
 router.get(
   '/:id/databases',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = req.params.id as string;
       const repo = resolveProjectForRequest(id);
-      const latest = readLatest(repo.path);
-      if (!latest) {
+      const analysisId = req.query.analysisId as string | undefined;
+
+      const resolved = resolveGraphForAnalysisId(repo.path, analysisId);
+      if (!resolved) {
         res.json([]);
         return;
       }
+      const { graph } = resolved;
 
-      const result = latest.graph.databases.map((dbRow) => ({
+      const result = graph.databases.map((dbRow) => ({
         id: dbRow.id,
         name: dbRow.name,
         type: dbRow.type,
         driver: dbRow.driver,
         tableCount: Array.isArray(dbRow.tables) ? (dbRow.tables as unknown[]).length : 0,
         connectedServices: dbRow.connectedServices,
-        connections: latest.graph.databaseConnections
+        connections: graph.databaseConnections
           .filter((c) => c.databaseId === dbRow.id)
           .map((c) => ({ serviceId: c.serviceId, driver: c.driver })),
       }));
@@ -37,7 +42,7 @@ router.get(
   },
 );
 
-// GET /api/repos/:id/databases/:dbId/schema — details
+// GET /api/repos/:id/databases/:dbId/schema?analysisId=
 router.get(
   '/:id/databases/:dbId/schema',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -45,9 +50,12 @@ router.get(
       const id = req.params.id as string;
       const dbId = req.params.dbId as string;
       const repo = resolveProjectForRequest(id);
-      const latest = readLatest(repo.path);
-      if (!latest) throw createAppError('Database not found', 404);
-      const dbRow = latest.graph.databases.find((d) => d.id === dbId);
+      const analysisId = req.query.analysisId as string | undefined;
+
+      const resolved = resolveGraphForAnalysisId(repo.path, analysisId);
+      if (!resolved) throw createAppError('Database not found', 404);
+
+      const dbRow = resolved.graph.databases.find((d) => d.id === dbId);
       if (!dbRow) throw createAppError('Database not found', 404);
 
       res.json({

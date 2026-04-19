@@ -8,7 +8,7 @@
  * isExported heuristic for JS/TS files.
  */
 
-import type { Tree, SyntaxNode } from 'tree-sitter'
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter'
 import type {
   FunctionDefinition,
   ClassDefinition,

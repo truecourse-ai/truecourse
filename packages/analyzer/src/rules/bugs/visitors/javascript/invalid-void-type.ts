@@ -29,7 +29,7 @@ export const invalidVoidTypeVisitor: CodeRuleVisitor = {
   },
 }
 
-function findVoidType(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findVoidType(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.children) {
     if (child.type === 'void_type') return child
     if (child.type === 'predefined_type' && child.text === 'void') return child

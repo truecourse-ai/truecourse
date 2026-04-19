@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
+import { checkCodeRules, parseFile, detectLanguage, buildScopedCompilerOptions, createTypeQueryService, hasTypeAwareVisitors, hasSchemaAwareVisitors, buildSchemaIndex, initParsers, type TypeQueryService, type SchemaIndex } from '@truecourse/analyzer';
 import type { CodeViolation } from '@truecourse/shared';
 import type { ModuleViolation, ServiceViolation } from '@truecourse/analyzer';
 import { runDeterministicModuleChecks, runDeterministicMethodChecks, runDeterministicServiceChecks, type AnalysisResult } from './analyzer.service.js';
@@ -117,6 +117,10 @@ export function compareDeterministicViolations<
 // ---------------------------------------------------------------------------
 
 export async function runViolationPipeline(input: ViolationPipelineInput): Promise<ViolationPipelineResult> {
+  // Ensure tree-sitter WASM parsers are loaded before any parseFile/checkCodeRules
+  // call below. Idempotent — returns the cached promise on subsequent calls.
+  await initParsers();
+
   const {
     repoPath, analysisId, now, result,
     serviceIdMap, moduleIdMap, methodIdMap, dbIdMap,
@@ -182,6 +186,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   if (hasLlm) tracker?.start('scan', 'Reading files...');
 
   const fileContents: Map<string, { content: string; lineCount: number }> = new Map();
+  const totalToScan = filesToScan.length;
+  let scanned = 0;
   for (const { filePath, resolve } of filesToScan) {
     try {
       const lang = detectLanguage(filePath);
@@ -193,6 +199,12 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       fileContents.set(changedFileSet ? absPath : filePath, { content, lineCount });
     } catch {
       // skip
+    }
+    scanned++;
+    // Emit progress every ~20 files (or on the last one) so the UI renders
+    // `scan` as active throughout, not just pending → done at the end.
+    if (hasLlm && (scanned % 20 === 0 || scanned === totalToScan)) {
+      tracker?.detail('scan', `Reading ${scanned}/${totalToScan} files...`);
     }
   }
 

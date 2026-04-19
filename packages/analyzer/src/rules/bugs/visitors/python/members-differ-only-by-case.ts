@@ -11,7 +11,7 @@ export const pythonMembersDifferOnlyByCaseVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    const memberNames: Array<{ name: string; node: import('tree-sitter').SyntaxNode }> = []
+    const memberNames: Array<{ name: string; node: import('web-tree-sitter').Node }> = []
 
     for (const stmt of body.namedChildren) {
       if (stmt.type === 'function_definition' || stmt.type === 'decorated_definition') {

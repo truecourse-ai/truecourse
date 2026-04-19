@@ -283,6 +283,8 @@ export async function runHooksRun(): Promise<void> {
     detectLanguage = analyzer.detectLanguage;
     checkCodeRules = analyzer.checkCodeRules;
     CODE_RULES = analyzer.CODE_RULES;
+    // WASM parsers need one-time async init before any parseCode call.
+    await analyzer.initParsers();
   } catch {
     console.log(" skipped (analyzer not available)");
     process.exit(0);

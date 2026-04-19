@@ -13,7 +13,7 @@ export const pythonIfElseDictLookupVisitor: CodeRuleVisitor = {
     const elseClause = node.namedChildren.find((c) => c.type === 'else_clause')
 
     // Check all branches assign to the same variable
-    function getSingleAssignmentTarget(body: import('tree-sitter').SyntaxNode): string | null {
+    function getSingleAssignmentTarget(body: import('web-tree-sitter').Node): string | null {
       const stmts = body.namedChildren
       if (stmts.length !== 1) return null
       // tree-sitter wraps assignments in expression_statement

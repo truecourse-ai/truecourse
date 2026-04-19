@@ -18,7 +18,7 @@ export const pythonLoopAtMostOneIterationVisitor: CodeRuleVisitor = {
     if (EXITS.has(last.type)) {
       // If the loop body contains a `continue` anywhere (including inside
       // if/else blocks), the loop CAN iterate more than once.
-      function containsContinue(n: import('tree-sitter').SyntaxNode): boolean {
+      function containsContinue(n: import('web-tree-sitter').Node): boolean {
         if (n.type === 'continue_statement') return true
         // Don't recurse into nested loops — their `continue` doesn't apply to us
         if (n.type === 'for_statement' || n.type === 'while_statement') return false

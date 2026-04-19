@@ -23,10 +23,10 @@ export function useAnalytics(repoId: string, branch?: string, analysisId?: strin
     setError(null);
     try {
       const [trendData, breakdownData, offendersData, resolutionData, hotspotsData] = await Promise.all([
-        api.getAnalyticsTrend(repoId, branch),
+        api.getAnalyticsTrend(repoId, branch, undefined, analysisId),
         api.getAnalyticsBreakdown(repoId, branch, analysisId),
         api.getAnalyticsTopOffenders(repoId, branch, analysisId),
-        api.getAnalyticsResolution(repoId, branch),
+        api.getAnalyticsResolution(repoId, branch, analysisId),
         api.getCodeViolationSummary(repoId, analysisId),
       ]);
       setTrend(trendData);

@@ -1,4 +1,4 @@
-import type { Tree, SyntaxNode } from 'tree-sitter'
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter'
 import type { CallExpression, SupportedLanguage, SourceLocation } from '@truecourse/shared'
 import { extractJsxReferences } from '../ts-compiler.js'
 import { getLanguageConfig } from '../language-config.js'

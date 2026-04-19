@@ -14,7 +14,7 @@ export const misleadingSameLineConditionalVisitor: CodeRuleVisitor = {
     // Check if this if_statement starts on the same line as a previous statement's end
     const startLine = node.startPosition.row
 
-    let prevSibling: import('tree-sitter').SyntaxNode | null = null
+    let prevSibling: import('web-tree-sitter').Node | null = null
     for (let i = 0; i < parent.childCount; i++) {
       const child = parent.child(i)
       if (!child) continue

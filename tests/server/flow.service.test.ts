@@ -63,7 +63,7 @@ describe('flow.service', () => {
   it('computeFlowSeverities returns empty when no violations', () => {
     const flows = detectFlows(analysisResult);
     const snapshot = makeLatest(fixture.project.path, flows);
-    expect(computeFlowSeverities(snapshot)).toEqual({});
+    expect(computeFlowSeverities(snapshot.graph, snapshot.violations)).toEqual({});
   });
 
   it('computeFlowSeverities picks up severity via targetMethod/targetModule names', () => {
@@ -120,7 +120,7 @@ describe('flow.service', () => {
       targetDatabaseName: null,
     });
 
-    const severities = computeFlowSeverities(snapshot);
+    const severities = computeFlowSeverities(snapshot.graph, snapshot.violations);
     expect(severities[flows[0].id]).toBe('high');
   });
 });

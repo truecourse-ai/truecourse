@@ -12,7 +12,7 @@ export const pythonTooManyReturnStatementsVisitor: CodeRuleVisitor = {
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 
-    function countReturns(n: import('tree-sitter').SyntaxNode) {
+    function countReturns(n: import('web-tree-sitter').Node) {
       if (n.type === 'return_statement') {
         returnCount++
         return

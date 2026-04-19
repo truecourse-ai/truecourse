@@ -6,7 +6,7 @@ export const pythonFstringDocstringVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['function_definition', 'class_definition', 'module'],
   visit(node, filePath, sourceCode) {
-    let body: import('tree-sitter').SyntaxNode | null = null
+    let body: import('web-tree-sitter').Node | null = null
     if (node.type === 'module') {
       body = node
     } else {

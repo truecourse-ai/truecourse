@@ -32,7 +32,7 @@ export const pythonLoadBeforeGlobalDeclarationVisitor: CodeRuleVisitor = {
       if (stmt.type === 'global_statement') continue
 
       // Look for identifier references in this statement
-      function findIdentifiers(n: import('tree-sitter').SyntaxNode): string[] {
+      function findIdentifiers(n: import('web-tree-sitter').Node): string[] {
         const ids: string[] = []
         if (n.type === 'identifier') ids.push(n.text)
         // Don't descend into nested function defs

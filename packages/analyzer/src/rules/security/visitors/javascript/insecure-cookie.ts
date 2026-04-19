@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-function findCookieOptionsObject(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findCookieOptionsObject(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   const fn = node.childForFieldName('function')
   if (!fn) return null
 
@@ -22,7 +22,7 @@ function findCookieOptionsObject(node: import('tree-sitter').SyntaxNode): import
   return null
 }
 
-function objectHasProperty(objectNode: import('tree-sitter').SyntaxNode, propName: string, propValue: string): boolean {
+function objectHasProperty(objectNode: import('web-tree-sitter').Node, propName: string, propValue: string): boolean {
   for (const child of objectNode.namedChildren) {
     if (child.type === 'pair') {
       const key = child.childForFieldName('key')

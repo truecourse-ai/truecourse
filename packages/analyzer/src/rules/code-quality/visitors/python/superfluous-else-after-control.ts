@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 const CONTROL_FLOW_TYPES = new Set(['return_statement', 'raise_statement', 'break_statement', 'continue_statement'])
 

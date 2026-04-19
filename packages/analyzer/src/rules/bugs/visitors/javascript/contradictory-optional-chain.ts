@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_LANGUAGES } from './_helpers.js'
@@ -30,7 +30,7 @@ export const contradictoryOptionalChainVisitor: CodeRuleVisitor = {
           const right = parent.childForFieldName('right')
           // Check if the non_null_expression is structurally within the right operand
           if (right) {
-            let n: import('tree-sitter').SyntaxNode | null = node
+            let n: import('web-tree-sitter').Node | null = node
             while (n && n.id !== parent.id) {
               if (n.id === right.id) return null
               n = n.parent

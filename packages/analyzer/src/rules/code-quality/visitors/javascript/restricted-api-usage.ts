@@ -41,7 +41,7 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
 
       // Skip if identifier is declared as a local variable or parameter in scope
       const declPattern = new RegExp(`\\b(?:const|let|var)\\s+${node.text}\\b`)
-      let scope = node.parent
+      let scope: typeof node.parent = node.parent
       while (scope) {
         if (scope.type === 'statement_block' || scope.type === 'program') {
           if (declPattern.test(scope.text)) return null

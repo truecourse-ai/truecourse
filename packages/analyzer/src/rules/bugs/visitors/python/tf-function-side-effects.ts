@@ -10,7 +10,7 @@ const SIDE_EFFECT_CALLS = new Set([
   'print', 'input',
 ])
 
-function hasTfFunctionDecorator(funcNode: import('tree-sitter').SyntaxNode): boolean {
+function hasTfFunctionDecorator(funcNode: import('web-tree-sitter').Node): boolean {
   const parent = funcNode.parent
   if (parent?.type === 'decorated_definition') {
     const decorators = parent.namedChildren.filter((c) => c.type === 'decorator')
@@ -22,7 +22,7 @@ function hasTfFunctionDecorator(funcNode: import('tree-sitter').SyntaxNode): boo
   return false
 }
 
-function findSideEffectCall(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findSideEffectCall(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   if (node.type === 'call') {
     const func = node.childForFieldName('function')
     if (func) {

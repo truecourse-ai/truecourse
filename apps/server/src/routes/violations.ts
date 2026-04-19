@@ -1,7 +1,10 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { resolveProjectForRequest } from '../config/current-project.js';
-import { readAnalysis, readLatest } from '../lib/analysis-store.js';
-import { listViolations } from '../services/violation-query.service.js';
+import { readLatest } from '../lib/analysis-store.js';
+import {
+  listViolations,
+  readActiveViolationsAt,
+} from '../services/violation-query.service.js';
 
 const router: Router = Router();
 
@@ -55,20 +58,21 @@ router.get(
       const analysisIdParam = req.query.analysisId as string | undefined;
       const latest = readLatest(repo.path);
 
-      if (!latest || (analysisIdParam && latest.analysis.id !== analysisIdParam)) {
-        // When asking for a non-LATEST historical analysis, fall back to its file.
-        if (analysisIdParam) {
-          // Walk history in reverse to find the matching analysis file.
-          const file = await findAnalysisFilename(repo.path, analysisIdParam);
-          if (file) {
-            const snap = readAnalysis(repo.path, file);
-            if (snap) {
-              res.json(summarizeViolations(snap.violations.added));
-              return;
-            }
-          }
-        }
+      if (!latest) {
         res.json({ total: 0, byFile: {}, bySeverity: {}, highestSeverityByFile: {} });
+        return;
+      }
+
+      if (analysisIdParam && latest.analysis.id !== analysisIdParam) {
+        // Historical analysis: reconstruct the active set as of that analysis
+        // (replay the delta chain) so the summary matches what the violations
+        // list shows for the same analysisId.
+        const historical = readActiveViolationsAt(repo.path, analysisIdParam);
+        if (!historical) {
+          res.json({ total: 0, byFile: {}, bySeverity: {}, highestSeverityByFile: {} });
+          return;
+        }
+        res.json(summarizeViolations(historical));
         return;
       }
 
@@ -104,16 +108,6 @@ function summarizeViolations(violations: { filePath: string | null; severity: st
     }
   }
   return { total, byFile, bySeverity, highestSeverityByFile };
-}
-
-async function findAnalysisFilename(repoPath: string, analysisId: string): Promise<string | null> {
-  // Minimal stub — in a future iteration, consult history.json for O(1) lookup.
-  const { listAnalyses, readAnalysis } = await import('../lib/analysis-store.js');
-  for (const name of listAnalyses(repoPath).reverse()) {
-    const snap = readAnalysis(repoPath, name);
-    if (snap?.id === analysisId) return name;
-  }
-  return null;
 }
 
 export default router;

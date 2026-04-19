@@ -47,7 +47,7 @@ export const missingReturnAwaitVisitor: CodeRuleVisitor = {
   },
 }
 
-function findReturnWithoutAwait(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findReturnWithoutAwait(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.namedChildren) {
     // Don't recurse into nested functions
     if (child.type === 'function_declaration' || child.type === 'arrow_function' ||

@@ -12,6 +12,7 @@ import {
   readHistory,
   readLatest,
 } from '../lib/analysis-store.js';
+import { readActiveViolationsForAnalysisId } from './violation-query.service.js';
 import type { HistoryEntry, ViolationWithNames } from '../types/snapshot.js';
 
 const STALE_DAYS = 7;
@@ -20,11 +21,24 @@ const STALE_DAYS = 7;
 // Trend
 // ---------------------------------------------------------------------------
 
-export function getTrend(repoPath: string, branch?: string, limit = 20): TrendResponse {
+export function getTrend(
+  repoPath: string,
+  branch?: string,
+  limit = 20,
+  upToAnalysisId?: string,
+): TrendResponse {
   const history = readHistory(repoPath);
-  const entries = history.analyses
-    .filter((e) => (!branch || e.branch === branch) && !isDiff(e))
-    .slice(-limit);
+  const eligible = history.analyses.filter((e) => (!branch || e.branch === branch) && !isDiff(e));
+
+  // When scoped to a past analysis, truncate at that entry (inclusive). Keeps
+  // the timeline honest — no future points after the one the user is viewing.
+  let windowed = eligible;
+  if (upToAnalysisId) {
+    const idx = eligible.findIndex((e) => e.id === upToAnalysisId);
+    if (idx >= 0) windowed = eligible.slice(0, idx + 1);
+  }
+
+  const entries = windowed.slice(-limit);
 
   const points: TrendDataPoint[] = entries.map((e) => {
     const sev = e.counts.violations.bySeverity;
@@ -139,7 +153,11 @@ export function getTopOffenders(
 // Resolution
 // ---------------------------------------------------------------------------
 
-export function getResolution(repoPath: string, branch?: string): ResolutionResponse {
+export function getResolution(
+  repoPath: string,
+  branch?: string,
+  upToAnalysisId?: string,
+): ResolutionResponse {
   const files = listAnalyses(repoPath);
   const staleThresholdMs = Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000;
 
@@ -149,8 +167,9 @@ export function getResolution(repoPath: string, branch?: string): ResolutionResp
   let timeSum = 0;
   let timeCount = 0;
 
-  // Walk snapshot files once to count resolved + compute avg time-to-resolve
-  // from (resolvedAt - firstSeenAt) on each resolved row.
+  // When scoped to a past analysis, stop the chronological walk once we've
+  // processed that analysis's file. Future resolutions aren't part of that
+  // point-in-time's metrics.
   const firstSeenByViolationId = new Map<string, string>();
   for (const name of files) {
     const snap = readAnalysis(repoPath, name);
@@ -172,15 +191,19 @@ export function getResolution(repoPath: string, branch?: string): ResolutionResp
         }
       }
     }
+
+    if (upToAnalysisId && snap.id === upToAnalysisId) break;
   }
 
-  const latest = readLatest(repoPath);
-  if (latest) {
-    for (const v of latest.violations) {
-      if (v.status === 'new' || v.status === 'unchanged') {
-        totalActive++;
-        if (v.firstSeenAt && Date.parse(v.firstSeenAt) < staleThresholdMs) staleCount++;
-      }
+  // Active-at-this-moment: LATEST when no selection; otherwise the
+  // reconstructed active set as of the selected analysis.
+  const activeSet = upToAnalysisId
+    ? readActiveViolationsForAnalysisId(repoPath, upToAnalysisId)
+    : readLatest(repoPath)?.violations.filter((v) => v.status === 'new' || v.status === 'unchanged') ?? null;
+  if (activeSet) {
+    for (const v of activeSet) {
+      totalActive++;
+      if (v.firstSeenAt && Date.parse(v.firstSeenAt) < staleThresholdMs) staleCount++;
     }
   }
 
@@ -210,32 +233,15 @@ function loadActiveViolations(
   branch?: string,
   specificAnalysisId?: string,
 ): ViolationWithNames[] {
-  const latest = readLatest(repoPath);
-  if (!latest) return [];
-
-  if (specificAnalysisId && latest.analysis.id !== specificAnalysisId) {
-    for (const name of listAnalyses(repoPath).reverse()) {
-      const snap = readAnalysis(repoPath, name);
-      if (snap?.id === specificAnalysisId) {
-        const serviceById = new Map(snap.graph.services.map((s) => [s.id, s.name]));
-        const moduleById = new Map(snap.graph.modules.map((m) => [m.id, m.name]));
-        const methodById = new Map(snap.graph.methods.map((m) => [m.id, m.name]));
-        const databaseById = new Map(snap.graph.databases.map((d) => [d.id, d.name]));
-        return snap.violations.added.map((v) => ({
-          ...v,
-          targetServiceName: v.targetServiceId ? serviceById.get(v.targetServiceId) ?? null : null,
-          targetModuleName: v.targetModuleId ? moduleById.get(v.targetModuleId) ?? null : null,
-          targetMethodName: v.targetMethodId ? methodById.get(v.targetMethodId) ?? null : null,
-          targetDatabaseName: v.targetDatabaseId ? databaseById.get(v.targetDatabaseId) ?? null : null,
-        }));
-      }
-    }
-    return [];
+  // LATEST-mode: respect the branch filter on LATEST's branch. For historical
+  // and diff ids the branch filter is implicit in the analysis itself, so
+  // skip it there.
+  if (!specificAnalysisId) {
+    const latest = readLatest(repoPath);
+    if (!latest) return [];
+    if (branch && latest.analysis.branch !== branch) return [];
   }
-
-  if (branch && latest.analysis.branch !== branch) return [];
-
-  return latest.violations.filter((v) => v.status === 'new' || v.status === 'unchanged');
+  return readActiveViolationsForAnalysisId(repoPath, specificAnalysisId) ?? [];
 }
 
 export function listHistoryEntries(repoPath: string): HistoryEntry[] {

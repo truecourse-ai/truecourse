@@ -148,7 +148,7 @@ export function HomePanel({
         ) : (
           <div className="flex-1 space-y-3 overflow-y-auto p-3">
             {resolution && <ResolutionMetrics data={resolution} />}
-            {trend && <TrendChart data={trend} />}
+            {trend && <TrendChart data={trend} selectedAnalysisId={analysisId} />}
             {breakdown && (
               <TypePieChart
                 data={breakdown}

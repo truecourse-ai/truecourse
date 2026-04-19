@@ -57,7 +57,7 @@ export const pythonUndefinedNameVisitor: CodeRuleVisitor = {
   },
 }
 
-function isTypeAnnotationContext(node: import('tree-sitter').SyntaxNode): boolean {
+function isTypeAnnotationContext(node: import('web-tree-sitter').Node): boolean {
   let current = node.parent
   while (current) {
     if (current.type === 'type') return true

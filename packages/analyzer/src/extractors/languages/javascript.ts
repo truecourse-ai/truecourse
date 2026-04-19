@@ -2,8 +2,8 @@
  * JavaScript extractors
  * JavaScript AST structure is similar to TypeScript but uses a different parser
  */
-import type { Tree, SyntaxNode } from 'tree-sitter'
-import Parser from 'tree-sitter'
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter'
+import { Query } from 'web-tree-sitter'
 import type {
   FunctionDefinition,
   ClassDefinition,
@@ -134,8 +134,9 @@ export function extractJavaScriptFunctions(
     config.functionNodeTypes.map((type) => `(${type}) @function`).join('\n')
 
   const parser = getParser('javascript')
-  const jsLanguage = parser.getLanguage()
-  const query = new Parser.Query(jsLanguage, queryString)
+  const jsLanguage = parser.language
+  if (!jsLanguage) throw new Error("parser has no language set")
+  const query = new Query(jsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 
@@ -331,8 +332,9 @@ export function extractJavaScriptClasses(
     config.classNodeTypes.map((type) => `(${type}) @class`).join('\n')
 
   const parser = getParser('javascript')
-  const jsLanguage = parser.getLanguage()
-  const query = new Parser.Query(jsLanguage, queryString)
+  const jsLanguage = parser.language
+  if (!jsLanguage) throw new Error("parser has no language set")
+  const query = new Query(jsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 
@@ -452,8 +454,9 @@ export function extractJavaScriptImports(
     config.importNodeTypes.map((type) => `(${type}) @import`).join('\n')
 
   const parser = getParser('javascript')
-  const jsLanguage = parser.getLanguage()
-  const query = new Parser.Query(jsLanguage, queryString)
+  const jsLanguage = parser.language
+  if (!jsLanguage) throw new Error("parser has no language set")
+  const query = new Query(jsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 
@@ -539,8 +542,9 @@ export function extractJavaScriptExports(
     config.exportNodeTypes.map((type) => `(${type}) @export`).join('\n')
 
   const parser = getParser('javascript')
-  const jsLanguage = parser.getLanguage()
-  const query = new Parser.Query(jsLanguage, queryString)
+  const jsLanguage = parser.language
+  if (!jsLanguage) throw new Error("parser has no language set")
+  const query = new Query(jsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 

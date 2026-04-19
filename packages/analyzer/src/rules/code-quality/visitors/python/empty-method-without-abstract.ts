@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { hasDecoratorNamed } from '../../../_shared/python-helpers.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 function isInsideAbcClass(node: SyntaxNode): boolean {
   let cur: SyntaxNode | null = node.parent

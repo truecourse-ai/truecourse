@@ -10,7 +10,7 @@ export const emptyObjectTypeVisitor: CodeRuleVisitor = {
   nodeTypes: ['type_annotation', 'type_alias_declaration', 'as_expression'],
   visit(node, filePath, sourceCode) {
     // Look for {} type (object_type with no members)
-    const checkForEmptyObject = (n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null => {
+    const checkForEmptyObject = (n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null => {
       for (const child of n.namedChildren) {
         if (child.type === 'object_type') {
           // Check if it's empty (no named children = {})

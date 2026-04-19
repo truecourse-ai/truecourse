@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import type { SyntaxNode } from 'tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const pythonIfElseInsteadOfDictGetVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/if-else-instead-of-dict-get',

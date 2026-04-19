@@ -7,7 +7,7 @@ export const caseWithoutBreakVisitor: CodeRuleVisitor = {
   nodeTypes: ['switch_case'],
   visit(node, filePath, sourceCode) {
     const valueNode = node.childForFieldName('value')
-    const stmts = node.namedChildren.filter((c) => c !== valueNode)
+    const stmts = node.namedChildren.filter((c) => !valueNode || c.id !== valueNode.id)
 
     if (stmts.length === 0) return null
 

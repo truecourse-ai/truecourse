@@ -73,7 +73,7 @@ export const pythonLowercaseEnvironmentVariableVisitor: CodeRuleVisitor = {
   },
 }
 
-function isOsEnviron(node: import('tree-sitter').SyntaxNode): boolean {
+function isOsEnviron(node: import('web-tree-sitter').Node): boolean {
   if (node.type === 'attribute') {
     const obj = node.childForFieldName('object')
     const attr = node.childForFieldName('attribute')

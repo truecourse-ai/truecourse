@@ -10,7 +10,7 @@ export const pythonNonlocalWithoutBindingVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     // Collect nonlocal declarations in this function
-    const nonlocalVars: Array<{ name: string; node: import('tree-sitter').SyntaxNode }> = []
+    const nonlocalVars: Array<{ name: string; node: import('web-tree-sitter').Node }> = []
     for (const stmt of body.namedChildren) {
       if (stmt.type === 'nonlocal_statement') {
         for (const child of stmt.namedChildren) {
@@ -25,7 +25,7 @@ export const pythonNonlocalWithoutBindingVisitor: CodeRuleVisitor = {
     // Collect all names defined in enclosing function scopes
     const enclosingNames = new Set<string>()
 
-    function collectEnclosingNames(n: import('tree-sitter').SyntaxNode): void {
+    function collectEnclosingNames(n: import('web-tree-sitter').Node): void {
       if (n.type === 'parameters') {
         for (const p of n.namedChildren) {
           if (p.type === 'identifier') enclosingNames.add(p.text)

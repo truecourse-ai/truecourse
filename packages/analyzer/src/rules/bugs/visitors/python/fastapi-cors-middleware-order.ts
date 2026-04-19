@@ -14,9 +14,9 @@ export const pythonFastapiCorsMiddlewareOrderVisitor: CodeRuleVisitor = {
   nodeTypes: ['module'],
   visit(node, filePath, sourceCode) {
     // Collect all add_middleware calls in order
-    const middlewareCalls: Array<{ isCors: boolean; n: import('tree-sitter').SyntaxNode }> = []
+    const middlewareCalls: Array<{ isCors: boolean; n: import('web-tree-sitter').Node }> = []
 
-    function findMiddlewareCalls(n: import('tree-sitter').SyntaxNode): void {
+    function findMiddlewareCalls(n: import('web-tree-sitter').Node): void {
       if (n.type === 'call') {
         const func = n.childForFieldName('function')
         if (func?.type === 'attribute') {

@@ -2,7 +2,7 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
-type SyntaxNode = import('tree-sitter').SyntaxNode
+type SyntaxNode = import('web-tree-sitter').Node
 
 function isInsideClass(node: SyntaxNode): boolean {
   let parent = node.parent

@@ -11,7 +11,7 @@ export const pythonSingledispatchMethodMismatchVisitor: CodeRuleVisitor = {
     if (!funcDef) return null
 
     // Determine if inside a class (method)
-    const isInsideClass = (n: import('tree-sitter').SyntaxNode): boolean => {
+    const isInsideClass = (n: import('web-tree-sitter').Node): boolean => {
       let curr = n.parent
       while (curr) {
         if (curr.type === 'class_definition') return true

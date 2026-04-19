@@ -25,7 +25,7 @@ export const pythonReturnInTryExceptFinallyVisitor: CodeRuleVisitor = {
   },
 }
 
-function findDirectReturn(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+function findDirectReturn(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.namedChildren) {
     if (child.type === 'return_statement') return child
     // Don't recurse into nested functions

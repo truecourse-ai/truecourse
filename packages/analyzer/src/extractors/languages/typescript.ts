@@ -1,5 +1,5 @@
-import type { Tree, SyntaxNode } from 'tree-sitter'
-import Parser from 'tree-sitter'
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter'
+import { Query } from 'web-tree-sitter'
 import type {
   FunctionDefinition,
   ClassDefinition,
@@ -461,8 +461,9 @@ export function extractTypeScriptFunctions(
     config.functionNodeTypes.map((type) => `(${type}) @function`).join('\n')
 
   const parser = getParser(language)
-  const tsLanguage = parser.getLanguage()
-  const query = new Parser.Query(tsLanguage, queryString)
+  const tsLanguage = parser.language
+  if (!tsLanguage) throw new Error(`parser for '${language}' has no language set`)
+  const query = new Query(tsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 
@@ -519,8 +520,9 @@ export function extractTypeScriptClasses(
     config.classNodeTypes.map((type) => `(${type}) @class`).join('\n')
 
   const parser = getParser(language)
-  const tsLanguage = parser.getLanguage()
-  const query = new Parser.Query(tsLanguage, queryString)
+  const tsLanguage = parser.language
+  if (!tsLanguage) throw new Error(`parser for '${language}' has no language set`)
+  const query = new Query(tsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 
@@ -582,8 +584,9 @@ export function extractTypeScriptImports(
     config.importNodeTypes.map((type) => `(${type}) @import`).join('\n')
 
   const parser = getParser(language)
-  const tsLanguage = parser.getLanguage()
-  const query = new Parser.Query(tsLanguage, queryString)
+  const tsLanguage = parser.language
+  if (!tsLanguage) throw new Error(`parser for '${language}' has no language set`)
+  const query = new Query(tsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 
@@ -626,8 +629,9 @@ export function extractTypeScriptExports(
     config.exportNodeTypes.map((type) => `(${type}) @export`).join('\n')
 
   const parser = getParser(language)
-  const tsLanguage = parser.getLanguage()
-  const query = new Parser.Query(tsLanguage, queryString)
+  const tsLanguage = parser.language
+  if (!tsLanguage) throw new Error(`parser for '${language}' has no language set`)
+  const query = new Query(tsLanguage, queryString)
 
   const captures = query.captures(tree.rootNode)
 

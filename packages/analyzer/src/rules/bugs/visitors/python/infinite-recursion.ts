@@ -18,7 +18,7 @@ export const pythonInfiniteRecursionVisitor: CodeRuleVisitor = {
 
     // Check if the first statement (without any condition) is a recursive call
     // We look for expression_statement containing a call to the same function
-    function isRecursiveCall(n: import('tree-sitter').SyntaxNode): boolean {
+    function isRecursiveCall(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'call') {
         const fn = n.childForFieldName('function')
         if (fn?.type === 'identifier' && fn.text === funcName) return true

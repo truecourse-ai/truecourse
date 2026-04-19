@@ -2,8 +2,8 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { CANCELLATION_EXCEPTIONS } from './_helpers.js'
 
-function findEnclosingFunction(node: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
-  let current: import('tree-sitter').SyntaxNode | null = node.parent
+function findEnclosingFunction(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
+  let current: import('web-tree-sitter').Node | null = node.parent
   while (current) {
     if (current.type === 'function_definition') return current
     current = current.parent
@@ -16,8 +16,8 @@ function findEnclosingFunction(node: import('tree-sitter').SyntaxNode): import('
  * This indicates the function intentionally cancels a task, so catching
  * CancelledError is expected behavior (caller-initiated cancellation).
  */
-function hasCancelCall(funcNode: import('tree-sitter').SyntaxNode): boolean {
-  function walk(n: import('tree-sitter').SyntaxNode): boolean {
+function hasCancelCall(funcNode: import('web-tree-sitter').Node): boolean {
+  function walk(n: import('web-tree-sitter').Node): boolean {
     if (n.type === 'call') {
       const func = n.childForFieldName('function')
       if (func?.type === 'attribute') {
@@ -64,7 +64,7 @@ export const pythonCancellationExceptionNotReraisedVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     // Check if the body re-raises (bare raise or raise <same var>)
-    function hasReraise(n: import('tree-sitter').SyntaxNode): boolean {
+    function hasReraise(n: import('web-tree-sitter').Node): boolean {
       if (n.type === 'raise_statement') {
         // Bare raise — re-raises current exception
         if (n.namedChildren.length === 0) return true

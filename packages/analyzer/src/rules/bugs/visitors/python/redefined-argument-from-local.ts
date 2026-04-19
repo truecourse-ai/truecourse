@@ -34,8 +34,8 @@ export const pythonRedefinedArgumentFromLocalVisitor: CodeRuleVisitor = {
 
     // Find for-loop variables or with-statement variables that match a parameter
     function findRedefinition(
-      n: import('tree-sitter').SyntaxNode,
-    ): { node: import('tree-sitter').SyntaxNode; paramName: string; context: string } | null {
+      n: import('web-tree-sitter').Node,
+    ): { node: import('web-tree-sitter').Node; paramName: string; context: string } | null {
       if (n.type === 'for_statement') {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier' && paramNames.has(left.text)) {

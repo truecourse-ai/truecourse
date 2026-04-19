@@ -17,7 +17,7 @@ export const pythonReturnInGeneratorVisitor: CodeRuleVisitor = {
     // Check if this is a generator (has yield statement)
     let hasYield = false
 
-    function findYield(n: import('tree-sitter').SyntaxNode): void {
+    function findYield(n: import('web-tree-sitter').Node): void {
       if (n.type === 'yield' || n.type === 'yield_from_statement') {
         hasYield = true
         return
@@ -35,7 +35,7 @@ export const pythonReturnInGeneratorVisitor: CodeRuleVisitor = {
     if (!hasYield) return null
 
     // Look for return statements with values
-    function findReturnWithValue(n: import('tree-sitter').SyntaxNode): import('tree-sitter').SyntaxNode | null {
+    function findReturnWithValue(n: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
       if (n.type === 'return_statement') {
         // Return with a value has named children
         const returnValue = n.namedChildren[0]

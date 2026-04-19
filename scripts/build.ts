@@ -4,19 +4,30 @@
  * Build script for TrueCourse npm package.
  *
  * 1. Build shared + analyzer (tsc)
- * 2. Build web (next build → static export to apps/web/out/)
- * 3. Bundle server with esbuild (native deps external)
- * 4. Copy static frontend + migrations + CLI entry to dist/
+ * 2. Build web (vite → static export to apps/web/dist/)
+ * 3. Bundle server + CLI with esbuild
+ * 4. Copy WASM assets (web-tree-sitter runtime + grammars) next to the bundle
+ * 5. Generate publishable package.json + install production deps
  */
 
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
+
+// require() resolver anchored at the analyzer package — NOT the repo root.
+// The tree-sitter-* grammar packages are devDependencies of
+// `packages/analyzer`; under pnpm's isolated layout they are NOT guaranteed
+// to be reachable from the workspace root. Anchoring here matches where
+// parser.ts runs at install time and ensures `.wasm` asset resolution works.
+const requireFromAnalyzer = createRequire(
+  path.join(ROOT, 'packages', 'analyzer', 'package.json'),
+);
 
 function run(cmd: string, cwd = ROOT) {
   console.log(`\n> ${cmd}`);
@@ -36,6 +47,7 @@ function copyDir(src: string, dest: string) {
   }
 }
 
+
 // Clean
 console.log('Cleaning dist/...');
 fs.rmSync(DIST, { recursive: true, force: true });
@@ -50,7 +62,9 @@ run('pnpm --filter @truecourse/analyzer build');
 console.log('\n=== Building frontend (static export) ===');
 run('pnpm --filter @truecourse/web build');
 
-// 3. Bundle server with esbuild
+// 3. Bundle server with esbuild. `web-tree-sitter` and `pyright`/`typescript`
+// stay external so their package metadata (and asset files like the WASM
+// runtime) can be resolved at runtime from installed node_modules.
 console.log('\n=== Bundling server ===');
 run(
   [
@@ -60,13 +74,7 @@ run(
     '--target=node20',
     '--format=esm',
     '--outfile=dist/server.mjs',
-    // Externalize native/binary deps that can't be bundled, plus typescript —
-    // it relies on CJS-only `__filename` in its bundled internals and works
-    // cleanly when resolved from node_modules at runtime.
-    '--external:tree-sitter',
-    '--external:tree-sitter-typescript',
-    '--external:tree-sitter-javascript',
-    '--external:tree-sitter-python',
+    '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
     '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
@@ -90,10 +98,7 @@ run(
     '--format=esm',
     '--outfile=dist/cli.mjs',
     '--external:node-windows',
-    '--external:tree-sitter',
-    '--external:tree-sitter-typescript',
-    '--external:tree-sitter-javascript',
-    '--external:tree-sitter-python',
+    '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
     '--banner:js="import { createRequire as __cR } from \'node:module\'; const require = __cR(import.meta.url);"',
@@ -103,24 +108,41 @@ run(
 // Ensure CLI is executable
 fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
 
-// 6b. Copy Claude Code skills
+// 6. Copy tree-sitter WASM assets into dist/wasm/ so parser.ts finds them via
+// BUNDLED_WASM_DIR at runtime. These are shipped alongside the bundle — no
+// native compilation, no postinstall. Each subpath is resolvable via
+// `require.resolve('<pkg>/<file>')` because web-tree-sitter exports its
+// .wasm explicitly and the grammar packages have no `exports` restriction.
+console.log('\n=== Copying tree-sitter WASM assets ===');
+const wasmDest = path.join(DIST, 'wasm');
+fs.mkdirSync(wasmDest, { recursive: true });
+const WASM_SUBPATHS = [
+  'web-tree-sitter/web-tree-sitter.wasm',
+  'tree-sitter-typescript/tree-sitter-typescript.wasm',
+  'tree-sitter-typescript/tree-sitter-tsx.wasm',
+  'tree-sitter-javascript/tree-sitter-javascript.wasm',
+  'tree-sitter-python/tree-sitter-python.wasm',
+];
+for (const subpath of WASM_SUBPATHS) {
+  const srcPath = requireFromAnalyzer.resolve(subpath);
+  const destPath = path.join(wasmDest, path.basename(subpath));
+  fs.copyFileSync(srcPath, destPath);
+  console.log(`  ${subpath} → dist/wasm/${path.basename(subpath)}`);
+}
+
+// 7. Copy Claude Code skills
 console.log('Copying skills...');
 const skillsSrc = path.join(ROOT, 'tools/cli/skills');
 const skillsDest = path.join(DIST, 'skills');
 copyDir(skillsSrc, skillsDest);
 
-// 7. Copy postinstall script (rebuilds tree-sitter with C++20 on Node 24+)
-console.log('Copying postinstall script...');
-fs.copyFileSync(path.join(ROOT, 'scripts/postinstall.cjs'), path.join(DIST, 'postinstall.cjs'));
-
-// 7b. Copy README and README assets used by npm package page rendering
+// 8. Copy README and README assets used by npm package page rendering
 console.log('Copying README and assets...');
 fs.copyFileSync(path.join(ROOT, 'README.md'), path.join(DIST, 'README.md'));
 copyDir(path.join(ROOT, 'assets'), path.join(DIST, 'assets'));
 
-// 8. Generate package.json for npm publish
+// 9. Generate package.json for npm publish
 console.log('\nGenerating package.json...');
-const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf-8'));
 const analyzerPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/analyzer/package.json'), 'utf-8'));
 const serverPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/server/package.json'), 'utf-8'));
 const cliPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'));
@@ -132,9 +154,6 @@ const publishPkg = {
   bin: {
     truecourse: './cli.mjs',
   },
-  scripts: {
-    postinstall: 'node postinstall.cjs',
-  },
   engines: {
     node: '>=20',
   },
@@ -144,14 +163,9 @@ const publishPkg = {
     'commander': cliPkg.dependencies['commander'],
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
     'typescript': analyzerPkg.dependencies['typescript'],
+    'web-tree-sitter': analyzerPkg.dependencies['web-tree-sitter'],
   },
   optionalDependencies: {
-    // tree-sitter is optional so npm continues if native compilation fails
-    // (Node 24 C++20 issue). The postinstall script rebuilds with the fix.
-    'tree-sitter': analyzerPkg.dependencies['tree-sitter'],
-    'tree-sitter-typescript': analyzerPkg.dependencies['tree-sitter-typescript'],
-    'tree-sitter-javascript': analyzerPkg.dependencies['tree-sitter-javascript'],
-    'tree-sitter-python': analyzerPkg.dependencies['tree-sitter-python'],
     'node-windows': '^1.0.0-beta.8',
   },
   license: 'MIT',
@@ -166,7 +180,7 @@ fs.writeFileSync(
   JSON.stringify(publishPkg, null, 2) + '\n',
 );
 
-// 9. Install production dependencies
+// 10. Install production dependencies
 console.log('\n=== Installing dependencies ===');
 run('npm install --omit=dev --legacy-peer-deps', DIST);
 

@@ -7,7 +7,7 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
-    const seenSources = new Map<string, import('tree-sitter').SyntaxNode>()
+    const seenSources = new Map<string, import('web-tree-sitter').Node>()
 
     for (const child of node.namedChildren) {
       if (child.type === 'import_statement') {
