@@ -157,6 +157,42 @@ function denormalizeAgainst(graph: Graph): (v: ViolationRecord) => ViolationWith
 }
 
 // ---------------------------------------------------------------------------
+// Active violations resolver — single dispatch for "what's the active set
+// for this analysisId?" across LATEST, diff, and historical modes. Consumed
+// by /violations, /violations/summary, /analytics/breakdown, /top-offenders,
+// and flow severities. Undefined id is treated as LATEST.
+// ---------------------------------------------------------------------------
+
+export function readActiveViolationsForAnalysisId(
+  repoPath: string,
+  analysisId?: string,
+): ViolationWithNames[] | null {
+  const latest = readLatest(repoPath);
+
+  // LATEST (default or explicit match).
+  if (!analysisId || (latest && latest.analysis.id === analysisId)) {
+    if (!latest) return null;
+    return latest.violations.filter((v) => v.status === 'new' || v.status === 'unchanged');
+  }
+
+  // Diff — compose "active set if committed" from the LATEST baseline plus
+  // the diff's delta. resolvedRefs carry ids from LATEST (remove them);
+  // newViolations carry fresh ids against diff.graph (add them).
+  const diff = readDiff(repoPath);
+  if (diff && diff.id === analysisId) {
+    if (!latest) return null;
+    const resolvedIds = new Set(diff.resolvedViolations.map((v) => v.id));
+    const carried = latest.violations.filter(
+      (v) => !resolvedIds.has(v.id) && (v.status === 'new' || v.status === 'unchanged'),
+    );
+    return [...carried, ...diff.newViolations];
+  }
+
+  // Historical — replay the delta chain up to and including target analysis.
+  return readActiveViolationsAt(repoPath, analysisId);
+}
+
+// ---------------------------------------------------------------------------
 // Graph resolver — used by /flows and /databases (and graph, analytics) to
 // honor `?analysisId=` consistently. Returns LATEST / diff / historical graph
 // in one call instead of every route re-implementing the three-way lookup.

@@ -7,21 +7,22 @@ import { DB_TYPE_COLORS, DB_TYPE_LABELS } from '@/lib/database-colors';
 type DatabaseListProps = {
   repoId: string;
   branch?: string;
+  analysisId?: string;
   activeDbId?: string | null;
   onSelectDatabase: (dbId: string, dbName: string, pinned: boolean) => void;
 };
 
-export function DatabaseList({ repoId, branch, activeDbId, onSelectDatabase }: DatabaseListProps) {
+export function DatabaseList({ repoId, branch, analysisId, activeDbId, onSelectDatabase }: DatabaseListProps) {
   const [databases, setDatabases] = useState<api.DatabaseResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     setIsLoading(true);
-    api.getDatabases(repoId, branch)
+    api.getDatabases(repoId, branch, analysisId)
       .then(setDatabases)
       .catch(() => setDatabases([]))
       .finally(() => setIsLoading(false));
-  }, [repoId, branch]);
+  }, [repoId, branch, analysisId]);
 
   if (isLoading) {
     return (

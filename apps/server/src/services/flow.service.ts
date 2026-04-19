@@ -3,7 +3,7 @@ import { log } from '../lib/logger.js';
 import { traceFlows, normalizeUrl, AnalysisGraph, type CrossServiceCall, type RouteHandler } from '@truecourse/analyzer';
 import type { AnalysisResult } from './analyzer.service.js';
 import type { FileAnalysis, SupportedLanguage } from '@truecourse/shared';
-import type { FlowRecord, FlowStepRecord, LatestSnapshot } from '../types/snapshot.js';
+import type { FlowRecord, FlowStepRecord, LatestSnapshot, ViolationWithNames } from '../types/snapshot.js';
 import { readLatest, writeLatest } from '../lib/analysis-store.js';
 
 /**
@@ -248,8 +248,13 @@ export function getFlowFromLatest(repoPath: string, flowId: string): FlowRecord 
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
-/** Compute per-flow highest severity from LATEST's active violations. */
-export function computeFlowSeverities(latest: LatestSnapshot): Record<string, string> {
+/** Compute per-flow highest severity from the given active violation set
+ *  against the given graph. Mode-agnostic: caller picks LATEST, historical,
+ *  or composed-diff violations + the matching graph. */
+export function computeFlowSeverities(
+  graph: Pick<LatestSnapshot['graph'], 'flows' | 'modules' | 'methods'>,
+  violations: ViolationWithNames[],
+): Record<string, string> {
   const nameSev = new Map<string, string>();
   const bump = (key: string, sev: string) => {
     const existing = nameSev.get(key);
@@ -258,10 +263,10 @@ export function computeFlowSeverities(latest: LatestSnapshot): Record<string, st
     }
   };
 
-  const moduleIdToName = new Map(latest.graph.modules.map((m) => [m.id, m.name]));
-  const methodIdToName = new Map(latest.graph.methods.map((m) => [m.id, m.name]));
+  const moduleIdToName = new Map(graph.modules.map((m) => [m.id, m.name]));
+  const methodIdToName = new Map(graph.methods.map((m) => [m.id, m.name]));
 
-  for (const v of latest.violations) {
+  for (const v of violations) {
     if (v.targetMethodId) {
       const name = methodIdToName.get(v.targetMethodId);
       if (name) bump(`method:${name}`, v.severity);
@@ -273,7 +278,7 @@ export function computeFlowSeverities(latest: LatestSnapshot): Record<string, st
   }
 
   const out: Record<string, string> = {};
-  for (const flow of latest.graph.flows) {
+  for (const flow of graph.flows) {
     let highest: string | null = null;
     for (const step of flow.steps) {
       for (const sev of [nameSev.get(`method:${step.targetMethod}`), nameSev.get(`module:${step.targetModule}`)]) {

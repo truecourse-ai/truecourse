@@ -409,7 +409,7 @@ export default function RepoGraphPage() {
     useCodeViolationSummary(repoId, graphAnalysisId, { enabled: leftTab === 'files' });
   const codeViolationSummary = emptyViolations ? undefined : rawCodeViolationSummary;
   const { flows: flowList, severities: rawFlowSeverities, isLoading: flowsLoading, refetch: refetchFlows } =
-    useFlows(repoId, { enabled: leftTab === 'flows' });
+    useFlows(repoId, { enabled: leftTab === 'flows', analysisId: graphAnalysisId });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
   const isViewingHistory = !!selectedAnalysisId;
@@ -928,6 +928,7 @@ export default function RepoGraphPage() {
             <DatabaseList
               repoId={repoId}
               branch={currentBranch}
+              analysisId={graphAnalysisId}
               activeDbId={activeDbId}
               onSelectDatabase={handleOpenDatabase}
             />
@@ -1091,11 +1092,14 @@ export default function RepoGraphPage() {
             <FlowDiagramPanel
               repoId={repoId}
               flowId={activeFlowId}
+              analysisId={graphAnalysisId}
+              canEnrich={!isDiffMode && !selectedAnalysisId}
             />
           ) : showingDatabase && activeDbId ? (
             <SchemaPanel
               repoId={repoId}
               databaseId={activeDbId}
+              analysisId={graphAnalysisId}
               violations={violations}
               isTab
             />

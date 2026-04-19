@@ -1,4 +1,4 @@
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, ReferenceDot, XAxis, YAxis } from 'recharts';
 import {
   ChartContainer,
   ChartTooltip,
@@ -22,7 +22,15 @@ function formatDate(iso: string) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export function TrendChart({ data }: { data: TrendResponse }) {
+export function TrendChart({
+  data,
+  selectedAnalysisId,
+}: {
+  data: TrendResponse;
+  /** When set and present in the trend data, renders a highlighted ring at
+   *  that point so the user can see which analysis they're inspecting. */
+  selectedAnalysisId?: string;
+}) {
   const { points } = data;
 
   if (points.length === 0) {
@@ -44,6 +52,10 @@ export function TrendChart({ data }: { data: TrendResponse }) {
     active: p.total - p.resolved,
     dateLabel: formatDate(p.date),
   }));
+
+  const selectedPoint = selectedAnalysisId
+    ? chartData.find((p) => p.analysisId === selectedAnalysisId)
+    : undefined;
 
   // Trend indicator
   const trendDirection =
@@ -113,6 +125,17 @@ export function TrendChart({ data }: { data: TrendResponse }) {
                 strokeWidth={2}
                 isAnimationActive={false}
               />
+              {selectedPoint && (
+                <ReferenceDot
+                  x={selectedPoint.dateLabel}
+                  y={selectedPoint.active}
+                  r={6}
+                  fill="var(--color-total)"
+                  stroke="var(--background)"
+                  strokeWidth={2}
+                  ifOverflow="visible"
+                />
+              )}
             </AreaChart>
           </ChartContainer>
         )}

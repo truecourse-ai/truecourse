@@ -337,13 +337,25 @@ export type DatabaseSchemaResponse = {
   }>;
 };
 
-export function getDatabases(repoId: string, branch?: string): Promise<DatabaseResponse[]> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<DatabaseResponse[]>(`/api/repos/${repoId}/databases${params}`);
+export function getDatabases(
+  repoId: string,
+  branch?: string,
+  analysisId?: string,
+): Promise<DatabaseResponse[]> {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<DatabaseResponse[]>(`/api/repos/${repoId}/databases${qs ? `?${qs}` : ''}`);
 }
 
-export function getDatabaseSchema(repoId: string, dbId: string): Promise<DatabaseSchemaResponse> {
-  return fetchApi<DatabaseSchemaResponse>(`/api/repos/${repoId}/databases/${dbId}/schema`);
+export function getDatabaseSchema(
+  repoId: string,
+  dbId: string,
+  analysisId?: string,
+): Promise<DatabaseSchemaResponse> {
+  const qs = analysisId ? `?analysisId=${encodeURIComponent(analysisId)}` : '';
+  return fetchApi<DatabaseSchemaResponse>(`/api/repos/${repoId}/databases/${dbId}/schema${qs}`);
 }
 
 // Rules
@@ -511,12 +523,18 @@ export type FlowListResponse = {
   severities: Record<string, string>;
 };
 
-export function getFlows(repoId: string): Promise<FlowListResponse> {
-  return fetchApi<FlowListResponse>(`/api/repos/${repoId}/flows`);
+export function getFlows(repoId: string, analysisId?: string): Promise<FlowListResponse> {
+  const qs = analysisId ? `?analysisId=${encodeURIComponent(analysisId)}` : '';
+  return fetchApi<FlowListResponse>(`/api/repos/${repoId}/flows${qs}`);
 }
 
-export function getFlow(repoId: string, flowId: string): Promise<FlowDetailResponse> {
-  return fetchApi<FlowDetailResponse>(`/api/repos/${repoId}/flows/${flowId}`);
+export function getFlow(
+  repoId: string,
+  flowId: string,
+  analysisId?: string,
+): Promise<FlowDetailResponse> {
+  const qs = analysisId ? `?analysisId=${encodeURIComponent(analysisId)}` : '';
+  return fetchApi<FlowDetailResponse>(`/api/repos/${repoId}/flows/${flowId}${qs}`);
 }
 
 export function enrichFlow(repoId: string, flowId: string): Promise<FlowDetailResponse> {
@@ -572,10 +590,16 @@ export type ResolutionResponse = {
   staleDays: number;
 };
 
-export function getAnalyticsTrend(repoId: string, branch?: string, limit?: number): Promise<TrendResponse> {
+export function getAnalyticsTrend(
+  repoId: string,
+  branch?: string,
+  limit?: number,
+  analysisId?: string,
+): Promise<TrendResponse> {
   const params = new URLSearchParams();
   if (branch) params.set('branch', branch);
   if (limit) params.set('limit', String(limit));
+  if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<TrendResponse>(`/api/repos/${repoId}/analytics/trend${qs ? `?${qs}` : ''}`);
 }
@@ -596,8 +620,15 @@ export function getAnalyticsTopOffenders(repoId: string, branch?: string, analys
   return fetchApi<TopOffendersResponse>(`/api/repos/${repoId}/analytics/top-offenders${qs ? `?${qs}` : ''}`);
 }
 
-export function getAnalyticsResolution(repoId: string, branch?: string): Promise<ResolutionResponse> {
-  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
-  return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${params}`);
+export function getAnalyticsResolution(
+  repoId: string,
+  branch?: string,
+  analysisId?: string,
+): Promise<ResolutionResponse> {
+  const params = new URLSearchParams();
+  if (branch) params.set('branch', branch);
+  if (analysisId) params.set('analysisId', analysisId);
+  const qs = params.toString();
+  return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
 }
 

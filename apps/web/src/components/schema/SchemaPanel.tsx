@@ -7,13 +7,14 @@ import * as api from '@/lib/api';
 type SchemaPanelProps = {
   repoId: string;
   databaseId: string;
+  analysisId?: string;
   violations?: import('@/lib/api').ViolationResponse[];
   onOpenInTab?: (dbId: string, dbName: string) => void;
   /** When rendered as a full tab, hides the header and uses all available space */
   isTab?: boolean;
 };
 
-export function SchemaPanel({ repoId, databaseId, violations = [], onOpenInTab, isTab = false }: SchemaPanelProps) {
+export function SchemaPanel({ repoId, databaseId, analysisId, violations = [], onOpenInTab, isTab = false }: SchemaPanelProps) {
   const [schema, setSchema] = useState<api.DatabaseSchemaResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
@@ -21,11 +22,11 @@ export function SchemaPanel({ repoId, databaseId, violations = [], onOpenInTab, 
 
   useEffect(() => {
     setIsLoading(true);
-    api.getDatabaseSchema(repoId, databaseId)
+    api.getDatabaseSchema(repoId, databaseId, analysisId)
       .then(setSchema)
       .catch(() => setSchema(null))
       .finally(() => setIsLoading(false));
-  }, [repoId, databaseId]);
+  }, [repoId, databaseId, analysisId]);
 
   if (isLoading) {
     return (

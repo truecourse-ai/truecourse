@@ -2,8 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import * as api from '@/lib/api';
 import type { FlowResponse } from '@/lib/api';
 
-export function useFlows(repoId: string, options: { enabled?: boolean } = {}) {
-  const { enabled = true } = options;
+export function useFlows(
+  repoId: string,
+  options: { enabled?: boolean; analysisId?: string } = {},
+) {
+  const { enabled = true, analysisId } = options;
   const [flows, setFlows] = useState<FlowResponse[]>([]);
   const [severities, setSeverities] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -18,7 +21,7 @@ export function useFlows(repoId: string, options: { enabled?: boolean } = {}) {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await api.getFlows(repoId);
+      const result = await api.getFlows(repoId, analysisId);
       setFlows(result.flows);
       setSeverities(result.severities);
     } catch (err) {
@@ -26,7 +29,7 @@ export function useFlows(repoId: string, options: { enabled?: boolean } = {}) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, enabled]);
+  }, [repoId, enabled, analysisId]);
 
   useEffect(() => {
     refetch();
