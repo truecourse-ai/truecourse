@@ -10,7 +10,6 @@
  */
 
 import type {
-  AnalysisSnapshot,
   DiffSnapshot,
   Graph,
   ViolationRecord,
@@ -33,6 +32,9 @@ export const SEVERITY_ORDER: Record<string, number> = {
   info: 4,
 };
 
+export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
+export const SEVERITIES: readonly Severity[] = ['critical', 'high', 'medium', 'low', 'info'];
+
 export interface ListViolationsOptions {
   /** Scope to a specific analysis id; if it doesn't match LATEST, returns empty. */
   analysisId?: string;
@@ -40,6 +42,8 @@ export interface ListViolationsOptions {
   status?: 'active' | 'resolved' | 'all';
   /** File path filter (absolute or repo-relative). Scoped to `type === 'code'`. */
   filePath?: string;
+  /** Severity filter. Accepts one or more; case-insensitive. Missing → no severity filter. */
+  severity?: Severity | Severity[];
   /** 0 = no pagination, just full list. */
   limit?: number;
   offset?: number;
@@ -94,6 +98,12 @@ export function listViolations(
     filtered = filtered.filter(
       (v) => v.type === 'code' && (v.filePath === absPath || v.filePath === options.filePath),
     );
+  }
+
+  if (options.severity !== undefined) {
+    const allowed = (Array.isArray(options.severity) ? options.severity : [options.severity])
+      .map((s) => s.toLowerCase());
+    filtered = filtered.filter((v) => allowed.includes(v.severity.toLowerCase()));
   }
 
   filtered.sort((a, b) => {

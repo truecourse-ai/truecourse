@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { resolveRepoDir } from "@truecourse/server/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
 import {
+  exitMissingNonInteractiveFlag,
   getConfigPath,
   getServerUrl,
+  isInteractive,
   openInBrowser,
   readConfig,
   writeConfig,
@@ -176,7 +178,18 @@ async function detectRunningState(): Promise<RunningState> {
   return { mode: "none" };
 }
 
-export async function runDashboard(options: { reconfigure?: boolean } = {}): Promise<void> {
+export interface DashboardOptions {
+  /** Force reconfigure (prompts for mode even if already configured). */
+  reconfigure?: boolean;
+  /**
+   * Pre-select the run mode without prompting. Mutually exclusive with
+   * each other; either is mutually exclusive with prompting. Required
+   * when running non-interactively and the mode isn't already configured.
+   */
+  mode?: TrueCourseConfig["runMode"];
+}
+
+export async function runDashboard(options: DashboardOptions = {}): Promise<void> {
   p.intro("Opening TrueCourse dashboard");
 
   const serverEntry = resolveServerEntry();
@@ -188,8 +201,26 @@ export async function runDashboard(options: { reconfigure?: boolean } = {}): Pro
   }
 
   const configured = fs.existsSync(getConfigPath());
-  const shouldPrompt = !configured || options.reconfigure;
-  const runMode = shouldPrompt ? await promptRunMode() : readConfig().runMode;
+  const needsDecision = !configured || options.reconfigure;
+
+  let runMode: TrueCourseConfig["runMode"];
+  if (options.mode) {
+    runMode = options.mode;
+  } else if (needsDecision) {
+    if (!isInteractive()) {
+      exitMissingNonInteractiveFlag(
+        "Dashboard run mode is not configured.",
+        "Pass --service for the background service or --console to run in this terminal.",
+      );
+    }
+    runMode = await promptRunMode();
+  } else {
+    runMode = readConfig().runMode;
+  }
+  // Persist only after the mode actually starts below — see the block after
+  // runServiceMode / runConsoleMode. Writing upfront caused the bug where a
+  // failed console attempt left config in a stale state (PR #55 context).
+  const shouldPersist = needsDecision || options.mode !== undefined;
 
   // If the user is switching away from service mode but the service is still
   // installed and/or running, starting a new process on the same port will
@@ -219,13 +250,13 @@ export async function runDashboard(options: { reconfigure?: boolean } = {}): Pro
       p.log.error(`Service mode failed: ${(err as Error).message}`);
       p.log.info("Falling back to console mode.");
       await runConsoleMode(serverEntry);
-      if (shouldPrompt) writeConfig({ runMode: "console" });
+      if (shouldPersist) writeConfig({ runMode: "console" });
       return;
     }
-    if (shouldPrompt) writeConfig({ runMode: "service" });
+    if (shouldPersist) writeConfig({ runMode: "service" });
   } else {
     await runConsoleMode(serverEntry);
-    if (shouldPrompt) writeConfig({ runMode: "console" });
+    if (shouldPersist) writeConfig({ runMode: "console" });
   }
 }
 
