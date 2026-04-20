@@ -90,12 +90,26 @@ truecourse rules llm --disable                 # Disable LLM rules
 
 ### Git Hooks
 
-TrueCourse can install a pre-commit hook that blocks commits with critical violations:
+TrueCourse can install a pre-commit hook that blocks commits introducing new violations at or above a configured severity:
 
 ```bash
 truecourse hooks install              # Install pre-commit hook
 truecourse hooks uninstall            # Remove pre-commit hook
-truecourse hooks status               # Show hook installation status
+truecourse hooks status               # Show hook status + config
+```
+
+On every commit the hook runs `truecourse analyze --diff` against the repo's last full analysis and blocks if any newly-introduced violation matches the configured block severities. **Commits will take as long as a full diff analysis** — on large repos that can be tens of seconds per commit. `truecourse hooks install` warns you and requires confirmation before writing the hook.
+
+**First-time setup:** run `truecourse analyze` once to establish a baseline. Without it the hook can't diff.
+
+**Bypass:** `git commit --no-verify` (standard git).
+
+**Configuration** — `hooks install` seeds `<repo>/.truecourse/hooks.yaml` with starter defaults; commit the file so your team shares one policy. The hook reads only from this file — if you delete it, the hook warns and passes every commit (no hidden code-level defaults). Current shape:
+
+```yaml
+pre-commit:
+  block-on: [critical, high]   # severities. Valid: info|low|medium|high|critical
+  llm: false                   # run LLM rules on every commit (tokens per commit)
 ```
 
 ### Telemetry
@@ -131,7 +145,7 @@ TrueCourse ships with **1,200+ deterministic rules** and **100 LLM rules** acros
 
 TrueCourse includes [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code/skills) for conversational analysis from within Claude Code.
 
-Run `truecourse add` to install skills to `.claude/skills/truecourse/` in your project.
+The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whether to install skills into `.claude/skills/truecourse/`. Re-runs skip the prompt if skills are already present. Pass `--install-skills` / `--no-skills` to bypass the prompt explicitly.
 
 | Skill | What it does |
 |---|---|
@@ -171,6 +185,10 @@ pnpm build              # Build all packages
 ## Telemetry
 
 TrueCourse collects anonymous usage data (event type, language, file count range, OS). No source code, file paths, or violation details are collected. Opt out with `truecourse telemetry disable` or `TRUECOURSE_TELEMETRY=0`.
+
+## Contact
+
+Questions, feedback, or security reports: **Mushegh Gevorgyan** — [mushegh@truecourse.dev](mailto:mushegh@truecourse.dev).
 
 ## License
 

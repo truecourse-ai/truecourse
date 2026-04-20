@@ -210,8 +210,8 @@ const hooksCmd = program
 hooksCmd
   .command("install")
   .description("Install pre-commit hook")
-  .action(() => {
-    runHooksInstall();
+  .action(async () => {
+    await runHooksInstall();
   });
 
 hooksCmd
