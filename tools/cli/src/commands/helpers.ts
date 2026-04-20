@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import { exec } from "node:child_process";
-import { cpSync, existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -333,16 +333,6 @@ export function openInBrowser(url: string): void {
   exec(`${cmd} ${url}`);
 }
 
-/** Return the path where the `truecourse` skill would be installed for a repo. */
-function skillDestPath(repoPath: string): string {
-  return resolve(repoPath, ".claude", "skills", "truecourse");
-}
-
-/** True if the `truecourse` skill is already present in `<repoPath>/.claude/skills/`. */
-export function hasInstalledSkills(repoPath: string): boolean {
-  return existsSync(skillDestPath(repoPath));
-}
-
 /** True when stdin is an interactive terminal (safe to prompt the user). */
 export function isInteractive(): boolean {
   return !!process.stdin.isTTY;
@@ -363,61 +353,124 @@ export function exitMissingNonInteractiveFlag(
   process.exit(1);
 }
 
-/**
- * Copy the bundled `truecourse` skill into `<repoPath>/.claude/skills/`.
- * Internal helper — callers decide *whether* to install; this just does it.
- */
-function copySkillsInto(repoPath: string): void {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  // In source: src/commands/ → ../../skills/truecourse
-  // In dist:   dist/ → ./skills/truecourse
-  const srcPath = resolve(__dirname, "..", "..", "skills", "truecourse");
-  const distPath = resolve(__dirname, "skills", "truecourse");
-  const skillsSrc = existsSync(srcPath) ? srcPath : distPath;
+// --------------------------------------------------------------------------
+// Claude Code skills install — per-skill sync
+// --------------------------------------------------------------------------
 
-  if (!existsSync(skillsSrc)) {
+/**
+ * Locate the bundled skills source directory.
+ *   - In source (pnpm dev): src/commands/ → ../../skills/truecourse
+ *   - In dist (packaged CLI): dist/ → ./skills/truecourse
+ * Returns null when neither location exists (shouldn't happen in a valid
+ * install; we degrade gracefully).
+ */
+function resolveSkillsSrcDir(): string | null {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(__dirname, "..", "..", "skills", "truecourse"),
+    resolve(__dirname, "skills", "truecourse"),
+  ];
+  return candidates.find((c) => existsSync(c)) ?? null;
+}
+
+function skillDestDir(repoPath: string): string {
+  return resolve(repoPath, ".claude", "skills", "truecourse");
+}
+
+/** Subdirectory names under a skills root — each entry is one skill. */
+function listSkillDirs(root: string): string[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+}
+
+/**
+ * Names of shipped skills not yet present in the user's repo. First-time
+ * install returns the full list; upgrades after a new skill ships return
+ * only the new one(s).
+ */
+function computeMissingSkills(repoPath: string): string[] {
+  const src = resolveSkillsSrcDir();
+  if (!src) return [];
+  const shipped = new Set(listSkillDirs(src));
+  const installed = new Set(listSkillDirs(skillDestDir(repoPath)));
+  return [...shipped].filter((name) => !installed.has(name));
+}
+
+/** True when every shipped skill is already present in the repo. */
+export function hasInstalledSkills(repoPath: string): boolean {
+  return computeMissingSkills(repoPath).length === 0;
+}
+
+/**
+ * Copy each named skill from the bundled source dir into the repo. Never
+ * overwrites an existing skill — user customizations are preserved; the
+ * "missing" list already excludes anything already installed.
+ */
+function copySkills(repoPath: string, skillNames: string[]): void {
+  const src = resolveSkillsSrcDir();
+  if (!src) {
     p.log.warn("Skills directory not found in package — skipping.");
     return;
   }
 
-  const skillsDest = resolve(repoPath, ".claude", "skills");
-  cpSync(skillsSrc, skillsDest, { recursive: true });
+  const destParent = skillDestDir(repoPath);
+  mkdirSync(destParent, { recursive: true });
 
-  p.log.success("Installed Claude Code skills:");
-  p.log.message("  - truecourse-analyze  (run analysis)");
-  p.log.message("  - truecourse-list     (list violations)");
-  p.log.message("  - truecourse-fix      (apply fixes)");
+  for (const name of skillNames) {
+    const skillSrc = resolve(src, name);
+    const skillDest = resolve(destParent, name);
+    if (existsSync(skillDest)) continue; // belt-and-suspenders
+    cpSync(skillSrc, skillDest, { recursive: true });
+  }
+
+  p.log.success(
+    `Installed ${skillNames.length} Claude Code skill${skillNames.length === 1 ? "" : "s"}:`,
+  );
+  for (const name of skillNames) p.log.message(`  - ${name}`);
 }
 
 /**
- * Offer to install Claude Code skills. No-op if already installed.
+ * Offer to install any Claude Code skills that ship with this truecourse
+ * version but aren't yet present in the repo. Handles both first-time
+ * install (nothing local yet) and upgrade (new skills shipped in a later
+ * truecourse release).
  *
  * Decision precedence:
- *   1. `install === true`  → install (no prompt)
- *   2. `install === false` → skip (no prompt)
- *   3. interactive TTY     → prompt the user
- *   4. non-interactive     → silently skip (agents shouldn't be nagged; if
- *                            the AI is invoking this, the skill is already
- *                            installed — that's how it was discoverable)
+ *   1. all shipped skills already present   → return (nothing to do)
+ *   2. `install === true`                   → install missing, no prompt
+ *   3. `install === false`                  → skip, no prompt
+ *   4. interactive TTY                      → prompt, then install on "yes"
+ *   5. non-interactive                      → silently skip (scripted
+ *                                             callers should pass `install`)
  */
 export async function promptInstallSkills(
   repoPath: string,
   { install }: { install?: boolean } = {},
 ): Promise<void> {
-  if (hasInstalledSkills(repoPath)) return;
+  const missing = computeMissingSkills(repoPath);
+  if (missing.length === 0) return;
 
   if (install === true) {
-    copySkillsInto(repoPath);
+    copySkills(repoPath, missing);
     return;
   }
   if (install === false) return;
 
   if (!isInteractive()) return;
 
-  const answer = await p.confirm({
-    message: "Would you like to install Claude Code skills?",
-  });
+  // First-time install vs upgrade phrasing — the latter names the new
+  // skill(s) so the user can decide whether they want that specific
+  // capability rather than being asked a generic yes/no.
+  const isUpgrade = existsSync(skillDestDir(repoPath));
+  const message = isUpgrade
+    ? `New Claude Code skill${missing.length === 1 ? "" : "s"} available: ${missing.join(", ")}. Install?`
+    : "Would you like to install Claude Code skills?";
+
+  const answer = await p.confirm({ message });
   if (p.isCancel(answer) || !answer) return;
 
-  copySkillsInto(repoPath);
+  copySkills(repoPath, missing);
 }
