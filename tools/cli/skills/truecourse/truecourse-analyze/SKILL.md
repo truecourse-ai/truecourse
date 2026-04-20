@@ -45,10 +45,11 @@ Use the Bash tool. This is long-running (minutes, especially with `--llm`) — u
 
 ### 4. Summarize
 
-When the command finishes, summarize the stdout for the user:
-- Total violations by severity
-- Number of changed files (diff mode)
-- Any errors
+When the command finishes, read the printed summary and relay the key numbers:
+
+- **Full analyze**: one line with the total violation count and per-severity breakdown, e.g. `15 violations (2 critical, 5 high, 8 medium)`.
+- **Diff analyze**: `Changed files: N (X modified, Y new, Z deleted)` and `Summary: N new issues, N resolved`. If you see `⚠ Results may be stale — baseline analysis has changed.`, surface that warning to the user and suggest running a full `npx -y truecourse analyze` to refresh the baseline.
+- If the command errored, relay the error message.
 
 ### 5. Next steps
 
