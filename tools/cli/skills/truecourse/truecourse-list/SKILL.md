@@ -15,7 +15,7 @@ Show violations and analysis results from TrueCourse.
 
 ## Important
 
-- **Always pass `-y` to `npx`** so it doesn't hang on the install prompt: `npx -y truecourse ...`.
+- **Always prefix `npx` with `-y`** in every invocation (examples below omit it to stay focused on the actual decision) — skips npx's "Ok to proceed?" install prompt.
 - **Plain `list` paginates** — it shows the first 20 violations by default. If the output says "Showing 1–20 of N violations" and N is larger than what you need to present, re-run with `--all` (or use `--limit` / `--offset` to page) so you don't silently hide results from the user.
 
 ## Instructions
@@ -23,9 +23,9 @@ Show violations and analysis results from TrueCourse.
 ### 1. Pick mode
 Determine whether the user wants **full violations** (from the last full analysis) or **diff results** (changes since the last full analysis). If they said "diff" in their request, use diff mode.
 
-- Full: `npx -y truecourse list`
-- Full (all, no pagination): `npx -y truecourse list --all`
-- Diff: `npx -y truecourse list --diff`
+- Full: `truecourse list`
+- Full (all, no pagination): `truecourse list --all`
+- Diff: `truecourse list --diff`
 
 ### 2. Run and present
 
