@@ -25,16 +25,20 @@ Apply fixes for TrueCourse violations that have fix suggestions.
 
 Ask: *"Do you want to fix violations from the latest full analysis, or just the changes you're working on right now (diff)?"*
 
-- Diff mode (recommended default): `npx -y truecourse list --diff`
-- Full mode: `npx -y truecourse list --all`
+- **Diff mode** (recommended default): `npx -y truecourse list --diff` — small set, usually fine to load in one call.
+- **Full mode**: start with a paged view, `npx -y truecourse list` (first 20). If the summary line shows a large total and the user hasn't narrowed scope, ask them to narrow before pulling more pages:
+  - by severity (e.g. "just critical and high") — there's no server-side filter flag yet, so page through and keep only matches.
+  - by a specific file / module / service they care about — same approach.
+
+  Avoid `--all` on large repos — it dumps every violation into context even though most won't be fixable.
 
 If `list --diff` returns "no diff results yet" or "stale diff", suggest the user first run `/truecourse-analyze` in diff mode.
 
 ### 2. Identify fixable violations
 
-Parse the output. Keep only violations that contain a `Fix:` block — those are the ones with actionable fix suggestions.
+From the output in hand, keep only violations that contain a `Fix:` block — those are the ones with actionable fix suggestions. If you loaded only one page in full mode, tell the user how many were fixable on this page and offer to continue to the next page (`--offset 20`, `--offset 40`, …) if they want more.
 
-If none are fixable, tell the user and stop.
+If none on the loaded page(s) are fixable, tell the user and stop (or offer to page further).
 
 ### 3. Present and select
 
