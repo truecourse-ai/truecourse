@@ -25,7 +25,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.5.0")
+  .version("0.5.1")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -60,8 +60,8 @@ dashboardCmd
 dashboardCmd
   .command("logs")
   .description("Tail dashboard logs (service mode only)")
-  .action(() => {
-    runDashboardLogs();
+  .action(async () => {
+    await runDashboardLogs();
   });
 
 dashboardCmd

@@ -137,6 +137,47 @@ async function runServiceMode(serverEntry: string): Promise<void> {
   p.log.info("Stop the dashboard with: truecourse dashboard stop");
 }
 
+/**
+ * The running dashboard, probed from reality rather than from `config.runMode`.
+ *
+ * `config.runMode` records the user's *preference* at setup time. It can drift
+ * from reality if, for example, the user reconfigures to "console" while a
+ * service is still active on the port. `status`/`stop`/`logs` must derive
+ * actual state from the platform service and the health endpoint, not from
+ * the config file alone.
+ */
+type RunningState =
+  | { mode: "service"; pid?: number; healthy: boolean }
+  | { mode: "console"; healthy: true }
+  | { mode: "none" };
+
+async function probeHealth(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/api/health`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function detectRunningState(): Promise<RunningState> {
+  const platform = getPlatform();
+  const url = getServerUrl();
+  const healthy = await probeHealth(url);
+
+  if (await platform.isInstalled()) {
+    const { running, pid } = await platform.status();
+    if (running) return { mode: "service", pid, healthy };
+    // Service installed but not running: if something else is answering on
+    // the port, treat that as a console-mode process (e.g. `pnpm dev`).
+    if (healthy) return { mode: "console", healthy: true };
+    return { mode: "none" };
+  }
+
+  if (healthy) return { mode: "console", healthy: true };
+  return { mode: "none" };
+}
+
 export interface DashboardOptions {
   /** Force reconfigure (prompts for mode even if already configured). */
   reconfigure?: boolean;
@@ -176,9 +217,32 @@ export async function runDashboard(options: DashboardOptions = {}): Promise<void
   } else {
     runMode = readConfig().runMode;
   }
+  // Persist only after the mode actually starts below — see the block after
+  // runServiceMode / runConsoleMode. Writing upfront caused the bug where a
+  // failed console attempt left config in a stale state (PR #55 context).
   const shouldPersist = needsDecision || options.mode !== undefined;
-  if (shouldPersist) writeConfig({ runMode });
 
+  // If the user is switching away from service mode but the service is still
+  // installed and/or running, starting a new process on the same port will
+  // silently fail or collide. Refuse and point at the right command rather
+  // than writing a stale `runMode` that status/stop then disagree with.
+  if (runMode !== "service") {
+    const platform = getPlatform();
+    if (await platform.isInstalled()) {
+      const { running } = await platform.status();
+      if (running) {
+        p.log.error(
+          "A dashboard service is already installed and running. Stop and remove it " +
+            "first: `truecourse dashboard uninstall`, then rerun `truecourse dashboard`.",
+        );
+        process.exit(1);
+      }
+    }
+  }
+
+  // Only persist the chosen mode AFTER we've validated it can actually run.
+  // If the mode-starting function (runServiceMode / runConsoleMode) fails or
+  // exits, the old config stays on disk — status/stop won't be misled.
   if (runMode === "service") {
     try {
       await runServiceMode(serverEntry);
@@ -186,82 +250,79 @@ export async function runDashboard(options: DashboardOptions = {}): Promise<void
       p.log.error(`Service mode failed: ${(err as Error).message}`);
       p.log.info("Falling back to console mode.");
       await runConsoleMode(serverEntry);
+      if (shouldPersist) writeConfig({ runMode: "console" });
+      return;
     }
+    if (shouldPersist) writeConfig({ runMode: "service" });
   } else {
     await runConsoleMode(serverEntry);
+    if (shouldPersist) writeConfig({ runMode: "console" });
   }
 }
 
 export async function runDashboardStop(): Promise<void> {
-  const config = readConfig();
-  if (config.runMode !== "service") {
-    p.log.info("Dashboard is running in console mode. Press Ctrl+C in its terminal to stop.");
-    return;
-  }
+  const state = await detectRunningState();
 
-  const platform = getPlatform();
-  const { running } = await platform.status();
-  if (!running) {
-    p.log.info("Dashboard is not running.");
-    return;
+  switch (state.mode) {
+    case "service": {
+      p.log.step("Stopping dashboard service...");
+      await getPlatform().stop();
+      p.log.success("Dashboard service stopped.");
+      return;
+    }
+    case "console": {
+      p.log.info(
+        "A dashboard is running in console mode (not managed by the service). " +
+          "Press Ctrl+C in its terminal to stop it.",
+      );
+      return;
+    }
+    case "none": {
+      p.log.info("Dashboard is not running.");
+      return;
+    }
   }
-
-  p.log.step("Stopping dashboard...");
-  await platform.stop();
-  p.log.success("Dashboard stopped.");
 }
 
 export async function runDashboardStatus(): Promise<void> {
-  const config = readConfig();
+  const state = await detectRunningState();
   const url = getServerUrl();
 
-  if (config.runMode !== "service") {
-    try {
-      const res = await fetch(`${url}/api/health`);
-      if (res.ok) {
-        p.log.success(`Dashboard is running in console mode at ${url}`);
+  switch (state.mode) {
+    case "service": {
+      const pidInfo = state.pid ? ` (PID: ${state.pid})` : "";
+      p.log.success(`Dashboard service is running${pidInfo}`);
+      if (state.healthy) {
+        p.log.info(`Server is healthy at ${url}`);
+      } else {
+        p.log.warn(`Service process is running but server is not responding at ${url}.`);
+      }
+      return;
+    }
+    case "console": {
+      p.log.success(`Dashboard is running in console mode at ${url}`);
+      return;
+    }
+    case "none": {
+      const platform = getPlatform();
+      if (await platform.isInstalled()) {
+        p.log.info("Dashboard service is installed but not running.");
       } else {
         p.log.info("Dashboard is not running.");
       }
-    } catch {
-      p.log.info("Dashboard is not running.");
+      return;
     }
-    return;
-  }
-
-  const platform = getPlatform();
-  const installed = await platform.isInstalled();
-  if (!installed) {
-    p.log.info("Dashboard service is not installed. Run `truecourse dashboard` to set it up.");
-    return;
-  }
-
-  const { running, pid } = await platform.status();
-  if (!running) {
-    p.log.info("Dashboard service is installed but not running.");
-    return;
-  }
-
-  const pidInfo = pid ? ` (PID: ${pid})` : "";
-  p.log.success(`Dashboard service is running${pidInfo}`);
-  try {
-    const res = await fetch(`${url}/api/health`);
-    if (res.ok) {
-      p.log.info(`Server is healthy at ${url}`);
-    } else {
-      p.log.warn(`Server returned status ${res.status}`);
-    }
-  } catch {
-    p.log.warn("Service process is running but server is not responding.");
   }
 }
 
-export function runDashboardLogs(): void {
-  const config = readConfig();
-  if (config.runMode !== "service") {
+export async function runDashboardLogs(): Promise<void> {
+  const state = await detectRunningState();
+  if (state.mode === "console") {
     p.log.info("Dashboard is running in console mode — logs print to its terminal.");
     return;
   }
+  // Service mode or not-running: either way the service's log file is the
+  // right place. tailLogs() handles the missing-log case.
   tailLogs();
 }
 
