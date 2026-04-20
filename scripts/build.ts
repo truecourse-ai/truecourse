@@ -169,6 +169,10 @@ const publishPkg = {
     'node-windows': '^1.0.0-beta.8',
   },
   license: 'MIT',
+  author: {
+    name: 'Mushegh Gevorgyan',
+    email: 'mushegh@truecourse.dev',
+  },
   repository: {
     type: 'git',
     url: 'https://github.com/truecourse-ai/truecourse',
