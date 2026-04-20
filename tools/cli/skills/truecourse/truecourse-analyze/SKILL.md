@@ -17,9 +17,8 @@ Run architecture analysis on the current repository using TrueCourse.
 
 - **Full analysis** stashes any uncommitted changes, analyzes the clean working tree, then unstashes. The user's uncommitted work is preserved.
 - **Diff check** analyzes the full working tree (including uncommitted changes — it does NOT stash) and compares the result against the last full analysis baseline. The report lists violations newly introduced and violations resolved since that baseline. Prefer diff for in-progress work where the user is iterating on changes.
-- **Always append these two safety flags to every invocation** (examples below omit them to stay focused on the actual decision):
-  - `-y` after `npx` — skips npx's own "Ok to proceed?" install confirmation
-  - `--no-skills` on the `truecourse` subcommand — skips any skills-install prompt
+- **Always invoke via `npx -y`** to skip npx's own "Ok to proceed?" install confirmation. Examples below use `npx -y` directly.
+- **Always append `--no-skills`** to the `truecourse` subcommand — skips any skills-install prompt. Examples below omit it to stay focused on the actual decision flags; add it when you run the command.
 - **LLM rules cost real money.** Never pass `--llm` without first relaying the cost estimate to the user and getting approval. See the LLM flow below.
 
 ## Instructions
@@ -27,8 +26,8 @@ Run architecture analysis on the current repository using TrueCourse.
 ### 1. Pick mode
 Ask the user whether they want a **full analysis** or a **diff check**. If they said "diff" in their request, default to diff.
 
-- Full: `truecourse analyze`
-- Diff: `truecourse analyze --diff`
+- Full: `npx -y truecourse analyze`
+- Diff: `npx -y truecourse analyze --diff`
 
 ### 2. Decide on LLM rules
 
