@@ -11,7 +11,7 @@ import {
   runDashboardLogs,
   runDashboardUninstall,
 } from "./commands/dashboard.js";
-import { runList, runListDiff } from "./commands/list.js";
+import { runList, runListDiff, parseSeverityFlag } from "./commands/list.js";
 import { runRulesCategories, runRulesLlm } from "./commands/rules.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -32,8 +32,15 @@ const dashboardCmd = program
   .command("dashboard")
   .description("Start the TrueCourse dashboard and open it in your browser")
   .option("--reconfigure", "Re-prompt for console vs background service mode")
+  .option("--service", "Run as a background service (skips mode prompt)")
+  .option("--console", "Run in this terminal (skips mode prompt)")
   .action(async (options) => {
-    await runDashboard({ reconfigure: options.reconfigure });
+    if (options.service && options.console) {
+      console.error("error: --service and --console are mutually exclusive");
+      process.exit(1);
+    }
+    const mode = options.service ? "service" : options.console ? "console" : undefined;
+    await runDashboard({ reconfigure: options.reconfigure, mode });
   });
 
 dashboardCmd
@@ -64,23 +71,52 @@ dashboardCmd
     await runDashboardUninstall();
   });
 
+/**
+ * Resolve the skills-install override from commander options.
+ *
+ * `--install-skills` and `--no-skills` are exposed as two separate flags
+ * (rather than a paired `--skills` / `--no-skills`) because `--skills`
+ * alone is ambiguous. That means commander stores them under two different
+ * properties: `options.installSkills === true` for the first, and
+ * `options.skills === false` for the second (commander's `--no-X` convention
+ * creates a negated boolean under the `X` property).
+ */
+function resolveInstallSkills(
+  options: { installSkills?: boolean; skills?: boolean },
+): boolean | undefined {
+  if (options.installSkills === true) return true;
+  if (options.skills === false) return false;
+  return undefined;
+}
+
 program
   .command("analyze")
   .description("Analyze the current repository")
   .option("--diff", "Run diff check against latest analysis")
+  // `--llm` and `--no-llm` are auto-paired by commander — they both control
+  // `options.llm`. Passing `--llm` → true, `--no-llm` → false, neither →
+  // undefined (falls through to config / interactive prompt).
+  .option("--llm", "Run LLM-powered rules (pre-approves the cost estimate)")
+  .option("--no-llm", "Skip LLM-powered rules for this run")
+  .option("--install-skills", "Install Claude Code skills without prompting")
+  .option("--no-skills", "Skip the Claude Code skills prompt")
   .action(async (options) => {
+    const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
+    const installSkills = resolveInstallSkills(options);
     if (options.diff) {
-      await runAnalyzeDiff();
+      await runAnalyzeDiff({ llm, installSkills });
     } else {
-      await runAnalyze();
+      await runAnalyze({ llm, installSkills });
     }
   });
 
 program
   .command("add")
   .description("Register the current directory with TrueCourse")
-  .action(async () => {
-    await runAdd();
+  .option("--install-skills", "Install Claude Code skills without prompting")
+  .option("--no-skills", "Skip the Claude Code skills prompt")
+  .action(async (options) => {
+    await runAdd({ installSkills: resolveInstallSkills(options) });
   });
 
 program
@@ -90,6 +126,10 @@ program
   .option("--limit <n>", "Number of violations to show (default: 20)", parseInt)
   .option("--offset <n>", "Skip first N violations", parseInt)
   .option("--all", "Show all violations")
+  .option(
+    "--severity <list>",
+    "Comma-separated severities to include (critical,high,medium,low,info)",
+  )
   .action(async (options) => {
     if (options.diff) {
       await runListDiff();
@@ -97,6 +137,7 @@ program
       await runList({
         limit: options.all ? Infinity : (options.limit ?? 20),
         offset: options.offset ?? 0,
+        severity: parseSeverityFlag(options.severity),
       });
     }
   });

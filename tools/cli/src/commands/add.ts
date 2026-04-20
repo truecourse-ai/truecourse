@@ -6,7 +6,12 @@ import {
 import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
 import { promptInstallSkills } from "./helpers.js";
 
-export async function runAdd(): Promise<void> {
+export interface AddOptions {
+  /** Force-install or force-skip the Claude Code skills prompt. */
+  installSkills?: boolean;
+}
+
+export async function runAdd(options: AddOptions = {}): Promise<void> {
   const repoPath = resolveRepoDir(process.cwd()) ?? process.cwd();
 
   p.intro("Adding repository to TrueCourse");
@@ -22,7 +27,7 @@ export async function runAdd(): Promise<void> {
     p.log.success(`Repository "${entry.name}" added.`);
   }
 
-  await promptInstallSkills(repoPath);
+  await promptInstallSkills(repoPath, { install: options.installSkills });
 
   p.outro("Run `truecourse analyze` to generate analysis data.");
 }

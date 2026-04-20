@@ -13,14 +13,29 @@ triggers:
 
 Show violations and analysis results from TrueCourse.
 
+## Important
+
+- **Always invoke via `npx -y`** — without `-y`, npx will hang on the "Ok to proceed?" prompt whenever the user hasn't cached the latest `truecourse` version.
+- **Don't dump everything at once.** Plain `list` shows the first 20 violations — use that by default. Large repos can have hundreds; pasting them all wastes context and the user can't read that much in one go. Page or filter instead.
+
 ## Instructions
 
-1. Determine whether to show **full violations** or **diff results**. If the user mentioned "diff" in their request, use diff mode.
+### 1. Pick mode
+Determine whether the user wants **full violations** (from the last full analysis) or **diff results** (changes since the last full analysis). If they said "diff" in their request, use diff mode.
 
-2. Run the appropriate command using the Bash tool:
-   - **Full violations:** `npx truecourse list`
-   - **Diff results:** `npx truecourse list --diff`
+- Full: `npx -y truecourse list`
+- Diff: `npx -y truecourse list --diff`
 
-3. Present the output to the user. The command output is already formatted — show it as-is.
+### 2. Run and present
 
-4. If violations with fix suggestions are found, tell the user they can run `/truecourse-fix` to apply fixes.
+Use the Bash tool. The output is already formatted — show it as-is.
+
+The final line summarises totals, e.g. `Showing 1–20 of 287 violations (12 critical, 45 high, ...)`. Lead your reply with that total + severity breakdown so the user knows the scope before scanning the first page.
+
+### 3. Offer the next step
+
+After showing the first page, ask the user what they want:
+- **Filter by severity** — `--severity <list>`, e.g. `--severity critical,high`. Valid values: `critical,high,medium,low,info`.
+- **Page further** — use `--offset <n>` (next page is `--offset 20`, then `--offset 40`, …) or widen with `--limit <n>`.
+- **Everything in one view** — `--all` (only when the user explicitly asks for the full dump, e.g. "show all of them", "give me the whole list"). Avoid by default.
+- **Start fixing** — `/truecourse-fix` (only for violations with a `Fix:` block attached).

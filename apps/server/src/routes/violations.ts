@@ -26,10 +26,22 @@ router.get(
       const status =
         statusParam === 'resolved' ? 'resolved' : statusParam === 'all' ? 'all' : 'active';
 
+      // `?severity=critical,high` — comma-separated, validated in the service layer.
+      const severityParam = req.query.severity as string | undefined;
+      const severity = severityParam
+        ? (severityParam
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter((s): s is 'critical' | 'high' | 'medium' | 'low' | 'info' =>
+              ['critical', 'high', 'medium', 'low', 'info'].includes(s),
+            ))
+        : undefined;
+
       const { violations, total } = listViolations(repo.path, {
         analysisId: req.query.analysisId as string | undefined,
         filePath: req.query.file as string | undefined,
         status,
+        severity: severity && severity.length > 0 ? severity : undefined,
         limit: limitParam,
         offset: offsetParam,
       });
