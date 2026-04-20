@@ -15,11 +15,10 @@ Run architecture analysis on the current repository using TrueCourse.
 
 ## Important
 
-- **No server prerequisite.** Analysis runs in-process — just invoke `npx truecourse analyze`. There is no "start the server first" step.
 - **Full analysis** stashes any uncommitted changes, analyzes the clean working tree, then unstashes. The user's uncommitted work is preserved.
 - **Diff check** analyzes only files changed since the last full analysis — it does NOT stash. Prefer diff for in-progress work where the user is iterating on changes.
 - **Always pass `-y` to `npx`** so it doesn't hang on the "Ok to proceed?" install prompt: `npx -y truecourse ...`.
-- **Always pass `--no-skills`** in agent invocations. The skills are already installed (that's how you found this one); the flag skips the first-run skills prompt silently.
+- **Always pass `--no-skills`** — the flag skips the first-run skills prompt silently.
 - **LLM rules cost real money.** Never pass `--llm` without first relaying the cost estimate to the user and getting approval. See the LLM flow below.
 
 ## Instructions
