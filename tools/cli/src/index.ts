@@ -11,7 +11,7 @@ import {
   runDashboardLogs,
   runDashboardUninstall,
 } from "./commands/dashboard.js";
-import { runList, runListDiff } from "./commands/list.js";
+import { runList, runListDiff, parseSeverityFlag } from "./commands/list.js";
 import { runRulesCategories, runRulesLlm } from "./commands/rules.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -126,6 +126,10 @@ program
   .option("--limit <n>", "Number of violations to show (default: 20)", parseInt)
   .option("--offset <n>", "Skip first N violations", parseInt)
   .option("--all", "Show all violations")
+  .option(
+    "--severity <list>",
+    "Comma-separated severities to include (critical,high,medium,low,info)",
+  )
   .action(async (options) => {
     if (options.diff) {
       await runListDiff();
@@ -133,6 +137,7 @@ program
       await runList({
         limit: options.all ? Infinity : (options.limit ?? 20),
         offset: options.offset ?? 0,
+        severity: parseSeverityFlag(options.severity),
       });
     }
   });

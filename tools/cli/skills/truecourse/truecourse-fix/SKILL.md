@@ -27,8 +27,8 @@ Ask: *"Do you want to fix violations from the latest full analysis, or just the 
 
 - **Diff mode** (recommended default): `npx -y truecourse list --diff` — small set, usually fine to load in one call.
 - **Full mode**: start with a paged view, `npx -y truecourse list` (first 20). If the summary line shows a large total and the user hasn't narrowed scope, ask them to narrow before pulling more pages:
-  - by severity (e.g. "just critical and high") — there's no server-side filter flag yet, so page through and keep only matches.
-  - by a specific file / module / service they care about — same approach.
+  - by severity — use `--severity <list>`, e.g. `npx -y truecourse list --severity critical,high`. Valid values: `critical,high,medium,low,info`.
+  - by a specific file / module / service they care about — no server-side filter yet, so page through and keep only matches.
 
   Avoid `--all` on large repos — it dumps every violation into context even though most won't be fixable.
 

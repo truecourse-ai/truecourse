@@ -35,6 +35,7 @@ The final line summarises totals, e.g. `Showing 1–20 of 287 violations (12 cri
 ### 3. Offer the next step
 
 After showing the first page, ask the user what they want:
+- **Filter by severity** — `--severity <list>`, e.g. `--severity critical,high`. Valid values: `critical,high,medium,low,info`.
 - **Page further** — use `--offset <n>` (next page is `--offset 20`, then `--offset 40`, …) or widen with `--limit <n>`.
 - **Everything in one view** — `--all` (only when the user explicitly asks for the full dump, e.g. "show all of them", "give me the whole list"). Avoid by default.
 - **Start fixing** — `/truecourse-fix` (only for violations with a `Fix:` block attached).
