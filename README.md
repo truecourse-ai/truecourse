@@ -152,6 +152,7 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 | `/truecourse-analyze` | Runs analysis or diff check, summarizes results |
 | `/truecourse-list` | Shows full violation details |
 | `/truecourse-fix` | Lists fixable violations, applies changes |
+| `/truecourse-hooks` | Installs, configures, or removes the pre-commit hook |
 
 ## Language Support
 
