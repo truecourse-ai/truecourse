@@ -369,11 +369,17 @@ function resolveSkillsSrcDir(): string | null {
   return existsSync(candidate) ? candidate : null;
 }
 
-function skillDestDir(repoPath: string): string {
-  return resolve(repoPath, ".claude", "skills", "truecourse");
+/**
+ * Where skills live in the consumer repo. Claude Code's canonical layout
+ * is flat: each skill at `<repo>/.claude/skills/<skill-name>/SKILL.md`.
+ * Don't nest under a `truecourse/` namespace folder — the docs call that
+ * out as non-standard and it won't be discovered by some tooling.
+ */
+function skillsParentDir(repoPath: string): string {
+  return resolve(repoPath, ".claude", "skills");
 }
 
-/** Subdirectory names under a skills root — each entry is one skill. */
+/** Subdirectory names immediately under `root`. */
 function listSkillDirs(root: string): string[] {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
@@ -383,27 +389,27 @@ function listSkillDirs(root: string): string[] {
 }
 
 /**
- * Names of shipped skills not yet present in the user's repo. First-time
- * install returns the full list; upgrades after a new skill ships return
- * only the new one(s).
+ * Names of shipped skills not yet present in the user's repo. We only
+ * consider truecourse-owned names — other tools' skills sitting in the
+ * same `.claude/skills/` are ignored.
  */
 function computeMissingSkills(repoPath: string): string[] {
   const src = resolveSkillsSrcDir();
   if (!src) return [];
-  const shipped = new Set(listSkillDirs(src));
-  const installed = new Set(listSkillDirs(skillDestDir(repoPath)));
-  return [...shipped].filter((name) => !installed.has(name));
+  const shipped = listSkillDirs(src);
+  const parent = skillsParentDir(repoPath);
+  return shipped.filter((name) => !existsSync(resolve(parent, name)));
 }
 
-/** True when every shipped skill is already present in the repo. */
+/** True when every shipped skill is already present (at the flat layout). */
 export function hasInstalledSkills(repoPath: string): boolean {
   return computeMissingSkills(repoPath).length === 0;
 }
 
 /**
- * Copy each named skill from the bundled source dir into the repo. Never
- * overwrites an existing skill — user customizations are preserved; the
- * "missing" list already excludes anything already installed.
+ * Copy each named skill from the bundled source dir into the repo at the
+ * flat layout. Never overwrites an existing skill — user customizations
+ * are preserved; the "missing" list already excludes anything present.
  */
 function copySkills(repoPath: string, skillNames: string[]): void {
   const src = resolveSkillsSrcDir();
@@ -412,12 +418,12 @@ function copySkills(repoPath: string, skillNames: string[]): void {
     return;
   }
 
-  const destParent = skillDestDir(repoPath);
-  mkdirSync(destParent, { recursive: true });
+  const parent = skillsParentDir(repoPath);
+  mkdirSync(parent, { recursive: true });
 
   for (const name of skillNames) {
     const skillSrc = resolve(src, name);
-    const skillDest = resolve(destParent, name);
+    const skillDest = resolve(parent, name);
     if (existsSync(skillDest)) continue; // belt-and-suspenders
     cpSync(skillSrc, skillDest, { recursive: true });
   }
@@ -459,9 +465,13 @@ export async function promptInstallSkills(
 
   // First-time install vs upgrade phrasing — the latter names the new
   // skill(s) so the user can decide whether they want that specific
-  // capability rather than being asked a generic yes/no.
-  const isUpgrade = existsSync(skillDestDir(repoPath));
-  const message = isUpgrade
+  // capability rather than being asked a generic yes/no. "Upgrade" means
+  // at least one of our shipped skills is already present in the repo.
+  const src = resolveSkillsSrcDir();
+  const shipped = src ? listSkillDirs(src) : [];
+  const parent = skillsParentDir(repoPath);
+  const alreadyInstalled = shipped.some((name) => existsSync(resolve(parent, name)));
+  const message = alreadyInstalled
     ? `New Claude Code skill${missing.length === 1 ? "" : "s"} available: ${missing.join(", ")}. Install?`
     : "Would you like to install Claude Code skills?";
 
