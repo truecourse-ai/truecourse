@@ -15,7 +15,7 @@ Show violations and analysis results from TrueCourse.
 
 ## Important
 
-- **Always invoke via `npx -y`** to skip npx's own "Ok to proceed?" install confirmation. Examples below use `npx -y` directly.
+- **Always invoke via `npx -y`** — without `-y`, npx will hang on the "Ok to proceed?" prompt whenever the user hasn't cached the latest `truecourse` version.
 - **Plain `list` paginates** — it shows the first 20 violations by default. If the output says "Showing 1–20 of N violations" and N is larger than what you need to present, re-run with `--all` (or use `--limit` / `--offset` to page) so you don't silently hide results from the user.
 
 ## Instructions

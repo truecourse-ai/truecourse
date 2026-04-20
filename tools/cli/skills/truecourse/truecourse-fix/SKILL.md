@@ -15,8 +15,7 @@ Apply fixes for TrueCourse violations that have fix suggestions.
 
 ## Important
 
-- **Always invoke via `npx -y`** to skip npx's own "Ok to proceed?" install confirmation. Examples below use `npx -y` directly.
-- **Always append `--no-skills`** to any `truecourse analyze` invocation (skips any skills-install prompt). `truecourse list` has no skills prompt, so it's not needed there. Examples below omit `--no-skills`; add it when you run an analyze.
+- **Always invoke via `npx -y`** — without `-y`, npx will hang on the "Ok to proceed?" prompt whenever the user hasn't cached the latest `truecourse` version.
 - **Default to the diff flow.** Users usually want to fix the violations introduced by the changes they're currently iterating on — not the whole repo. Start by asking which set to fix.
 - **Only violations with a `Fix:` block can be auto-fixed.** Violations without one require human design decisions; mention them but don't attempt them.
 
@@ -53,5 +52,5 @@ For each selected violation:
 
 After fixes, suggest the user re-run the appropriate analysis to confirm the violations are resolved:
 
-- If you worked in **diff mode**: run `npx -y truecourse analyze --diff --no-llm` (fast, free; remember to append `--no-skills`). If they want LLM rules re-checked too, use `--llm` and relay the cost estimate first.
+- If you worked in **diff mode**: run `npx -y truecourse analyze --diff --no-llm` (fast, free). If they want LLM rules re-checked too, use `--llm` and relay the cost estimate first.
 - If you worked in **full mode**: suggest `/truecourse-analyze` so the user picks the LLM/no-LLM decision fresh.
