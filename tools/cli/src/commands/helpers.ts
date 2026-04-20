@@ -358,19 +358,15 @@ export function exitMissingNonInteractiveFlag(
 // --------------------------------------------------------------------------
 
 /**
- * Locate the bundled skills source directory.
- *   - In source (pnpm dev): src/commands/ → ../../skills/truecourse
- *   - In dist (packaged CLI): dist/ → ./skills/truecourse
- * Returns null when neither location exists (shouldn't happen in a valid
- * install; we degrade gracefully).
+ * Locate the bundled skills source directory. In the published CLI the
+ * bundled entry sits next to `skills/` (see `scripts/build.ts` — the skills
+ * tree is copied into dist). Returns null if the skills bundle is missing
+ * (degrades to a warning rather than a crash).
  */
 function resolveSkillsSrcDir(): string | null {
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve(__dirname, "..", "..", "skills", "truecourse"),
-    resolve(__dirname, "skills", "truecourse"),
-  ];
-  return candidates.find((c) => existsSync(c)) ?? null;
+  const candidate = resolve(__dirname, "skills", "truecourse");
+  return existsSync(candidate) ? candidate : null;
 }
 
 function skillDestDir(repoPath: string): string {
