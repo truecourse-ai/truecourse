@@ -407,24 +407,6 @@ export function hasInstalledSkills(repoPath: string): boolean {
 }
 
 /**
- * Pre-0.5.3 installs sometimes ended up with a wrapper folder at
- * `.claude/skills/truecourse/<skill-name>/`. That's not a layout Claude
- * Code discovers cleanly. Warn the user once on install so they can
- * delete it — we don't remove anything automatically.
- */
-function warnAboutLegacyWrapper(repoPath: string): void {
-  const legacy = resolve(skillsParentDir(repoPath), "truecourse");
-  if (!existsSync(legacy)) return;
-  const nestedSkills = listSkillDirs(legacy);
-  if (nestedSkills.length === 0) return;
-  p.log.warn(
-    `Found legacy nested skills at ${legacy}. The current layout is flat ` +
-      `(\`.claude/skills/<skill>/\`), so that directory is now unused and ` +
-      `can be deleted: \`rm -rf ${legacy}\`.`,
-  );
-}
-
-/**
  * Copy each named skill from the bundled source dir into the repo at the
  * flat layout. Never overwrites an existing skill — user customizations
  * are preserved; the "missing" list already excludes anything present.
@@ -450,8 +432,6 @@ function copySkills(repoPath: string, skillNames: string[]): void {
     `Installed ${skillNames.length} Claude Code skill${skillNames.length === 1 ? "" : "s"}:`,
   );
   for (const name of skillNames) p.log.message(`  - ${name}`);
-
-  warnAboutLegacyWrapper(repoPath);
 }
 
 /**
