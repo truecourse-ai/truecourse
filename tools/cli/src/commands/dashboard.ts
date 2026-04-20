@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import { resolveRepoDir } from "@truecourse/server/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
 import {
+  exitMissingNonInteractiveFlag,
   getConfigPath,
   getServerUrl,
+  isInteractive,
   openInBrowser,
   readConfig,
   writeConfig,
@@ -135,7 +137,18 @@ async function runServiceMode(serverEntry: string): Promise<void> {
   p.log.info("Stop the dashboard with: truecourse dashboard stop");
 }
 
-export async function runDashboard(options: { reconfigure?: boolean } = {}): Promise<void> {
+export interface DashboardOptions {
+  /** Force reconfigure (prompts for mode even if already configured). */
+  reconfigure?: boolean;
+  /**
+   * Pre-select the run mode without prompting. Mutually exclusive with
+   * each other; either is mutually exclusive with prompting. Required
+   * when running non-interactively and the mode isn't already configured.
+   */
+  mode?: TrueCourseConfig["runMode"];
+}
+
+export async function runDashboard(options: DashboardOptions = {}): Promise<void> {
   p.intro("Opening TrueCourse dashboard");
 
   const serverEntry = resolveServerEntry();
@@ -147,9 +160,24 @@ export async function runDashboard(options: { reconfigure?: boolean } = {}): Pro
   }
 
   const configured = fs.existsSync(getConfigPath());
-  const shouldPrompt = !configured || options.reconfigure;
-  const runMode = shouldPrompt ? await promptRunMode() : readConfig().runMode;
-  if (shouldPrompt) writeConfig({ runMode });
+  const needsDecision = !configured || options.reconfigure;
+
+  let runMode: TrueCourseConfig["runMode"];
+  if (options.mode) {
+    runMode = options.mode;
+  } else if (needsDecision) {
+    if (!isInteractive()) {
+      exitMissingNonInteractiveFlag(
+        "Dashboard run mode is not configured.",
+        "Pass --service for the background service or --console to run in this terminal.",
+      );
+    }
+    runMode = await promptRunMode();
+  } else {
+    runMode = readConfig().runMode;
+  }
+  const shouldPersist = needsDecision || options.mode !== undefined;
+  if (shouldPersist) writeConfig({ runMode });
 
   if (runMode === "service") {
     try {

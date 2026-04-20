@@ -15,25 +15,45 @@ Run architecture analysis on the current repository using TrueCourse.
 
 ## Important
 
-- The TrueCourse server must be running before using this skill. If it's not running, tell the user to start it with `npx truecourse start` and try again.
-- Full analysis stashes any uncommitted changes, analyzes the clean working tree, then unstashes. The user's uncommitted work is preserved.
-- Diff check analyzes only files changed since the last analysis — it does NOT stash.
+- **No server prerequisite.** Analysis runs in-process — just invoke `npx truecourse analyze`. There is no "start the server first" step.
+- **Full analysis** stashes any uncommitted changes, analyzes the clean working tree, then unstashes. The user's uncommitted work is preserved.
+- **Diff check** analyzes only files changed since the last full analysis — it does NOT stash. Prefer diff for in-progress work where the user is iterating on changes.
+- **Always pass `-y` to `npx`** so it doesn't hang on the "Ok to proceed?" install prompt: `npx -y truecourse ...`.
+- **Always pass `--no-skills`** in agent invocations. The skills are already installed (that's how you found this one); the flag skips the first-run skills prompt silently.
+- **LLM rules cost real money.** Never pass `--llm` without first relaying the cost estimate to the user and getting approval. See the LLM flow below.
 
 ## Instructions
 
-1. Ask the user whether they want a **full analysis** or a **diff check** (changes only). If they mentioned "diff" in their request, default to diff mode.
+### 1. Pick mode
+Ask the user whether they want a **full analysis** or a **diff check**. If they said "diff" in their request, default to diff.
 
-2. Run the appropriate command using the Bash tool:
-   - **Full analysis:** `npx truecourse analyze --no-autostart`
-   - **Diff check:** `npx truecourse analyze --diff --no-autostart`
+- Full: `npx -y truecourse analyze ...`
+- Diff: `npx -y truecourse analyze --diff ...`
 
-3. This is a long-running command (can take several minutes). Let it run to completion — do NOT set a short timeout. Use a timeout of at least 600000ms (10 minutes).
+### 2. Decide on LLM rules
 
-4. If the command fails with "Could not connect to TrueCourse server", tell the user to run `npx truecourse start` first.
+LLM rules add higher-value insights but cost money per run. Ask the user one question: **"Run LLM-powered rules this time?"** If the user is unsure, offer to run deterministic-only first (free, fast) and add LLM later.
 
-5. When the command finishes, summarize the output for the user:
-   - Number of violations found (by severity)
-   - Number of changed files (for diff mode)
-   - Any errors that occurred
+- If **user approves LLM**: append `--llm --no-skills` to the command.
+  Example: `npx -y truecourse analyze --llm --no-skills`
+- If **user declines LLM or wants a free run**: append `--no-llm --no-skills`.
+  Example: `npx -y truecourse analyze --diff --no-llm --no-skills`
 
-6. After summarizing, tell the user they can run `/truecourse-list` to see the full violation details, or `/truecourse-fix` to apply suggested fixes.
+You MUST pass either `--llm` or `--no-llm` — running without either in a non-interactive shell will exit with an error naming the flags.
+
+### 3. Run the command
+
+Use the Bash tool. This is long-running (minutes, especially with `--llm`) — use a timeout of at least 600000ms (10 minutes).
+
+### 4. Summarize
+
+When the command finishes, summarize the stdout for the user:
+- Total violations by severity
+- Number of changed files (diff mode)
+- Any errors
+
+### 5. Next steps
+
+Tell the user they can:
+- Run `/truecourse-list` to see the full violation list.
+- Run `/truecourse-fix` to apply suggested fixes.

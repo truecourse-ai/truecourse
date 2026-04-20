@@ -343,22 +343,31 @@ export function hasInstalledSkills(repoPath: string): boolean {
   return existsSync(skillDestPath(repoPath));
 }
 
+/** True when stdin is an interactive terminal (safe to prompt the user). */
+export function isInteractive(): boolean {
+  return !!process.stdin.isTTY;
+}
+
 /**
- * Prompt to install Claude Code skills into a repo directory.
- *
- * No-op if the skills are already installed. Call this from any first-run
- * path (`truecourse add`, first `truecourse analyze`) and it will prompt
- * the user only once per repo.
+ * Emit a clear error when a command needs a user decision but is running
+ * non-interactively and no flag provided an answer. The message names the
+ * exact flag(s) the caller should pass — agents and CI can act on it.
  */
-export async function promptInstallSkills(repoPath: string): Promise<void> {
-  if (hasInstalledSkills(repoPath)) return;
+export function exitMissingNonInteractiveFlag(
+  context: string,
+  flagGuidance: string,
+): never {
+  p.log.error(
+    `${context}\n\nRunning non-interactively with no answer. ${flagGuidance}`,
+  );
+  process.exit(1);
+}
 
-  const installSkills = await p.confirm({
-    message: "Would you like to install Claude Code skills?",
-  });
-
-  if (p.isCancel(installSkills) || !installSkills) return;
-
+/**
+ * Copy the bundled `truecourse` skill into `<repoPath>/.claude/skills/`.
+ * Internal helper — callers decide *whether* to install; this just does it.
+ */
+function copySkillsInto(repoPath: string): void {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   // In source: src/commands/ → ../../skills/truecourse
   // In dist:   dist/ → ./skills/truecourse
@@ -378,4 +387,37 @@ export async function promptInstallSkills(repoPath: string): Promise<void> {
   p.log.message("  - truecourse-analyze  (run analysis)");
   p.log.message("  - truecourse-list     (list violations)");
   p.log.message("  - truecourse-fix      (apply fixes)");
+}
+
+/**
+ * Offer to install Claude Code skills. No-op if already installed.
+ *
+ * Decision precedence:
+ *   1. `install === true`  → install (no prompt)
+ *   2. `install === false` → skip (no prompt)
+ *   3. interactive TTY     → prompt the user
+ *   4. non-interactive     → silently skip (agents shouldn't be nagged; if
+ *                            the AI is invoking this, the skill is already
+ *                            installed — that's how it was discoverable)
+ */
+export async function promptInstallSkills(
+  repoPath: string,
+  { install }: { install?: boolean } = {},
+): Promise<void> {
+  if (hasInstalledSkills(repoPath)) return;
+
+  if (install === true) {
+    copySkillsInto(repoPath);
+    return;
+  }
+  if (install === false) return;
+
+  if (!isInteractive()) return;
+
+  const answer = await p.confirm({
+    message: "Would you like to install Claude Code skills?",
+  });
+  if (p.isCancel(answer) || !answer) return;
+
+  copySkillsInto(repoPath);
 }

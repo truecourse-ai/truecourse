@@ -7,7 +7,7 @@ import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from 
 import { registerProject, type RegistryEntry } from "@truecourse/server/config/registry";
 import { readProjectConfig } from "@truecourse/server/config/project-config";
 import { closeLogger, configureLogger } from "@truecourse/server/lib/logger";
-import { promptInstallSkills, renderViolationsSummary } from "./helpers.js";
+import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
@@ -114,7 +114,44 @@ function stopSpinner(): void {
 // runAnalyze — main entry
 // ---------------------------------------------------------------------------
 
-export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Promise<void> {
+/**
+ * Per-invocation flags that control prompts.
+ *
+ * Agent-friendly: every prompt has an explicit override flag so scripted
+ * callers never hang on a stdin they can't reach.
+ *   - `llm === true`  → run LLM rules (pre-approve the cost estimate)
+ *   - `llm === false` → skip LLM rules entirely (deterministic-only, no cost)
+ *   - `llm` undefined → fall back to per-repo config; if non-interactive,
+ *                       exit with an error telling the caller to pass one.
+ * Same shape as `installSkills` below.
+ */
+export interface AnalyzeOptions {
+  /** Override `enableLlmRules` for this run. */
+  llm?: boolean;
+  /** Force-install / force-skip the Claude Code skills first-run prompt. */
+  installSkills?: boolean;
+}
+
+/** Resolve the per-run `enableLlmRules` decision from flag + config + TTY state. */
+function resolveLlmDecision(
+  options: AnalyzeOptions,
+  configDefault: boolean,
+): { enabled: boolean; autoApproveEstimate: boolean } {
+  if (options.llm === true) return { enabled: true, autoApproveEstimate: true };
+  if (options.llm === false) return { enabled: false, autoApproveEstimate: false };
+
+  // Flag not passed. If interactive, the estimate prompt will fire and the
+  // user decides there. If non-interactive, we can't prompt — exit loudly.
+  if (!isInteractive()) {
+    exitMissingNonInteractiveFlag(
+      "analyze needs a decision on LLM rules before running non-interactively.",
+      "Pass --llm to run with LLM rules (cost) or --no-llm to skip them.",
+    );
+  }
+  return { enabled: configDefault, autoApproveEstimate: false };
+}
+
+export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   p.intro("Analyzing repository");
   ensureClaudeCli();
   showFirstRunNotice();
@@ -123,9 +160,9 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
   p.log.step(`Repository: ${project.name}`);
 
   // First-time setup convenience: offer to install Claude Code skills if
-  // they haven't been installed for this repo yet. No-op on repeat runs.
-  // `truecourse add` still exists as an explicit opt-in path.
-  await promptInstallSkills(project.path);
+  // they haven't been installed for this repo yet. `--install-skills` /
+  // `--no-skills` bypasses the prompt; non-interactive runs skip silently.
+  await promptInstallSkills(project.path, { install: options.installSkills });
 
   // All internal pipeline logs (`[Pipeline]`, `[LLM]`, `[CLI]`, `[Analyzer]`,
   // `[Flows]`, `[Violations]`) go to this repo's analyze.log. The terminal
@@ -137,7 +174,8 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
 
   const config = readProjectConfig(project.path);
   const enabledCategories = config.enabledCategories ?? undefined;
-  const enableLlmRules = config.enableLlmRules ?? true;
+  const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
+  const enableLlmRules = llmDecision.enabled;
 
   // LLM disabled → no prompt will fire → render everything inline.
   // LLM enabled → start in pre-llm phase (parse + scan only). `onLlmEstimate`
@@ -166,7 +204,9 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
       enableLlmRulesOverride: enableLlmRules,
       onLlmEstimate: async (estimate) => {
         stopSpinner();
-        const proceed = await promptLlmEstimate(estimate);
+        const proceed = await promptLlmEstimate(estimate, {
+          autoApprove: llmDecision.autoApproveEstimate,
+        });
         // Prompt answered — subsequent renders show domain + persist steps
         // below the prompt; parse + scan are already printed above it.
         renderPhase = "post-llm";
@@ -197,7 +237,7 @@ export async function runAnalyze(_options: { noAutostart?: boolean } = {}): Prom
 // Shares `diffInProcess` with POST /api/repos/:id/diff-check.
 // ---------------------------------------------------------------------------
 
-export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): Promise<void> {
+export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void> {
   const { diffInProcess } = await import("@truecourse/server/diff");
   const { renderDiffResultsSummary } = await import("./helpers.js");
 
@@ -208,13 +248,17 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
   const project = resolveOrInitProject();
   p.log.step(`Repository: ${project.name}`);
 
+  // Same first-run skill convenience as `runAnalyze`.
+  await promptInstallSkills(project.path, { install: options.installSkills });
+
   configureLogger({
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
 
   const config = readProjectConfig(project.path);
   const enabledCategories = config.enabledCategories ?? undefined;
-  const enableLlmRules = config.enableLlmRules ?? true;
+  const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
+  const enableLlmRules = llmDecision.enabled;
 
   // Reset module-level renderer state between runs. runAnalyze and
   // runAnalyzeDiff share the same `renderPhase`, `spinnerFrame`, and
@@ -238,7 +282,9 @@ export async function runAnalyzeDiff(_options: { noAutostart?: boolean } = {}): 
       enableLlmRulesOverride: enableLlmRules,
       onLlmEstimate: async (estimate) => {
         stopSpinner();
-        const proceed = await promptLlmEstimate(estimate);
+        const proceed = await promptLlmEstimate(estimate, {
+          autoApprove: llmDecision.autoApproveEstimate,
+        });
         renderPhase = "post-llm";
         return proceed;
       },
