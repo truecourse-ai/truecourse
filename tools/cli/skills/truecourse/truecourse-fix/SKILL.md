@@ -52,5 +52,5 @@ For each selected violation:
 
 After fixes, suggest the user re-run the appropriate analysis to confirm the violations are resolved:
 
-- If you worked in **diff mode**: `npx -y truecourse analyze --diff --no-llm` (fast, free). If they want LLM rules re-checked too, use `--llm` instead of `--no-llm` and relay the cost estimate first.
+- If you worked in **diff mode**: `npx -y truecourse analyze --diff --no-llm --no-skills` (fast, free). If they want LLM rules re-checked too, use `--llm` instead of `--no-llm` and relay the cost estimate first.
 - If you worked in **full mode**: suggest `/truecourse-analyze` so the user picks the LLM/no-LLM decision fresh.

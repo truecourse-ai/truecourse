@@ -18,6 +18,7 @@ Run architecture analysis on the current repository using TrueCourse.
 - **Full analysis** stashes any uncommitted changes, analyzes the clean working tree, then unstashes. The user's uncommitted work is preserved.
 - **Diff check** analyzes the full working tree (including uncommitted changes — it does NOT stash) and compares the result against the last full analysis baseline. The report lists violations newly introduced and violations resolved since that baseline. Prefer diff for in-progress work where the user is iterating on changes.
 - **Always pass `-y` to `npx`** so it doesn't hang on the "Ok to proceed?" install prompt: `npx -y truecourse ...`.
+- **Always pass `--no-skills`** so no skills-install prompt can fire in any environment.
 - **LLM rules cost real money.** Never pass `--llm` without first relaying the cost estimate to the user and getting approval. See the LLM flow below.
 
 ## Instructions
@@ -32,10 +33,10 @@ Ask the user whether they want a **full analysis** or a **diff check**. If they 
 
 LLM rules add higher-value insights but cost money per run. Ask the user one question: **"Run LLM-powered rules this time?"** If the user is unsure, offer to run deterministic-only first (free, fast) and add LLM later.
 
-- If **user approves LLM**: append `--llm` to the command.
-  Example: `npx -y truecourse analyze --llm`
-- If **user declines LLM or wants a free run**: append `--no-llm`.
-  Example: `npx -y truecourse analyze --diff --no-llm`
+- If **user approves LLM**: append `--llm --no-skills` to the command.
+  Example: `npx -y truecourse analyze --llm --no-skills`
+- If **user declines LLM or wants a free run**: append `--no-llm --no-skills`.
+  Example: `npx -y truecourse analyze --diff --no-llm --no-skills`
 
 You MUST pass either `--llm` or `--no-llm` — running without either in a non-interactive shell will exit with an error naming the flags.
 
