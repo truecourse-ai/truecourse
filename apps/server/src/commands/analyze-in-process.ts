@@ -11,6 +11,8 @@ import type { LLMProvider } from '../services/llm/provider.js';
 import type { StepTracker } from '../socket/handlers.js';
 import { analyzeCore, type LlmEstimate } from './analyze-core.js';
 import { persistFullAnalysis, type PersistFullResult } from './analyze-persist.js';
+import { config } from '../config/index.js';
+import { log } from '../lib/logger.js';
 
 export type { LlmEstimate };
 
@@ -36,6 +38,9 @@ export async function analyzeInProcess(
   options: AnalyzeInProcessOptions = {},
 ): Promise<AnalyzeInProcessResult> {
   const startedAt = Date.now();
+  log.info(
+    `[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
+  );
   const core = await analyzeCore(project, { ...options, mode: 'full' });
   return persistFullAnalysis(project, core, startedAt);
 }
