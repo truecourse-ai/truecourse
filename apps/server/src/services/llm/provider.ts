@@ -190,6 +190,10 @@ export interface AllViolationsInput {
   database?: DatabaseViolationContext;
   module?: ModuleViolationContext;
   onStepComplete?: (step: string) => void;
+  /** Fires when each sub-call's limiter slot is acquired (before the CLI spawns). */
+  onCallStart?: (key: 'service' | 'database' | 'module') => void;
+  /** Fires when each sub-call settles (fulfilled or rejected). */
+  onCallDone?: (key: 'service' | 'database' | 'module', ok: boolean) => void;
 }
 
 export interface AllViolationsResult {
@@ -224,12 +228,24 @@ export interface UsageRecord {
 }
 
 export interface LLMProvider {
-  generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult>;
-  generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult>;
-  generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult>;
+  generateServiceViolations(
+    context: ServiceViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<ServiceViolationsResult>;
+  generateDatabaseViolations(
+    context: DatabaseViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<DatabaseViolationsResult>;
+  generateModuleViolations(
+    context: ModuleViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<ModuleViolationsResult>;
   generateAllViolations(contexts: AllViolationsInput): Promise<AllViolationsResult>;
   generateAllViolationsWithLifecycle(contexts: AllViolationsInput, onStepComplete?: (step: string) => void): Promise<AllViolationsLifecycleResult>;
-  generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult>;
+  generateCodeViolations(
+    context: CodeViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   setAnalysisId(id: string): void;

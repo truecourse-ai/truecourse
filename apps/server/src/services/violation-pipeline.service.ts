@@ -23,6 +23,62 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
 }
 
+/** Format an elapsed duration as "Ns" under a minute, "Nm Ns" otherwise. */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min === 0 ? `${sec}s` : `${min}m ${sec}s`;
+}
+
+/**
+ * Unified LLM-phase detail string used across all domains.
+ * Format: `{N det · }LLM {done}/{total}{ · M running}{ · elapsed}`.
+ * `det` is shown only when > 0; `running` only when > 0; elapsed only after 1s.
+ */
+function renderLlmDetail(s: {
+  detCount: number;
+  total: number;
+  done: number;
+  running: number;
+  elapsedMs: number;
+}): string {
+  const parts: string[] = [];
+  if (s.detCount > 0) parts.push(`${s.detCount} det`);
+  parts.push(`LLM ${s.done}/${s.total}`);
+  if (s.running > 0) parts.push(`${s.running} running`);
+  if (s.elapsedMs >= 1000) parts.push(formatElapsed(s.elapsedMs));
+  return parts.join(' · ');
+}
+
+/**
+ * Per-domain LLM progress tracker. Owns a running/done counter, a start
+ * timestamp, and refreshes tracker.detail on every state transition.
+ * Call onCallStart when a call's limiter slot is granted; call onCallDone
+ * when the call settles (pass whether onCallStart had fired — tasks that
+ * abort while still queued never fire onCallStart, so we must not decrement
+ * `running` for them).
+ */
+function createLlmTracker(
+  tracker: import('../socket/handlers.js').StepTracker | undefined,
+  domain: string,
+  detCount: number,
+  total: number,
+) {
+  let done = 0;
+  let running = 0;
+  const t0 = Date.now();
+  const render = () => tracker?.detail(domain, renderLlmDetail({
+    detCount, total, done, running, elapsedMs: Date.now() - t0,
+  }));
+
+  return {
+    initialDetail: renderLlmDetail({ detCount, total, done: 0, running: 0, elapsedMs: 0 }),
+    onCallStart: () => { running++; render(); },
+    onCallDone: (started: boolean) => { if (started) running--; done++; render(); },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -554,11 +610,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allResolvedLlmIds: string[] = [];
 
   const hasArchLlm = enableLlmRules !== false && !llmSkipped;
-  if (hasArchLlm) tracker?.start('architecture', 'Running LLM analysis...');
-  for (const [domain] of domainCodeBatches) {
-    const detCount = violationsByDomain.get(domain) ?? 0;
-    tracker?.start(domain, detCount > 0 ? `${detCount} det, running LLM...` : 'Running LLM...');
-  }
+  // tracker.start for LLM steps fires later, once dbSchemaContext and
+  // violationInput are known — see the "build LLM trackers" block below.
 
   const previousDetForComparison = previousDetViolations.map((v) => ({
     ruleKey: v.ruleKey,
@@ -813,6 +866,36 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     existingModuleViolations: hasLlmOnlyExistingViolations ? existingModuleViolations : undefined,
   };
 
+  // ---------- Build LLM trackers (one shared instance per tracker key) ----------
+  // Every LLM-phase detail string goes through createLlmTracker so the format
+  // is identical across code-batch, schema, and architecture paths.
+  const llmTrackers = new Map<string, ReturnType<typeof createLlmTracker>>();
+
+  for (const [domain, batches] of domainCodeBatches) {
+    const detCount = violationsByDomain.get(domain) ?? 0;
+    const ll = createLlmTracker(tracker, domain, detCount, batches.length);
+    llmTrackers.set(domain, ll);
+    tracker?.start(domain, ll.initialDetail);
+  }
+  // Schema-only case: database has no code batches but does have a schema call.
+  // When both exist, the code-batch tracker dominates (schema runs silently —
+  // a pre-existing aggregation limitation we preserve for now).
+  if (dbSchemaContext && !llmSkipped && !domainCodeBatches.has('database')) {
+    const detCount = violationsByDomain.get('database') ?? 0;
+    const ll = createLlmTracker(tracker, 'database', detCount, 1);
+    llmTrackers.set('database', ll);
+    tracker?.start('database', ll.initialDetail);
+  }
+  if (hasArchLlm) {
+    const detCount = violationsByDomain.get('architecture') ?? 0;
+    // generateViolations calls: 1 (service, always) + 1 (module, if any).
+    // The pipeline passes `databases: undefined` to arch, so db sub-call never fires.
+    const archTotal = 1 + (violationModules && violationModules.length > 0 ? 1 : 0);
+    const ll = createLlmTracker(tracker, 'architecture', detCount, archTotal);
+    llmTrackers.set('architecture', ll);
+    tracker?.start('architecture', ll.initialDetail);
+  }
+
   type DomainLlmResult = { domain: string; violations: CodeViolation[]; resolvedIds: string[]; unchangedIds: string[] };
   const domainLlmPromises: Promise<DomainLlmResult>[] = [];
 
@@ -821,9 +904,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const detCount = violationsByDomain.get(domain) ?? 0;
       log.info(`[LLM] ${domain}: starting (${batches.length} code batches)`);
       const t0 = Date.now();
+      const ll = llmTrackers.get(domain)!;
 
       const codeResults = await Promise.allSettled(
-        batches.map((b) => provider.generateCodeViolations(b)),
+        batches.map((b) => {
+          let started = false;
+          return provider.generateCodeViolations(b, {
+            onStart: () => { started = true; ll.onCallStart(); },
+          }).finally(() => ll.onCallDone(started));
+        }),
       );
 
       const rawViolations: CodeViolationRaw[] = [];
@@ -853,16 +942,20 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // Database schema LLM (separate from code batches)
   let dbSchemaViolations: ViolationRecord[] = [];
   if (dbSchemaContext && !llmSkipped) {
-    if (!domainCodeBatches.has('database')) {
-      const detCount = violationsByDomain.get('database') ?? 0;
-      tracker?.start('database', detCount > 0 ? `${detCount} det, running LLM...` : 'Running LLM...');
-    }
+    // Shared tracker exists only when schema is the sole database LLM path.
+    // When code batches also exist, the code-batch tracker dominates and
+    // schema runs silently (pre-existing aggregation limitation).
+    const schemaLl = domainCodeBatches.has('database') ? undefined : llmTrackers.get('database');
 
     domainLlmPromises.push((async (): Promise<DomainLlmResult> => {
       log.info(`[LLM] database-schema: starting`);
       const t0 = Date.now();
+      let started = false;
       try {
-        const dbResult = await provider.generateDatabaseViolations(dbSchemaContext);
+        const dbResult = await provider.generateDatabaseViolations(dbSchemaContext, {
+          onStart: () => { started = true; schemaLl?.onCallStart(); },
+        });
+        schemaLl?.onCallDone(started);
         const dur = Date.now() - t0;
         log.info(`[LLM] database-schema: done in ${dur}ms — ${dbResult.violations.length} violations`);
 
@@ -905,6 +998,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
         return { domain: 'database-schema', violations: [], resolvedIds: [], unchangedIds: [] };
       } catch (err) {
+        schemaLl?.onCallDone(started);
         const dur = Date.now() - t0;
         log.warn(`[LLM] database-schema: failed in ${dur}ms — ${err instanceof Error ? err.message : String(err)}`);
         if (!domainCodeBatches.has('database')) tracker?.error('database', `Schema LLM failed`);
@@ -919,11 +1013,24 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   const llmRulePromise = (async () => {
     if (enableLlmRules === false || llmSkipped) return;
+    const archLl = llmTrackers.get('architecture');
+    // Mirror sub-call lifecycle events into the architecture tracker so
+    // `LLM X/Y · M running · elapsed` refreshes per sub-call, not all-at-end.
+    const archStarted = new Set<string>();
+    const archOnCallStart = (key: 'service' | 'database' | 'module') => {
+      archStarted.add(key);
+      archLl?.onCallStart();
+    };
+    const archOnCallDone = (key: 'service' | 'database' | 'module') => {
+      archLl?.onCallDone(archStarted.has(key));
+    };
     if (hasLlmOnlyExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(
         violationInput,
-        (step) => tracker?.detail('architecture', step),
+        undefined,
         provider,
+        archOnCallStart,
+        archOnCallDone,
       );
       serviceDescriptions = archResult.serviceDescriptions;
       allResolvedLlmIds.push(...archResult.resolvedViolationIds);
@@ -954,8 +1061,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     } else {
       const archResult = await generateViolations(
         violationInput,
-        (step) => tracker?.detail('architecture', step),
+        undefined,
         provider,
+        archOnCallStart,
+        archOnCallDone,
       );
       serviceDescriptions = archResult.serviceDescriptions;
 

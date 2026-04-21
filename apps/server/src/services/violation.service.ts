@@ -93,6 +93,8 @@ export async function generateViolations(
   input: ViolationGenerationInput,
   onProgress?: (step: string) => void,
   externalProvider?: LLMProvider,
+  onCallStart?: (key: 'service' | 'database' | 'module') => void,
+  onCallDone?: (key: 'service' | 'database' | 'module', ok: boolean) => void,
 ): Promise<ViolationsResult> {
   const provider = externalProvider ?? createLLMProvider();
 
@@ -156,6 +158,8 @@ export async function generateViolations(
     database: dbContext,
     module: moduleContext,
     onStepComplete: onProgress,
+    onCallStart,
+    onCallDone,
   });
 
   // --- Merge results ---
@@ -210,6 +214,8 @@ export async function generateViolationsWithLifecycle(
   input: ViolationGenerationInput,
   onProgress?: (step: string) => void,
   externalProvider?: LLMProvider,
+  onCallStart?: (key: 'service' | 'database' | 'module') => void,
+  onCallDone?: (key: 'service' | 'database' | 'module', ok: boolean) => void,
 ): Promise<AllViolationsLifecycleResult> {
   const provider = externalProvider ?? createLLMProvider();
 
@@ -264,6 +270,8 @@ export async function generateViolationsWithLifecycle(
     service: serviceContext,
     database: dbContext,
     module: moduleContext,
+    onCallStart,
+    onCallDone,
   }, (step) => {
     onProgress?.(step);
   });

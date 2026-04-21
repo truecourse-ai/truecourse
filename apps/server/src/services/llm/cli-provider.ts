@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../../lib/logger.js';
+import pLimit, { type LimitFunction } from 'p-limit';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { registerChildProcess, unregisterChildProcess } from '../analysis-registry.js';
@@ -62,6 +63,8 @@ interface SpawnOptions {
   timeoutMs?: number;
   /** Extra CLI args appended after base args */
   extraArgs?: string[];
+  /** Fires once the concurrency limiter grants a slot, before spawnCLI runs. */
+  onStart?: () => void;
 }
 
 interface CLIUsage {
@@ -79,6 +82,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   abstract get modelFlag(): string[];
 
   private maxRetries = config.claudeCodeMaxRetries ?? 2;
+  private limit: LimitFunction = pLimit(config.claudeCodeMaxConcurrency);
   private debugDir: string | null = null;
   private callCounter = 0;
   private _analysisId: string | null = null;
@@ -296,39 +300,52 @@ export abstract class BaseCLIProvider implements LLMProvider {
     schema: ZodType<T>,
     opts?: SpawnOptions & { label?: string },
   ): Promise<{ data: T; usage?: CLIUsage }> {
-    const jsonSchemaStr = this.toJsonSchema(schema);
-    const label = opts?.label ?? 'call';
-    let lastError: Error | null = null;
+    // Cap concurrent CLI spawns across all callers on this provider.
+    // The limit runs the inner fn only when a slot is free, so timeout
+    // timers (inside spawnCLI) can't start while the task is queued.
+    return this.limit(async () => {
+      if (this._abortSignal?.aborted) {
+        throw this._abortSignal.reason ?? new DOMException('Analysis cancelled', 'AbortError');
+      }
+      opts?.onStart?.();
 
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      try {
-        const raw = await this.spawnCLI(prompt, jsonSchemaStr, opts);
-        this.dumpDebug(label, prompt, raw, jsonSchemaStr);
-        return this.parseAndValidate(raw, schema);
-      } catch (err) {
-        lastError = err as Error;
-        if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
-        if (attempt < this.maxRetries) {
-          log.warn(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
+      const jsonSchemaStr = this.toJsonSchema(schema);
+      const label = opts?.label ?? 'call';
+      let lastError: Error | null = null;
+
+      for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+        try {
+          const raw = await this.spawnCLI(prompt, jsonSchemaStr, opts);
+          this.dumpDebug(label, prompt, raw, jsonSchemaStr);
+          return this.parseAndValidate(raw, schema);
+        } catch (err) {
+          lastError = err as Error;
+          if (this._abortSignal?.aborted) throw lastError; // don't retry on cancel
+          if (attempt < this.maxRetries) {
+            log.warn(`[CLI] Attempt ${attempt + 1} failed, retrying... (${lastError.message})`);
+          }
         }
       }
-    }
 
-    throw lastError!;
+      throw lastError!;
+    });
   }
 
   // ---------------------------------------------------------------------------
   // LLMProvider implementation
   // ---------------------------------------------------------------------------
 
-  async generateServiceViolations(context: ServiceViolationContext): Promise<ServiceViolationsResult> {
+  async generateServiceViolations(
+    context: ServiceViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<ServiceViolationsResult> {
     const { vars, idMap } = buildServiceTemplateVars(context);
     const prompt = getPrompt('violations-service', vars);
 
     log.info('[CLI] Service violations call starting...');
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, ServiceViolationOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'service',
+      extraArgs: ['--tools', ''], label: 'service', onStart: opts?.onStart,
     });
     const dur = Date.now() - t0;
     log.info(`[CLI] Service violations call done in ${dur}ms — ${object.violations.length} violations`);
@@ -353,14 +370,17 @@ export abstract class BaseCLIProvider implements LLMProvider {
     };
   }
 
-  async generateDatabaseViolations(context: DatabaseViolationContext): Promise<DatabaseViolationsResult> {
+  async generateDatabaseViolations(
+    context: DatabaseViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<DatabaseViolationsResult> {
     const { vars, idMap } = buildDatabaseTemplateVars(context);
     const prompt = getPrompt('violations-database', vars);
 
     log.info('[CLI] Database violations call starting...');
     const t0 = Date.now();
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DatabaseViolationOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'database',
+      extraArgs: ['--tools', ''], label: 'database', onStart: opts?.onStart,
     });
     const dur = Date.now() - t0;
     log.info(`[CLI] Database violations call done in ${dur}ms — ${object.violations.length} violations`);
@@ -382,7 +402,10 @@ export abstract class BaseCLIProvider implements LLMProvider {
     };
   }
 
-  async generateModuleViolations(context: ModuleViolationContext): Promise<ModuleViolationsResult> {
+  async generateModuleViolations(
+    context: ModuleViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<ModuleViolationsResult> {
     const { vars, idMap } = buildModuleTemplateVars(context);
     const prompt = getPrompt('violations-module', vars);
 
@@ -396,7 +419,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     // to avoid losing cross-module dependency edges
     const moduleTimeoutMs = 300_000; // 5 minutes
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, ModuleViolationOutputSchema, {
-      extraArgs: ['--tools', ''], label: 'module', timeoutMs: moduleTimeoutMs,
+      extraArgs: ['--tools', ''], label: 'module', timeoutMs: moduleTimeoutMs, onStart: opts?.onStart,
     });
     const dur = Date.now() - t0;
     log.info(`[CLI] Module violations call done in ${dur}ms — ${object.violations.length} violations`);
@@ -425,16 +448,24 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
   async generateAllViolations(contexts: AllViolationsInput): Promise<AllViolationsResult> {
     const onStepComplete = contexts.onStepComplete;
+    const onCallStart = contexts.onCallStart;
+    const onCallDone = contexts.onCallDone;
     const promises: [string, Promise<unknown>][] = [];
 
     if (contexts.service) {
-      promises.push(['service', this.generateServiceViolations(contexts.service)]);
+      promises.push(['service', this.generateServiceViolations(contexts.service, {
+        onStart: () => onCallStart?.('service'),
+      })]);
     }
     if (contexts.database) {
-      promises.push(['database', this.generateDatabaseViolations(contexts.database)]);
+      promises.push(['database', this.generateDatabaseViolations(contexts.database, {
+        onStart: () => onCallStart?.('database'),
+      })]);
     }
     if (contexts.module) {
-      promises.push(['module', this.generateModuleViolations(contexts.module)]);
+      promises.push(['module', this.generateModuleViolations(contexts.module, {
+        onStart: () => onCallStart?.('module'),
+      })]);
     }
 
     const stepLabels: Record<string, string> = {
@@ -444,7 +475,10 @@ export abstract class BaseCLIProvider implements LLMProvider {
     };
 
     const settled = await Promise.allSettled(promises.map(([key, p]) =>
-      p.then((v) => { onStepComplete?.(stepLabels[key] || `${key} done`); return v; })
+      p.then(
+        (v) => { onStepComplete?.(stepLabels[key] || `${key} done`); onCallDone?.(key as 'service' | 'database' | 'module', true); return v; },
+        (err) => { onCallDone?.(key as 'service' | 'database' | 'module', false); throw err; },
+      )
     ));
 
     const result: AllViolationsResult = {};
@@ -465,6 +499,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     contexts: AllViolationsInput,
     onStepComplete?: (step: string) => void,
   ): Promise<AllViolationsLifecycleResult> {
+    const onCallStart = contexts.onCallStart;
     const allResolved: string[] = [];
     const allNew: DiffViolationItem[] = [];
     let serviceDescriptions: ServiceDescription[] = [];
@@ -483,7 +518,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
           log.info('[CLI] Lifecycle service call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, LifecycleServiceOutputSchema, {
-            extraArgs: ['--tools', ''], label: 'service-lifecycle',
+            extraArgs: ['--tools', ''], label: 'service-lifecycle', onStart: () => onCallStart?.('service'),
           });
           const dur = Date.now() - t0;
           log.info(`[CLI] Lifecycle service call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
@@ -491,7 +526,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
           return object;
         })()]);
       } else {
-        promises.push(['service-normal', this.generateServiceViolations(ctx)]);
+        promises.push(['service-normal', this.generateServiceViolations(ctx, {
+          onStart: () => onCallStart?.('service'),
+        })]);
       }
     }
 
@@ -506,7 +543,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
           log.info('[CLI] Lifecycle database call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
-            extraArgs: ['--tools', ''], label: 'database-lifecycle',
+            extraArgs: ['--tools', ''], label: 'database-lifecycle', onStart: () => onCallStart?.('database'),
           });
           const dur = Date.now() - t0;
           log.info(`[CLI] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
@@ -514,7 +551,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
           return object;
         })()]);
       } else {
-        promises.push(['database-normal', this.generateDatabaseViolations(ctx)]);
+        promises.push(['database-normal', this.generateDatabaseViolations(ctx, {
+          onStart: () => onCallStart?.('database'),
+        })]);
       }
     }
 
@@ -532,7 +571,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
           log.info('[CLI] Lifecycle module call starting...');
           const t0 = Date.now();
           const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
-            extraArgs: ['--tools', ''], label: 'module-lifecycle',
+            extraArgs: ['--tools', ''], label: 'module-lifecycle', onStart: () => onCallStart?.('module'),
           });
           const dur = Date.now() - t0;
           log.info(`[CLI] Lifecycle module call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
@@ -553,7 +592,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
           };
         })()]);
       } else {
-        promises.push(['module-normal', this.generateModuleViolations(ctx)]);
+        promises.push(['module-normal', this.generateModuleViolations(ctx, {
+          onStart: () => onCallStart?.('module'),
+        })]);
       }
     }
 
@@ -565,9 +606,14 @@ export abstract class BaseCLIProvider implements LLMProvider {
       module: 'Module checks done',
       'module-normal': 'Module checks done',
     };
+    const baseKey = (key: string) => key.replace('-normal', '') as 'service' | 'database' | 'module';
+    const onCallDone = contexts.onCallDone;
 
     const settled = await Promise.allSettled(promises.map(([key, p]) =>
-      p.then((v) => { onStepComplete?.(stepLabels[key] || `${key} done`); return v; })
+      p.then(
+        (v) => { onStepComplete?.(stepLabels[key] || `${key} done`); onCallDone?.(baseKey(key), true); return v; },
+        (err) => { onCallDone?.(baseKey(key), false); throw err; },
+      )
     ));
 
     for (let i = 0; i < promises.length; i++) {
@@ -651,7 +697,10 @@ export abstract class BaseCLIProvider implements LLMProvider {
     return { resolvedViolationIds: allResolved, newViolations: allNew, serviceDescriptions };
   }
 
-  async generateCodeViolations(context: CodeViolationContext): Promise<CodeViolationsResult> {
+  async generateCodeViolations(
+    context: CodeViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<CodeViolationsResult> {
     const hasExisting = context.existingViolations && context.existingViolations.length > 0;
     let promptName: Parameters<typeof getPrompt>[0];
     if (context.tier === 'metadata') {
@@ -677,7 +726,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
     if (hasExisting) {
       const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, CodeViolationLifecycleOutputSchema, {
-        extraArgs: codeExtraArgs, label: 'code-lifecycle', timeoutMs: codeTimeoutMs,
+        extraArgs: codeExtraArgs, label: 'code-lifecycle', timeoutMs: codeTimeoutMs, onStart: opts?.onStart,
       });
       const dur = Date.now() - t0;
       log.info(`[CLI] Code violations call done in ${dur}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
@@ -700,7 +749,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     }
 
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, CodeViolationOutputSchema, {
-      extraArgs: codeExtraArgs, label: 'code', timeoutMs: codeTimeoutMs,
+      extraArgs: codeExtraArgs, label: 'code', timeoutMs: codeTimeoutMs, onStart: opts?.onStart,
     });
     const dur = Date.now() - t0;
     log.info(`[CLI] Code violations call done in ${dur}ms — ${object.violations.length} violations`);

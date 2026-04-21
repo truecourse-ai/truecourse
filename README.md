@@ -170,6 +170,28 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 - Node.js >= 20
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your PATH. Deterministic rules run without it, LLM-powered rules need it.
 
+## Configuration
+
+TrueCourse talks to Claude Code via the `claude` CLI. You can tune how that interaction behaves — which binary to invoke, which model to pass, timeouts, retries, and how many `claude` processes to run in parallel — through environment variables.
+
+For packaged installs (`npx truecourse` or `npm install -g truecourse`), the simplest place to set them is `~/.truecourse/.env`. The file is loaded automatically on every invocation:
+
+```
+CLAUDE_CODE_BINARY=claude             # override the `claude` binary on PATH
+CLAUDE_CODE_MODEL=                    # Claude Code --model flag (empty = default)
+CLAUDE_CODE_TIMEOUT_MS=120000         # per-call timeout (ms)
+CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failure
+CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
+```
+
+**`CLAUDE_CODE_MAX_CONCURRENCY`** caps how many Claude CLI processes TrueCourse spawns in parallel during a single analyze. Default `10`. Raise it on CI runners with spare headroom; lower it on resource-constrained machines (e.g. 8 GB laptops, shared VMs) to avoid OOM on large repos. Must be a positive integer.
+
+For a one-off override, prefix the command:
+
+```bash
+CLAUDE_CODE_MAX_CONCURRENCY=2 truecourse analyze
+```
+
 ## Development
 
 ```bash

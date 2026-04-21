@@ -38,8 +38,6 @@ async function main() {
     log.info('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
   }
 
-  log.info(`[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}`);
-
   // 2. Setup Express app
   const app: express.Express = express();
   const httpServer = createServer(app);
