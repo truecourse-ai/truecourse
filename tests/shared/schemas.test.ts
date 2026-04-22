@@ -605,3 +605,129 @@ describe('MethodLevelDependencySchema', () => {
     expect(result.success).toBe(false);
   });
 });
+
+// ===========================================================================
+// ADR schemas (Phase 19.1)
+// ===========================================================================
+
+import {
+  AdrSchema,
+  AdrStatusSchema,
+  AdrDraftSchema,
+  TopicSignatureSchema,
+  type Adr,
+  type AdrDraft,
+} from '../../packages/shared/src/types/adr';
+
+function validAdr(): Adr {
+  return {
+    id: 'ADR-0001',
+    number: 1,
+    title: 'Use event bus for cross-service communication',
+    status: 'accepted',
+    date: '2026-04-21',
+    path: 'docs/adr/ADR-0001-event-bus.md',
+    sections: {
+      context: 'Services are growing; direct HTTP is becoming tangled.',
+      decision: 'Introduce an event bus.',
+      consequences: 'New ops burden; looser coupling.',
+    },
+    deciders: ['alice', 'bob'],
+    linkedNodeIds: ['auth-service', 'billing-service'],
+    supersedes: [],
+    requiredEntities: ['auth-service', 'billing-service'],
+  };
+}
+
+function validAdrDraft(): AdrDraft {
+  return {
+    id: 'draft-abc123',
+    createdAt: '2026-04-21T10:00:00.000Z',
+    title: 'Accept circular dependency between auth and billing',
+    topic: 'circular-dependency',
+    entities: ['auth-service', 'billing-service'],
+    madrBody: '# Draft\n\n## Context\n...\n## Decision\n...\n## Consequences\n...',
+    confidence: 0.78,
+  };
+}
+
+describe('AdrStatusSchema', () => {
+  it('accepts all MADR statuses plus the computed "stale"', () => {
+    for (const s of ['proposed', 'accepted', 'deprecated', 'superseded', 'stale']) {
+      expect(AdrStatusSchema.safeParse(s).success).toBe(true);
+    }
+  });
+
+  it('rejects unknown statuses', () => {
+    expect(AdrStatusSchema.safeParse('rejected').success).toBe(false);
+    expect(AdrStatusSchema.safeParse('').success).toBe(false);
+  });
+});
+
+describe('AdrSchema', () => {
+  it('accepts a valid ADR', () => {
+    expect(AdrSchema.safeParse(validAdr()).success).toBe(true);
+  });
+
+  it('requires id to match ADR-NNNN format', () => {
+    const bad = { ...validAdr(), id: 'ADR-1' };
+    expect(AdrSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('requires number to be a positive integer', () => {
+    expect(AdrSchema.safeParse({ ...validAdr(), number: 0 }).success).toBe(false);
+    expect(AdrSchema.safeParse({ ...validAdr(), number: -1 }).success).toBe(false);
+    expect(AdrSchema.safeParse({ ...validAdr(), number: 1.5 }).success).toBe(false);
+  });
+
+  it('requires all three sections', () => {
+    const bad = {
+      ...validAdr(),
+      sections: { context: 'x', decision: 'y' },   // missing consequences
+    };
+    expect(AdrSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('allows optional fields to be omitted', () => {
+    const minimal = validAdr();
+    delete minimal.deciders;
+    delete minimal.supersedes;
+    expect(AdrSchema.safeParse(minimal).success).toBe(true);
+  });
+});
+
+describe('AdrDraftSchema', () => {
+  it('accepts a valid draft', () => {
+    expect(AdrDraftSchema.safeParse(validAdrDraft()).success).toBe(true);
+  });
+
+  it('requires confidence in [0, 1]', () => {
+    expect(AdrDraftSchema.safeParse({ ...validAdrDraft(), confidence: 1.1 }).success).toBe(false);
+    expect(AdrDraftSchema.safeParse({ ...validAdrDraft(), confidence: -0.01 }).success).toBe(false);
+    expect(AdrDraftSchema.safeParse({ ...validAdrDraft(), confidence: 0 }).success).toBe(true);
+    expect(AdrDraftSchema.safeParse({ ...validAdrDraft(), confidence: 1 }).success).toBe(true);
+  });
+
+  it('rejects topics outside the fixed vocab', () => {
+    expect(AdrDraftSchema.safeParse({ ...validAdrDraft(), topic: 'not-a-real-topic' as never }).success).toBe(false);
+  });
+});
+
+describe('TopicSignatureSchema', () => {
+  it('accepts a well-formed signature', () => {
+    const sig = { topic: 'circular-dependency', entities: ['auth-service', 'billing-service'] };
+    expect(TopicSignatureSchema.safeParse(sig).success).toBe(true);
+  });
+
+  it('permits an empty entity set (signatures without entity anchors)', () => {
+    expect(
+      TopicSignatureSchema.safeParse({ topic: 'service-boundary', entities: [] }).success,
+    ).toBe(true);
+  });
+
+  it('rejects topics outside the fixed vocab', () => {
+    expect(
+      TopicSignatureSchema.safeParse({ topic: 'not-a-real-topic', entities: [] }).success,
+    ).toBe(false);
+  });
+});

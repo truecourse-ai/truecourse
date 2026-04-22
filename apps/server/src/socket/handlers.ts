@@ -267,3 +267,21 @@ export function createSocketLlmEstimateHandler(repoId: string):
       }
     });
 }
+
+// ---------------------------------------------------------------------------
+// ADR suggest progress → Socket.io
+// ---------------------------------------------------------------------------
+//
+// `suggestAdrsInProcess` emits a typed event stream via its `onProgress`
+// callback. This wrapper forwards each event to all clients in the repo's
+// room so the Decisions tab can render a live review queue as drafts land.
+//
+// Single wire event `adr:suggest:progress`; clients switch on
+// `payload.event.kind` for survey progress, per-draft streaming, completion.
+
+import type { AdrSuggestEvent } from '../services/llm/adr-suggester.js';
+
+export function emitAdrSuggestEvent(repoId: string, runId: string, event: AdrSuggestEvent): void {
+  const io = getIO();
+  io.to(`repo:${repoId}`).emit('adr:suggest:progress', { repoId, runId, event });
+}

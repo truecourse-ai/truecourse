@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TRUECOURSE_DIR = '.truecourse';
-const GITIGNORE_CONTENTS = 'analyses/\nLATEST.json\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\n';
+const GITIGNORE_CONTENTS =
+  'analyses/\nLATEST.json\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\nadrs.json\ndrafts/\nadr-rejected.json\n';
 
 // ---------------------------------------------------------------------------
 // Global paths (user-level)
@@ -43,6 +44,34 @@ export function getRepoConfigPath(repoDir: string): string {
 
 export function getRepoUiStatePath(repoDir: string): string {
   return path.join(getRepoTruecourseDir(repoDir), 'ui-state.json');
+}
+
+// ---------------------------------------------------------------------------
+// ADR paths
+// ---------------------------------------------------------------------------
+
+export function getAdrCorpusPath(repoDir: string): string {
+  return path.join(getRepoTruecourseDir(repoDir), 'adrs.json');
+}
+
+export function getAdrDraftsDir(repoDir: string): string {
+  return path.join(getRepoTruecourseDir(repoDir), 'drafts');
+}
+
+export function getAdrDraftPath(repoDir: string, draftId: string): string {
+  return path.join(getAdrDraftsDir(repoDir), `${draftId}.md`);
+}
+
+export function getAdrRejectedPath(repoDir: string): string {
+  return path.join(getRepoTruecourseDir(repoDir), 'adr-rejected.json');
+}
+
+/** Output directory for accepted ADR markdown files. Default is `docs/adr/`
+ *  under the repo root; overridable per-repo via `config.adr.path` (read by
+ *  callers, not computed here).
+ */
+export function getDefaultAdrOutputDir(repoDir: string): string {
+  return path.join(repoDir, 'docs', 'adr');
 }
 
 // ---------------------------------------------------------------------------

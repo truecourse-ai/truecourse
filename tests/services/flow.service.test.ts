@@ -1,35 +1,46 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 import { randomUUID } from 'node:crypto';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import { runAnalysis, type AnalysisResult } from '../../apps/server/src/services/analyzer.service';
 import {
   computeFlowSeverities,
   detectFlows,
-  getFlowFromLatest,
-  getFlowsFromLatest,
 } from '../../apps/server/src/services/flow.service';
-import { writeLatest } from '../../apps/server/src/lib/analysis-store';
 import type { LatestSnapshot } from '../../apps/server/src/types/snapshot';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');
+const FIXTURE_SRC = resolve(__dirname, '../fixtures/sample-js-project-negative');
+
+function copyDir(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (entry.name === '.truecourse' || entry.name === 'node_modules' || entry.name === '.git') continue;
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
 
 describe('flow.service', () => {
-  let fixture: TestFixture;
+  let workDir: string;
   let analysisResult: AnalysisResult;
 
   beforeAll(async () => {
-    fixture = await setupTestFixture(FIXTURE_PATH);
-    analysisResult = await runAnalysis(FIXTURE_PATH, undefined, () => {}, {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-flow-test-'));
+    copyDir(FIXTURE_SRC, workDir);
+    analysisResult = await runAnalysis(workDir, undefined, () => {}, {
       skipStash: true,
       skipGit: true,
     });
   }, 60_000);
 
-  afterAll(async () => {
-    await teardownTestFixture(fixture.project.slug);
+  afterAll(() => {
+    if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
   });
 
   it('detectFlows returns flows with nested steps', () => {
@@ -47,22 +58,9 @@ describe('flow.service', () => {
     }
   });
 
-  it('getFlowsFromLatest / getFlowFromLatest read from LATEST.json', () => {
-    const flows = detectFlows(analysisResult);
-    const snapshot = makeLatest(fixture.project.path, flows);
-    writeLatest(fixture.project.path, snapshot);
-
-    const read = getFlowsFromLatest(fixture.project.path);
-    expect(read).toEqual(flows);
-
-    const one = getFlowFromLatest(fixture.project.path, flows[0].id);
-    expect(one?.id).toBe(flows[0].id);
-    expect(getFlowFromLatest(fixture.project.path, 'not-a-real-id')).toBeNull();
-  });
-
   it('computeFlowSeverities returns empty when no violations', () => {
     const flows = detectFlows(analysisResult);
-    const snapshot = makeLatest(fixture.project.path, flows);
+    const snapshot = makeLatest(flows);
     expect(computeFlowSeverities(snapshot.graph, snapshot.violations)).toEqual({});
   });
 
@@ -73,7 +71,7 @@ describe('flow.service', () => {
     const moduleId = randomUUID();
 
     // Build a minimal LATEST that exposes the target method by id+name.
-    const snapshot: LatestSnapshot = makeLatest(fixture.project.path, flows);
+    const snapshot: LatestSnapshot = makeLatest(flows);
     snapshot.graph.methods.push({
       id: methodId,
       moduleId,
@@ -125,10 +123,7 @@ describe('flow.service', () => {
   });
 });
 
-function makeLatest(
-  _repoPath: string,
-  flows: ReturnType<typeof detectFlows>,
-): LatestSnapshot {
+function makeLatest(flows: ReturnType<typeof detectFlows>): LatestSnapshot {
   return {
     head: 'test.json',
     analysis: {

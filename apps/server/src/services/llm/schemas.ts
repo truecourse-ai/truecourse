@@ -156,3 +156,35 @@ export const FlowEnrichmentOutputSchema = z.object({
     })
   ),
 });
+
+// ---------------------------------------------------------------------------
+// ADR Suggest (Phase 19.1) — survey + draft output schemas
+// ---------------------------------------------------------------------------
+//
+// Two schemas feed the two-pass suggest loop:
+//
+//   Pass 1 (survey) → AdrSurveyOutput  — list of topic candidates
+//   Pass 2 (draft)  → AdrDraftOutput   — one MADR draft for one candidate
+//
+// `topic` is validated as a string here (not an enum) because the LLM may
+// occasionally pick from outside the vocab — the suggester filters invalid
+// topics AFTER Zod parse and logs them as "dropped" instead of throwing at
+// the CLI parse boundary.
+
+export const AdrSurveyCandidateSchema = z.object({
+  topic: z.string(),
+  entities: z.array(z.string()),
+  rationale: z.string(),
+});
+
+export const AdrSurveyOutputSchema = z.object({
+  candidates: z.array(AdrSurveyCandidateSchema).max(20),
+});
+
+export const AdrDraftOutputSchema = z.object({
+  title: z.string(),
+  madrBody: z.string(),
+  topic: z.string(),
+  entities: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+});

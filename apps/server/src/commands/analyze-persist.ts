@@ -23,6 +23,7 @@ import {
   writeDiff,
   writeLatest,
 } from '../lib/analysis-store.js';
+import { refreshAdrStaleness } from '../lib/adr-store.js';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
@@ -86,6 +87,11 @@ export function persistFullAnalysis(
   writeAnalysis(project.path, snapshot);
   writeLatest(project.path, latest);
   appendHistory(project.path, buildHistoryEntry(snapshot, filename, core.pipelineResult));
+
+  // ADR corpus staleness — cheap, idempotent, writes only when a corpus
+  // already exists. Runs after LATEST so the staleness flags reflect the
+  // same graph the dashboard is about to read.
+  refreshAdrStaleness(project.path, core.graph);
 
   // Baseline moved — any prior diff is obsolete.
   deleteDiff(project.path);

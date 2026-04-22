@@ -1,8 +1,12 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as api from '@/lib/api';
-import type { ServiceNodeData, DepthLevel } from '@/types/graph';
+import type { DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
+import {
+  buildDatabaseNodeData,
+  buildServiceNodeData,
+} from '@/components/graph/node-builders';
 
 export type GraphScopeOption = { id: string; name: string };
 export type GraphModuleOption = { id: string; name: string; serviceId: string; serviceName: string };
@@ -420,13 +424,13 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
               id: node.id,
               type: 'database' as const,
               position: node.position,
-              data: {
-                label: node.data.label,
-                databaseType: node.data.databaseType || node.data.serviceType,
-                tableCount: node.data.tableCount ?? node.data.fileCount ?? 0,
-                connectedServices: node.data.connectedServices || [],
-                framework: node.data.framework,
-              },
+              data: buildDatabaseNodeData({
+                label: node.data.label as string,
+                databaseType: (node.data.databaseType as string | undefined) ?? (node.data.serviceType as string | undefined),
+                tableCount: (node.data.tableCount as number | undefined) ?? (node.data.fileCount as number | undefined),
+                connectedServices: node.data.connectedServices as string[] | undefined,
+                framework: node.data.framework as string | undefined,
+              }),
             };
           }
 
@@ -434,23 +438,15 @@ export function useGraph(repoId: string, options: UseGraphOptions = {}) {
             id: node.id,
             type: 'service' as const,
             position: node.position,
-            data: {
-              label: node.data.label,
-              description: node.data.description,
-              serviceInfo: {
-                type: node.data.serviceType || 'unknown',
-                framework: node.data.framework || null,
-                fileCount: node.data.fileCount || 0,
-                layers: (node.data.layers || []).map((l) => ({
-                  layer: l,
-                  confidence: 1,
-                  evidence: [],
-                })),
-                rootPath: node.data.rootPath ?? '',
-              },
-              violationCount: 0,
-              hasHighSeverity: false,
-            } as ServiceNodeData,
+            data: buildServiceNodeData({
+              label: node.data.label as string,
+              description: node.data.description as string | undefined,
+              serviceType: node.data.serviceType as string | undefined,
+              framework: node.data.framework as string | undefined,
+              fileCount: node.data.fileCount as number | undefined,
+              layers: node.data.layers as string[] | undefined,
+              rootPath: node.data.rootPath as string | undefined,
+            }),
           };
         });
 

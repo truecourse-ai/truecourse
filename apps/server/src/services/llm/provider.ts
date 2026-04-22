@@ -1,4 +1,4 @@
-import type { Violation } from '@truecourse/shared';
+import type { TopicSignature, Violation } from '@truecourse/shared';
 import { ClaudeCodeProvider } from './cli-provider.js';
 import type { FlowEnrichmentContext } from './prompts.js';
 import type { UsageData } from '../usage.service.js';
@@ -227,6 +227,54 @@ export interface UsageRecord {
   durationMs: number;
 }
 
+// ---------------------------------------------------------------------------
+// ADR Suggest — survey + draft contexts/results
+// ---------------------------------------------------------------------------
+
+export interface AdrSurveyContext {
+  /** Pre-formatted graph summary (see `buildGraphSummary`). */
+  graphSummary: string;
+  /** Existing accepted ADRs — so the LLM doesn't re-propose them. */
+  existingAdrs: Array<{ id: string; title: string; topic?: string }>;
+  /** Rejected topic signatures — so the LLM doesn't re-propose rejected ones. */
+  rejectedSignatures: TopicSignature[];
+  /** Fixed topic vocabulary the LLM must pick from. */
+  vocab: readonly string[];
+  /** Cap on candidates returned. */
+  maxCandidates: number;
+  /** Optional user-supplied focus hint ("focus on data layer"). */
+  topicHint?: string;
+}
+
+export interface AdrSurveyCandidate {
+  topic: string;
+  entities: string[];
+  rationale: string;
+}
+
+export interface AdrSurveyResult {
+  candidates: AdrSurveyCandidate[];
+}
+
+export interface AdrDraftContext {
+  topic: string;
+  entities: string[];
+  rationale: string;
+  graphSummary: string;
+}
+
+export interface AdrDraftResult {
+  title: string;
+  madrBody: string;
+  topic: string;
+  entities: string[];
+  confidence: number;
+}
+
+// ---------------------------------------------------------------------------
+// Provider interface
+// ---------------------------------------------------------------------------
+
 export interface LLMProvider {
   generateServiceViolations(
     context: ServiceViolationContext,
@@ -248,6 +296,16 @@ export interface LLMProvider {
   ): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
+  /** Pass 1 of the ADR suggest loop: survey the graph for candidate topics. */
+  generateAdrSurvey(
+    context: AdrSurveyContext,
+    opts?: { onStart?: () => void },
+  ): Promise<AdrSurveyResult>;
+  /** Pass 2 of the ADR suggest loop: produce one MADR draft for a candidate. */
+  generateAdrDraft(
+    context: AdrDraftContext,
+    opts?: { onStart?: () => void },
+  ): Promise<AdrDraftResult>;
   setAnalysisId(id: string): void;
   setRepoId(repoId: string): void;
   setRepoPath(path: string): void;

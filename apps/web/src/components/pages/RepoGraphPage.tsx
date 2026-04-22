@@ -1,6 +1,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
+import { useParams, useSearchParams, Navigate } from 'react-router-dom';
+import { useRepoUrl, setDetailPatch, clearDetailPatch, CLEAR_ALL_DETAILS } from '@/hooks/useRepoUrl';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
@@ -13,6 +14,10 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
+import { DecisionsPanel } from '@/components/decisions/DecisionsPanel';
+import { AdrViewerPanel } from '@/components/decisions/AdrViewerPanel';
+import { ScrollText } from 'lucide-react';
+import type { AdrDraftResponse, AdrListItem } from '@/lib/api';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
@@ -53,6 +58,7 @@ const VALID_LEFT_TABS = new Set<LeftTab>([
   'flows',
   'databases',
   'analyses',
+  'decisions',
 ]);
 
 const MAIN_CONTENT_TABS = new Set<LeftTab>([
@@ -64,7 +70,7 @@ const MAIN_CONTENT_TABS = new Set<LeftTab>([
 export default function RepoGraphPage() {
   const { repoId = '' } = useParams();
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  const updateUrl = useRepoUrl();
   const [repo, setRepo] = useState<RepoResponse | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
 
@@ -82,46 +88,48 @@ export default function RepoGraphPage() {
     () => searchParams?.get('scopeModule') || null,
   );
 
-  const setScopedServiceId = useCallback((id: string | null) => {
-    setScopedServiceIdState(id);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('scopeService', id);
-    else url.searchParams.delete('scopeService');
-    navigate(url.pathname + url.search);
-  }, [navigate]);
+  const setScopedServiceId = useCallback(
+    (id: string | null) => {
+      setScopedServiceIdState(id);
+      updateUrl({ scopeService: id });
+    },
+    [updateUrl],
+  );
 
-  const setScopedModuleId = useCallback((id: string | null) => {
-    setScopedModuleIdState(id);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('scopeModule', id);
-    else url.searchParams.delete('scopeModule');
-    navigate(url.pathname + url.search);
-  }, [navigate]);
+  const setScopedModuleId = useCallback(
+    (id: string | null) => {
+      setScopedModuleIdState(id);
+      updateUrl({ scopeModule: id });
+    },
+    [updateUrl],
+  );
 
-  const setDepthLevel = useCallback((level: DepthLevel) => {
-    setDepthLevelState(level);
-    const url = new URL(window.location.href);
-    if (level === 'services') {
-      url.searchParams.delete('mode');
-      // Services depth doesn't consume scope params — strip them from the URL
-      // but keep them in memory so returning to modules/methods restores the
-      // user's last picks.
-      url.searchParams.delete('scopeService');
-      url.searchParams.delete('scopeModule');
-    } else if (level === 'modules') {
-      url.searchParams.set('mode', 'modules');
-      // Modules depth uses `scopeService` but not `scopeModule` — keep the
-      // module id in memory for when the user returns to methods.
-      url.searchParams.delete('scopeModule');
-      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
-    } else {
-      url.searchParams.set('mode', depthToUrl[level]);
-      // Methods depth: restore both scope params to URL from memory if present.
-      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
-      if (scopedModuleId) url.searchParams.set('scopeModule', scopedModuleId);
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate, scopedServiceId, scopedModuleId]);
+  const setDepthLevel = useCallback(
+    (level: DepthLevel) => {
+      setDepthLevelState(level);
+      if (level === 'services') {
+        // Services depth doesn't consume scope params — strip from URL
+        // but keep them in memory so returning to modules/methods restores
+        // the user's last picks.
+        updateUrl({ mode: null, scopeService: null, scopeModule: null });
+      } else if (level === 'modules') {
+        // Modules depth uses `scopeService` but not `scopeModule`.
+        updateUrl({
+          mode: 'modules',
+          scopeService: scopedServiceId,
+          scopeModule: null,
+        });
+      } else {
+        // Methods depth: restore both scope params from memory if present.
+        updateUrl({
+          mode: depthToUrl[level],
+          scopeService: scopedServiceId,
+          scopeModule: scopedModuleId,
+        });
+      }
+    },
+    [updateUrl, scopedServiceId, scopedModuleId],
+  );
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
@@ -137,21 +145,28 @@ export default function RepoGraphPage() {
     if (searchParams?.get('file')) return 'files';
     return 'home';
   });
-  const setLeftTab = useCallback((tab: LeftTab | null) => {
-    setLeftTabState(tab);
-    const url = new URL(window.location.href);
-    if (tab && tab !== 'home') {
-      url.searchParams.set('tab', tab);
-    } else {
-      // Home is the default landing. Strip tab-scoped params so the URL
-      // shortens to /repos/:id, but keep `view=diff` — diff mode is a
-      // page-level mode that home now renders alongside the default view.
-      for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
-        url.searchParams.delete(key);
+  const setLeftTab = useCallback(
+    (tab: LeftTab | null) => {
+      setLeftTabState(tab);
+      if (tab && tab !== 'home') {
+        updateUrl({ tab });
+      } else {
+        // Home is the default landing. Strip tab-scoped params so the URL
+        // shortens to /repos/:id, but keep `view=diff` — diff mode is a
+        // page-level mode that home renders alongside the default view.
+        // Detail params (file/flow/adr/draft/db) are cleared via the
+        // centralized sentinel so every detail kind is handled here.
+        updateUrl({
+          tab: null,
+          mode: null,
+          scopeService: null,
+          scopeModule: null,
+          [CLEAR_ALL_DETAILS]: true,
+        });
       }
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
+    },
+    [updateUrl],
+  );
   const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
   const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -164,16 +179,13 @@ export default function RepoGraphPage() {
   );
   const [activeFilePath, setActiveFilePathState] = useState<string | null>(fileFromUrl);
 
-  const setActiveFilePath = useCallback((path: string | null) => {
-    setActiveFilePathState(path);
-    const url = new URL(window.location.href);
-    if (path) {
-      url.searchParams.set('file', path);
-    } else {
-      url.searchParams.delete('file');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
+  const setActiveFilePath = useCallback(
+    (path: string | null) => {
+      setActiveFilePathState(path);
+      updateUrl(path ? setDetailPatch('file', path) : clearDetailPatch('file'));
+    },
+    [updateUrl],
+  );
 
   const handleOpenFile = useCallback((path: string, pinned: boolean, scrollToLine?: number) => {
     setOpenFiles((prev) => {
@@ -216,17 +228,13 @@ export default function RepoGraphPage() {
   );
   const [activeFlowId, setActiveFlowIdState] = useState<string | null>(flowFromUrl);
 
-  const setActiveFlowId = useCallback((id: string | null) => {
-    setActiveFlowIdState(id);
-    const url = new URL(window.location.href);
-    if (id) {
-      url.searchParams.set('flow', id);
-      url.searchParams.delete('file');
-    } else {
-      url.searchParams.delete('flow');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
+  const setActiveFlowId = useCallback(
+    (id: string | null) => {
+      setActiveFlowIdState(id);
+      updateUrl(id ? setDetailPatch('flow', id) : clearDetailPatch('flow'));
+    },
+    [updateUrl],
+  );
 
   const handleCloseFlow = useCallback((flowId: string) => {
     setOpenFlows((prev) => prev.filter((f) => f.id !== flowId));
@@ -244,11 +252,173 @@ export default function RepoGraphPage() {
     setActiveDbIdState(id);
   }, []);
 
+  // Multi-tab ADR / draft viewer state. Mirrors openFiles — single-click
+  // opens in preview (unpinned, italic; replaces any existing preview slot),
+  // double-click pins the tab. Key shape: `draft:<id>` for drafts,
+  // `adr:<id>` for accepted ADRs, so the same tab bar can render both.
+  type OpenAdr = { key: string; kind: 'adr' | 'draft'; id: string; title: string; pinned: boolean };
+  // URL restore: `?adr=<adrId>` or `?draft=<draftId>` — mirrors how files
+  // and flows round-trip through the URL so refresh / back+forward / deep
+  // links land on the same tab.
+  const adrFromUrl = searchParams?.get('adr') ?? null;
+  const draftFromUrl = searchParams?.get('draft') ?? null;
+  const initialAdrTab: OpenAdr | null = adrFromUrl
+    ? { key: `adr:${adrFromUrl}`, kind: 'adr', id: adrFromUrl, title: adrFromUrl, pinned: true }
+    : draftFromUrl
+      ? { key: `draft:${draftFromUrl}`, kind: 'draft', id: draftFromUrl, title: 'Draft', pinned: true }
+      : null;
+  const [openAdrs, setOpenAdrs] = useState<OpenAdr[]>(() =>
+    initialAdrTab ? [initialAdrTab] : [],
+  );
+  const [activeAdrKey, setActiveAdrKeyState] = useState<string | null>(
+    initialAdrTab?.key ?? null,
+  );
+
+  const setActiveAdrKey = useCallback(
+    (key: string | null) => {
+      setActiveAdrKeyState(key);
+      if (!key) {
+        // Clear both adr+draft — the caller doesn't tell us which was set.
+        // Other detail params (file/flow/db) stay untouched so calling
+        // this right after `setActiveFilePath(path)` doesn't wipe `file`.
+        updateUrl({ adr: null, draft: null });
+        return;
+      }
+      if (key.startsWith('adr:')) {
+        updateUrl(setDetailPatch('adr', key.slice('adr:'.length)));
+      } else if (key.startsWith('draft:')) {
+        updateUrl(setDetailPatch('draft', key.slice('draft:'.length)));
+      }
+    },
+    [updateUrl],
+  );
+
+  /** Core logic shared by handleOpenAdr / handleOpenDraft — matches handleOpenFile. */
+  const openAdrTab = useCallback(
+    (incoming: Omit<OpenAdr, 'pinned'>, pinned: boolean) => {
+      setOpenAdrs((prev) => {
+        const existing = prev.find((o) => o.key === incoming.key);
+        if (existing) {
+          // Already open — OR pinning so double-clicking a preview tab promotes it.
+          return prev.map((o) => (o.key === incoming.key ? { ...o, pinned: pinned || o.pinned } : o));
+        }
+        if (pinned) {
+          return [...prev, { ...incoming, pinned: true }];
+        }
+        // Unpinned: replace any existing preview slot (one preview at a time).
+        const hasUnpinned = prev.find((o) => !o.pinned);
+        if (hasUnpinned) {
+          return prev.map((o) => (!o.pinned ? { ...incoming, pinned: false } : o));
+        }
+        return [...prev, { ...incoming, pinned: false }];
+      });
+      // Switch the main area to this ADR — clears other actives + flips
+      // leftTab so `showingAdr` becomes true (and the existing sibling
+      // `showingX` derivations become false).
+      setActiveAdrKey(incoming.key);
+      setActiveFilePath(null);
+      setActiveFlowId(null);
+      setActiveDbId(null);
+      setLeftTab('decisions');
+    },
+    [setActiveFilePath, setActiveFlowId, setActiveDbId, setLeftTab],
+  );
+
+  const handleOpenAdr = useCallback(
+    (adr: AdrListItem, pinned: boolean) => {
+      openAdrTab({ key: `adr:${adr.id}`, kind: 'adr', id: adr.id, title: adr.title }, pinned);
+    },
+    [openAdrTab],
+  );
+
+  const handleOpenDraft = useCallback(
+    (draft: AdrDraftResponse, pinned: boolean) => {
+      openAdrTab({ key: `draft:${draft.id}`, kind: 'draft', id: draft.id, title: draft.title }, pinned);
+    },
+    [openAdrTab],
+  );
+
+  const handleCloseAdrTab = useCallback((key: string) => {
+    setOpenAdrs((prev) => prev.filter((o) => o.key !== key));
+    if (activeAdrKey === key) {
+      const remaining = openAdrs.filter((o) => o.key !== key);
+      setActiveAdrKey(remaining.length > 0 ? remaining[remaining.length - 1].key : null);
+    }
+  }, [openAdrs, activeAdrKey, setActiveAdrKey]);
+
+  // Bumped after an accept/reject so the Decisions sidebar list refetches —
+  // otherwise the list would stay stale until the next socket event.
+  const [decisionsRefreshKey, setDecisionsRefreshKey] = useState(0);
+  const bumpDecisionsRefresh = useCallback(() => {
+    setDecisionsRefreshKey((k) => k + 1);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Global tab-insertion order across kinds. Composite keys:
+  //   `file:<path>`  `flow:<id>`  `db:<id>`  `adr:<id>`  `draft:<id>`
+  //
+  // Derived from the union of openFiles / openFlows / openDatabases / openAdrs.
+  // New keys append at the end; disappeared keys are dropped. The tab bar
+  // iterates this order so a file opened AFTER an ADR appears to the right of
+  // the ADR, not bunched at the left of a per-kind section.
+  // ---------------------------------------------------------------------------
+  const [tabOrder, setTabOrder] = useState<string[]>([]);
+  useEffect(() => {
+    const present = new Set<string>([
+      ...openFiles.map((f) => `file:${f.path}`),
+      ...openFlows.map((f) => `flow:${f.id}`),
+      ...openDatabases.map((d) => `db:${d.id}`),
+      ...openAdrs.map((o) => o.key),
+    ]);
+    setTabOrder((prev) => {
+      const kept = prev.filter((k) => present.has(k));
+      const appended: string[] = [];
+      for (const k of present) {
+        if (!prev.includes(k)) appended.push(k);
+      }
+      if (kept.length === prev.length && appended.length === 0) return prev;
+      return [...kept, ...appended];
+    });
+  }, [openFiles, openFlows, openDatabases, openAdrs]);
+
+  // Auto-activate the last open tab of a kind when re-entering that tab.
+  // Example: open ADR-0001 → click Home (URL clears) → click Decisions. The
+  // tab chip is still there (`openAdrs` is in-memory state), but the URL
+  // sync cleared `activeAdrKey`. Without this, the user lands on an empty
+  // Decisions pane with the old tab visible but inert. Same for Files /
+  // Flows. Runs only when the kind is the current `leftTab` so closing a
+  // tab elsewhere doesn't silently re-activate it in the background.
+  useEffect(() => {
+    if (leftTab === 'files' && !activeFilePath && openFiles.length > 0) {
+      setActiveFilePath(openFiles[openFiles.length - 1].path);
+    }
+    if (leftTab === 'flows' && !activeFlowId && openFlows.length > 0) {
+      setActiveFlowId(openFlows[openFlows.length - 1].id);
+    }
+    if (leftTab === 'decisions' && !activeAdrKey && openAdrs.length > 0) {
+      setActiveAdrKey(openAdrs[openAdrs.length - 1].key);
+    }
+  }, [
+    leftTab,
+    openFiles,
+    openFlows,
+    openAdrs,
+    activeFilePath,
+    activeFlowId,
+    activeAdrKey,
+    setActiveFilePath,
+    setActiveFlowId,
+    setActiveAdrKey,
+  ]);
+
   // Sync React state from the URL on every location change. This covers
   // browser Back / Forward (and deep-linked reloads) — without it, the URL
   // changes but in-memory state stays frozen at whatever the user last set.
   // Setters are idempotent, so running this on our own navigations is a no-op.
   useEffect(() => {
+    const urlAdr = searchParams?.get('adr') ?? null;
+    const urlDraft = searchParams?.get('draft') ?? null;
+
     const tabParam = searchParams?.get('tab') ?? null;
     const nextTab: LeftTab =
       tabParam === 'violations'
@@ -261,7 +431,9 @@ export default function RepoGraphPage() {
               ? 'flows'
               : searchParams?.get('file')
                 ? 'files'
-                : 'home';
+                : urlAdr || urlDraft
+                  ? 'decisions'
+                  : 'home';
     setLeftTabState(nextTab);
 
     const modeParam = searchParams?.get('mode') ?? '';
@@ -271,6 +443,9 @@ export default function RepoGraphPage() {
     setScopedModuleIdState(searchParams?.get('scopeModule') ?? null);
     setActiveFilePathState(searchParams?.get('file') ?? null);
     setActiveFlowIdState(searchParams?.get('flow') ?? null);
+    setActiveAdrKeyState(
+      urlAdr ? `adr:${urlAdr}` : urlDraft ? `draft:${urlDraft}` : null,
+    );
     setIsDiffModeState(searchParams?.get('view') === 'diff');
   }, [searchParams]);
 
@@ -284,7 +459,9 @@ export default function RepoGraphPage() {
     setActiveFilePath(path);
     setActiveFlowId(null);
     setActiveDbId(null);
-  }, [setActiveFilePath, setActiveFlowId, setActiveDbId]);
+    setActiveAdrKey(null);
+    setLeftTab('files');
+  }, [setActiveFilePath, setActiveFlowId, setActiveDbId, setLeftTab]);
 
   const handleSelectTab = useCallback((path: string | null) => {
     showFileView(path);
@@ -294,13 +471,25 @@ export default function RepoGraphPage() {
     setActiveFlowId(flowId);
     setActiveFilePath(null);
     setActiveDbId(null);
-  }, [setActiveFlowId, setActiveFilePath, setActiveDbId]);
+    setActiveAdrKey(null);
+    setLeftTab('flows');
+  }, [setActiveFlowId, setActiveFilePath, setActiveDbId, setLeftTab]);
 
   const showDatabaseView = useCallback((dbId: string | null) => {
     setActiveDbId(dbId);
     setActiveFilePath(null);
     setActiveFlowId(null);
-  }, [setActiveDbId, setActiveFilePath, setActiveFlowId]);
+    setActiveAdrKey(null);
+    setLeftTab('databases');
+  }, [setActiveDbId, setActiveFilePath, setActiveFlowId, setLeftTab]);
+
+  const showAdrView = useCallback((key: string) => {
+    setActiveAdrKey(key);
+    setActiveFilePath(null);
+    setActiveFlowId(null);
+    setActiveDbId(null);
+    setLeftTab('decisions');
+  }, [setActiveFilePath, setActiveFlowId, setActiveDbId, setLeftTab]);
 
   // Home is the default + locked tab. Clicking an active rail icon (which the
   // sidebar signals as `null`) falls back to Home instead of nulling out.
@@ -520,16 +709,13 @@ export default function RepoGraphPage() {
   }, [nodes, handleOpenDatabase]);
 
 
-  const setIsDiffMode = useCallback((diff: boolean) => {
-    setIsDiffModeState(diff);
-    const url = new URL(window.location.href);
-    if (diff) {
-      url.searchParams.set('view', 'diff');
-    } else {
-      url.searchParams.delete('view');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
+  const setIsDiffMode = useCallback(
+    (diff: boolean) => {
+      setIsDiffModeState(diff);
+      updateUrl({ view: diff ? 'diff' : null });
+    },
+    [updateUrl],
+  );
 
   const handleEnterDiffMode = useCallback(() => {
     setIsDiffMode(true);
@@ -819,21 +1005,18 @@ export default function RepoGraphPage() {
     setScopedServiceIdState(nextServiceId);
     setScopedModuleIdState(nextModuleId);
 
-    const url = new URL(window.location.href);
-    if (targetDepth === 'services') url.searchParams.delete('mode');
-    else url.searchParams.set('mode', depthToUrl[targetDepth]);
-    if (nextServiceId) url.searchParams.set('scopeService', nextServiceId);
-    else url.searchParams.delete('scopeService');
-    if (nextModuleId) url.searchParams.set('scopeModule', nextModuleId);
-    else url.searchParams.delete('scopeModule');
-    navigate(url.pathname + url.search);
+    updateUrl({
+      mode: targetDepth === 'services' ? null : depthToUrl[targetDepth],
+      scopeService: nextServiceId,
+      scopeModule: nextModuleId,
+    });
 
     if (requiredDepth && requiredDepth !== depthLevel) {
       setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
     } else {
       setFocusRequest({ nodeId, key: Date.now() });
     }
-  }, [depthLevel, scopedServiceId, scopedModuleId, navigate]);
+  }, [depthLevel, scopedServiceId, scopedModuleId, updateUrl]);
 
   const handleLocateNodeFromHome = useCallback((
     nodeId: string,
@@ -850,6 +1033,8 @@ export default function RepoGraphPage() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
+  const activeAdrTab = openAdrs.find((o) => o.key === activeAdrKey) ?? null;
+  const showingAdr = activeAdrTab !== null && leftTab === 'decisions';
 
   const hasAnalysis = repo?.lastAnalyzed != null;
 
@@ -933,6 +1118,15 @@ export default function RepoGraphPage() {
               onSelectDatabase={handleOpenDatabase}
             />
           )}
+          {leftTab === 'decisions' && (
+            <DecisionsPanel
+              repoId={repoId}
+              onOpenAdr={handleOpenAdr}
+              onOpenDraft={handleOpenDraft}
+              activeTabKey={leftTab === 'decisions' ? activeAdrKey : null}
+              refreshKey={decisionsRefreshKey}
+            />
+          )}
           {leftTab === 'files' && (
             <FileTree
               repoId={repoId}
@@ -980,94 +1174,102 @@ export default function RepoGraphPage() {
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases) */}
-          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
-            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
+          {/* Tab bar only on tabs where opening items makes sense */}
+          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases' || leftTab === 'decisions') &&
+            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0 || openAdrs.length > 0) && (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
-              {/* File tabs */}
-              {openFiles.map((file) => {
-                const fileName = file.path.split('/').pop() || file.path;
-                const isActive = activeFilePath === file.path;
-                return (
-                  <div
-                    key={file.path}
-                    onClick={() => handleSelectTab(file.path)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={file.path}
-                  >
-                    <span className={file.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseFile(file.path);
-                      }}
-                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
+              {/* Unified tab rendering — iterate the global insertion order so
+                  tabs interleave across kinds (file → ADR → file lands L→R). */}
+              {tabOrder.map((key) => {
+                if (key.startsWith('file:')) {
+                  const filePath = key.slice('file:'.length);
+                  const file = openFiles.find((f) => f.path === filePath);
+                  if (!file) return null;
+                  const fileName = filePath.split('/').pop() || filePath;
+                  const isActive = activeFilePath === filePath && leftTab === 'files';
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => handleSelectTab(filePath)}
+                      className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${isActive ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                      title={filePath}
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-              {/* Flow tabs */}
-              {openFlows.map((flow) => {
-                const isActive = activeFlowId === flow.id && !showingCodeViewer;
-                return (
-                  <div
-                    key={flow.id}
-                    onClick={() => showFlowView(flow.id)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={flow.name}
-                  >
-                    <Workflow className="h-3 w-3 shrink-0" />
-                    <span className={flow.pinned ? 'font-medium' : 'italic'}>{flow.name}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseFlow(flow.id);
-                      }}
-                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
+                      <span className={file.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCloseFile(filePath); }}
+                        className={`rounded p-0.5 hover:bg-muted transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                }
+                if (key.startsWith('flow:')) {
+                  const flowId = key.slice('flow:'.length);
+                  const flow = openFlows.find((f) => f.id === flowId);
+                  if (!flow) return null;
+                  const isActive = activeFlowId === flow.id && leftTab === 'flows';
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => showFlowView(flow.id)}
+                      className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${isActive ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                      title={flow.name}
                     >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                );
-              })}
-              {/* Database tabs */}
-              {openDatabases.map((db) => {
-                const isActive = activeDbId === db.id && !showingCodeViewer && !showingFlow;
+                      <Workflow className="h-3 w-3 shrink-0" />
+                      <span className={flow.pinned ? 'font-medium' : 'italic'}>{flow.name}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCloseFlow(flow.id); }}
+                        className={`rounded p-0.5 hover:bg-muted transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                }
+                if (key.startsWith('db:')) {
+                  const dbId = key.slice('db:'.length);
+                  const db = openDatabases.find((d) => d.id === dbId);
+                  if (!db) return null;
+                  const isActive = activeDbId === db.id && leftTab === 'databases';
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => showDatabaseView(db.id)}
+                      className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${isActive ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                      title={db.name}
+                    >
+                      <Database className="h-3 w-3 shrink-0" />
+                      <span className={db.pinned ? 'font-medium' : 'italic'}>{db.name}</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCloseDatabase(db.id); }}
+                        className={`rounded p-0.5 hover:bg-muted transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                }
+                // ADR / draft tabs — keys `adr:<id>` or `draft:<id>`
+                const tab = openAdrs.find((o) => o.key === key);
+                if (!tab) return null;
+                const isActive = activeAdrKey === tab.key && leftTab === 'decisions';
+                const label = tab.kind === 'draft' ? tab.title : `${tab.id}: ${tab.title}`;
                 return (
                   <div
-                    key={db.id}
-                    onClick={() => showDatabaseView(db.id)}
-                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
-                      isActive
-                        ? 'bg-background text-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                    }`}
-                    title={db.name}
+                    key={key}
+                    onClick={() => showAdrView(tab.key)}
+                    onDoubleClick={() => {
+                      setOpenAdrs((prev) => prev.map((o) => (o.key === tab.key ? { ...o, pinned: true } : o)));
+                    }}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${isActive ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                    title={label}
                   >
-                    <Database className="h-3 w-3 shrink-0" />
-                    <span className={db.pinned ? 'font-medium' : 'italic'}>{db.name}</span>
+                    <ScrollText className="h-3 w-3 shrink-0" />
+                    <span className={tab.pinned ? 'font-medium' : 'italic'}>{label}</span>
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseDatabase(db.id);
-                      }}
-                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
-                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                      }`}
+                      onClick={(e) => { e.stopPropagation(); handleCloseAdrTab(tab.key); }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1102,6 +1304,16 @@ export default function RepoGraphPage() {
               analysisId={graphAnalysisId}
               violations={violations}
               isTab
+            />
+          ) : showingAdr && activeAdrTab ? (
+            <AdrViewerPanel
+              repoId={repoId}
+              kind={activeAdrTab.kind}
+              id={activeAdrTab.id}
+              onDraftResolved={() => {
+                handleCloseAdrTab(activeAdrTab.key);
+                bumpDecisionsRefresh();
+              }}
             />
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
@@ -1269,7 +1481,9 @@ export default function RepoGraphPage() {
                     ? 'Pick a flow to view its sequence diagram here.'
                     : leftTab === 'databases'
                       ? 'Pick a database to view its schema here.'
-                      : null}
+                      : leftTab === 'decisions'
+                        ? 'Pick an ADR or draft from the list. Or click "Suggest undocumented decisions" to generate drafts from the current code graph.'
+                        : null}
               </p>
             </div>
           )}

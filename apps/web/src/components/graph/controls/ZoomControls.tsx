@@ -1,6 +1,6 @@
 
 import { useReactFlow } from '@xyflow/react';
-import { ZoomIn, ZoomOut, Maximize2, LayoutGrid, Hand, Move } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, LayoutGrid, Hand, MousePointer2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 
@@ -59,14 +59,34 @@ export function ZoomControls({ onAutoLayout, panMode, onTogglePanMode }: ZoomCon
       {onTogglePanMode && (
         <>
           <Separator />
+          {/* Industry-standard mapping (Figma / Excalidraw / Miro / Maps):
+              Pointer = select and drag nodes; Hand = pan the viewport.
+              Active button is the current mode. */}
           <Button
             variant="ghost"
             size="icon-xs"
-            onClick={onTogglePanMode}
-            aria-label={panMode ? 'Switch to select mode' : 'Switch to move mode'}
-            title={panMode ? 'Switch to select mode' : 'Switch to move mode'}
+            onClick={() => {
+              if (panMode) onTogglePanMode();
+            }}
+            aria-label="Select mode — drag nodes to reposition them"
+            title="Select — drag a node to move it"
+            aria-pressed={!panMode}
+            className={!panMode ? 'bg-muted text-foreground' : undefined}
           >
-            {panMode ? <Move className="h-4 w-4" /> : <Hand className="h-4 w-4" />}
+            <MousePointer2 className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => {
+              if (!panMode) onTogglePanMode();
+            }}
+            aria-label="Pan mode — drag to move the viewport"
+            title="Pan — drag to move the viewport"
+            aria-pressed={panMode}
+            className={panMode ? 'bg-muted text-foreground' : undefined}
+          >
+            <Hand className="h-4 w-4" />
           </Button>
         </>
       )}

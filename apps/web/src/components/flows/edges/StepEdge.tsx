@@ -28,14 +28,14 @@ function StepEdgeComponent({
     isPlayed: boolean;
     showTrail: boolean;
     showEndDot: boolean;
+    isSelf?: boolean;
   };
 
-  const [edgePath] = getStraightPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-  });
+  // Self-calls draw a UML-style loop: right out of the lifeline, down,
+  // and back in with the arrowhead. Regular steps use a straight path.
+  const edgePath = edgeData.isSelf
+    ? buildSelfLoopPath(sourceX, sourceY, targetX, targetY)
+    : getStraightPath({ sourceX, sourceY, targetX, targetY })[0];
 
   const activeColor = edgeData.dbColor || stepTypeColors[edgeData.stepType] || '#6b7280';
   const color = edgeData.isActive ? activeColor : '#374151';
@@ -84,3 +84,13 @@ function StepEdgeComponent({
 }
 
 export const StepEdge = memo(StepEdgeComponent);
+
+/** UML self-call loop: right (out of the lifeline), down, left (back into
+ *  the lifeline). Source and target anchors share the same X; the layout
+ *  puts the target a few pixels below the source so this path has
+ *  vertical extent to render. */
+function buildSelfLoopPath(sx: number, sy: number, tx: number, ty: number): string {
+  const LOOP_WIDTH = 32;
+  const right = Math.max(sx, tx) + LOOP_WIDTH;
+  return `M ${sx},${sy} L ${right},${sy} L ${right},${ty} L ${tx},${ty}`;
+}

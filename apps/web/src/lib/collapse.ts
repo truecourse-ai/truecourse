@@ -1,6 +1,6 @@
-import dagre from 'dagre';
 import type { Node, Edge } from '@xyflow/react';
 import type { DepthLevel } from '@/types/graph';
+import { layoutNodesWithDagre } from '@/components/graph/layout';
 
 const COLLAPSED_HEIGHT = 32;
 const COLLAPSED_WIDTH = 260;
@@ -239,19 +239,12 @@ export function applyCollapseState(
     );
     if (topLevelNodes.length > 1) {
       const topLevelIds = new Set(topLevelNodes.map((n) => n.id));
-      const g = new dagre.graphlib.Graph();
-      g.setGraph({ rankdir: 'TB', nodesep: 150, ranksep: 200, marginx: 60, marginy: 60 });
-      g.setDefaultEdgeLabel(() => ({}));
 
-      for (const node of topLevelNodes) {
-        const style = (node as Record<string, unknown>).style as { width?: number; height?: number } | undefined;
-        g.setNode(node.id, {
-          width: style?.width ?? node.measured?.width ?? 280,
-          height: style?.height ?? node.measured?.height ?? 120,
-        });
-      }
-
+      // Promote each cross-module edge to a top-level edge between the
+      // service groups (or databases) that own its endpoints. Dedupe pairs
+      // so dagre doesn't over-weight heavily-connected groups.
       const seenEdgePairs = new Set<string>();
+      const layoutEdges: Edge[] = [];
       for (const edge of edges) {
         const srcGroup = getServiceGroupId(edge.source);
         const tgtGroup = getServiceGroupId(edge.target);
@@ -261,21 +254,24 @@ export function applyCollapseState(
           const key = `${src}::${tgt}`;
           if (!seenEdgePairs.has(key)) {
             seenEdgePairs.add(key);
-            g.setEdge(src, tgt);
+            layoutEdges.push({ ...edge, source: src, target: tgt });
           }
         }
       }
 
-      dagre.layout(g);
-
+      const positioned = layoutNodesWithDagre(topLevelNodes, layoutEdges, {
+        rankdir: 'TB',
+        nodesep: 150,
+        ranksep: 200,
+        marginx: 60,
+        marginy: 60,
+        defaultNodeWidth: 280,
+        defaultNodeHeight: 120,
+      });
+      const positionById = new Map(positioned.map((n) => [n.id, n.position]));
       for (const node of resultNodes) {
-        if (!topLevelIds.has(node.id)) continue;
-        const dagreNode = g.node(node.id);
-        if (!dagreNode) continue;
-        const style = (node as Record<string, unknown>).style as { width?: number; height?: number } | undefined;
-        const w = style?.width ?? node.measured?.width ?? 280;
-        const h = style?.height ?? node.measured?.height ?? 120;
-        node.position = { x: dagreNode.x - w / 2, y: dagreNode.y - h / 2 };
+        const pos = positionById.get(node.id);
+        if (pos) node.position = pos;
       }
     }
   }
