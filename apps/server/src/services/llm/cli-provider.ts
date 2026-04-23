@@ -17,6 +17,8 @@ import {
   buildModuleTemplateVars,
   buildCodeTemplateVars,
   buildFlowTemplateVars,
+  buildSurveyPrompt,
+  buildDraftPrompt,
   resolveId,
   resolveIds,
   type FlowEnrichmentContext,
@@ -31,6 +33,8 @@ import {
   CodeViolationOutputSchema,
   CodeViolationLifecycleOutputSchema,
   FlowEnrichmentOutputSchema,
+  AdrSurveyOutputSchema,
+  AdrDraftOutputSchema,
 } from './schemas.js';
 import type { UsageData } from '../usage.service.js';
 import type {
@@ -52,6 +56,10 @@ import type {
   DiffViolationItem,
   DiffViolationsResult,
   ServiceDescription,
+  AdrSurveyContext,
+  AdrSurveyResult,
+  AdrDraftContext,
+  AdrDraftResult,
 } from './provider.js';
 
 
@@ -816,6 +824,64 @@ export abstract class BaseCLIProvider implements LLMProvider {
       name: object.name,
       description: object.description,
       stepDescriptions: object.stepDescriptions,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // ADR Suggest
+  // ---------------------------------------------------------------------------
+
+  async generateAdrSurvey(
+    context: AdrSurveyContext,
+    opts?: { onStart?: () => void },
+  ): Promise<AdrSurveyResult> {
+    const prompt = buildSurveyPrompt({
+      graphSummary: context.graphSummary,
+      existingAdrs: context.existingAdrs,
+      rejectedSignatures: context.rejectedSignatures,
+      vocab: context.vocab,
+      maxCandidates: context.maxCandidates,
+      topicHint: context.topicHint,
+    });
+
+    log.info('[CLI] ADR survey call starting...');
+    const t0 = Date.now();
+    const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, AdrSurveyOutputSchema, {
+      extraArgs: ['--tools', ''], label: 'adr-survey', onStart: opts?.onStart,
+    });
+    const dur = Date.now() - t0;
+    log.info(`[CLI] ADR survey done in ${dur}ms — ${object.candidates.length} candidates`);
+    this.collectUsage('adr-survey', cliUsage, dur);
+
+    return { candidates: object.candidates };
+  }
+
+  async generateAdrDraft(
+    context: AdrDraftContext,
+    opts?: { onStart?: () => void },
+  ): Promise<AdrDraftResult> {
+    const prompt = buildDraftPrompt({
+      topic: context.topic,
+      entities: context.entities,
+      rationale: context.rationale,
+      graphSummary: context.graphSummary,
+    });
+
+    log.info(`[CLI] ADR draft call starting (topic=${context.topic})...`);
+    const t0 = Date.now();
+    const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, AdrDraftOutputSchema, {
+      extraArgs: ['--tools', ''], label: 'adr-draft', onStart: opts?.onStart,
+    });
+    const dur = Date.now() - t0;
+    log.info(`[CLI] ADR draft done in ${dur}ms — "${object.title}"`);
+    this.collectUsage('adr-draft', cliUsage, dur);
+
+    return {
+      title: object.title,
+      madrBody: object.madrBody,
+      topic: object.topic,
+      entities: object.entities,
+      confidence: object.confidence,
     };
   }
 }

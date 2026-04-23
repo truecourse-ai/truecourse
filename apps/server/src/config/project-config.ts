@@ -1,11 +1,24 @@
 import fs from 'node:fs';
 import { ensureRepoTruecourseDir, getRepoConfigPath } from './paths.js';
 
+export interface AdrConfig {
+  /** Directory ADR markdown files are written to. Relative to the repo root.
+   *  null/undefined = use default `docs/adr`. */
+  path?: string | null;
+  /** Draft-confidence floor for the suggest review queue. 0-1.
+   *  null/undefined = show all drafts. */
+  defaultThreshold?: number | null;
+  /** Max drafts a single `suggest` run may produce. null/undefined = 5. */
+  maxDraftsPerRun?: number | null;
+}
+
 export interface ProjectConfig {
   /** Rule categories enabled for this project. null/undefined = use all defaults. */
   enabledCategories?: string[] | null;
   /** Whether LLM-powered rules are enabled. null/undefined = use default (true). */
   enableLlmRules?: boolean | null;
+  /** ADR-related settings (Phase 19). */
+  adr?: AdrConfig | null;
 }
 
 const EMPTY: ProjectConfig = {};

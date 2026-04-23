@@ -20,12 +20,24 @@ import {
   runHooksStatus,
   runHooksRun,
 } from "./commands/hooks.js";
+import {
+  runAdrSuggest,
+  runAdrDrafts,
+  runAdrAccept,
+  runAdrReject,
+  runAdrEdit,
+  runAdrList,
+  runAdrShow,
+  runAdrStale,
+  runAdrLink,
+  runAdrUnlink,
+} from "./commands/adr.js";
 
 const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.5.5")
+  .version("0.6.0")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -233,6 +245,102 @@ hooksCmd
   .description("Run pre-commit checks (called by the hook)")
   .action(async () => {
     await runHooksRun();
+  });
+
+// ADR subcommands (Phase 19.1)
+const adrCmd = program
+  .command("adr")
+  .description("Architectural Decision Records — suggest, review, manage");
+
+adrCmd
+  .command("suggest")
+  .description("Generate draft ADRs from the current code graph")
+  .option("--threshold <n>", "draft confidence floor (0-1)")
+  .option("--max <n>", "max drafts this run")
+  .option("--topic <hint>", "focus hint for the LLM")
+  .option("--non-interactive", "skip interactive review; drafts stay in queue")
+  .option("--json", "machine-readable output (implies --non-interactive)")
+  .action(async (options) => {
+    await runAdrSuggest({
+      threshold: options.threshold,
+      max: options.max,
+      topic: options.topic,
+      nonInteractive: options.nonInteractive,
+      json: options.json,
+    });
+  });
+
+adrCmd
+  .command("drafts")
+  .description("List pending drafts in the review queue")
+  .option("--json", "machine-readable output")
+  .action(async (options) => {
+    await runAdrDrafts({ json: options.json });
+  });
+
+adrCmd
+  .command("accept <draftId>")
+  .description("Accept a draft — writes ADR-NNNN-<slug>.md")
+  .action(async (draftId: string) => {
+    await runAdrAccept(draftId);
+  });
+
+adrCmd
+  .command("reject <draftId>")
+  .description("Reject a draft — persists topic signature and deletes the draft")
+  .action(async (draftId: string) => {
+    await runAdrReject(draftId);
+  });
+
+adrCmd
+  .command("edit <draftId>")
+  .description("Edit a draft body in $EDITOR")
+  .action(async (draftId: string) => {
+    await runAdrEdit(draftId);
+  });
+
+adrCmd
+  .command("list")
+  .description("List accepted ADRs")
+  .option("--json", "machine-readable output")
+  .option("--status <status>", "filter by status (accepted | proposed | deprecated | superseded | stale)")
+  .option("--linked-to <nodeId>", "show only ADRs linked to this graph node")
+  .action(async (options) => {
+    await runAdrList({
+      json: options.json,
+      status: options.status,
+      linkedTo: options.linkedTo,
+    });
+  });
+
+adrCmd
+  .command("show <adrId>")
+  .description("Show a single ADR")
+  .option("--json", "machine-readable output")
+  .action(async (adrId: string, options) => {
+    await runAdrShow(adrId, { json: options.json });
+  });
+
+adrCmd
+  .command("stale")
+  .description("List ADRs flagged stale by the last analyze")
+  .option("--json", "machine-readable output")
+  .action(async (options) => {
+    await runAdrStale({ json: options.json });
+  });
+
+adrCmd
+  .command("link <adrId> <nodeId>")
+  .description("Add a link between an ADR and a graph node")
+  .action(async (adrId: string, nodeId: string) => {
+    await runAdrLink(adrId, nodeId);
+  });
+
+adrCmd
+  .command("unlink <adrId> <nodeId>")
+  .description("Remove a link between an ADR and a graph node")
+  .action(async (adrId: string, nodeId: string) => {
+    await runAdrUnlink(adrId, nodeId);
   });
 
 program.action(() => {

@@ -12,8 +12,16 @@
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS only)
 - `tools/cli/` — CLI commands (setup, start, analyze, list, add)
-- `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
-- `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
+- `tests/` — All tests (centralized, not colocated). Organized by concern:
+  - `tests/analyzer/` — analyzer engine unit tests (tree-sitter, rules, detectors)
+  - `tests/routes/` — HTTP route handlers (supertest against `createApp()`)
+  - `tests/services/` — analysis services (flow, graph, analyzer, diff-check, adr-suggester, etc.)
+  - `tests/store/` — file-store persistence (analysis-store, adr-store, adr-writer)
+  - `tests/llm/` — LLM provider infrastructure (cli-provider, concurrency, prompt mapping)
+  - `tests/cli/` — CLI command integration tests (analyze e2e, adr lifecycle, service daemon)
+  - `tests/shared/` — shared Zod schemas + types
+  - `tests/helpers/` — shared test utilities (`test-db.ts` file-store fixture helper)
+  - `tests/fixtures/` — sample TS/JS/Python projects used as test inputs
 
 ## Development Commands
 

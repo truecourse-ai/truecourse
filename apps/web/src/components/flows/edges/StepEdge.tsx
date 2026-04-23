@@ -28,20 +28,24 @@ function StepEdgeComponent({
     isPlayed: boolean;
     showTrail: boolean;
     showEndDot: boolean;
+    isSelf?: boolean;
   };
 
-  const [edgePath] = getStraightPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-  });
+  // Self-calls draw a UML-style loop: right out of the lifeline, down,
+  // and back in with the arrowhead. Regular steps use a straight path.
+  const edgePath = edgeData.isSelf
+    ? buildSelfLoopPath(sourceX, sourceY, targetX, targetY)
+    : getStraightPath({ sourceX, sourceY, targetX, targetY })[0];
 
   const activeColor = edgeData.dbColor || stepTypeColors[edgeData.stepType] || '#6b7280';
   const color = edgeData.isActive ? activeColor : '#374151';
   const markerId = `arrow-${id}`;
-  // Animate the dash pattern for played/current steps (marching ants — persists after completion)
-  const shouldAnimateDash = (edgeData.isPlayed || edgeData.isCurrent) && edgeData.showTrail;
+  // Animate the dash on every active edge — matches `DependencyEdge`'s
+  // always-on `animate-edge-flow` behavior so the main Graph tab and the
+  // sequence diagram (both main Flows tab and ADR flow fragments) feel
+  // equally "live". Inactive pre-play steps stay static so the dimmed
+  // "not yet run" state is still distinguishable.
+  const shouldAnimateDash = edgeData.isActive;
 
   return (
     <>
@@ -84,3 +88,13 @@ function StepEdgeComponent({
 }
 
 export const StepEdge = memo(StepEdgeComponent);
+
+/** UML self-call loop: right (out of the lifeline), down, left (back into
+ *  the lifeline). Source and target anchors share the same X; the layout
+ *  puts the target a few pixels below the source so this path has
+ *  vertical extent to render. */
+function buildSelfLoopPath(sx: number, sy: number, tx: number, ty: number): string {
+  const LOOP_WIDTH = 32;
+  const right = Math.max(sx, tx) + LOOP_WIDTH;
+  return `M ${sx},${sy} L ${right},${sy} L ${right},${ty} L ${tx},${ty}`;
+}

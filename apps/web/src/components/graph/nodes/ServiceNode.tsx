@@ -3,6 +3,7 @@ import { memo } from 'react';
 import { Handle, Position, useNodeConnections, type NodeProps } from '@xyflow/react';
 import { Monitor, Server, Cog, Package, AlertTriangle } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { renderInlineCode } from '@/lib/render-inline-code';
 import type { ServiceNodeData } from '@/types/graph';
 import { LAYER_COLORS } from '@/types/graph';
 
@@ -89,7 +90,7 @@ function ServiceNodeComponent({ data, selected }: NodeProps & { data: ServiceNod
 
         {description && (
           <p className="mt-2 max-w-[240px] text-[10px] leading-tight text-muted-foreground">
-            {description}
+            {renderInlineCode(description)}
           </p>
         )}
 

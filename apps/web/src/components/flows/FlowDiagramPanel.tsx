@@ -1,36 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  ReactFlow,
-  ReactFlowProvider,
-  Background,
-  useReactFlow,
-  type Node,
-  type Edge,
-  type NodeTypes,
-  type EdgeTypes,
-  Position,
-} from '@xyflow/react';
-import { Loader2, Sparkles, ZoomIn, ZoomOut, Maximize2, Globe, Zap, Clock, Power } from 'lucide-react';
+import { ReactFlow, ReactFlowProvider, Background } from '@xyflow/react';
+import { Loader2, Sparkles, Globe, Zap, Clock, Power } from 'lucide-react';
 import { FlowPlayer } from './FlowPlayer';
-import { ParticipantNode } from './nodes/ParticipantNode';
-import { AnchorNode } from './nodes/AnchorNode';
-import { StepDetailNode } from './nodes/StepDetailNode';
-import { StepEdge } from './edges/StepEdge';
+import { flowNodeTypes, flowEdgeTypes } from './registries';
+import { buildFlowLayout } from './layout';
+import { ZoomControls } from '@/components/graph/controls/ZoomControls';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import * as api from '@/lib/api';
 import type { FlowDetailResponse, ViolationResponse } from '@/lib/api';
-import { DB_TYPE_COLORS } from '@/lib/database-colors';
-
-const nodeTypes: NodeTypes = {
-  participant: ParticipantNode,
-  anchor: AnchorNode,
-  stepDetail: StepDetailNode,
-};
-
-const edgeTypes: EdgeTypes = {
-  step: StepEdge,
-};
 
 type FlowDiagramPanelProps = {
   repoId: string;
@@ -41,38 +18,6 @@ type FlowDiagramPanelProps = {
    *  persists back to LATEST.json. */
   canEnrich?: boolean;
 };
-
-const COLUMN_WIDTH = 240;
-const ROW_HEIGHT_COMPACT = 60;
-const ROW_HEIGHT_WITH_DESC = 100;
-const HEADER_HEIGHT = 80;
-const PADDING_X = 60;
-const PADDING_Y = 20;
-const PARTICIPANT_WIDTH = 180;
-
-function FlowZoomControls() {
-  const { zoomIn, zoomOut, fitView } = useReactFlow();
-
-  return (
-    <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-1 rounded-lg border border-border bg-card p-1 shadow-md">
-      <Button variant="ghost" size="icon-xs" onClick={() => zoomIn()} aria-label="Zoom in">
-        <ZoomIn className="h-4 w-4" />
-      </Button>
-      <Button variant="ghost" size="icon-xs" onClick={() => zoomOut()} aria-label="Zoom out">
-        <ZoomOut className="h-4 w-4" />
-      </Button>
-      <Separator />
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={() => fitView({ padding: 0.3, duration: 300 })}
-        aria-label="Fit view"
-      >
-        <Maximize2 className="h-4 w-4" />
-      </Button>
-    </div>
-  );
-}
 
 function FlowDiagramInner({ repoId, flowId, analysisId, canEnrich }: FlowDiagramPanelProps) {
   const [flow, setFlow] = useState<FlowDetailResponse | null>(null);
@@ -153,166 +98,12 @@ function FlowDiagramInner({ repoId, flowId, analysisId, canEnrich }: FlowDiagram
 
   const { nodes, edges } = useMemo(() => {
     if (!flow || !flow.steps?.length) return { nodes: [], edges: [] };
-
-    const steps = [...flow.steps].sort((a, b) => a.stepOrder - b.stepOrder);
-    const hasAnyDescription = steps.some((s) => !!s.dataDescription);
-    const rowHeight = hasAnyDescription ? ROW_HEIGHT_WITH_DESC : ROW_HEIGHT_COMPACT;
-
-    // Track which services have already had their service-level violations attached
-    const serviceViolationAttached = new Set<string>();
-
-    // Collect unique participants (service::module pairs)
-    const participantKeys: string[] = [];
-    const participantSet = new Set<string>();
-
-    const addParticipant = (service: string, module: string) => {
-      const key = `${service}::${module}`;
-      if (!participantSet.has(key)) {
-        participantSet.add(key);
-        participantKeys.push(key);
-      }
-    };
-
-    for (const step of steps) {
-      addParticipant(step.sourceService, step.sourceModule);
-      addParticipant(step.targetService, step.targetModule);
-    }
-
-    const columnIndex = new Map<string, number>();
-    participantKeys.forEach((key, i) => columnIndex.set(key, i));
-
-    // Center of each participant column
-    const colCenter = (col: number) => PADDING_X + col * COLUMN_WIDTH + PARTICIPANT_WIDTH / 2;
-
-    // Build participant header nodes
-    const nodes: Node[] = participantKeys.map((key, i) => {
-      const [service, module] = key.split('::');
-      return {
-        id: `participant-${key}`,
-        type: 'participant',
-        position: { x: PADDING_X + i * COLUMN_WIDTH, y: PADDING_Y },
-        data: {
-          service,
-          module,
-          height: HEADER_HEIGHT + steps.length * rowHeight + 20,
-          dbType: null, // ParticipantNode auto-detects from module field
-        },
-        draggable: false,
-        selectable: false,
-      };
+    return buildFlowLayout<ViolationResponse>({
+      steps: flow.steps,
+      violationsByTarget,
+      playback: { currentStep, isPlaying },
+      includeStepDetails: true,
     });
-
-    // Build step edges with properly centered anchor nodes
-    const edges: Edge[] = steps.map((step, i) => {
-      const sourceKey = `${step.sourceService}::${step.sourceModule}`;
-      const targetKey = `${step.targetService}::${step.targetModule}`;
-      const sourceCol = columnIndex.get(sourceKey) ?? 0;
-      const targetCol = columnIndex.get(targetKey) ?? 0;
-      const y = HEADER_HEIGHT + PADDING_Y + i * rowHeight + rowHeight / 2;
-
-      const isActive = currentStep > 0 && step.stepOrder <= currentStep;
-      const isCurrent = currentStep > 0 && step.stepOrder === currentStep;
-      const isPlayed = currentStep > 0 && step.stepOrder < currentStep;
-
-      const srcNodeId = `step-src-${step.stepOrder}`;
-      const tgtNodeId = `step-tgt-${step.stepOrder}`;
-
-      const isReverse = targetCol < sourceCol;
-      // Place anchors at the center of participant columns
-      const srcCenterX = colCenter(sourceCol);
-      const tgtCenterX = colCenter(targetCol);
-
-      nodes.push(
-        {
-          id: srcNodeId,
-          type: 'anchor',
-          position: { x: srcCenterX, y },
-          data: {},
-          draggable: false,
-          selectable: false,
-          sourcePosition: isReverse ? Position.Left : Position.Right,
-          targetPosition: isReverse ? Position.Right : Position.Left,
-        },
-        {
-          id: tgtNodeId,
-          type: 'anchor',
-          position: { x: tgtCenterX, y },
-          data: {},
-          draggable: false,
-          selectable: false,
-          sourcePosition: isReverse ? Position.Left : Position.Right,
-          targetPosition: isReverse ? Position.Right : Position.Left,
-        },
-      );
-
-      const methodName = step.targetMethod;
-      const typeLabel = step.stepType === 'call' ? '' : ` [${step.stepType}]`;
-      const description = step.dataDescription || null;
-      const dbColor = (step.stepType === 'db-read' || step.stepType === 'db-write')
-        ? (DB_TYPE_COLORS[step.targetModule] || null)
-        : null;
-
-      // Attach service-level violations only to the first step in that service
-      const serviceViolations = !serviceViolationAttached.has(step.targetService)
-        ? (violationsByTarget.get(`service::${step.targetService}`) || [])
-        : [];
-      if (serviceViolations.length > 0) serviceViolationAttached.add(step.targetService);
-
-      const stepViolations = [
-        ...(violationsByTarget.get(`${step.targetService}::${step.targetModule}::${step.targetMethod}`) || []),
-        ...(violationsByTarget.get(`${step.targetService}::${step.targetModule}`) || []),
-        ...serviceViolations,
-      ].filter((v, i, arr) => arr.findIndex((x) => x.id === v.id) === i);
-
-      // Step detail node — spans between source and target columns, centered
-      const leftX = Math.min(srcCenterX, tgtCenterX);
-      const rightX = Math.max(srcCenterX, tgtCenterX);
-      const spanWidth = rightX - leftX;
-      nodes.push({
-        id: `step-detail-${step.stepOrder}`,
-        type: 'stepDetail',
-        position: { x: leftX, y: y + 8 },
-        data: {
-          methodName: `${methodName}${typeLabel}`,
-          description,
-          stepType: step.stepType,
-          dbColor,
-          isAsync: step.isAsync,
-          isActive,
-          stepOrder: step.stepOrder,
-          violations: stepViolations,
-          width: spanWidth,
-        },
-        draggable: false,
-        selectable: false,
-        style: { zIndex: 10, width: spanWidth },
-      });
-
-      return {
-        id: `step-${step.stepOrder}`,
-        source: srcNodeId,
-        target: tgtNodeId,
-        type: 'step',
-        animated: isCurrent && isPlaying,
-        style: {
-          opacity: isActive ? 1 : 0.35,
-        },
-        markerEnd: undefined,
-        data: {
-          stepType: step.stepType,
-          dbColor,
-          isAsync: step.isAsync,
-          isActive,
-          isCurrent,
-          isAnimating: isCurrent && isPlaying,
-          isPlayed,
-          showTrail: currentStep > 0,
-          showEndDot: step.stepOrder === steps.length && currentStep >= steps.length && !isPlaying,
-        },
-      };
-    });
-
-    return { nodes, edges };
   }, [flow, currentStep, isPlaying, violationsByTarget]);
 
   if (isLoading) {
@@ -373,8 +164,8 @@ function FlowDiagramInner({ repoId, flowId, analysisId, canEnrich }: FlowDiagram
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
+          nodeTypes={flowNodeTypes}
+          edgeTypes={flowEdgeTypes}
           fitView
           fitViewOptions={{ padding: 0.2 }}
           nodesDraggable={false}
@@ -387,7 +178,7 @@ function FlowDiagramInner({ repoId, flowId, analysisId, canEnrich }: FlowDiagram
           proOptions={{ hideAttribution: true }}
         >
           {/* No background grid — cleaner for sequence diagrams */}
-          <FlowZoomControls />
+          <ZoomControls />
         </ReactFlow>
 
         {/* Player controls */}

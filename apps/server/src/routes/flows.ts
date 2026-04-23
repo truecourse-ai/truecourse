@@ -3,8 +3,8 @@ import { createAppError } from '../middleware/error.js';
 import {
   computeFlowSeverities,
   enrichFlowWithLLM,
-  getFlowFromLatest,
 } from '../services/flow.service.js';
+import { readLatest } from '../lib/analysis-store.js';
 import { resolveProjectForRequest } from '../config/current-project.js';
 import {
   readActiveViolationsForAnalysisId,
@@ -70,12 +70,12 @@ router.post(
       const id = req.params.id as string;
       const flowId = req.params.flowId as string;
       const repo = resolveProjectForRequest(id);
-      const existing = getFlowFromLatest(repo.path, flowId);
+      const existing = readLatest(repo.path)?.graph.flows.find((f) => f.id === flowId);
       if (!existing) throw createAppError('Flow not found', 404);
 
       await enrichFlowWithLLM(repo.path, flowId);
 
-      const enriched = getFlowFromLatest(repo.path, flowId);
+      const enriched = readLatest(repo.path)?.graph.flows.find((f) => f.id === flowId);
       res.json(enriched);
     } catch (err) {
       next(err);

@@ -88,6 +88,48 @@ truecourse rules llm --enable                  # Enable LLM rules
 truecourse rules llm --disable                 # Disable LLM rules
 ```
 
+### ADRs (Architectural Decision Records)
+
+TrueCourse can surface the architectural decisions already embedded in your code — and document them as MADR-format ADRs that live in `docs/adr/` alongside your source. Uses the LLM to propose draft ADRs from the analyzed graph; you review and accept.
+
+```bash
+truecourse adr suggest                   # Generate draft ADRs from the code graph
+truecourse adr suggest --max 3           # Cap drafts per run
+truecourse adr suggest --topic "data"    # Optional focus hint
+truecourse adr suggest --non-interactive --json   # CI-friendly output
+
+truecourse adr drafts                    # List pending drafts
+truecourse adr accept <draftId>          # Promote draft → docs/adr/ADR-NNNN-<slug>.md
+truecourse adr reject <draftId>          # Reject; topic won't resurface next run
+truecourse adr edit <draftId>            # Edit the draft body in $EDITOR
+
+truecourse adr list                      # List accepted ADRs
+truecourse adr show <adrId>              # Show a single ADR
+truecourse adr stale                     # ADRs whose linked entities were removed
+
+truecourse adr link <adrId> <nodeId>     # Add a manual link
+truecourse adr unlink <adrId> <nodeId>   # Remove a link
+```
+
+ADR output directory, draft-confidence threshold, and per-run cap are configurable under the `adr` block of `.truecourse/config.json` — see [Configuration](#configuration).
+
+The **Decisions** tab in the dashboard mirrors the CLI — review pending drafts, accept/reject inline, see the accepted ADR corpus, and view staleness warnings when an ADR references entities that no longer exist in the graph.
+
+**Living Fragments.** Draft and accepted ADRs can embed fenced blocks that render live in the dashboard, showing the exact subgraph or flow the decision is about:
+
+~~~
+```adr-graph
+services: [auth-service, billing-service]
+show: dependencies
+```
+
+```adr-flow
+flowId: user-registration
+```
+~~~
+
+At accept time, the referenced subgraph/flow is resolved against the current graph and a compact snapshot is captured on the ADR. The dashboard renders the snapshot; staleness flags an ADR whose fragment references a removed service, module, or flow. Plain markdown readers (GitHub, VS Code) see the fenced block as readable YAML — no broken rendering.
+
 ### Git Hooks
 
 TrueCourse can install a pre-commit hook that blocks commits introducing new violations at or above a configured severity:
@@ -172,9 +214,41 @@ The first `truecourse analyze` (or `truecourse add`) in a fresh repo asks whethe
 
 ## Configuration
 
-TrueCourse talks to Claude Code via the `claude` CLI. You can tune how that interaction behaves — which binary to invoke, which model to pass, timeouts, retries, and how many `claude` processes to run in parallel — through environment variables.
+Two layers: a **per-repo project file** (`.truecourse/config.json` — committable, team-wide settings) and **environment variables** (local / global overrides, typically for Claude Code integration).
 
-For packaged installs (`npx truecourse` or `npm install -g truecourse`), the simplest place to set them is `~/.truecourse/.env`. The file is loaded automatically on every invocation:
+### Per-repo config — `.truecourse/config.json`
+
+Committable. Shape:
+
+```json
+{
+  "enabledCategories": null,
+  "enableLlmRules": null,
+  "adr": {
+    "path": "docs/adr",
+    "defaultThreshold": 0.5,
+    "maxDraftsPerRun": 5
+  }
+}
+```
+
+| Field | Purpose | Default | Normally set via |
+|---|---|---|---|
+| `enabledCategories` | Array of rule categories active on this repo. `null` = use global defaults. | `null` | `truecourse rules categories --enable/--disable <name>` |
+| `enableLlmRules` | Whether LLM-powered rules run. `null` = use global default (`true`). | `null` | `truecourse rules llm --enable/--disable` |
+| `adr.path` | Output directory for accepted ADR files, relative to repo root. | `docs/adr` | hand-edit |
+| `adr.defaultThreshold` | Draft-confidence floor for the suggest review queue (0–1). Overridden by `--threshold`. | `0` (show all) | hand-edit or `--threshold` on `adr suggest` |
+| `adr.maxDraftsPerRun` | Cap on drafts produced by a single `suggest` run. Overridden by `--max`. | `5` | hand-edit or `--max` on `adr suggest` |
+
+Rule fields are normally managed via the CLI so the file stays in a consistent shape. ADR fields are typically hand-edited once per repo.
+
+Git-hook policy lives in a separate file — see [Git Hooks](#git-hooks) for `.truecourse/hooks.yaml`.
+
+### Environment variables — Claude Code integration
+
+TrueCourse talks to Claude Code via the `claude` CLI. Tune how that interaction behaves — which binary, which model, timeouts, retries, concurrency — through environment variables.
+
+For packaged installs (`npx truecourse` or `npm install -g truecourse`), the simplest place to set them is `~/.truecourse/.env`. Loaded automatically on every invocation:
 
 ```
 CLAUDE_CODE_BINARY=claude             # override the `claude` binary on PATH

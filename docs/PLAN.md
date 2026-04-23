@@ -138,7 +138,7 @@ truecourse/
 ## Testing Strategy
 
 - **Framework:** Vitest
-- **Test location:** All tests live in a centralized `tests/` folder at the repo root, organized by package (`tests/shared/`, `tests/analyzer/`, `tests/server/`)
+- **Test location:** All tests live in a centralized `tests/` folder at the repo root, organized by concern: `tests/analyzer/`, `tests/routes/`, `tests/services/`, `tests/store/`, `tests/llm/`, `tests/cli/`, `tests/shared/`
 - **Fixture project:** `tests/fixtures/sample-project/` — a small multi-service TS/JS repo used by analyzer and server tests
 - **Convention:** Test files named `*.test.ts`
 - **Categories:** Unit tests (no I/O), integration tests (filesystem/DB), E2E tests (full server + client)
@@ -1911,7 +1911,18 @@ Track business logic requirements alongside code, verify which are implemented (
 
 ---
 
-## Phase 19: ADR (Architectural Decision Records) `STATUS: BACKLOG`
+## Phase 19: ADR (Architectural Decision Records) `STATUS: IN PROGRESS`
+
+See **`docs/ADR_PLAN.md`** for the authoritative sub-phase breakdown (19.1 Suggest, 19.2 Rule Codification, 19.3 Consistency, 19.4 Diff, 19.5 Add, 19.6 BYO, 19.7 Agent Skill) and **`docs/19_1_IMPL.md`** for the implementation plan of the current sub-phase.
+
+Sub-phase status:
+- **19.1 Suggest** — `STATUS: DONE` (LLM generates draft ADRs with Living Fragments from code graph + flows; dashboard renders frozen subgraph/flow snapshots per ADR)
+- 19.2 Rule Codification — `STATUS: BACKLOG`
+- 19.3 Consistency Checks — `STATUS: BACKLOG`
+- 19.4 Diff Integration — `STATUS: BACKLOG`
+- 19.5 Add (blank-slate authoring) — `STATUS: BACKLOG`
+- 19.6 BYO (external ADRs) — `STATUS: BACKLOG`
+- 19.7 AI Agent Skill — `STATUS: BACKLOG`
 
 Surface and generate Architectural Decision Records, linking them to the code structures they shaped. Bridges the gap between "what the code looks like" and "why it was built that way."
 

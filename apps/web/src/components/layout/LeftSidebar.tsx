@@ -1,8 +1,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network } from 'lucide-react';
+import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network, ScrollText } from 'lucide-react';
 
-export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses';
+export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses' | 'decisions';
 
 const TAB_LABELS: Record<LeftTab, string> = {
   home: 'Home',
@@ -11,6 +11,7 @@ const TAB_LABELS: Record<LeftTab, string> = {
   flows: 'Flows',
   databases: 'Databases',
   analyses: 'Analyses',
+  decisions: 'Decisions',
 };
 
 const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
@@ -30,6 +31,7 @@ const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
   { id: 'flows', icon: Workflow, label: 'Flows' },
   { id: 'files', icon: FolderTree, label: 'Files' },
   { id: 'databases', icon: Database, label: 'Databases' },
+  { id: 'decisions', icon: ScrollText, label: 'Decisions' },
   { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
 ];
 

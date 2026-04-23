@@ -632,3 +632,192 @@ export function getAnalyticsResolution(
   return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
 }
 
+
+// ---------------------------------------------------------------------------
+// ADRs (Phase 19.1)
+// ---------------------------------------------------------------------------
+
+/** Metadata-only index entry. Returned by list endpoints. Sections live on
+ *  disk in the MADR file and are fetched separately via `getAdr(id)`. */
+/** Matches `FragmentSnapshot` in `packages/shared/src/types/adr.ts`. */
+export type AdrGraphFragmentNode = {
+  id: string;
+  name: string;
+  kind: 'service' | 'module' | 'database';
+  description?: string | null;
+  // service only
+  serviceType?: string;
+  framework?: string | null;
+  fileCount?: number;
+  layers?: string[];
+  rootPath?: string;
+  // database only
+  databaseType?: string;
+  tableCount?: number;
+  connectedServices?: string[];
+  // module only
+  moduleKind?: string;
+  methodCount?: number;
+};
+
+export type AdrGraphFragmentEdge = {
+  source: string;
+  target: string;
+  count?: number;
+  dependencyType?: string;
+};
+
+export type AdrFragmentSnapshot =
+  | {
+      kind: 'graph';
+      locator: { services?: string[]; modules?: string[]; show?: string };
+      capturedAt: string;
+      nodes: AdrGraphFragmentNode[];
+      edges: AdrGraphFragmentEdge[];
+      graphHash: string;
+    }
+  | {
+      kind: 'flow';
+      locator: { flowId: string; fromStep?: number; toStep?: number };
+      capturedAt: string;
+      flowName: string;
+      steps: Array<{
+        stepOrder: number;
+        sourceService: string;
+        sourceModule?: string;
+        targetService: string;
+        targetModule?: string;
+        targetMethod?: string;
+        stepType: string;
+        isAsync?: boolean;
+        dataDescription?: string | null;
+      }>;
+      graphHash: string;
+    };
+
+export type AdrListItem = {
+  id: string;
+  number: number;
+  title: string;
+  status: 'proposed' | 'accepted' | 'deprecated' | 'superseded' | 'stale';
+  date: string;
+  path: string;
+  deciders?: string[];
+  linkedNodeIds: string[];
+  supersedes?: string[];
+  supersededBy?: string;
+  requiredEntities: string[];
+  isStale?: boolean;
+  staleReasons?: string[];
+  sourceDraftId?: string;
+  fragments?: AdrFragmentSnapshot[];
+};
+
+/** Full ADR — index entry plus parsed MADR sections. Returned by detail
+ *  endpoints and by `acceptAdrDraft`.
+ *  `source` is the raw `.md` bytes on disk — the Raw-mode editor reads
+ *  and writes this; Preview mode keeps using `sections` + metadata. */
+export type AdrResponse = AdrListItem & {
+  sections: { context: string; decision: string; consequences: string };
+  source: string;
+};
+
+export type AdrDraftResponse = {
+  id: string;
+  createdAt: string;
+  title: string;
+  topic: string;
+  entities: string[];
+  madrBody: string;
+  confidence: number;
+  /** Raw `.md` source (frontmatter + body) — what Raw mode edits. */
+  source: string;
+  /** Fragment snapshots resolved live against current LATEST.graph — drafts
+   *  don't persist snapshots (capture happens at accept time), so the server
+   *  computes them on each read so the preview renders the same components
+   *  the accepted ADR will. */
+  fragments?: AdrFragmentSnapshot[];
+};
+
+export function getAdrs(repoId: string): Promise<{ adrs: AdrListItem[]; generatedAt: string | null }> {
+  return fetchApi(`/api/repos/${repoId}/adrs`);
+}
+
+export function getAdr(repoId: string, adrId: string): Promise<{ adr: AdrResponse }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/${adrId}`);
+}
+
+export function getAdrDrafts(repoId: string): Promise<{ drafts: AdrDraftResponse[] }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/drafts`);
+}
+
+export function suggestAdrs(
+  repoId: string,
+  body: { threshold?: number; max?: number; topicHint?: string } = {},
+): Promise<{ runId: string }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/suggest`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function acceptAdrDraft(
+  repoId: string,
+  draftId: string,
+): Promise<{ adr: AdrResponse; filePath: string }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/drafts/${draftId}/accept`, { method: 'POST' });
+}
+
+export function rejectAdrDraft(
+  repoId: string,
+  draftId: string,
+): Promise<{ signature: { topic: string; entities: string[] } }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/drafts/${draftId}/reject`, { method: 'POST' });
+}
+
+/** Replace a draft's raw `.md` source. Server reparses via
+ *  `parseAdrDraft` and rewrites the file. Returns the reparsed draft. */
+export function saveAdrDraftRaw(
+  repoId: string,
+  draftId: string,
+  source: string,
+): Promise<{ draft: AdrDraftResponse }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/drafts/${draftId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  });
+}
+
+/** Replace an accepted ADR's raw `.md` source. Server reparses via
+ *  `parseAdr` and rewrites the file. Returns the reloaded ADR. */
+export function saveAdrRaw(
+  repoId: string,
+  adrId: string,
+  source: string,
+): Promise<{ adr: AdrResponse }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/${adrId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  });
+}
+
+export function linkAdrNode(
+  repoId: string,
+  adrId: string,
+  nodeId: string,
+): Promise<{ adr: AdrResponse }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/${adrId}/link`, {
+    method: 'POST',
+    body: JSON.stringify({ nodeId }),
+  });
+}
+
+export function unlinkAdrNode(
+  repoId: string,
+  adrId: string,
+  nodeId: string,
+): Promise<{ adr: AdrResponse }> {
+  return fetchApi(`/api/repos/${repoId}/adrs/${adrId}/link/${encodeURIComponent(nodeId)}`, {
+    method: 'DELETE',
+  });
+}

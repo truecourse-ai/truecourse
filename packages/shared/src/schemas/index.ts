@@ -27,3 +27,28 @@ export const GenerateViolationsSchema = z.object({
 })
 
 export type GenerateViolationsInput = z.infer<typeof GenerateViolationsSchema>
+
+// ---------------------------------------------------------------------------
+// ADR API request schemas — used by the HTTP routes (web UI) only.
+// The CLI imports `suggestAdrsInProcess` etc. directly; these don't apply there.
+// ---------------------------------------------------------------------------
+
+export const SuggestAdrsRequestSchema = z.object({
+  threshold: z.number().min(0).max(1).optional(),
+  max: z.number().int().positive().optional(),
+  topicHint: z.string().optional(),
+})
+export type SuggestAdrsRequest = z.infer<typeof SuggestAdrsRequestSchema>
+
+/** Raw-MADR save payload. Single body for both drafts and accepted ADRs —
+ *  the user edits the full `.md` document (frontmatter + body) in the
+ *  Raw mode textarea, sends it back whole, and the server reparses. */
+export const SaveRawMadrRequestSchema = z.object({
+  source: z.string().min(1),
+})
+export type SaveRawMadrRequest = z.infer<typeof SaveRawMadrRequestSchema>
+
+export const LinkAdrRequestSchema = z.object({
+  nodeId: z.string().min(1),
+})
+export type LinkAdrRequest = z.infer<typeof LinkAdrRequestSchema>

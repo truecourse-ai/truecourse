@@ -702,3 +702,221 @@ export function getPrompt(
   }
   return text;
 }
+
+// ===========================================================================
+// ADR Suggest (Phase 19.1) — survey + draft prompts + graph summary
+// ===========================================================================
+//
+// ADR prompts don't use the `PROMPT_DEFINITIONS` registry: they take
+// structured vars rather than flat key/value substitutions, and their
+// template shape is sufficiently different from the violation prompts that
+// sharing `getPrompt(...)` would fight the types. Kept in this file anyway
+// so all LLM-facing prompts live in one place.
+
+import type { TopicSignature } from '@truecourse/shared';
+import type { Graph } from '../../types/snapshot.js';
+
+/**
+ * Compact, deterministic text view of the code graph. Shared by the survey
+ * and draft prompts. Enough signal for the LLM to reason about services,
+ * dependencies, and major modules without flooding the context window.
+ */
+export function buildGraphSummary(graph: Graph): string {
+  const lines: string[] = [];
+  lines.push(`Services (${graph.services.length}):`);
+  for (const svc of graph.services) {
+    const layers = graph.layers
+      .filter((l) => l.serviceId === svc.id)
+      .map((l) => l.layer)
+      .join(', ');
+    lines.push(
+      `- ${svc.name} [${svc.type}${svc.framework ? `, ${svc.framework}` : ''}]` +
+        (svc.fileCount != null ? ` · ${svc.fileCount} files` : '') +
+        (layers ? ` · layers: ${layers}` : ''),
+    );
+  }
+
+  if (graph.serviceDependencies.length) {
+    lines.push('', `Service dependencies (${graph.serviceDependencies.length}):`);
+    const nameById = new Map(graph.services.map((s) => [s.id, s.name]));
+    for (const dep of graph.serviceDependencies) {
+      const src = nameById.get(dep.sourceServiceId) ?? dep.sourceServiceId;
+      const tgt = nameById.get(dep.targetServiceId) ?? dep.targetServiceId;
+      lines.push(`- ${src} → ${tgt}${dep.dependencyCount != null ? ` (${dep.dependencyCount})` : ''}`);
+    }
+  }
+
+  if (graph.modules.length) {
+    lines.push('', `Modules (${graph.modules.length} total, showing top 20 by export count):`);
+    const top = [...graph.modules]
+      .sort((a, b) => b.exportCount - a.exportCount)
+      .slice(0, 20);
+    for (const mod of top) {
+      lines.push(`- ${mod.name} [${mod.kind}] in ${mod.filePath} (${mod.exportCount} exports)`);
+    }
+  }
+
+  if (graph.databases.length) {
+    lines.push('', `Databases (${graph.databases.length}):`);
+    for (const db of graph.databases) {
+      lines.push(
+        `- ${db.name} [${db.type}]` +
+          (db.connectedServices?.length ? ` · used by: ${db.connectedServices.join(', ')}` : ''),
+      );
+    }
+  }
+
+  // Flows (M10) — request-handling / event sequences across services.
+  // Critical context for communication-pattern and service-boundary drafts.
+  // Capped at top-N by step count + max steps per flow so the context
+  // window doesn't blow up on repos with hundreds of flows.
+  if (graph.flows.length) {
+    const MAX_FLOWS = 15;
+    const MAX_STEPS_PER_FLOW = 8;
+    const topFlows = [...graph.flows]
+      .sort((a, b) => b.stepCount - a.stepCount)
+      .slice(0, MAX_FLOWS);
+    const truncated = graph.flows.length > MAX_FLOWS;
+    lines.push(
+      '',
+      `Flows (${graph.flows.length}${truncated ? `, showing top ${MAX_FLOWS} by step count` : ''}):`,
+    );
+    for (const flow of topFlows) {
+      lines.push(
+        `- ${flow.name} [${flow.trigger}] · entry: ${flow.entryService}.${flow.entryMethod} · ${flow.stepCount} steps`,
+      );
+      const shownSteps = flow.steps.slice(0, MAX_STEPS_PER_FLOW);
+      for (const step of shownSteps) {
+        lines.push(
+          `  ${step.stepOrder}. ${step.sourceService} → ${step.targetService} (${step.stepType})`,
+        );
+      }
+      if (flow.steps.length > MAX_STEPS_PER_FLOW) {
+        lines.push(`  … (${flow.steps.length - MAX_STEPS_PER_FLOW} more steps)`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Survey prompt — Pass 1: identify candidate topics
+// ---------------------------------------------------------------------------
+
+export interface SurveyPromptVars {
+  graphSummary: string;
+  existingAdrs: Array<{ id: string; title: string; topic?: string }>;
+  rejectedSignatures: TopicSignature[];
+  vocab: readonly string[];
+  maxCandidates: number;
+  topicHint?: string;
+}
+
+export function buildSurveyPrompt(vars: SurveyPromptVars): string {
+  const existingLines = vars.existingAdrs.length
+    ? vars.existingAdrs.map((a) => `- ${a.id}: ${a.title}`).join('\n')
+    : '(none)';
+
+  const rejectedLines = vars.rejectedSignatures.length
+    ? vars.rejectedSignatures
+        .map((s) => `- topic=${s.topic}, entities=[${s.entities.join(', ')}]`)
+        .join('\n')
+    : '(none)';
+
+  const hintLine = vars.topicHint ? `\nUser focus hint: ${vars.topicHint}\n` : '';
+
+  return [
+    'You are an architectural decision reviewer. Your job is to look at a codebase',
+    'and identify architectural decisions that SHOULD have an ADR but currently do not.',
+    '',
+    `Propose at most ${vars.maxCandidates} candidates. Do not pad to the maximum —`,
+    'only include decisions that are genuinely non-obvious and worth documenting.',
+    'Do NOT propose obvious/universal choices (e.g. "we use TypeScript").',
+    '',
+    '## Code graph',
+    '',
+    vars.graphSummary,
+    '',
+    '## Existing ADRs (do NOT re-propose decisions already covered by these)',
+    '',
+    existingLines,
+    '',
+    '## Previously rejected topics (do NOT re-propose)',
+    '',
+    rejectedLines,
+    '',
+    '## Topic vocabulary (you MUST pick one of these per candidate)',
+    '',
+    vars.vocab.map((t) => `- ${t}`).join('\n'),
+    hintLine,
+    '## Output',
+    '',
+    'Return a JSON object with a `candidates` array. Each candidate has:',
+    '- `topic`: one of the vocab values above',
+    '- `entities`: array of graph node IDs (service names or module names)',
+    '  that this decision is about. Only use IDs/names that appear in the',
+    '  code graph above.',
+    '- `rationale`: one sentence explaining why this decision is non-obvious',
+    '  and worth documenting.',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Draft prompt — Pass 2: write one MADR for one candidate
+// ---------------------------------------------------------------------------
+
+export interface DraftPromptVars {
+  topic: string;
+  entities: string[];
+  rationale: string;
+  graphSummary: string;
+}
+
+export function buildDraftPrompt(vars: DraftPromptVars): string {
+  return [
+    'You are writing a MADR-format architectural decision record based on an',
+    'identified architectural pattern in an existing codebase.',
+    '',
+    `Topic: ${vars.topic}`,
+    `Entities involved: ${vars.entities.join(', ') || '(none)'}`,
+    `Why this matters: ${vars.rationale}`,
+    '',
+    '## Code graph (for context)',
+    '',
+    vars.graphSummary,
+    '',
+    '## Output',
+    '',
+    'Return a JSON object with:',
+    '- `title`: a short title (≤ 80 chars). Do NOT include "ADR-" prefix or',
+    '  numbering — those are added on accept.',
+    '- `madrBody`: the MADR body as markdown. Three sections — `## Context`,',
+    '  `## Decision`, `## Consequences`. Do NOT include an H1 title line;',
+    '  the title is stored separately in the `title` field above and added',
+    '  to the final file on accept. Start the body directly with `## Context`.',
+    '  Optionally include ONE fenced block in the Context section showing the',
+    '  specific services or flow this decision is about. The dashboard renders',
+    '  these blocks live from the current code graph with drift highlighting.',
+    '  Syntax (pick one, only when the block adds clarity to prose):',
+    '    ```adr-graph',
+    '    services: [<service-name>, <another>]',
+    '    show: dependencies',
+    '    ```',
+    '  or',
+    '    ```adr-flow',
+    '    flowId: <flow-name-or-id>',
+    '    ```',
+    '  Only reference service names / module names / flow ids that actually',
+    '  appear in the code graph above. Invalid references will be stripped',
+    '  from the block post-validation. Do not invent.',
+    '- `topic`: echo the topic above exactly.',
+    '- `entities`: the graph node IDs/names this ADR is actually about. May',
+    '  refine the input list; use only IDs that appear in the code graph.',
+    '- `confidence`: 0 to 1. Your confidence that this is a genuinely',
+    '  non-obvious decision worth an ADR. Use < 0.5 if unsure.',
+    '',
+    'Keep Context/Decision/Consequences grounded in what the code actually shows —',
+    'do not invent history or stakeholders that are not visible in the graph.',
+  ].join('\n');
+}

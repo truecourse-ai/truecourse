@@ -1,6 +1,6 @@
 {
   "name": "@truecourse/server",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -39,6 +39,22 @@
     "./services/violation-query": {
       "types": "./dist/services/violation-query.service.d.ts",
       "import": "./dist/services/violation-query.service.js"
+    },
+    "./lib/adr-store": {
+      "types": "./dist/lib/adr-store.d.ts",
+      "import": "./dist/lib/adr-store.js"
+    },
+    "./lib/adr-writer": {
+      "types": "./dist/lib/adr-writer.d.ts",
+      "import": "./dist/lib/adr-writer.js"
+    },
+    "./services/llm/adr-suggester": {
+      "types": "./dist/services/llm/adr-suggester.d.ts",
+      "import": "./dist/services/llm/adr-suggester.js"
+    },
+    "./services/llm/provider": {
+      "types": "./dist/services/llm/provider.d.ts",
+      "import": "./dist/services/llm/provider.js"
     }
   },
   "scripts": {

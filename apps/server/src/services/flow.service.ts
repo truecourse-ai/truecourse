@@ -232,20 +232,6 @@ function composePath(prefix: string, routePath: string): string {
   return full.length > 1 && full.endsWith('/') ? full.slice(0, -1) : full || '/';
 }
 
-// ---------------------------------------------------------------------------
-// Read-side helpers backed by LATEST.json (used by routes)
-// ---------------------------------------------------------------------------
-
-export function getFlowsFromLatest(repoPath: string): FlowRecord[] {
-  const latest = readLatest(repoPath);
-  return latest?.graph.flows ?? [];
-}
-
-export function getFlowFromLatest(repoPath: string, flowId: string): FlowRecord | null {
-  const latest = readLatest(repoPath);
-  return latest?.graph.flows.find((f) => f.id === flowId) ?? null;
-}
-
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
 /** Compute per-flow highest severity from the given active violation set
