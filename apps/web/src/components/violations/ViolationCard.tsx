@@ -1,32 +1,11 @@
 
 import { Copy, Check, ChevronDown, ChevronUp, Crosshair, FileCode } from 'lucide-react';
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { renderInlineCode } from '@/lib/render-inline-code';
 import type { ViolationResponse } from '@/lib/api';
-
-/**
- * Render a violation string that uses markdown-style backticks around code
- * identifiers (the convention used by both deterministic rules and LLM
- * prompts). Backtick-wrapped spans become inline <code> elements; everything
- * else stays as plain text. We intentionally don't support any other markdown
- * (bold, links, lists) — violation text is short and only ever uses backticks.
- */
-function renderInlineCode(text: string | null | undefined): React.ReactNode {
-  if (!text) return null;
-  const parts = text.split(/(`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.length >= 2 && part.startsWith('`') && part.endsWith('`')) {
-      return (
-        <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.9em] text-foreground">
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    return <Fragment key={i}>{part}</Fragment>;
-  });
-}
 
 type ViolationCardProps = {
   violation: ViolationResponse;

@@ -10,7 +10,13 @@ import type { AdrFragmentSnapshot } from '@/lib/api';
  *  node + edge components + layout math as the main Flows tab. Interaction
  *  is off by default so page scroll passes through; click the chip to opt
  *  into pan/zoom. */
-function AdrFlowFragmentDiagramInner({ snapshot }: { snapshot: AdrFragmentSnapshot }) {
+function AdrFlowFragmentDiagramInner({
+  snapshot,
+  fillHeight,
+}: {
+  snapshot: AdrFragmentSnapshot;
+  fillHeight?: boolean;
+}) {
   const [interactive, setInteractive] = useState(false);
 
   const { nodes, edges, height } = useMemo(() => {
@@ -34,8 +40,12 @@ function AdrFlowFragmentDiagramInner({ snapshot }: { snapshot: AdrFragmentSnapsh
 
   return (
     <div
-      className="relative my-3 overflow-hidden rounded-md border border-primary/30 bg-card"
-      style={{ height: Math.max(220, Math.min(height, 560)) }}
+      className={`relative overflow-hidden rounded-md border border-primary/30 bg-card ${
+        fillHeight ? 'h-full' : 'my-3'
+      }`}
+      style={
+        fillHeight ? undefined : { height: Math.max(220, Math.min(height, 560)) }
+      }
     >
       <ReactFlow
         nodes={nodes}
@@ -93,10 +103,11 @@ function AdrFlowFragmentDiagramInner({ snapshot }: { snapshot: AdrFragmentSnapsh
 
 export const AdrFlowFragmentDiagram = memo(function AdrFlowFragmentDiagram(props: {
   snapshot: AdrFragmentSnapshot;
+  fillHeight?: boolean;
 }) {
   return (
     <ReactFlowProvider>
-      <AdrFlowFragmentDiagramInner snapshot={props.snapshot} />
+      <AdrFlowFragmentDiagramInner snapshot={props.snapshot} fillHeight={props.fillHeight} />
     </ReactFlowProvider>
   );
 });

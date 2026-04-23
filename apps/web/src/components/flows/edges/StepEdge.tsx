@@ -40,8 +40,12 @@ function StepEdgeComponent({
   const activeColor = edgeData.dbColor || stepTypeColors[edgeData.stepType] || '#6b7280';
   const color = edgeData.isActive ? activeColor : '#374151';
   const markerId = `arrow-${id}`;
-  // Animate the dash pattern for played/current steps (marching ants — persists after completion)
-  const shouldAnimateDash = (edgeData.isPlayed || edgeData.isCurrent) && edgeData.showTrail;
+  // Animate the dash on every active edge — matches `DependencyEdge`'s
+  // always-on `animate-edge-flow` behavior so the main Graph tab and the
+  // sequence diagram (both main Flows tab and ADR flow fragments) feel
+  // equally "live". Inactive pre-play steps stay static so the dimmed
+  // "not yet run" state is still distinguishable.
+  const shouldAnimateDash = edgeData.isActive;
 
   return (
     <>

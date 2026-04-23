@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Check, X, AlertTriangle, FileText, Eye, Code, Save, Workflow, Box } from 'lucide-react';
+import { Loader2, Check, X, AlertTriangle, FileText, Eye, Code, Save, Workflow, Network, Maximize2, ArrowLeft } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import * as api from '@/lib/api';
 import type { AdrDraftResponse, AdrFragmentSnapshot, AdrResponse } from '@/lib/api';
@@ -200,6 +200,11 @@ type BodyAction = {
   disabledReason?: string;
 };
 
+type MaximizedFragment = {
+  snapshot: AdrFragmentSnapshot;
+  label: string;
+};
+
 type AdrBodyViewProps = {
   statusLabel: string;
   statusTone: 'warning' | 'accepted' | 'neutral';
@@ -245,6 +250,11 @@ function AdrBodyView({
   const [rawBuffer, setRawBuffer] = useState(source);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Transient "maximize this fragment" state. When set, the Preview area
+  // renders just the chosen diagram full-height instead of the normal
+  // prose+fragments layout. Not persisted to the URL — view state, not
+  // shareable state.
+  const [maximized, setMaximized] = useState<MaximizedFragment | null>(null);
 
   // Parse the body half of the MADR text into sections on every render.
   // One code path for draft + accepted — no mismatch between server-parsed
@@ -338,13 +348,35 @@ function AdrBodyView({
       )}
 
       <div className="mt-3 min-h-0 flex-1">
-        {mode === 'preview' ? (
+        {mode === 'preview' && maximized ? (
+          <div className="flex h-full flex-col">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border/60 pb-2 text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setMaximized(null)}
+                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 hover:bg-muted hover:text-foreground"
+                aria-label="Back to ADR"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" /> Back to ADR
+              </button>
+              <span>·</span>
+              <span>{maximized.label}</span>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden pt-2">
+              {maximized.snapshot.kind === 'graph' ? (
+                <AdrGraphFragmentDiagram snapshot={maximized.snapshot} fillHeight />
+              ) : (
+                <AdrFlowFragmentDiagram snapshot={maximized.snapshot} fillHeight />
+              )}
+            </div>
+          </div>
+        ) : mode === 'preview' ? (
           <div className="h-full space-y-4 overflow-auto">
-            <Section label="Context" body={sections.context} fragments={fragments} />
-            <Section label="Decision" body={sections.decision} fragments={fragments} />
-            <Section label="Consequences" body={sections.consequences} fragments={fragments} />
+            <Section label="Context" body={sections.context} fragments={fragments} onMaximize={setMaximized} />
+            <Section label="Decision" body={sections.decision} fragments={fragments} onMaximize={setMaximized} />
+            <Section label="Consequences" body={sections.consequences} fragments={fragments} onMaximize={setMaximized} />
             {sections.extra.map((s, i) => (
-              <Section key={i} label={s.label} body={s.body} fragments={fragments} />
+              <Section key={i} label={s.label} body={s.body} fragments={fragments} onMaximize={setMaximized} />
             ))}
           </div>
         ) : (
@@ -630,10 +662,12 @@ function Section({
   label,
   body,
   fragments,
+  onMaximize,
 }: {
   label: string;
   body: string;
   fragments?: AdrFragmentSnapshot[];
+  onMaximize?: (m: MaximizedFragment) => void;
 }) {
   const chunks = useMemo(() => splitBodyAtFragments(body), [body]);
   if (!body) return null;
@@ -657,6 +691,7 @@ function Section({
                 key={i}
                 snapshot={findGraphSnapshot(chunk.content, fragments)}
                 rawContent={chunk.content}
+                onMaximize={onMaximize}
               />
             );
           }
@@ -666,6 +701,7 @@ function Section({
                 key={i}
                 snapshot={findFlowSnapshot(chunk.content, fragments)}
                 rawContent={chunk.content}
+                onMaximize={onMaximize}
               />
             );
           }
@@ -719,19 +755,23 @@ function findGraphSnapshot(
 function AdrGraphFragment({
   snapshot,
   rawContent,
+  onMaximize,
 }: {
   snapshot?: AdrFragmentSnapshot;
   rawContent: string;
+  onMaximize?: (m: MaximizedFragment) => void;
 }) {
   if (!snapshot || snapshot.kind !== 'graph') {
     return <FragmentFallback kind="adr-graph" rawContent={rawContent} />;
   }
+  const label = `decision-time subgraph · ${snapshot.nodes.length} node${snapshot.nodes.length === 1 ? '' : 's'}`;
   return (
     <div className="my-3">
-      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-        <Box className="h-3 w-3" />
-        <span>decision-time subgraph · {snapshot.nodes.length} node{snapshot.nodes.length === 1 ? '' : 's'}</span>
-      </div>
+      <FragmentHeader
+        icon={<Network className="h-3 w-3" />}
+        label={label}
+        onMaximize={onMaximize ? () => onMaximize({ snapshot, label }) : undefined}
+      />
       <AdrGraphFragmentDiagram snapshot={snapshot} />
     </div>
   );
@@ -740,23 +780,55 @@ function AdrGraphFragment({
 function AdrFlowFragment({
   snapshot,
   rawContent,
+  onMaximize,
 }: {
   snapshot?: AdrFragmentSnapshot;
   rawContent: string;
+  onMaximize?: (m: MaximizedFragment) => void;
 }) {
   if (!snapshot || snapshot.kind !== 'flow') {
     return <FragmentFallback kind="adr-flow" rawContent={rawContent} />;
   }
+  const label = `decision-time flow · ${snapshot.flowName} · ${snapshot.steps.length} step${snapshot.steps.length === 1 ? '' : 's'}`;
   return (
     <div className="my-3">
-      <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-        <Workflow className="h-3 w-3" />
-        <span>
-          decision-time flow · {snapshot.flowName} · {snapshot.steps.length} step
-          {snapshot.steps.length === 1 ? '' : 's'}
-        </span>
-      </div>
+      <FragmentHeader
+        icon={<Workflow className="h-3 w-3" />}
+        label={label}
+        onMaximize={onMaximize ? () => onMaximize({ snapshot, label }) : undefined}
+      />
       <AdrFlowFragmentDiagram snapshot={snapshot} />
+    </div>
+  );
+}
+
+/** Shared header row for both fragment kinds — label on the left, small
+ *  maximize button on the right when a handler is provided. Keeps the
+ *  two fragment components visually identical above the diagram. */
+function FragmentHeader({
+  icon,
+  label,
+  onMaximize,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onMaximize?: () => void;
+}) {
+  return (
+    <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+      {icon}
+      <span className="flex-1 truncate">{label}</span>
+      {onMaximize && (
+        <button
+          type="button"
+          onClick={onMaximize}
+          className="flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-muted hover:text-foreground"
+          aria-label="Maximize diagram"
+          title="Maximize"
+        >
+          <Maximize2 className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }

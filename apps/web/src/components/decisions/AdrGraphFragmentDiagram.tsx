@@ -37,7 +37,13 @@ const DAGRE_OPTS = {
   defaultNodeHeight: GRAPH_NODE_DIMENSIONS.service.height,
 };
 
-function AdrGraphFragmentDiagramInner({ snapshot }: { snapshot: AdrFragmentSnapshot }) {
+function AdrGraphFragmentDiagramInner({
+  snapshot,
+  fillHeight,
+}: {
+  snapshot: AdrFragmentSnapshot;
+  fillHeight?: boolean;
+}) {
   const [interactive, setInteractive] = useState(false);
   // When interactive, panMode=true → drag-canvas-to-pan; panMode=false →
   // drag nodes to reposition. Matches the main Graph tab's toggle.
@@ -146,7 +152,11 @@ function AdrGraphFragmentDiagramInner({ snapshot }: { snapshot: AdrFragmentSnaps
   }, [edges, setNodes]);
 
   return (
-    <div className="relative my-3 h-[520px] overflow-hidden rounded-md border border-primary/30 bg-card">
+    <div
+      className={`relative overflow-hidden rounded-md border border-primary/30 bg-card ${
+        fillHeight ? 'h-full' : 'my-3 h-[520px]'
+      }`}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -215,10 +225,11 @@ function AdrGraphFragmentDiagramInner({ snapshot }: { snapshot: AdrFragmentSnaps
 
 export const AdrGraphFragmentDiagram = memo(function AdrGraphFragmentDiagram(props: {
   snapshot: AdrFragmentSnapshot;
+  fillHeight?: boolean;
 }) {
   return (
     <ReactFlowProvider>
-      <AdrGraphFragmentDiagramInner snapshot={props.snapshot} />
+      <AdrGraphFragmentDiagramInner snapshot={props.snapshot} fillHeight={props.fillHeight} />
     </ReactFlowProvider>
   );
 });
