@@ -6,9 +6,7 @@
  *   history.json                       → History           (summaries for cross-analysis queries)
  *   diff.json                          → DiffSnapshot      (active diff against LATEST)
  *
- * Fields mirror the legacy DB rows (`apps/server/src/db/schema.ts`) verbatim so
- * the migration is a straight projection — no renaming, no shape surprises.
- * UUIDs stay strings, timestamps are ISO-8601 strings.
+ * UUIDs are strings, timestamps are ISO-8601 strings.
  */
 
 // ---------------------------------------------------------------------------

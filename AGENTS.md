@@ -19,18 +19,17 @@
 ## Development Commands
 
 ```bash
-pnpm dev          # Start all services (turbo) — embedded Postgres starts automatically, migrations run on boot
+pnpm dev          # Start all services (turbo) — file-based store under <repo>/.truecourse/
 pnpm build        # Build all packages
 pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
 pnpm test         # Run all tests (vitest)
-pnpm db:generate  # Generate migration SQL files after schema changes (drizzle-kit generate)
 ```
 
 ## Rules
 
 - **No workarounds.** Always find and fix the root cause. Do not use hacks, fallbacks, or temporary patches to bypass issues. If something isn't working, investigate why and fix it properly.
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
-- **Database.** Uses embedded Postgres (not Docker). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
+- **Storage.** The store is file-based (no DB). Writes go through `packages/core/src/lib/analysis-store.ts` via `atomicWriteJson`. Reads are mtime-cached on `LATEST.json`. Concurrent analyses are prevented by `.analyze.lock` (O_EXCL).
 
 ## Conventions
 

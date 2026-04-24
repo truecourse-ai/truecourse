@@ -8,14 +8,6 @@
       "types": "./dist/commands/analyze-in-process.d.ts",
       "import": "./dist/commands/analyze-in-process.js"
     },
-    "./commands/analyze-core": {
-      "types": "./dist/commands/analyze-core.d.ts",
-      "import": "./dist/commands/analyze-core.js"
-    },
-    "./commands/analyze-persist": {
-      "types": "./dist/commands/analyze-persist.d.ts",
-      "import": "./dist/commands/analyze-persist.js"
-    },
     "./commands/diff-in-process": {
       "types": "./dist/commands/diff-in-process.d.ts",
       "import": "./dist/commands/diff-in-process.js"
@@ -60,10 +52,6 @@
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
-    "./lib/atomic-write": {
-      "types": "./dist/lib/atomic-write.d.ts",
-      "import": "./dist/lib/atomic-write.js"
-    },
     "./lib/git": {
       "types": "./dist/lib/git.d.ts",
       "import": "./dist/lib/git.js"
@@ -88,21 +76,9 @@
       "types": "./dist/services/violation-query.service.d.ts",
       "import": "./dist/services/violation-query.service.js"
     },
-    "./services/violation-pipeline": {
-      "types": "./dist/services/violation-pipeline.service.d.ts",
-      "import": "./dist/services/violation-pipeline.service.js"
-    },
-    "./services/violation-lifecycle": {
-      "types": "./dist/services/violation-lifecycle.service.d.ts",
-      "import": "./dist/services/violation-lifecycle.service.js"
-    },
     "./services/violation": {
       "types": "./dist/services/violation.service.d.ts",
       "import": "./dist/services/violation.service.js"
-    },
-    "./services/analysis-persistence": {
-      "types": "./dist/services/analysis-persistence.service.d.ts",
-      "import": "./dist/services/analysis-persistence.service.js"
     },
     "./services/analysis-registry": {
       "types": "./dist/services/analysis-registry.d.ts",
@@ -112,10 +88,6 @@
       "types": "./dist/services/rules.service.d.ts",
       "import": "./dist/services/rules.service.js"
     },
-    "./services/usage": {
-      "types": "./dist/services/usage.service.d.ts",
-      "import": "./dist/services/usage.service.js"
-    },
     "./services/stable-keys": {
       "types": "./dist/services/stable-keys.d.ts",
       "import": "./dist/services/stable-keys.js"
@@ -123,22 +95,6 @@
     "./services/llm/provider": {
       "types": "./dist/services/llm/provider.d.ts",
       "import": "./dist/services/llm/provider.js"
-    },
-    "./services/llm/cli-provider": {
-      "types": "./dist/services/llm/cli-provider.d.ts",
-      "import": "./dist/services/llm/cli-provider.js"
-    },
-    "./services/llm/prompts": {
-      "types": "./dist/services/llm/prompts.d.ts",
-      "import": "./dist/services/llm/prompts.js"
-    },
-    "./services/llm/schemas": {
-      "types": "./dist/services/llm/schemas.d.ts",
-      "import": "./dist/services/llm/schemas.js"
-    },
-    "./services/llm/context-router": {
-      "types": "./dist/services/llm/context-router.d.ts",
-      "import": "./dist/services/llm/context-router.js"
     },
     "./types/snapshot": {
       "types": "./dist/types/snapshot.d.ts",

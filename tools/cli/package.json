@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
-    "@truecourse/analyzer": "workspace:*",
     "@truecourse/core": "workspace:*",
     "@truecourse/shared": "workspace:^",
     "commander": "^12.1.0",

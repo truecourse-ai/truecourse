@@ -8,9 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@types/cors':
-        specifier: ^2.8.17
-        version: 2.8.19
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -20,18 +17,12 @@ importers:
       '@types/supertest':
         specifier: ^7.2.0
         version: 7.2.0
-      cors:
-        specifier: ^2.8.5
-        version: 2.8.6
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
       express:
         specifier: ^4.22.1
         version: 4.22.1
-      simple-git:
-        specifier: ^3.27.0
-        version: 3.33.0
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -283,9 +274,6 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
-      '@truecourse/analyzer':
-        specifier: workspace:*
-        version: link:../../packages/analyzer
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../packages/core
