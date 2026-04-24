@@ -3,10 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import * as p from "@clack/prompts";
-import { resolveRepoDir } from "@truecourse/server/config/paths";
-import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
-import { readLatest } from "@truecourse/server/lib/analysis-store";
-import { diffInProcess } from "@truecourse/server/diff";
+import { resolveRepoDir } from "@truecourse/core/config/paths";
+import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
+import { readLatest } from "@truecourse/core/lib/analysis-store";
+import { diffInProcess } from "@truecourse/core/commands/diff-in-process";
 import { isInteractive, severityIcon, severityColor } from "./helpers.js";
 
 // ---------------------------------------------------------------------------

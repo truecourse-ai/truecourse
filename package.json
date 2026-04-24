@@ -13,14 +13,11 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "@types/supertest": "^7.2.0",
-    "cors": "^2.8.5",
     "esbuild": "^0.24.0",
     "express": "^4.22.1",
-    "simple-git": "^3.27.0",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",

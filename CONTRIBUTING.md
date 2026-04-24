@@ -15,21 +15,22 @@ Thanks for your interest in contributing! This guide will help you get started.
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-pnpm dev          # Start all services (Vite frontend + Express backend + embedded Postgres)
+pnpm dev          # Start all services (Vite frontend + Express backend)
 ```
 
-The dev server starts at `http://localhost:3000`. Embedded Postgres starts automatically — no Docker needed. Database migrations run on boot.
+The dev server starts at `http://localhost:3000`. State is stored as JSON files under `.truecourse/` in your repo — no database, no Docker.
 
 ### Project Structure
 
 ```
-apps/web/        — Vite + React frontend (React Flow graph, Tailwind CSS)
-apps/server/     — Express + Socket.io backend (Drizzle ORM, LLM providers)
-packages/shared/ — Shared Zod schemas and TypeScript types
-packages/analyzer/ — Tree-sitter analysis engine + TypeScript Compiler API
-tools/cli/       — CLI commands (analyze, code-review, list)
-tests/           — All tests (centralized, not colocated)
-tests/fixtures/  — Fixture projects for integration tests
+apps/dashboard/client/    — Vite + React frontend (React Flow graph, Tailwind CSS)
+apps/dashboard/server/    — Express + Socket.io HTTP layer (thin adapter over core)
+packages/core/            — Framework-agnostic analysis engine, persistence, LLM providers
+packages/analyzer/        — Tree-sitter + TypeScript Compiler analysis engine
+packages/shared/          — Shared Zod schemas and TypeScript types
+tools/cli/                — CLI commands (thin adapter over core)
+tests/                    — All tests (centralized, not colocated)
+tests/fixtures/           — Fixture projects for integration tests
 ```
 
 ### Useful Commands
@@ -38,12 +39,12 @@ tests/fixtures/  — Fixture projects for integration tests
 pnpm dev          # Start all services
 pnpm build        # Build all packages
 pnpm test         # Run all tests (vitest)
-pnpm db:generate  # Generate migration SQL after schema changes
+pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
 ```
 
-### Database
+### Storage
 
-TrueCourse uses embedded Postgres — no Docker or external database needed. Schema changes require generating a migration via `pnpm db:generate`. Never use `db:push`. Migrations run automatically on server startup.
+TrueCourse stores everything as plain JSON files under `<repo>/.truecourse/` — no database, no Docker, no migrations. The file format is documented in `packages/core/src/types/snapshot.ts`.
 
 ## How to Contribute
 

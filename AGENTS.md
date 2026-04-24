@@ -7,29 +7,29 @@
 
 ## Project Layout
 
-- `apps/web/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
-- `apps/server/` — Express + Socket.io backend (Drizzle ORM, LLM providers)
+- `apps/dashboard/client/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
+- `apps/dashboard/server/` — Express + Socket.io HTTP layer that serves the dashboard. Thin adapter over `@truecourse/core`.
+- `packages/core/` — Framework-agnostic analysis engine: pipeline, graph/flow services, LLM providers, persistence, config, logger. Consumed by both the CLI and the dashboard server.
 - `packages/shared/` — Shared Zod schemas and TypeScript types
-- `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS only)
-- `tools/cli/` — CLI commands (setup, start, analyze, list, add)
-- `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
+- `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS/Python)
+- `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
+- `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
 - `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
 
 ## Development Commands
 
 ```bash
-pnpm dev          # Start all services (turbo) — embedded Postgres starts automatically, migrations run on boot
+pnpm dev          # Start all services (turbo) — file-based store under <repo>/.truecourse/
 pnpm build        # Build all packages
 pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
 pnpm test         # Run all tests (vitest)
-pnpm db:generate  # Generate migration SQL files after schema changes (drizzle-kit generate)
 ```
 
 ## Rules
 
 - **No workarounds.** Always find and fix the root cause. Do not use hacks, fallbacks, or temporary patches to bypass issues. If something isn't working, investigate why and fix it properly.
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
-- **Database.** Uses embedded Postgres (not Docker). Schema changes require generating a migration via `pnpm db:generate` — never use `db:push`. Migrations run automatically on server startup.
+- **Storage.** The store is file-based (no DB). Writes go through `packages/core/src/lib/analysis-store.ts` via `atomicWriteJson`. Reads are mtime-cached on `LATEST.json`. Concurrent analyses are prevented by `.analyze.lock` (O_EXCL).
 
 ## Conventions
 

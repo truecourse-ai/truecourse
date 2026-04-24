@@ -8,9 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@types/cors':
-        specifier: ^2.8.17
-        version: 2.8.19
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -20,18 +17,12 @@ importers:
       '@types/supertest':
         specifier: ^7.2.0
         version: 7.2.0
-      cors:
-        specifier: ^2.8.5
-        version: 2.8.6
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
       express:
         specifier: ^4.22.1
         version: 4.22.1
-      simple-git:
-        specifier: ^3.27.0
-        version: 3.33.0
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -48,68 +39,7 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.12)(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(msw@2.12.10(@types/node@22.19.15)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.2)
 
-  apps/server:
-    dependencies:
-      '@truecourse/analyzer':
-        specifier: workspace:*
-        version: link:../../packages/analyzer
-      '@truecourse/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      chokidar:
-        specifier: ^4.0.0
-        version: 4.0.3
-      cors:
-        specifier: ^2.8.5
-        version: 2.8.6
-      dagre:
-        specifier: ^0.8.5
-        version: 0.8.5
-      dotenv:
-        specifier: ^16.4.0
-        version: 16.6.1
-      express:
-        specifier: ^4.21.0
-        version: 4.22.1
-      p-limit:
-        specifier: ^7.3.0
-        version: 7.3.0
-      posthog-node:
-        specifier: ^4.0.0
-        version: 4.18.0
-      simple-git:
-        specifier: ^3.27.0
-        version: 3.33.0
-      socket.io:
-        specifier: ^4.8.0
-        version: 4.8.3
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
-      zod-to-json-schema:
-        specifier: ^3.25.1
-        version: 3.25.1(zod@3.25.76)
-    devDependencies:
-      '@types/cors':
-        specifier: ^2.8.17
-        version: 2.8.19
-      '@types/dagre':
-        specifier: ^0.7.52
-        version: 0.7.54
-      '@types/express':
-        specifier: ^5.0.0
-        version: 5.0.6
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.15
-      tsx:
-        specifier: ^4.19.0
-        version: 4.21.0
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
-  apps/web:
+  apps/dashboard/client:
     dependencies:
       '@base-ui/react':
         specifier: ^1.3.0
@@ -131,7 +61,7 @@ importers:
         version: 6.40.0
       '@truecourse/shared':
         specifier: workspace:*
-        version: link:../../packages/shared
+        version: link:../../../packages/shared
       '@uiw/codemirror-theme-vscode':
         specifier: ^4.25.8
         version: 4.25.8(@codemirror/language@6.12.2)(@codemirror/state@6.6.0)(@codemirror/view@6.40.0)
@@ -212,6 +142,46 @@ importers:
         specifier: ^6.0.0
         version: 6.4.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
 
+  apps/dashboard/server:
+    dependencies:
+      '@truecourse/core':
+        specifier: workspace:*
+        version: link:../../../packages/core
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      chokidar:
+        specifier: ^4.0.0
+        version: 4.0.3
+      cors:
+        specifier: ^2.8.5
+        version: 2.8.6
+      express:
+        specifier: ^4.21.0
+        version: 4.22.1
+      posthog-node:
+        specifier: ^4.0.0
+        version: 4.18.0
+      socket.io:
+        specifier: ^4.8.0
+        version: 4.8.3
+    devDependencies:
+      '@types/cors':
+        specifier: ^2.8.17
+        version: 2.8.19
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/analyzer:
     dependencies:
       '@truecourse/shared':
@@ -249,6 +219,46 @@ importers:
         specifier: ^0.23.2
         version: 0.23.2
 
+  packages/core:
+    dependencies:
+      '@truecourse/analyzer':
+        specifier: workspace:*
+        version: link:../analyzer
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      dagre:
+        specifier: ^0.8.5
+        version: 0.8.5
+      dotenv:
+        specifier: ^16.4.0
+        version: 16.6.1
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
+      simple-git:
+        specifier: ^3.27.0
+        version: 3.33.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+      zod-to-json-schema:
+        specifier: ^3.25.1
+        version: 3.25.1(zod@3.25.76)
+    devDependencies:
+      '@types/dagre':
+        specifier: ^0.7.52
+        version: 0.7.54
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      tsx:
+        specifier: ^4.19.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/shared:
     dependencies:
       zod:
@@ -264,12 +274,9 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
-      '@truecourse/analyzer':
+      '@truecourse/core':
         specifier: workspace:*
-        version: link:../../packages/analyzer
-      '@truecourse/server':
-        specifier: workspace:*
-        version: link:../../apps/server
+        version: link:../../packages/core
       '@truecourse/shared':
         specifier: workspace:^
         version: link:../../packages/shared

@@ -1,0 +1,124 @@
+{
+  "name": "@truecourse/core",
+  "version": "0.5.5",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./commands/analyze-in-process": {
+      "types": "./dist/commands/analyze-in-process.d.ts",
+      "import": "./dist/commands/analyze-in-process.js"
+    },
+    "./commands/diff-in-process": {
+      "types": "./dist/commands/diff-in-process.d.ts",
+      "import": "./dist/commands/diff-in-process.js"
+    },
+    "./progress": {
+      "types": "./dist/progress.d.ts",
+      "import": "./dist/progress.js"
+    },
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "import": "./dist/config/index.js"
+    },
+    "./config/paths": {
+      "types": "./dist/config/paths.d.ts",
+      "import": "./dist/config/paths.js"
+    },
+    "./config/registry": {
+      "types": "./dist/config/registry.d.ts",
+      "import": "./dist/config/registry.js"
+    },
+    "./config/project-config": {
+      "types": "./dist/config/project-config.d.ts",
+      "import": "./dist/config/project-config.js"
+    },
+    "./config/current-project": {
+      "types": "./dist/config/current-project.d.ts",
+      "import": "./dist/config/current-project.js"
+    },
+    "./config/ui-state": {
+      "types": "./dist/config/ui-state.d.ts",
+      "import": "./dist/config/ui-state.js"
+    },
+    "./config/env": {
+      "types": "./dist/config/env.d.ts",
+      "import": "./dist/config/env.js"
+    },
+    "./lib/logger": {
+      "types": "./dist/lib/logger.d.ts",
+      "import": "./dist/lib/logger.js"
+    },
+    "./lib/analysis-store": {
+      "types": "./dist/lib/analysis-store.d.ts",
+      "import": "./dist/lib/analysis-store.js"
+    },
+    "./lib/git": {
+      "types": "./dist/lib/git.d.ts",
+      "import": "./dist/lib/git.js"
+    },
+    "./lib/errors": {
+      "types": "./dist/lib/errors.d.ts",
+      "import": "./dist/lib/errors.js"
+    },
+    "./services/analyzer": {
+      "types": "./dist/services/analyzer.service.d.ts",
+      "import": "./dist/services/analyzer.service.js"
+    },
+    "./services/graph": {
+      "types": "./dist/services/graph.service.d.ts",
+      "import": "./dist/services/graph.service.js"
+    },
+    "./services/flow": {
+      "types": "./dist/services/flow.service.d.ts",
+      "import": "./dist/services/flow.service.js"
+    },
+    "./services/violation-query": {
+      "types": "./dist/services/violation-query.service.d.ts",
+      "import": "./dist/services/violation-query.service.js"
+    },
+    "./services/violation": {
+      "types": "./dist/services/violation.service.d.ts",
+      "import": "./dist/services/violation.service.js"
+    },
+    "./services/analysis-registry": {
+      "types": "./dist/services/analysis-registry.d.ts",
+      "import": "./dist/services/analysis-registry.js"
+    },
+    "./services/rules": {
+      "types": "./dist/services/rules.service.d.ts",
+      "import": "./dist/services/rules.service.js"
+    },
+    "./services/stable-keys": {
+      "types": "./dist/services/stable-keys.d.ts",
+      "import": "./dist/services/stable-keys.js"
+    },
+    "./services/llm/provider": {
+      "types": "./dist/services/llm/provider.d.ts",
+      "import": "./dist/services/llm/provider.js"
+    },
+    "./types/snapshot": {
+      "types": "./dist/types/snapshot.d.ts",
+      "import": "./dist/types/snapshot.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@truecourse/analyzer": "workspace:*",
+    "@truecourse/shared": "workspace:*",
+    "dagre": "^0.8.5",
+    "dotenv": "^16.4.0",
+    "p-limit": "^7.3.0",
+    "simple-git": "^3.27.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "@types/dagre": "^0.7.52",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

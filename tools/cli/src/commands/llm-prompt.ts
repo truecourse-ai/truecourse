@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { LlmEstimate } from "@truecourse/server/analyze";
+import type { LlmEstimate } from "@truecourse/core/commands/analyze-in-process";
 import { isInteractive } from "./helpers.js";
 
 /**

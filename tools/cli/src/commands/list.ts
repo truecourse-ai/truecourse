@@ -4,7 +4,7 @@ import {
   getDiffResult,
   SEVERITIES,
   type Severity,
-} from "@truecourse/server/services/violation-query";
+} from "@truecourse/core/services/violation-query";
 import type { Violation, DiffResult } from "./helpers.js";
 import { requireRegisteredRepo, renderViolations, renderDiffResults } from "./helpers.js";
 
