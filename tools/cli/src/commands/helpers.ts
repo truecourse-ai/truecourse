@@ -6,8 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveRepoDir } from "@truecourse/server/config/paths";
-import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
+import { resolveRepoDir } from "@truecourse/core/config/paths";
+import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
 
 const DEFAULT_PORT = 3001;
 

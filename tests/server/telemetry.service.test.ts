@@ -9,8 +9,8 @@ import {
   bucketDuration,
   detectLanguages,
   getSystemInfo,
-} from '../../apps/server/src/services/telemetry.service';
-import type { AnalysisResult } from '../../apps/server/src/services/analyzer.service';
+} from '../../apps/dashboard/server/src/services/telemetry.service';
+import type { AnalysisResult } from '../../packages/core/src/services/analyzer.service';
 
 let tmpDir: string;
 const originalHome = process.env.HOME;

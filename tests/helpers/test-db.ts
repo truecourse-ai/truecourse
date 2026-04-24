@@ -5,8 +5,8 @@ import {
   registerProject,
   unregisterProject,
   type RegistryEntry,
-} from '../../apps/server/src/config/registry';
-import { clearLatestCache } from '../../apps/server/src/lib/analysis-store';
+} from '../../packages/core/src/config/registry';
+import { clearLatestCache } from '../../packages/core/src/lib/analysis-store';
 
 /**
  * File-store test harness. Each call creates a throwaway repo dir and

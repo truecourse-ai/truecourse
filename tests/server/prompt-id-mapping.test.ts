@@ -6,7 +6,7 @@ import {
   buildDatabaseTemplateVars,
   buildModuleTemplateVars,
   buildCodeTemplateVars,
-} from '../../apps/server/src/services/llm/prompts.js';
+} from '../../packages/core/src/services/llm/prompts.js';
 
 describe('resolveId', () => {
   it('resolves a short ID to a real UUID', () => {

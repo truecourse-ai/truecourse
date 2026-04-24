@@ -17,7 +17,7 @@
   "dependencies": {
     "@clack/prompts": "^1.2.0",
     "@truecourse/analyzer": "workspace:*",
-    "@truecourse/server": "workspace:*",
+    "@truecourse/core": "workspace:*",
     "@truecourse/shared": "workspace:^",
     "commander": "^12.1.0",
     "js-yaml": "^4.1.0"

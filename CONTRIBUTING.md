@@ -23,13 +23,14 @@ The dev server starts at `http://localhost:3000`. Embedded Postgres starts autom
 ### Project Structure
 
 ```
-apps/web/        — Vite + React frontend (React Flow graph, Tailwind CSS)
-apps/server/     — Express + Socket.io backend (Drizzle ORM, LLM providers)
-packages/shared/ — Shared Zod schemas and TypeScript types
-packages/analyzer/ — Tree-sitter analysis engine + TypeScript Compiler API
-tools/cli/       — CLI commands (analyze, code-review, list)
-tests/           — All tests (centralized, not colocated)
-tests/fixtures/  — Fixture projects for integration tests
+apps/dashboard/client/    — Vite + React frontend (React Flow graph, Tailwind CSS)
+apps/dashboard/server/    — Express + Socket.io HTTP layer (thin adapter over core)
+packages/core/            — Framework-agnostic analysis engine, persistence, LLM providers
+packages/analyzer/        — Tree-sitter + TypeScript Compiler analysis engine
+packages/shared/          — Shared Zod schemas and TypeScript types
+tools/cli/                — CLI commands (thin adapter over core)
+tests/                    — All tests (centralized, not colocated)
+tests/fixtures/           — Fixture projects for integration tests
 ```
 
 ### Useful Commands

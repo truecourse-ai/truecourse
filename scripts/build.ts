@@ -3,9 +3,9 @@
 /**
  * Build script for TrueCourse npm package.
  *
- * 1. Build shared + analyzer (tsc)
- * 2. Build web (vite → static export to apps/web/dist/)
- * 3. Bundle server + CLI with esbuild
+ * 1. Build shared + analyzer + core (tsc)
+ * 2. Build dashboard client (vite → static export to apps/dashboard/client/dist/)
+ * 3. Bundle dashboard server + CLI with esbuild
  * 4. Copy WASM assets (web-tree-sitter runtime + grammars) next to the bundle
  * 5. Generate publishable package.json + install production deps
  */
@@ -53,22 +53,23 @@ console.log('Cleaning dist/...');
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
 
-// 1. Build shared + analyzer
+// 1. Build shared + analyzer + core
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
 run('pnpm --filter @truecourse/analyzer build');
+run('pnpm --filter @truecourse/core build');
 
-// 2. Build web (static export)
-console.log('\n=== Building frontend (static export) ===');
-run('pnpm --filter @truecourse/web build');
+// 2. Build dashboard client (static export)
+console.log('\n=== Building dashboard client (static export) ===');
+run('pnpm --filter @truecourse/dashboard-client build');
 
-// 3. Bundle server with esbuild. `web-tree-sitter` and `pyright`/`typescript`
+// 3. Bundle dashboard server with esbuild. `web-tree-sitter` and `pyright`/`typescript`
 // stay external so their package metadata (and asset files like the WASM
 // runtime) can be resolved at runtime from installed node_modules.
-console.log('\n=== Bundling server ===');
+console.log('\n=== Bundling dashboard server ===');
 run(
   [
-    'npx esbuild apps/server/src/index.ts',
+    'npx esbuild apps/dashboard/server/src/index.ts',
     '--bundle',
     '--platform=node',
     '--target=node20',
@@ -83,7 +84,7 @@ run(
 
 // 4. Copy static frontend
 console.log('\n=== Copying frontend to dist/public/ ===');
-const webOut = path.join(ROOT, 'apps/web/dist');
+const webOut = path.join(ROOT, 'apps/dashboard/client/dist');
 const distPublic = path.join(DIST, 'public');
 copyDir(webOut, distPublic);
 
@@ -144,7 +145,7 @@ copyDir(path.join(ROOT, 'assets'), path.join(DIST, 'assets'));
 // 9. Generate package.json for npm publish
 console.log('\nGenerating package.json...');
 const analyzerPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/analyzer/package.json'), 'utf-8'));
-const serverPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'apps/server/package.json'), 'utf-8'));
+const corePkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/core/package.json'), 'utf-8'));
 const cliPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'));
 const publishPkg = {
   name: 'truecourse',
@@ -159,7 +160,7 @@ const publishPkg = {
   },
   dependencies: {
     'pyright': analyzerPkg.dependencies['pyright'],
-    'dotenv': serverPkg.dependencies['dotenv'],
+    'dotenv': corePkg.dependencies['dotenv'],
     'commander': cliPkg.dependencies['commander'],
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
     'typescript': analyzerPkg.dependencies['typescript'],

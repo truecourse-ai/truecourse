@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { runAnalysis, type AnalysisResult } from '../../apps/server/src/services/analyzer.service';
+import { runAnalysis, type AnalysisResult } from '../../packages/core/src/services/analyzer.service';
 import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 

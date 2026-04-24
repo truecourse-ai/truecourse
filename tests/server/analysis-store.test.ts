@@ -23,19 +23,19 @@ import {
   writeAnalysis,
   writeDiff,
   writeLatest,
-} from '../../apps/server/src/lib/analysis-store';
+} from '../../packages/core/src/lib/analysis-store';
 import {
   acquireAnalyzeLock,
   AnalyzeLockError,
   atomicWriteJson,
   releaseAnalyzeLock,
-} from '../../apps/server/src/lib/atomic-write';
+} from '../../packages/core/src/lib/atomic-write';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
   HistoryEntry,
   LatestSnapshot,
-} from '../../apps/server/src/types/snapshot';
+} from '../../packages/core/src/types/snapshot';
 
 let repoPath: string;
 

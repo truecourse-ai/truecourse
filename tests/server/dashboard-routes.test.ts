@@ -6,8 +6,8 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Express } from 'express';
 
-vi.mock('../../apps/server/src/socket/handlers', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../apps/server/src/socket/handlers')>();
+vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
   class NoopTracker {
     start() {}
     done() {}
@@ -26,7 +26,7 @@ vi.mock('../../apps/server/src/socket/handlers', async (importOriginal) => {
   };
 });
 
-import { createApp } from '../../apps/server/src/app';
+import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   setupTestFixture,
   teardownTestFixture,
@@ -38,12 +38,12 @@ import {
   appendHistory,
   writeDiff,
   clearLatestCache,
-} from '../../apps/server/src/lib/analysis-store';
+} from '../../packages/core/src/lib/analysis-store';
 import {
   setLastAnalyzed,
   getProjectBySlug,
-} from '../../apps/server/src/config/registry';
-import { getRepoTruecourseDir } from '../../apps/server/src/config/paths';
+} from '../../packages/core/src/config/registry';
+import { getRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
@@ -52,7 +52,7 @@ import type {
   LatestSnapshot,
   ViolationRecord,
   ViolationWithNames,
-} from '../../apps/server/src/types/snapshot';
+} from '../../packages/core/src/types/snapshot';
 
 // ---------------------------------------------------------------------------
 // Fixtures

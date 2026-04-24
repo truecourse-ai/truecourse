@@ -3,15 +3,15 @@ import { fileURLToPath } from 'url';
 import { resolve, dirname } from 'path';
 import { randomUUID } from 'node:crypto';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
-import { runAnalysis, type AnalysisResult } from '../../apps/server/src/services/analyzer.service';
+import { runAnalysis, type AnalysisResult } from '../../packages/core/src/services/analyzer.service';
 import {
   computeFlowSeverities,
   detectFlows,
   getFlowFromLatest,
   getFlowsFromLatest,
-} from '../../apps/server/src/services/flow.service';
-import { writeLatest } from '../../apps/server/src/lib/analysis-store';
-import type { LatestSnapshot } from '../../apps/server/src/types/snapshot';
+} from '../../packages/core/src/services/flow.service';
+import { writeLatest } from '../../packages/core/src/lib/analysis-store';
+import type { LatestSnapshot } from '../../packages/core/src/types/snapshot';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = resolve(__dirname, '../fixtures/sample-js-project-negative');

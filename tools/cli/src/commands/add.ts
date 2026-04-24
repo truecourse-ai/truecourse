@@ -2,8 +2,8 @@ import * as p from "@clack/prompts";
 import {
   ensureRepoTruecourseDir,
   resolveRepoDir,
-} from "@truecourse/server/config/paths";
-import { getProjectByPath, registerProject } from "@truecourse/server/config/registry";
+} from "@truecourse/core/config/paths";
+import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
 import { promptInstallSkills } from "./helpers.js";
 
 export interface AddOptions {

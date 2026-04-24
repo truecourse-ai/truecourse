@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { BaseCLIProvider } from '../../apps/server/src/services/llm/cli-provider.js';
-import { ServiceViolationOutputSchema } from '../../apps/server/src/services/llm/schemas.js';
-import { config } from '../../apps/server/src/config/index.js';
+import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
+import { ServiceViolationOutputSchema } from '../../packages/core/src/services/llm/schemas.js';
+import { config } from '../../packages/core/src/config/index.js';
 
 /**
  * Test subclass: bypasses real process spawning. Each spawnCLI call

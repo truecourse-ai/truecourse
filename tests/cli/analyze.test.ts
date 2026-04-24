@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 // Stub only the emit helpers + trackers; pass every other export (domain
 // constants, StepTracker, etc.) through so violation-pipeline etc. keep
 // working.
-vi.mock('../../apps/server/src/socket/handlers', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../apps/server/src/socket/handlers')>();
+vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
   class NoopTracker {
     start() {}
     done() {}
@@ -29,20 +29,20 @@ vi.mock('../../apps/server/src/socket/handlers', async (importOriginal) => {
   };
 });
 
-import { analyzeInProcess } from '../../apps/server/src/commands/analyze-in-process';
+import { analyzeInProcess } from '../../packages/core/src/commands/analyze-in-process';
 import {
   readLatest,
   readHistory,
   listAnalyses,
   clearLatestCache,
-} from '../../apps/server/src/lib/analysis-store';
+} from '../../packages/core/src/lib/analysis-store';
 import {
   registerProject,
   unregisterProject,
   getProjectBySlug,
   type RegistryEntry,
-} from '../../apps/server/src/config/registry';
-import { updateProjectConfig } from '../../apps/server/src/config/project-config';
+} from '../../packages/core/src/config/registry';
+import { updateProjectConfig } from '../../packages/core/src/config/project-config';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/sample-js-project-negative');

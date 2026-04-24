@@ -4,7 +4,7 @@ import {
   CodeViolationOutputSchema,
   EnrichmentOutputSchema,
   FlowEnrichmentOutputSchema,
-} from '../../apps/server/src/services/llm/schemas.js';
+} from '../../packages/core/src/services/llm/schemas.js';
 
 // ---------------------------------------------------------------------------
 // Test the BaseCLIProvider internals via ClaudeCodeProvider
@@ -14,7 +14,7 @@ describe('ClaudeCodeProvider', () => {
   describe('getCleanEnv', () => {
     it('strips CLAUDE_CODE_* and CLAUDE_INTERNAL_* env vars', async () => {
       // Dynamically import to avoid circular issues
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       // Set some env vars
@@ -38,7 +38,7 @@ describe('ClaudeCodeProvider', () => {
 
   describe('parseAndValidate', () => {
     it('parses structured_output from JSON envelope', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       const structuredOutput = {
@@ -70,7 +70,7 @@ describe('ClaudeCodeProvider', () => {
     });
 
     it('falls back to result field as JSON', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       const validOutput = {
@@ -90,7 +90,7 @@ describe('ClaudeCodeProvider', () => {
     });
 
     it('throws on is_error response', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       const raw = JSON.stringify({
@@ -102,14 +102,14 @@ describe('ClaudeCodeProvider', () => {
     });
 
     it('throws on invalid JSON', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       expect(() => (provider as any).parseAndValidate('not json', ServiceViolationOutputSchema)).toThrow();
     });
 
     it('throws when no structured_output present', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       const raw = JSON.stringify({
@@ -124,7 +124,7 @@ describe('ClaudeCodeProvider', () => {
 
   describe('toJsonSchema', () => {
     it('converts Zod schemas to valid JSON Schema strings', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       const jsonSchemaStr = (provider as any).toJsonSchema(ServiceViolationOutputSchema);
@@ -139,14 +139,14 @@ describe('ClaudeCodeProvider', () => {
 
   describe('ClaudeCodeProvider configuration', () => {
     it('has correct binary name', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       expect(provider.binaryName).toBe('claude');
     });
 
     it('has correct base args', async () => {
-      const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+      const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
       const provider = new ClaudeCodeProvider();
 
       const args = provider.baseArgs;
@@ -164,7 +164,7 @@ describe('ClaudeCodeProvider', () => {
 
 describe('Schema conversion via toJsonSchema', () => {
   it('all output schemas convert to valid JSON Schema via provider', async () => {
-    const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+    const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
     const provider = new ClaudeCodeProvider();
 
     const schemas = [
@@ -191,7 +191,7 @@ describe('createLLMProvider factory', () => {
   it('returns ClaudeCodeProvider from the factory', async () => {
     // We can't easily change config at runtime since it's read-only,
     // so we test the provider class directly
-    const { ClaudeCodeProvider } = await import('../../apps/server/src/services/llm/cli-provider.js');
+    const { ClaudeCodeProvider } = await import('../../packages/core/src/services/llm/cli-provider.js');
     const provider = new ClaudeCodeProvider();
 
     // Verify it implements the expected interface methods

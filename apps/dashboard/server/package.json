@@ -1,0 +1,29 @@
+{
+  "name": "@truecourse/dashboard-server",
+  "version": "0.5.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "TRUECOURSE_DEV=1 tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@truecourse/analyzer": "workspace:*",
+    "@truecourse/core": "workspace:*",
+    "@truecourse/shared": "workspace:*",
+    "chokidar": "^4.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "posthog-node": "^4.0.0",
+    "socket.io": "^4.8.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

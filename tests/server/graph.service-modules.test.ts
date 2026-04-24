@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildUnifiedGraph, type UnifiedInput } from '../../apps/server/src/services/graph.service';
+import { buildUnifiedGraph, type UnifiedInput } from '../../packages/core/src/services/graph.service';
 
 // ---------------------------------------------------------------------------
 // Helpers

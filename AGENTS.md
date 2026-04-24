@@ -7,12 +7,13 @@
 
 ## Project Layout
 
-- `apps/web/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
-- `apps/server/` — Express + Socket.io backend (Drizzle ORM, LLM providers)
+- `apps/dashboard/client/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
+- `apps/dashboard/server/` — Express + Socket.io HTTP layer that serves the dashboard. Thin adapter over `@truecourse/core`.
+- `packages/core/` — Framework-agnostic analysis engine: pipeline, graph/flow services, LLM providers, persistence, config, logger. Consumed by both the CLI and the dashboard server.
 - `packages/shared/` — Shared Zod schemas and TypeScript types
-- `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS only)
-- `tools/cli/` — CLI commands (setup, start, analyze, list, add)
-- `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/`
+- `packages/analyzer/` — Tree-sitter + TypeScript Compiler analysis engine (TS/JS/Python)
+- `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
+- `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
 - `tests/fixtures/sample-project/` — Realistic multi-service TS/JS repo used by tests
 
 ## Development Commands

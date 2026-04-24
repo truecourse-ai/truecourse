@@ -1,12 +1,12 @@
 import * as p from "@clack/prompts";
 import { execSync } from "node:child_process";
 import path from "node:path";
-import { analyzeInProcess } from "@truecourse/server/analyze";
-import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/server/progress";
-import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/server/config/paths";
-import { registerProject, type RegistryEntry } from "@truecourse/server/config/registry";
-import { readProjectConfig } from "@truecourse/server/config/project-config";
-import { closeLogger, configureLogger } from "@truecourse/server/lib/logger";
+import { analyzeInProcess } from "@truecourse/core/commands/analyze-in-process";
+import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/core/progress";
+import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/core/config/paths";
+import { registerProject, type RegistryEntry } from "@truecourse/core/config/registry";
+import { readProjectConfig } from "@truecourse/core/config/project-config";
+import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
@@ -238,7 +238,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void> {
-  const { diffInProcess } = await import("@truecourse/server/diff");
+  const { diffInProcess } = await import("@truecourse/core/commands/diff-in-process");
   const { renderDiffResultsSummary } = await import("./helpers.js");
 
   p.intro("Running diff check");

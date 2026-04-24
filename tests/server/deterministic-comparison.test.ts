@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compareDeterministicViolations } from '../../apps/server/src/services/violation-pipeline.service.js';
+import { compareDeterministicViolations } from '../../packages/core/src/services/violation-pipeline.service.js';
 
 describe('compareDeterministicViolations', () => {
   it('identifies new detections (current exists, previous does not)', () => {

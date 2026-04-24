@@ -3,7 +3,7 @@ import { DOMAIN_ORDER } from "@truecourse/shared";
 import {
   readProjectConfig,
   updateProjectConfig,
-} from "@truecourse/server/config/project-config";
+} from "@truecourse/core/config/project-config";
 import { requireRegisteredRepo } from "./helpers.js";
 
 const ALL_CATEGORIES = [...DOMAIN_ORDER] as string[];
