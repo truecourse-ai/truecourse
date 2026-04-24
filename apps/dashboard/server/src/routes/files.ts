@@ -9,7 +9,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createAppError } from '../middleware/error.js';
+import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { readLatest } from '@truecourse/core/lib/analysis-store';

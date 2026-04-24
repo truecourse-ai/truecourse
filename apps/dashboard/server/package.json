@@ -10,7 +10,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@truecourse/analyzer": "workspace:*",
     "@truecourse/core": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "chokidar": "^4.0.0",

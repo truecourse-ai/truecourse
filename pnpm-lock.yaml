@@ -153,9 +153,6 @@ importers:
 
   apps/dashboard/server:
     dependencies:
-      '@truecourse/analyzer':
-        specifier: workspace:*
-        version: link:../../../packages/analyzer
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import * as fs from 'fs';
 import { CreateRepoSchema } from '@truecourse/shared';
-import { createAppError } from '../middleware/error.js';
+import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
 import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';

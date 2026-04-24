@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { createAppError } from '../middleware/error.js';
+import { createAppError } from '@truecourse/core/lib/errors';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { resolveGraphForAnalysisId } from '@truecourse/core/services/violation-query';
 

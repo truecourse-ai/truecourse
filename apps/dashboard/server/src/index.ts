@@ -1,11 +1,13 @@
 import { createServer } from 'http';
 import path from 'node:path';
-import { config } from '@truecourse/core/config';
+import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
+
+const port = parseInt(process.env.PORT || '3001', 10);
 
 async function main() {
   // 0. Route all internal diagnostics to the dashboard log file. When running
@@ -32,14 +34,14 @@ async function main() {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
         reject(new Error(
-          `Port ${config.port} is already in use. Is another TrueCourse instance running?\n` +
+          `Port ${port} is already in use. Is another TrueCourse instance running?\n` +
           `Stop it first, or set PORT to use a different port.`
         ));
       } else {
         reject(err);
       }
     });
-    httpServer.listen(config.port, () => {
+    httpServer.listen(port, () => {
       log.banner([
         '',
         '         _|_',
@@ -58,7 +60,7 @@ async function main() {
         '   Charting your course...',
         '',
       ]);
-      log.info(`[Server] Listening on port ${config.port}`);
+      log.info(`[Server] Listening on port ${port}`);
       resolve();
     });
   });

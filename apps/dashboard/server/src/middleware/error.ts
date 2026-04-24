@@ -2,9 +2,6 @@ import type { Request, Response, NextFunction } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import type { AppError } from '@truecourse/core/lib/errors';
 
-// Re-export so existing dashboard-server imports keep working.
-export { createAppError, type AppError } from '@truecourse/core/lib/errors';
-
 export function errorHandler(
   err: AppError,
   _req: Request,

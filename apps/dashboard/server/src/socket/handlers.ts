@@ -6,22 +6,6 @@ import {
   type AnalysisProgressPayload,
 } from '@truecourse/core/progress';
 
-// Re-export progress primitives so callers within this package can keep a
-// single import path for both transport-bound emitters and tracker types.
-export {
-  DOMAIN_ORDER,
-  CODE_DOMAINS,
-  DEFAULT_DOMAINS,
-  LLM_DOMAINS,
-  DOMAIN_LABELS,
-  buildAnalysisSteps,
-  StepTracker,
-  type StepStatus,
-  type AnalysisStep,
-  type AnalysisProgressPayload,
-  type ProgressEmit,
-} from '@truecourse/core/progress';
-
 // Track in-progress analyses so we can inform clients that join mid-analysis
 const activeAnalyses = new Map<string, AnalysisProgressPayload>();
 

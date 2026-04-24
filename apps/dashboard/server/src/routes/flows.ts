@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { createAppError } from '../middleware/error.js';
+import { createAppError } from '@truecourse/core/lib/errors';
 import {
   computeFlowSeverities,
   enrichFlowWithLLM,

@@ -14,21 +14,20 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import path from 'node:path';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
-import { createAppError } from '../middleware/error.js';
+import { createAppError } from '@truecourse/core/lib/errors';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { readProjectConfig } from '@truecourse/core/config/project-config';
 import type { RegistryEntry } from '@truecourse/core/config/registry';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { diffInProcess } from '@truecourse/core/commands/diff-in-process';
+import { buildAnalysisSteps, type StepTracker } from '@truecourse/core/progress';
 import {
-  buildAnalysisSteps,
   createSocketLlmEstimateHandler,
   createSocketTracker,
   emitAnalysisProgress,
   emitAnalysisComplete,
   emitViolationsReady,
   emitAnalysisCanceled,
-  type StepTracker,
 } from '../socket/handlers.js';
 import {
   cancelAnalysis,

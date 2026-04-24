@@ -10,7 +10,6 @@ function parsePositiveInt(envVar: string, raw: string | undefined, defaultValue:
 }
 
 export const config = {
-  port: parseInt(process.env.PORT || '3001', 10),
   llmProvider: 'claude-code' as const,
   // Claude Code CLI provider settings
   claudeCodeBinary: process.env.CLAUDE_CODE_BINARY || 'claude',
