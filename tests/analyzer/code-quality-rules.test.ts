@@ -356,6 +356,43 @@ describe('code-quality/deterministic/no-var-declaration', () => {
   });
 });
 
+describe('code-quality/deterministic/unknown-catch-variable', () => {
+  const ruleKey = 'code-quality/deterministic/unknown-catch-variable';
+
+  it('detects untyped catch parameter', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e) {
+  console.error(e);
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag catch typed as unknown', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e: unknown) {
+  console.error(e);
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag catch typed as Error', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e: Error) {
+  console.error(e.message);
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Integration
 // ---------------------------------------------------------------------------

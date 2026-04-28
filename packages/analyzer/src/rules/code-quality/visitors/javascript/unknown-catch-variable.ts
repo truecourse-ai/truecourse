@@ -9,7 +9,7 @@ export const unknownCatchVariableVisitor: CodeRuleVisitor = {
     const param = node.childForFieldName('parameter')
     if (!param) return null
 
-    const typeAnnotation = param.namedChildren.find((c) => c.type === 'type_annotation')
+    const typeAnnotation = node.childForFieldName('type')
     if (typeAnnotation) return null
 
     const paramName = param.text
