@@ -1,8 +1,16 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
+
+function gitInit(dir: string): void {
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: dir });
+  execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: dir });
+}
 
 const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.meta.url).pathname;
 
@@ -191,5 +199,89 @@ describe('.truecourseignore with parent .gitignore', () => {
     expect(files.some((f) => f === join(repoDir, 'extensions', 'plugin.ts'))).toBe(false);
     // Negation re-includes extensions/keep.ts after re-anchoring.
     expect(files.some((f) => f === join(repoDir, 'extensions', 'keep.ts'))).toBe(true);
+  });
+});
+
+// These exercise gitignore semantics that the manual walker can't get right.
+// They require an actual git repo so the implementation can delegate to
+// `git ls-files --exclude-standard`.
+describe('discoverFiles in a git repo (gitignore semantics)', () => {
+  const tempDirs: string[] = [];
+
+  afterAll(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-gitrepo-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it('honors anchored patterns in nested .gitignore files', () => {
+    // A nested .gitignore at repo/sub/.gitignore with an internal-slash
+    // pattern is anchored to repo/sub/, not the repo root. The single-matcher
+    // walker conflates the two roots and silently misses anchored rules in
+    // nested .gitignore files.
+    const repo = makeRepo();
+    gitInit(repo);
+
+    mkdirSync(join(repo, 'sub', 'internal'), { recursive: true });
+    mkdirSync(join(repo, 'internal'), { recursive: true });
+
+    writeFileSync(join(repo, 'sub', '.gitignore'), 'internal/secret.ts\n');
+    writeFileSync(join(repo, 'sub', 'internal', 'secret.ts'), 'export const s = 1;');
+    writeFileSync(join(repo, 'sub', 'internal', 'public.ts'), 'export const p = 1;');
+    // Decoy at the repo root — the nested rule must not anchor here.
+    writeFileSync(join(repo, 'internal', 'secret.ts'), 'export const r = 1;');
+
+    const files = discoverFiles(repo);
+
+    // The nested rule should anchor to repo/sub/.
+    expect(files.some((f) => f === join(repo, 'sub', 'internal', 'secret.ts'))).toBe(false);
+    expect(files.some((f) => f === join(repo, 'sub', 'internal', 'public.ts'))).toBe(true);
+    // Repo-root file is unrelated to the nested rule.
+    expect(files.some((f) => f === join(repo, 'internal', 'secret.ts'))).toBe(true);
+  });
+
+  it('honors .git/info/exclude', () => {
+    // git's per-repo non-shared excludes file. The walker never reads it.
+    const repo = makeRepo();
+    gitInit(repo);
+
+    writeFileSync(join(repo, '.git', 'info', 'exclude'), 'private.ts\n');
+    writeFileSync(join(repo, 'private.ts'), 'export const p = 1;');
+    writeFileSync(join(repo, 'public.ts'), 'export const q = 1;');
+
+    const files = discoverFiles(repo);
+
+    expect(files.some((f) => f === join(repo, 'private.ts'))).toBe(false);
+    expect(files.some((f) => f === join(repo, 'public.ts'))).toBe(true);
+  });
+
+  it('does not apply .gitignore from outside the git repo boundary', () => {
+    // The walker climbs to the filesystem root collecting every ancestor
+    // .gitignore. A .gitignore in a directory that is not part of the git
+    // repo (e.g. ~/.gitignore) must not influence files inside the repo —
+    // git itself ignores it.
+    const tempDir = mkdtempSync(join(tmpdir(), 'truecourse-boundary-'));
+    tempDirs.push(tempDir);
+
+    const outside = join(tempDir, 'outside');
+    mkdirSync(outside, { recursive: true });
+    // This .gitignore lives outside any git repo; it must not leak in.
+    writeFileSync(join(outside, '.gitignore'), 'should-be-included.ts\n');
+
+    const repo = join(outside, 'repo');
+    mkdirSync(repo, { recursive: true });
+    gitInit(repo);
+
+    writeFileSync(join(repo, 'should-be-included.ts'), 'export const x = 1;');
+
+    const files = discoverFiles(repo);
+
+    expect(files.some((f) => f === join(repo, 'should-be-included.ts'))).toBe(true);
   });
 });
