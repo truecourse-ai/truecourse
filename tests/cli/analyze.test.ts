@@ -139,3 +139,98 @@ describe('CLI analyze pipeline (e2e)', () => {
     expect(fresh?.lastAnalyzed).toBeTruthy();
   }, 120_000);
 });
+
+// ---------------------------------------------------------------------------
+// Stash decision (issue #64) — the CLI must never silently stash a dirty
+// working tree. Flags pre-approve; absent flag + dirty + non-interactive must
+// exit with a clear message; absent flag + clean does nothing.
+// ---------------------------------------------------------------------------
+
+import { resolveStashDecision } from '../../tools/cli/src/commands/analyze';
+
+describe('resolveStashDecision', () => {
+  let workDir: string;
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'test',
+    GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 'test',
+    GIT_COMMITTER_EMAIL: 't@t',
+  };
+
+  beforeAll(() => {
+    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-stash-decision-'));
+    execSync('git init -q -b main', { cwd: workDir, env });
+    fs.writeFileSync(path.join(workDir, 'a.txt'), 'committed\n');
+    execSync('git add -A', { cwd: workDir, env });
+    execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
+  });
+
+  afterAll(() => {
+    if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
+  });
+
+  function makeDirty(): void {
+    fs.writeFileSync(path.join(workDir, 'a.txt'), 'dirty\n');
+    fs.writeFileSync(path.join(workDir, 'untracked.txt'), 'new\n');
+  }
+  function cleanTree(): void {
+    execSync('git checkout -- a.txt', { cwd: workDir, env });
+    fs.rmSync(path.join(workDir, 'untracked.txt'), { force: true });
+  }
+
+  it('--no-stash: returns skipStash=true without prompting (dirty tree)', async () => {
+    makeDirty();
+    try {
+      const result = await resolveStashDecision({ stash: false }, workDir);
+      expect(result).toEqual({ skipStash: true });
+    } finally {
+      cleanTree();
+    }
+  });
+
+  it('--stash: returns skipStash=false without prompting (dirty tree)', async () => {
+    makeDirty();
+    try {
+      const result = await resolveStashDecision({ stash: true }, workDir);
+      expect(result).toEqual({ skipStash: false });
+    } finally {
+      cleanTree();
+    }
+  });
+
+  it('no flag + clean tree: returns skipStash=false without prompting', async () => {
+    const result = await resolveStashDecision({}, workDir);
+    expect(result).toEqual({ skipStash: false });
+  });
+
+  it('no flag + non-interactive + dirty tree: exits with helpful message', async () => {
+    makeDirty();
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+    try {
+      await expect(resolveStashDecision({}, workDir)).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+      Object.defineProperty(process.stdin, 'isTTY', {
+        value: originalIsTTY,
+        configurable: true,
+      });
+      cleanTree();
+    }
+  });
+
+  it('non-git directory: returns skipStash=false (nothing to stash)', async () => {
+    const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-stash-nongit-'));
+    try {
+      const result = await resolveStashDecision({}, nonGitDir);
+      expect(result).toEqual({ skipStash: false });
+    } finally {
+      fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+});

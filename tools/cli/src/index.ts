@@ -98,15 +98,18 @@ program
   // undefined (falls through to config / interactive prompt).
   .option("--llm", "Run LLM-powered rules (pre-approves the cost estimate)")
   .option("--no-llm", "Skip LLM-powered rules for this run")
+  .option("--stash", "Pre-approve stashing pending changes before analysis")
+  .option("--no-stash", "Analyze the working tree as-is without stashing")
   .option("--install-skills", "Install Claude Code skills without prompting")
   .option("--no-skills", "Skip the Claude Code skills prompt")
   .action(async (options) => {
     const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
+    const stash: boolean | undefined = typeof options.stash === "boolean" ? options.stash : undefined;
     const installSkills = resolveInstallSkills(options);
     if (options.diff) {
-      await runAnalyzeDiff({ llm, installSkills });
+      await runAnalyzeDiff({ llm, stash, installSkills });
     } else {
-      await runAnalyze({ llm, installSkills });
+      await runAnalyze({ llm, stash, installSkills });
     }
   });
 

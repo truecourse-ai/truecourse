@@ -21,6 +21,12 @@ export interface AnalyzeInProcessOptions {
   commitHash?: string | null;
   /** Skip all git commands (branch detection, commit hash, diff). */
   skipGit?: boolean;
+  /**
+   * Analyze the working tree as-is instead of stashing dirty changes first.
+   * The CLI sets this from `--no-stash` (or after the user declines the
+   * stash prompt). Defaults to `false` (stash if dirty).
+   */
+  skipStash?: boolean;
   enabledCategoriesOverride?: string[];
   enableLlmRulesOverride?: boolean;
   tracker?: StepTracker;

@@ -56,6 +56,11 @@ export interface AnalyzeCoreOptions {
   commitHash?: string | null;
   /** Full-mode only: skip git branch/commit/diff calls entirely. Ignored in diff mode. */
   skipGit?: boolean;
+  /**
+   * Full-mode only: analyze the working tree as-is instead of stashing
+   * dirty changes first. Diff mode always skips stashing regardless.
+   */
+  skipStash?: boolean;
   enabledCategoriesOverride?: string[];
   enableLlmRulesOverride?: boolean;
   tracker?: StepTracker;
@@ -155,7 +160,7 @@ export async function analyzeCore(
         options.tracker?.detail('parse', progress.detail ?? 'Analyzing...');
         options.onProgress?.({ detail: progress.detail });
       },
-      { signal, skipStash: isDiff },
+      { signal, skipStash: isDiff || !!options.skipStash },
     );
 
     if (signal?.aborted) {

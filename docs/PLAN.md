@@ -659,10 +659,11 @@ The header contains a **Normal / Git Diff** toggle (segmented control) with an i
 
 When running analysis in Normal mode, the system:
 1. Checks `git status` for uncommitted changes
-2. If dirty: stashes with `git stash push --include-untracked -m 'truecourse-analysis-stash'`
-3. Emits progress: "Stashing pending changes to analyze committed state..."
-4. Runs the full analysis on committed code
-5. Pops the stash in a `finally` block: "Restoring pending changes..."
+2. If dirty: prompts the user for confirmation before stashing (CLI only — the dashboard server never sees TTY). The CLI exposes `--stash` to pre-approve and `--no-stash` to analyze the working tree as-is.
+3. Stashes with `git stash push --include-untracked -m 'truecourse-analysis-stash'`
+4. Emits progress: "Stashing pending changes to analyze committed state..."
+5. Runs the full analysis on committed code
+6. Pops the stash in a `finally` block: "Restoring pending changes..."
 
 This ensures the baseline always reflects the committed state, making Git Diff comparisons meaningful.
 
