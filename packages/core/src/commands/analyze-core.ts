@@ -25,6 +25,9 @@ import { runAnalysis, type AnalysisResult } from '../services/analyzer.service.j
 import { buildGraph } from '../services/analysis-persistence.service.js';
 import { detectFlows } from '../services/flow.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
+import { enforceInvariants } from '../services/invariants/enforce.js';
+import { mapInvariantViolations } from '../services/invariants/snapshot-mapper.js';
+import { estimateInvariantEnforcement } from '../services/invariants/estimator.js';
 import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
 import { toUsageRecords } from '../services/usage.service.js';
 import { readLatest } from '../lib/analysis-store.js';
@@ -68,6 +71,15 @@ export interface AnalyzeCoreOptions {
   onProgress?: (progress: { detail?: string }) => void;
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   onLlmResolved?: (proceed: boolean) => void;
+  /**
+   * Separate prompt for invariant LLM cost. Fires after the rule pipeline
+   * returns and before invariant enforcement runs, only when there's
+   * non-zero invariant LLM cost. The user can approve or skip independently
+   * of the rule-LLM decision (a plugin like `state-machine` is fully
+   * deterministic and runs regardless).
+   */
+  onInvariantsLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  onInvariantsLlmResolved?: (proceed: boolean) => void;
   provider?: LLMProvider;
   signal?: AbortSignal;
 }
@@ -283,15 +295,63 @@ export async function analyzeCore(
 
     // ------------------------------------------------------------
     // Violation pipeline
+    //
+    // Provider is provisioned whenever LLM checks COULD run — either rule
+    // LLM is enabled at config level, or there are active invariants whose
+    // enforcement uses the LLM. This way the pre-flight prompt sees the
+    // combined cost and the user makes a single decision for the run.
     // ------------------------------------------------------------
-    const provider = options.provider ?? (effectiveLlmRules ? createLLMProvider() : undefined);
+    const invariantEstimate = estimateInvariantEnforcement(project.path);
+    const invariantsNeedLlm = invariantEstimate.totalLlmCalls > 0;
+    const provider =
+      options.provider ??
+      (effectiveLlmRules || invariantsNeedLlm ? createLLMProvider() : undefined);
     if (provider) {
       provider.setAnalysisId(analysisId);
       provider.setRepoPath(project.path);
       if (signal) provider.setAbortSignal(signal);
     }
 
-    const pipelineResult = await runViolationPipeline({
+    // ------------------------------------------------------------
+    // Run rule pipeline + invariant enforcement in PARALLEL with two
+    // separate cost prompts.
+    //
+    // Sequence the user sees (for a typical run with both LLM rules and
+    // LLM-using invariants):
+    //   1. Rule pipeline starts → fires rule-LLM prompt → user answers.
+    //   2. Immediately after, invariant phase fires invariant-LLM prompt →
+    //      user answers.
+    //   3. Both phases run concurrently. The shared LLMProvider's global
+    //      concurrency cap (CLAUDE_CODE_MAX_CONCURRENCY) throttles them
+    //      together so they cooperate rather than oversubscribe.
+    //
+    // `ruleDecided` is the gate that lets the invariant phase fire its
+    // prompt only after the rule prompt resolves (or after we know no rule
+    // prompt will fire), so the user never sees both prompts on top of
+    // each other in the CLI.
+    // ------------------------------------------------------------
+    let ruleDecisionResolve!: (proceed: boolean) => void;
+    const ruleDecided: Promise<boolean> = new Promise((r) => {
+      ruleDecisionResolve = r;
+    });
+    let invariantsDecisionResolve!: (proceed: boolean) => void;
+    const invariantsDecided: Promise<boolean> = new Promise((r) => {
+      invariantsDecisionResolve = r;
+    });
+    if (!effectiveLlmRules) {
+      // Rule LLM phase is config-disabled → pipeline won't fire prompt.
+      // Resolve now so the invariant phase doesn't have to wait for the
+      // rule pipeline (deterministic-only) to finish before its prompt.
+      ruleDecisionResolve(true);
+    }
+    if (!invariantsNeedLlm) {
+      // No invariant LLM cost → no invariant prompt will fire. Resolve so
+      // the rule pipeline's onLlmEstimate wrapper doesn't block waiting on
+      // a prompt that won't happen.
+      invariantsDecisionResolve(true);
+    }
+
+    const pipelinePromise = runViolationPipeline({
       repoPath: project.path,
       analysisId,
       now,
@@ -311,10 +371,129 @@ export async function analyzeCore(
         ? async (estimate) => {
             const proceed = await options.onLlmEstimate!(estimate);
             options.onLlmResolved?.(proceed);
+            ruleDecisionResolve(proceed);
+            // Block rule-LLM execution until the invariants prompt has
+            // also been answered, so the user sees both prompts back-to-
+            // back at the start instead of having rule-LLM start running
+            // mid-prompt.
+            await invariantsDecided;
             return proceed;
           }
         : undefined,
+    }).then((res) => {
+      // Backstop — if the pipeline never fired the prompt (e.g. LLM rules
+      // enabled at config but no LLM rule actually applies), resolve
+      // ruleDecided so the invariant phase unblocks. Idempotent if the
+      // wrapper already resolved.
+      ruleDecisionResolve(true);
+      return res;
     });
+
+    const invariantsPromise = (async () => {
+      // Wait for rule prompt to be answered (or for the pipeline to finish
+      // without firing one) so the two prompts don't overlap.
+      await ruleDecided;
+
+      let invariantsApproved = !invariantsNeedLlm;
+      if (invariantsNeedLlm) {
+        if (options.onInvariantsLlmEstimate) {
+          const invariantsEstimate: LlmEstimate = {
+            totalEstimatedTokens: invariantEstimate.totalEstimatedTokens,
+            tiers: [
+              {
+                tier: 'invariants',
+                ruleCount: invariantEstimate.activeCount,
+                fileCount: invariantEstimate.totalLlmCalls,
+                estimatedTokens: invariantEstimate.totalEstimatedTokens,
+              },
+            ],
+            uniqueFileCount: invariantEstimate.filePaths.length,
+            uniqueRuleCount: invariantEstimate.activeCount,
+          };
+          log.info(
+            `[Invariants] Pre-flight: ${invariantEstimate.totalEstimatedTokens} estimated tokens, ` +
+              `${invariantEstimate.activeCount} active across ${invariantEstimate.filePaths.length} file(s)`,
+          );
+          try {
+            invariantsApproved = await options.onInvariantsLlmEstimate(invariantsEstimate);
+          } catch (err) {
+            log.warn(
+              `[Invariants] prompt failed: ${err instanceof Error ? err.message : String(err)} — proceeding`,
+            );
+            invariantsApproved = true;
+          }
+          options.onInvariantsLlmResolved?.(invariantsApproved);
+          if (!invariantsApproved) {
+            log.info(`[Invariants] LLM enforcement skipped by user`);
+          }
+        } else {
+          // Non-interactive caller didn't wire a prompt — default to running.
+          invariantsApproved = true;
+        }
+      }
+
+      // Unblock rule-LLM execution. Set BEFORE running enforce so rule LLM
+      // and invariant LLM start in parallel rather than serializing the
+      // invariant prompt's resolution behind invariant enforcement.
+      invariantsDecisionResolve(invariantsApproved);
+
+      const llmForInvariants = invariantsApproved ? provider : undefined;
+      const invariantsStarted = Date.now();
+      try {
+        const enforceResult = await enforceInvariants({
+          repoPath: project.path,
+          llm: llmForInvariants,
+          files: result.fileAnalyses,
+          onProgress: (event) => {
+            const stepKey = `invariant:${event.pluginType}`;
+            if (event.kind === 'plugin-start') {
+              options.tracker?.start(
+                stepKey,
+                `LLM 0/${event.activeCount}`,
+              );
+            } else if (event.kind === 'plugin-progress') {
+              const parts: string[] = [`LLM ${event.done}/${event.total}`];
+              if (event.running > 0) parts.push(`${event.running} running`);
+              if (event.elapsedMs >= 1000) {
+                const totalSec = Math.floor(event.elapsedMs / 1000);
+                const min = Math.floor(totalSec / 60);
+                const sec = totalSec % 60;
+                parts.push(min === 0 ? `${sec}s` : `${min}m ${sec}s`);
+              }
+              options.tracker?.detail(stepKey, parts.join(' · '));
+            } else if (event.kind === 'plugin-done') {
+              options.tracker?.done(
+                stepKey,
+                `${event.violations} violation${event.violations === 1 ? '' : 's'}`,
+              );
+            } else if (event.kind === 'plugin-failed') {
+              options.tracker?.error(stepKey, 'enforcement failed (see logs)');
+            }
+          },
+        });
+        log.info(
+          `[Invariants] enforce: ${enforceResult.violations.length} violation(s), ` +
+            `plugins run=${enforceResult.pluginsRun.join(',') || '(none)'}, ` +
+            `skipped=${enforceResult.pluginsSkipped.join(',') || '(none)'}, ` +
+            `llm=${llmForInvariants ? 'on' : 'off'} (${Date.now() - invariantsStarted}ms)`,
+        );
+        return enforceResult;
+      } catch (err) {
+        log.error(
+          `[Invariants] enforce failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return {
+          violations: [] as import('@truecourse/shared').Violation[],
+          pluginsRun: [],
+          pluginsSkipped: [],
+        };
+      }
+    })();
+
+    const [pipelineResult, enforceResult] = await Promise.all([
+      pipelinePromise,
+      invariantsPromise,
+    ]);
 
     // Apply LLM-generated service descriptions to the graph in-place.
     if (pipelineResult.serviceDescriptions.length > 0) {
@@ -322,6 +501,26 @@ export async function analyzeCore(
         const svc = graph.services.find((s) => s.id === desc.id);
         if (svc) svc.description = desc.description;
       }
+    }
+
+    // Merge invariant violations into the snapshot stream. Done after both
+    // phases complete so the snapshot mapper sees the final current set
+    // and computes lifecycle (added/unchanged/resolved) against the same
+    // previousActiveViolations the rule pipeline used.
+    {
+      const split = mapInvariantViolations({
+        current: enforceResult.violations,
+        previousActive: previousActiveViolations,
+        analysisId,
+        now,
+      });
+      pipelineResult.added.push(...split.added);
+      pipelineResult.unchanged.push(...split.unchanged);
+      pipelineResult.resolved.push(...split.resolved);
+      pipelineResult.resolvedRefs.push(...split.resolvedRefs);
+      log.info(
+        `[Invariants] snapshot: ${split.added.length} new + ${split.unchanged.length} unchanged + ${split.resolved.length} resolved`,
+      );
     }
 
     // Drain LLM usage before the pipelineResult is frozen into a snapshot.

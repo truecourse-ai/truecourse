@@ -3,7 +3,6 @@ import path from 'node:path';
 import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
-import { stopAllWatchers } from './services/watcher.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
@@ -72,7 +71,6 @@ async function main() {
   // Graceful shutdown
   async function shutdown() {
     log.info('[Server] Shutting down...');
-    stopAllWatchers();
     httpServer.closeAllConnections();
     httpServer.close();
     log.info('[Server] Closed');

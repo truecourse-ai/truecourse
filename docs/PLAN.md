@@ -3180,3 +3180,104 @@ Token-based comparison algorithm to detect copy-pasted code blocks across the co
 3. Hash each window, compare across files
 4. Merge overlapping matches into contiguous duplicate blocks
 5. Report duplicate blocks with file locations and percentage
+
+---
+
+## Phase 37: Invariants Framework `STATUS: IN PROGRESS`
+
+Self-sustained subsystem for catching **semantic** correctness defects — bugs where code is internally consistent but wrong relative to a project's spec or intent. Plugins (shipped) take the project's spec/requirements + code, generate **Invariants** (per-project facts that must always hold), and enforce them at analyze time. Findings land in the existing violations bucket tagged `type: 'invariant'`.
+
+Design doc: `docs/INVARIANTS.md`.
+
+### 37.1 Framework + rest-contract plugin `STATUS: DONE`
+
+- Generic plugin interface (`packages/analyzer/src/plugins/types.ts`): `Plugin<I>`, `DiscoverContext`, `EnforceContext`, `LLMRunner`, declaration-schema validation.
+- File-based spec source (`packages/analyzer/src/spec-sources/files.ts`) — `SPEC.md` convention + override + fallback scan + PRD glob; markdown sections content-hashed for `--diff`.
+- Atomic YAML/JSON store (`packages/core/src/lib/invariant-store.ts`) for active invariants (committed YAML) + drafts (gitignored JSON) + checkpoint + rejected signatures.
+- Suggest pipeline (`packages/core/src/services/invariants/suggest.ts`) — load spec → analyze files → diff vs checkpoint → call plugin discover → persist drafts → update checkpoint. Emits structured `ProgressEvent`s.
+- Enforce pipeline (`enforce.ts`) — load active invariants → per-plugin schema validation → call enforce → normalize violations into `type: 'invariant'`.
+- Lifecycle (`lifecycle.ts`) — `acceptDraft`, `rejectDraft`, `retireBySlug`, `listActive`, `listPendingDrafts`.
+- `rest-contract` plugin (1 of 6 in the catalog): LLM extracts structured claims (error-code / endpoint-contract / field-schema) from spec sections and compares each claim against anchored code. Per-claim invariant; LLM-only enforcement in v1.
+- CLI: `truecourse invariants {suggest,list,list-drafts,accept,reject,retire}`. Suggest streams progress to a clack spinner; logs to `<repo>/.truecourse/logs/invariants.log`.
+- 60 tests under `tests/invariant-framework/` and `tests/plugins/rest-contract/`.
+
+### 37.2 Dashboard stub UI `STATUS: DONE`
+
+Per `INVARIANTS.md` § Discovery UX (Phase 1 deliverable: "review queue (stub UI)").
+
+- Server: `apps/dashboard/server/src/routes/invariants.ts` — GET active, GET drafts, POST suggest (202; streams over socket), POST accept, POST reject, DELETE retire. Concurrent-suggest guard returns 409.
+- Socket emitters: `invariants:progress | :complete | :failed` on the `repo:<id>` room.
+- Client: Invariants tab (shield icon) in the LeftSidebar. Slim sidebar list (sticky-header `Section`s for Review queue + Active) with a Suggest CTA at the top + live progress message.
+- Click a row → `InvariantViewerPanel` opens in the main content area: status pill, scope, confidence, rationale, provenance dl, formatted declaration JSON. Accept / Reject / Retire are emerald/red `ActionButton`s in the header (matching ADR's `ActionButton` palette).
+
+### 37.3 Plugin catalog visibility (Browse Plugins Sheet) `STATUS: TODO`
+
+Surface shipped plugins as a discoverable browse view on the home page. **A first cut tried merging plugins into `RulesPanel` as a third type alongside `deterministic | llm` and was reverted** — the design doc deliberately keeps "rule" and "invariant" separate (`INVARIANTS.md:31, :460`), and forcing plugins into the rules schema misrepresented their lifecycle (rules fire automatically; plugins require suggest → review → accept), abstraction level (one rule = one check; one plugin = a capability that produces 0..N invariants), and severity (rules have a fixed severity; plugin findings get severity per violation at enforce time). The redundant `Invariants` + `Invariant` pills were the visible symptom of the schema mismatch.
+
+Final shape — mirror the existing **"Browse Rules"** Shield-button → Sheet → `RulesPanel` pattern (`apps/dashboard/client/src/components/pages/HomePanel.tsx:215-237`) with a parallel **"Browse Plugins"** ShieldCheck-button → Sheet → `PluginsPanel`:
+
+- Server: `GET /api/plugins` returns each plugin's `PluginCatalogEntry` (`key`, `pluginType`, `name`, `description`, `enforcement: 'static' | 'llm' | 'mixed'`, `defaultSeverity`, `pluginVersion`). Lives in `packages/core/src/services/plugins.ts` and exposed via `@truecourse/core/services/plugins` so the dashboard server doesn't pull `@truecourse/analyzer` directly.
+- Plugin metadata: each plugin declares `metadata: PluginMetadata` (name, description, enforcement, defaultSeverity) on `Plugin<I>`. Required.
+- Client: new `PluginsPanel.tsx` parallel to `RulesPanel`. Lists each plugin with name, description, enforcement pill (Static / LLM / Mixed), default severity, version. Search by name/description. **No domain or type filter** — those are rule axes, not plugin axes.
+- HomePanel: add a "Browse Plugins" Sheet trigger next to "Browse Rules" (sibling button, ShieldCheck icon). Each catalog has its own slide-over.
+- `RulesPanel` stays untouched and lists static rules only.
+
+### 37.4 Second plugin: `state-machine` `STATUS: TODO`
+
+The deliberate "different on every axis" pair to `rest-contract`. Validates the framework isn't overfit to one plugin shape.
+
+- Code-driven discovery: enumerate string-literal union types + TS enums + ORM enum fields; collect assignment sites; infer transitions from surrounding guards.
+- Structured graph declaration: `{ states, terminal, transitions: Array<{from, to}>, scope }`.
+- Static enforcement via guard inference: walk up from each write to the scope field, collect prior-state constraints from `if`/`switch`/case guards, verify `(prior, new) ∈ transitions`. No-guard sites are skipped (FP avoidance).
+- LLM is sanity filter only — distinguishes real state machines from ad-hoc enums (`user.role`).
+- Tests under `tests/plugins/state-machine/{discover,enforce,diff-mode}.test.ts`.
+
+### 37.5 Real fixture bug sites `STATUS: TODO`
+
+`tests/fixtures/sample-js-project-{positive,negative}/` share the same SPEC.md but the negative fixture's handler code does not actually contain bugs that violate the spec. Add real bug sites (e.g., `createUser` returns 200 instead of 201, missing 409 path, missing 404 path on delete) at known file:line locations so end-to-end runs (LLM enabled, no mocks) demonstrate drift detection. Update `expected-graph.json` if structural assertions shift.
+
+### 37.6 Python fixtures `STATUS: TODO`
+
+Same SPEC.md + bug-site pattern, Python edition. Required before plugins like `ordering` and `fairness` ship — they must work in both languages from day one per the design.
+
+### 37.7 Synthesis runtime infrastructure `STATUS: TODO`
+
+Sandbox-subprocess runner for property-based tests (`INVARIANTS.md` § Property-test synthesis):
+- fast-check bundled (JS/TS path)
+- Hypothesis lazy-installed into `~/.truecourse/runners/python/`
+- Per-language adapters under `packages/analyzer/src/plugins/synthesis/<language>/`
+- Timeout + memory caps; seeded RNG; counterexample reproducibility
+
+Not needed until `ordering` / `fairness` plugins are implemented.
+
+### 37.8 Remaining plugins `STATUS: TODO`
+
+- `cross-route-guard` — code-heavy static.
+- `ordering` — synthesis (depends on 37.7).
+- `fairness` — synthesis (depends on 37.7); ships last (highest FP risk).
+- `lease-gating` — small static; consults `state-machine`.
+
+### 37.9 Drift / anchor-missing tests `STATUS: TODO`
+
+End-to-end drift tests under `tests/plugins/<type>/{drift,anchor-missing}.test.ts`: discover invariants from a fixture, mutate spec or code in a temp copy, re-run discovery, assert drift is flagged with the right summary.
+
+### 37.10 Battle test on real codebases `STATUS: TODO`
+
+Per the project's existing rule cycle, every plugin must run on at least 2–3 real codebases before merge (TrueCourse itself + 1–2 OSS repos). Capture FPs as additions to the negative fixture.
+
+### Test Plan (Phase 37)
+
+- Framework: store round-trip, spec section parsing, lifecycle, suggest pipeline, enforce pipeline (60 tests, currently passing).
+- Each plugin: `discover`, `enforce`, `diff-mode`, `drift`, `anchor-missing` test files.
+- HTTP: route tests under `tests/server/` for each invariants endpoint (success + 404 + 409-while-running).
+- UI: smoke test that the Invariants tab loads and the Suggest button POSTs.
+- `pnpm build` and `pnpm test` pass.
+
+### Verification (Phase 37)
+
+1. Place a SPEC.md at the repo root → `truecourse invariants suggest` discovers structured claims → drafts appear in `.truecourse/invariant-drafts/`.
+2. Open the dashboard → Invariants tab → Suggest button streams progress → drafts appear in the review queue.
+3. Click a draft → viewer renders with declaration + provenance → click Accept → YAML lands in `.truecourse/invariants/` and the draft moves to Active.
+4. Run `truecourse analyze` → invariant violations land in the violations stream tagged `type: 'invariant'`.
+5. Mutate the spec or code → re-run `suggest --diff` → drift surfaces on the affected invariants.
+6. Browse the Rules catalog → filter by type `invariant` → see all six shipped plugins in the catalog.

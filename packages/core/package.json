@@ -52,6 +52,10 @@
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
+    "./lib/invariant-store": {
+      "types": "./dist/lib/invariant-store.d.ts",
+      "import": "./dist/lib/invariant-store.js"
+    },
     "./lib/git": {
       "types": "./dist/lib/git.d.ts",
       "import": "./dist/lib/git.js"
@@ -92,6 +96,10 @@
       "types": "./dist/services/rules.service.d.ts",
       "import": "./dist/services/rules.service.js"
     },
+    "./services/plugins": {
+      "types": "./dist/services/plugins.d.ts",
+      "import": "./dist/services/plugins.js"
+    },
     "./services/stable-keys": {
       "types": "./dist/services/stable-keys.d.ts",
       "import": "./dist/services/stable-keys.js"
@@ -99,6 +107,10 @@
     "./services/llm/provider": {
       "types": "./dist/services/llm/provider.d.ts",
       "import": "./dist/services/llm/provider.js"
+    },
+    "./services/invariants": {
+      "types": "./dist/services/invariants/index.d.ts",
+      "import": "./dist/services/invariants/index.js"
     },
     "./types/snapshot": {
       "types": "./dist/types/snapshot.d.ts",
@@ -115,6 +127,7 @@
     "cross-spawn": "^7.0.6",
     "dagre": "^0.8.5",
     "dotenv": "^16.4.0",
+    "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
     "simple-git": "^3.27.0",
     "zod": "^3.23.8",
@@ -123,6 +136,7 @@
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
     "@types/dagre": "^0.7.52",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

@@ -339,6 +339,15 @@ export abstract class BaseCLIProvider implements LLMProvider {
   // LLMProvider implementation
   // ---------------------------------------------------------------------------
 
+  async runStructuredPrompt<T>(args: {
+    prompt: string;
+    schema: ZodType<T>;
+    label: string;
+  }): Promise<T> {
+    const { data } = await this.spawnAndParse(args.prompt, args.schema, { label: args.label });
+    return data;
+  }
+
   async generateServiceViolations(
     context: ServiceViolationContext,
     opts?: { onStart?: () => void },

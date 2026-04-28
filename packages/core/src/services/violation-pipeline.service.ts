@@ -124,6 +124,12 @@ export interface ViolationPipelineResult {
   unchanged: ViolationRecord[];
   /** Compact refs for AnalysisSnapshot.violations.resolved (saves space in delta). */
   resolvedRefs: ResolvedViolationRef[];
+  /**
+   * True when the pre-flight prompt was shown and the user declined LLM
+   * checks. Callers (analyze-core) use this to also skip LLM-needing
+   * invariant enforcement.
+   */
+  llmSkipped: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +293,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
   // ---------------------------------------------------------------------------
   // 3. LLM estimate + confirmation
+  //
+  // Rule LLM cost only — invariant LLM cost has its own prompt fired by
+  // `analyze-core` so users see two distinct decisions (rules vs invariants).
   // ---------------------------------------------------------------------------
   if (hasLlm && input.onLlmEstimate) {
     const codeEstimate = enabledLlmCodeRules.length > 0 && fileContents.size > 0
@@ -1433,6 +1442,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     unchanged,
     resolved,
     resolvedRefs,
+    llmSkipped,
   };
 }
 

@@ -1,13 +1,13 @@
 
 import { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { AlertTriangle, AlertCircle, Loader2, X, Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Loader2, X, Shield, ShieldCheck, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Search, LayoutList } from 'lucide-react';
 import { ViolationCard } from '@/components/violations/ViolationCard';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
-export type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
+export type CategoryFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style' | 'invariants';
 export type TypeFilter = 'all' | 'deterministic' | 'llm';
 
 type ViolationsPanelProps = {
@@ -40,7 +40,7 @@ type ViolationsPanelProps = {
 };
 
 const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
-  { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
+  { value: 'all', label: 'All', icon: <LayoutList className="h-3.5 w-3.5" /> },
   { value: 'security', label: 'Security', icon: <Shield className="h-3.5 w-3.5" /> },
   { value: 'bugs', label: 'Bugs', icon: <Bug className="h-3.5 w-3.5" /> },
   { value: 'architecture', label: 'Architecture', icon: <Network className="h-3.5 w-3.5" /> },
@@ -49,6 +49,7 @@ const categories: { value: CategoryFilter; label: string; icon: React.ReactNode 
   { value: 'code-quality', label: 'Code Quality', icon: <Code2 className="h-3.5 w-3.5" /> },
   { value: 'database', label: 'Database', icon: <Database className="h-3.5 w-3.5" /> },
   { value: 'style', label: 'Style', icon: <Paintbrush className="h-3.5 w-3.5" /> },
+  { value: 'invariants', label: 'Invariants', icon: <ShieldCheck className="h-3.5 w-3.5" /> },
 ];
 
 /** Derive domain from ruleKey (e.g. 'security/deterministic/foo' → 'security') */
@@ -58,7 +59,11 @@ function getDomain(v: ViolationResponse): string {
   return slash > 0 ? key.slice(0, slash) : v.type;
 }
 
-/** Derive detection type from ruleKey (e.g. 'security/deterministic/foo' → 'deterministic') */
+/** Derive detection type. Both rule findings and invariant findings encode
+ *  det/llm in the ruleKey path:
+ *    static rule:    `<domain>/(deterministic|llm)/<rule-name>`
+ *    invariant:      `invariants/(deterministic|llm)/<invariantId>`
+ *  so the same `/llm/` substring check works for both. */
 function getDetectionType(v: ViolationResponse): 'deterministic' | 'llm' {
   const key = v.ruleKey || '';
   return key.includes('/llm/') ? 'llm' : 'deterministic';
@@ -192,13 +197,14 @@ export function ViolationsPanel({
   }, [isDiffMode, diffResult]);
 
   // Filter violations by selected file path.
-  // Works without nodeFilePathMap for code violations (which carry filePath directly);
-  // non-code violations fall through (show) when the map isn't available.
+  // Works without nodeFilePathMap for any violation that carries `filePath`
+  // (code-rule findings and invariant findings alike); architectural
+  // violations fall through to the nodeFilePathMap lookup.
   const pathFilteredViolations = useMemo(() => {
     if (!selectedPath) return violations;
     return violations.filter((violation) => {
-      // Code violations: match by filePath directly
-      if (violation.type === 'code' && violation.filePath) {
+      // File-anchored violations: match by filePath directly
+      if (violation.filePath) {
         if (violation.filePath.includes(selectedPath)) return true;
         if (selectedPath.includes(violation.filePath)) return true;
         const parts = violation.filePath.split('/');

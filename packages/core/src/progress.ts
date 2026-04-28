@@ -20,6 +20,7 @@ export const DOMAIN_LABELS: Record<string, string> = {
 export function buildAnalysisSteps(
   enabledCategories?: string[],
   enableLlmRules?: boolean,
+  invariantSteps?: { key: string; label: string }[],
 ): { key: string; label: string }[] {
   const steps: { key: string; label: string }[] = [
     { key: 'parse', label: 'Parsing repository' },
@@ -34,6 +35,12 @@ export function buildAnalysisSteps(
 
   for (const domain of activeDomains) {
     steps.push({ key: domain, label: `${DOMAIN_LABELS[domain]} checks` });
+  }
+
+  if (invariantSteps?.length) {
+    for (const step of invariantSteps) {
+      steps.push(step);
+    }
   }
 
   steps.push({ key: 'persist', label: 'Saving results' });

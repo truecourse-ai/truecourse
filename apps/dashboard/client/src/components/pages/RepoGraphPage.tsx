@@ -13,6 +13,8 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
+import { InvariantsPanel, type SelectedInvariant } from '@/components/invariants/InvariantsPanel';
+import { InvariantViewerPanel } from '@/components/invariants/InvariantViewerPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
@@ -20,6 +22,8 @@ import { useDiffCheck } from '@/hooks/useDiffCheck';
 import { useAnalysisList } from '@/hooks/useAnalysisList';
 import { useCodeViolationSummary } from '@/hooks/useCodeViolationSummary';
 import { useFlows } from '@/hooks/useFlows';
+import { useInvariants } from '@/hooks/useInvariants';
+import { useAnalytics } from '@/hooks/useAnalytics';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
@@ -53,6 +57,7 @@ const VALID_LEFT_TABS = new Set<LeftTab>([
   'flows',
   'databases',
   'analyses',
+  'invariants',
 ]);
 
 const MAIN_CONTENT_TABS = new Set<LeftTab>([
@@ -215,6 +220,7 @@ export default function RepoGraphPage() {
     flowFromUrl ? [{ id: flowFromUrl, name: 'Flow', pinned: true }] : []
   );
   const [activeFlowId, setActiveFlowIdState] = useState<string | null>(flowFromUrl);
+  const [selectedInvariant, setSelectedInvariant] = useState<SelectedInvariant | null>(null);
 
   const setActiveFlowId = useCallback((id: string | null) => {
     setActiveFlowIdState(id);
@@ -305,28 +311,6 @@ export default function RepoGraphPage() {
     if (dbId !== null) setLeftTab('databases');
   }, [setActiveDbId, setActiveFilePath, setActiveFlowId, setLeftTab]);
 
-  // Home is the default + locked tab. Clicking an active rail icon (which the
-  // sidebar signals as `null`) falls back to Home instead of nulling out.
-  // When entering Files/Flows/Databases with no active item (e.g. URL params
-  // were stripped by a prior Home visit), restore the last-opened item so the
-  // detail view reopens instead of showing the empty placeholder.
-  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
-    const next = tab ?? 'home';
-    setLeftTab(next);
-    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
-      setActiveFlowId(openFlows[openFlows.length - 1].id);
-    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
-      setActiveFilePath(openFiles[openFiles.length - 1].path);
-    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
-      setActiveDbId(openDatabases[openDatabases.length - 1].id);
-    }
-  }, [
-    setLeftTab,
-    activeFlowId, openFlows, setActiveFlowId,
-    activeFilePath, openFiles, setActiveFilePath,
-    activeDbId, openDatabases, setActiveDbId,
-  ]);
-
   const handleOpenFlow = useCallback((flowId: string, flowName: string, pinned: boolean) => {
     setOpenFlows((prev) => {
       const existing = prev.find((f) => f.id === flowId);
@@ -382,6 +366,8 @@ export default function RepoGraphPage() {
     respondToLlmEstimate,
     stashConfirm,
     respondToStashConfirm,
+    invariantsLlmEstimate,
+    respondToInvariantsLlmEstimate,
   } = useSocket(repoId);
 
   useEffect(() => {
@@ -415,6 +401,7 @@ export default function RepoGraphPage() {
   const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } =
     useViolations(repoId, undefined, selectedAnalysisId ?? undefined, { enabled: leftTab === 'home' });
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId, onEvent);
+  const invariants = useInvariants({ repoId, onEvent });
 
   // In diff mode with no diff result yet, show no violations
   const emptyViolations = isDiffMode && !diffResult;
@@ -463,6 +450,75 @@ export default function RepoGraphPage() {
   const { flows: flowList, severities: rawFlowSeverities, isLoading: flowsLoading, refetch: refetchFlows } =
     useFlows(repoId, { enabled: leftTab === 'flows', analysisId: graphAnalysisId });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
+
+  const {
+    trend: analyticsTrend,
+    breakdown: analyticsBreakdown,
+    topOffenders: analyticsTopOffenders,
+    resolution: analyticsResolution,
+    codeHotspots: analyticsCodeHotspots,
+    refetch: refetchAnalytics,
+  } = useAnalytics(repoId, currentBranch, graphAnalysisId);
+
+  // Home is the default + locked tab. Clicking an active rail icon (which the
+  // sidebar signals as `null`) falls back to Home instead of nulling out.
+  // When entering Files/Flows/Databases with no active item (e.g. URL params
+  // were stripped by a prior Home visit), restore the last-opened item so the
+  // detail view reopens instead of showing the empty placeholder.
+  //
+  // Refetching on tab click is what surfaces CLI-triggered analyses without a
+  // page refresh. Dashboard-triggered runs already refresh via the
+  // `analysis:complete` / `violations:ready` socket handlers below.
+  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
+    const next = tab ?? 'home';
+    setLeftTab(next);
+    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
+      setActiveFlowId(openFlows[openFlows.length - 1].id);
+    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
+      setActiveFilePath(openFiles[openFiles.length - 1].path);
+    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
+      setActiveDbId(openDatabases[openDatabases.length - 1].id);
+    }
+    switch (next) {
+      case 'home':
+        refetchViolations();
+        refetchAnalyses();
+        refetchAnalytics();
+        break;
+      case 'graphs':
+        refetchGraph();
+        refetchViolations();
+        break;
+      case 'files':
+        refetchGraph();
+        refetchCodeViolationSummary();
+        break;
+      case 'flows':
+        refetchFlows();
+        break;
+      case 'databases':
+        refetchGraph();
+        break;
+      case 'analyses':
+        refetchAnalyses();
+        break;
+      case 'invariants':
+        invariants.refresh();
+        break;
+    }
+  }, [
+    setLeftTab,
+    activeFlowId, openFlows, setActiveFlowId,
+    activeFilePath, openFiles, setActiveFilePath,
+    activeDbId, openDatabases, setActiveDbId,
+    refetchViolations,
+    refetchAnalyses,
+    refetchAnalytics,
+    refetchGraph,
+    refetchCodeViolationSummary,
+    refetchFlows,
+    invariants,
+  ]);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -985,6 +1041,19 @@ export default function RepoGraphPage() {
               onSelectDatabase={handleOpenDatabase}
             />
           )}
+          {leftTab === 'invariants' && (
+            <InvariantsPanel
+              active={invariants.active}
+              drafts={invariants.drafts}
+              isLoading={invariants.isLoading}
+              error={invariants.error}
+              run={invariants.run}
+              selected={selectedInvariant}
+              onTrigger={invariants.trigger}
+              onSelectDraft={(id) => setSelectedInvariant({ kind: 'draft', id })}
+              onSelectActive={(slug) => setSelectedInvariant({ kind: 'active', slug })}
+            />
+          )}
           {leftTab === 'files' && (
             <FileTree
               repoId={repoId}
@@ -1174,6 +1243,54 @@ export default function RepoGraphPage() {
               }}
               repoId={repoId}
             />
+          ) : leftTab === 'invariants' ? (
+            (() => {
+              if (!selectedInvariant) {
+                return (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    Select a draft or active invariant from the sidebar.
+                  </div>
+                );
+              }
+              if (selectedInvariant.kind === 'draft') {
+                const draft = invariants.drafts.find((d) => d.id === selectedInvariant.id);
+                if (!draft) {
+                  return (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      Draft no longer in the review queue.
+                    </div>
+                  );
+                }
+                return (
+                  <InvariantViewerPanel
+                    kind="draft"
+                    draft={draft}
+                    onAccept={() => invariants.accept(draft.id)}
+                    onReject={() => invariants.reject(draft.id)}
+                    onResolved={() => setSelectedInvariant(null)}
+                  />
+                );
+              }
+              const inv = invariants.active.find(
+                (a) => (a.sourceFile?.split('/').pop() ?? '').replace(/\.ya?ml$/, '') === selectedInvariant.slug,
+              );
+              if (!inv) {
+                return (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    Invariant not found.
+                  </div>
+                );
+              }
+              return (
+                <InvariantViewerPanel
+                  kind="active"
+                  invariant={inv}
+                  slug={selectedInvariant.slug}
+                  onRetire={() => invariants.retire(selectedInvariant.slug)}
+                  onResolved={() => setSelectedInvariant(null)}
+                />
+              );
+            })()
           ) : leftTab === 'home' ? (
             repo == null ? (
               <div className="flex h-full w-full items-center justify-center">
@@ -1183,11 +1300,15 @@ export default function RepoGraphPage() {
               <HomePanel
                 key={repo.lastAnalyzed ?? 'unanalyzed'}
                 repoId={repoId}
-                branch={currentBranch}
                 analysisId={graphAnalysisId}
                 hasAnalysis={hasAnalysis}
                 violations={violations}
                 violationsLoading={violationsLoading}
+                trend={analyticsTrend}
+                breakdown={analyticsBreakdown}
+                topOffenders={analyticsTopOffenders}
+                resolution={analyticsResolution}
+                codeHotspots={analyticsCodeHotspots}
                 isDiffMode={isDiffMode}
                 diffResult={diffResult}
                 onLocateNode={handleLocateNodeFromHome}
@@ -1436,6 +1557,34 @@ export default function RepoGraphPage() {
           </div>
         </div>
       )}
+      {invariantsLlmEstimate && (() => {
+        const totalInvariants = invariantsLlmEstimate.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
+        const totalFiles = invariantsLlmEstimate.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
+        return (
+          <div className="fixed bottom-4 left-1/2 z-50 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-4 shadow-lg">
+            <div className="mb-3">
+              <span className="text-xs font-medium text-foreground">LLM invariants</span>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {totalFiles} files, {totalInvariants} invariants (~{Math.round(invariantsLlmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens)
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="flex-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                onClick={() => respondToInvariantsLlmEstimate(invariantsLlmEstimate.repoId, true)}
+              >
+                Run invariants
+              </button>
+              <button
+                className="flex-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                onClick={() => respondToInvariantsLlmEstimate(invariantsLlmEstimate.repoId, false)}
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        );
+      })()}
       {analysisProgress && (
         <div
           className={`fixed bottom-4 left-1/2 z-40 w-80 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${

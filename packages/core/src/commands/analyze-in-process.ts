@@ -33,6 +33,9 @@ export interface AnalyzeInProcessOptions {
   onProgress?: (progress: { detail?: string }) => void;
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   onLlmResolved?: (proceed: boolean) => void;
+  /** Separate prompt for invariant LLM cost — see `AnalyzeCoreOptions`. */
+  onInvariantsLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  onInvariantsLlmResolved?: (proceed: boolean) => void;
   provider?: LLMProvider;
   signal?: AbortSignal;
 }

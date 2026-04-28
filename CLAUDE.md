@@ -70,6 +70,7 @@ npm publishing is automated: push a git tag `vX.Y.Z` after merging to `main` and
 ## Testing
 
 - When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
+- Live LLM tests are gated behind `LLM_TESTS=1`. The default `pnpm test` skips them (CI stays fast and free). Run `LLM_TESTS=1 pnpm test` to exercise the gated end-to-end blocks in `tests/cli/analyze.test.ts` against the negative fixture (every `// VIOLATION:` and `// INVARIANT-DRIFT:` marker must fire) and the positive fixture (zero invariant + zero LLM-rule false positives). Each gated block runs real Claude calls against `sample-js-project-{negative,positive}` — slow + costs cents per run.
 
 ## Conventions
 

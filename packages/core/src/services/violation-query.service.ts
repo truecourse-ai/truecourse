@@ -40,7 +40,8 @@ export interface ListViolationsOptions {
   analysisId?: string;
   /** `active` (default) = new + unchanged. `resolved` = only resolved. `all` = no status filter. */
   status?: 'active' | 'resolved' | 'all';
-  /** File path filter (absolute or repo-relative). Scoped to `type === 'code'`. */
+  /** File path filter (absolute or repo-relative). Matches any violation that
+   *  carries a `filePath` — code-rule findings and invariant findings alike. */
   filePath?: string;
   /** Severity filter. Accepts one or more; case-insensitive. Missing → no severity filter. */
   severity?: Severity | Severity[];
@@ -96,7 +97,7 @@ export function listViolations(
       ? options.filePath
       : `${repoPath}/${options.filePath}`;
     filtered = filtered.filter(
-      (v) => v.type === 'code' && (v.filePath === absPath || v.filePath === options.filePath),
+      (v) => v.filePath != null && (v.filePath === absPath || v.filePath === options.filePath),
     );
   }
 

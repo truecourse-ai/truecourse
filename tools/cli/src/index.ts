@@ -13,6 +13,14 @@ import {
 } from "./commands/dashboard.js";
 import { runList, runListDiff, parseSeverityFlag } from "./commands/list.js";
 import { runRulesCategories, runRulesLlm } from "./commands/rules.js";
+import {
+  runInvariantsSuggest,
+  runInvariantsList,
+  runInvariantsListDrafts,
+  runInvariantsAccept,
+  runInvariantsReject,
+  runInvariantsRetire,
+} from "./commands/invariants.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -168,6 +176,54 @@ rulesCmd
   .option("--reset", "Reset to global default")
   .action(async (options) => {
     await runRulesLlm(options);
+  });
+
+// Invariants management — discovery, review queue, lifecycle
+const invariantsCmd = program
+  .command("invariants")
+  .description("Manage per-project invariants (dynamic rules)");
+
+invariantsCmd
+  .command("suggest")
+  .description("Discover candidate invariants from spec + code")
+  .option("--diff", "Incremental: only re-scan files/sections changed since the last checkpoint")
+  .action(async (options) => {
+    await runInvariantsSuggest({ diff: !!options.diff });
+  });
+
+invariantsCmd
+  .command("list")
+  .description("Show active invariants")
+  .action(async () => {
+    await runInvariantsList();
+  });
+
+invariantsCmd
+  .command("list-drafts")
+  .description("Show pending draft invariants awaiting review")
+  .action(async () => {
+    await runInvariantsListDrafts();
+  });
+
+invariantsCmd
+  .command("accept <draft-id>")
+  .description("Accept a draft and persist it as an active invariant")
+  .action(async (draftId: string) => {
+    await runInvariantsAccept(draftId);
+  });
+
+invariantsCmd
+  .command("reject <draft-id>")
+  .description("Reject a draft; its signature is persisted so discovery won't resurface it")
+  .action(async (draftId: string) => {
+    await runInvariantsReject(draftId);
+  });
+
+invariantsCmd
+  .command("retire <slug>")
+  .description("Retire an active invariant; enforcement stops")
+  .action(async (slug: string) => {
+    await runInvariantsRetire(slug);
   });
 
 // Telemetry management

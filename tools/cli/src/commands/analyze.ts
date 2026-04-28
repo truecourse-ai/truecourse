@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import path from "node:path";
 import { analyzeInProcess } from "@truecourse/core/commands/analyze-in-process";
 import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/core/progress";
+import { activeInvariantSteps } from "@truecourse/core/services/invariants";
 import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/core/config/paths";
 import { registerProject, type RegistryEntry } from "@truecourse/core/config/registry";
 import { readProjectConfig } from "@truecourse/core/config/project-config";
@@ -264,7 +265,8 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     p.log.info("Legacy Postgres data wiped. Re-analyze to repopulate.");
   }
 
-  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const invariantSteps = activeInvariantSteps(project.path);
+  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules, invariantSteps);
   const tracker = new StepTracker((payload) => {
     if (payload.steps) renderSteps(payload.steps);
   }, stepDefs);
@@ -301,6 +303,13 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
         // below the prompt; parse + scan are already printed above it.
         renderPhase = "post-llm";
         return proceed;
+      },
+      onInvariantsLlmEstimate: async (estimate) => {
+        stopSpinner();
+        return promptLlmEstimate(estimate, {
+          autoApprove: llmDecision.autoApproveEstimate,
+          subject: "invariants",
+        });
       },
     });
 
@@ -359,7 +368,8 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   // `renderedLineCount` globals.
   renderPhase = enableLlmRules ? "pre-llm" : "all";
 
-  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const invariantSteps = activeInvariantSteps(project.path);
+  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules, invariantSteps);
   const tracker = new StepTracker((payload) => {
     if (payload.steps) renderSteps(payload.steps);
   }, stepDefs);
@@ -390,6 +400,13 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
         });
         renderPhase = "post-llm";
         return proceed;
+      },
+      onInvariantsLlmEstimate: async (estimate) => {
+        stopSpinner();
+        return promptLlmEstimate(estimate, {
+          autoApprove: llmDecision.autoApproveEstimate,
+          subject: "invariants",
+        });
       },
     });
 

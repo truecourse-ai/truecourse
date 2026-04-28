@@ -15,6 +15,7 @@ export const ViolationTypeSchema = z.enum([
   'module',
   'service',
   'function',
+  'invariant',
 ])
 export type ViolationType = z.infer<typeof ViolationTypeSchema>
 
@@ -56,10 +57,23 @@ export const ViolationSchema = z.object({
   targetTable: z.string().optional(),
   fixPrompt: z.string().optional(),
   ruleKey: z.string().optional(),
+  invariantId: z.string().optional(),
   deterministicViolationId: z.string().optional(),
   firstSeenAt: z.string().optional(),
   resolvedAt: z.string().optional(),
   createdAt: z.string(),
+  /** Optional source location — populated by plugins (and historically by code rules). */
+  filePath: z.string().optional(),
+  lineStart: z.number().int().nonnegative().optional(),
+  lineEnd: z.number().int().nonnegative().optional(),
+  /**
+   * How the finding was produced. For static rules this is implicit in the
+   * ruleKey path (`<domain>/deterministic/...` vs `<domain>/llm/...`). For
+   * invariant findings, the plugin sets this so the snapshot mapper can
+   * embed it in the persisted ruleKey, keeping the det/llm filter in the
+   * UI orthogonal to the source-of-finding category (rules vs invariants).
+   */
+  enforcement: z.enum(['deterministic', 'llm', 'mixed']).optional(),
 })
 
 export type Violation = z.infer<typeof ViolationSchema>

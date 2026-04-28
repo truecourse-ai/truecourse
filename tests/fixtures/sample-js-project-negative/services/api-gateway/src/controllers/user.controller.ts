@@ -7,6 +7,7 @@ export class UserController {
 
   getAll = async (_req: Request, res: Response) => {
     const users = await this.userService.findAll();
+    // INVARIANT-DRIFT: rest-contract — GET /users response-body
     res.json(users);
   };
 
@@ -20,11 +21,15 @@ export class UserController {
   };
 
   create = async (req: Request, res: Response) => {
+    // INVARIANT-DRIFT: rest-contract — POST /users status-400
+    // INVARIANT-DRIFT: rest-contract — POST /users status-409
     const user = await this.userService.create(req.body);
     res.status(201).json(user);
   };
 
   delete = async (req: Request, res: Response) => {
+    // INVARIANT-DRIFT: rest-contract — DELETE /users/:id status-404
+    // INVARIANT-DRIFT: rest-contract — DELETE /users/:id error-envelope:404
     await this.userService.delete(req.params.id);
     res.status(204).send();
   };

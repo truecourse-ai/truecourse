@@ -9,6 +9,7 @@ const userService = new UserService();
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 export async function getUsers(_req: Request, res: Response) {
   const users = await userService.getAll();
+  // INVARIANT-DRIFT: rest-contract — GET /users response-body
   res.json(users);
 }
 
@@ -31,13 +32,17 @@ export async function createUser(req: Request, res: Response) {
     res.status(400).json({ error: 'Invalid email' });
     return;
   }
+  // INVARIANT-DRIFT: rest-contract — POST /users status-409
   const user = await userService.create({ name, email });
-  res.status(201).json(user);
+  // INVARIANT-DRIFT: rest-contract — POST /users status-201
+  res.status(200).json(user);
 }
 
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 export async function deleteUser(req: Request, res: Response) {
+  // INVARIANT-DRIFT: rest-contract — DELETE /users/:id status-404
+  // INVARIANT-DRIFT: rest-contract — DELETE /users/:id error-envelope:404
   await userService.delete(req.params.id);
   res.status(204).send();
 }

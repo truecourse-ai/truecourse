@@ -23,7 +23,8 @@
     "pyright": "^1.1.408",
     "smol-toml": "^1.6.1",
     "typescript": "^5.7.0",
-    "web-tree-sitter": "^0.26.0"
+    "web-tree-sitter": "^0.26.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

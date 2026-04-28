@@ -22,6 +22,7 @@ import { checkCodeRules, parseFile, detectLanguage, buildSchemaIndex } from '../
 import { detectDatabases } from '../../packages/analyzer/src/database-detector';
 import { buildScopedCompilerOptions, createTypeQueryService } from '../../packages/analyzer/src/ts-compiler';
 import type { FileAnalysis, CodeViolation } from '../../packages/shared/src/types/analysis';
+import { parseExpectedViolations, type ExpectedRuleViolation } from '../_shared/markers';
 
 const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.meta.url).pathname;
 
@@ -29,47 +30,7 @@ const FIXTURE_PATH = new URL('../fixtures/sample-js-project-negative', import.me
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface ExpectedViolation {
-  ruleKey: string;
-  filePath: string;
-  line: number; // 1-indexed line of the violating code (line AFTER the comment)
-}
-
-/**
- * Parse all `// VIOLATION: rule-key` comments from source files.
- * The violation is expected on the NEXT line after the comment.
- */
-function parseExpectedViolations(rootPath: string): ExpectedViolation[] {
-  const expected: ExpectedViolation[] = [];
-
-  function walk(dir: string) {
-    for (const entry of readdirSync(dir).sort()) {
-      const fullPath = join(dir, entry);
-      const stat = statSync(fullPath);
-      if (stat.isDirectory()) {
-        if (entry === 'node_modules' || entry === '.git') continue;
-        walk(fullPath);
-      } else if (/\.(ts|tsx|js|jsx)$/.test(entry)) {
-        const content = readFileSync(fullPath, 'utf-8');
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-          const match = lines[i].match(/\/\/\s*VIOLATION:\s*(.+)/);
-          if (match) {
-            const ruleKey = match[1].trim();
-            expected.push({
-              ruleKey,
-              filePath: fullPath,
-              line: i + 2, // 1-indexed, violation is on the NEXT line
-            });
-          }
-        }
-      }
-    }
-  }
-
-  walk(rootPath);
-  return expected;
-}
+type ExpectedViolation = ExpectedRuleViolation;
 
 /**
  * Run code-level rules on all files in the fixture.

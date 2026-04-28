@@ -63,7 +63,10 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isCodeViolation = violation.type === 'code';
+  // Any violation with a filePath — code-rule finding or invariant — gets the
+  // Open button + file-path summary. Architectural violations (no filePath)
+  // fall through to the Locate-in-graph branch.
+  const hasFileLocation = !!violation.filePath;
 
   // Most specific target: method > module > database > service
   const locateTargetId = violation.targetMethodId || violation.targetModuleId || violation.targetDatabaseId || violation.targetServiceId;
@@ -101,8 +104,8 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
           >
             {violation.severity}
           </Badge>
-          {/* Locate button: open file for code violations, focus graph node for arch violations */}
-          {isCodeViolation && violation.filePath && onOpenFile ? (
+          {/* Locate button: open file when the violation has a file location, focus graph node for arch violations */}
+          {hasFileLocation && onOpenFile ? (
             <Button
               variant="outline"
               size="xs"
@@ -137,8 +140,8 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
           {renderInlineCode(violation.content)}
         </p>
 
-        {/* Code violation: show file path + line */}
-        {isCodeViolation && violation.filePath && (
+        {/* File-anchored violation: show file path + line */}
+        {hasFileLocation && (
           <p className="mt-2 truncate text-[10px] text-muted-foreground" title={`${violation.filePath}${violation.lineStart ? `:${violation.lineStart}` : ''}`}>
             File:{' '}
             <span className="font-medium text-foreground">
@@ -151,7 +154,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
         )}
 
         {/* Arch violation: show target service/module/method */}
-        {!isCodeViolation && (violation.targetServiceName || violation.targetDatabaseName) && (
+        {!hasFileLocation && (violation.targetServiceName || violation.targetDatabaseName) && (
           <p className="mt-2 text-[10px] text-muted-foreground">
             Target:{' '}
             <span className="font-medium text-foreground">

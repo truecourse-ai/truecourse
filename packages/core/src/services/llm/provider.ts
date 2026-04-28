@@ -228,6 +228,17 @@ export interface UsageRecord {
 }
 
 export interface LLMProvider {
+  /**
+   * Generic structured-prompt entry — used by invariant plugins. Plugins ship
+   * a prompt and a Zod schema; the framework owns the spawn, retries,
+   * concurrency limits, and usage accounting.
+   */
+  runStructuredPrompt<T>(args: {
+    prompt: string;
+    schema: import('zod').ZodType<T>;
+    label: string;
+  }): Promise<T>;
+
   generateServiceViolations(
     context: ServiceViolationContext,
     opts?: { onStart?: () => void },

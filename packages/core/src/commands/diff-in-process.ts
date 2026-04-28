@@ -26,6 +26,9 @@ export interface DiffInProcessOptions {
   /** Pre-flight prompt hook — same contract as `analyzeInProcess`. */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   onLlmResolved?: (proceed: boolean) => void;
+  /** Separate invariants prompt — same contract as `analyzeInProcess`. */
+  onInvariantsLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
+  onInvariantsLlmResolved?: (proceed: boolean) => void;
 }
 
 export type DiffInProcessResult = PersistDiffResult;

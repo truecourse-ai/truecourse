@@ -22,8 +22,10 @@ import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { diffInProcess } from '@truecourse/core/commands/diff-in-process';
 import { buildAnalysisSteps, type StepTracker } from '@truecourse/core/progress';
 import { getGit } from '@truecourse/core/lib/git';
+import { activeInvariantSteps } from '@truecourse/core/services/invariants';
 import {
   createSocketLlmEstimateHandler,
+  createSocketInvariantsLlmEstimateHandler,
   createSocketStashConfirmHandler,
   createSocketTracker,
   emitAnalysisProgress,
@@ -84,7 +86,8 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
 
     res.status(202).json({ message: `${mode === 'diff' ? 'Diff check' : 'Analysis'} started`, repoId: id, mode });
 
-    const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+    const invariantSteps = activeInvariantSteps(repo.path);
+    const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules, invariantSteps);
     const tracker = createSocketTracker(id, trackerSteps);
 
     pushLogger({
@@ -331,6 +334,7 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
     signal: opts.signal,
     provider,
     onLlmEstimate: createSocketLlmEstimateHandler(id),
+    onInvariantsLlmEstimate: createSocketInvariantsLlmEstimateHandler(id),
   });
 
   emitViolationsReady(id, outcome.analysisId);
@@ -350,6 +354,7 @@ async function runDiffAnalyze(id: string, repo: RegistryEntry, opts: Pick<StartR
     tracker: opts.tracker,
     signal: opts.signal,
     onLlmEstimate: createSocketLlmEstimateHandler(id),
+    onInvariantsLlmEstimate: createSocketInvariantsLlmEstimateHandler(id),
   });
 
   emitViolationsReady(id, diff.id);

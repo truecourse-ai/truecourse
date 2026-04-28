@@ -19,7 +19,6 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
     emitAnalysisProgress: vi.fn(),
     emitAnalysisComplete: vi.fn(),
     emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
     emitAnalysisCanceled: vi.fn(),
     createSocketTracker: () => new NoopTracker(),
     createSocketLlmEstimateHandler: () => () => Promise.resolve(true),

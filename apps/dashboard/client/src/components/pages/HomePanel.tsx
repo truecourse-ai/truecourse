@@ -1,33 +1,43 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Activity, BarChart3, CheckCircle2, FileText, GitCompare, PlusCircle, Shield } from 'lucide-react';
+import { Activity, BarChart3, BookOpen, Boxes, CheckCircle2, FileText, GitCompare, PlusCircle } from 'lucide-react';
 import { TrendChart } from '@/components/analytics/TrendChart';
 import { TypePieChart } from '@/components/analytics/TypePieChart';
 import { SeverityBarChart } from '@/components/analytics/SeverityBarChart';
 import { TopOffendersTable } from '@/components/analytics/TopOffendersTable';
 import { ResolutionMetrics } from '@/components/analytics/ResolutionMetrics';
 import { CodeHotspots } from '@/components/analytics/CodeHotspots';
-import type { BreakdownResponse } from '@/lib/api';
+import type {
+  BreakdownResponse,
+  TrendResponse,
+  TopOffendersResponse,
+  ResolutionResponse,
+  CodeViolationSummary,
+} from '@/lib/api';
 import {
   ViolationsPanel,
   type CategoryFilter,
   type TypeFilter,
 } from '@/components/violations/ViolationsPanel';
 import { RulesPanel } from '@/components/rules/RulesPanel';
+import { PluginsPanel } from '@/components/plugins/PluginsPanel';
 import type { SeverityFilter } from '@/components/ui/SeverityDropdown';
 import { Sheet, SheetTrigger, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { useAnalytics } from '@/hooks/useAnalytics';
 import type { ViolationResponse, DiffCheckResponse } from '@/lib/api';
 
 type HomePanelProps = {
   repoId: string;
-  branch?: string;
   analysisId?: string;
   /** Whether this repo has at least one completed analysis. Drives the
    * placeholder-vs-panel decision on first render so there's no flash. */
   hasAnalysis: boolean;
   violations: ViolationResponse[];
   violationsLoading: boolean;
+  trend: TrendResponse | null;
+  breakdown: BreakdownResponse | null;
+  topOffenders: TopOffendersResponse | null;
+  resolution: ResolutionResponse | null;
+  codeHotspots: CodeViolationSummary | null;
   isDiffMode?: boolean;
   diffResult?: DiffCheckResponse | null;
   onLocateNode: (
@@ -43,11 +53,15 @@ const MAX_PANEL_WIDTH = 800;
 
 export function HomePanel({
   repoId,
-  branch,
   analysisId,
   hasAnalysis,
   violations,
   violationsLoading,
+  trend,
+  breakdown,
+  topOffenders,
+  resolution,
+  codeHotspots,
   isDiffMode,
   diffResult,
   onLocateNode,
@@ -82,12 +96,6 @@ export function HomePanel({
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }, [panelWidth]);
-
-  const { trend, breakdown, topOffenders, resolution, codeHotspots } = useAnalytics(
-    repoId,
-    branch,
-    analysisId,
-  );
 
   // Narrow the violations list by the currently-selected offender (service/module/method/database).
   // Code violations carry no node target so they're excluded by an offender selection —
@@ -214,27 +222,50 @@ export function HomePanel({
         ) : (
         <ViolationsPanel
           headerRight={
-            <Sheet>
-              <SheetTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    title="Browse Rules"
-                    aria-label="Browse Rules"
-                  />
-                }
-              >
-                <Shield className="h-3.5 w-3.5" />
-              </SheetTrigger>
-              <SheetContent
-                side="right"
-                title="Rules"
-                description="Browse the catalog of rules this repo is analyzed against."
-              >
-                <RulesPanel />
-              </SheetContent>
-            </Sheet>
+            <div className="flex items-center gap-1.5">
+              <Sheet>
+                <SheetTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      title="Browse Rules"
+                      aria-label="Browse Rules"
+                    />
+                  }
+                >
+                  <BookOpen className="h-3.5 w-3.5" />
+                </SheetTrigger>
+                <SheetContent
+                  side="right"
+                  title="Rules"
+                  description="Browse the catalog of rules this repo is analyzed against."
+                >
+                  <RulesPanel />
+                </SheetContent>
+              </Sheet>
+              <Sheet>
+                <SheetTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      title="Browse Plugins"
+                      aria-label="Browse Plugins"
+                    />
+                  }
+                >
+                  <Boxes className="h-3.5 w-3.5" />
+                </SheetTrigger>
+                <SheetContent
+                  side="right"
+                  title="Plugins"
+                  description="Plugins generate per-project invariants from spec + code. Trigger discovery from the Invariants tab."
+                >
+                  <PluginsPanel />
+                </SheetContent>
+              </Sheet>
+            </div>
           }
           violations={scopedViolations}
           isLoading={violationsLoading}

@@ -1,7 +1,7 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search } from 'lucide-react';
+import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search, LayoutList } from 'lucide-react';
 import { getRules, type RuleResponse } from '@/lib/api';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 
@@ -49,7 +49,7 @@ function getDomain(rule: RuleResponse): string {
 }
 
 const domainTabs: { value: DomainFilter; label: string; icon: React.ReactNode }[] = [
-  { value: 'all', label: 'All', icon: <Shield className="h-3.5 w-3.5" /> },
+  { value: 'all', label: 'All', icon: <LayoutList className="h-3.5 w-3.5" /> },
   { value: 'security', label: 'Security', icon: <Shield className="h-3.5 w-3.5" /> },
   { value: 'bugs', label: 'Bugs', icon: <Bug className="h-3.5 w-3.5" /> },
   { value: 'architecture', label: 'Architecture', icon: <Network className="h-3.5 w-3.5" /> },

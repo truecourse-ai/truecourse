@@ -136,9 +136,11 @@ export type ViolationResponse = {
   fixPrompt?: string | null;
   firstSeenAt?: string | null;
   createdAt: string;
-  // Code violation fields (type === 'code')
+  // File-anchored violation fields. Set on code-rule findings and on invariant
+  // findings whose plugin produced an anchor (e.g. rest-contract).
   filePath?: string;
   lineStart?: number;
+  lineEnd?: number;
   ruleKey?: string;
 };
 
@@ -372,6 +374,23 @@ export type RuleResponse = {
 
 export function getRules(): Promise<RuleResponse[]> {
   return fetchApi<RuleResponse[]>('/api/rules');
+}
+
+export type PluginCatalogEntry = {
+  key: string;
+  pluginType: string;
+  name: string;
+  description: string;
+  category: 'invariants';
+  type: 'invariant';
+  enforcement: 'deterministic' | 'llm' | 'mixed';
+  defaultSeverity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  enabled: true;
+  pluginVersion: number;
+};
+
+export function getPlugins(): Promise<PluginCatalogEntry[]> {
+  return fetchApi<PluginCatalogEntry[]>('/api/plugins');
 }
 
 // Diff Check
@@ -630,5 +649,77 @@ export function getAnalyticsResolution(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
+
+export type InvariantProvenance = {
+  source: 'discovered' | 'hand-authored';
+  inputs: Array<'code' | 'spec'>;
+  timestamp: string;
+  signal?: string;
+  specSection?: string;
+};
+
+export type InvariantResponse = {
+  id: string;
+  type: string;
+  pluginVersion: number;
+  scope: string;
+  declaration: unknown;
+  provenance: InvariantProvenance;
+  sourceFile?: string;
+};
+
+export type InvariantDraftResponse = {
+  id: string;
+  type: string;
+  pluginVersion: number;
+  scope: string;
+  declaration: unknown;
+  provenance: InvariantProvenance;
+  rationale: string;
+  confidence: number;
+};
+
+export function getInvariants(repoId: string): Promise<InvariantResponse[]> {
+  return fetchApi<InvariantResponse[]>(`/api/repos/${repoId}/invariants`);
+}
+
+export function getInvariantDrafts(repoId: string): Promise<InvariantDraftResponse[]> {
+  return fetchApi<InvariantDraftResponse[]>(`/api/repos/${repoId}/invariant-drafts`);
+}
+
+export function runInvariantsSuggest(
+  repoId: string,
+  mode: 'full' | 'diff' = 'full',
+): Promise<{ message: string; repoId: string; mode: string }> {
+  return fetchApi(`/api/repos/${repoId}/invariants/suggest`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function acceptInvariantDraft(
+  repoId: string,
+  draftId: string,
+): Promise<{ slug: string; invariant: InvariantResponse }> {
+  return fetchApi(`/api/repos/${repoId}/invariant-drafts/${draftId}/accept`, {
+    method: 'POST',
+  });
+}
+
+export function rejectInvariantDraft(repoId: string, draftId: string): Promise<{ ok: boolean }> {
+  return fetchApi(`/api/repos/${repoId}/invariant-drafts/${draftId}/reject`, {
+    method: 'POST',
+  });
+}
+
+export function retireInvariant(repoId: string, slug: string): Promise<{ ok: boolean }> {
+  return fetchApi(`/api/repos/${repoId}/invariants/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+  });
 }
 

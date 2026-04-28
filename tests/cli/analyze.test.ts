@@ -22,7 +22,6 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
     emitAnalysisProgress: vi.fn(),
     emitAnalysisComplete: vi.fn(),
     emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
     emitAnalysisCanceled: vi.fn(),
     createSocketTracker: () => new NoopTracker(),
     createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
@@ -43,9 +42,27 @@ import {
   type RegistryEntry,
 } from '../../packages/core/src/config/registry';
 import { updateProjectConfig } from '../../packages/core/src/config/project-config';
+import {
+  suggestInvariants,
+  acceptDraft,
+} from '../../packages/core/src/services/invariants';
+import { readAllActiveInvariants } from '../../packages/core/src/lib/invariant-store';
+import { createLLMProvider } from '../../packages/core/src/services/llm/provider';
+import {
+  parseInvariantDriftMarkers,
+  type ExpectedInvariantDrift,
+} from '../_shared/markers';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_SRC = path.resolve(__dirname, '../fixtures/sample-js-project-negative');
+const FIXTURE_POSITIVE = path.resolve(__dirname, '../fixtures/sample-js-project-positive');
+
+/**
+ * Live LLM tests are gated behind `LLM_TESTS=1` because they make real Claude
+ * calls (slow + nonzero cost). Default CI run skips the gated block; local
+ * verification + dedicated CI jobs run with the env set.
+ */
+const LLM_TESTS = process.env.LLM_TESTS === '1';
 
 /**
  * Copy a directory recursively, skipping `.truecourse/` so fixture pollution
@@ -62,30 +79,33 @@ function copyDir(src: string, dest: string): void {
   }
 }
 
+/**
+ * Copy a fixture into a throwaway tmpdir + initialize an empty git repo so
+ * `analyzeInProcess` can collect branch/commit metadata. Shared across the
+ * deterministic e2e block and the gated live-LLM blocks.
+ */
+function setupFixtureWorkdir(src: string): string {
+  const wd = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-e2e-analyze-'));
+  copyDir(src, wd);
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'test',
+    GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 'test',
+    GIT_COMMITTER_EMAIL: 't@t',
+  };
+  execSync('git init -q -b main', { cwd: wd, env });
+  execSync('git add -A', { cwd: wd, env });
+  execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: wd, env });
+  return wd;
+}
+
 describe('CLI analyze pipeline (e2e)', () => {
   let workDir: string;
   let project: RegistryEntry;
 
   beforeAll(async () => {
-    // Copy fixture into a throwaway tmpdir. We avoid analyzing the fixture
-    // in-place so the shared fixture directory stays pristine across runs
-    // and parallel test invocations don't step on each other.
-    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-e2e-analyze-'));
-    copyDir(FIXTURE_SRC, workDir);
-
-    // Initialize a real (empty) git repo so analyzeInProcess can collect
-    // branch/commit metadata — that's what the CLI sees in production.
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'test',
-      GIT_AUTHOR_EMAIL: 't@t',
-      GIT_COMMITTER_NAME: 'test',
-      GIT_COMMITTER_EMAIL: 't@t',
-    };
-    execSync('git init -q -b main', { cwd: workDir, env });
-    execSync('git add -A', { cwd: workDir, env });
-    execSync('git -c commit.gpgsign=false commit -q -m init', { cwd: workDir, env });
-
+    workDir = setupFixtureWorkdir(FIXTURE_SRC);
     project = registerProject(workDir);
 
     // Disable LLM rules so the pipeline is deterministic and network-free.
@@ -232,5 +252,168 @@ describe('resolveStashDecision', () => {
     } finally {
       fs.rmSync(nonGitDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gated live-LLM end-to-end. Set `LLM_TESTS=1 pnpm test` to run.
+//
+// Validates invariant prompts (discovery + enforcement) end-to-end on real
+// Claude:
+//   • Negative fixture — every `// INVARIANT-DRIFT:` marker has a matching
+//     real invariant violation.
+//   • Positive fixture — zero invariant violations on spec-compliant code.
+//
+// Rule-LLM testing is intentionally NOT exercised here. The negative fixture
+// triggers rule-LLM scans across many files × many rules; bundling it into
+// the same block easily blows past test timeouts and hides which prompt
+// changed. The design (env gate + same fixture-copy infra + marker parser)
+// supports rule-LLM blocks, so a `rule-llm.live.test.ts` can be added later
+// using the same shape.
+//
+// LLM rules are explicitly disabled in this run via
+// `enableLlmRulesOverride: false`. Invariants still get LLM access because
+// `analyze-core` provisions an LLM provider whenever active invariants need
+// it, independent of the rule-LLM toggle.
+// ---------------------------------------------------------------------------
+
+(LLM_TESTS ? describe : describe.skip)('CLI analyze e2e — live LLM (invariants)', () => {
+  describe('negative fixture — every INVARIANT-DRIFT marker fires', () => {
+    let workDir: string;
+    let project: RegistryEntry;
+
+    beforeAll(async () => {
+      workDir = setupFixtureWorkdir(FIXTURE_SRC);
+      project = registerProject(workDir);
+      // Rule LLM off (slow + tested elsewhere). Invariants will still use LLM
+      // because analyze-core provisions a provider whenever active invariants
+      // need one — independent of `enableLlmRules`.
+      updateProjectConfig(workDir, { enableLlmRules: false });
+      clearLatestCache();
+    }, 30_000);
+
+    afterAll(() => {
+      if (project) unregisterProject(project.slug);
+      if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
+      clearLatestCache();
+    });
+
+    it('catches every // INVARIANT-DRIFT: marker on real Claude', async () => {
+      const llm = createLLMProvider();
+      llm.setRepoPath(workDir);
+
+      const suggestion = await suggestInvariants({
+        repoPath: workDir,
+        mode: 'full',
+        llm,
+      });
+      for (const draft of suggestion.drafts) {
+        acceptDraft(workDir, draft.id);
+      }
+
+      await analyzeInProcess(project, { enableLlmRulesOverride: false });
+
+      const violations = readLatest(workDir)!.violations;
+
+      // Every // INVARIANT-DRIFT: marker must match a violation whose
+      // underlying invariant has the same `obligationKey` AND whose line
+      // range covers the marker's line (± a small slop window — the LLM
+      // sometimes pins to the function declaration when the drift is
+      // "missing required code"). Same shape as the rule-marker test:
+      // exact-string identity + line proximity, not file-only proximity.
+      const invariantMarkers = parseInvariantDriftMarkers(workDir);
+      const invariantViolations = violations.filter((v) => v.type === 'invariant');
+
+      // Build invariantId → obligationKey map from the persisted active set.
+      const activeInvariants = readAllActiveInvariants(workDir);
+      const idToKey = new Map<string, string>();
+      for (const inv of activeInvariants) {
+        const decl = inv.declaration as { obligationKey?: string };
+        if (decl.obligationKey) idToKey.set(inv.id, decl.obligationKey);
+      }
+
+      // Snapshot violations encode invariantId in `ruleKey` as
+      // `invariants/<enforcement>/<id>`. Extract the id and look up the
+      // obligationKey from the persisted active invariant.
+      const extractInvariantId = (ruleKey: string | undefined): string | undefined => {
+        if (!ruleKey) return undefined;
+        const m = /^invariants\/[^/]+\/(.+)$/.exec(ruleKey);
+        return m ? m[1] : undefined;
+      };
+
+      const SLOP = 5;
+      const missingDrifts: ExpectedInvariantDrift[] = [];
+      for (const m of invariantMarkers) {
+        const matched = invariantViolations.some((v) => {
+          if (!v.filePath) return false;
+          const vAbs = path.resolve(workDir, v.filePath);
+          if (vAbs !== m.filePath) return false;
+          const id = extractInvariantId(v.ruleKey);
+          const vKey = id ? idToKey.get(id) : undefined;
+          if (vKey !== m.obligationKey) return false;
+          const ls = v.lineStart ?? 0;
+          const le = v.lineEnd ?? ls;
+          return m.line >= ls - SLOP && m.line <= le + SLOP;
+        });
+        if (!matched) missingDrifts.push(m);
+      }
+
+      const driftReport = missingDrifts
+        .map(
+          (m) =>
+            `  ${path.relative(workDir, m.filePath)}:${m.line} — ${m.obligationKey}`,
+        )
+        .join('\n');
+      expect(missingDrifts, `missing invariant violations:\n${driftReport}`).toEqual(
+        [],
+      );
+    }, 20 * 60 * 1000);
+  });
+
+  describe('positive fixture — zero invariant false positives', () => {
+    let workDir: string;
+    let project: RegistryEntry;
+
+    beforeAll(async () => {
+      workDir = setupFixtureWorkdir(FIXTURE_POSITIVE);
+      project = registerProject(workDir);
+      updateProjectConfig(workDir, { enableLlmRules: false });
+      clearLatestCache();
+    }, 30_000);
+
+    afterAll(() => {
+      if (project) unregisterProject(project.slug);
+      if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
+      clearLatestCache();
+    });
+
+    it('produces zero invariant violations on spec-compliant code', async () => {
+      const llm = createLLMProvider();
+      llm.setRepoPath(workDir);
+
+      const suggestion = await suggestInvariants({
+        repoPath: workDir,
+        mode: 'full',
+        llm,
+      });
+      for (const draft of suggestion.drafts) {
+        acceptDraft(workDir, draft.id);
+      }
+
+      await analyzeInProcess(project, { enableLlmRulesOverride: false });
+
+      const violations = readLatest(workDir)!.violations;
+      const invariantViolations = violations.filter((v) => v.type === 'invariant');
+      const invariantReport = invariantViolations
+        .map(
+          (v) =>
+            `  ${v.filePath ? path.relative(workDir, v.filePath) : '?'}:${v.lineStart ?? '?'} — ${v.title}`,
+        )
+        .join('\n');
+      expect(
+        invariantViolations,
+        `false-positive invariants:\n${invariantReport}`,
+      ).toEqual([]);
+    }, 20 * 60 * 1000);
   });
 });

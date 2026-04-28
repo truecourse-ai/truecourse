@@ -73,6 +73,28 @@ export { AnalysisGraph, type AnalysisGraphInput } from './analysis-graph.js'
 // Cycle detection
 export { findCycles, type CycleResult, type CycleInfo, type EdgeMetadata } from './rules/architecture/tarjan.js'
 
+// Invariant plugins
+export { PLUGINS, getPlugin, listPluginTypes } from './plugins/index.js'
+export type {
+  Plugin,
+  PluginMetadata,
+  InvariantEnforceEstimate,
+  EstimateContext,
+  DiscoverContext,
+  EnforceContext,
+  DiscoverDiff,
+  LLMRunner,
+  SpecBundle,
+  SpecSection,
+  SuggestMode,
+  ProgressEvent,
+  ProgressReporter,
+} from './plugins/types.js'
+export { TOKEN_ESTIMATE } from './plugins/types.js'
+
+// Spec sources
+export { loadSpecBundle } from './spec-sources/files.js'
+
 // Rules — domain-based structure
 export {
   // Rule arrays

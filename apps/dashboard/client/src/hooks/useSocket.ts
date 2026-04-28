@@ -41,6 +41,7 @@ export function useSocket(repoId?: string) {
   const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
   const [llmEstimate, setLlmEstimate] = useState<LlmEstimate | null>(null);
   const [stashConfirm, setStashConfirm] = useState<StashConfirmRequest | null>(null);
+  const [invariantsLlmEstimate, setInvariantsLlmEstimate] = useState<LlmEstimate | null>(null);
   const handlersRef = useRef<Map<string, EventHandler[]>>(new Map());
 
   useEffect(() => {
@@ -78,9 +79,6 @@ export function useSocket(repoId?: string) {
     socket.on('disconnect', onDisconnect);
     socket.on('analysis:progress', onAnalysisProgress);
     socket.on('analysis:complete', onAnalysisComplete);
-    socket.on('files:changed', (data: unknown) => {
-      handlersRef.current.get('files:changed')?.forEach((h) => h(data));
-    });
     socket.on('violations:ready', (data: unknown) => {
       setAnalysisProgress(null);
       handlersRef.current.get('violations:ready')?.forEach((h) => h(data));
@@ -89,6 +87,7 @@ export function useSocket(repoId?: string) {
       setAnalysisProgress(null);
       setLlmEstimate(null);
       setStashConfirm(null);
+      setInvariantsLlmEstimate(null);
       handlersRef.current.get('analysis:canceled')?.forEach((h) => h(data));
     });
     socket.on('analysis:llm-estimate', (data: LlmEstimate) => {
@@ -99,6 +98,12 @@ export function useSocket(repoId?: string) {
     });
     socket.on('analysis:stash-confirm-request', (data: StashConfirmRequest) => {
       setStashConfirm(data);
+    });
+    socket.on('analysis:invariants-llm-estimate', (data: LlmEstimate) => {
+      setInvariantsLlmEstimate(data);
+    });
+    socket.on('analysis:invariants-llm-resolved', () => {
+      setInvariantsLlmEstimate(null);
     });
     if (socket.connected && repoId) {
       joinRepoRoom(repoId);
@@ -144,6 +149,12 @@ export function useSocket(repoId?: string) {
     setStashConfirm(null);
   }, []);
 
+  const respondToInvariantsLlmEstimate = useCallback((repoIdArg: string, proceed: boolean) => {
+    const socket = connectSocket();
+    socket.emit('analysis:invariants-llm-proceed', { repoId: repoIdArg, proceed });
+    setInvariantsLlmEstimate(null);
+  }, []);
+
   return {
     isConnected,
     analysisProgress,
@@ -153,5 +164,7 @@ export function useSocket(repoId?: string) {
     respondToLlmEstimate,
     stashConfirm,
     respondToStashConfirm,
+    invariantsLlmEstimate,
+    respondToInvariantsLlmEstimate,
   };
 }

@@ -12,7 +12,6 @@
   "dependencies": {
     "@truecourse/core": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "chokidar": "^4.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "posthog-node": "^4.0.0",
