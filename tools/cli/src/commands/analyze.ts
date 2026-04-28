@@ -199,17 +199,29 @@ export async function resolveStashDecision(
   }
 
   p.log.warn(
-    `Your repository has ${modifiedCount} modified and ${untrackedCount} untracked file(s).\n` +
-      "TrueCourse analyzes the committed state, so these will be\n" +
-      "temporarily stashed and restored after the run.",
+    `Your repository has ${modifiedCount} modified and ${untrackedCount} untracked file(s).`,
   );
 
-  const proceed = await p.confirm({ message: "Continue?", initialValue: true });
-  if (p.isCancel(proceed) || proceed !== true) {
-    p.outro("Cancelled — no changes made");
+  const choice = await p.select<"stash" | "no-stash">({
+    message: "How should TrueCourse handle them?",
+    options: [
+      {
+        value: "stash",
+        label: "Stash and analyze committed state (recommended)",
+        hint: "changes are temporarily stashed and restored after the run",
+      },
+      {
+        value: "no-stash",
+        label: "Don't stash — analyze the working tree as-is",
+        hint: "uncommitted changes are included in the analysis",
+      },
+    ],
+  });
+  if (p.isCancel(choice)) {
+    p.cancel("Cancelled — no changes made");
     process.exit(0);
   }
-  return { skipStash: false };
+  return { skipStash: choice === "no-stash" };
 }
 
 export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
