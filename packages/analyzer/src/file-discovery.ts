@@ -28,6 +28,36 @@ function findAllGitignores(startDir: string): Array<{ path: string; dir: string 
   return gitignores
 }
 
+// Re-anchor leading-/internal-slash patterns to baseDir so they still match
+// when a parent .gitignore makes rootDir an ancestor of baseDir.
+function reanchorTruecourseignore(content: string, prefix: string): string {
+  if (prefix === '' || prefix === '.') return content
+
+  return content
+    .split('\n')
+    .map((line) => {
+      const raw = line
+      const trimmed = raw.trim()
+      if (trimmed === '' || trimmed.startsWith('#')) return raw
+
+      const negate = trimmed.startsWith('!')
+      const body = negate ? trimmed.slice(1) : trimmed
+
+      if (body.startsWith('**/')) return raw
+
+      const hasLeadingSlash = body.startsWith('/')
+      const withoutTrailing = body.endsWith('/') ? body.slice(0, -1) : body
+      const inner = hasLeadingSlash ? withoutTrailing.slice(1) : withoutTrailing
+      const hasInternalSlash = inner.includes('/')
+
+      if (!hasLeadingSlash && !hasInternalSlash) return raw
+
+      const stripped = hasLeadingSlash ? body.slice(1) : body
+      return `${negate ? '!' : ''}${prefix}/${stripped}`
+    })
+    .join('\n')
+}
+
 /**
  * Load ignore patterns from .gitignore and .truecourseignore files
  * Returns ignore instance and the root directory (where topmost .gitignore is)
@@ -49,7 +79,8 @@ function loadIgnorePatterns(baseDir: string): { ig: ReturnType<typeof ignore>; r
   const truecourseignorePath = join(baseDir, '.truecourseignore')
   if (existsSync(truecourseignorePath)) {
     const content = readFileSync(truecourseignorePath, 'utf8')
-    ig.add(content)
+    const prefix = relative(rootDir, baseDir).replace(/\\/g, '/')
+    ig.add(reanchorTruecourseignore(content, prefix))
   }
 
   // Always ignore .git directory (never analyze git internals)

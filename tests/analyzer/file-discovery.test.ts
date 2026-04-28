@@ -93,3 +93,103 @@ describe('discoverFiles with gitignore patterns', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('.truecourseignore with parent .gitignore', () => {
+  const tempDirs: string[] = [];
+  let repoDir: string;
+
+  afterAll(() => {
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function setup(truecourseignore: string): void {
+    const tempDir = mkdtempSync(join(tmpdir(), 'truecourse-anchored-'));
+    tempDirs.push(tempDir);
+    const parentDir = join(tempDir, 'parent');
+    repoDir = join(parentDir, 'repo');
+
+    // Parent .gitignore — its presence is what triggers the bug; content is
+    // intentionally generic.
+    mkdirSync(parentDir, { recursive: true });
+    writeFileSync(join(parentDir, '.gitignore'), 'node_modules/\n');
+
+    // Repo layout.
+    const srcDir = join(repoDir, 'src');
+    const extensionsDir = join(repoDir, 'extensions');
+    const scriptsDir = join(repoDir, 'scripts');
+    const booksDir = join(repoDir, 'BOOKS');
+    const nestedExt = join(repoDir, 'src', 'extensions');
+    mkdirSync(srcDir, { recursive: true });
+    mkdirSync(extensionsDir, { recursive: true });
+    mkdirSync(scriptsDir, { recursive: true });
+    mkdirSync(booksDir, { recursive: true });
+    mkdirSync(nestedExt, { recursive: true });
+
+    writeFileSync(join(srcDir, 'app.ts'), 'export const x = 1;');
+    writeFileSync(join(extensionsDir, 'plugin.ts'), 'export const p = 1;');
+    writeFileSync(join(extensionsDir, 'keep.ts'), 'export const k = 1;');
+    writeFileSync(join(scriptsDir, 'ingest-epub.js'), 'module.exports = {};');
+    writeFileSync(join(scriptsDir, 'other.js'), 'module.exports = {};');
+    writeFileSync(join(booksDir, 'reader.ts'), 'export const b = 1;');
+    writeFileSync(join(repoDir, 'secret.txt'), 'shh');
+    writeFileSync(join(nestedExt, 'inner.ts'), 'export const i = 1;');
+
+    writeFileSync(join(repoDir, '.truecourseignore'), truecourseignore);
+  }
+
+  it('honors leading-slash anchored pattern in .truecourseignore', () => {
+    setup('/extensions/\n');
+
+    const files = discoverFiles(repoDir);
+
+    // Top-level extensions/ is excluded (anchored).
+    expect(files.some((f) => f === join(repoDir, 'extensions', 'plugin.ts'))).toBe(false);
+    // src/ files unaffected.
+    expect(files.some((f) => f === join(repoDir, 'src', 'app.ts'))).toBe(true);
+    // Leading-slash anchors only the top level — nested src/extensions/ is NOT
+    // matched.
+    expect(files.some((f) => f === join(repoDir, 'src', 'extensions', 'inner.ts'))).toBe(true);
+  });
+
+  it('honors internal-slash anchored pattern in .truecourseignore', () => {
+    setup('scripts/ingest-epub.js\n');
+
+    const files = discoverFiles(repoDir);
+
+    // Specific anchored file is excluded.
+    expect(files.some((f) => f === join(repoDir, 'scripts', 'ingest-epub.js'))).toBe(false);
+    // Sibling in same directory is preserved.
+    expect(files.some((f) => f === join(repoDir, 'scripts', 'other.js'))).toBe(true);
+  });
+
+  it('preserves non-anchored patterns (trailing-slash and bare name)', () => {
+    // BOOKS/ is non-anchored (trailing-slash only) so it must match at any
+    // depth. plugin.ts is a bare-name match — non-anchored, matches anywhere.
+    setup('BOOKS/\nplugin.ts\n');
+
+    const files = discoverFiles(repoDir);
+
+    // Trailing-slash pattern excludes BOOKS/ at top level.
+    expect(files.some((f) => f === join(repoDir, 'BOOKS', 'reader.ts'))).toBe(false);
+    // Bare-name pattern excludes plugin.ts wherever it appears.
+    expect(files.some((f) => f.endsWith('plugin.ts'))).toBe(false);
+    // Other source files still discovered.
+    expect(files.some((f) => f === join(repoDir, 'src', 'app.ts'))).toBe(true);
+    expect(files.some((f) => f === join(repoDir, 'extensions', 'keep.ts'))).toBe(true);
+  });
+
+  it('honors negation in .truecourseignore', () => {
+    // Ignore specific anchored files, then re-include one. The directory
+    // itself stays traversable because we use file-level patterns.
+    setup('extensions/plugin.ts\nextensions/keep.ts\n!extensions/keep.ts\n');
+
+    const files = discoverFiles(repoDir);
+
+    // Anchored ignore still applies to plugin.ts.
+    expect(files.some((f) => f === join(repoDir, 'extensions', 'plugin.ts'))).toBe(false);
+    // Negation re-includes extensions/keep.ts after re-anchoring.
+    expect(files.some((f) => f === join(repoDir, 'extensions', 'keep.ts'))).toBe(true);
+  });
+});
