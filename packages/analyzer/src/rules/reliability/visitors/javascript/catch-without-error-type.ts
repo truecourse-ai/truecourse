@@ -19,9 +19,7 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     const bodyText = body.text
     if (bodyText.includes('instanceof') || bodyText.includes('typeof')) return null
 
-    // Check for type annotation on the parameter (TS catch(e: SomeType))
-    // In tree-sitter, a typed catch param has a type_annotation child
-    const hasTypeAnnotation = param.namedChildren.some((c) => c.type === 'type_annotation')
+    const hasTypeAnnotation = node.childForFieldName('type') !== null
     if (hasTypeAnnotation) return null
 
     return makeViolation(

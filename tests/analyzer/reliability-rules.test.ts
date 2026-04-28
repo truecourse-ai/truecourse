@@ -55,6 +55,28 @@ try {
 `);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
+
+  it('does not flag typed catch parameter (Error)', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e: Error) {
+  console.error(e.message);
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag typed catch parameter (unknown)', () => {
+    const violations = check(`
+try {
+  doSomething();
+} catch (e: unknown) {
+  console.error(e);
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
 });
 
 // ===========================================================================
