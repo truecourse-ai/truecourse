@@ -26,12 +26,21 @@ export type LlmEstimate = {
   };
 };
 
+export type StashConfirmRequest = {
+  repoId: string;
+  modifiedCount: number;
+  untrackedCount: number;
+};
+
+export type StashConfirmChoice = 'stash' | 'no-stash' | 'cancel';
+
 type EventHandler = (data: unknown) => void;
 
 export function useSocket(repoId?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
   const [llmEstimate, setLlmEstimate] = useState<LlmEstimate | null>(null);
+  const [stashConfirm, setStashConfirm] = useState<StashConfirmRequest | null>(null);
   const handlersRef = useRef<Map<string, EventHandler[]>>(new Map());
 
   useEffect(() => {
@@ -79,6 +88,7 @@ export function useSocket(repoId?: string) {
     socket.on('analysis:canceled', (data: unknown) => {
       setAnalysisProgress(null);
       setLlmEstimate(null);
+      setStashConfirm(null);
       handlersRef.current.get('analysis:canceled')?.forEach((h) => h(data));
     });
     socket.on('analysis:llm-estimate', (data: LlmEstimate) => {
@@ -86,6 +96,9 @@ export function useSocket(repoId?: string) {
     });
     socket.on('analysis:llm-resolved', () => {
       setLlmEstimate(null);
+    });
+    socket.on('analysis:stash-confirm-request', (data: StashConfirmRequest) => {
+      setStashConfirm(data);
     });
     if (socket.connected && repoId) {
       joinRepoRoom(repoId);
@@ -125,5 +138,20 @@ export function useSocket(repoId?: string) {
     setLlmEstimate(null);
   }, []);
 
-  return { isConnected, analysisProgress, clearProgress, onEvent, llmEstimate, respondToLlmEstimate };
+  const respondToStashConfirm = useCallback((repoIdArg: string, choice: StashConfirmChoice) => {
+    const socket = connectSocket();
+    socket.emit('analysis:stash-confirm-response', { repoId: repoIdArg, choice });
+    setStashConfirm(null);
+  }, []);
+
+  return {
+    isConnected,
+    analysisProgress,
+    clearProgress,
+    onEvent,
+    llmEstimate,
+    respondToLlmEstimate,
+    stashConfirm,
+    respondToStashConfirm,
+  };
 }

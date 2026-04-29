@@ -17,6 +17,12 @@ export interface DiffInProcessOptions {
   signal?: AbortSignal;
   enableLlmRulesOverride?: boolean;
   enabledCategoriesOverride?: string[];
+  /**
+   * Accepted for symmetry with `analyzeInProcess`. Diff mode always analyzes
+   * the working tree as-is, so this is effectively a no-op — kept on the
+   * type so the CLI can thread the flag without conditional plumbing.
+   */
+  skipStash?: boolean;
   /** Pre-flight prompt hook — same contract as `analyzeInProcess`. */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   onLlmResolved?: (proceed: boolean) => void;

@@ -6,6 +6,7 @@ import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/
 import { ensureRepoTruecourseDir, resolveRepoDir, wipeLegacyPostgresData } from "@truecourse/core/config/paths";
 import { registerProject, type RegistryEntry } from "@truecourse/core/config/registry";
 import { readProjectConfig } from "@truecourse/core/config/project-config";
+import { getGit } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
@@ -128,6 +129,13 @@ function stopSpinner(): void {
 export interface AnalyzeOptions {
   /** Override `enableLlmRules` for this run. */
   llm?: boolean;
+  /**
+   * Stash decision override.
+   *   - `true`  → pre-approve stashing dirty working tree (no prompt).
+   *   - `false` → don't stash; analyze the working tree as-is.
+   *   - undefined → interactive prompt (or exit on non-interactive + dirty).
+   */
+  stash?: boolean;
   /** Force-install / force-skip the Claude Code skills first-run prompt. */
   installSkills?: boolean;
 }
@@ -149,6 +157,71 @@ function resolveLlmDecision(
     );
   }
   return { enabled: configDefault, autoApproveEstimate: false };
+}
+
+/**
+ * Resolve the per-run stash decision from flag + git state + TTY state.
+ *
+ * Returning `{ skipStash: false }` lets the analyzer service stash the
+ * working tree (its existing behaviour). `{ skipStash: true }` analyzes the
+ * tree as-is. The CLI does the dirty-tree check + prompt here so the shared
+ * core service stays free of TTY assumptions.
+ */
+export async function resolveStashDecision(
+  options: AnalyzeOptions,
+  repoPath: string,
+): Promise<{ skipStash: boolean }> {
+  if (options.stash === true) return { skipStash: false };
+  if (options.stash === false) return { skipStash: true };
+
+  // No flag passed. If the tree is clean there's nothing to stash and no
+  // need to prompt. If it's dirty we either ask (interactive) or exit
+  // loudly (non-interactive) — never stash silently.
+  let modifiedCount = 0;
+  let untrackedCount = 0;
+  try {
+    const git = await getGit(repoPath);
+    const status = await git.status();
+    if (status.isClean()) return { skipStash: false };
+    modifiedCount =
+      status.modified.length + status.staged.length + status.deleted.length + status.created.length;
+    untrackedCount = status.not_added.length;
+  } catch {
+    // Not a git repo / git unavailable — nothing for the analyzer to stash.
+    return { skipStash: false };
+  }
+
+  if (!isInteractive()) {
+    exitMissingNonInteractiveFlag(
+      "analyze needs a decision on stashing before running non-interactively.",
+      "Pass --stash to stash pending changes (analyze committed state) or --no-stash to analyze the working tree as-is.",
+    );
+  }
+
+  p.log.warn(
+    `Your repository has ${modifiedCount} modified and ${untrackedCount} untracked file(s).`,
+  );
+
+  const choice = await p.select<"stash" | "no-stash">({
+    message: "How should TrueCourse handle them?",
+    options: [
+      {
+        value: "stash",
+        label: "Stash and analyze committed state (recommended)",
+        hint: "changes are temporarily stashed and restored after the run",
+      },
+      {
+        value: "no-stash",
+        label: "Don't stash — analyze the working tree as-is",
+        hint: "uncommitted changes are included in the analysis",
+      },
+    ],
+  });
+  if (p.isCancel(choice)) {
+    p.cancel("Cancelled — no changes made");
+    process.exit(0);
+  }
+  return { skipStash: choice === "no-stash" };
 }
 
 export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
@@ -177,6 +250,10 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
   const enableLlmRules = llmDecision.enabled;
 
+  // Resolve stash decision before any analyzer work — keeps the prompt out
+  // of the shared core service (which the dashboard server also calls).
+  const stashDecision = await resolveStashDecision(options, project.path);
+
   // LLM disabled → no prompt will fire → render everything inline.
   // LLM enabled → start in pre-llm phase (parse + scan only). `onLlmEstimate`
   // flips to 'post-llm' once the user answers.
@@ -200,6 +277,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     const result = await analyzeInProcess(project, {
       tracker,
       signal: abortController.signal,
+      skipStash: stashDecision.skipStash,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
       onLlmEstimate: async (estimate) => {
@@ -259,6 +337,10 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   const enabledCategories = config.enabledCategories ?? undefined;
   const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
   const enableLlmRules = llmDecision.enabled;
+
+  // Diff is by definition working-tree analysis — it never stashes, so
+  // --stash / --no-stash are accepted (for symmetry with `analyze`) but the
+  // dirty-tree prompt does not fire here.
 
   // Reset module-level renderer state between runs. runAnalyze and
   // runAnalyzeDiff share the same `renderPhase`, `spinnerFrame`, and

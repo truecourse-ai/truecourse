@@ -21,8 +21,10 @@ import type { RegistryEntry } from '@truecourse/core/config/registry';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { diffInProcess } from '@truecourse/core/commands/diff-in-process';
 import { buildAnalysisSteps, type StepTracker } from '@truecourse/core/progress';
+import { getGit } from '@truecourse/core/lib/git';
 import {
   createSocketLlmEstimateHandler,
+  createSocketStashConfirmHandler,
   createSocketTracker,
   emitAnalysisProgress,
   emitAnalysisComplete,
@@ -278,7 +280,41 @@ interface StartRunOptions {
   signal: AbortSignal;
 }
 
+// Mirror of CLI `resolveStashDecision` for the dashboard. Returns 'stash' /
+// 'no-stash' / 'cancel'. Skips the prompt when the tree is clean, when the
+// repo is a subdirectory of a larger git repo (analyze-core would skip the
+// stash anyway), or when git is unavailable.
+async function resolveStashDecisionForRoute(
+  repoId: string,
+  repoPath: string,
+): Promise<'stash' | 'no-stash' | 'cancel'> {
+  let modifiedCount = 0;
+  let untrackedCount = 0;
+  try {
+    const git = await getGit(repoPath);
+    const status = await git.status();
+    if (status.isClean()) return 'stash';
+
+    const gitRoot = (await git.revparse(['--show-toplevel'])).trim();
+    if (path.resolve(repoPath) !== path.resolve(gitRoot)) return 'stash';
+
+    modifiedCount =
+      status.modified.length + status.staged.length + status.deleted.length + status.created.length;
+    untrackedCount = status.not_added.length;
+  } catch {
+    return 'stash';
+  }
+
+  return createSocketStashConfirmHandler(repoId)({ modifiedCount, untrackedCount });
+}
+
 async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOptions): Promise<void> {
+  const stashDecision = await resolveStashDecisionForRoute(id, repo.path);
+  if (stashDecision === 'cancel') {
+    emitAnalysisCanceled(id);
+    return;
+  }
+
   const provider: LLMProvider | undefined = opts.effectiveLlmRules ? createLLMProvider() : undefined;
   if (provider) {
     provider.setRepoId(id);
@@ -288,6 +324,7 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
 
   const outcome = await analyzeInProcess(repo, {
     skipGit: opts.skipGit,
+    skipStash: stashDecision === 'no-stash',
     enabledCategoriesOverride: opts.effectiveCategories,
     enableLlmRulesOverride: opts.effectiveLlmRules,
     tracker: opts.tracker,

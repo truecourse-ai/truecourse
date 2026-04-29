@@ -150,3 +150,46 @@ export function createSocketLlmEstimateHandler(repoId: string):
       }
     });
 }
+
+/**
+ * Build a stash-decision callback that prompts via sockets: emits
+ * `analysis:stash-confirm-request` to the repo room, then resolves with the
+ * client's choice from `analysis:stash-confirm-response`.
+ *
+ * Mirrors the CLI's `resolveStashDecision`: three outcomes — stash, no-stash,
+ * cancel. Caller (route) translates these into `skipStash` for `analyzeInProcess`
+ * or aborts the run on cancel. No timeout — matches the LLM estimate handler's
+ * behavior of blocking until the user answers.
+ */
+export type StashConfirmChoice = 'stash' | 'no-stash' | 'cancel';
+
+export function createSocketStashConfirmHandler(repoId: string):
+  (info: { modifiedCount: number; untrackedCount: number }) => Promise<StashConfirmChoice> {
+  return (info) =>
+    new Promise<StashConfirmChoice>((resolve) => {
+      const io = getIO();
+      const room = `repo:${repoId}`;
+
+      io.to(room).emit('analysis:stash-confirm-request', {
+        repoId,
+        modifiedCount: info.modifiedCount,
+        untrackedCount: info.untrackedCount,
+      });
+
+      function onResponse(data: { repoId: string; choice: StashConfirmChoice }) {
+        if (data.repoId !== repoId) return;
+        cleanup();
+        resolve(data.choice);
+      }
+
+      function cleanup() {
+        for (const [, socket] of io.sockets.sockets) {
+          socket.removeListener('analysis:stash-confirm-response', onResponse);
+        }
+      }
+
+      for (const [, socket] of io.sockets.sockets) {
+        socket.on('analysis:stash-confirm-response', onResponse);
+      }
+    });
+}
