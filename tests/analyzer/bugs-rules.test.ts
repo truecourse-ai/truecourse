@@ -47,15 +47,22 @@ describe('bugs/deterministic/empty-catch', () => {
 // ---------------------------------------------------------------------------
 
 describe('Python: bugs/deterministic/empty-catch', () => {
-  it('detects except with only pass', () => {
+  // The pass-only case is owned by `code-quality/deterministic/try-except-pass`
+  // (same detector, more actionable suggestion). The Python `empty-catch`
+  // visitor only fires on a truly empty body — unreachable in valid Python —
+  // so it has no positive case in this suite.
+
+  it('does not double-fire with try-except-pass on the pass-only case', () => {
     const violations = check(`
 try:
     do_something()
 except Exception:
     pass
 `, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
-    expect(matches).toHaveLength(1);
+    const empty = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
+    const pass = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/try-except-pass');
+    expect(empty).toHaveLength(0);
+    expect(pass).toHaveLength(1);
   });
 
   it('does not flag except with handler', () => {

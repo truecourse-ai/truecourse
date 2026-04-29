@@ -190,3 +190,56 @@ def call_variadic_helpers() -> None:
     emit_event("WARN", "retry", attempt=2)
     join_keys("user", "id", "name", "email")
     join_keys("session", "token")
+
+
+def run_with_closure() -> int:
+    """Closure resolves a captured variable defined later in the enclosing scope.
+
+    Python resolves free variables in nested functions at CALL time, not at
+    DEF time. `request_id` is referenced inside `inner()` before the textual
+    assignment, but `inner()` is not called until after the assignment has
+    run, so no NameError occurs. The undefined-local-variable detector must
+    not flag this pattern.
+    """
+    def inner() -> str:
+        """Format the captured request id for logging."""
+        return f"trace={request_id}"
+
+    request_id = "req-42"
+    return len(inner())
+
+
+class _AnnotatedAxes:
+    """Minimal stand-in for a matplotlib axes object."""
+
+    def __init__(self) -> None:
+        self._width = 1.0
+        self._y = 0.0
+        self._labels: list[str] = []
+
+    def text(self, x: float, y: float, label: str) -> None:
+        """Render an annotation at (x, y)."""
+        self._labels.append(f"{x},{y}:{label}")
+
+    def get_width(self) -> float:
+        """Return the bar width."""
+        return self._width
+
+    def get_y(self) -> float:
+        """Return the y-baseline."""
+        return self._y
+
+
+def annotate_chart(values: list[int], series: str) -> None:
+    """Annotate a chart with a computed label using matplotlib-style coords.
+
+    `ax.text(...)` is the matplotlib annotation API, not a SQL call. The
+    first positional argument is an arithmetic x-coordinate expression
+    (`bar.get_width() + offset`) which the sql-injection detector mis-fires
+    on because it sees a binary `+` operator. There is no SQL anywhere
+    here - the rule must not fire.
+    """
+    bar = _AnnotatedAxes()
+    ax = _AnnotatedAxes()
+    offset = max(values) * 0.02
+    ax.text(bar.get_width() + offset, bar.get_y() + 0.5, f"Total: {sum(values)} ({series})")

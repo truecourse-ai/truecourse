@@ -56,3 +56,31 @@ def init_local_db() -> None:
     with get_connection() as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, rating INTEGER, note TEXT)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_rating ON feedback(rating)")
+
+
+def _open_postgres():
+    """Connection factory: callers are responsible for releasing.
+
+    The `connection-not-released` rule must not fire on factory functions
+    that return a freshly-opened connection - the resource ownership is
+    transferred to the caller, who handles the lifecycle.
+    """
+    return sqlite3.connect(DATABASE_URL)
+
+
+def count_active_users() -> int:
+    """Acquire a connection, run a query, release it on every exit path.
+
+    The `try/finally: conn.close()` idiom is the canonical way to release
+    a connection when a `with` block isn't appropriate (e.g. the cursor
+    is the context-managed object). The detector must recognise this
+    flow even though `sqlite3.connect()` is outside the try body.
+    """
+    conn = sqlite3.connect(DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM users WHERE active = 1")
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+    finally:
+        conn.close()

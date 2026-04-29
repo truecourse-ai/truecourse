@@ -26,7 +26,10 @@ import { pythonUnusedVariableVisitor } from './unused-variable.js'
 import { pythonCommentedOutCodeVisitor } from './commented-out-code.js'
 import { pythonAbstractClassWithoutAbstractMethodVisitor } from './abstract-class-without-abstract-method.js'
 import { pythonAndOrTernaryVisitor } from './and-or-ternary.js'
-import { pythonAnyTypeHintVisitor } from './any-type-hint.js'
+// `any-type-hint` is a duplicate of `no-explicit-any` — both Python visitors
+// detect the same `Any` annotation. The visitor is intentionally not imported
+// or registered; the rule definition remains in the catalog but never fires.
+// Re-enable only if the visitor is rewritten to detect a distinct pattern.
 import { pythonAssertInProductionVisitor } from './assert-in-production.js'
 import { pythonAsyncLongSleepVisitor } from './async-long-sleep.js'
 import { pythonAsyncUnusedAsyncVisitor } from './async-unused-async.js'
@@ -282,7 +285,6 @@ export const CODE_QUALITY_PYTHON_VISITORS: CodeRuleVisitor[] = [
   pythonCommentedOutCodeVisitor,
   pythonAbstractClassWithoutAbstractMethodVisitor,
   pythonAndOrTernaryVisitor,
-  pythonAnyTypeHintVisitor,
   pythonAssertInProductionVisitor,
   pythonAsyncLongSleepVisitor,
   pythonAsyncUnusedAsyncVisitor,

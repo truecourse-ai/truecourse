@@ -118,14 +118,33 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
       if (v.kind === 'var' || v.kind === 'function' || v.kind === 'import' || v.kind === 'global' || v.kind === 'nonlocal' || v.kind === 'for-variable' || v.kind === 'catch-parameter') continue
       if (v.useSites.length === 0) continue
 
+      // Closure capture — a use site sitting inside a nested function scope
+      // resolves at *call* time, not at the textual position of the use.
+      // `def inner(): use(x)` followed by `x = ...; inner()` is valid Python
+      // even though the textual use precedes the assignment. Restrict the
+      // position check to use sites in the same scope as the declaration
+      // (or non-function descendant blocks).
+      const directUseSites = v.useSites.filter((u) => !isInNestedFunctionScope(u.scope, v.scope))
+      if (directUseSites.length === 0) continue
+
       const declPos = v.declarationNode.startIndex
-      const earliestUse = Math.min(...v.useSites.map(u => u.node.startIndex))
+      const earliestUse = Math.min(...directUseSites.map((u) => u.node.startIndex))
       if (earliestUse < declPos) {
         result.push(v)
       }
     }
     cachedUsedBeforeDefined = result
     return result
+  }
+
+  function isInNestedFunctionScope(useScope: Scope, declScope: Scope): boolean {
+    if (useScope === declScope) return false
+    let cursor: Scope | null = useScope
+    while (cursor && cursor !== declScope) {
+      if (cursor.kind === 'function') return true
+      cursor = cursor.parent
+    }
+    return false
   }
 
   function unusedVariables(): Variable[] {

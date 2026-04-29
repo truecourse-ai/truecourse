@@ -58,16 +58,35 @@ export const pythonSqlInjectionVisitor: CodeRuleVisitor = {
     if (firstArg.type === 'binary_operator') {
       const op = firstArg.children.find((c) => c.text === '+')
       if (op) {
-        return makeViolation(
-          this.ruleKey, node, filePath, 'high',
-          'Potential SQL injection',
-          `String concatenation passed to ${methodName}(). Use parameterized queries instead.`,
-          sourceCode,
-          'Use parameterized queries (e.g., %s or :param) instead of string concatenation in SQL.',
-        )
+        // The `+` operator is overloaded for both string concatenation and
+        // numeric arithmetic. matplotlib's `ax.text(bar.get_width() + offset,
+        // bar.get_y() + 0.5, ...)` puts numeric arithmetic in the first
+        // positional argument, which has nothing to do with SQL. Only fire
+        // when at least one operand is a string-shaped value (string literal
+        // or another binary `+` containing strings) so we can be confident
+        // this is concatenation, not arithmetic.
+        if (hasStringOperand(firstArg)) {
+          return makeViolation(
+            this.ruleKey, node, filePath, 'high',
+            'Potential SQL injection',
+            `String concatenation passed to ${methodName}(). Use parameterized queries instead.`,
+            sourceCode,
+            'Use parameterized queries (e.g., %s or :param) instead of string concatenation in SQL.',
+          )
+        }
       }
     }
 
     return null
   },
+}
+
+function hasStringOperand(binNode: import('web-tree-sitter').Node): boolean {
+  for (let i = 0; i < binNode.namedChildCount; i++) {
+    const child = binNode.namedChild(i)
+    if (!child) continue
+    if (child.type === 'string') return true
+    if (child.type === 'binary_operator' && hasStringOperand(child)) return true
+  }
+  return false
 }
