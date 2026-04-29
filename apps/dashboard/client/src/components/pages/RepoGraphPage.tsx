@@ -377,6 +377,15 @@ export default function RepoGraphPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, [stashConfirm, respondToStashConfirm]);
 
+  useEffect(() => {
+    if (!llmEstimate) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') respondToLlmEstimate(llmEstimate.repoId, false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [llmEstimate, respondToLlmEstimate]);
+
   // Note: graph node clicks store into `selectedService` for visual highlight only —
   // we deliberately don't pass it to useViolations so the violations list is never
   // filtered as a side effect of clicking a graph node.
@@ -1359,30 +1368,47 @@ export default function RepoGraphPage() {
         </div>
       )}
       {llmEstimate && (
-        <div className="fixed bottom-4 left-1/2 z-50 w-80 -translate-x-1/2 rounded-lg border border-border bg-card p-4 shadow-lg">
-          <div className="mb-3">
-            <span className="text-xs font-medium text-foreground">LLM Analysis</span>
-            <p className="mt-1 text-[11px] text-muted-foreground">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="w-96 rounded-lg border border-border bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between">
+              <span className="text-xs font-medium text-foreground">Run LLM rules?</span>
+              <button
+                onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                title="Skip"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="mb-4 text-[11px] text-muted-foreground">
               {(() => {
                 const totalRules = llmEstimate.estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
                 const totalFiles = llmEstimate.estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-                return `${totalFiles} files, ${totalRules} rules (~${Math.round(llmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens)`;
+                return `${totalFiles} files, ${totalRules} rules (~${Math.round(llmEstimate.estimate.totalEstimatedTokens / 1000)}k tokens).`;
               })()}
             </p>
-          </div>
-          <div className="flex gap-2">
-            <button
-              className="flex-1 rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
-              onClick={() => respondToLlmEstimate(llmEstimate.repoId, true)}
-            >
-              Run LLM rules
-            </button>
-            <button
-              className="flex-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
-              onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
-            >
-              Skip
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                className="rounded-md bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                onClick={() => respondToLlmEstimate(llmEstimate.repoId, true)}
+              >
+                Run LLM rules
+              </button>
+              <button
+                className="rounded-md border border-border px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent"
+                onClick={() => respondToLlmEstimate(llmEstimate.repoId, false)}
+              >
+                Skip — deterministic rules only
+              </button>
+            </div>
           </div>
         </div>
       )}
