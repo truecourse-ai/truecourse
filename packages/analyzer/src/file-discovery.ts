@@ -1,12 +1,87 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { join, relative, resolve } from 'path'
 import ignore from 'ignore'
 import { detectLanguage, getAllIgnorePatterns, getAllTestPatterns } from './language-config.js'
 
-/**
- * Find all .gitignore files from startDir up to root
- * Returns array of {path, dir} objects, ordered from root to startDir
- */
+function isInsideGitWorkTree(dir: string): boolean {
+  try {
+    const out = execFileSync('git', ['-C', dir, 'rev-parse', '--is-inside-work-tree'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return out.toString('utf8').trim() === 'true'
+  } catch {
+    return false
+  }
+}
+
+// Build the post-git filter: .truecourseignore + language test/ignore patterns
+// + .git. Rooted at `dir` so .truecourseignore patterns are anchored correctly.
+function buildPostGitFilter(dir: string): ReturnType<typeof ignore> {
+  const ig = ignore()
+  const tcPath = join(dir, '.truecourseignore')
+  if (existsSync(tcPath)) ig.add(readFileSync(tcPath, 'utf8'))
+  ig.add('.git')
+  for (const p of getAllTestPatterns()) ig.add(p)
+  for (const p of getAllIgnorePatterns()) ig.add(p)
+  return ig
+}
+
+// Use git for full gitignore semantics: nested .gitignore, .git/info/exclude,
+// the configured global excludes file, and the repo boundary. Returns null
+// when `dir` is not in a git work tree or git is unavailable.
+function discoverFilesViaGit(dir: string): string[] | null {
+  if (!isInsideGitWorkTree(dir)) return null
+
+  let stdout: Buffer
+  try {
+    stdout = execFileSync(
+      'git',
+      ['-C', dir, 'ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '.'],
+      { maxBuffer: 256 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] },
+    ) as Buffer
+  } catch {
+    return null
+  }
+
+  const relPaths = stdout.toString('utf8').split('\0').filter(Boolean)
+  // git emits a flat lexicographic order; the walker emits depth-first per-
+  // directory order. They diverge when a directory and a sibling file share
+  // a prefix (e.g. `foo/` and `foo.ts`). Downstream service/layer detection
+  // is order-sensitive, so re-sort to match the walker.
+  relPaths.sort(compareDepthFirst)
+  const ig = buildPostGitFilter(dir)
+
+  const out: string[] = []
+  for (const rel of relPaths) {
+    if (ig.ignores(rel)) continue
+    const abs = join(dir, rel)
+    let isFile = false
+    try {
+      isFile = statSync(abs).isFile()
+    } catch {
+      continue
+    }
+    if (!isFile) continue
+    if (detectLanguage(abs)) out.push(abs)
+  }
+  return out
+}
+
+function compareDepthFirst(a: string, b: string): number {
+  const ap = a.split('/')
+  const bp = b.split('/')
+  const len = Math.min(ap.length, bp.length)
+  for (let i = 0; i < len; i++) {
+    const x = ap[i]!
+    const y = bp[i]!
+    if (x !== y) return x < y ? -1 : 1
+  }
+  return ap.length - bp.length
+}
+
+// Find all .gitignore files from startDir up to root.
+// Returns array of {path, dir} objects, ordered from root to startDir.
 function findAllGitignores(startDir: string): Array<{ path: string; dir: string }> {
   const gitignores: Array<{ path: string; dir: string }> = []
   let currentDir = resolve(startDir)
@@ -18,94 +93,113 @@ function findAllGitignores(startDir: string): Array<{ path: string; dir: string 
     }
 
     const parentDir = resolve(currentDir, '..')
-    // Reached root directory (on both Unix and Windows)
-    if (parentDir === currentDir) {
-      break
-    }
+    if (parentDir === currentDir) break
     currentDir = parentDir
   }
 
   return gitignores
 }
 
-/**
- * Load ignore patterns from .gitignore and .truecourseignore files
- * Returns ignore instance and the root directory (where topmost .gitignore is)
- */
+// Re-anchor leading-/internal-slash patterns to baseDir so they still match
+// when a parent .gitignore makes rootDir an ancestor of baseDir.
+function reanchorTruecourseignore(content: string, prefix: string): string {
+  if (prefix === '' || prefix === '.') return content
+
+  return content
+    .split('\n')
+    .map((line) => {
+      const raw = line
+      const trimmed = raw.trim()
+      if (trimmed === '' || trimmed.startsWith('#')) return raw
+
+      const negate = trimmed.startsWith('!')
+      const body = negate ? trimmed.slice(1) : trimmed
+
+      if (body.startsWith('**/')) return raw
+
+      const hasLeadingSlash = body.startsWith('/')
+      const withoutTrailing = body.endsWith('/') ? body.slice(0, -1) : body
+      const inner = hasLeadingSlash ? withoutTrailing.slice(1) : withoutTrailing
+      const hasInternalSlash = inner.includes('/')
+
+      if (!hasLeadingSlash && !hasInternalSlash) return raw
+
+      const stripped = hasLeadingSlash ? body.slice(1) : body
+      return `${negate ? '!' : ''}${prefix}/${stripped}`
+    })
+    .join('\n')
+}
+
 function loadIgnorePatterns(baseDir: string): { ig: ReturnType<typeof ignore>; rootDir: string } {
   const ig = ignore()
 
-  // Find all .gitignore files in parent hierarchy
   const gitignores = findAllGitignores(baseDir)
   const rootDir = gitignores.length > 0 && gitignores[0] ? gitignores[0].dir : baseDir
 
-  // Load all .gitignore files (from root down to baseDir)
   for (const { path: gitignorePath } of gitignores) {
-    const content = readFileSync(gitignorePath, 'utf8')
-    ig.add(content)
+    ig.add(readFileSync(gitignorePath, 'utf8'))
   }
 
-  // Load .truecourseignore (tool-specific ignore rules, only from baseDir)
   const truecourseignorePath = join(baseDir, '.truecourseignore')
   if (existsSync(truecourseignorePath)) {
     const content = readFileSync(truecourseignorePath, 'utf8')
-    ig.add(content)
+    const prefix = relative(rootDir, baseDir).replace(/\\/g, '/')
+    ig.add(reanchorTruecourseignore(content, prefix))
   }
 
-  // Always ignore .git directory (never analyze git internals)
   ig.add('.git')
 
-  // Ignore test files and language-specific directories (from language configs)
   for (const pattern of getAllTestPatterns()) ig.add(pattern)
   for (const pattern of getAllIgnorePatterns()) ig.add(pattern)
 
   return { ig, rootDir }
 }
 
-/**
- * Discover all supported source files in a directory
- * Respects .gitignore and .truecourseignore patterns
- */
-export function discoverFiles(dir: string): string[] {
+// Manual walker — used when `dir` is not in a git work tree (e.g. test temp
+// dirs without git init). git delegation is preferred when available because
+// it gets nested-.gitignore anchoring, .git/info/exclude, the global excludes
+// file, and the repo boundary right.
+function discoverFilesViaWalker(dir: string): string[] {
   const files: string[] = []
   const { ig, rootDir } = loadIgnorePatterns(dir)
 
   function traverse(currentPath: string) {
     try {
-      // Sort so traversal order is deterministic across filesystems — ext4
-      // returns entries in creation order, APFS in insertion/alphabetical
-      // order. Downstream steps (service detection, layer classification)
-      // have order-sensitive decisions, so leaving this unsorted gives
-      // different results on macOS vs Linux CI.
+      // Sort for deterministic traversal — APFS and ext4 return entries in
+      // different orders, and downstream service/layer detection is order-
+      // sensitive.
       const entries = readdirSync(currentPath).sort()
 
       for (const entry of entries) {
         const fullPath = join(currentPath, entry)
-        // Calculate path relative to the root where .gitignore is located
         const relativePath = relative(rootDir, fullPath)
         const stat = statSync(fullPath)
 
-        // Check if path should be ignored
-        // For directories, add trailing slash for proper gitignore matching
         const pathToCheck = stat.isDirectory() ? relativePath + '/' : relativePath
-        if (ig.ignores(pathToCheck)) {
-          continue
-        }
+        if (ig.ignores(pathToCheck)) continue
 
         if (stat.isDirectory()) {
           traverse(fullPath)
         } else if (stat.isFile()) {
-          // Use detectLanguage to check if file is supported
-          if (detectLanguage(fullPath)) {
-            files.push(fullPath)
-          }
+          if (detectLanguage(fullPath)) files.push(fullPath)
         }
       }
-    } catch (error) {
-      // Skip directories we can't read
+    } catch {
+      // Skip directories we can't read.
     }
   }
 
   traverse(dir)
   return files
+}
+
+/**
+ * Discover all supported source files in a directory.
+ * Respects .gitignore (incl. nested), .git/info/exclude, the configured
+ * global excludes file, and .truecourseignore.
+ */
+export function discoverFiles(dir: string): string[] {
+  const viaGit = discoverFilesViaGit(dir)
+  if (viaGit !== null) return viaGit
+  return discoverFilesViaWalker(dir)
 }

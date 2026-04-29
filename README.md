@@ -194,6 +194,23 @@ For a one-off override, prefix the command:
 CLAUDE_CODE_MAX_CONCURRENCY=2 truecourse analyze
 ```
 
+### Excluding files from analysis
+
+TrueCourse honors `.gitignore` automatically (including nested `.gitignore` files, `.git/info/exclude`, and your configured global excludes file).
+
+For paths you want tracked in git but not analyzed — generated code, vendored snapshots, large fixtures — add a `.truecourseignore` at the repo root. Same syntax as `.gitignore`:
+
+```
+# generated
+src/generated/
+# vendored
+third_party/
+# specific files
+scripts/ingest-epub.js
+```
+
+Patterns are anchored to the file's location, so `src/generated/` matches the top-level directory only; use `**/generated/` to match at any depth.
+
 ## Development
 
 ```bash
