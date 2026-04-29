@@ -120,6 +120,53 @@ describe('discoverFiles with gitignore patterns', () => {
 
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('skips minified-shaped JS files even when the name does not contain .min', () => {
+    // Vendored bundles that ship as `*.production.js`, `*.bundle.js`, or
+    // unconventional names slip through the *.min.* glob but are obviously
+    // minified by content. Detect them by sniffing line density: if the
+    // file is sufficiently large and the first window has very few
+    // newlines, treat it as a build artifact.
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-mincontent-'));
+    const vendor = join(dir, 'static', 'vendor');
+    mkdirSync(vendor, { recursive: true });
+
+    // Normal source file - many short lines.
+    writeFileSync(
+      join(dir, 'app.js'),
+      Array.from({ length: 200 }, (_, i) => `const x${i} = ${i};`).join('\n'),
+    );
+
+    // Auth0-spa-js style: ~80KB with two extremely long lines (license
+    // banner + minified IIFE). This must be excluded by the content sniff.
+    const longLine = 'a'.repeat(80_000);
+    writeFileSync(
+      join(vendor, 'auth0-spa-js.production.js'),
+      `/* Auth0 SDK v2.0 - Apache 2.0 */\n${longLine}`,
+    );
+
+    const files = discoverFiles(dir);
+
+    expect(files.some((f) => f.endsWith('app.js'))).toBe(true);
+    expect(files.some((f) => f.endsWith('auth0-spa-js.production.js'))).toBe(false);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not treat large hand-written source as minified', () => {
+    // Guard against false negatives - a 200KB hand-written JS file with
+    // normal line lengths should still be discovered. The heuristic must
+    // key off line *density*, not raw size.
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-largesrc-'));
+    const big = Array.from({ length: 5_000 }, (_, i) => `function f${i}() { return ${i}; }`).join('\n');
+    writeFileSync(join(dir, 'big.js'), big);
+
+    const files = discoverFiles(dir);
+
+    expect(files.some((f) => f.endsWith('big.js'))).toBe(true);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe('.truecourseignore with parent .gitignore', () => {
