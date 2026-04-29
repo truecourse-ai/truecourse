@@ -167,3 +167,26 @@ def save_user_data(db: object) -> None:
 def compute_value() -> int:
     """Compute a constant value."""
     return 42
+
+
+# Variadic-arg signatures with explicit type annotations. The argument-type-
+# mismatch detector must treat `**kwargs: Any` and `*keys: str` as varargs
+# (not as required positional params) when it sees them as `typed_parameter`
+# nodes in tree-sitter.
+
+def emit_event(level: str, event: str, **kwargs: object) -> None:
+    """Emit a structured log event with arbitrary metadata."""
+    logger.info("%s %s %s", level, event, kwargs)
+
+
+def join_keys(prefix: str, *keys: str) -> str:
+    """Join keys with a prefix using positional varargs."""
+    return prefix + ":" + "/".join(keys)
+
+
+def call_variadic_helpers() -> None:
+    """Call helpers with extra positional and keyword arguments."""
+    emit_event("INFO", "boot", request_id="abc-123", trace_id="xyz")
+    emit_event("WARN", "retry", attempt=2)
+    join_keys("user", "id", "name", "email")
+    join_keys("session", "token")

@@ -69,8 +69,18 @@ export const pythonMissingTransactionVisitor: CodeRuleVisitor = {
     if (!body) return null
 
     const bodyText = body.text.toLowerCase()
-    // If there's already a transaction context, skip
-    if (/transaction|atomic|begin\b/.test(bodyText)) return null
+    // If there's already a transaction context, skip. Two signals:
+    //   1. Explicit transaction keyword (`transaction.atomic()`, `session.begin()`,
+    //      raw SQL `BEGIN;`, or `autocommit = False`).
+    //   2. A `with` block whose context manager produces a connection/session
+    //      binding — sqlite3 / psycopg / SQLAlchemy context managers commit on
+    //      success and roll back on exception, so they ARE the transaction.
+    //
+    // A bare `.commit()` call is *not* sufficient: writers commonly call
+    // `commit()` once at the end of a loop without any rollback path, which
+    // is exactly the bug this rule catches.
+    if (/transaction|atomic|begin\b|autocommit\s*=\s*false/.test(bodyText)) return null
+    if (/\bwith\s+[^:]*\bas\s+(conn|connection|cursor|cur|session|engine|tx|trans)\b[^:]*:/.test(bodyText)) return null
 
     // Count ORM write calls in the body
     let writeCount = 0

@@ -294,11 +294,19 @@ export const hardcodedBlockchainMnemonicVisitor: CodeRuleVisitor = {
 // hardcoded-database-password
 // ---------------------------------------------------------------------------
 
-const DB_CONNECTION_PATTERNS = [
-  /(?:mysql|postgresql|postgres|mongodb|sqlite|mssql|oracle):\/\/[^:]+:([^@]+)@/i,
+// URL-style DSN: scheme://user:PASSWORD@host. Group 1 captures the password
+// segment so we can check whether it's a literal vs an interpolation expression.
+const DB_URL_PATTERN = /(?:mysql|postgresql|postgres|mongodb|sqlite|mssql|oracle):\/\/[^:]+:([^@]+)@/i
+const DB_PASSWORD_KV_PATTERNS = [
   /password\s*=\s*['"][^'"]{4,}['"]/i,
   /pwd\s*=\s*['"][^'"]{4,}['"]/i,
 ]
+
+// A password segment that is *not* a literal value: f-string / template
+// interpolation, printf placeholder, env-var reference, angle-placeholder,
+// shell substitution. If the URL's password slot matches any of these the
+// connection string is templated, not hardcoded.
+const NON_LITERAL_PASSWORD_SEGMENT = /^\{[^{}]*\}$|^\$\{[^}]*\}$|^%s$|^%\([^)]+\)s$|^<[^>]+>$|^\$\([^)]*\)$|^\$[A-Z_][A-Z0-9_]*$|process\.env/i
 
 export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-database-password',
@@ -307,10 +315,28 @@ export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
     const text = node.text
     const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
 
-    for (const pattern of DB_CONNECTION_PATTERNS) {
+    // Generic placeholder/env-var exclusion (applies to any pattern).
+    if (/\$\{|%s|<password>|\$\(|process\.env/i.test(stripped)) return null
+
+    const urlMatch = DB_URL_PATTERN.exec(stripped)
+    if (urlMatch) {
+      // URL-style match: suppress when the captured password segment is a
+      // templating expression rather than a literal value. Covers the most
+      // common Python idiom — `f"postgres://{user}:{password}@..."` — which
+      // the generic exclusion above misses (Python f-strings use `{...}`,
+      // not `${...}`).
+      if (NON_LITERAL_PASSWORD_SEGMENT.test(urlMatch[1])) return null
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'Hardcoded database password',
+        'Database connection string contains a hardcoded password.',
+        sourceCode,
+        'Load database credentials from environment variables.',
+      )
+    }
+
+    for (const pattern of DB_PASSWORD_KV_PATTERNS) {
       if (pattern.test(stripped)) {
-        // Exclude placeholders and env-var references
-        if (/\$\{|%s|<password>|\$\(|process\.env/i.test(stripped)) return null
         return makeViolation(
           this.ruleKey, node, filePath, 'critical',
           'Hardcoded database password',
