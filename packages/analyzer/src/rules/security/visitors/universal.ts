@@ -21,6 +21,22 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // Skip docstrings — a string node sitting as the first statement of a
+    // module / class / function body is documentation, not code that ships
+    // secrets. The Python tree-sitter shape is:
+    //   <module|block>
+    //     <expression_statement>          ← parent.parent
+    //       <string>                      ← node
+    if (parent?.type === 'expression_statement') {
+      const grandParent = parent.parent
+      if (grandParent && (grandParent.type === 'module' || grandParent.type === 'block')) {
+        const firstChild = grandParent.namedChild(0)
+        if (firstChild && firstChild.id === parent.id) {
+          return null
+        }
+      }
+    }
+
     // ── Pattern-based detection (222 patterns) ──────────────────────────
     const match = scanForSecrets(stripped)
     if (match) {

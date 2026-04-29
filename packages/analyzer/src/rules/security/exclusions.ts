@@ -42,4 +42,10 @@ export const GLOBAL_ALLOWLIST: RegExp[] = [
   /^\*+$/, // All asterisks (masked values)
   /^x+$/i, // All x's (placeholder)
   /^\.{3,}$/, // Ellipsis placeholders
+
+  // Filenames with a recognized document/media/archive/data extension.
+  // Composed object keys like `<hash>__<date>__<batch>.pdf` look like
+  // high-entropy tokens to pattern detectors, but the trailing extension
+  // makes them clearly filenames. Anchored at string end.
+  /\.(pdf|csv|tsv|json|jsonl|ndjson|parquet|xml|html?|md|rst|txt|log|zip|tar|gz|tgz|bz2|7z|rar|png|jpe?g|gif|webp|svg|ico|bmp|tiff?|mp[34]|wav|flac|ogg|webm|avi|mov|mkv|docx?|xlsx?|pptx?|odt|ods|odp|rtf|epub|yaml|yml|toml|ini|cfg|conf|sql)$/i,
 ]
