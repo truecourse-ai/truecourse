@@ -344,10 +344,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     if (domain === 'architecture') {
       tracker?.detail(stepKey, 'Service checks...');
+      await new Promise((r) => setImmediate(r));
       serviceViolationResults.push(...runDeterministicServiceChecks(result, domainRules));
       tracker?.detail(stepKey, 'Module checks...');
+      await new Promise((r) => setImmediate(r));
       moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
       tracker?.detail(stepKey, 'Method checks...');
+      await new Promise((r) => setImmediate(r));
       methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
       tracker?.detail(stepKey, 'Deterministic checks done');
     }
@@ -359,14 +362,20 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allCodeViolations: CodeViolation[] = [];
 
   if (enabledCodeRules.length > 0 && filesToScan.length > 0) {
+    const activeCodeDomains: string[] = [];
     for (const domain of DOMAIN_ORDER) {
       if (domain === 'architecture') continue;
       const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
-      if (domainRules.length > 0) tracker?.start(`${domain}`);
+      if (domainRules.length > 0) {
+        tracker?.start(`${domain}`);
+        activeCodeDomains.push(domain);
+      }
     }
 
     await new Promise((r) => setImmediate(r));
 
+    const totalFiles = filesToScan.length;
+    let processed = 0;
     for (const { filePath, resolve } of filesToScan) {
       try {
         const lang = detectLanguage(filePath);
@@ -381,6 +390,16 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         allCodeViolations.push(...codeRuleViolations);
       } catch {
         // Skip files that fail to parse
+      }
+      processed++;
+      // Yield every ~10 files so the CLI's spinner setInterval (80ms) can
+      // fire and per-domain progress detail updates render. Without this
+      // the loop blocks the event loop for the full scan and the UI looks
+      // frozen.
+      if (processed % 10 === 0 || processed === totalFiles) {
+        const detail = `Checking ${processed}/${totalFiles} files...`;
+        for (const domain of activeCodeDomains) tracker?.detail(domain, detail);
+        await new Promise((r) => setImmediate(r));
       }
     }
   }

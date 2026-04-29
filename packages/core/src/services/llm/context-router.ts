@@ -457,10 +457,72 @@ function splitIntoBatches(
 }
 
 // ---------------------------------------------------------------------------
+// Error translation
+// ---------------------------------------------------------------------------
+
+/**
+ * Translate V8's opaque "Invalid string length" RangeError into a message
+ * that names the likely culprit files and tells the user how to skip them.
+ *
+ * The throw fires when the aggregated LLM context exceeds V8's ~512MB max
+ * string length — almost always because a minified bundle, vendored lib, or
+ * generated file produces an explosion of extracted function bodies. We
+ * surface the largest in-scope files so the user knows what to add to
+ * `.truecourseignore`.
+ */
+function translateContextRangeError(
+  err: unknown,
+  fileContents: Map<string, { content: string; lineCount: number }>,
+): never {
+  if (!(err instanceof RangeError) || !err.message.includes('Invalid string length')) {
+    throw err;
+  }
+  const sized = [...fileContents.entries()]
+    .map(([filePath, fc]) => ({
+      filePath,
+      sizeKb: Math.round(fc.content.length / 1024),
+      lineCount: fc.lineCount,
+      // long single lines are a strong minified-bundle signal
+      maxLineLength: fc.lineCount > 0 ? Math.round(fc.content.length / fc.lineCount) : 0,
+    }))
+    .sort((a, b) => b.sizeKb - a.sizeKb)
+    .slice(0, 5);
+
+  const list = sized
+    .map((f) => {
+      const minHint = f.maxLineLength > 5_000 ? ' [likely minified]' : '';
+      return `  - ${f.filePath} (${f.sizeKb} KB, ${f.lineCount} lines)${minHint}`;
+    })
+    .join('\n');
+
+  const suggestions = sized.slice(0, 3).map((f) => `  ${f.filePath}`).join('\n');
+
+  throw new Error(
+    `LLM context exceeded V8's max string length (~512 MB) while preparing rule batches. ` +
+      `This is almost always caused by minified bundles, vendored libraries, or generated files.\n\n` +
+      `Largest files in scope:\n${list}\n\n` +
+      `Add the offending paths to \`.truecourseignore\` at the repo root, e.g.:\n${suggestions}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 export function estimateContext(
+  rules: AnalysisRule[],
+  fileAnalyses: FileAnalysis[],
+  fileContents: Map<string, { content: string; lineCount: number }>,
+  options?: { useFilePaths?: boolean },
+): PreFlightEstimate {
+  try {
+    return estimateContextInner(rules, fileAnalyses, fileContents, options);
+  } catch (err) {
+    translateContextRangeError(err, fileContents);
+  }
+}
+
+function estimateContextInner(
   rules: AnalysisRule[],
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
@@ -539,6 +601,18 @@ export function estimateContext(
 }
 
 export function routeContext(
+  rules: AnalysisRule[],
+  fileAnalyses: FileAnalysis[],
+  fileContents: Map<string, { content: string; lineCount: number }>,
+): ContextBatch[] {
+  try {
+    return routeContextInner(rules, fileAnalyses, fileContents);
+  } catch (err) {
+    translateContextRangeError(err, fileContents);
+  }
+}
+
+function routeContextInner(
   rules: AnalysisRule[],
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,

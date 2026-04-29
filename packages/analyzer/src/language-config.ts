@@ -178,6 +178,12 @@ export const JAVASCRIPT_CONFIG: LanguageConfig = {
     (class_declaration) @class
     (class) @class
   `,
+
+  // Skip pre-built/minified bundles. They have no analytical value (build
+  // artifacts of source already in the repo or vendored libs) and a single
+  // ~1MB minified line can blow past V8's max string length when the LLM
+  // context router extracts thousands of arrow_function bodies from it.
+  ignorePatterns: ['**/*.min.js', '**/*.min.cjs', '**/*.min.mjs'],
 }
 
 /**

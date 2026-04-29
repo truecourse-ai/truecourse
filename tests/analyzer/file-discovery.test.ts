@@ -100,6 +100,26 @@ describe('discoverFiles with gitignore patterns', () => {
     // Cleanup
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it('skips minified bundles by default (*.min.js / .min.cjs / .min.mjs)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-min-'));
+    const vendor = join(dir, 'vendor');
+    mkdirSync(vendor, { recursive: true });
+
+    writeFileSync(join(dir, 'app.js'), 'const x = 1;');
+    writeFileSync(join(vendor, 'pdf.worker.min.js'), 'a.b=1');
+    writeFileSync(join(vendor, 'lib.min.cjs'), 'a.b=1');
+    writeFileSync(join(vendor, 'lib.min.mjs'), 'a.b=1');
+
+    const files = discoverFiles(dir);
+
+    expect(files.some((f) => f.endsWith('app.js'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.min.js'))).toBe(false);
+    expect(files.some((f) => f.endsWith('.min.cjs'))).toBe(false);
+    expect(files.some((f) => f.endsWith('.min.mjs'))).toBe(false);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe('.truecourseignore with parent .gitignore', () => {
