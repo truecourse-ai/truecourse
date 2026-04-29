@@ -54,3 +54,11 @@ When the command finishes, read the printed summary and relay the key numbers:
 Tell the user they can:
 - Run `/truecourse-list` to see the full violation list.
 - Run `/truecourse-fix` to apply suggested fixes.
+
+If the run was a **full analyze on `main`** (not a feature branch, not `--diff`), also suggest committing `.truecourse/LATEST.json`:
+
+```
+git add .truecourse/LATEST.json && git commit -m "refresh truecourse baseline"
+```
+
+That's the baseline `--diff` and the pre-commit hook read. Committing it on `main` lets fresh clones and `git worktree add` checkouts use the hook without re-running analyze. Don't suggest this on feature branches — `LATEST.json` updates from multiple PRs will conflict on a large generated JSON.

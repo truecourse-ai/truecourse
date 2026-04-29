@@ -31,13 +31,15 @@ Analyses are stored as JSON files. **No database.**
 
 Per-repo layout under `<repo>/.truecourse/`:
 - `analyses/` — per-analysis snapshot files, filenames `<iso>_<short-uuid>.json` (gitignored)
-- `LATEST.json` — materialized current-state view read by the dashboard (gitignored)
+- `LATEST.json` — materialized current-state view, also serves as the diff baseline (committable — see below)
 - `history.json` — append-only summaries for cross-analysis queries (gitignored)
 - `diff.json` — optional current diff analysis, overwritten each diff run (gitignored)
 - `config.json` — per-repo settings (committable)
 - `ui-state.json` — graph positions + collapse state (gitignored)
 - `logs/` — per-repo analyze logs (gitignored)
 - `.analyze.lock` — transient, held for the duration of an analyze (gitignored)
+
+`LATEST.json` is tracked so it travels via git: `git worktree add` and fresh clones inherit a baseline without anyone having to cold-start `truecourse analyze`. The convention is **only commit `LATEST.json` after merging to main** (run `truecourse analyze`, commit the result). Don't commit it from feature branches — two PRs both updating `LATEST.json` will conflict on a giant generated JSON.
 
 Global layout under `~/.truecourse/`:
 - `config.json` — LLM keys, provider

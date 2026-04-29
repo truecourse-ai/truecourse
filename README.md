@@ -52,6 +52,32 @@ No setup step. TrueCourse creates `.truecourse/` in your repo on first analyze a
 
 TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for LLM-powered rules. If `claude` isn't on your PATH, deterministic rules still run and LLM rules are skipped.
 
+## Setup
+
+The first `truecourse analyze` creates `.truecourse/` in your repo. Three files inside it are committable and travel with the repo:
+
+| File | Purpose |
+|---|---|
+| `LATEST.json` | Most recent analysis snapshot. Doubles as the baseline for `truecourse analyze --diff` and the pre-commit hook. |
+| `config.json` | Per-repo rule categories and LLM toggles. |
+| `hooks.yaml` | Pre-commit hook policy (created by `truecourse hooks install`). |
+
+Everything else (`analyses/`, `diff.json`, `history.json`, `ui-state.json`, `logs/`, `.analyze.lock`) is local-only and added to `.truecourse/.gitignore` automatically.
+
+**First time, on `main`:**
+
+```bash
+truecourse analyze
+git add .truecourse/LATEST.json .truecourse/config.json
+git commit -m "add truecourse baseline"
+```
+
+**Refreshing the baseline:** re-run `truecourse analyze` after merging to `main` and commit the updated `LATEST.json`. **Don't commit `LATEST.json` from feature branches** — two PRs both updating it will conflict on a large generated JSON.
+
+### Worktrees and fresh clones
+
+`LATEST.json` is tracked, so `git worktree add ../feat-x` and fresh clones inherit the baseline through git. `truecourse analyze --diff` and the pre-commit hook both work on the first commit in a new worktree — no per-checkout cold-start. Inside a worktree, run `truecourse analyze --diff` to see what your in-flight changes introduce relative to `main`'s committed baseline; the diff result lands in `.truecourse/diff.json` (gitignored, per-checkout).
+
 ## CLI Commands
 
 ```bash
@@ -102,7 +128,7 @@ truecourse hooks status               # Show hook status + config
 
 On every commit the hook runs `truecourse analyze --diff` against the repo's last full analysis and blocks if any newly-introduced violation matches the configured block severities. **Commits will take as long as a full diff analysis** — on large repos that can be tens of seconds per commit. `truecourse hooks install` warns you and requires confirmation before writing the hook.
 
-**First-time setup:** run `truecourse analyze` once to establish a baseline. Without it the hook can't diff.
+The hook diffs against `.truecourse/LATEST.json`, so you need a committed baseline first — see [Setup](#setup). Without it the hook has nothing to diff against.
 
 **Bypass:** `git commit --no-verify` (standard git).
 
