@@ -184,9 +184,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
     ];
 
     return new Promise((resolve, reject) => {
+      // Windows needs `shell: true`: cmd.exe applies PATHEXT for the resolved
+      // binary, and the CVE-2024-27980 mitigation rejects direct spawn of
+      // `.cmd`/`.bat` files. Node handles cmd.exe argv quoting under shell.
       const child: ChildProcess = spawn(this.binaryName, args, {
         env: this.getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
         ...(this._repoPath ? { cwd: this._repoPath } : {}),
       });
 
