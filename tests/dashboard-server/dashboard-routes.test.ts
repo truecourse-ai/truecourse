@@ -23,6 +23,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
     emitAnalysisCanceled: vi.fn(),
     createSocketTracker: () => new NoopTracker(),
     createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
+    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
   };
 });
 
