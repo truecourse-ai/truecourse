@@ -1,9 +1,19 @@
 """General helper utilities for common operations."""
 import os
 import logging
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Module-level mutable cache, explicitly guarded by a colocated lock. The
+# `shared-mutable-module-state` detector must recognise that the writer has
+# already considered concurrency when a `threading.Lock` (or `RLock`) is
+# declared in the same module - suppressing the FP without requiring the
+# state to be hoisted into a request handler.
+_cache_lock = threading.Lock()
+_request_cache: dict = {}
+_recent_keys: list = []
 
 
 def collect_items(item: object, items: list | None = None) -> list:
