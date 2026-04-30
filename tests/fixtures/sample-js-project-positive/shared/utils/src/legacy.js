@@ -121,6 +121,19 @@ const indexEntries = (entries) => {
 };
 module.exports.indexEntries = indexEntries;
 
+// Single-param arrow without parentheses: `t => ...`. Tree-sitter JS
+// represents the parameter as a bare `identifier` child of `arrow_function`
+// (no `formal_parameters` wrapper). The scope tracker has to register
+// that identifier as a parameter binding, otherwise both the param
+// declaration and every use inside the body look undeclared to no-undef.
+const doubleAll = (xs) => xs.map(t => t * 2);
+const labelAll = (xs) => xs.map(t => ({ value: t, label: t }));
+const toggle = (prev) => (prev ? null : 'open');
+const flipFlag = () => toggle('a');
+module.exports.doubleAll = doubleAll;
+module.exports.labelAll = labelAll;
+module.exports.flipFlag = flipFlag;
+
 // Helper functions declared inside an IIFE and used by sibling functions
 // in the same IIFE body. The no-undef rule must hoist `function`
 // declarations into their enclosing function scope so callers can resolve

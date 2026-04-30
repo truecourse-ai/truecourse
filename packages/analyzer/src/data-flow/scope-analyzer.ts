@@ -260,6 +260,10 @@ function isJsDeclarationPosition(node: SyntaxNode): boolean {
   if (parent.type === 'catch_clause') return true
   // for...of / for...in loop variable
   if (parent.type === 'for_in_statement' && parent.childForFieldName('left')?.id === node.id) return true
+  // Single-param arrow without parentheses: `t => …`. Tree-sitter places
+  // the bare identifier directly under `arrow_function` (no
+  // `formal_parameters` wrapper).
+  if (parent.type === 'arrow_function' && parent.childForFieldName('parameter')?.id === node.id) return true
 
   return false
 }
@@ -497,6 +501,16 @@ export function buildScopeTree(
       return
     }
 
+    // Single-param arrow without parentheses: `t => …`. The arrow_function
+    // has the identifier as a direct child via the `parameter` field.
+    if (parent.type === 'arrow_function' && parent.childForFieldName('parameter')?.id === node.id) {
+      const funcScope = nodeToScope.get(parent.id)
+      if (funcScope && !funcScope.variables.has(node.text)) {
+        createVariable(node.text, 'parameter', node, funcScope, false)
+      }
+      return
+    }
+
     // Rest patterns in parameters
     if (parent.type === 'rest_pattern' || parent.type === 'rest_element') {
       const funcNode = findFunctionAncestor(node)
@@ -536,6 +550,67 @@ export function buildScopeTree(
           if (funcScope && !funcScope.variables.has(node.text)) {
             createVariable(node.text, 'parameter', node, funcScope, false)
           }
+        }
+        return
+      }
+
+      // Same identifier shape but inside a variable_declarator:
+      //   `const [open, setOpen] = useState(...)`
+      //   `const { user, token } = ctx`
+      // The walker doesn't visit a wrapping `variable_declarator`-positioned
+      // identifier (the LHS is the pattern itself), so the existing
+      // variable_declarator branch never sees these. Walk up to find the
+      // declarator + its declaration kind and register accordingly.
+      let ancestor: SyntaxNode | null = parent.parent
+      let declarator: SyntaxNode | null = null
+      let forIn: SyntaxNode | null = null
+      while (ancestor) {
+        if (ancestor.type === 'variable_declarator') {
+          declarator = ancestor
+          break
+        }
+        if (ancestor.type === 'for_in_statement' && ancestor.childForFieldName('left')?.id === parent.id) {
+          forIn = ancestor
+          break
+        }
+        if (
+          ancestor.type === 'function_declaration' ||
+          ancestor.type === 'function_expression' ||
+          ancestor.type === 'arrow_function' ||
+          ancestor.type === 'method_definition' ||
+          ancestor.type === 'program'
+        ) break
+        ancestor = ancestor.parent
+      }
+      if (declarator) {
+        const grandparent = declarator.parent
+        if (grandparent?.type === 'variable_declaration') {
+          const targetScope = findFunctionScope(scope)
+          if (!targetScope.variables.has(node.text)) {
+            createVariable(node.text, 'var', node, targetScope, false)
+          }
+        } else if (grandparent?.type === 'lexical_declaration') {
+          const keyword = grandparent.child(0)?.text
+          const kind: DeclarationKind = keyword === 'const' ? 'const' : 'let'
+          if (!scope.variables.has(node.text)) {
+            createVariable(node.text, kind, node, scope, false)
+          }
+        }
+        return
+      }
+      if (forIn) {
+        // `for (const [k, v] of pairs)` — bindings live in the enclosing
+        // scope (the loop's body block creates its own scope for body
+        // statements, but the loop variable resolves via the chain).
+        const kindText = forIn.childForFieldName('kind')?.text
+        const kind: DeclarationKind =
+          kindText === 'var' ? 'var' :
+          kindText === 'const' ? 'const' :
+          kindText === 'let' ? 'let' :
+          'for-variable'
+        const targetScope = kind === 'var' ? findFunctionScope(scope) : scope
+        if (!targetScope.variables.has(node.text)) {
+          createVariable(node.text, kind, node, targetScope, false)
         }
         return
       }
