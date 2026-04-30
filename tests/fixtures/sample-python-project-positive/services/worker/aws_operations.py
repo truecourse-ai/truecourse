@@ -82,6 +82,14 @@ EXCLUDED_SOURCE_IDS = {
     "s8pj84dgla49c88br0bjvg2caur1cjtbpjn7ogg1__01_15__2026-02-06__home_depot_batch_1.pdf",
 }
 
+# S3 path prefix - the file extension is followed by a slash because it
+# acts as a directory in the bucket layout. Filename allowlist must match
+# `.pdf/` at end of string too, not just `.pdf`.
+EXPECTED_NON_STANDARD_SOURCE_PDF_KEYS = {
+    "v7dl45eu7kr1i9oetd7tnlvv0jikb8odprinei81__01_PH_19_021626_73183038.PDF/",
+    "k3jx84dgla49c88br0bjvg2caur1cjtbpjn7ogg1__01_PH_20_021626_99213017.pdf/",
+}
+
 
 def is_excluded_source(source_id: str) -> bool:
     """Check whether a source id is in the exclusion set."""

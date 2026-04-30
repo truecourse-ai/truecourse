@@ -108,6 +108,19 @@ const renderRowEscaped = (host, label) => {
 module.exports.renderUserName = renderUserName;
 module.exports.renderRowEscaped = renderRowEscaped;
 
+// Destructured key from a forEach iteration writes to a local map. The
+// prototype-pollution detector should treat destructured arrow / function
+// parameters the same as keys assigned from local helper calls - they're
+// scoped to the iteration, not user-controlled at this site.
+const indexEntries = (entries) => {
+  const out = {};
+  entries.forEach(([key, val]) => {
+    out[key] = val;
+  });
+  return out;
+};
+module.exports.indexEntries = indexEntries;
+
 // Helper functions declared inside an IIFE and used by sibling functions
 // in the same IIFE body. The no-undef rule must hoist `function`
 // declarations into their enclosing function scope so callers can resolve

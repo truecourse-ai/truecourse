@@ -218,6 +218,18 @@ CHART_LABELS = [
 ]
 
 
+XPATH_SELECTORS = [
+    # Multi-line literal split for an XPath that doesn't end in whitespace
+    # at line breaks - the readability signal here is total length plus
+    # path-like separators (`]`, `/`), not a trailing space.
+    "//div[contains(@class,'invoicing-table-header')]//span[normalize-space()='Vendor Bills']"
+    "/ancestor::div[contains(@class,'invoicing-table-header')][1]",
+    "//table[@data-test='vendor-bills-grid']//tbody//tr"
+    "/td[contains(@class,'invoice-number')]"
+    "/a[normalize-space()]",
+]
+
+
 SQL_PATTERNS = [
     # Multi-line implicit string concatenation inside a list - the canonical
     # Python idiom for splitting a long string across lines. The

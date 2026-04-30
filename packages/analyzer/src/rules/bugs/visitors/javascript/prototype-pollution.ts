@@ -40,6 +40,15 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     // reach into the helper to reason about what it returns.
     if (isKeyAssignedFromLocalCall(node, keyName)) return null
 
+    // Skip when the key is a destructured parameter: `forEach(([key, val]) =>
+    // out[key] = val)`. The destructuring pattern means the key was iterated
+    // from a structured value the caller composed, not pulled directly from
+    // user input. Same reasoning as the local-call case: without inter-
+    // procedural taint, the rule has no way to see whether the iterable's
+    // keys could be `__proto__`, and firing on every iteration loop is
+    // ~100% noise.
+    if (isKeyDestructuredParam(node, keyName)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Prototype pollution',
@@ -87,6 +96,53 @@ function isObjectEntriesOrKeys(node: SyntaxNode): boolean {
     }
   }
   return false
+}
+
+// True if the key variable's name appears as a direct child of an
+// array_pattern or object_pattern in some enclosing arrow / function /
+// method's parameter list. `(([key, val]) => out[key] = val)` matches.
+function isKeyDestructuredParam(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition'
+    ) {
+      const params = scope.childForFieldName('parameters') ?? scope.childForFieldName('parameter')
+      if (params && containsDestructuredName(params, keyName)) return true
+    }
+    if (scope.type === 'program') break
+    scope = scope.parent
+  }
+  return false
+}
+
+function containsDestructuredName(params: SyntaxNode, keyName: string): boolean {
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'identifier' && n.text === keyName) {
+      const parent = n.parent
+      if (parent?.type === 'array_pattern' || parent?.type === 'object_pattern') {
+        found = true
+        return
+      }
+      // Shorthand: `({ key })` lifts the identifier directly into
+      // shorthand_property_identifier_pattern.
+      if (parent?.type === 'shorthand_property_identifier_pattern' && n.text === keyName) {
+        found = true
+        return
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const child = n.child(i)
+      if (child) walk(child)
+    }
+  }
+  walk(params)
+  return found
 }
 
 // True if the key variable was declared in an enclosing function scope as

@@ -18,11 +18,16 @@ export const pythonImplicitStringConcatenationVisitor: CodeRuleVisitor = {
     const grandparent = parent.parent
     if (!isCollection(parent) && !isCollection(grandparent ?? { type: '' } as SyntaxNode)) return null
 
-    // Multi-line concat where every part except possibly the last ends with
-    // whitespace is the canonical Python idiom for splitting one logical
-    // string across lines for readability. Skip those. Multi-line without
-    // trailing whitespace (e.g. `"moderator"\n"viewer"`) is far more likely
-    // to be a missing comma between two list elements - keep firing on it.
+    // Multi-line concat is the canonical Python idiom for splitting one
+    // logical string across lines for readability. Two signals tell us
+    // it's intentional rather than a missing-comma bug:
+    //   1. All parts except possibly the last end with whitespace - the
+    //      writer is concatenating sentence fragments.
+    //   2. The combined string is long (> 60 chars). Missing-comma bugs
+    //      are typically `"foo"\n"bar"` style with two short list items.
+    //      Long XPaths, S3 keys, and SQL queries split for readability
+    //      almost always exceed this length even when the parts end in
+    //      `/`, `]`, or other path/punctuation characters.
     if (node.startPosition.row !== node.endPosition.row) {
       const parts = node.namedChildren
       let allButLastEndWithSpace = parts.length > 1
@@ -36,6 +41,8 @@ export const pythonImplicitStringConcatenationVisitor: CodeRuleVisitor = {
         }
       }
       if (allButLastEndWithSpace) return null
+      const totalLen = parts.reduce((sum, p) => sum + p.text.length, 0)
+      if (totalLen > 60) return null
     }
 
     return makeViolation(

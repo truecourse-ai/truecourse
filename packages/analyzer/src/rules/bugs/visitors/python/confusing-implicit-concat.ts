@@ -30,16 +30,17 @@ export const pythonConfusingImplicitConcatVisitor: CodeRuleVisitor = {
         }
         if (hasFormatString) continue
 
-        // Skip multi-line concat where every part except possibly the last
-        // ends with a whitespace character. That's the readability-driven
-        // "split a long sentence across lines" idiom, not a missing-comma
-        // bug. `["first" "second"]` (short, no trailing whitespace) still
-        // fires - it's far more likely to be a missing comma than an
-        // intentional concat.
+        // Skip multi-line concat that's intentional readability splitting:
+        //   1. Every part except possibly the last ends in whitespace
+        //      (sentence fragments).
+        //   2. OR the joined length is > 60 chars (long XPath / SQL / S3
+        //      key split for line width). `["first"\n"second"]` (short,
+        //      no trailing whitespace) still fires - it's far more
+        //      likely to be a missing comma.
         const isMultiLine = child.startPosition.row !== child.endPosition.row
         if (isMultiLine) {
           const parts = child.namedChildren
-          let allButLastEndWithSpace = true
+          let allButLastEndWithSpace = parts.length > 1
           for (let i = 0; i < parts.length - 1; i++) {
             const t = parts[i].text
             // Strip the trailing quote(s) and look at the last content char.
@@ -50,7 +51,9 @@ export const pythonConfusingImplicitConcatVisitor: CodeRuleVisitor = {
               break
             }
           }
-          if (allButLastEndWithSpace && parts.length > 1) continue
+          if (allButLastEndWithSpace) continue
+          const totalLen = parts.reduce((sum, p) => sum + p.text.length, 0)
+          if (totalLen > 60) continue
         }
 
         // This is implicit string concatenation inside a list/set/args/tuple
