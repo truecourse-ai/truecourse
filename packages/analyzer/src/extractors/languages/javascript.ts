@@ -17,13 +17,35 @@ import { getLanguageConfig } from '../../language-config.js'
 import { getParser } from '../../parser.js'
 import { createSourceLocation, extractDocComment, computeFunctionMetrics } from './common.js'
 
+const FUNCTION_NODE_TYPES = new Set([
+  'function_declaration', 'function', 'function_expression', 'arrow_function',
+  'generator_function_declaration', 'generator_function', 'method_definition',
+])
+
+/** Check if a node is nested inside another function (not top-level). */
+function isNestedInFunction(node: SyntaxNode): boolean {
+  let current = node.parent
+  while (current) {
+    if (FUNCTION_NODE_TYPES.has(current.type)) return true
+    current = current.parent
+  }
+  return false
+}
+
 /**
  * Extract function name from node.
  * For arrow functions / function expressions, check parent context:
  *  - variable_declarator: `const foo = () => {}` → "foo"
  *  - pair (object literal): `{ foo: () => {} }` → "foo"
  *  - assignment_expression: `obj.foo = () => {}` → "foo"
- *  - argument in a method call: `router.get('/', () => {})` → "get_handler"
+ *
+ * Nested arrows / function expressions inside other functions are
+ * implementation details (e.g. `arr.map(t => …)`, `setTimeout(() => …)`)
+ * and get the synthetic name `anonymous`. The previous behaviour
+ * synthesised `${method.text}_handler` from ANY method-call argument,
+ * which produced ~414 false `unused-export` / `dead-method` violations
+ * on real React codebases (every `.map()` callback was treated as a
+ * named, exported method).
  */
 function extractFunctionName(node: SyntaxNode): string {
   const nameNode = node.childForFieldName('name')
@@ -31,6 +53,9 @@ function extractFunctionName(node: SyntaxNode): string {
 
   const parent = node.parent
   if (!parent) return 'anonymous'
+
+  // Anything nested inside another function is an implementation detail.
+  if (isNestedInFunction(node)) return 'anonymous'
 
   if (parent.type === 'variable_declarator') {
     const varName = parent.childForFieldName('name')
@@ -50,33 +75,26 @@ function extractFunctionName(node: SyntaxNode): string {
     }
   }
 
-  if (parent.type === 'arguments') {
-    const callNode = parent.parent
-    if (callNode?.type === 'call_expression') {
-      const callee = callNode.childForFieldName('function')
-      if (callee?.type === 'member_expression') {
-        const method = callee.childForFieldName('property')
-        if (method?.text) return `${method.text}_handler`
-      }
-    }
-  }
-
   return 'anonymous'
 }
 
 /**
- * Check if function is exported
+ * Check if function is exported.
+ *
+ * Walks up through *declaration-wrapper* nodes (variable_declarator,
+ * lexical_declaration, variable_declaration) but STOPS at any function
+ * boundary. A nested arrow inside `export function App() { … }` is NOT
+ * itself exported - the outer function is. Without this stop, the
+ * `unused-export` rule fires on every callback inside an exported
+ * component.
  */
 function isExported(node: SyntaxNode): boolean {
   let current: SyntaxNode | null = node.parent
-
   while (current) {
-    if (current.type === 'export_statement') {
-      return true
-    }
+    if (current.type === 'export_statement') return true
+    if (FUNCTION_NODE_TYPES.has(current.type)) return false
     current = current.parent
   }
-
   return false
 }
 
