@@ -23,4 +23,18 @@ const safeRun = (work) => {
   }
 };
 
-module.exports = { config, data, safeParse, safeRun };
+// Common browser globals - the no-undef rule must recognise these as
+// runtime-defined and not flag them as ReferenceErrors.
+const buildRequest = (url, body) => {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  return new Request(url, { method: 'POST', headers, body });
+};
+
+const fireReady = (detail) => {
+  const event = new CustomEvent('ready', { detail });
+  document.dispatchEvent(event);
+};
+
+const newAbortController = () => new AbortController();
+
+module.exports = { config, data, safeParse, safeRun, buildRequest, fireReady, newAbortController };
