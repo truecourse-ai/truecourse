@@ -406,13 +406,14 @@ export default function RepoGraphPage() {
   // we deliberately don't pass it to useViolations so the violations list is never
   // filtered as a side effect of clicking a graph node.
   // Mirror the per-tab refetch pattern used by useFlows / useCodeViolationSummary /
-  // useGraph: the hook re-fetches whenever `enabled` flips true again, so entering
-  // a tab that consumes violations (Home or any tab where a Database detail is open)
-  // refreshes the list. Other tabs keep the last fetched value for the sidebar badge.
-  const violationsEnabled =
-    leftTab === 'home' || leftTab === 'graphs' || activeDbId !== null;
+  // useGraph: the hook re-fetches whenever `enabled` flips true again. The
+  // violations list is only rendered inside HomePanel, so gating strictly on
+  // 'home' guarantees a refetch on every entry into the Home tab — including
+  // from Graphs or Databases, which both kept enabled=true under the broader
+  // gate and silently skipped the refresh. Other consumers (SchemaPanel ER
+  // annotations, sidebar badge count) keep the last fetched value.
   const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } =
-    useViolations(repoId, undefined, selectedAnalysisId ?? undefined, { enabled: violationsEnabled });
+    useViolations(repoId, undefined, selectedAnalysisId ?? undefined, { enabled: leftTab === 'home' });
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId, onEvent);
 
   // In diff mode with no diff result yet, show no violations
