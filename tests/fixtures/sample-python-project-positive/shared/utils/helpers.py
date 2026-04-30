@@ -4,6 +4,7 @@ import logging
 import threading
 from pathlib import Path
 from typing import Callable, Literal, Optional, Union
+from urllib.request import urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,18 @@ def iterate_attrs(args: object) -> int:
     for pdf in args.pdf:
         total += len(pdf.name)
     return total
+
+
+def fetch_webhook_status() -> int:
+    """Fetch a status from a webhook URL configured via environment variable.
+
+    The URL is loaded from `os.getenv` - it's not user input from a
+    request. The suspicious-url-open detector should trace the value
+    back to its env-var source and skip rather than flag SSRF.
+    """
+    webhook_url = os.getenv("WEBHOOK_STATUS_URL", "https://status.internal/healthz")
+    with urlopen(webhook_url) as resp:
+        return resp.status
 
 
 def fetch_all(urls: list[str], fetcher: object) -> list[str]:

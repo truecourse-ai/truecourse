@@ -90,6 +90,24 @@ const summarize = (entries) => {
 };
 module.exports.summarize = summarize;
 
+// Pre-escaped innerHTML assignments. The disabled-auto-escaping detector
+// must recognise calls to local helpers like `esc()` / `escapeHtml()` /
+// `sanitize()` / `DOMPurify.sanitize()` as escaping, otherwise it fires
+// on every dynamic-but-escaped fragment - the same as if the writer had
+// not escaped at all.
+const esc = (s) => String(s).replace(/[&<>"']/gu, (c) => `&#${c.charCodeAt(0)};`);
+
+const renderUserName = (host, raw) => {
+  host.innerHTML = `<span class="name">${esc(raw)}</span>`;
+};
+
+const renderRowEscaped = (host, label) => {
+  host.innerHTML = `<tr><td>${esc(label)}</td></tr>`;
+};
+
+module.exports.renderUserName = renderUserName;
+module.exports.renderRowEscaped = renderRowEscaped;
+
 // Helper functions declared inside an IIFE and used by sibling functions
 // in the same IIFE body. The no-undef rule must hoist `function`
 // declarations into their enclosing function scope so callers can resolve
