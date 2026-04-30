@@ -30,6 +30,29 @@ export const pythonConfusingImplicitConcatVisitor: CodeRuleVisitor = {
         }
         if (hasFormatString) continue
 
+        // Skip multi-line concat where every part except possibly the last
+        // ends with a whitespace character. That's the readability-driven
+        // "split a long sentence across lines" idiom, not a missing-comma
+        // bug. `["first" "second"]` (short, no trailing whitespace) still
+        // fires - it's far more likely to be a missing comma than an
+        // intentional concat.
+        const isMultiLine = child.startPosition.row !== child.endPosition.row
+        if (isMultiLine) {
+          const parts = child.namedChildren
+          let allButLastEndWithSpace = true
+          for (let i = 0; i < parts.length - 1; i++) {
+            const t = parts[i].text
+            // Strip the trailing quote(s) and look at the last content char.
+            const stripped = t.replace(/['"]+$/, '')
+            const lastChar = stripped.charAt(stripped.length - 1)
+            if (lastChar !== ' ' && lastChar !== '\\' && lastChar !== '\t') {
+              allButLastEndWithSpace = false
+              break
+            }
+          }
+          if (allButLastEndWithSpace && parts.length > 1) continue
+        }
+
         // This is implicit string concatenation inside a list/set/args/tuple
         return makeViolation(
           this.ruleKey, child, filePath, 'medium',

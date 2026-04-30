@@ -194,6 +194,22 @@ def join_keys(prefix: str, *keys: str) -> str:
     return prefix + ":" + "/".join(keys)
 
 
+SQL_PATTERNS = [
+    # Multi-line implicit string concatenation inside a list - the canonical
+    # Python idiom for splitting a long string across lines. The
+    # implicit-string-concatenation detector must not flag this; it should
+    # only fire on same-line adjacency like `"foo" "bar"` which is more
+    # likely a missing-comma bug.
+    "SELECT id, name, email "
+    "FROM users "
+    "WHERE active = 1 AND deleted_at IS NULL "
+    "ORDER BY created_at DESC",
+    "SELECT id, total "
+    "FROM orders "
+    "WHERE status = 'pending'",
+]
+
+
 def fetch_all(urls: list[str], fetcher: object) -> list[str]:
     """Fetch each URL, skipping ones that time out.
 

@@ -18,6 +18,26 @@ export const pythonImplicitStringConcatenationVisitor: CodeRuleVisitor = {
     const grandparent = parent.parent
     if (!isCollection(parent) && !isCollection(grandparent ?? { type: '' } as SyntaxNode)) return null
 
+    // Multi-line concat where every part except possibly the last ends with
+    // whitespace is the canonical Python idiom for splitting one logical
+    // string across lines for readability. Skip those. Multi-line without
+    // trailing whitespace (e.g. `"moderator"\n"viewer"`) is far more likely
+    // to be a missing comma between two list elements - keep firing on it.
+    if (node.startPosition.row !== node.endPosition.row) {
+      const parts = node.namedChildren
+      let allButLastEndWithSpace = parts.length > 1
+      for (let i = 0; i < parts.length - 1; i++) {
+        const t = parts[i].text
+        const inner = t.replace(/['"]+$/, '')
+        const lastChar = inner.charAt(inner.length - 1)
+        if (lastChar !== ' ' && lastChar !== '\\' && lastChar !== '\t') {
+          allButLastEndWithSpace = false
+          break
+        }
+      }
+      if (allButLastEndWithSpace) return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Implicit string concatenation in collection',
