@@ -4,9 +4,9 @@ import { join, relative, resolve } from 'path'
 import ignore from 'ignore'
 import { detectLanguage, getAllIgnorePatterns, getAllTestPatterns } from './language-config.js'
 
-// Minified/bundled JS or TS files have no analytical value (they're build
-// artifacts of source already in the repo, or vendored libraries) and they
-// produce huge amounts of FP noise across many rules. Three signals layered
+// Minified/bundled JS or TS files are build artifacts (or vendored libraries)
+// of source already present in the repo, so analyzing them duplicates work and
+// reports noise on transformed code that no one will fix. Three signals layered
 // from cheap to expensive:
 //
 // 1. Build-artifact filename suffix — `*.bundle.js`, `*.production.js`,
