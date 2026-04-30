@@ -20,6 +20,67 @@ function isFactoryReturn(node: SyntaxNode): boolean {
   return false
 }
 
+// Module-level cache pattern: `_DB_CONN = sqlite3.connect(...)` at the top
+// level of a module, with an UPPER_CASE-constant or leading-underscore
+// name. This is the standard Lambda warm-start optimisation - the
+// connection's lifetime is the container's lifetime, not the function's.
+// The naming convention requirement avoids matching ad-hoc module-level
+// `conn = ...` snippets that should still be flagged.
+function isModuleLevelCache(node: SyntaxNode): boolean {
+  // Walk up to the assignment.
+  let assign: SyntaxNode | null = node.parent
+  while (assign) {
+    if (assign.type === 'assignment') break
+    if (assign.type === 'expression_statement') return false
+    if (assign.type === 'function_definition') return false
+    if (assign.type === 'class_definition') return false
+    assign = assign.parent
+  }
+  if (!assign) return false
+  // Module-level assignments are wrapped in an expression_statement
+  // whose parent is `module`.
+  const stmt = assign.parent
+  if (!(stmt?.type === 'expression_statement' && stmt.parent?.type === 'module')) return false
+  // Require an intentional-cache naming convention.
+  const lhs = assign.childForFieldName('left')
+  const nameNode = lhs?.type === 'identifier' ? lhs : null
+  if (!nameNode) return false
+  const name = nameNode.text
+  return /^[A-Z_][A-Z0-9_]*$/.test(name) || name.startsWith('_')
+}
+
+// Object-attribute pattern: `self.conn = sqlite3.connect(...)` inside a
+// leading-underscore-named class. Private classes (`_CleanupScript`,
+// `_Worker`) are by convention scoped helpers with controlled lifetimes;
+// long-lived public services (`JobProcessor`, `UserRepository`) leak
+// connections in the same shape and stay flagged. The Python-private
+// convention is the same disambiguator we use for `missing-transaction`.
+function isInstanceAttributeAssignmentInPrivateClass(node: SyntaxNode): boolean {
+  let assign: SyntaxNode | null = node.parent
+  while (assign) {
+    if (assign.type === 'assignment') break
+    if (assign.type === 'expression_statement') return false
+    if (assign.type === 'function_definition') return false
+    assign = assign.parent
+  }
+  if (!assign) return false
+  const lhs = assign.childForFieldName('left')
+  if (lhs?.type !== 'attribute') return false
+  const obj = lhs.childForFieldName('object')
+  if (!(obj?.type === 'identifier' && (obj.text === 'self' || obj.text === 'cls'))) return false
+
+  // Walk up to the enclosing class_definition and check the name.
+  let cls: SyntaxNode | null = assign.parent
+  while (cls) {
+    if (cls.type === 'class_definition') {
+      const name = cls.childForFieldName('name')
+      return name?.type === 'identifier' && name.text.startsWith('_')
+    }
+    cls = cls.parent
+  }
+  return false
+}
+
 // Try/finally release pattern:
 //
 //   conn = psycopg2.connect(...)
@@ -125,6 +186,13 @@ export const pythonConnectionNotReleasedVisitor: CodeRuleVisitor = {
 
     // `conn = X.connect(...)` followed by `try: ... finally: conn.close()`
     if (isClosedInFinally(node)) return null
+
+    // Lambda warm-start cache: module-level `_DB_CONN = X.connect(...)`.
+    if (isModuleLevelCache(node)) return null
+
+    // Long-lived object attribute in a leading-underscore-named class:
+    // `self.conn = X.connect(...)` inside `class _CleanupScript`.
+    if (isInstanceAttributeAssignmentInPrivateClass(node)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'high',

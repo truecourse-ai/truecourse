@@ -86,6 +86,28 @@ def count_active_users() -> int:
         conn.close()
 
 
+# Lambda warm-start cache - module-level connection reused across invocations
+# of the same container. The connection is owned by the runtime, not by any
+# single function, so the rule shouldn't fire on the assignment.
+_DB_CONN: sqlite3.Connection = sqlite3.connect(DATABASE_URL)
+
+
+class _CleanupScript:
+    """Long-lived cleanup-script object that holds its connection for the
+    entire run via `self.conn`. The rule shouldn't fire on attribute
+    assignment patterns - the connection's lifetime is the object's
+    lifetime, which is well-scoped.
+    """
+
+    def __init__(self, db_path: str) -> None:
+        self.conn = sqlite3.connect(db_path)
+
+    def cleanup(self) -> None:
+        """Run the cleanup query against the held connection."""
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM stale_rows WHERE archived = 1")
+
+
 def _replace_attachments(cur: object, attachment_id: int, payload: dict) -> None:
     """Private helper that takes a caller-supplied cursor.
 
