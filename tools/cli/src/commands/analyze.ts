@@ -270,7 +270,19 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   }, stepDefs);
 
   const abortController = new AbortController();
-  const onSigint = () => abortController.abort();
+  // Two-stage SIGINT: first Ctrl+C requests a graceful abort and lets the
+  // pipeline finish writing logs / restoring stashed state. Second Ctrl+C
+  // force-exits immediately for users who don't want to wait.
+  let sigintRequested = false;
+  const onSigint = () => {
+    if (sigintRequested) {
+      process.stderr.write("\nForce quit.\n");
+      process.exit(130);
+    }
+    sigintRequested = true;
+    abortController.abort();
+    process.stderr.write("\nCancelling… (press Ctrl+C again to force quit)\n");
+  };
   process.on("SIGINT", onSigint);
 
   try {
@@ -353,7 +365,16 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   }, stepDefs);
 
   const abortController = new AbortController();
-  const onSigint = () => abortController.abort();
+  let sigintRequested = false;
+  const onSigint = () => {
+    if (sigintRequested) {
+      process.stderr.write("\nForce quit.\n");
+      process.exit(130);
+    }
+    sigintRequested = true;
+    abortController.abort();
+    process.stderr.write("\nCancelling… (press Ctrl+C again to force quit)\n");
+  };
   process.on("SIGINT", onSigint);
 
   try {

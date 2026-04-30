@@ -345,12 +345,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     if (domain === 'architecture') {
       tracker?.detail(stepKey, 'Service checks...');
       await new Promise((r) => setImmediate(r));
+      throwIfAborted(signal);
       serviceViolationResults.push(...runDeterministicServiceChecks(result, domainRules));
       tracker?.detail(stepKey, 'Module checks...');
       await new Promise((r) => setImmediate(r));
+      throwIfAborted(signal);
       moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
       tracker?.detail(stepKey, 'Method checks...');
       await new Promise((r) => setImmediate(r));
+      throwIfAborted(signal);
       methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
       tracker?.detail(stepKey, 'Deterministic checks done');
     }
@@ -402,6 +405,12 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       }
       processed++;
 
+      // Cheap abort check on every iteration — `signal.aborted` is just a
+      // boolean field flipped by the SIGINT handler, so this is safe to
+      // run per-file. Without it, Ctrl+C only takes effect after the
+      // entire scan finishes.
+      if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+
       const now = Date.now();
       const isLast = processed === totalFiles;
       if (isLast || now - lastDetailMs >= DETAIL_UPDATE_MS) {
@@ -412,6 +421,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       if (isLast || now - lastYieldMs >= SPINNER_YIELD_MS) {
         await new Promise((r) => setImmediate(r));
         lastYieldMs = Date.now();
+        // Re-check after yielding — the SIGINT handler runs during the
+        // event-loop tick we just gave it, so the flag may have flipped.
+        if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
       }
     }
   }
