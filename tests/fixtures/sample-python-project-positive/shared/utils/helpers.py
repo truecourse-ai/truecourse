@@ -194,6 +194,19 @@ def join_keys(prefix: str, *keys: str) -> str:
     return prefix + ":" + "/".join(keys)
 
 
+CHART_LABELS = [
+    # Typographic punctuation in human-readable strings - em-dashes,
+    # multiplication signs, smart quotes - is intentional copy for
+    # matplotlib labels / log messages / docstrings, not a homoglyph
+    # attack. The ambiguous-unicode-character rule must restrict to
+    # actual identifier-confusable letters (Cyrillic/Greek lookalikes).
+    "Open vs. issued AR — narrow band",
+    "Aging × vendor breakdown",
+    "Rate (“good” versus “bad”)",
+    "Spread: 3.5 – 4.5%",
+]
+
+
 SQL_PATTERNS = [
     # Multi-line implicit string concatenation inside a list - the canonical
     # Python idiom for splitting a long string across lines. The
@@ -208,6 +221,19 @@ SQL_PATTERNS = [
     "FROM orders "
     "WHERE status = 'pending'",
 ]
+
+
+def iterate_attrs(args: object) -> int:
+    """Iterate over an attribute that happens to be named the same as the
+    loop variable (`args.pdf`). Python evaluates the iterable expression
+    ONCE before binding the loop variable, so the loop var doesn't shadow
+    or override `args.pdf`. The detector should only fire on true name
+    collision (`for x in x`), not on attribute access.
+    """
+    total = 0
+    for pdf in args.pdf:
+        total += len(pdf.name)
+    return total
 
 
 def fetch_all(urls: list[str], fetcher: object) -> list[str]:

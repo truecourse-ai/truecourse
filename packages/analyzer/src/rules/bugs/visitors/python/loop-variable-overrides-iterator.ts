@@ -15,17 +15,33 @@ export const pythonLoopVariableOverridesIteratorVisitor: CodeRuleVisitor = {
     if (loopVar.type !== 'identifier') return null
     const varName = loopVar.text
 
-    // Check if the iterator expression contains the same identifier
-    function containsIdentifier(n: import('web-tree-sitter').Node, name: string): boolean {
-      if (n.type === 'identifier' && n.text === name) return true
+    // Fire when the iterable expression contains a *free* use of the loop
+    // variable's name — i.e. one that would resolve to the outer-scope
+    // binding the loop variable is about to shadow. `for fields in
+    // range(len(fields))` is the canonical bug. The trailing `x` in `obj.x`
+    // is an attribute name (not a variable reference), so `for x in obj.x`
+    // is fine.
+    function hasFreeUse(n: import('web-tree-sitter').Node, name: string): boolean {
+      if (n.type === 'identifier' && n.text === name) {
+        const parent = n.parent
+        // Skip when this identifier is the *attribute* part of `obj.attr`.
+        if (parent?.type === 'attribute' && parent.childForFieldName('attribute')?.id === n.id) {
+          return false
+        }
+        // Skip when this identifier is a keyword-argument name (`f(x=1)`).
+        if (parent?.type === 'keyword_argument' && parent.childForFieldName('name')?.id === n.id) {
+          return false
+        }
+        return true
+      }
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
-        if (child && containsIdentifier(child, name)) return true
+        if (child && hasFreeUse(child, name)) return true
       }
       return false
     }
 
-    if (containsIdentifier(iterExpr, varName)) {
+    if (hasFreeUse(iterExpr, varName)) {
       return makeViolation(
         this.ruleKey, loopVar, filePath, 'high',
         'Loop variable overrides iterator',
