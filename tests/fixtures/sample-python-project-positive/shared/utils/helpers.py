@@ -194,6 +194,24 @@ def join_keys(prefix: str, *keys: str) -> str:
     return prefix + ":" + "/".join(keys)
 
 
+def fetch_all(urls: list[str], fetcher: object) -> list[str]:
+    """Fetch each URL, skipping ones that time out.
+
+    `except TimeoutError: continue` is the canonical Python idiom for
+    "on this specific recoverable error, drop the item and move on."
+    The try-except-continue detector should only fire on bare except /
+    `Exception` / `BaseException` catches that swallow all errors silently;
+    a typed exception is an explicit, narrow suppression and is fine.
+    """
+    results: list[str] = []
+    for url in urls:
+        try:
+            results.append(fetcher.fetch(url))
+        except TimeoutError:
+            continue
+    return results
+
+
 def call_variadic_helpers() -> None:
     """Call helpers with extra positional and keyword arguments."""
     emit_event("INFO", "boot", request_id="abc-123", trace_id="xyz")

@@ -8,11 +8,16 @@ import { Request, Response, NextFunction } from 'express';
 const app = { get: (...args: any[]) => {}, post: (...args: any[]) => {} };
 
 // VIOLATION: reliability/deterministic/catch-without-error-type
+let retryAttempts = 0;
 export function catchUntyped() {
   try {
     throw new Error('test');
   } catch (e) {
     console.error(e);
+    retryAttempts += 1;
+    if (retryAttempts < 3) {
+      console.warn('retrying');
+    }
   }
 }
 

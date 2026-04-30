@@ -20,6 +20,24 @@ describe('reliability/deterministic/catch-without-error-type', () => {
   const ruleKey = 'reliability/deterministic/catch-without-error-type';
 
   it('detects catch without type checking', () => {
+    // Multi-statement handler that branches and recovers without knowing
+    // which error type it's handling — the actual anti-pattern. A single
+    // log/return is intentionally not flagged (see test below).
+    const violations = check(`
+try {
+  doSomething();
+} catch (e) {
+  console.error(e);
+  retryAttempts += 1;
+  if (retryAttempts < 3) {
+    scheduleRetry();
+  }
+}
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  it('does not flag short single-statement handlers (log-only / return-default)', () => {
     const violations = check(`
 try {
   doSomething();
@@ -27,7 +45,7 @@ try {
   console.error(e);
 }
 `);
-    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 
   it('does not flag catch with instanceof check', () => {

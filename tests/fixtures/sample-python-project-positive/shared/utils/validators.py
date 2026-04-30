@@ -16,6 +16,14 @@ DATE_RE = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})")
 # Named backreference: open and close quote must match.
 BALANCED_QUOTE_RE = re.compile(r"(?P<q>['\"])[\w\s]+(?P=q)")
 
+# DOTALL flag (`(?s)`) makes `.` span newlines. The non-greedy `.*?` is the
+# canonical way to match across multiple lines without consuming the
+# terminator - `[^x]*` doesn't work because there's no single stop char and
+# DOTALL deliberately allows newlines through. The `regex-char-class-preferred`
+# detector must skip `.*?` / `.+?` when the pattern is in DOTALL mode.
+COMMENT_BLOCK_RE = re.compile(r"(?s)/\*.*?\*/")
+SCRIPT_TAG_RE = re.compile(r"(?is)<script\b[^>]*>.*?</script>")
+
 
 def validate_email(email: str) -> bool:
     """Validate an email address format using a simple regex."""
