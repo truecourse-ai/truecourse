@@ -25,3 +25,18 @@ const score = (counts) => {
   return total;
 };
 module.exports.score = score;
+
+// Arrow callback inside an exported function. The inner `(p, i) => …`
+// is NOT itself an export - it's a callback to `.map()` inside the
+// enclosing function body. The export-walker must stop at function
+// boundaries; otherwise the synthesized `map_handler` name leaks into
+// `unused-export` and `dead-method` and produces hundreds of FPs on
+// any React component that maps over an array.
+const PAGES = ['home', 'about', 'contact'];
+export const App = () => PAGES.map((p, i) => ({ name: p, idx: i }));
+
+// Plain JS doesn't have `noUncheckedIndexedAccess` semantics to opt
+// into - every index access is `T | undefined` regardless. The
+// unchecked-array-access rule should only run on TS / TSX where the
+// flag is meaningful; on JS it's pure noise.
+export const indexAt = (arr, i) => arr[i];
