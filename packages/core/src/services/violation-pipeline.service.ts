@@ -376,6 +376,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     const totalFiles = filesToScan.length;
     let processed = 0;
+    // Spinner ticks at 80ms; yield to the event loop whenever we've gone
+    // ~50ms without yielding so the spinner stays smooth even when per-
+    // file work is heavy. Detail updates are throttled separately to
+    // avoid spamming the renderer (each `tracker?.detail` triggers a
+    // full step-list re-render).
+    const SPINNER_YIELD_MS = 50;
+    const DETAIL_UPDATE_MS = 200;
+    let lastYieldMs = Date.now();
+    let lastDetailMs = lastYieldMs;
     for (const { filePath, resolve } of filesToScan) {
       try {
         const lang = detectLanguage(filePath);
@@ -392,14 +401,17 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         // Skip files that fail to parse
       }
       processed++;
-      // Yield every ~10 files so the CLI's spinner setInterval (80ms) can
-      // fire and per-domain progress detail updates render. Without this
-      // the loop blocks the event loop for the full scan and the UI looks
-      // frozen.
-      if (processed % 10 === 0 || processed === totalFiles) {
+
+      const now = Date.now();
+      const isLast = processed === totalFiles;
+      if (isLast || now - lastDetailMs >= DETAIL_UPDATE_MS) {
         const detail = `Checking ${processed}/${totalFiles} files...`;
         for (const domain of activeCodeDomains) tracker?.detail(domain, detail);
+        lastDetailMs = now;
+      }
+      if (isLast || now - lastYieldMs >= SPINNER_YIELD_MS) {
         await new Promise((r) => setImmediate(r));
+        lastYieldMs = Date.now();
       }
     }
   }
