@@ -195,6 +195,27 @@ function isPropertyAccess(node: SyntaxNode): boolean {
   }
   // Python keyword argument keys (e.g., datefmt=...) are not variable references
   if (parent.type === 'keyword_argument' && parent.childForFieldName('name')?.id === node.id) return true
+  // JSX prop name: `<div className="x" />` — the `className` identifier is
+  // a prop name on the element, not a JS variable reference.
+  if (parent.type === 'jsx_attribute' && parent.namedChild(0)?.id === node.id) return true
+  // Lowercase / hyphenated JSX element name: `<div>`, `<my-element>`. By
+  // JSX semantics these are intrinsic HTML / SVG / custom-element tags,
+  // not JS bindings. Capitalised names (`<MyComponent>`) ARE references —
+  // those still resolve normally so no-undef can validate them.
+  if (
+    parent.type === 'jsx_opening_element' ||
+    parent.type === 'jsx_closing_element' ||
+    parent.type === 'jsx_self_closing_element'
+  ) {
+    const tagName = parent.childForFieldName('name')
+    if (tagName?.id === node.id) {
+      const text = node.text
+      if (text.length > 0) {
+        const first = text[0]!
+        if (first === first.toLowerCase() || text.includes('-')) return true
+      }
+    }
+  }
   return false
 }
 
@@ -981,25 +1002,41 @@ export function buildScopeTree(
     // Walk up to find the enclosing variable_declarator and create the binding
     // directly here.
     if (isJs && node.type === 'shorthand_property_identifier_pattern') {
-      // Find the enclosing variable_declarator (could be nested inside object_pattern,
-      // pair_pattern, array_pattern, etc.)
+      // Find the enclosing variable_declarator OR formal_parameters /
+      // function boundary. The shorthand pattern can land in two places:
+      //   - `const { name } = obj` → declarator-based binding
+      //   - `({ name }) => …` → function-parameter binding
       let ancestor: SyntaxNode | null = node.parent
       let declarator: SyntaxNode | null = null
+      let isParam = false
+      let funcNode: SyntaxNode | null = null
       while (ancestor) {
         if (ancestor.type === 'variable_declarator') {
           declarator = ancestor
           break
         }
-        // Stop walking if we hit a function boundary — destructured params handled separately
         if (
           ancestor.type === 'formal_parameters' ||
           ancestor.type === 'function_declaration' ||
+          ancestor.type === 'function_expression' ||
           ancestor.type === 'arrow_function' ||
-          ancestor.type === 'method_definition'
+          ancestor.type === 'method_definition' ||
+          ancestor.type === 'generator_function_declaration' ||
+          ancestor.type === 'generator_function'
         ) {
+          isParam = true
+          // Find the actual function node so we can target its body scope.
+          funcNode = ancestor.type === 'formal_parameters' ? ancestor.parent : ancestor
           break
         }
         ancestor = ancestor.parent
+      }
+      if (isParam && funcNode) {
+        const funcScope = nodeToScope.get(funcNode.id)
+        const name = node.text
+        if (funcScope && !funcScope.variables.has(name)) {
+          createVariable(name, 'parameter', node, funcScope, false)
+        }
       }
       if (declarator) {
         const grandparent = declarator.parent
