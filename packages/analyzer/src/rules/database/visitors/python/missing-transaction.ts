@@ -27,7 +27,10 @@ function isOrmWriteCall(n: SyntaxNode): boolean {
     const firstArg = args?.namedChildren[0]
     if (firstArg?.type === 'string') {
       const sql = firstArg.text.toLowerCase()
-      if (/insert|update|delete|alter|create|drop/.test(sql)) return true
+      // Word-bounded so `update` doesn't match inside identifiers like
+      // `updated_at` / `created_at` / `deleted_at` and turn pure-SELECT
+      // queries into false-positive writes.
+      if (/\b(insert|update|delete|alter|create|drop)\b/.test(sql)) return true
     }
     return false
   }

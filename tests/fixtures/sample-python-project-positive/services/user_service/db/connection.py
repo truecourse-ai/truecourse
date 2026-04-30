@@ -84,3 +84,20 @@ def count_active_users() -> int:
         return int(row[0]) if row else 0
     finally:
         conn.close()
+
+
+def watermark_summary(cur: object, lower_bound: int = 0) -> tuple[int, int]:
+    """Read-only summary over an events table whose timestamp columns are
+    named `updated_at` and `created_at`.
+
+    Both branches issue pure SELECT queries. The write-detection regex
+    `/insert|update|delete|.../` must be word-bounded - otherwise
+    `update` matches inside `updated_at` and the if/else-of-SELECTs
+    pattern fires a false `Multiple writes without...` violation.
+    """
+    if lower_bound == 0:
+        cur.execute("SELECT COUNT(*), MAX(updated_at) FROM events WHERE updated_at <= %s", (0,))
+    else:
+        cur.execute("SELECT COUNT(*), MAX(updated_at) FROM events WHERE updated_at <= %s AND created_at >= %s", (0, lower_bound))
+    row = cur.fetchone() or (0, 0)
+    return int(row[0]), int(row[1] or 0)
