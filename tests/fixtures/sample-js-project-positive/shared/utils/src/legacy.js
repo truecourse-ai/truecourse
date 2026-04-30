@@ -55,6 +55,41 @@ module.exports = {
   state, recordSample,
 };
 
+// Client-side state managed via a JS `Set`. `state.expandedVendors.add(...)`
+// is a Set membership update, not a database write - even though the
+// vendor name comes from a `data-vendor` HTML attribute (external input
+// in a request-handler sense). The unvalidated-external-data detector
+// must not flag `Set.add()` style calls just because `add` is in the
+// ambiguous-ORM-method list.
+const expandedVendors = new Set();
+const onClick = (event) => {
+  const vendor = String(event.target.getAttribute('data-vendor') || '');
+  if (!vendor) return;
+  if (expandedVendors.has(vendor)) {
+    expandedVendors.delete(vendor);
+  } else {
+    expandedVendors.add(vendor);
+  }
+};
+module.exports.onClick = onClick;
+
+// Destructured arrow parameters and for...of variables - the no-undef
+// rule's scope tracker must recognise both as in-scope declarations,
+// otherwise it fires ReferenceError-style FPs on perfectly normal JS.
+const summarize = (entries) => {
+  let total = 0;
+  entries.forEach(([key, value]) => {
+    total += String(key).length + Number(value);
+  });
+  const separators = [',', ';', '|'];
+  let lastSep = '';
+  for (const sep of separators) {
+    lastSep = sep;
+  }
+  return { total, lastSep };
+};
+module.exports.summarize = summarize;
+
 // Helper functions declared inside an IIFE and used by sibling functions
 // in the same IIFE body. The no-undef rule must hoist `function`
 // declarations into their enclosing function scope so callers can resolve

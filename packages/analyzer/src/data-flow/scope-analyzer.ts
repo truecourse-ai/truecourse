@@ -237,6 +237,8 @@ function isJsDeclarationPosition(node: SyntaxNode): boolean {
   }
   // catch parameter
   if (parent.type === 'catch_clause') return true
+  // for...of / for...in loop variable
+  if (parent.type === 'for_in_statement' && parent.childForFieldName('left')?.id === node.id) return true
 
   return false
 }
@@ -498,6 +500,43 @@ export function buildScopeTree(
         }
         return
       }
+    }
+
+    // Identifier as a direct child of array_pattern / object_pattern in
+    // formal parameters: e.g. `([key, value]) => …` or `({ a, b }) => …`
+    // (the shorthand `{ a }` form is handled separately above; this is the
+    // explicit `{ a: a }` / `[a, b]` shape). Without this, destructured
+    // arrow / function params look undeclared to no-undef and friends.
+    if (parent.type === 'array_pattern' || parent.type === 'object_pattern') {
+      if (isInFormalParameters(node)) {
+        const funcNode = findFunctionAncestor(node)
+        if (funcNode) {
+          const funcScope = nodeToScope.get(funcNode.id)
+          if (funcScope && !funcScope.variables.has(node.text)) {
+            createVariable(node.text, 'parameter', node, funcScope, false)
+          }
+        }
+        return
+      }
+    }
+
+    // for...of / for...in declaration: tree-sitter JS lifts the loop
+    // variable to a direct identifier child of for_in_statement (with
+    // `kind` field = "const" | "let" | "var") rather than wrapping it
+    // in a variable_declarator. Without this branch, `for (const sep
+    // of items) …` looks undeclared to no-undef.
+    if (parent.type === 'for_in_statement' && parent.childForFieldName('left')?.id === node.id) {
+      const kindText = parent.childForFieldName('kind')?.text
+      const kind: DeclarationKind =
+        kindText === 'var' ? 'var' :
+        kindText === 'const' ? 'const' :
+        kindText === 'let' ? 'let' :
+        'for-variable'
+      const targetScope = kind === 'var' ? findFunctionScope(scope) : scope
+      if (!targetScope.variables.has(node.text)) {
+        createVariable(node.text, kind, node, targetScope, false)
+      }
+      return
     }
 
     // Shorthand property identifier pattern

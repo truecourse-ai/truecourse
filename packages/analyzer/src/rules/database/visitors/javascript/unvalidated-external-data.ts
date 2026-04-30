@@ -4,6 +4,33 @@ import { makeViolation } from '../../../types.js'
 import { getMethodName, ORM_WRITE_METHODS, SQL_WRITE_METHODS } from './_helpers.js'
 import { findUserInputAccess } from '../../../_shared/javascript-helpers.js'
 
+// Method names heavily overloaded by built-in JS collections - `Set.add`,
+// `Map.delete`, `Array.indexOf`-adjacent. ORM frameworks happen to use
+// the same words (`session.add(model)`), but firing on every `.add()` /
+// `.delete()` produces ~100% FPs on UI code. Require an ORM-shaped
+// receiver for these specific methods. `create` / `update` / `save` /
+// `upsert` / `destroy` stay unrestricted because they're rarely used as
+// JS collection method names.
+const AMBIGUOUS_ORM_METHODS = new Set(['add', 'delete'])
+const ORM_RECEIVER_NAMES = new Set([
+  'session', 'db', 'conn', 'connection', 'cursor', 'engine', 'database',
+  'manager', 'repo', 'repository', 'orm', 'em', 'tx', 'trx', 'knex',
+  'prisma', 'sequelize', 'mongoose',
+])
+
+function hasOrmLikeReceiver(node: import('web-tree-sitter').Node): boolean {
+  const fn = node.childForFieldName('function')
+  if (fn?.type !== 'member_expression') return false
+  let receiver: import('web-tree-sitter').Node | null = fn.childForFieldName('object')
+  // Walk to the root identifier.
+  while (receiver?.type === 'member_expression') {
+    receiver = receiver.childForFieldName('object')
+  }
+  if (receiver?.type !== 'identifier') return false
+  const name = receiver.text.toLowerCase()
+  return ORM_RECEIVER_NAMES.has(name)
+}
+
 export const unvalidatedExternalDataVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/unvalidated-external-data',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -12,6 +39,12 @@ export const unvalidatedExternalDataVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, dataFlow?: DataFlowContext) {
     const methodName = getMethodName(node)
     if (!ORM_WRITE_METHODS.has(methodName) && !SQL_WRITE_METHODS.has(methodName)) return null
+
+    // Ambiguous method names (`add`, `update`, etc.) overlap with Set /
+    // Map / array semantics. Require the receiver to look ORM-shaped to
+    // avoid firing on `state.expandedVendors.add(vendor)` and similar
+    // client-side state updates.
+    if (AMBIGUOUS_ORM_METHODS.has(methodName) && !hasOrmLikeReceiver(node)) return null
 
     const args = node.childForFieldName('arguments')
     if (!args) return null
