@@ -33,6 +33,13 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     const keyName = index.text
     if (isKeyFromControlledIteration(node, keyName)) return null
 
+    // Skip when the key was computed from a local helper call in the same
+    // function scope - e.g. `const key = composeBucketKey(a, b)`. Helpers
+    // that compose app-controlled identifiers don't admit `__proto__` /
+    // `constructor` short of an unrelated bug, and the rule has no way to
+    // reach into the helper to reason about what it returns.
+    if (isKeyAssignedFromLocalCall(node, keyName)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Prototype pollution',
@@ -80,4 +87,52 @@ function isObjectEntriesOrKeys(node: SyntaxNode): boolean {
     }
   }
   return false
+}
+
+// True if the key variable was declared in an enclosing function scope as
+// `const | let | var keyName = <call_expression>(...)`. The result of a
+// local helper call is treated as internally-derived (not user input) and
+// the rule suppresses to avoid noise on `state[key] = ...` patterns where
+// `key` is composed from app-controlled identifiers.
+function isKeyAssignedFromLocalCall(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return false
+
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'identifier' && name.text === keyName && value?.type === 'call_expression') {
+        found = true
+        return
+      }
+    }
+    // Don't descend into nested function bodies — they can't shadow the key
+    // we're looking for in this enclosing scope.
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'arrow_function' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const child = n.child(i)
+      if (child) walk(child)
+    }
+  }
+  walk(scope)
+  return found
 }

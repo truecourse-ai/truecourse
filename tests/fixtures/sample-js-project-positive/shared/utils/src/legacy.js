@@ -37,4 +37,20 @@ const fireReady = (detail) => {
 
 const newAbortController = () => new AbortController();
 
-module.exports = { config, data, safeParse, safeRun, buildRequest, fireReady, newAbortController };
+// Internal-state writes via a key derived from in-app values (not user
+// input). The prototype-pollution detector should not fire on
+// `state[key] = ...` when `key` is the return value of a local helper that
+// composes app-controlled identifiers - there's no path for `__proto__`
+// or `constructor` to reach `key` short of a separate code-path bug.
+const state = {};
+const computeBucketKey = (dataset, source) => `${dataset}:${source}`;
+
+const recordSample = (dataset, source, value) => {
+  const key = computeBucketKey(dataset, source);
+  state[key] = value;
+};
+
+module.exports = {
+  config, data, safeParse, safeRun, buildRequest, fireReady, newAbortController,
+  state, recordSample,
+};
