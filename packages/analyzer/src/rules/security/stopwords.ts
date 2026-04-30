@@ -1,5 +1,5 @@
 /**
- * Stopwords for false-positive suppression in secret scanning.
+ * Stopwords excluded from secret scanning.
  * When any stopword appears as a substring in the captured secret value, the match is suppressed.
  */
 

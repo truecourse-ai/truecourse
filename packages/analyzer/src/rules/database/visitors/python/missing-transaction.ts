@@ -5,8 +5,8 @@ import { getPythonMethodName, PYTHON_WRITE_METHODS, getPythonEnclosingFunctionBo
 
 /**
  * Known ORM session / database receiver names. When we see `receiver.add()`,
- * we only count it as a DB write if the receiver looks like an ORM object.
- * This avoids false positives from `my_set.add(item)` or `my_list.update(vals)`.
+ * we only count it as a DB write if the receiver looks like an ORM object —
+ * `my_set.add(item)` and `my_list.update(vals)` are not DB writes.
  */
 const ORM_RECEIVER_NAMES = new Set([
   'session', 'db', 'conn', 'connection', 'cursor', 'engine',
@@ -51,8 +51,8 @@ function isOrmWriteCall(n: SyntaxNode): boolean {
     if (firstArg?.type === 'string') {
       const sql = firstArg.text.toLowerCase()
       // Word-bounded so `update` doesn't match inside identifiers like
-      // `updated_at` / `created_at` / `deleted_at` and turn pure-SELECT
-      // queries into false-positive writes.
+      // `updated_at` / `created_at` / `deleted_at` and misclassify pure
+      // SELECTs as writes.
       if (/\b(insert|update|delete|alter|create|drop)\b/.test(sql)) return true
     }
     return false

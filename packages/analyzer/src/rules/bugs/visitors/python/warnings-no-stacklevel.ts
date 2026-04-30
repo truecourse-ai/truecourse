@@ -12,14 +12,9 @@ export const pythonWarningsNoStacklevelVisitor: CodeRuleVisitor = {
     const funcText = func.text
     if (funcText !== 'warnings.warn' && funcText !== 'warn') return null
 
-    // For bare 'warn', verify it's likely the warnings.warn function
-    // by checking if called directly (not as a method on something unexpected)
-    if (funcText === 'warn') {
-      // Could be any warn function; only flag if it looks like a direct import
-      // We'll flag it since the rule applies to warnings.warn specifically
-      // Skip bare `warn` to avoid false positives
-      return null
-    }
+    // Bare `warn` is too ambiguous — could be any function. Only flag the
+    // explicit `warnings.warn(...)` form.
+    if (funcText === 'warn') return null
 
     const args = node.childForFieldName('arguments')
     if (!args) return null

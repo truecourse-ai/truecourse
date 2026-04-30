@@ -27,7 +27,7 @@ const PYTHON_BUILTINS = new Set([
  * class namespace and are accessed via `self.id` or `Foo.id`, which never
  * collides with the module-level `id()` function. Pydantic / SQLAlchemy /
  * dataclasses / plain classes all use `id: int`, `type: str`, etc. as
- * idiomatic field names, and flagging these is a false positive.
+ * idiomatic field names — treat them as legitimate.
  *
  * Walks up parents and stops at the first function_definition (false — inside
  * a method, still production code) or class_definition (true — class body).

@@ -14,8 +14,7 @@ export const pythonPandasUseOfDotValuesVisitor: CodeRuleVisitor = {
     const attr = node.childForFieldName('attribute')
     if (attr?.text !== 'values') return null
 
-    // Avoid false positives: only flag when inside a statement (not as part of assignment target)
-    // We heuristically check if parent is not an assignment target
+    // Only flag when used in an expression position, not as an assignment target.
     const parent = node.parent
     if (parent?.type === 'assignment') {
       const left = parent.childForFieldName('left')

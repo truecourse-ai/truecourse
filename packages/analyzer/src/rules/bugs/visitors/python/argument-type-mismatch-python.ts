@@ -40,9 +40,7 @@ function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, ma
           }
           // A typed splat — e.g. `*args: str` or `**kwargs: Any` — parses as a
           // `typed_parameter` whose first named child is the underlying splat
-          // pattern. Without this branch, those typed splats are mis-counted
-          // as required positional params and every call gets an arity-mismatch
-          // FP.
+          // pattern. Unwrap it so it isn't mis-counted as a required positional.
           if (p.type === 'typed_parameter') {
             const inner = p.namedChild(0)
             if (inner && (inner.type === 'list_splat_pattern' || inner.type === 'dictionary_splat_pattern')) {
