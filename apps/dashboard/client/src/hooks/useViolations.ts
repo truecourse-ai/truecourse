@@ -3,13 +3,19 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import * as api from '@/lib/api';
 import type { ViolationResponse } from '@/lib/api';
 
-export function useViolations(repoId: string, selectedServiceId?: string, analysisId?: string) {
+export function useViolations(
+  repoId: string,
+  selectedServiceId?: string,
+  analysisId?: string,
+  options: { enabled?: boolean } = {},
+) {
+  const { enabled = true } = options;
   const [violations, setViolations] = useState<ViolationResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchViolations = useCallback(async () => {
-    if (!repoId) return;
+    if (!repoId || !enabled) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -20,7 +26,7 @@ export function useViolations(repoId: string, selectedServiceId?: string, analys
     } finally {
       setIsLoading(false);
     }
-  }, [repoId, analysisId]);
+  }, [repoId, analysisId, enabled]);
 
   useEffect(() => {
     fetchViolations();
