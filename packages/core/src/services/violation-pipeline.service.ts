@@ -379,21 +379,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     const totalFiles = filesToScan.length;
     let processed = 0;
-    // Tuned to feel like the LLM phase, which is naturally smooth because
-    // I/O-bound `await` calls leave the event loop free for spinner ticks.
-    // Det work is CPU-bound, so we have to manufacture the same breathing
-    // room: yield every ~25ms (≈40fps headroom for the 80ms spinner),
-    // refresh the per-domain detail every ~100ms (≈10fps counter), and
-    // show the current file basename so the user sees concrete progress
-    // rather than just a counter.
+    // Yield every ~25ms (≈40fps headroom against the 80ms spinner) and
+    // refresh the per-domain detail every ~100ms. Det work is CPU-bound,
+    // so we have to manufacture the same breathing room the LLM phase
+    // gets naturally from I/O-bound awaits.
     const SPINNER_YIELD_MS = 25;
     const DETAIL_UPDATE_MS = 100;
     let lastYieldMs = Date.now();
     let lastDetailMs = lastYieldMs;
-    let currentBasename = '';
     for (const { filePath, resolve } of filesToScan) {
-      const slash = filePath.lastIndexOf('/');
-      currentBasename = slash >= 0 ? filePath.slice(slash + 1) : filePath;
       try {
         const lang = detectLanguage(filePath);
         if (!lang) continue;
@@ -419,7 +413,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const now = Date.now();
       const isLast = processed === totalFiles;
       if (isLast || now - lastDetailMs >= DETAIL_UPDATE_MS) {
-        const detail = `${processed}/${totalFiles} · ${currentBasename}`;
+        const detail = `${processed}/${totalFiles} files`;
         for (const domain of activeCodeDomains) tracker?.detail(domain, detail);
         lastDetailMs = now;
       }
