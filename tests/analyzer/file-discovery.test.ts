@@ -137,9 +137,9 @@ describe('discoverFiles with gitignore patterns', () => {
       Array.from({ length: 200 }, (_, i) => `const x${i} = ${i};`).join('\n'),
     );
 
-    // Auth0-spa-js style: ~80KB with two extremely long lines (license
+    // Auth0-spa-js style: ~40KB with two extremely long lines (license
     // banner + minified IIFE). This must be excluded by the content sniff.
-    const longLine = 'a'.repeat(80_000);
+    const longLine = 'a'.repeat(40_000);
     writeFileSync(
       join(vendor, 'auth0-spa-js.production.js'),
       `/* Auth0 SDK v2.0 - Apache 2.0 */\n${longLine}`,
@@ -149,6 +149,31 @@ describe('discoverFiles with gitignore patterns', () => {
 
     expect(files.some((f) => f.endsWith('app.js'))).toBe(true);
     expect(files.some((f) => f.endsWith('auth0-spa-js.production.js'))).toBe(false);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('skips webpack-style *.bundle.js even when the bundle has many short lines', () => {
+    // Webpack output keeps line breaks - line-density sniff alone misses it
+    // - but the `.bundle.js` suffix is a universal build-artifact tell.
+    const dir = mkdtempSync(join(tmpdir(), 'truecourse-bundle-'));
+    const staticDir = join(dir, 'static');
+    mkdirSync(staticDir, { recursive: true });
+
+    writeFileSync(join(dir, 'app.js'), 'const a = 1;');
+
+    // Webpack-shaped: many lines, each short, but it's still a bundle.
+    const bundle = Array.from({ length: 500 }, (_, i) => `var v${i} = ${i};`).join('\n');
+    writeFileSync(join(staticDir, 'tracking.bundle.js'), bundle);
+    writeFileSync(join(staticDir, 'admin.production.js'), bundle);
+    writeFileSync(join(staticDir, 'admin.development.js'), bundle);
+
+    const files = discoverFiles(dir);
+
+    expect(files.some((f) => f.endsWith('app.js'))).toBe(true);
+    expect(files.some((f) => f.endsWith('.bundle.js'))).toBe(false);
+    expect(files.some((f) => f.endsWith('.production.js'))).toBe(false);
+    expect(files.some((f) => f.endsWith('.development.js'))).toBe(false);
 
     rmSync(dir, { recursive: true, force: true });
   });

@@ -6,19 +6,35 @@ import { detectLanguage, getAllIgnorePatterns, getAllTestPatterns } from './lang
 
 // Minified/bundled JS or TS files have no analytical value (they're build
 // artifacts of source already in the repo, or vendored libraries) and they
-// produce huge amounts of FP noise across many rules. The `**/*.min.*` glob
-// catches files that follow the convention; this content sniff catches the
-// rest - vendored bundles named `*.production.js`, `*.bundle.js`, or weirder.
+// produce huge amounts of FP noise across many rules. Three signals layered
+// from cheap to expensive:
 //
-// Heuristic: a JS/TS file larger than `MIN_SIZE_FOR_SNIFF` whose first
-// `SNIFF_BYTES` window contains fewer than `MIN_NEWLINES` newlines is
-// almost certainly minified. The numbers are tuned to keep large
-// hand-written source (1000s of normal lines) discoverable while excluding
-// 50KB+ single-IIFE bundles.
+// 1. Build-artifact filename suffix — `*.bundle.js`, `*.production.js`,
+//    `*.development.js` (and corresponding cjs/mjs variants). Webpack /
+//    Rollup / Auth0-style production bundles ship under these names. This
+//    catches files like `tracking.bundle.js` that have realistic line
+//    breaks (so the line-density sniff misses them) but are still 100%
+//    bundled output. The `**/*.min.*` glob in language-config covers the
+//    other half.
+//
+// 2. Size-and-density sniff — JS/TS files of any meaningful size whose
+//    first window contains very few newlines are minified. Threshold is
+//    set low enough (15KB) to catch single-line bundles in the ~40KB
+//    range like `auth0-spa-js.production.js` (already covered by signal 1
+//    too, but signal 2 protects against weirder names).
+
 const SNIFFED_EXTS = new Set(['.js', '.jsx', '.cjs', '.mjs', '.ts', '.tsx', '.mts', '.cts'])
-const MIN_SIZE_FOR_SNIFF = 50 * 1024 // 50KB
+const MIN_SIZE_FOR_SNIFF = 15 * 1024 // 15KB
 const SNIFF_BYTES = 8 * 1024 // 8KB
 const MIN_NEWLINES = 4
+
+// Build-artifact filename patterns. Match on basename only (the path
+// segments are already filtered by .gitignore at this point).
+function looksLikeBuildArtifact(absPath: string): boolean {
+  const slash = absPath.lastIndexOf('/')
+  const basename = slash >= 0 ? absPath.slice(slash + 1) : absPath
+  return /\.(bundle|production|development)\.(js|cjs|mjs|jsx|ts|tsx|mts|cts)$/i.test(basename)
+}
 
 function looksMinified(absPath: string): boolean {
   // Cheap extension check first.
@@ -26,6 +42,8 @@ function looksMinified(absPath: string): boolean {
   if (dotIdx < 0) return false
   const ext = absPath.slice(dotIdx)
   if (!SNIFFED_EXTS.has(ext)) return false
+
+  if (looksLikeBuildArtifact(absPath)) return true
 
   let size: number
   try {
