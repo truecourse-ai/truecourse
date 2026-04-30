@@ -3,6 +3,7 @@ import os
 import logging
 import threading
 from pathlib import Path
+from typing import Callable, Literal, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,15 @@ def emit_event(level: str, event: str, **kwargs: object) -> None:
 def join_keys(prefix: str, *keys: str) -> str:
     """Join keys with a prefix using positional varargs."""
     return prefix + ":" + "/".join(keys)
+
+
+# Module-level type aliases - immutable typing constructs, NOT mutable
+# shared state. The detector should skip these.
+RetryHook = Callable[[int, str], None]
+BeforeAttemptHook = Callable[[dict], bool]
+Status = Literal["pending", "active", "done"]
+NumberOrString = Union[int, str]
+MaybeUser = Optional[dict]
 
 
 CHART_LABELS = [

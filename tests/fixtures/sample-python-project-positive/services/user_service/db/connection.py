@@ -86,6 +86,18 @@ def count_active_users() -> int:
         conn.close()
 
 
+def _replace_attachments(cur: object, attachment_id: int, payload: dict) -> None:
+    """Private helper that takes a caller-supplied cursor.
+
+    The leading-underscore convention plus the cursor parameter signal
+    that callers in this module manage the scope. The detector should
+    not flag write counts inside such helpers - the public callers
+    are where the lifecycle ownership question lands.
+    """
+    cur.execute("DELETE FROM attachments WHERE id = %s", (attachment_id,))
+    cur.execute("INSERT INTO attachments (id, data) VALUES (%s, %s)", (attachment_id, payload["data"]))
+
+
 def watermark_summary(cur: object, lower_bound: int = 0) -> tuple[int, int]:
     """Read-only summary over an events table whose timestamp columns are
     named `updated_at` and `created_at`.

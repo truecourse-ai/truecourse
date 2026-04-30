@@ -18,6 +18,29 @@ const UNAMBIGUOUS_DB_WRITES = new Set([
   'add_all', 'bulk_create', 'bulk_update', 'executemany',
 ])
 
+// Cursor / connection / session parameter names. When a function takes
+// one of these as a parameter, write calls on it are scoped by the caller.
+const CURSOR_PARAM_NAMES = new Set([
+  'cur', 'cursor', 'conn', 'connection', 'session', 'db', 'tx', 'trans', 'transaction',
+])
+
+function hasCursorLikeParam(params: SyntaxNode): boolean {
+  for (let i = 0; i < params.namedChildCount; i++) {
+    const p = params.namedChild(i)
+    if (!p) continue
+    let nameNode: SyntaxNode | null = null
+    if (p.type === 'identifier') {
+      nameNode = p
+    } else if (p.type === 'typed_parameter' || p.type === 'default_parameter' || p.type === 'typed_default_parameter') {
+      nameNode = p.childForFieldName('name') ?? p.namedChild(0)
+    }
+    if (nameNode && nameNode.type === 'identifier' && CURSOR_PARAM_NAMES.has(nameNode.text)) {
+      return true
+    }
+  }
+  return false
+}
+
 function isOrmWriteCall(n: SyntaxNode): boolean {
   const name = getPythonMethodName(n)
 
@@ -84,6 +107,25 @@ export const pythonMissingTransactionVisitor: CodeRuleVisitor = {
     // is exactly the bug this rule catches.
     if (/transaction|atomic|begin\b|autocommit\s*=\s*false/.test(bodyText)) return null
     if (/\bwith\s+[^:]*\bas\s+(conn|connection|cursor|cur|session|engine|tx|trans)\b[^:]*:/.test(bodyText)) return null
+
+    // Private helpers (leading-underscore name) that take a cursor /
+    // connection / session as a parameter are by convention called from
+    // controlled in-module sites that manage the scope - flagging them
+    // produces noise (the rule has no way to inspect the caller). Public
+    // functions with the same shape stay flagged because they may be
+    // called from anywhere, including sites that don't wrap.
+    const funcDef = body.parent
+    if (funcDef?.type === 'function_definition') {
+      const nameNode = funcDef.childForFieldName('name')
+      const params = funcDef.childForFieldName('parameters')
+      if (
+        nameNode?.text.startsWith('_') &&
+        params &&
+        hasCursorLikeParam(params)
+      ) {
+        return null
+      }
+    }
 
     // Count ORM write calls in the body
     let writeCount = 0
