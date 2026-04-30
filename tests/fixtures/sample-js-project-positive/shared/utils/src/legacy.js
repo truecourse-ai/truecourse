@@ -54,3 +54,22 @@ module.exports = {
   config, data, safeParse, safeRun, buildRequest, fireReady, newAbortController,
   state, recordSample,
 };
+
+// Helper functions declared inside an IIFE and used by sibling functions
+// in the same IIFE body. The no-undef rule must hoist `function`
+// declarations into their enclosing function scope so callers can resolve
+// them; without this the declaration looks invisible to the scope chain.
+(() => {
+  const els = {};
+
+  function byId(id) {
+    return document.getElementById(id);
+  }
+
+  function cacheElements() {
+    els.panel = byId('tab-unbatched');
+    els.meta = byId('ub-meta');
+  }
+
+  cacheElements();
+})();

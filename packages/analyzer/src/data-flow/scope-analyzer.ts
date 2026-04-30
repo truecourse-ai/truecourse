@@ -434,10 +434,17 @@ export function buildScopeTree(
       (parent.type === 'function_declaration' || parent.type === 'generator_function_declaration') &&
       parent.childForFieldName('name')?.id === node.id
     ) {
-      // Functions are hoisted to the enclosing function scope
-      const targetScope = findFunctionScope(scope)
-      if (!targetScope.variables.has(node.text)) {
-        createVariable(node.text, 'function', node, targetScope, false)
+      // Functions are hoisted to the *enclosing* function scope - the scope
+      // outside the function being declared, not the function's own body
+      // scope. The walker has already entered the function and made its
+      // body scope current, so we step one parent up before searching for
+      // the next function/module scope. Without this step the function
+      // declaration registers inside its own body, which is invisible to
+      // sibling callers and produces no-undef false positives like
+      // `els.foo = byId(...)` where `byId` is a sibling helper.
+      const enclosing = scope.parent ? findFunctionScope(scope.parent) : scope
+      if (!enclosing.variables.has(node.text)) {
+        createVariable(node.text, 'function', node, enclosing, false)
       }
       return
     }
