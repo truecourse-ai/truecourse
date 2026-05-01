@@ -68,7 +68,32 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
           /https?:\/\//.test(stripped)                          // URLs
           || /^(true|false|null|undefined|localhost|None|True|False|Bearer)$/i.test(stripped) // literals & common tokens
           || /[[\]<>{}()#.=\s]/.test(stripped)                  // selectors, HTML, format strings, paths
-        if (secretNames.some((s) => name.includes(s)) && stripped.length >= 8 && !isNonSecretName && !isNonSecretValue) {
+
+        // Vocabulary-tag pattern: the literal *is* the field name (or a
+        // plain-text extension of it). Catches things like
+        //   class AttributeType(StrEnum): PASSWORD = "password"     # enum tag
+        //   { password: 'Password' }                                # UI label
+        //   IDLINK_PROPS = { "password": "hashed_password" }        # field-name map
+        // None of these are credentials — they describe a *type* of evidence
+        // or a UI string, and have no entropy. We keep this carve-out narrow
+        // by requiring the value to be plain letters/underscores only — real
+        // credentials have digits, special characters, or both.
+        const nameClean = name.replace(/^['"`]+|['"`]+$/g, '')
+        const valueClean = stripped.toLowerCase()
+        const isPlainAlphaSnake = /^[a-z_]+$/.test(valueClean)
+        const isVocabularyTag =
+          isPlainAlphaSnake && nameClean.length >= 4 && (
+            valueClean === nameClean ||
+            valueClean.includes(nameClean)
+          )
+
+        if (
+          secretNames.some((s) => name.includes(s)) &&
+          stripped.length >= 8 &&
+          !isNonSecretName &&
+          !isNonSecretValue &&
+          !isVocabularyTag
+        ) {
           return makeViolation(
             this.ruleKey, node, filePath, 'critical',
             'Hardcoded secret detected',
