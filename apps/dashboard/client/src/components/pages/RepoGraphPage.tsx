@@ -311,6 +311,28 @@ export default function RepoGraphPage() {
     if (dbId !== null) setLeftTab('databases');
   }, [setActiveDbId, setActiveFilePath, setActiveFlowId, setLeftTab]);
 
+  // Home is the default + locked tab. Clicking an active rail icon (which the
+  // sidebar signals as `null`) falls back to Home instead of nulling out.
+  // When entering Files/Flows/Databases with no active item (e.g. URL params
+  // were stripped by a prior Home visit), restore the last-opened item so the
+  // detail view reopens instead of showing the empty placeholder.
+  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
+    const next = tab ?? 'home';
+    setLeftTab(next);
+    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
+      setActiveFlowId(openFlows[openFlows.length - 1].id);
+    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
+      setActiveFilePath(openFiles[openFiles.length - 1].path);
+    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
+      setActiveDbId(openDatabases[openDatabases.length - 1].id);
+    }
+  }, [
+    setLeftTab,
+    activeFlowId, openFlows, setActiveFlowId,
+    activeFilePath, openFiles, setActiveFilePath,
+    activeDbId, openDatabases, setActiveDbId,
+  ]);
+
   const handleOpenFlow = useCallback((flowId: string, flowName: string, pinned: boolean) => {
     setOpenFlows((prev) => {
       const existing = prev.find((f) => f.id === flowId);
@@ -401,7 +423,7 @@ export default function RepoGraphPage() {
   const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } =
     useViolations(repoId, undefined, selectedAnalysisId ?? undefined, { enabled: leftTab === 'home' });
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId, onEvent);
-  const invariants = useInvariants({ repoId, onEvent });
+  const invariants = useInvariants({ repoId, onEvent, enabled: leftTab === 'invariants' });
 
   // In diff mode with no diff result yet, show no violations
   const emptyViolations = isDiffMode && !diffResult;
@@ -459,66 +481,6 @@ export default function RepoGraphPage() {
     codeHotspots: analyticsCodeHotspots,
     refetch: refetchAnalytics,
   } = useAnalytics(repoId, currentBranch, graphAnalysisId);
-
-  // Home is the default + locked tab. Clicking an active rail icon (which the
-  // sidebar signals as `null`) falls back to Home instead of nulling out.
-  // When entering Files/Flows/Databases with no active item (e.g. URL params
-  // were stripped by a prior Home visit), restore the last-opened item so the
-  // detail view reopens instead of showing the empty placeholder.
-  //
-  // Refetching on tab click is what surfaces CLI-triggered analyses without a
-  // page refresh. Dashboard-triggered runs already refresh via the
-  // `analysis:complete` / `violations:ready` socket handlers below.
-  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
-    const next = tab ?? 'home';
-    setLeftTab(next);
-    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
-      setActiveFlowId(openFlows[openFlows.length - 1].id);
-    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
-      setActiveFilePath(openFiles[openFiles.length - 1].path);
-    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
-      setActiveDbId(openDatabases[openDatabases.length - 1].id);
-    }
-    switch (next) {
-      case 'home':
-        refetchViolations();
-        refetchAnalyses();
-        refetchAnalytics();
-        break;
-      case 'graphs':
-        refetchGraph();
-        refetchViolations();
-        break;
-      case 'files':
-        refetchGraph();
-        refetchCodeViolationSummary();
-        break;
-      case 'flows':
-        refetchFlows();
-        break;
-      case 'databases':
-        refetchGraph();
-        break;
-      case 'analyses':
-        refetchAnalyses();
-        break;
-      case 'invariants':
-        invariants.refresh();
-        break;
-    }
-  }, [
-    setLeftTab,
-    activeFlowId, openFlows, setActiveFlowId,
-    activeFilePath, openFiles, setActiveFilePath,
-    activeDbId, openDatabases, setActiveDbId,
-    refetchViolations,
-    refetchAnalyses,
-    refetchAnalytics,
-    refetchGraph,
-    refetchCodeViolationSummary,
-    refetchFlows,
-    invariants,
-  ]);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;

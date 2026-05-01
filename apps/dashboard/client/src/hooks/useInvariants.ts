@@ -24,9 +24,10 @@ export type InvariantsRunState =
 interface UseInvariantsOpts {
   repoId: string;
   onEvent: (event: string, handler: (data: unknown) => void) => () => void;
+  enabled?: boolean;
 }
 
-export function useInvariants({ repoId, onEvent }: UseInvariantsOpts) {
+export function useInvariants({ repoId, onEvent, enabled = true }: UseInvariantsOpts) {
   const [active, setActive] = useState<InvariantResponse[]>([]);
   const [drafts, setDrafts] = useState<InvariantDraftResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,7 +35,7 @@ export function useInvariants({ repoId, onEvent }: UseInvariantsOpts) {
   const [run, setRun] = useState<InvariantsRunState>({ status: 'idle' });
 
   const refresh = useCallback(async () => {
-    if (!repoId) return;
+    if (!repoId || !enabled) return;
     setIsLoading(true);
     setError(null);
     try {
@@ -49,7 +50,7 @@ export function useInvariants({ repoId, onEvent }: UseInvariantsOpts) {
     } finally {
       setIsLoading(false);
     }
-  }, [repoId]);
+  }, [repoId, enabled]);
 
   useEffect(() => {
     refresh();
