@@ -229,11 +229,17 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       !componentBodyFunctions.has(id)
     )
 
-    // Skip when the source code near the useEffect contains eslint-disable — the developer
-    // has explicitly suppressed this lint and we should respect that decision
+    // Skip when the source code anywhere within (or near) the useEffect call
+    // contains an eslint-disable — the developer has explicitly suppressed
+    // the canonical ESLint rule (react-hooks/exhaustive-deps) and we should
+    // respect that decision. The canonical placement is on the line preceding
+    // the deps array (i.e. inside the call), so the window must span the
+    // whole node, not just the lines around its opening.
     const nodeStartLine = node.startPosition.row
-    const linesAbove = sourceCode.split('\n').slice(Math.max(0, nodeStartLine - 2), nodeStartLine + 1)
-    if (linesAbove.some(line => line.includes('eslint-disable'))) return null
+    const nodeEndLine = node.endPosition.row
+    const sourceLines = sourceCode.split('\n')
+    const windowLines = sourceLines.slice(Math.max(0, nodeStartLine - 2), nodeEndLine + 2)
+    if (windowLines.some(line => line.includes('eslint-disable'))) return null
 
     if (suspiciousIds.length > 0) {
       return makeViolation(

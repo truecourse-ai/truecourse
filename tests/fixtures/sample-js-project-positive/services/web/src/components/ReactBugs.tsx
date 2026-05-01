@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 export function SafeHook(): JSX.Element { return <div>Safe</div>; }
 export function StableDep(): JSX.Element { return <div>Stable</div>; }
 export function AccessibleTable(): JSX.Element {
@@ -50,3 +50,19 @@ export function SafePromise(): JSX.Element {
 }
 
 // Positive: react-unstable-key — covered by existing LoadingSkeleton fixture above
+
+// useeffect-missing-deps: developer has explicitly suppressed the dependency
+// rule via // eslint-disable-next-line on the line preceding the deps array.
+// truecourse should respect this suppression and stay silent.
+interface UserProfileProps { readonly userId: string; }
+interface User { id: string; email: string; }
+export function UserProfile({ userId }: UserProfileProps): JSX.Element {
+  const [user, setUser] = useState<User | null>(null);
+  useEffect(() => {
+    fetch(`/api/users/${userId}`)
+      .then((r) => r.json())
+      .then((data: User) => setUser(data));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <div data-user={user?.id}>{user?.email}</div>;
+}
