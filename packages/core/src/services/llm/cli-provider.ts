@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
+import spawn from 'cross-spawn';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../../lib/logger.js';
@@ -184,13 +185,12 @@ export abstract class BaseCLIProvider implements LLMProvider {
     ];
 
     return new Promise((resolve, reject) => {
-      // Windows needs `shell: true`: cmd.exe applies PATHEXT for the resolved
-      // binary, and the CVE-2024-27980 mitigation rejects direct spawn of
-      // `.cmd`/`.bat` files. Node handles cmd.exe argv quoting under shell.
+      // cross-spawn handles Windows `.cmd`/`.ps1` shim resolution without
+      // shell:true, avoiding the CVE-2024-27980 spawn restriction and the
+      // DEP0190 deprecation for shell:true + args array.
       const child: ChildProcess = spawn(this.binaryName, args, {
         env: this.getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: process.platform === 'win32',
         ...(this._repoPath ? { cwd: this._repoPath } : {}),
       });
 

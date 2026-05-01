@@ -227,6 +227,9 @@ importers:
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       dagre:
         specifier: ^0.8.5
         version: 0.8.5
@@ -246,6 +249,9 @@ importers:
         specifier: ^3.25.1
         version: 3.25.1(zod@3.25.76)
     devDependencies:
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
       '@types/dagre':
         specifier: ^0.7.52
         version: 0.7.54
@@ -1377,6 +1383,9 @@ packages:
 
   '@types/cors@2.8.19':
     resolution: {integrity: sha512-mFNylyeyqN93lfe/9CSxOGREz8cpzAhH+E93xJ4xWQf62V8sQ/24reV2nyzUWM6H6Xji+GGHpkbLe7pVoUEskg==}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/d3-array@3.2.2':
     resolution: {integrity: sha512-hOLWVbm7uRza0BYXpIIW5pxfrKe0W+D5lrFiAEYR+pb6w3N2SwSMaJbXdUfSEv+dT4MfHBLtn5js0LAWaO6otw==}
@@ -4699,6 +4708,10 @@ snapshots:
   '@types/cookiejar@2.1.5': {}
 
   '@types/cors@2.8.19':
+    dependencies:
+      '@types/node': 22.19.15
+
+  '@types/cross-spawn@6.0.6':
     dependencies:
       '@types/node': 22.19.15
 

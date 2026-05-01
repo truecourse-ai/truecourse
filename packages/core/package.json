@@ -112,6 +112,7 @@
   "dependencies": {
     "@truecourse/analyzer": "workspace:*",
     "@truecourse/shared": "workspace:*",
+    "cross-spawn": "^7.0.6",
     "dagre": "^0.8.5",
     "dotenv": "^16.4.0",
     "p-limit": "^7.3.0",
@@ -120,6 +121,7 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "@types/dagre": "^0.7.52",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
