@@ -13,9 +13,13 @@ async function main() {
   // 0. Route all internal diagnostics to the dashboard log file. When running
   //    via `pnpm dev` the `TRUECOURSE_DEV=1` env var tees lines to stderr
   //    too so the dev terminal still shows them. Packaged dashboard (console
-  //    or service) gets file-only output.
+  //    or service) gets file-only output. Service installers pass an explicit
+  //    `TRUECOURSE_LOG_DIR` so the log lands somewhere the user can reach
+  //    even when the service runs as a system account whose `os.homedir()`
+  //    differs from the invoking user's.
+  const logDir = process.env.TRUECOURSE_LOG_DIR ?? getLogDir();
   configureLogger({
-    filePath: path.join(getLogDir(), 'dashboard.log'),
+    filePath: path.join(logDir, 'dashboard.log'),
     tee: process.env.TRUECOURSE_DEV === '1',
   });
 

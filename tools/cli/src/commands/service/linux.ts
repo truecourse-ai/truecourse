@@ -22,8 +22,9 @@ ExecStart=${process.execPath} ${serverPath}
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=${envFile}
-StandardOutput=append:${path.join(logDir, "truecourse.log")}
-StandardError=append:${path.join(logDir, "truecourse.error.log")}
+Environment=TRUECOURSE_LOG_DIR=${logDir}
+StandardOutput=append:${path.join(logDir, "dashboard.out.log")}
+StandardError=append:${path.join(logDir, "dashboard.err.log")}
 
 [Install]
 WantedBy=default.target

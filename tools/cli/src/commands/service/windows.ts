@@ -1,7 +1,12 @@
 import { execSync } from "node:child_process";
+import path from "node:path";
 import type { ServicePlatform } from "./platform.js";
 
 const SERVICE_NAME = "TrueCourse";
+// node-windows derives wrapper-log filenames from the service `id` — using
+// "dashboard" gives us `dashboard.out.log` / `dashboard.err.log` /
+// `dashboard.wrapper.log`, matching what macOS/Linux installers write.
+const SERVICE_ID = "dashboard";
 
 export class WindowsService implements ServicePlatform {
   private svc: any;
@@ -20,16 +25,21 @@ export class WindowsService implements ServicePlatform {
   async install(serverPath: string, logPath: string): Promise<void> {
     const nw = await this.getNodeWindows();
     const { Service } = nw;
+    const logDir = path.dirname(logPath);
 
     return new Promise<void>((resolve, reject) => {
       const svc = new Service({
         name: SERVICE_NAME,
+        id: SERVICE_ID,
         description: "TrueCourse Server",
         script: serverPath,
         nodeOptions: [],
+        // Land wrapper logs in our shared log dir (default is the
+        // node-windows install dir, often inside an npx cache).
+        logpath: logDir,
         env: [{
           name: "TRUECOURSE_LOG_DIR",
-          value: logPath,
+          value: logDir,
         }],
       });
 
