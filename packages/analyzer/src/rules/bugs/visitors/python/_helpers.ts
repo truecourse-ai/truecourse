@@ -1,5 +1,20 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const MUTABLE_DEFAULTS = new Set(['list', 'dict', 'set', '[]', '{}'])
+
+/**
+ * True when `node` is a string with at least one f-string `{…}` interpolation.
+ * Tree-sitter parses both `"…"` and `f"…"` as `string`; the difference is
+ * that f-strings have `interpolation` named children for each `{expr}` block.
+ * A key like `f"{x}:{y}"` is therefore dynamic per iteration, not static.
+ */
+export function isFStringWithInterpolation(node: SyntaxNode): boolean {
+  if (node.type !== 'string') return false
+  for (const child of node.namedChildren) {
+    if (child && child.type === 'interpolation') return true
+  }
+  return false
+}
 
 export const PY_TERMINAL_TYPES = new Set(['return_statement', 'raise_statement', 'break_statement', 'continue_statement'])
 

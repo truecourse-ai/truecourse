@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isFStringWithInterpolation } from './_helpers.js'
 
 export const pythonStaticKeyDictComprehensionVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/static-key-dict-comprehension',
@@ -14,9 +15,11 @@ export const pythonStaticKeyDictComprehensionVisitor: CodeRuleVisitor = {
     const keyNode = pairNode.childForFieldName('key')
     if (!keyNode) return null
 
-    // A static key is a literal (string, integer, float, true, false, none)
+    // A static key is a literal (string, integer, float, true, false, none).
+    // Tree-sitter also parses f-strings as `string`, so we have to peek at the
+    // children to tell `"foo"` (static) from `f"{x}"` (dynamic per iteration).
     const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'true', 'false', 'none'])
-    if (LITERAL_TYPES.has(keyNode.type)) {
+    if (LITERAL_TYPES.has(keyNode.type) && !isFStringWithInterpolation(keyNode)) {
       return makeViolation(
         this.ruleKey, keyNode, filePath, 'high',
         'Static key in dict comprehension',
