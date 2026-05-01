@@ -461,14 +461,12 @@ function splitIntoBatches(
 // ---------------------------------------------------------------------------
 
 /**
- * Translate V8's opaque "Invalid string length" RangeError into a message
- * that names the likely culprit files and tells the user how to skip them.
+ * When the aggregated LLM context exceeds V8's ~512MB string cap, re-throw
+ * with the names of the largest in-scope files attached, so the user can
+ * add them to `.truecourseignore`.
  *
- * The throw fires when the aggregated LLM context exceeds V8's ~512MB max
- * string length — almost always because a minified bundle, vendored lib, or
- * generated file produces an explosion of extracted function bodies. We
- * surface the largest in-scope files so the user knows what to add to
- * `.truecourseignore`.
+ * The trigger is almost always a minified bundle, vendored lib, or generated
+ * file expanding into a huge pile of extracted function bodies.
  */
 function translateContextRangeError(
   err: unknown,
