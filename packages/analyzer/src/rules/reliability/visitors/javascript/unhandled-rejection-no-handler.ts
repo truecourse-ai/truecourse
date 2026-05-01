@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { looksLikeAwsCdkScript, looksLikeAwsLambda } from './_helpers.js'
 
 export const unhandledRejectionNoHandlerVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/unhandled-rejection-no-handler',
@@ -21,6 +22,13 @@ export const unhandledRejectionNoHandlerVisitor: CodeRuleVisitor = {
     ) {
       return null
     }
+
+    // AWS Lambda owns the process lifecycle — user-installed top-level error
+    // handlers interfere with the runtime's reporting and are AWS-discouraged.
+    if (looksLikeAwsLambda(sourceCode)) return null
+    // CDK synthesis scripts are short-lived; crashing on misconfiguration is
+    // the desired behavior, so a swallowing handler would mask deploy issues.
+    if (looksLikeAwsCdkScript(sourceCode)) return null
 
     // Strip comment lines so VIOLATION markers don't trigger false negatives
     const text = sourceCode.replace(/\/\/.*$/gm, '')
