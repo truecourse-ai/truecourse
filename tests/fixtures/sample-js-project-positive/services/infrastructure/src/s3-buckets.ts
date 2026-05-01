@@ -8,6 +8,15 @@ declare class Bucket {
 declare const BucketAccessControl: { PRIVATE: string };
 declare const BlockPublicAccess: { BLOCK_ALL: string };
 
+// CDK-style namespaced module — the canonical form `new s3.Bucket(...)` —
+// and a removal-policy enum for the construct below.
+declare const s3: {
+  Bucket: typeof Bucket;
+  BucketEncryption: { KMS: string; S3_MANAGED: string };
+  BlockPublicAccess: { BLOCK_ALL: string };
+};
+declare const RemovalPolicy: { RETAIN: string; DESTROY: string };
+
 export function createSecureBucket(): Bucket {
   return new Bucket({}, 'SecureAssets', {
     versioned: true,
@@ -46,8 +55,8 @@ export function createS3ClientSecure(): { ssl: boolean; region: string } {
 }
 
 export function uploadWithOwner(): Record<string, string> {
-  const s3 = { putObject: (params: Record<string, string>) => params };
-  return s3.putObject({
+  const s3Client = { putObject: (params: Record<string, string>) => params };
+  return s3Client.putObject({
     Bucket: 'my-bucket',
     Key: 'data.json',
     Body: '{}',
@@ -56,8 +65,8 @@ export function uploadWithOwner(): Record<string, string> {
 }
 
 export function enablePublicBlock(): Record<string, unknown> {
-  const s3 = { putPublicAccessBlock: (params: Record<string, unknown>) => params };
-  return s3.putPublicAccessBlock({
+  const s3Client = { putPublicAccessBlock: (params: Record<string, unknown>) => params };
+  return s3Client.putPublicAccessBlock({
     Bucket: 'my-bucket',
     PublicAccessBlockConfiguration: {
       BlockPublicAcls: true,
@@ -70,4 +79,17 @@ export function enablePublicBlock(): Record<string, unknown> {
 
 export function restrictedBucketPolicy(): string {
   return '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::123456789:role/app-role"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::my-bucket/*"}]}';
+}
+
+// Canonical CDK shorthand: `enforceSSL: true` attaches a bucket policy
+// denying `aws:SecureTransport: false`. The aws-s3-insecure-http rule
+// should treat this as satisfying the requirement.
+export function createWebsiteBucket(scope: unknown): Bucket {
+  return new s3.Bucket(scope, 'WebsiteBucket', {
+    enforceSSL: true,
+    encryption: s3.BucketEncryption.KMS,
+    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    versioned: true,
+    removalPolicy: RemovalPolicy.RETAIN,
+  });
 }
