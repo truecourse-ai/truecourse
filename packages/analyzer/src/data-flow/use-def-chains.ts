@@ -118,6 +118,17 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
       if (v.kind === 'var' || v.kind === 'function' || v.kind === 'import' || v.kind === 'global' || v.kind === 'nonlocal' || v.kind === 'for-variable' || v.kind === 'catch-parameter') continue
       if (v.useSites.length === 0) continue
 
+      // Skip walrus-bound names: PEP 572 walrus assigns the name *before*
+      // the surrounding expression evaluates each branch, so a use textually
+      // earlier than the `:=` token can still be evaluation-order correct.
+      // Examples:
+      //   c if (c := f()) else default                       # ternary
+      //   {k: v.upper() for k, v0 in d if (v := v0) and v}   # comprehension
+      // Tree-sitter's textual-position check has no way to distinguish these
+      // valid patterns from a real "use before assignment", so we exclude
+      // walrus-bound vars from this rule.
+      if (v.declarationNode.parent?.type === 'named_expression') continue
+
       // Closure capture — a use site sitting inside a nested function scope
       // resolves at *call* time, not at the textual position of the use.
       // `def inner(): use(x)` followed by `x = ...; inner()` is valid Python
