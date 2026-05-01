@@ -1,6 +1,6 @@
 {
   "name": "truecourse",
-  "version": "0.5.8-windows.3",
+  "version": "0.5.8-windows.4",
   "type": "module",
   "bin": {
     "truecourse": "./dist/index.js"
