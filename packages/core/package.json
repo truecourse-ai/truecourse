@@ -1,6 +1,6 @@
 {
   "name": "@truecourse/core",
-  "version": "0.5.7",
+  "version": "0.5.8-windows.1",
   "private": true,
   "type": "module",
   "exports": {
