@@ -19,6 +19,20 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
 
     let operatorCount = 0
     const BINARY_TYPES = new Set(['binary_expression', 'logical_expression'])
+    // Don't recurse into nested function bodies. Each nested function's
+    // expressions are visited as their own `expression_statement` /
+    // `return_statement` nodes - counting them again at the outer scope
+    // double-counts and inflates IIFE wrappers (which call a function whose
+    // body has its own complex expressions) past the threshold for reasons
+    // unrelated to the IIFE call itself.
+    const FUNCTION_BOUNDARY_TYPES = new Set([
+      'function_declaration',
+      'function_expression',
+      'arrow_function',
+      'method_definition',
+      'generator_function_declaration',
+      'generator_function',
+    ])
 
     function countOps(n: SyntaxNode) {
       if (BINARY_TYPES.has(n.type)) {
@@ -26,7 +40,9 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
       }
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
-        if (child) countOps(child)
+        if (!child) continue
+        if (FUNCTION_BOUNDARY_TYPES.has(child.type)) continue
+        countOps(child)
       }
     }
 

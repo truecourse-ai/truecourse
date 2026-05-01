@@ -275,6 +275,15 @@ def check_self(x):
 # VIOLATION: bugs/deterministic/static-key-dict-comprehension
 static_dict = {1: v for v in range(10)}
 
+# F-string without interpolation is functionally identical to a plain
+# string literal — every iteration still produces the same key. The
+# rule should keep flagging this even after the f-string-with-{var}
+# carve-out (#80).
+# VIOLATION: bugs/deterministic/static-key-dict-comprehension
+# VIOLATION: bugs/deterministic/static-key-dict-comprehension-ruff
+# VIOLATION: bugs/deterministic/duplicate-dict-key
+no_interp_fstring_dict = {f"plain_prefix": v for v in range(5)}
+
 
 # ---- Unreachable code ----
 

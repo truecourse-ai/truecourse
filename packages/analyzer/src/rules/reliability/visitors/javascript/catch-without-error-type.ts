@@ -22,6 +22,18 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     const hasTypeAnnotation = node.childForFieldName('type') !== null
     if (hasTypeAnnotation) return null
 
+    // Short handlers - one statement that logs, returns a default, or
+    // re-throws - aren't doing branching work that benefits from type
+    // discrimination. Flagging them is noise: `safeParse` / `safeRun`
+    // wrappers, the most common JS try/catch pattern in app code, would
+    // all fire even though they're correctly written. Restrict the rule
+    // to bodies with multiple statements where discrimination would
+    // actually change behaviour.
+    const stmts = body.namedChildren.filter(
+      (c) => c.type !== 'comment',
+    )
+    if (stmts.length <= 1) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Catch without error type discrimination',

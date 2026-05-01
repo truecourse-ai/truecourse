@@ -19,8 +19,9 @@ function escapeXml(s: string): string {
 }
 
 function buildPlist(serverPath: string, logPath: string, envVars: Record<string, string>): string {
-  const stdoutPath = path.join(path.dirname(logPath), "truecourse.log");
-  const stderrPath = path.join(path.dirname(logPath), "truecourse.error.log");
+  const logDir = path.dirname(logPath);
+  const stdoutPath = path.join(logDir, "dashboard.out.log");
+  const stderrPath = path.join(logDir, "dashboard.err.log");
 
   let envSection = "";
   if (Object.keys(envVars).length > 0) {
@@ -67,6 +68,15 @@ export class MacOSService implements ServicePlatform {
     if (process.env.PATH && !envVars.PATH) {
       envVars.PATH = process.env.PATH;
     }
+    // Tell the server where to write its structured log so it lands next to
+    // launchd's stdout/stderr capture and `truecourse dashboard logs` can
+    // surface all three streams from one directory.
+    envVars.TRUECOURSE_LOG_DIR = path.dirname(logPath);
+    // Pin the service to the invoking user's `.truecourse/` so the project
+    // registry the dashboard reads matches the one the user CLI writes,
+    // independent of what `os.homedir()` resolves to in the service's
+    // execution context.
+    envVars.TRUECOURSE_HOME = path.join(os.homedir(), ".truecourse");
 
     fs.mkdirSync(PLIST_DIR, { recursive: true });
     fs.mkdirSync(path.dirname(logPath), { recursive: true });

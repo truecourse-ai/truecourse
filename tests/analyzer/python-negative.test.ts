@@ -174,6 +174,38 @@ describe('Python negative fixture — code rules', () => {
       }
     }
   });
+
+  // Pairs of rule keys whose visitors detect the same Python pattern. They
+  // should never fire at the same (file, line) — if they do, the rule
+  // catalog has a duplicate registration. The audit on signal7/ap_automation
+  // surfaced two such pairs:
+  //   - any-type-hint / no-explicit-any
+  //   - empty-catch / try-except-pass
+  const DUPLICATE_RULE_PAIRS: Array<[string, string]> = [
+    ['code-quality/deterministic/any-type-hint', 'code-quality/deterministic/no-explicit-any'],
+    ['bugs/deterministic/empty-catch', 'code-quality/deterministic/try-except-pass'],
+  ];
+
+  it('does not fire duplicate rules at the same location', () => {
+    const overlaps: Array<{ filePath: string; line: number; rules: [string, string] }> = [];
+    for (const [a, b] of DUPLICATE_RULE_PAIRS) {
+      const aLocations = new Set(
+        violations.filter((v) => v.ruleKey === a).map((v) => `${v.filePath}:${v.lineStart}`),
+      );
+      for (const v of violations) {
+        if (v.ruleKey === b && aLocations.has(`${v.filePath}:${v.lineStart}`)) {
+          overlaps.push({ filePath: v.filePath, line: v.lineStart, rules: [a, b] });
+        }
+      }
+    }
+    if (overlaps.length > 0) {
+      console.log(`\nDUPLICATE-RULE OVERLAPS (${overlaps.length}):`);
+      for (const o of overlaps.slice(0, 20)) {
+        console.log(`  ${relative(FIXTURE_PATH, o.filePath)}:${o.line} — ${o.rules.join(' + ')}`);
+      }
+    }
+    expect(overlaps).toEqual([]);
+  });
 });
 
 describe('Python negative fixture — architecture', () => {

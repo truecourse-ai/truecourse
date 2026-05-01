@@ -46,9 +46,8 @@ export const magicNumberVisitor: CodeRuleVisitor = {
     if (parentType === 'enum_assignment') return null
     // Skip default parameter value
     if (parentType === 'assignment_pattern' || parentType === 'assignment_expression') return null
-    // Skip return statements (too many false positives)
+    // Skip return statements and object property values — too noisy in practice.
     if (parentType === 'return_statement') return null
-    // Skip object properties (too noisy)
     if (parentType === 'pair') return null
     // Only flag in binary expressions and function arguments
     if (parentType !== 'binary_expression' && parentType !== 'arguments') return null

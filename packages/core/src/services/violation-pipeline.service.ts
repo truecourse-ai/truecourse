@@ -344,10 +344,16 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
 
     if (domain === 'architecture') {
       tracker?.detail(stepKey, 'Service checks...');
+      await new Promise((r) => setImmediate(r));
+      throwIfAborted(signal);
       serviceViolationResults.push(...runDeterministicServiceChecks(result, domainRules));
       tracker?.detail(stepKey, 'Module checks...');
+      await new Promise((r) => setImmediate(r));
+      throwIfAborted(signal);
       moduleViolationResults.push(...runDeterministicModuleChecks(result, domainRules));
       tracker?.detail(stepKey, 'Method checks...');
+      await new Promise((r) => setImmediate(r));
+      throwIfAborted(signal);
       methodViolationResults.push(...runDeterministicMethodChecks(result, domainRules));
       tracker?.detail(stepKey, 'Deterministic checks done');
     }
@@ -359,14 +365,28 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   const allCodeViolations: CodeViolation[] = [];
 
   if (enabledCodeRules.length > 0 && filesToScan.length > 0) {
+    const activeCodeDomains: string[] = [];
     for (const domain of DOMAIN_ORDER) {
       if (domain === 'architecture') continue;
       const domainRules = enabledDeterministic.filter(r => (r.domain ?? '').startsWith(domain));
-      if (domainRules.length > 0) tracker?.start(`${domain}`);
+      if (domainRules.length > 0) {
+        tracker?.start(`${domain}`);
+        activeCodeDomains.push(domain);
+      }
     }
 
     await new Promise((r) => setImmediate(r));
 
+    const totalFiles = filesToScan.length;
+    let processed = 0;
+    // Yield every ~25ms (≈40fps headroom against the 80ms spinner) and
+    // refresh the per-domain detail every ~100ms. Det work is CPU-bound,
+    // so we have to manufacture the same breathing room the LLM phase
+    // gets naturally from I/O-bound awaits.
+    const SPINNER_YIELD_MS = 25;
+    const DETAIL_UPDATE_MS = 100;
+    let lastYieldMs = Date.now();
+    let lastDetailMs = lastYieldMs;
     for (const { filePath, resolve } of filesToScan) {
       try {
         const lang = detectLanguage(filePath);
@@ -381,6 +401,28 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         allCodeViolations.push(...codeRuleViolations);
       } catch {
         // Skip files that fail to parse
+      }
+      processed++;
+
+      // Cheap abort check on every iteration — `signal.aborted` is just a
+      // boolean field flipped by the SIGINT handler, so this is safe to
+      // run per-file. Without it, Ctrl+C only takes effect after the
+      // entire scan finishes.
+      if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
+
+      const now = Date.now();
+      const isLast = processed === totalFiles;
+      if (isLast || now - lastDetailMs >= DETAIL_UPDATE_MS) {
+        const detail = `${processed}/${totalFiles} files`;
+        for (const domain of activeCodeDomains) tracker?.detail(domain, detail);
+        lastDetailMs = now;
+      }
+      if (isLast || now - lastYieldMs >= SPINNER_YIELD_MS) {
+        await new Promise((r) => setImmediate(r));
+        lastYieldMs = Date.now();
+        // Re-check after yielding — the SIGINT handler runs during the
+        // event-loop tick we just gave it, so the flag may have flipped.
+        if (signal?.aborted) throw new DOMException('Analysis cancelled', 'AbortError');
       }
     }
   }

@@ -35,13 +35,22 @@ jobs:
         run: pnpm build:dist
 
       - name: Set version from tag
+        id: version
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           cd dist
           npm pkg set version="$VERSION"
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE="${VERSION#*-}"
+            NPM_TAG="${PRERELEASE%%.*}"
+          else
+            NPM_TAG="latest"
+          fi
+          echo "npm_tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing under npm dist-tag: $NPM_TAG"
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --tag "${{ steps.version.outputs.npm_tag }}"
         working-directory: dist
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

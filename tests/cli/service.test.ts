@@ -17,7 +17,6 @@ import { parseEnvFile } from '../../tools/cli/src/commands/service/env'
 // Test log rotation
 import {
   rotateLogs,
-  rotateErrorLogs,
   getLogDir,
   getLogPath,
 } from '../../tools/cli/src/commands/service/logs'
@@ -209,12 +208,23 @@ describe('Log rotation', () => {
     expect(fs.statSync(path.join(logDir, 'truecourse.log.1')).size).toBeGreaterThan(10 * 1024 * 1024)
   })
 
-  it('rotateErrorLogs works the same way for error log', () => {
+  it('rotates the supervisor stderr capture file (dashboard.err.log)', () => {
+    const logFile = path.join(logDir, 'dashboard.err.log')
+    const buf = Buffer.alloc(10 * 1024 * 1024 + 1, 'x')
+    fs.writeFileSync(logFile, buf)
+
+    rotateLogs(logDir)
+
+    expect(fs.existsSync(logFile)).toBe(false)
+    expect(fs.existsSync(path.join(logDir, 'dashboard.err.log.1'))).toBe(true)
+  })
+
+  it('rotates the legacy truecourse.error.log for back-compat', () => {
     const logFile = path.join(logDir, 'truecourse.error.log')
     const buf = Buffer.alloc(10 * 1024 * 1024 + 1, 'x')
     fs.writeFileSync(logFile, buf)
 
-    rotateErrorLogs(logDir)
+    rotateLogs(logDir)
 
     expect(fs.existsSync(logFile)).toBe(false)
     expect(fs.existsSync(path.join(logDir, 'truecourse.error.log.1'))).toBe(true)
@@ -226,8 +236,8 @@ describe('getLogDir / getLogPath', () => {
     expect(getLogDir()).toBe(path.join(os.homedir(), '.truecourse', 'logs'))
   })
 
-  it('getLogPath returns ~/.truecourse/logs/truecourse.log', () => {
-    expect(getLogPath()).toBe(path.join(os.homedir(), '.truecourse', 'logs', 'truecourse.log'))
+  it('getLogPath returns ~/.truecourse/logs/dashboard.log', () => {
+    expect(getLogPath()).toBe(path.join(os.homedir(), '.truecourse', 'logs', 'dashboard.log'))
   })
 })
 

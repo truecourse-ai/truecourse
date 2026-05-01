@@ -44,3 +44,35 @@ def classify_error(error: BaseException) -> str:
     if isinstance(error, ConnectionError):
         return "network"
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Walrus bound names consumed in the same expression. Walrus evaluates
+# left-to-right; the bound name is in scope for the rest of the surrounding
+# expression. undefined-local-variable should not flag any of these.
+# ---------------------------------------------------------------------------
+
+
+def fallback_class(data: dict, default: str) -> str:
+    """Walrus inside a conditional expression — `c` is consumed by the
+    surrounding ternary as soon as it is bound."""
+    return c if (c := data.get("class_")) else default
+
+
+def first_token(items: dict[str, list]) -> dict[str, str]:
+    """Walrus inside a dict-comprehension's filter — `v` is consumed both
+    in the filter clause and in the value position of the same expression."""
+    return {
+        key: v.upper()
+        for key, value in items.items()
+        if isinstance(v := value[0], str) and v.startswith("X")
+    }
+
+
+def first_matching_prefix(tokens: list[str], prefix: str) -> str | None:
+    """Walrus in a while-loop condition — `token` is consumed in the body."""
+    while (token := next(iter(tokens), None)) is not None:
+        if token.startswith(prefix):
+            return token
+        tokens.pop(0)
+    return None

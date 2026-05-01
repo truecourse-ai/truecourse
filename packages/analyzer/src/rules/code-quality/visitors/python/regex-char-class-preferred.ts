@@ -28,6 +28,12 @@ export const pythonRegexCharClassPreferredVisitor: CodeRuleVisitor = {
 
     const pattern = node.text.slice(1, -1) // strip quotes
 
+    // DOTALL mode (`(?s)` inline or `(?is...)` group): `.` is allowed to
+    // match newlines, so `.*?` is the canonical way to match across lines
+    // until a terminator. There's no single character to exclude in a
+    // `[^x]*` rewrite, so the suggestion would be wrong here. Skip.
+    if (/\(\?[aiLmux]*s[aiLmux]*[):]/.test(pattern)) return null
+
     // Look for .+? or .*? patterns preceded by a literal character
     // e.g., "something.+?something" suggests using character class
     if (/\..+?\?/.test(pattern) || /\.\*\?/.test(pattern)) {

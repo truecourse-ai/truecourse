@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isFStringWithInterpolation } from './_helpers.js'
 
 /**
  * Detects dictionary comprehensions with a static (constant) key — every iteration
@@ -19,7 +20,7 @@ export const pythonStaticKeyDictComprehensionRuffVisitor: CodeRuleVisitor = {
     const keyNode = pairNode.childForFieldName('key')
     if (!keyNode) return null
 
-    if (LITERAL_TYPES.has(keyNode.type)) {
+    if (LITERAL_TYPES.has(keyNode.type) && !isFStringWithInterpolation(keyNode)) {
       return makeViolation(
         this.ruleKey, keyNode, filePath, 'high',
         'Static key in dict comprehension',

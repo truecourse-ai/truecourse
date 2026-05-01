@@ -20,7 +20,7 @@ Install, configure, and manage the pre-commit hook that blocks new violations be
 
 - **Always invoke via `npx -y`** — without `-y`, npx will hang on the "Ok to proceed?" prompt whenever the user hasn't cached the latest `truecourse` version.
 - **The hook makes commits slower.** Every commit runs `truecourse analyze --diff`. On large repos that can be tens of seconds per commit. Make sure the user knows before you install.
-- **Baseline required.** The hook needs a `truecourse analyze` to have run at least once in the repo — otherwise every commit is blocked with "run analyze first". If the user hasn't, suggest running `/truecourse-analyze` first (or `npx -y truecourse analyze`).
+- **Baseline required.** The hook diffs against `.truecourse/LATEST.json`. The user needs `truecourse analyze` to have run at least once. On `main`, they should also commit the resulting `LATEST.json` so the hook works in fresh clones and `git worktree add` checkouts without a per-checkout cold-start. If no baseline exists yet, suggest `/truecourse-analyze` first.
 - **`hooks.yaml` is the single source of truth.** Installation creates `<repo>/.truecourse/hooks.yaml` with defaults; edit it to change policy. The file is meant to be committed so the whole team shares one hook config.
 
 ## Instructions
@@ -34,7 +34,7 @@ Install, configure, and manage the pre-commit hook that blocks new violations be
 
 ### 2. Install flow
 
-1. Tell the user the tradeoff upfront: commits will be slower; this repo needs a `truecourse analyze` baseline; policy lives in `.truecourse/hooks.yaml` which they should commit.
+1. Tell the user the tradeoff upfront: commits will be slower; the hook needs a `.truecourse/LATEST.json` baseline (run analyze on `main` and commit the file so it propagates to clones and worktrees); policy lives in `.truecourse/hooks.yaml` which they should also commit.
 2. Run:
    ```
    npx -y truecourse hooks install
@@ -42,7 +42,7 @@ Install, configure, and manage the pre-commit hook that blocks new violations be
 3. Relay the output. Two files get created:
    - `.git/hooks/pre-commit` (the script git invokes)
    - `.truecourse/hooks.yaml` (starter policy, blocks `critical` and `high` by default, LLM off)
-4. If the user hasn't run a full analysis in this repo, suggest `/truecourse-analyze` — without it, every commit will be blocked with "no baseline" until they do.
+4. If the user hasn't run a full analysis in this repo, suggest `/truecourse-analyze` — without a baseline, the hook has nothing to diff against. After analyze on `main`, also remind them to commit `.truecourse/LATEST.json` so fresh worktrees/clones inherit it.
 
 ### 3. Status flow
 

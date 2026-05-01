@@ -21,6 +21,22 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // Skip docstrings — a string node sitting as the first statement of a
+    // module / class / function body is documentation, not code that ships
+    // secrets. The Python tree-sitter shape is:
+    //   <module|block>
+    //     <expression_statement>          ← parent.parent
+    //       <string>                      ← node
+    if (parent?.type === 'expression_statement') {
+      const grandParent = parent.parent
+      if (grandParent && (grandParent.type === 'module' || grandParent.type === 'block')) {
+        const firstChild = grandParent.namedChild(0)
+        if (firstChild && firstChild.id === parent.id) {
+          return null
+        }
+      }
+    }
+
     // ── Pattern-based detection (222 patterns) ──────────────────────────
     const match = scanForSecrets(stripped)
     if (match) {
@@ -52,7 +68,32 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
           /https?:\/\//.test(stripped)                          // URLs
           || /^(true|false|null|undefined|localhost|None|True|False|Bearer)$/i.test(stripped) // literals & common tokens
           || /[[\]<>{}()#.=\s]/.test(stripped)                  // selectors, HTML, format strings, paths
-        if (secretNames.some((s) => name.includes(s)) && stripped.length >= 8 && !isNonSecretName && !isNonSecretValue) {
+
+        // Vocabulary-tag pattern: the literal *is* the field name (or a
+        // plain-text extension of it). Catches things like
+        //   class AttributeType(StrEnum): PASSWORD = "password"     # enum tag
+        //   { password: 'Password' }                                # UI label
+        //   IDLINK_PROPS = { "password": "hashed_password" }        # field-name map
+        // None of these are credentials — they describe a *type* of evidence
+        // or a UI string, and have no entropy. We keep this carve-out narrow
+        // by requiring the value to be plain letters/underscores only — real
+        // credentials have digits, special characters, or both.
+        const nameClean = name.replace(/^['"`]+|['"`]+$/g, '')
+        const valueClean = stripped.toLowerCase()
+        const isPlainAlphaSnake = /^[a-z_]+$/.test(valueClean)
+        const isVocabularyTag =
+          isPlainAlphaSnake && nameClean.length >= 4 && (
+            valueClean === nameClean ||
+            valueClean.includes(nameClean)
+          )
+
+        if (
+          secretNames.some((s) => name.includes(s)) &&
+          stripped.length >= 8 &&
+          !isNonSecretName &&
+          !isNonSecretValue &&
+          !isVocabularyTag
+        ) {
           return makeViolation(
             this.ruleKey, node, filePath, 'critical',
             'Hardcoded secret detected',
@@ -294,11 +335,19 @@ export const hardcodedBlockchainMnemonicVisitor: CodeRuleVisitor = {
 // hardcoded-database-password
 // ---------------------------------------------------------------------------
 
-const DB_CONNECTION_PATTERNS = [
-  /(?:mysql|postgresql|postgres|mongodb|sqlite|mssql|oracle):\/\/[^:]+:([^@]+)@/i,
+// URL-style DSN: scheme://user:PASSWORD@host. Group 1 captures the password
+// segment so we can check whether it's a literal vs an interpolation expression.
+const DB_URL_PATTERN = /(?:mysql|postgresql|postgres|mongodb|sqlite|mssql|oracle):\/\/[^:]+:([^@]+)@/i
+const DB_PASSWORD_KV_PATTERNS = [
   /password\s*=\s*['"][^'"]{4,}['"]/i,
   /pwd\s*=\s*['"][^'"]{4,}['"]/i,
 ]
+
+// A password segment that is *not* a literal value: f-string / template
+// interpolation, printf placeholder, env-var reference, angle-placeholder,
+// shell substitution. If the URL's password slot matches any of these the
+// connection string is templated, not hardcoded.
+const NON_LITERAL_PASSWORD_SEGMENT = /^\{[^{}]*\}$|^\$\{[^}]*\}$|^%s$|^%\([^)]+\)s$|^<[^>]+>$|^\$\([^)]*\)$|^\$[A-Z_][A-Z0-9_]*$|process\.env/i
 
 export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-database-password',
@@ -307,10 +356,28 @@ export const hardcodedDatabasePasswordVisitor: CodeRuleVisitor = {
     const text = node.text
     const stripped = text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
 
-    for (const pattern of DB_CONNECTION_PATTERNS) {
+    // Generic placeholder/env-var exclusion (applies to any pattern).
+    if (/\$\{|%s|<password>|\$\(|process\.env/i.test(stripped)) return null
+
+    const urlMatch = DB_URL_PATTERN.exec(stripped)
+    if (urlMatch) {
+      // URL-style match: suppress when the captured password segment is a
+      // templating expression rather than a literal value. Covers the most
+      // common Python idiom — `f"postgres://{user}:{password}@..."` — which
+      // the generic exclusion above misses (Python f-strings use `{...}`,
+      // not `${...}`).
+      if (NON_LITERAL_PASSWORD_SEGMENT.test(urlMatch[1])) return null
+      return makeViolation(
+        this.ruleKey, node, filePath, 'critical',
+        'Hardcoded database password',
+        'Database connection string contains a hardcoded password.',
+        sourceCode,
+        'Load database credentials from environment variables.',
+      )
+    }
+
+    for (const pattern of DB_PASSWORD_KV_PATTERNS) {
       if (pattern.test(stripped)) {
-        // Exclude placeholders and env-var references
-        if (/\$\{|%s|<password>|\$\(|process\.env/i.test(stripped)) return null
         return makeViolation(
           this.ruleKey, node, filePath, 'critical',
           'Hardcoded database password',

@@ -23,6 +23,39 @@ function isConstantName(name: string): boolean {
   return name === name.toUpperCase()
 }
 
+// True if the module declares a `threading.Lock()` / `threading.RLock()` /
+// `Lock()` / `RLock()` / `asyncio.Lock()` at module scope. The presence of
+// any such guard is a strong signal that the writer has already considered
+// concurrency for the module's mutable state - suppress the FP rather than
+// nag.
+function moduleHasLockGuard(moduleNode: SyntaxNode): boolean {
+  for (let i = 0; i < moduleNode.namedChildCount; i++) {
+    const stmt = moduleNode.namedChild(i)
+    if (!stmt) continue
+    const inner = stmt.type === 'expression_statement' ? stmt.namedChild(0) : stmt
+    if (inner?.type !== 'assignment') continue
+    const rhs = inner.childForFieldName('right')
+    if (rhs?.type !== 'call') continue
+    const fn = rhs.childForFieldName('function')
+    if (!fn) continue
+    const text = fn.text
+    if (
+      text === 'threading.Lock' ||
+      text === 'threading.RLock' ||
+      text === 'threading.Semaphore' ||
+      text === 'threading.BoundedSemaphore' ||
+      text === 'asyncio.Lock' ||
+      text === 'multiprocessing.Lock' ||
+      text === 'multiprocessing.RLock' ||
+      text === 'Lock' ||
+      text === 'RLock'
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 export const pythonSharedMutableModuleStateVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/shared-mutable-module-state',
   languages: ['python'],
@@ -39,6 +72,11 @@ export const pythonSharedMutableModuleStateVisitor: CodeRuleVisitor = {
     const varName = left.text
     if (isConstantName(varName)) return null // ALL_CAPS are conventions for constants
     if (varName === '__all__') return null // __all__ defines module public API, never mutated at runtime
+
+    // Walk to the module root and check for a colocated Lock declaration.
+    let moduleNode: SyntaxNode | null = node.parent
+    while (moduleNode && moduleNode.type !== 'module') moduleNode = moduleNode.parent
+    if (moduleNode && moduleHasLockGuard(moduleNode)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'high',

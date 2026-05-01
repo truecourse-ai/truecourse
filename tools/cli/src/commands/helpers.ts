@@ -1,11 +1,12 @@
 import * as p from "@clack/prompts";
 import { exec } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { resolveRepoDir } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
 
@@ -406,10 +407,51 @@ export function hasInstalledSkills(repoPath: string): boolean {
   return computeMissingSkills(repoPath).length === 0;
 }
 
+// --------------------------------------------------------------------------
+// Hash-based safe upgrade: lockfile records the SHA of each skill at the
+// time we copied it. On later runs we can tell "unmodified, safe to
+// overwrite" from "user-edited, leave alone" by comparing on-disk content
+// to the recorded SHA.
+// --------------------------------------------------------------------------
+
+const SKILLS_LOCKFILE_NAME = ".truecourse-skills.json";
+
+function skillFilePath(parent: string, name: string): string {
+  return resolve(parent, name, "SKILL.md");
+}
+
+function sha256OfFile(filePath: string): string | null {
+  if (!existsSync(filePath)) return null;
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function skillsLockPath(repoPath: string): string {
+  return resolve(skillsParentDir(repoPath), SKILLS_LOCKFILE_NAME);
+}
+
+function readSkillsLock(repoPath: string): Record<string, string> {
+  const lockPath = skillsLockPath(repoPath);
+  if (!existsSync(lockPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(lockPath, "utf-8"));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSkillsLock(repoPath: string, lock: Record<string, string>): void {
+  const lockPath = skillsLockPath(repoPath);
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n");
+}
+
 /**
  * Copy each named skill from the bundled source dir into the repo at the
  * flat layout. Never overwrites an existing skill — user customizations
  * are preserved; the "missing" list already excludes anything present.
+ * Records the SHA of each freshly-installed `SKILL.md` so later sync runs
+ * can tell "unmodified" from "customized."
  */
 function copySkills(repoPath: string, skillNames: string[]): void {
   const src = resolveSkillsSrcDir();
@@ -421,17 +463,117 @@ function copySkills(repoPath: string, skillNames: string[]): void {
   const parent = skillsParentDir(repoPath);
   mkdirSync(parent, { recursive: true });
 
+  const lock = readSkillsLock(repoPath);
   for (const name of skillNames) {
     const skillSrc = resolve(src, name);
     const skillDest = resolve(parent, name);
     if (existsSync(skillDest)) continue; // belt-and-suspenders
     cpSync(skillSrc, skillDest, { recursive: true });
+    const sha = sha256OfFile(skillFilePath(parent, name));
+    if (sha) lock[name] = sha;
   }
+  writeSkillsLock(repoPath, lock);
 
   p.log.success(
     `Installed ${skillNames.length} Claude Code skill${skillNames.length === 1 ? "" : "s"}:`,
   );
   for (const name of skillNames) p.log.message(`  - ${name}`);
+}
+
+/**
+ * Refresh shipped skills already present in the repo. For each, compare
+ * the package's shipped `SKILL.md` SHA, the on-disk SHA, and the SHA
+ * recorded at last install (the lockfile). Four outcomes:
+ *
+ *   shipped == on-disk      → already current, no-op
+ *   on-disk == recorded     → unmodified since our last write, overwrite
+ *   no recorded sha         → pre-lockfile install (one-time migration):
+ *                             overwrite with shipped, record the new sha
+ *   on-disk != recorded     → user edited after our last write, warn
+ *
+ * Lockfile entries are refreshed whenever the recorded sha drifts from
+ * reality so future runs branch correctly.
+ */
+export function syncShippedSkills(repoPath: string, srcDirOverride?: string): void {
+  const src = srcDirOverride ?? resolveSkillsSrcDir();
+  if (!src) return;
+  const parent = skillsParentDir(repoPath);
+  if (!existsSync(parent)) return;
+
+  const shipped = listSkillDirs(src);
+  const lock = readSkillsLock(repoPath);
+  const updated: string[] = [];
+  const migrated: string[] = [];
+  const customized: string[] = [];
+  let lockChanged = false;
+
+  const overwriteWithShipped = (name: string, shippedSha: string): void => {
+    const skillSrc = resolve(src, name);
+    const skillDest = resolve(parent, name);
+    rmSync(skillDest, { recursive: true, force: true });
+    cpSync(skillSrc, skillDest, { recursive: true });
+    lock[name] = shippedSha;
+    lockChanged = true;
+  };
+
+  for (const name of shipped) {
+    const skillSrcFile = skillFilePath(src, name);
+    const skillDestFile = skillFilePath(parent, name);
+    if (!existsSync(skillDestFile)) continue; // not installed → handled separately
+
+    const shippedSha = sha256OfFile(skillSrcFile);
+    const installedSha = sha256OfFile(skillDestFile);
+    if (!shippedSha || !installedSha) continue;
+
+    if (shippedSha === installedSha) {
+      if (lock[name] !== shippedSha) {
+        lock[name] = shippedSha;
+        lockChanged = true;
+      }
+      continue;
+    }
+
+    const recordedSha = lock[name];
+    if (!recordedSha) {
+      // Pre-lockfile install: we have no record of what we last wrote, so
+      // we can't tell "old shipped version" from "user-customized." The
+      // overwhelming common case is the former — almost no one edits
+      // SKILL.md by hand. Treat this as a one-time migration: overwrite
+      // and seed the lockfile so future upgrades branch cleanly.
+      overwriteWithShipped(name, shippedSha);
+      migrated.push(name);
+      continue;
+    }
+
+    if (installedSha === recordedSha) {
+      overwriteWithShipped(name, shippedSha);
+      updated.push(name);
+    } else {
+      customized.push(name);
+    }
+  }
+
+  if (lockChanged) writeSkillsLock(repoPath, lock);
+
+  if (updated.length > 0) {
+    p.log.info(
+      `Updated ${updated.length} Claude Code skill${updated.length === 1 ? "" : "s"} to the current version: ${updated.join(", ")}`,
+    );
+  }
+  if (migrated.length > 0) {
+    const word = migrated.length === 1 ? "skill" : "skills";
+    p.log.info(
+      `Migrated ${migrated.length} pre-existing Claude Code ${word} to the current shipped version: ${migrated.join(", ")}.\n` +
+        `If you had local edits, they're recoverable from git history. Future upgrades will preserve customizations automatically.`,
+    );
+  }
+  if (customized.length > 0) {
+    const word = customized.length === 1 ? "skill has" : "skills have";
+    p.log.warn(
+      `Claude Code ${word} local edits and a newer version is available — keeping yours: ${customized.join(", ")}.\n` +
+        `To take the new version, delete the skill folder under .claude/skills/ and re-run truecourse.`,
+    );
+  }
 }
 
 /**
@@ -452,6 +594,13 @@ export async function promptInstallSkills(
   repoPath: string,
   { install }: { install?: boolean } = {},
 ): Promise<void> {
+  // `--no-skills` is a hard opt-out: don't sync, don't prompt, don't write.
+  if (install === false) return;
+
+  // Refresh already-installed shipped skills first so users on older
+  // versions silently get the current SKILL.md (when unmodified).
+  syncShippedSkills(repoPath);
+
   const missing = computeMissingSkills(repoPath);
   if (missing.length === 0) return;
 
@@ -459,7 +608,6 @@ export async function promptInstallSkills(
     copySkills(repoPath, missing);
     return;
   }
-  if (install === false) return;
 
   if (!isInteractive()) return;
 

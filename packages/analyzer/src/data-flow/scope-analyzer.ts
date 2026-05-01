@@ -195,6 +195,27 @@ function isPropertyAccess(node: SyntaxNode): boolean {
   }
   // Python keyword argument keys (e.g., datefmt=...) are not variable references
   if (parent.type === 'keyword_argument' && parent.childForFieldName('name')?.id === node.id) return true
+  // JSX prop name: `<div className="x" />` — the `className` identifier is
+  // a prop name on the element, not a JS variable reference.
+  if (parent.type === 'jsx_attribute' && parent.namedChild(0)?.id === node.id) return true
+  // Lowercase / hyphenated JSX element name: `<div>`, `<my-element>`. By
+  // JSX semantics these are intrinsic HTML / SVG / custom-element tags,
+  // not JS bindings. Capitalised names (`<MyComponent>`) ARE references —
+  // those still resolve normally so no-undef can validate them.
+  if (
+    parent.type === 'jsx_opening_element' ||
+    parent.type === 'jsx_closing_element' ||
+    parent.type === 'jsx_self_closing_element'
+  ) {
+    const tagName = parent.childForFieldName('name')
+    if (tagName?.id === node.id) {
+      const text = node.text
+      if (text.length > 0) {
+        const first = text[0]!
+        if (first === first.toLowerCase() || text.includes('-')) return true
+      }
+    }
+  }
   return false
 }
 
@@ -237,6 +258,12 @@ function isJsDeclarationPosition(node: SyntaxNode): boolean {
   }
   // catch parameter
   if (parent.type === 'catch_clause') return true
+  // for...of / for...in loop variable
+  if (parent.type === 'for_in_statement' && parent.childForFieldName('left')?.id === node.id) return true
+  // Single-param arrow without parentheses: `t => …`. Tree-sitter places
+  // the bare identifier directly under `arrow_function` (no
+  // `formal_parameters` wrapper).
+  if (parent.type === 'arrow_function' && parent.childForFieldName('parameter')?.id === node.id) return true
 
   return false
 }
@@ -434,10 +461,17 @@ export function buildScopeTree(
       (parent.type === 'function_declaration' || parent.type === 'generator_function_declaration') &&
       parent.childForFieldName('name')?.id === node.id
     ) {
-      // Functions are hoisted to the enclosing function scope
-      const targetScope = findFunctionScope(scope)
-      if (!targetScope.variables.has(node.text)) {
-        createVariable(node.text, 'function', node, targetScope, false)
+      // Functions are hoisted to the *enclosing* function scope — the scope
+      // outside the function being declared, not the function's own body
+      // scope. The walker has already entered the function and made its
+      // body scope current, so we step one parent up before searching for
+      // the next function/module scope. Without this step the function
+      // declaration registers inside its own body and is invisible to
+      // sibling callers, e.g. `els.foo = byId(...)` where `byId` is a
+      // sibling helper would resolve as undefined.
+      const enclosing = scope.parent ? findFunctionScope(scope.parent) : scope
+      if (!enclosing.variables.has(node.text)) {
+        createVariable(node.text, 'function', node, enclosing, false)
       }
       return
     }
@@ -467,6 +501,16 @@ export function buildScopeTree(
       return
     }
 
+    // Single-param arrow without parentheses: `t => …`. The arrow_function
+    // has the identifier as a direct child via the `parameter` field.
+    if (parent.type === 'arrow_function' && parent.childForFieldName('parameter')?.id === node.id) {
+      const funcScope = nodeToScope.get(parent.id)
+      if (funcScope && !funcScope.variables.has(node.text)) {
+        createVariable(node.text, 'parameter', node, funcScope, false)
+      }
+      return
+    }
+
     // Rest patterns in parameters
     if (parent.type === 'rest_pattern' || parent.type === 'rest_element') {
       const funcNode = findFunctionAncestor(node)
@@ -491,6 +535,104 @@ export function buildScopeTree(
         }
         return
       }
+    }
+
+    // Identifier as a direct child of array_pattern / object_pattern in
+    // formal parameters: e.g. `([key, value]) => …` or `({ a, b }) => …`
+    // (the shorthand `{ a }` form is handled separately above; this is the
+    // explicit `{ a: a }` / `[a, b]` shape). Without this, destructured
+    // arrow / function params look undeclared to no-undef and friends.
+    if (parent.type === 'array_pattern' || parent.type === 'object_pattern') {
+      if (isInFormalParameters(node)) {
+        const funcNode = findFunctionAncestor(node)
+        if (funcNode) {
+          const funcScope = nodeToScope.get(funcNode.id)
+          if (funcScope && !funcScope.variables.has(node.text)) {
+            createVariable(node.text, 'parameter', node, funcScope, false)
+          }
+        }
+        return
+      }
+
+      // Same identifier shape but inside a variable_declarator:
+      //   `const [open, setOpen] = useState(...)`
+      //   `const { user, token } = ctx`
+      // The walker doesn't visit a wrapping `variable_declarator`-positioned
+      // identifier (the LHS is the pattern itself), so the existing
+      // variable_declarator branch never sees these. Walk up to find the
+      // declarator + its declaration kind and register accordingly.
+      let ancestor: SyntaxNode | null = parent.parent
+      let declarator: SyntaxNode | null = null
+      let forIn: SyntaxNode | null = null
+      while (ancestor) {
+        if (ancestor.type === 'variable_declarator') {
+          declarator = ancestor
+          break
+        }
+        if (ancestor.type === 'for_in_statement' && ancestor.childForFieldName('left')?.id === parent.id) {
+          forIn = ancestor
+          break
+        }
+        if (
+          ancestor.type === 'function_declaration' ||
+          ancestor.type === 'function_expression' ||
+          ancestor.type === 'arrow_function' ||
+          ancestor.type === 'method_definition' ||
+          ancestor.type === 'program'
+        ) break
+        ancestor = ancestor.parent
+      }
+      if (declarator) {
+        const grandparent = declarator.parent
+        if (grandparent?.type === 'variable_declaration') {
+          const targetScope = findFunctionScope(scope)
+          if (!targetScope.variables.has(node.text)) {
+            createVariable(node.text, 'var', node, targetScope, false)
+          }
+        } else if (grandparent?.type === 'lexical_declaration') {
+          const keyword = grandparent.child(0)?.text
+          const kind: DeclarationKind = keyword === 'const' ? 'const' : 'let'
+          if (!scope.variables.has(node.text)) {
+            createVariable(node.text, kind, node, scope, false)
+          }
+        }
+        return
+      }
+      if (forIn) {
+        // `for (const [k, v] of pairs)` — bindings live in the enclosing
+        // scope (the loop's body block creates its own scope for body
+        // statements, but the loop variable resolves via the chain).
+        const kindText = forIn.childForFieldName('kind')?.text
+        const kind: DeclarationKind =
+          kindText === 'var' ? 'var' :
+          kindText === 'const' ? 'const' :
+          kindText === 'let' ? 'let' :
+          'for-variable'
+        const targetScope = kind === 'var' ? findFunctionScope(scope) : scope
+        if (!targetScope.variables.has(node.text)) {
+          createVariable(node.text, kind, node, targetScope, false)
+        }
+        return
+      }
+    }
+
+    // for...of / for...in declaration: tree-sitter JS lifts the loop
+    // variable to a direct identifier child of for_in_statement (with
+    // `kind` field = "const" | "let" | "var") rather than wrapping it
+    // in a variable_declarator. Without this branch, `for (const sep
+    // of items) …` looks undeclared to no-undef.
+    if (parent.type === 'for_in_statement' && parent.childForFieldName('left')?.id === node.id) {
+      const kindText = parent.childForFieldName('kind')?.text
+      const kind: DeclarationKind =
+        kindText === 'var' ? 'var' :
+        kindText === 'const' ? 'const' :
+        kindText === 'let' ? 'let' :
+        'for-variable'
+      const targetScope = kind === 'var' ? findFunctionScope(scope) : scope
+      if (!targetScope.variables.has(node.text)) {
+        createVariable(node.text, kind, node, targetScope, false)
+      }
+      return
     }
 
     // Shorthand property identifier pattern
@@ -935,25 +1077,41 @@ export function buildScopeTree(
     // Walk up to find the enclosing variable_declarator and create the binding
     // directly here.
     if (isJs && node.type === 'shorthand_property_identifier_pattern') {
-      // Find the enclosing variable_declarator (could be nested inside object_pattern,
-      // pair_pattern, array_pattern, etc.)
+      // Find the enclosing variable_declarator OR formal_parameters /
+      // function boundary. The shorthand pattern can land in two places:
+      //   - `const { name } = obj` → declarator-based binding
+      //   - `({ name }) => …` → function-parameter binding
       let ancestor: SyntaxNode | null = node.parent
       let declarator: SyntaxNode | null = null
+      let isParam = false
+      let funcNode: SyntaxNode | null = null
       while (ancestor) {
         if (ancestor.type === 'variable_declarator') {
           declarator = ancestor
           break
         }
-        // Stop walking if we hit a function boundary — destructured params handled separately
         if (
           ancestor.type === 'formal_parameters' ||
           ancestor.type === 'function_declaration' ||
+          ancestor.type === 'function_expression' ||
           ancestor.type === 'arrow_function' ||
-          ancestor.type === 'method_definition'
+          ancestor.type === 'method_definition' ||
+          ancestor.type === 'generator_function_declaration' ||
+          ancestor.type === 'generator_function'
         ) {
+          isParam = true
+          // Find the actual function node so we can target its body scope.
+          funcNode = ancestor.type === 'formal_parameters' ? ancestor.parent : ancestor
           break
         }
         ancestor = ancestor.parent
+      }
+      if (isParam && funcNode) {
+        const funcScope = nodeToScope.get(funcNode.id)
+        const name = node.text
+        if (funcScope && !funcScope.variables.has(name)) {
+          createVariable(name, 'parameter', node, funcScope, false)
+        }
       }
       if (declarator) {
         const grandparent = declarator.parent

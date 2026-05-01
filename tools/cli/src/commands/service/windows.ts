@@ -1,11 +1,17 @@
 import { execSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import type { ServicePlatform } from "./platform.js";
 
-const SERVICE_NAME = "TrueCourse";
+// Display name shown in the Services UI.
+const SERVICE_DISPLAY_NAME = "TrueCourse";
+// SCM service name node-windows actually registers under. It auto-derives
+// this from the display name as `<sanitized lowercase>.exe`, ignoring any
+// explicit `id` we set in the Service config (verified empirically). All
+// sc.exe queries must use this exact string to find the service.
+const SERVICE_SCM_NAME = "truecourse.exe";
 
 export class WindowsService implements ServicePlatform {
-  private svc: any;
-
   private async getNodeWindows(): Promise<any> {
     try {
       return require("node-windows");
@@ -20,17 +26,26 @@ export class WindowsService implements ServicePlatform {
   async install(serverPath: string, logPath: string): Promise<void> {
     const nw = await this.getNodeWindows();
     const { Service } = nw;
+    const logDir = path.dirname(logPath);
+    // Point the service at the invoking user's `.truecourse/` dir. Without
+    // this the service runs as LocalSystem and `os.homedir()` resolves to
+    // `C:\Windows\System32\config\systemprofile`, so the server reads an
+    // empty registry / config tree and the dashboard shows no projects.
+    const truecourseHome = path.join(os.homedir(), ".truecourse");
 
     return new Promise<void>((resolve, reject) => {
       const svc = new Service({
-        name: SERVICE_NAME,
+        name: SERVICE_DISPLAY_NAME,
         description: "TrueCourse Server",
         script: serverPath,
         nodeOptions: [],
-        env: [{
-          name: "TRUECOURSE_LOG_DIR",
-          value: logPath,
-        }],
+        // Land wrapper logs in our shared log dir (default is the
+        // node-windows install dir, often inside an npx cache).
+        logpath: logDir,
+        env: [
+          { name: "TRUECOURSE_HOME", value: truecourseHome },
+          { name: "TRUECOURSE_LOG_DIR", value: logDir },
+        ],
       });
 
       svc.on("install", () => {
@@ -49,7 +64,7 @@ export class WindowsService implements ServicePlatform {
 
     return new Promise<void>((resolve, reject) => {
       const svc = new Service({
-        name: SERVICE_NAME,
+        name: SERVICE_DISPLAY_NAME,
         script: "", // Not needed for uninstall
       });
 
@@ -60,16 +75,16 @@ export class WindowsService implements ServicePlatform {
   }
 
   async start(): Promise<void> {
-    execSync(`sc.exe start ${SERVICE_NAME}`, { stdio: "pipe" });
+    execSync(`sc.exe start ${SERVICE_SCM_NAME}`, { stdio: "pipe" });
   }
 
   async stop(): Promise<void> {
-    execSync(`sc.exe stop ${SERVICE_NAME}`, { stdio: "pipe" });
+    execSync(`sc.exe stop ${SERVICE_SCM_NAME}`, { stdio: "pipe" });
   }
 
   async status(): Promise<{ running: boolean; pid?: number }> {
     try {
-      const output = execSync(`sc.exe query ${SERVICE_NAME}`, {
+      const output = execSync(`sc.exe query ${SERVICE_SCM_NAME}`, {
         stdio: ["pipe", "pipe", "pipe"],
         encoding: "utf-8",
       });
@@ -86,7 +101,7 @@ export class WindowsService implements ServicePlatform {
 
   async isInstalled(): Promise<boolean> {
     try {
-      execSync(`sc.exe query ${SERVICE_NAME}`, { stdio: "pipe" });
+      execSync(`sc.exe query ${SERVICE_SCM_NAME}`, { stdio: "pipe" });
       return true;
     } catch {
       return false;

@@ -30,14 +30,14 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
     }
 
     // Skip ALL await on call_expression and member_expression chains — any function/method call
-    // may return a Promise at runtime even when static type analysis can't determine it.
-    // This MUST be checked before any type queries to avoid false positives from
-    // LangChain .invoke(), Prisma queries, dynamically typed wrappers, etc.
+    // may return a Promise at runtime even when static type analysis can't determine it
+    // (e.g. LangChain `.invoke()`, Prisma queries, dynamically typed wrappers). Must run
+    // before any type query.
     if (awaitedExpr.type === 'call_expression') return null
     if (awaitedExpr.type === 'member_expression') return null
 
     // If the type is `any` or `unknown`, we can't determine if it's a Promise — skip.
-    // Both are compatible with PromiseLike, so flagging them would be a false positive.
+    // Both are compatible with PromiseLike.
     const isAny = typeQuery.isAnyType(
       filePath,
       awaitedExpr.startPosition.row,

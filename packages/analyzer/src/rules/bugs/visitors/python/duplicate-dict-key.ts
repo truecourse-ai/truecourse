@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isFStringWithInterpolation } from './_helpers.js'
 
 /**
  * Collect all identifier names from a loop variable node, handling
@@ -39,9 +40,12 @@ export const pythonDuplicateDictKeyVisitor: CodeRuleVisitor = {
     const leftNode = forInClause?.childForFieldName('left')
     const loopVarNames = leftNode ? collectLoopVarNames(leftNode) : new Set<string>()
 
-    // A constant key is a literal or an identifier that is NOT any loop variable
+    // A constant key is a literal or an identifier that is NOT any loop variable.
+    // F-strings parse as `string` but are dynamic per iteration when they
+    // interpolate values, so peek at the children to tell them apart.
     const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'true', 'false', 'none'])
-    const isConstantKey = LITERAL_TYPES.has(keyNode.type) ||
+    const isStaticLiteral = LITERAL_TYPES.has(keyNode.type) && !isFStringWithInterpolation(keyNode)
+    const isConstantKey = isStaticLiteral ||
       (keyNode.type === 'identifier' && loopVarNames.size > 0 && !loopVarNames.has(keyNode.text))
 
     if (isConstantKey) {

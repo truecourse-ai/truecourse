@@ -284,7 +284,8 @@ export default function RepoGraphPage() {
     setActiveFilePath(path);
     setActiveFlowId(null);
     setActiveDbId(null);
-  }, [setActiveFilePath, setActiveFlowId, setActiveDbId]);
+    if (path !== null) setLeftTab('files');
+  }, [setActiveFilePath, setActiveFlowId, setActiveDbId, setLeftTab]);
 
   const handleSelectTab = useCallback((path: string | null) => {
     showFileView(path);
@@ -294,22 +295,37 @@ export default function RepoGraphPage() {
     setActiveFlowId(flowId);
     setActiveFilePath(null);
     setActiveDbId(null);
-  }, [setActiveFlowId, setActiveFilePath, setActiveDbId]);
+    if (flowId !== null) setLeftTab('flows');
+  }, [setActiveFlowId, setActiveFilePath, setActiveDbId, setLeftTab]);
 
   const showDatabaseView = useCallback((dbId: string | null) => {
     setActiveDbId(dbId);
     setActiveFilePath(null);
     setActiveFlowId(null);
-  }, [setActiveDbId, setActiveFilePath, setActiveFlowId]);
+    if (dbId !== null) setLeftTab('databases');
+  }, [setActiveDbId, setActiveFilePath, setActiveFlowId, setLeftTab]);
 
   // Home is the default + locked tab. Clicking an active rail icon (which the
   // sidebar signals as `null`) falls back to Home instead of nulling out.
-  // Active file/flow/db IDs persist across tab switches — their detail views
-  // are gated on `leftTab`, so returning to Files/Flows/Databases reopens the
-  // last-viewed item.
+  // When entering Files/Flows/Databases with no active item (e.g. URL params
+  // were stripped by a prior Home visit), restore the last-opened item so the
+  // detail view reopens instead of showing the empty placeholder.
   const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
-    setLeftTab(tab ?? 'home');
-  }, [setLeftTab]);
+    const next = tab ?? 'home';
+    setLeftTab(next);
+    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
+      setActiveFlowId(openFlows[openFlows.length - 1].id);
+    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
+      setActiveFilePath(openFiles[openFiles.length - 1].path);
+    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
+      setActiveDbId(openDatabases[openDatabases.length - 1].id);
+    }
+  }, [
+    setLeftTab,
+    activeFlowId, openFlows, setActiveFlowId,
+    activeFilePath, openFiles, setActiveFilePath,
+    activeDbId, openDatabases, setActiveDbId,
+  ]);
 
   const handleOpenFlow = useCallback((flowId: string, flowName: string, pinned: boolean) => {
     setOpenFlows((prev) => {
@@ -389,7 +405,15 @@ export default function RepoGraphPage() {
   // Note: graph node clicks store into `selectedService` for visual highlight only —
   // we deliberately don't pass it to useViolations so the violations list is never
   // filtered as a side effect of clicking a graph node.
-  const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } = useViolations(repoId, undefined, selectedAnalysisId ?? undefined);
+  // Mirror the per-tab refetch pattern used by useFlows / useCodeViolationSummary /
+  // useGraph: the hook re-fetches whenever `enabled` flips true again. The
+  // violations list is only rendered inside HomePanel, so gating strictly on
+  // 'home' guarantees a refetch on every entry into the Home tab — including
+  // from Graphs or Databases, which both kept enabled=true under the broader
+  // gate and silently skipped the refresh. Other consumers (SchemaPanel ER
+  // annotations, sidebar badge count) keep the last fetched value.
+  const { violations: rawViolations, allViolations: rawAllViolations, isLoading: violationsLoading, refetch: refetchViolations } =
+    useViolations(repoId, undefined, selectedAnalysisId ?? undefined, { enabled: leftTab === 'home' });
   const { diffResult, isChecking: isDiffChecking, error: diffError, run: runDiffCheckAnalysis, load: loadDiffCheck } = useDiffCheck(repoId, onEvent);
 
   // In diff mode with no diff result yet, show no violations

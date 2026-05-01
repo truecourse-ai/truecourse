@@ -16,7 +16,7 @@ import {
   type TrueCourseConfig,
 } from "./helpers.js";
 import { getPlatform } from "./service/platform.js";
-import { rotateLogs, rotateErrorLogs, getLogDir, getLogPath, tailLogs } from "./service/logs.js";
+import { rotateLogs, getLogDir, getLogPath, tailLogs, dumpLogTails } from "./service/logs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -110,7 +110,6 @@ async function runServiceMode(serverEntry: string): Promise<void> {
   const url = getServerUrl();
 
   rotateLogs(logDir);
-  rotateErrorLogs(logDir);
 
   const installed = await platform.isInstalled();
   if (!installed) {
@@ -126,8 +125,15 @@ async function runServiceMode(serverEntry: string): Promise<void> {
 
   const healthy = await waitForHealth(url);
   if (!healthy) {
-    p.log.warn("Service started but server hasn't responded yet.");
-    p.log.info("Check logs with: truecourse dashboard logs");
+    p.log.warn("Service started but server hasn't responded on the health endpoint.");
+    p.log.info(`Log dir: ${logDir}`);
+    const dumped = dumpLogTails(logDir);
+    if (!dumped) {
+      p.log.info(
+        "No log files have appeared yet — the supervisor may not have launched the server. " +
+          "Re-run in a few seconds or use: truecourse dashboard logs",
+      );
+    }
     process.exit(1);
   }
 

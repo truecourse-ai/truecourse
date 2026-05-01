@@ -70,3 +70,41 @@ export function isInsidePromiseConstructor(node: SyntaxNode): boolean {
   }
   return false
 }
+
+/**
+ * Heuristic: does this file look like an AWS Lambda handler? Lambda's runtime
+ * owns the process lifecycle — user-installed top-level error handlers can
+ * interfere with the runtime's reporting and are AWS-discouraged. Entry-point
+ * rules should skip Lambda files.
+ *
+ * Detection looks for any of:
+ *   - import from `aws-lambda` (the canonical types package)
+ *   - canonical Lambda type names (APIGatewayProxyEvent, etc.)
+ *   - the conventional `export const handler = async (event...)` shape
+ */
+export function looksLikeAwsLambda(sourceCode: string): boolean {
+  if (/\baws-lambda\b/.test(sourceCode)) return true
+  if (/\bAPIGatewayProxy(Event|Result|Handler)/.test(sourceCode)) return true
+  if (/\bLambda(Event|Result|Context|Handler)\b/.test(sourceCode)) return true
+  if (/export\s+const\s+handler\s*[:=]\s*async\s*\(/.test(sourceCode)) return true
+  return false
+}
+
+/**
+ * Heuristic: does this file look like an AWS CDK synthesis script (typically
+ * `bin/app.ts`)? CDK synth is short-lived; crashing on misconfiguration is the
+ * desired behavior, so a top-level error handler that swallows the failure
+ * would mask deployment-time issues.
+ *
+ * Detection looks for any of:
+ *   - import from `aws-cdk-lib` or `@aws-cdk/...`
+ *   - `new cdk.App(...)` / `new cdk.Stack(...)`
+ *   - `app.synth()`
+ */
+export function looksLikeAwsCdkScript(sourceCode: string): boolean {
+  if (/\baws-cdk-lib\b/.test(sourceCode)) return true
+  if (/@aws-cdk\//.test(sourceCode)) return true
+  if (/\bnew\s+cdk\.(App|Stack)\b/.test(sourceCode)) return true
+  if (/\bapp\.synth\(\)/.test(sourceCode)) return true
+  return false
+}

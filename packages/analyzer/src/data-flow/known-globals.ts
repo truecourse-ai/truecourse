@@ -1,9 +1,36 @@
 export const JS_GLOBALS = new Set([
-  // Browser
+  // Browser — global namespaces
   'window', 'document', 'navigator', 'location', 'history', 'localStorage', 'sessionStorage',
-  'fetch', 'XMLHttpRequest', 'WebSocket', 'URL', 'URLSearchParams',
-  'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'requestAnimationFrame',
+  'screen', 'performance', 'crypto', 'caches', 'indexedDB', 'matchMedia',
+  // Browser — networking / fetch
+  'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource',
+  'URL', 'URLSearchParams', 'Headers', 'Request', 'Response',
+  'FormData', 'Blob', 'File', 'FileReader', 'FileList',
+  'AbortController', 'AbortSignal', 'ReadableStream', 'WritableStream', 'TransformStream',
+  // Browser — events
+  'Event', 'CustomEvent', 'EventTarget', 'MessageEvent', 'ErrorEvent', 'CloseEvent',
+  'ProgressEvent', 'PointerEvent', 'KeyboardEvent', 'MouseEvent', 'TouchEvent',
+  'DragEvent', 'WheelEvent', 'FocusEvent', 'InputEvent', 'StorageEvent',
+  'PopStateEvent', 'HashChangeEvent', 'BeforeUnloadEvent',
+  // Browser — DOM
+  'Node', 'Element', 'HTMLElement', 'HTMLInputElement', 'HTMLButtonElement',
+  'HTMLFormElement', 'HTMLSelectElement', 'HTMLTextAreaElement', 'HTMLAnchorElement',
+  'HTMLImageElement', 'HTMLCanvasElement', 'HTMLVideoElement', 'HTMLAudioElement',
+  'HTMLDivElement', 'HTMLSpanElement', 'HTMLScriptElement', 'HTMLStyleElement',
+  'HTMLTemplateElement', 'HTMLIFrameElement', 'HTMLDialogElement',
+  'DocumentFragment', 'ShadowRoot', 'Text', 'Comment', 'Range', 'Selection',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver', 'PerformanceObserver',
+  'NodeList', 'HTMLCollection', 'DOMTokenList',
+  'CanvasRenderingContext2D', 'OffscreenCanvas',
+  // Browser — timers / scheduling
+  'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
+  'requestAnimationFrame', 'cancelAnimationFrame',
+  'requestIdleCallback', 'cancelIdleCallback',
+  // Browser — dialogs
   'alert', 'confirm', 'prompt',
+  // Browser — workers / messaging
+  'Worker', 'SharedWorker', 'ServiceWorker', 'BroadcastChannel', 'MessageChannel', 'MessagePort',
+  'postMessage',
   // Node.js
   'process', 'global', 'globalThis', '__dirname', '__filename', 'require', 'module', 'exports',
   'Buffer', 'setImmediate', 'clearImmediate', 'queueMicrotask',

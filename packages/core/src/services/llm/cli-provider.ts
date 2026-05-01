@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { type ChildProcess } from 'node:child_process';
+import spawn from 'cross-spawn';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { log } from '../../lib/logger.js';
@@ -184,6 +185,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
     ];
 
     return new Promise((resolve, reject) => {
+      // cross-spawn handles Windows `.cmd`/`.ps1` shim resolution without
+      // shell:true, avoiding the CVE-2024-27980 spawn restriction and the
+      // DEP0190 deprecation for shell:true + args array.
       const child: ChildProcess = spawn(this.binaryName, args, {
         env: this.getCleanEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],

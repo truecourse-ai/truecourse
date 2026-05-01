@@ -1,5 +1,4 @@
 import * as p from "@clack/prompts";
-import { execSync } from "node:child_process";
 import path from "node:path";
 import { analyzeInProcess } from "@truecourse/core/commands/analyze-in-process";
 import { StepTracker, buildAnalysisSteps, type AnalysisStep } from "@truecourse/core/progress";
@@ -8,20 +7,21 @@ import { registerProject, type RegistryEntry } from "@truecourse/core/config/reg
 import { readProjectConfig } from "@truecourse/core/config/project-config";
 import { getGit } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
+import { isCliBinaryAvailable } from "@truecourse/core/lib/cli-binary";
+import { config } from "@truecourse/core/config";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 
 function ensureClaudeCli(): void {
-  try {
-    execSync("which claude", { stdio: "ignore" });
-  } catch {
-    p.log.error(
-      "Claude Code CLI not found on PATH. TrueCourse requires the `claude` binary to run analysis.\n" +
-        "Install it from https://docs.anthropic.com/en/docs/claude-code and try again.",
-    );
-    process.exit(1);
-  }
+  const binary = config.claudeCodeBinary;
+  if (isCliBinaryAvailable(binary)) return;
+  p.log.error(
+    `Claude Code CLI not found (tried \`${binary}\`). TrueCourse requires the Claude Code binary to run analysis.\n` +
+      "Install it from https://docs.anthropic.com/en/docs/claude-code, " +
+      "or set CLAUDE_CODE_BINARY to its name or absolute path if it's installed elsewhere.",
+  );
+  process.exit(1);
 }
 
 function resolveOrInitProject(): RegistryEntry {
@@ -270,7 +270,19 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   }, stepDefs);
 
   const abortController = new AbortController();
-  const onSigint = () => abortController.abort();
+  // Two-stage SIGINT: first Ctrl+C requests a graceful abort and lets the
+  // pipeline finish writing logs / restoring stashed state. Second Ctrl+C
+  // force-exits immediately for users who don't want to wait.
+  let sigintRequested = false;
+  const onSigint = () => {
+    if (sigintRequested) {
+      process.stderr.write("\nForce quit.\n");
+      process.exit(130);
+    }
+    sigintRequested = true;
+    abortController.abort();
+    process.stderr.write("\nCancelling… (press Ctrl+C again to force quit)\n");
+  };
   process.on("SIGINT", onSigint);
 
   try {
@@ -353,7 +365,16 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   }, stepDefs);
 
   const abortController = new AbortController();
-  const onSigint = () => abortController.abort();
+  let sigintRequested = false;
+  const onSigint = () => {
+    if (sigintRequested) {
+      process.stderr.write("\nForce quit.\n");
+      process.exit(130);
+    }
+    sigintRequested = true;
+    abortController.abort();
+    process.stderr.write("\nCancelling… (press Ctrl+C again to force quit)\n");
+  };
   process.on("SIGINT", onSigint);
 
   try {

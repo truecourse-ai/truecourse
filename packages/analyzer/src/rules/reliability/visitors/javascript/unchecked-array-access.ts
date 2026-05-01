@@ -5,7 +5,11 @@ import { findContainingStatement } from './_helpers.js'
 
 export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/unchecked-array-access',
-  languages: ['typescript', 'tsx', 'javascript'],
+  // TS/TSX only. The rule is meaningful when the project opts into
+  // `noUncheckedIndexedAccess`, which only exists in TypeScript. Plain
+  // JS / JSX has no static type system to opt into - every index access
+  // is implicitly `T | undefined` and flagging it is pure noise.
+  languages: ['typescript', 'tsx'],
   nodeTypes: ['subscript_expression'],
   visit(node, filePath, sourceCode) {
     const object = node.childForFieldName('object')

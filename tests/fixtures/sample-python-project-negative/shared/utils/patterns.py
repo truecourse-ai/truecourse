@@ -19,7 +19,7 @@ from functools import lru_cache
 
 # ---- Type patterns ----
 
-# VIOLATION: code-quality/deterministic/any-type-hint
+# VIOLATION: code-quality/deterministic/no-explicit-any
 def flexible(x: Any):
     return x
 
@@ -227,7 +227,7 @@ assert "this is always true"
 
 # ---- Exception handling patterns ----
 
-# VIOLATION: bugs/deterministic/empty-catch
+# VIOLATION: code-quality/deterministic/try-except-pass
 try:
     open("file.txt")
 except FileNotFoundError:

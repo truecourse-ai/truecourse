@@ -39,6 +39,36 @@ describe('analyzeFileContent', () => {
     expect(arrowFn.params.length).toBe(2);
   });
 
+  it('does NOT synthesize map_handler / mark callbacks as exported (JS)', () => {
+    // Audit on signal7/Compliance found ~414 FPs across `unused-export`
+    // and `dead-method` rules driven by this single bug: in JS files
+    // (no TS compiler to override), arrow callbacks passed to `.map()`
+    // got the synthesized name `map_handler` AND inherited
+    // `isExported: true` from the enclosing function via a recursive
+    // ancestor walk. The callback isn't actually exported - the
+    // enclosing function is.
+    const code = `
+const PAGES = ['a', 'b'];
+export function App() {
+  return PAGES.map((p, i) => ({ name: p, idx: i }));
+}
+`;
+    const result = analyzeFileContent('/test/file.js', code, 'javascript');
+    // No `_handler` synthesis on collection callbacks.
+    const handlerFn = result.functions.find((f) => f.name?.endsWith('_handler'));
+    expect(handlerFn).toBeUndefined();
+    // Inner anonymous arrow is not flagged as exported.
+    const inner = result.functions.find((f) => f.name === 'anonymous');
+    expect(inner?.isExported ?? false).toBe(false);
+  });
+
+  it('still marks a top-level exported arrow as exported (JS)', () => {
+    const code = `export const greet = (name) => name;`;
+    const result = analyzeFileContent('/test/file.js', code, 'javascript');
+    const greet = result.functions.find((f) => f.name === 'greet');
+    expect(greet?.isExported).toBe(true);
+  });
+
   it('extracts a class with methods and properties', () => {
     const code = `class UserService {
   private name: string;

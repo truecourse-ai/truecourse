@@ -9,7 +9,11 @@ export const pythonEmptyCatchVisitor: CodeRuleVisitor = {
     const body = node.namedChildren.find((c) => c.type === 'block')
     if (!body) return null
     const statements = body.namedChildren.filter((c) => c.type !== 'comment')
-    if (statements.length === 0 || (statements.length === 1 && statements[0].type === 'pass_statement')) {
+    // `try-except-pass` covers the pass-only case with a more actionable
+    // suggestion (contextlib.suppress). Fire here only on a truly empty
+    // body — comments without `pass` — to avoid duplicate violations at
+    // the same line.
+    if (statements.length === 0) {
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Empty except block',

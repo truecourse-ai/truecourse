@@ -3,7 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TRUECOURSE_DIR = '.truecourse';
-const GITIGNORE_CONTENTS = 'analyses/\nLATEST.json\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\n';
+// `LATEST.json` is intentionally tracked: it travels with the repo via git so
+// fresh clones and `git worktree add` checkouts inherit a baseline without
+// having to cold-start `truecourse analyze`. Convention: only commit it after
+// merging to main (post-merge analyze). Branch-local analyzes shouldn't
+// commit it, to avoid PR conflicts on a generated JSON.
+const GITIGNORE_CONTENTS = 'analyses/\nhistory.json\ndiff.json\nui-state.json\nlogs/\n.analyze.lock\n';
 
 // ---------------------------------------------------------------------------
 // Global paths (user-level)

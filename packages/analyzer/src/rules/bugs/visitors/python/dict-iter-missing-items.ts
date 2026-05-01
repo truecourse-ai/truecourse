@@ -35,8 +35,7 @@ export const pythonDictIterMissingItemsVisitor: CodeRuleVisitor = {
       if (fn?.type === 'identifier' && ['enumerate', 'zip', 'reversed', 'sorted', 'map', 'filter', 'range'].includes(fn.text)) return null
     }
 
-    // Heuristic: check if variable name suggests it's a dict (contains 'dict', 'map', ends in 's')
-    // We use a simple naming heuristic to reduce false positives
+    // Naming heuristic: only flag when the variable name suggests a dict.
     const iterName = iterExpr.type === 'identifier' ? iterExpr.text : ''
     const looksLikeDict = iterName.toLowerCase().includes('dict') ||
       iterName.toLowerCase().includes('map') ||

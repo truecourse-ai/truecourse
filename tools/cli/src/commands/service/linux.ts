@@ -9,7 +9,8 @@ const UNIT_DIR = path.join(os.homedir(), ".config", "systemd", "user");
 const UNIT_PATH = path.join(UNIT_DIR, `${SERVICE_NAME}.service`);
 
 function buildUnitFile(serverPath: string, logPath: string): string {
-  const envFile = path.join(os.homedir(), ".truecourse", ".env");
+  const truecourseHome = path.join(os.homedir(), ".truecourse");
+  const envFile = path.join(truecourseHome, ".env");
   const logDir = path.dirname(logPath);
 
   return `[Unit]
@@ -22,8 +23,10 @@ ExecStart=${process.execPath} ${serverPath}
 Restart=on-failure
 RestartSec=5
 EnvironmentFile=${envFile}
-StandardOutput=append:${path.join(logDir, "truecourse.log")}
-StandardError=append:${path.join(logDir, "truecourse.error.log")}
+Environment=TRUECOURSE_HOME=${truecourseHome}
+Environment=TRUECOURSE_LOG_DIR=${logDir}
+StandardOutput=append:${path.join(logDir, "dashboard.out.log")}
+StandardError=append:${path.join(logDir, "dashboard.err.log")}
 
 [Install]
 WantedBy=default.target

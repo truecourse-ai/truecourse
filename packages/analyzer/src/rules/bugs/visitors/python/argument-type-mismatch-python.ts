@@ -38,7 +38,19 @@ function findFunctionDefs(root: SyntaxNode): Map<string, { minParams: number, ma
             hasVarArgs = true
             continue
           }
-          if (p.type === 'identifier' || p.type === 'typed_parameter') {
+          // A typed splat — e.g. `*args: str` or `**kwargs: Any` — parses as a
+          // `typed_parameter` whose first named child is the underlying splat
+          // pattern. Unwrap it so it isn't mis-counted as a required positional.
+          if (p.type === 'typed_parameter') {
+            const inner = p.namedChild(0)
+            if (inner && (inner.type === 'list_splat_pattern' || inner.type === 'dictionary_splat_pattern')) {
+              hasVarArgs = true
+              continue
+            }
+            required++
+            continue
+          }
+          if (p.type === 'identifier') {
             required++
           } else if (p.type === 'default_parameter' || p.type === 'typed_default_parameter') {
             optional++

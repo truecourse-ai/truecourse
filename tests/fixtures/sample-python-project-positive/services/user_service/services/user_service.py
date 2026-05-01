@@ -34,3 +34,29 @@ class UserBusinessService:
             del self._users[user_id]
             return True
         return False
+
+    def list_users(
+        self,
+        filters: dict | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[dict]:
+        """List users with optional filters. Default is None — the recommended
+        idiom for an optional dict-shaped argument. mutable-default-arg should
+        not flag the `dict | None = None` signature."""
+        results = list(self._users.values())
+        if filters:
+            results = [u for u in results if all(u.get(k) == v for k, v in filters.items())]
+        offset = (page - 1) * page_size
+        return results[offset : offset + page_size]
+
+    def fetch_audit_records(
+        self,
+        user_ids: list[str] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> list[dict]:
+        """Both arguments default to None even though the type hint mentions
+        list / dict — the actual default value is None, not a mutable."""
+        ids = user_ids or list(self._users.keys())
+        _ = extra_headers
+        return [{"user_id": uid, "audited": True} for uid in ids]

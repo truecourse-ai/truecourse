@@ -2,6 +2,31 @@ import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+// Names from `typing` (and built-in generic equivalents) that mark a
+// `subscript` as a type-alias construction, not a runtime mutable.
+const TYPING_NAMES = new Set([
+  'Callable', 'Optional', 'Union', 'Literal', 'Annotated', 'Final',
+  'List', 'Tuple', 'Dict', 'Set', 'FrozenSet', 'Type', 'ClassVar',
+  'Sequence', 'Mapping', 'MutableMapping', 'Iterable', 'Iterator',
+  'Generator', 'Coroutine', 'Awaitable', 'AsyncIterable', 'AsyncIterator',
+  'Protocol', 'TypedDict', 'NamedTuple',
+  // Built-in generics (PEP 585)
+  'list', 'tuple', 'dict', 'set', 'frozenset', 'type',
+])
+
+function isTypingConstruct(node: SyntaxNode): boolean {
+  if (node.type !== 'subscript') return false
+  const value = node.childForFieldName('value')
+  if (!value) return false
+  if (value.type === 'identifier') return TYPING_NAMES.has(value.text)
+  // typing.Callable / t.Optional → check the trailing attribute
+  if (value.type === 'attribute') {
+    const attr = value.childForFieldName('attribute')
+    if (attr && TYPING_NAMES.has(attr.text)) return true
+  }
+  return false
+}
+
 /** Walk attribute chain to check if the root is a call (e.g., Path(...).parent.parent). */
 function rootIsCall(node: SyntaxNode): boolean {
   if (node.type === 'call') return true
@@ -68,6 +93,12 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
     const right = node.childForFieldName('right')
     if (right?.type === 'call') return null
     if (right?.type === 'attribute' && rootIsCall(right)) return null
+
+    // Skip type aliases — `RetryHook = Callable[..., None]`, `Status =
+    // Literal["a", "b"]`, `Pair = tuple[int, str]`. These are immutable
+    // typing declarations, not mutable shared state. Detect by RHS
+    // shape: a `subscript` whose value is a typing construct.
+    if (right?.type === 'subscript' && isTypingConstruct(right)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

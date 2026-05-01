@@ -5,7 +5,7 @@ import type { DataFlowContext } from '../../../../data-flow/types.js'
 /**
  * Detects local variables and local functions defined in a scope but never used.
  * Uses dataFlow.unusedVariables() which returns variables with no use sites.
- * Only reports non-module-scope definitions (local scope) to avoid false positives on exports.
+ * Module-scope definitions are skipped — they may be exported and used elsewhere.
  */
 export const unusedScopeDefinitionVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/unused-scope-definition',

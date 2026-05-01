@@ -35,6 +35,15 @@ export const pythonMissingMigrationVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // Idempotent DDL (`IF NOT EXISTS` / `IF EXISTS`) is the standard sqlite
+    // bootstrap pattern: it runs safely on every startup and serves as the
+    // migration mechanism for embedded stores. A real migration tool would
+    // never need this guard, so the presence of one signals intentional
+    // initialisation code, not an accidental schema change.
+    if (/if\s+(not\s+)?exists/.test(sqlText)) {
+      return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Schema change outside migration file',

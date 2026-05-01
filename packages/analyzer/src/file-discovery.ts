@@ -1,8 +1,77 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
+import { existsSync, openSync, readFileSync, readSync, readdirSync, statSync, closeSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { join, relative, resolve } from 'path'
 import ignore from 'ignore'
 import { detectLanguage, getAllIgnorePatterns, getAllTestPatterns } from './language-config.js'
+
+// Minified/bundled JS or TS files are build artifacts (or vendored libraries)
+// of source already present in the repo, so analyzing them duplicates work and
+// reports noise on transformed code that no one will fix. Three signals layered
+// from cheap to expensive:
+//
+// 1. Build-artifact filename suffix — `*.bundle.js`, `*.production.js`,
+//    `*.development.js` (and corresponding cjs/mjs variants). Webpack /
+//    Rollup / Auth0-style production bundles ship under these names. This
+//    catches files like `tracking.bundle.js` that have realistic line
+//    breaks (so the line-density sniff misses them) but are still 100%
+//    bundled output. The `**/*.min.*` glob in language-config covers the
+//    other half.
+//
+// 2. Size-and-density sniff — JS/TS files of any meaningful size whose
+//    first window contains very few newlines are minified. Threshold is
+//    set low enough (15KB) to catch single-line bundles in the ~40KB
+//    range like `auth0-spa-js.production.js` (already covered by signal 1
+//    too, but signal 2 protects against weirder names).
+
+const SNIFFED_EXTS = new Set(['.js', '.jsx', '.cjs', '.mjs', '.ts', '.tsx', '.mts', '.cts'])
+const MIN_SIZE_FOR_SNIFF = 15 * 1024 // 15KB
+const SNIFF_BYTES = 8 * 1024 // 8KB
+const MIN_NEWLINES = 4
+
+// Build-artifact filename patterns. Match on basename only (the path
+// segments are already filtered by .gitignore at this point).
+function looksLikeBuildArtifact(absPath: string): boolean {
+  const slash = absPath.lastIndexOf('/')
+  const basename = slash >= 0 ? absPath.slice(slash + 1) : absPath
+  return /\.(bundle|production|development)\.(js|cjs|mjs|jsx|ts|tsx|mts|cts)$/i.test(basename)
+}
+
+function looksMinified(absPath: string): boolean {
+  // Cheap extension check first.
+  const dotIdx = absPath.lastIndexOf('.')
+  if (dotIdx < 0) return false
+  const ext = absPath.slice(dotIdx)
+  if (!SNIFFED_EXTS.has(ext)) return false
+
+  if (looksLikeBuildArtifact(absPath)) return true
+
+  let size: number
+  try {
+    size = statSync(absPath).size
+  } catch {
+    return false
+  }
+  if (size < MIN_SIZE_FOR_SNIFF) return false
+
+  let fd: number | null = null
+  try {
+    fd = openSync(absPath, 'r')
+    const buf = Buffer.alloc(SNIFF_BYTES)
+    const read = readSync(fd, buf, 0, SNIFF_BYTES, 0)
+    let newlines = 0
+    for (let i = 0; i < read; i++) {
+      if (buf[i] === 0x0a) newlines++
+      if (newlines >= MIN_NEWLINES) return false
+    }
+    return true
+  } catch {
+    return false
+  } finally {
+    if (fd !== null) {
+      try { closeSync(fd) } catch { /* ignore */ }
+    }
+  }
+}
 
 function isInsideGitWorkTree(dir: string): boolean {
   try {
@@ -63,7 +132,9 @@ function discoverFilesViaGit(dir: string): string[] | null {
       continue
     }
     if (!isFile) continue
-    if (detectLanguage(abs)) out.push(abs)
+    if (!detectLanguage(abs)) continue
+    if (looksMinified(abs)) continue
+    out.push(abs)
   }
   return out
 }
@@ -181,7 +252,9 @@ function discoverFilesViaWalker(dir: string): string[] {
         if (stat.isDirectory()) {
           traverse(fullPath)
         } else if (stat.isFile()) {
-          if (detectLanguage(fullPath)) files.push(fullPath)
+          if (!detectLanguage(fullPath)) continue
+          if (looksMinified(fullPath)) continue
+          files.push(fullPath)
         }
       }
     } catch {
