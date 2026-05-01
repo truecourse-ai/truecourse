@@ -72,6 +72,11 @@ export class MacOSService implements ServicePlatform {
     // launchd's stdout/stderr capture and `truecourse dashboard logs` can
     // surface all three streams from one directory.
     envVars.TRUECOURSE_LOG_DIR = path.dirname(logPath);
+    // Pin the service to the invoking user's `.truecourse/` so the project
+    // registry the dashboard reads matches the one the user CLI writes,
+    // independent of what `os.homedir()` resolves to in the service's
+    // execution context.
+    envVars.TRUECOURSE_HOME = path.join(os.homedir(), ".truecourse");
 
     fs.mkdirSync(PLIST_DIR, { recursive: true });
     fs.mkdirSync(path.dirname(logPath), { recursive: true });

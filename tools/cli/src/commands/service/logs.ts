@@ -7,28 +7,16 @@ const MAX_LOG_FILES = 5;
 const POLL_INTERVAL_MS = 500;
 
 // All service supervisors and the dashboard server itself land their logs in
-// this dir. Filenames follow a single contract every platform installer
-// translates into its native format:
-//
-//   dashboard.log         — server's structured log (always present once boot
-//                           reaches the logger configure step)
-//   dashboard.out.log     — supervisor-captured stdout (launchd / systemd /
-//                           node-windows)
-//   dashboard.err.log     — supervisor-captured stderr
-//   dashboard.wrapper.log — node-windows supervisor's own events (Windows
-//                           only; child started/exited/restart counters)
-//
-// Plus legacy names from older installs we still surface so users on stale
-// service registrations see their logs without reinstalling.
-const KNOWN_LOG_FILENAMES = [
+// this dir. Aim is one shared layout (`dashboard.log` for the server's
+// structured output, plus `*.out.log` / `*.err.log` / `*.wrapper.log` from
+// whichever platform supervisor is active), but node-windows has the final
+// say on its own filenames — it auto-derives them from the service id and
+// ignores explicit `id` overrides. So the aggregator globs `*.log` rather
+// than maintaining a fixed list, and rotation does the same.
+const ROTATABLE_LOG_NAMES = [
+  // Server's structured log — always rotated as a known target so we don't
+  // have to detect it among arbitrary other .log files in the dir.
   "dashboard.log",
-  "dashboard.out.log",
-  "dashboard.err.log",
-  "dashboard.wrapper.log",
-  // Legacy (pre-unified-layout) — kept for backward compatibility with
-  // existing macOS/Linux service registrations.
-  "truecourse.log",
-  "truecourse.error.log",
 ];
 
 export function getLogDir(): string {
@@ -45,9 +33,14 @@ export function getLogPath(): string {
 }
 
 function existingLogFiles(logDir: string): string[] {
-  return KNOWN_LOG_FILENAMES
-    .map((name) => path.join(logDir, name))
-    .filter((p) => fs.existsSync(p));
+  if (!fs.existsSync(logDir)) return [];
+  // Live `.log` files only — `.log.1`, `.log.2`, etc. are rotated archives
+  // and shouldn't be tailed. Sort alphabetically so the order is stable
+  // across calls and `dashboard.log` lands first when present.
+  return fs.readdirSync(logDir)
+    .filter((name) => /\.log$/.test(name))
+    .sort()
+    .map((name) => path.join(logDir, name));
 }
 
 /**
@@ -71,13 +64,18 @@ function rotateOne(logFile: string): void {
 }
 
 /**
- * Rotate every known log file in the dir if oversized. Called by `dashboard`
+ * Rotate every live log file in the dir if oversized. Called by `dashboard`
  * before (re)starting the service so the supervisor opens fresh files.
+ * Globs `*.log` so it catches whatever filenames the active supervisor
+ * happens to use, plus our own `dashboard.log` even when the directory
+ * doesn't exist yet (so callers don't have to guard).
  */
 export function rotateLogs(logDir: string): void {
-  for (const name of KNOWN_LOG_FILENAMES) {
+  for (const name of ROTATABLE_LOG_NAMES) {
     rotateOne(path.join(logDir, name));
   }
+  if (!fs.existsSync(logDir)) return;
+  for (const file of existingLogFiles(logDir)) rotateOne(file);
 }
 
 function readLastLines(filePath: string, maxLines: number): string {
