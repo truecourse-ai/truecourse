@@ -391,6 +391,12 @@
       "layer": "api"
     },
     {
+      "name": "step",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "TokenService",
       "service": "user-service",
       "kind": "class",

@@ -66,3 +66,23 @@ prepared to handle each:
 | 400  | Request body failed validation         |
 | 404  | Requested user does not exist          |
 | 409  | Email conflict on create               |
+
+## Step lifecycle
+
+Long-running work in the user-service is tracked as a `Step`. Each step
+moves through a fixed lifecycle.
+
+- **States**: `pending`, `running`, `waiting_retry`, `done`, `failed`.
+- **Initial state**: every newly created step begins in `pending`.
+- **Terminal states**: `done` and `failed`. Once a step reaches a terminal
+  state it must not transition back into any active state — a finished
+  step must stay finished, a hard-failed step must stay failed.
+- **Allowed transitions**:
+  - `pending → running`
+  - `running → done`
+  - `running → failed`
+  - `running → waiting_retry`
+  - `waiting_retry → running`
+  - `waiting_retry → failed`
+
+Any other transition is illegal and indicates a regression bug.

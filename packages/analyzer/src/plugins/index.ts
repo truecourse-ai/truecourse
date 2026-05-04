@@ -1,5 +1,6 @@
 import type { Plugin } from './types.js'
 import { restContractPlugin } from './rest-contract/index.js'
+import { stateMachinePlugin } from './state-machine/index.js'
 
 export type {
   Plugin,
@@ -28,7 +29,7 @@ export { TOKEN_ESTIMATE } from './types.js'
 // generic envelope (`Invariant`) is uniform across the registry.
 // ---------------------------------------------------------------------------
 
-export const PLUGINS: Plugin[] = [restContractPlugin]
+export const PLUGINS: Plugin[] = [restContractPlugin, stateMachinePlugin]
 
 export function getPlugin(type: string): Plugin | undefined {
   return PLUGINS.find((p) => p.type === type)
