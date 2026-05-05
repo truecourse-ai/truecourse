@@ -22,6 +22,12 @@ export function ConditionalNamespaceHook({ ready }: { ready: boolean }) {
   return null;
 }
 
+export function TernaryBranchHook({ enabled }: { enabled: boolean }) {
+  // VIOLATION: bugs/deterministic/conditional-hook
+  const value = enabled ? useState('on')[0] : 'off';
+  return <span>{value}</span>;
+}
+
 // VIOLATION: bugs/deterministic/usestate-object-mutation
 export function StateMutation() {
   const [state, setState] = useState({ items: [] as string[], count: 0 });

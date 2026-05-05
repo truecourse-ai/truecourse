@@ -29,13 +29,28 @@ function isHookCall(node: SyntaxNode): boolean {
   return false
 }
 
-// Check if the node is inside a conditional block (if/else/ternary/loop)
+// Check if the node is inside a conditional block (if/else/ternary/loop).
+// The CONDITION position of a ternary or `if` is evaluated unconditionally
+// every time control reaches the construct — only the consequent / alternate
+// branches are conditional. So `useHook()` as `useHook() ? A : B` is fine,
+// but `cond ? useHook() : useOther()` is not.
 function getConditionalAncestor(node: SyntaxNode): SyntaxNode | null {
+  let prev: SyntaxNode = node
   let current: SyntaxNode | null = node.parent
   while (current) {
-    if (
-      current.type === 'if_statement' ||
-      current.type === 'ternary_expression' ||
+    if (current.type === 'ternary_expression') {
+      // Skip when arriving from the `condition` child — it runs unconditionally.
+      const condition = current.childForFieldName('condition')
+      if (!condition || condition.id !== prev.id) {
+        return current
+      }
+    } else if (current.type === 'if_statement') {
+      // Skip when arriving from the `condition` child — same reasoning.
+      const condition = current.childForFieldName('condition')
+      if (!condition || condition.id !== prev.id) {
+        return current
+      }
+    } else if (
       current.type === 'for_statement' ||
       current.type === 'for_in_statement' ||
       current.type === 'for_of_statement' ||
@@ -52,6 +67,7 @@ function getConditionalAncestor(node: SyntaxNode): SyntaxNode | null {
     ) {
       break
     }
+    prev = current
     current = current.parent
   }
   return null
