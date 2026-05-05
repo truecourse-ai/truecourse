@@ -3,11 +3,31 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_LANGUAGES } from './_helpers.js'
 
+/**
+ * `await reader.read()` is the canonical ReadableStream consumption
+ * pattern. Returns `{value, done}` and the next call depends on the
+ * previous's `done` bit — there is no fixed iteration set to
+ * parallelise. Same for any `<X>.next()` async-iterator manual drive.
+ */
+function isStreamReadCall(node: SyntaxNode): boolean {
+  // node is the await_expression; its argument is the actual call.
+  const argument = node.namedChildren[0]
+  if (!argument || argument.type !== 'call_expression') return false
+  const fn = argument.childForFieldName('function')
+  if (fn?.type !== 'member_expression') return false
+  const property = fn.childForFieldName('property')
+  return property?.text === 'read' || property?.text === 'next'
+}
+
 export const awaitInLoopVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/await-in-loop',
   languages: JS_LANGUAGES,
   nodeTypes: ['await_expression'],
   visit(node, filePath, sourceCode) {
+    // `await stream.read()` / `await iterator.next()` — sequential by
+    // protocol; no parallel alternative exists.
+    if (isStreamReadCall(node)) return null
+
     // Walk up the tree to find if we're inside a loop
     let current: SyntaxNode | null = node.parent
     while (current) {
