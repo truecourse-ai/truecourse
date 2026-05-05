@@ -33,6 +33,15 @@ export const arrayCallbackMissingReturnVisitor: CodeRuleVisitor = {
     if (!firstArg) return null
     if (firstArg.type !== 'arrow_function' && firstArg.type !== 'function' && firstArg.type !== 'function_expression') return null
 
+    // Async callbacks always implicitly return a Promise — there is no
+    // "missing return" to flag. See array-callback-return.ts for the
+    // matching guard.
+    for (let i = 0; i < firstArg.childCount; i++) {
+      const child = firstArg.child(i)
+      if (child && child.type === 'async') return null
+      if (child && (child.type === 'formal_parameters' || child.type === 'identifier' || child.type === '=>' )) break
+    }
+
     const body = firstArg.childForFieldName('body')
     if (!body || body.type !== 'statement_block') return null
 

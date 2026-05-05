@@ -25,6 +25,18 @@ export const arrayCallbackReturnVisitor: CodeRuleVisitor = {
     // The callback must be arrow_function, function, or function_expression
     if (firstArg.type !== 'arrow_function' && firstArg.type !== 'function' && firstArg.type !== 'function_expression') return null
 
+    // Async callbacks ALWAYS return a Promise implicitly — even an empty
+    // body produces `Promise<undefined>`, which `.map()` happily collects
+    // for `Promise.all(...)`. There is no "missing return" semantically.
+    // Tree-sitter exposes the `async` keyword as a leading child token;
+    // check the first un-named child for it.
+    for (let i = 0; i < firstArg.childCount; i++) {
+      const child = firstArg.child(i)
+      if (child && child.type === 'async') return null
+      // Stop scanning once we hit the parameters/body — `async` always leads.
+      if (child && (child.type === 'formal_parameters' || child.type === 'identifier' || child.type === '=>' )) break
+    }
+
     const body = firstArg.childForFieldName('body')
     if (!body) return null
 
