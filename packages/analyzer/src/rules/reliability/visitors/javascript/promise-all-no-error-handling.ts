@@ -24,8 +24,12 @@ export const promiseAllNoErrorHandlingVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (parent?.type === 'await_expression' && isInsideTryCatch(parent)) return null
 
-    // Skip Next.js page/layout files — errors are handled by error.tsx boundary
-    if (/\/app\/.*(?:page|layout)\.[tj]sx?$/.test(filePath)) return null
+    // Skip framework-managed routes where the framework catches thrown
+    // errors and renders an error boundary / 500 response:
+    //   - Next.js app router: page.tsx, layout.tsx, route.ts(x)
+    //   - Remix: anything under app/routes/
+    if (/\/app\/.*(?:page|layout|route)\.[tj]sx?$/.test(filePath)) return null
+    if (/\/app\/routes\//.test(filePath)) return null
 
     // Skip shutdown/teardown/cleanup functions — errors during shutdown are typically acceptable
     let ancestor: import('web-tree-sitter').Node | null = node.parent
