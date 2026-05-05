@@ -2,17 +2,28 @@
 
 Source: `truecourse@latest analyze --no-llm --no-skills --no-stash` against shallow clone of `documenso/documenso` at `/tmp/tc-targets/documenso`. Run after the FP fixes from commits `97fcc99..0c816bd` (the v0.5.7 → fp-fixes delta).
 
-## Current totals (post FP #21)
+## Current totals (post FP #26)
 
 | Tier | v0.5.7 baseline | Current | Δ |
 |---|---|---|---|
 | critical | 18 | **0** | -18 |
-| high | 4,929 | **604** | -88% |
-| medium | 47,724 | 47,481 | -243 |
+| high | 4,929 | **577** | -88% |
+| medium | 47,724 | 47,438 | -286 |
 | low | 4,222 | 3,989 | -233 |
-| **total** | **57,351** | **52,074** | -5,277 |
+| **total** | **57,351** | **52,004** | -5,347 |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
+
+## Additional FP classes found in deeper second-pass investigation (FP #22–#26)
+
+Rules I'd dismissed as TP/STYLE on quick samples that turned out to have real FP shapes on closer look:
+
+- `bugs/deterministic/unbound-method` — fired on `this._dataField` references (Redis connections, queues, Maps); rule was treating any `this.X` value-use as a method reference. Fix: walk class_body, skip when X is declared as a field. **25 → 0 documenso.**
+- `bugs/deterministic/prototype-pollution` — fired on numeric loop counters and forEach `(_, index)` callback indexes (numbers can never stringify to `__proto__`). Fix: detect iteration-callback 2nd-param + `let i = 0` numeric counters. **9+7 → 7+6.**
+- `security/deterministic/timing-attack-comparison` — second pass found 3 more shapes beyond enum tags: presence checks (`X !== ''`, `X === null`, `X === false`), `.id` / `.length` access, same-receiver self-compare (form validation), and `typeof X` type checks. **53 → 12 documenso.**
+- `bugs/deterministic/await-in-loop` — fired on `while ((await reader.read()).done)` ReadableStream consumption (sequential by protocol). Fix: skip `await X.read()` / `await X.next()`. **6 → 0 in stream-consuming files.**
+
+Lesson: 4-sample classifications are unreliable. Going rule-by-rule with 8+ samples + reading source context found 5 additional FP classes I'd missed.
 
 ## Classification
 
