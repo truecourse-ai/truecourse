@@ -23,7 +23,10 @@ describe('security/deterministic/hardcoded-secret', () => {
   });
 
   it('detects Stripe-like key pattern', () => {
-    const violations = check(`const key = "sk_live_abcdefghijklmnop";`);
+    // Real Stripe keys are mixed-case + digits; an all-lowercase synthetic
+    // value would be indistinguishable from a normal identifier and
+    // legitimately suppressed by the identifier-shape filter.
+    const violations = check(`const key = "sk_live_4eC39HqLyjWDarjtT1zdp7dc";`);
     const matches = violations.filter((v) => v.ruleKey === 'security/deterministic/hardcoded-secret');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });

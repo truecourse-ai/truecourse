@@ -6,16 +6,17 @@ import type { CodeRuleVisitor } from '../../types.js'
 import { makeViolation } from '../../types.js'
 import { scanForSecrets, isSensitiveFile } from '../secret-scanner.js'
 
-// Identifier-shaped value: dictionary-word segments separated by `_` or `-`,
-// uniform case (all-lower or all-upper alphabetic chars), no random alpha+digit
-// segments. Catches enum tags, error codes, env-var names, query keys —
-// e.g. 'manage_secrets', 'INVALID_TOKEN', 'api-keys', 'GITHUB_TOKEN',
-// 'app_invitation_token', 'APP_SESSION_API_KEYS_0'. Rejects real credentials
-// like 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' (mixed case + alphanumeric segment)
-// and 'ghp_FakeTokenThatLooksReal0123456789abcd'.
+// Identifier-shaped value: dictionary-word segments separated by `_`, `-`,
+// or `$`, uniform case (all-lower or all-upper alphabetic chars), no random
+// alpha+digit segments. Catches enum tags, error codes, env-var names,
+// query keys, namespaced i18n constants — e.g. 'manage_secrets',
+// 'INVALID_TOKEN', 'api-keys', 'GITHUB_TOKEN', 'app_invitation_token',
+// 'APP_SESSION_API_KEYS_0', 'BITBUCKET_DATA_CENTER$CONNECT_TO_BITBUCKET_
+// DATA_CENTER'. Rejects real credentials like 'sk_live_4eC39HqLyj...'
+// (mixed case + alphanumeric segment) and 'ghp_FakeToken0123abcd'.
 function isIdentifierShapedValue(value: string): boolean {
-  if (!/^[A-Za-z0-9_-]+$/.test(value)) return false
-  const segments = value.split(/[_-]/)
+  if (!/^[A-Za-z0-9_$-]+$/.test(value)) return false
+  const segments = value.split(/[_$-]/)
   for (const seg of segments) {
     if (seg.length === 0) return false
     if (!/^[A-Za-z]+$/.test(seg) && !/^[0-9]+$/.test(seg)) return false
@@ -58,7 +59,12 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
 
     // ── Pattern-based detection (222 patterns) ──────────────────────────
     const match = scanForSecrets(stripped)
-    if (match) {
+    if (match && !isIdentifierShapedValue(stripped)) {
+      // Suppress when the WHOLE value is identifier-shaped — a snake/kebab
+      // case identifier or namespaced i18n key matching a vendor pattern
+      // (e.g. `bitbucket-client-secret` regex hitting an enum constant
+      // `BITBUCKET_DATA_CENTER$CONNECT_TO_BITBUCKET_DATA_CENTER`) is a
+      // false positive even when the substring captures match.
       return makeViolation(
         this.ruleKey, node, filePath, 'critical',
         `Hardcoded secret detected (${match.patternId})`,
@@ -589,6 +595,15 @@ export const hardcodedSecretInCommentVisitor: CodeRuleVisitor = {
     const trimmed = stripped.trim()
     if (/^(?:if |elif |else:|return |import |from |def |class |for |while |with |raise |try:|except |#|\/\/)/.test(trimmed)) return null
     if (/^(?:await |async |yield |pass$|break$|continue$)/.test(trimmed)) return null
+
+    // Skip JSON-shaped sample payloads. Documentation comments that paste a
+    // sample event/webhook body — `# { "token": "...", "team_id": "..." }` —
+    // routinely contain high-entropy fake credentials whose presence in
+    // source code is intentional reference material, not a leak.
+    if (/^[\s]*\{[\s\S]*"\w+"\s*:[\s\S]*\}[\s]*$/.test(trimmed) ||
+        /^[\s]*\[[\s\S]*\][\s]*$/.test(trimmed)) {
+      return null
+    }
 
     // Scan the whole stripped comment text
     const match = scanForSecrets(stripped)
