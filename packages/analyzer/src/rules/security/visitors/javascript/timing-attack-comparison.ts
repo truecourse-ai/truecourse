@@ -22,6 +22,28 @@ function isEnumLikeReference(node: SyntaxNode): boolean {
   return false
 }
 
+// Presence/state checks: `signature !== ''`, `token === null`,
+// `enabled === false`, `length === 0`. These compare against a
+// non-credential sentinel — empty string, null, undefined, boolean,
+// or number literal. No timing-attack risk because the operand carries
+// no secret material.
+function isPresenceCheckOperand(node: SyntaxNode): boolean {
+  // Empty-string literal: `""`, `''`, ``
+  if (node.type === 'string') {
+    const inner = node.text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    if (inner === '') return true
+  }
+  // Numeric literal: `0`, `1`, etc.
+  if (node.type === 'number') return true
+  // null / undefined / true / false
+  if (node.type === 'null') return true
+  if (node.type === 'undefined') return true
+  if (node.type === 'true' || node.type === 'false') return true
+  // identifier `null` / `undefined` (sometimes parsed as identifier)
+  if (node.type === 'identifier' && (node.text === 'null' || node.text === 'undefined' || node.text === 'true' || node.text === 'false')) return true
+  return false
+}
+
 export const timingAttackComparisonVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/timing-attack-comparison',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -43,6 +65,23 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
       // Skip enum-tag / state-key comparisons: `field.type === FieldType.SIGNATURE`
       // or `selected === 'SIGNATURE'` — those are dispatch checks, not credentials.
       if (isEnumLikeReference(left) || isEnumLikeReference(right)) return null
+      // Skip presence/state checks: `signature !== ''`, `token === null`,
+      // `enabled === false`, `length === 0`. Sentinel operand carries no secret.
+      if (isPresenceCheckOperand(left) || isPresenceCheckOperand(right)) return null
+      // Skip object identity comparisons via `.id`: `token.id === otherToken.id`
+      // — IDs are application-controlled, not credentials.
+      if (left.type === 'member_expression' && left.childForFieldName('property')?.text === 'id') return null
+      if (right.type === 'member_expression' && right.childForFieldName('property')?.text === 'id') return null
+      // Skip `.length` comparisons (`signatureTypes.length === 0`).
+      if (left.type === 'member_expression' && left.childForFieldName('property')?.text === 'length') return null
+      if (right.type === 'member_expression' && right.childForFieldName('property')?.text === 'length') return null
+      // Skip self-compare: `data.password === data.repeatedPassword`.
+      // Both sides root in the same object → local form validation, no
+      // remote attacker, no timing-attack surface.
+      if (
+        left.type === 'member_expression' && right.type === 'member_expression' &&
+        left.childForFieldName('object')?.text === right.childForFieldName('object')?.text
+      ) return null
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Timing attack via string comparison',
