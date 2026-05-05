@@ -4,14 +4,15 @@ import { makeViolation } from '../../../types.js'
 import { getMethodName, ORM_WRITE_METHODS, SQL_WRITE_METHODS } from './_helpers.js'
 import { findUserInputAccess } from '../../../_shared/javascript-helpers.js'
 
-// Method names heavily overloaded by built-in JS collections - `Set.add`,
-// `Map.delete`, `Array.indexOf`-adjacent. ORM frameworks happen to use
-// the same words (`session.add(model)`), but firing on every `.add()` /
-// `.delete()` produces ~100% FPs on UI code. Require an ORM-shaped
-// receiver for these specific methods. `create` / `update` / `save` /
-// `upsert` / `destroy` stay unrestricted because they're rarely used as
-// JS collection method names.
-const AMBIGUOUS_ORM_METHODS = new Set(['add', 'delete'])
+// Method names heavily overloaded outside ORM/DB contexts:
+//   - `add`, `delete` → Set / Map collection methods
+//   - `query` → tRPC procedure builder, GraphQL resolvers, jQuery,
+//     react-query / TanStack Query, etc.
+//   - `exec` → `child_process.exec`, regex `.exec`, builder patterns
+// Real DB calls with these names (e.g. `db.query('SELECT ...')`) all
+// have receivers in `ORM_RECEIVER_NAMES`, so requiring the ORM-shaped
+// receiver eliminates the FPs without losing real coverage.
+const AMBIGUOUS_ORM_METHODS = new Set(['add', 'delete', 'query', 'exec'])
 const ORM_RECEIVER_NAMES = new Set([
   'session', 'db', 'conn', 'connection', 'cursor', 'engine', 'database',
   'manager', 'repo', 'repository', 'orm', 'em', 'tx', 'trx', 'knex',
