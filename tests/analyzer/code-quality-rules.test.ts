@@ -1017,14 +1017,23 @@ describe('code-quality/deterministic/no-proto', () => {
 });
 
 describe('code-quality/deterministic/no-void', () => {
-  it('detects void expression', () => {
-    const violations = check(`void someFunction();`);
+  it('detects void <non-call> expression', () => {
+    // `void <identifier>` is the canonical no-void shape: pointless and
+    // confusing. Real-world usage is rare, but the rule must continue
+    // to fire on it.
+    const violations = check(`const value = 42; const x = void value;`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag void 0', () => {
     const violations = check(`const undef = void 0;`);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag void <call> (fire-and-forget Promise pattern)', () => {
+    const violations = check(`void someFunction();`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/no-void');
     expect(matches).toHaveLength(0);
   });

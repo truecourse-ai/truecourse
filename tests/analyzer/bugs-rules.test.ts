@@ -1684,10 +1684,10 @@ describe('bugs/deterministic/void-zero-argument', () => {
     expect(matches).toHaveLength(1);
   });
 
-  it('detects void expression', () => {
+  it('does not flag void <call> (fire-and-forget Promise pattern)', () => {
     const violations = check(`void doSomething();`);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-zero-argument');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 });
 

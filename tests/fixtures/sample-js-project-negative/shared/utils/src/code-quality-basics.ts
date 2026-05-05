@@ -48,9 +48,12 @@ export function getProto(obj: any) {
 
 // VIOLATION: code-quality/deterministic/no-void
 export function voidCall() {
-  return void someFunction();
+  // `void <call>` is the canonical fire-and-forget Promise pattern
+  // (endorsed by no-floating-promises) and is no longer flagged. Use a
+  // non-call `void` expression instead for the negative test.
+  const value: number = 42;
+  return void value;
 }
-function someFunction() { return 42; }
 
 // VIOLATION: code-quality/deterministic/console-log
 export function logDebug() {
