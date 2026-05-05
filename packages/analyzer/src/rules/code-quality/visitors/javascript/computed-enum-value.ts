@@ -6,7 +6,10 @@ export const computedEnumValueVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx'],
   nodeTypes: ['enum_assignment'],
   visit(node, filePath, sourceCode) {
-    const value = node.namedChildren[0]
+    // tree-sitter shape: enum_assignment → [property_identifier, value].
+    // namedChildren[0] is the LHS member name (always an identifier);
+    // the value we care about is namedChildren[1].
+    const value = node.namedChildren[1]
     if (!value) return null
 
     if (value.type === 'string' || value.type === 'number') return null
