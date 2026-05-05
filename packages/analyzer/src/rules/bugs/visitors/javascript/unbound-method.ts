@@ -72,7 +72,11 @@ export const unboundMethodVisitor: CodeRuleVisitor = {
 
     const methodName = property.text
 
-    // Skip if the method is an arrow function property (lexically bound this)
+    // Walk up to the enclosing class_body and check the declaration of
+    // the property being referenced. Skip when:
+    //   - it's a field (`_connection: T`, `_queue = ...`) — not a method
+    //     reference, no `this` to lose
+    //   - it's an arrow-function property (lexically bound this)
     let classBody: SyntaxNode | null = node.parent
     while (classBody && classBody.type !== 'class_body') classBody = classBody.parent
     if (classBody) {
@@ -80,8 +84,16 @@ export const unboundMethodVisitor: CodeRuleVisitor = {
         if (member.type === 'public_field_definition' || member.type === 'field_definition') {
           const nameNode = member.children.find((c) => c.type === 'property_identifier')
           if (nameNode?.text === methodName) {
+            // Arrow-function property: lexically bound, not unbound.
             const value = member.childForFieldName('value')
             if (value?.type === 'arrow_function') return null
+            // Function expression assigned to a field — also bound at construction.
+            if (value?.type === 'function_expression' || value?.type === 'function') return null
+            // Any OTHER field declaration: this is data, not a method.
+            // `this._connection` (Redis connection), `this._queue` (object),
+            // `this._jobDefinitions` (Map) — passing them carries no `this`
+            // dependency, so there's nothing to unbind.
+            return null
           }
         }
       }
