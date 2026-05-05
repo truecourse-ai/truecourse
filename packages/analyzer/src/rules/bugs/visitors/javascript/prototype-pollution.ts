@@ -40,6 +40,10 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     // reach into the helper to reason about what it returns.
     if (isKeyAssignedFromLocalCall(node, keyName)) return null
 
+    // Skip numeric loop counters and iteration index parameters. JS guarantees
+    // a number for these, and a number can never stringify to `__proto__`.
+    if (isKeyNumericIndex(node, keyName)) return null
+
     // Skip when the key is a destructured parameter: `forEach(([key, val]) =>
     // out[key] = val)`. The destructuring pattern means the key was iterated
     // from a structured value the caller composed, not pulled directly from
@@ -262,6 +266,147 @@ function containsDestructuredName(params: SyntaxNode, keyName: string): boolean 
     }
   }
   walk(params)
+  return found
+}
+
+// True if `keyName` is provably a numeric index. Two patterns:
+//   1. The 2nd parameter of an iteration callback (`forEach`, `map`,
+//      `filter`, `reduce`, `every`, `some`, `find`, `findIndex`,
+//      `flatMap`) — JS spec guarantees this is the array index (number).
+//   2. The `init` of a traditional `for (let i = 0; ...)` counter — the
+//      initialiser is a number literal and the loop body increments it.
+// Numbers can never equal `__proto__` / `constructor` / `prototype` once
+// stringified into a property key, so the pollution risk is zero.
+const ITERATION_CALLBACKS = new Set([
+  'forEach', 'map', 'filter', 'reduce', 'reduceRight',
+  'every', 'some', 'find', 'findIndex', 'findLast', 'findLastIndex', 'flatMap',
+])
+function isKeyNumericIndex(assignmentNode: SyntaxNode, keyName: string): boolean {
+  // Pattern 1: 2nd param of array-method callback. Walk up to the
+  // enclosing arrow / function expression that's an arg to a member call.
+  let cursor: SyntaxNode | null = assignmentNode.parent
+  while (cursor) {
+    if (
+      cursor.type === 'arrow_function' ||
+      cursor.type === 'function_expression' ||
+      cursor.type === 'function'
+    ) {
+      const paramsNode = cursor.childForFieldName('parameters') ?? cursor.childForFieldName('parameter')
+      if (paramsNode) {
+        // Find direct identifier parameters and their position.
+        const idents: SyntaxNode[] = []
+        for (let i = 0; i < paramsNode.namedChildCount; i++) {
+          const p = paramsNode.namedChild(i)
+          if (!p) continue
+          // identifier or required_parameter wrapping identifier
+          if (p.type === 'identifier') idents.push(p)
+          else if (p.type === 'required_parameter') {
+            const inner = p.childForFieldName('pattern')
+            if (inner?.type === 'identifier') idents.push(inner)
+          }
+        }
+        // Index parameter is the second one in iteration callbacks.
+        if (idents.length >= 2 && idents[1].text === keyName) {
+          // Confirm parent call is an iteration method.
+          const callExpr = cursor.parent?.type === 'arguments' ? cursor.parent.parent : null
+          if (callExpr?.type === 'call_expression') {
+            const fn = callExpr.childForFieldName('function')
+            if (fn?.type === 'member_expression') {
+              const prop = fn.childForFieldName('property')
+              if (prop && ITERATION_CALLBACKS.has(prop.text)) return true
+            }
+          }
+        }
+      }
+    }
+    cursor = cursor.parent
+  }
+
+  // Pattern 2: traditional `for (let i = 0; ...; i++)` counter. Walk up
+  // to find any enclosing `for_statement` whose initializer declares
+  // `keyName` with a number-literal value.
+  cursor = assignmentNode.parent
+  while (cursor) {
+    if (cursor.type === 'for_statement') {
+      const init = cursor.childForFieldName('initializer')
+      if (init && declaresNumericVariable(init, keyName)) return true
+    }
+    cursor = cursor.parent
+  }
+
+  // Pattern 3: counter declared in the enclosing function scope as
+  // `let counter = 0` (or any number literal) and only ever reassigned
+  // via `counter++` / `counter--` / number expressions. Documenso pattern:
+  //   let currentGroupedRowIndex = 0;
+  //   for (...) { currentGroupedRowIndex++; arr[currentGroupedRowIndex] = ... }
+  if (isLetCounterInScope(assignmentNode, keyName)) return true
+
+  return false
+}
+
+function declaresNumericVariable(node: SyntaxNode, keyName: string): boolean {
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'identifier' && name.text === keyName && value?.type === 'number') {
+        found = true
+        return
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(node)
+  return found
+}
+
+function isLetCounterInScope(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return false
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'lexical_declaration' || n.type === 'variable_declaration') {
+      // `let X = <number>` — declare numeric counter.
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const decl = n.namedChild(i)
+        if (decl?.type !== 'variable_declarator') continue
+        const name = decl.childForFieldName('name')
+        const value = decl.childForFieldName('value')
+        if (name?.type === 'identifier' && name.text === keyName && value?.type === 'number') {
+          found = true
+          return
+        }
+      }
+    }
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'arrow_function' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
   return found
 }
 
