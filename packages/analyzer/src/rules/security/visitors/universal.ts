@@ -6,6 +6,25 @@ import type { CodeRuleVisitor } from '../../types.js'
 import { makeViolation } from '../../types.js'
 import { scanForSecrets, isSensitiveFile } from '../secret-scanner.js'
 
+// Identifier-shaped value: dictionary-word segments separated by `_` or `-`,
+// uniform case (all-lower or all-upper alphabetic chars), no random alpha+digit
+// segments. Catches enum tags, error codes, env-var names, query keys —
+// e.g. 'manage_secrets', 'INVALID_TOKEN', 'api-keys', 'GITHUB_TOKEN',
+// 'app_invitation_token', 'APP_SESSION_API_KEYS_0'. Rejects real credentials
+// like 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' (mixed case + alphanumeric segment)
+// and 'ghp_FakeTokenThatLooksReal0123456789abcd'.
+function isIdentifierShapedValue(value: string): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return false
+  const segments = value.split(/[_-]/)
+  for (const seg of segments) {
+    if (seg.length === 0) return false
+    if (!/^[A-Za-z]+$/.test(seg) && !/^[0-9]+$/.test(seg)) return false
+  }
+  const alpha = value.replace(/[^A-Za-z]/g, '')
+  if (alpha.length === 0) return false
+  return alpha === alpha.toLowerCase() || alpha === alpha.toUpperCase()
+}
+
 export const hardcodedSecretVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-secret',
   nodeTypes: ['string', 'template_string'],
@@ -62,12 +81,15 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
       if (nameNode) {
         const name = nameNode.text.toLowerCase()
         const secretNames = ['password', 'passwd', 'secret', 'apikey', 'api_key', 'token', 'auth_token', 'access_token', 'private_key']
-        // Exclude variable names that are clearly not secrets (URIs, URLs, endpoints, types)
-        const isNonSecretName = /(?:uri|url|endpoint|type|scope|name|header|grant|method)/.test(name)
+        // Exclude variable names that are clearly not secrets (URIs, URLs, endpoints, types,
+        // identifier/variable/envvar references — the value is a name, not a credential)
+        const isNonSecretName = /(?:uri|url|endpoint|type|scope|name|header|grant|method|identifier|variable|envvar|env_var)/.test(name)
         const isNonSecretValue =
           /https?:\/\//.test(stripped)                          // URLs
           || /^(true|false|null|undefined|localhost|None|True|False|Bearer)$/i.test(stripped) // literals & common tokens
           || /[[\]<>{}()#.=\s]/.test(stripped)                  // selectors, HTML, format strings, paths
+          || /^(.)\1{3,}$/.test(stripped)                       // same char repeated (e.g. '**********', 'xxxxxxxx')
+          || /^<?(redacted|placeholder|masked)>?$/i.test(stripped) // explicit redaction labels
 
         // Vocabulary-tag pattern: the literal *is* the field name (or a
         // plain-text extension of it). Catches things like
@@ -92,7 +114,8 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
           stripped.length >= 8 &&
           !isNonSecretName &&
           !isNonSecretValue &&
-          !isVocabularyTag
+          !isVocabularyTag &&
+          !isIdentifierShapedValue(stripped)
         ) {
           return makeViolation(
             this.ruleKey, node, filePath, 'critical',

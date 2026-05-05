@@ -174,6 +174,22 @@ export function connectToPaymentGateway() {
 
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
+export function connectToS3() {
+  // VIOLATION: security/deterministic/hardcoded-secret
+  const awsAccessKey = 'AKIAIOSFODNN7EXAMPLE';
+  return { awsAccessKey };
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
+export function readGitHubReleases() {
+  // VIOLATION: security/deterministic/hardcoded-secret
+  const githubToken = 'ghp_FakeTokenThatLooksReal0123456789abcd';
+  return { githubToken };
+}
+
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+// VIOLATION: code-quality/deterministic/missing-return-type
 export function setSessionCookie(res: any, token: string) {
   // VIOLATION: security/deterministic/cookie-without-httponly
   res.cookie('session', token, { secure: true, sameSite: 'strict' });

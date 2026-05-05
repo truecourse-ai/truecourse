@@ -19,6 +19,15 @@ AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"
 AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
 
+# ---- Generic hardcoded credentials ----
+
+# VIOLATION: security/deterministic/hardcoded-secret
+STRIPE_API_SECRET = "sk_live_4eC39HqLyjWDarjtT1zdp7dc"
+
+# VIOLATION: security/deterministic/hardcoded-secret
+GITHUB_PAT = "ghp_FakeTokenThatLooksReal0123456789abcd"
+
+
 # ---- Flask secret key ----
 
 app = Flask(__name__)
