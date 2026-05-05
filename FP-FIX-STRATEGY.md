@@ -1,8 +1,25 @@
 # False-Positive Fix Strategy
 
-This document drives the work on branch `fp-fixes`. It is the source of truth for **how** each rule fix is done. The rules being fixed come from the report at `outreach-findings.md` (run on documenso 0.5.7 + OpenHands 0.5.7).
+This document is the source of truth for **how** false-positive fix work is done on TrueCourse, regardless of which target repo we're analyzing. Every time we adopt a new target repo for FP analysis, we follow the same two-phase protocol below.
 
-## The non-negotiable cycle
+## Phase 1 — Comprehensive FP analysis (BEFORE any fix work)
+
+We do not fix anything until we have classified every rule that fires on the target. Sampling 4 of each rule is not enough; the queue must be derived from a full pass over the analysis output.
+
+For each target repo:
+
+1. **Run the analyzer, dump every violation to disk.** `truecourse analyze --no-llm --no-skills --no-stash` against a fresh shallow clone. The full output lives in `<repo>/.truecourse/LATEST.json`.
+2. **Group every violation by `ruleKey`.** Produce a per-rule frequency table covering ALL severity tiers — critical, high, medium, low. Medium and low tier are not skipped just because they're noisy; they're where the long-tail FPs hide.
+3. **Classify every rule** as TP / FP / mixed:
+   - Rules with ≤10 findings: read every finding, classify each.
+   - Rules with 11–100 findings: read every finding, group by file-path or snippet shape, classify each shape.
+   - Rules with >100 findings: group by shape first (cluster file-path patterns, snippet prefixes, surrounding-AST patterns), then classify each shape. Confirm the rule's classification covers all observed shapes — do not declare a rule "fully classified" after looking at one cluster.
+4. **Write the FP analysis to `FP-ANALYSIS-<target>.md`** alongside this strategy doc. One row per rule, columns: rule key, total firings, classification (TP / FP / mixed), notes per FP shape, file:line references for the worst examples.
+5. **Build the fix queue** at the end of the analysis doc, ordered by FP volume (biggest noise reduction first). The queue is the ONLY input to Phase 2.
+
+**Do not start fixing until the analysis doc is complete for the target.** Every shortcut in Phase 1 produces a partial fix queue, which leaves work that "feels done" but isn't.
+
+## Phase 2 — The non-negotiable fix cycle
 
 For every rule fix, in order:
 
@@ -45,37 +62,21 @@ pnpm test tests/analyzer/secret-scanning.test.ts 2>&1 | tee /tmp/test-output.txt
 - **Service layout**: both fixtures use the same multi-service shape (`api-gateway`, `user-service`, `notification-service`, `web`, `infrastructure`). Match new code to the service whose role best fits (e.g. auth/identity → `user-service`, public API gateway → `api-gateway`, frontend → `web`).
 - **Realism**: per `CLAUDE.md` and memory, fixtures must look like production code. Take the actual snippet from the documenso/OpenHands FP that motivated the fix and lift it into the fixture nearly verbatim, with naming adapted to the service.
 
-## Fix queue (priority order from `outreach-findings.md`)
+## Fix queue
 
-These are listed in the order to tackle them. Higher items have higher FP volume → bigger noise reduction per fix.
+The fix queue is defined per-target in `FP-ANALYSIS-<target>.md`, derived from the Phase 1 analysis. Order it by FP volume (biggest noise reduction first). Do not maintain a fix queue here — this doc is just the protocol; the queue lives next to the analysis it came from.
 
-1. **`security/deterministic/hardcoded-secret`** — matches identifier-name shapes (`MANAGE_SECRETS = 'manage_secrets'`), env-var **names** as values (`'GITHUB_TOKEN'`), masked placeholders (`'**********'`), strings inside comments, sample-data files, and React Query keys. Combined ~47 critical FPs across both repos.
-2. **`bugs/deterministic/conditional-hook`** — flags Zustand `useStore.getState()` calls in event handlers/services as React hook calls. 31 FPs in OpenHands.
-3. **`bugs/deterministic/argument-type-mismatch`** — flags valid TS calls (`defineConfig({...})`, `await import("fs")`, `path.resolve(...)`, framework `.map()` returns). ~4,246 high-severity findings combined; biggest noise source.
-4. **`bugs/deterministic/undefined-local-variable`** — does not handle Python's walrus operator (`NamedExpr`). Real analyzer bug, not just calibration. 2 FPs verified at `enterprise/storage/{saas_settings_store,user_store}.py`.
-5. **`security/deterministic/hardcoded-database-password`** — matches f-string URL pattern even when the password slot is an interpolated variable (`{DB_PASS}`). 2 FPs.
-6. **`security/deterministic/os-command-injection`** — fires on calls to a local function named `exec` regardless of whether `child_process.exec` is imported. 2 FPs.
-7. **`database/deterministic/unsafe-delete-without-where`** — flags Alembic migrations whose explicit purpose is bulk delete/update. Add path exclusion for `**/migrations/versions/**`, `**/alembic/versions/**`. 2 FPs.
-8. **`database/deterministic/missing-transaction`** — fires on non-DB awaits (`loadedPdf.destroy()`), on single writes (rule name says "multiple"), and on writes already inside a `prisma.$transaction(...)` / `tx.*` block. ~163 FPs.
-9. **`reliability/deterministic/uncaught-exception-no-handler`** — applied per-file to every entry; should be project-level (one finding per project if no `process.on('uncaughtException')` is registered anywhere). ~60 FPs.
-10. **`bugs/deterministic/array-callback-return`** — flags `array.map(async (x) => { ... })` where the async callback already implicitly returns a Promise. 21 FPs.
+## Phase 3 — Verification after every fix queue is exhausted
 
-## Verification after the queue
+Re-run the analyzer on every target whose FP analysis fed the queue. Compare counts at every severity tier (not just critical). Update `FP-ANALYSIS-<target>.md` with post-fix numbers and a TP/FP breakdown of what's left.
 
-After all (or a chosen prefix of) the fixes land:
+Done = every rule that still fires has been confirmed as a true positive on every remaining finding (or the count is 0). "0 critical, low residual high" is not enough; if medium tier still has known FPs, the queue isn't exhausted.
 
 ```bash
-# Re-run on the same two targets
-cd /tmp/tc-targets/documenso && rm -rf .truecourse && \
-  node /Users/musheghgevorgyan/repos/truecourse/.claude/worktrees/fp-fixes/tools/cli/dist/index.js \
-       analyze --no-llm --no-skills --no-stash
-
-cd /tmp/tc-targets/OpenHands && rm -rf .truecourse && \
-  node /Users/musheghgevorgyan/repos/truecourse/.claude/worktrees/fp-fixes/tools/cli/dist/index.js \
-       analyze --no-llm --no-skills --no-stash
+# Example invocation against the cached clones
+cd /tmp/tc-targets/<repo> && rm -rf .truecourse && \
+  node <worktree>/tools/cli/dist/index.js analyze --no-llm --no-skills --no-stash
 ```
-
-Compare critical-tier counts before/after. Update `outreach-findings.md` with the post-fix numbers. Goal: **0 critical FPs on documenso, ≤5 critical (all real) on OpenHands**.
 
 ## What not to do
 
