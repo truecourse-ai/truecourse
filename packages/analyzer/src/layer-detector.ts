@@ -115,7 +115,7 @@ function hasDataLayerPatterns(
 
   // Check file patterns
   for (const pattern of dataLayerPatterns.filePatterns) {
-    if (minimatch(analysis.filePath, pattern)) {
+    if (minimatch(analysis.filePath, pattern, { dot: true })) {
       reasons.push(`File path matches data layer pattern: ${pattern}`)
       return { match: true, reasons }
     }
@@ -170,7 +170,7 @@ function hasAPILayerPatterns(
   const hasRoutes = (analysis.routeRegistrations?.length ?? 0) > 0
 
   for (const pattern of apiLayerPatterns.filePatterns) {
-    if (minimatch(analysis.filePath, pattern)) {
+    if (minimatch(analysis.filePath, pattern, { dot: true })) {
       // Broad patterns require evidence of actual route handling
       if (broadDirPatterns.has(pattern) && !hasRoutes) continue
       reasons.push(`File path matches API layer pattern: ${pattern}`)
@@ -229,7 +229,7 @@ function hasExternalLayerPatterns(
 
   // Check file patterns
   for (const pattern of externalLayerPatterns.filePatterns) {
-    if (minimatch(analysis.filePath, pattern)) {
+    if (minimatch(analysis.filePath, pattern, { dot: true })) {
       reasons.push(`File path matches external layer pattern: ${pattern}`)
       return { match: true, reasons }
     }

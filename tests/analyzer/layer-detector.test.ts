@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import type { FileAnalysis } from '../../packages/shared/src/types/analysis';
 import { detectLayers, toLayerDetectionResults } from '../../packages/analyzer/src/layer-detector';
 
-function makeAnalysis(imports: Array<{ source: string }>): FileAnalysis {
+function makeAnalysis(imports: Array<{ source: string }>, filePath = '/test/file.ts'): FileAnalysis {
   return {
-    filePath: '/test/file.ts',
+    filePath,
     language: 'typescript',
     functions: [],
     classes: [],
@@ -101,5 +101,25 @@ describe('toLayerDetectionResults', () => {
     const layerNames = results.map((r) => r.layer);
     expect(layerNames).toContain('api');
     expect(layerNames).toContain('external');
+  });
+
+  // File-pattern matching must not be defeated by dot-prefixed path segments
+  // (e.g. projects living under `.claude/worktrees/...`). minimatch's default
+  // glob behavior excludes dot segments, so all `**/...` patterns require
+  // `{ dot: true }` to match through them.
+  it('matches data layer file patterns through dot-prefixed path segments', () => {
+    const analysis = makeAnalysis(
+      [],
+      '/Users/dev/.claude/worktrees/feature/services/user-service/src/models/user.model.ts',
+    );
+    expect(detectLayers(analysis).layers).toContain('data');
+  });
+
+  it('matches API layer file patterns through dot-prefixed path segments', () => {
+    const analysis = makeAnalysis(
+      [],
+      '/Users/dev/.claude/worktrees/feature/services/api-gateway/src/handlers/user.handler.ts',
+    );
+    expect(detectLayers(analysis).layers).toContain('api');
   });
 });
