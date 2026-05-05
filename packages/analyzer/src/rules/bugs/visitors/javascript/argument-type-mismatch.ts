@@ -2,6 +2,15 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { TS_LANGUAGES } from './_helpers.js'
 
+// TypeScript diagnostic codes that indicate an actual argument/parameter
+// mismatch. Anything else (TS2339 property-not-found, TS2304 cannot-find-name,
+// TS2307 cannot-find-module, etc.) lives at the call site coincidentally and
+// must not surface as an "argument type mismatch" violation.
+//   2345 — Argument of type 'X' is not assignable to parameter of type 'Y'
+//   2554 — Expected N arguments, but got M
+//   2769 — No overload matches this call
+const ARGUMENT_MISMATCH_DIAGNOSTIC_CODES = new Set<number>([2345, 2554, 2769])
+
 /**
  * Detect: Arguments to built-in functions that don't match documented types.
  * Corresponds to sonarjs S3782 (argument-type).
@@ -18,9 +27,13 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
     // Use the TS compiler's own diagnostics to detect argument type mismatches.
     // This is the only reliable way — our own type comparison fails on generics,
     // overloads, and complex type inference that TypeScript handles correctly.
+    // Filter to argument-mismatch codes only — the call's line range can also
+    // contain unrelated diagnostics (property-not-found, missing module, etc.).
     const startLine = node.startPosition.row
     const endLine = node.endPosition.row
-    const hasError = typeQuery.hasTypeErrorInRange(filePath, startLine, endLine)
+    const hasError = typeQuery.hasTypeErrorInRange(
+      filePath, startLine, endLine, ARGUMENT_MISMATCH_DIAGNOSTIC_CODES,
+    )
     if (!hasError) return null
 
     // There's a real TS type error at this call site — get details for the message
