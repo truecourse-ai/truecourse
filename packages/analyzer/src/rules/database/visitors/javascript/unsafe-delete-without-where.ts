@@ -2,11 +2,18 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getMethodName, SQL_WRITE_METHODS } from './_helpers.js'
 
+// Schema-migration directories where bulk DELETE / UPDATE without WHERE is
+// the explicit, intended operation. Detection here is noise — file naming
+// and the migration runner already telegraph intent.
+const MIGRATION_PATH_RE = /(?:[\\/]|^)(?:migrations[\\/](?:versions[\\/])?|knex[\\/]migrations[\\/]|prisma[\\/]migrations[\\/])/i
+
 export const unsafeDeleteWithoutWhereVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/unsafe-delete-without-where',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
+    if (MIGRATION_PATH_RE.test(filePath)) return null
+
     const methodName = getMethodName(node)
     if (!SQL_WRITE_METHODS.has(methodName)) return null
 

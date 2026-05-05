@@ -2,6 +2,12 @@ import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+// Schema-migration directories: Alembic / Django / generic migration files
+// are essentially top-down scripts whose canonical structure includes
+// module-level metadata (revision, down_revision, branch_labels,
+// depends_on) and mutable bookkeeping. The rule is moot here.
+const MIGRATION_PATH_RE = /(?:[\\/]|^)(?:alembic|migrations)[\\/]versions[\\/]/i
+
 // Names from `typing` (and built-in generic equivalents) that mark a
 // `subscript` as a type-alias construction, not a runtime mutable.
 const TYPING_NAMES = new Set([
@@ -46,6 +52,8 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['assignment'],
   visit(node, filePath, sourceCode) {
+    if (MIGRATION_PATH_RE.test(filePath)) return null
+
     // tree-sitter wraps assignments in expression_statement, so check both:
     // assignment → module  OR  assignment → expression_statement → module
     const parent = node.parent
