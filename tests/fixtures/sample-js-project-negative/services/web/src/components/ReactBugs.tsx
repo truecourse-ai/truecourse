@@ -13,6 +13,15 @@ export function ConditionalHook({ show }: { show: boolean }) {
   return <div>Hidden</div>;
 }
 
+export function ConditionalNamespaceHook({ ready }: { ready: boolean }) {
+  if (ready) {
+    // VIOLATION: bugs/deterministic/conditional-hook
+    const [value, setValue] = React.useState('');
+    return <input value={value} onChange={(e) => setValue(e.target.value)} />;
+  }
+  return null;
+}
+
 // VIOLATION: bugs/deterministic/usestate-object-mutation
 export function StateMutation() {
   const [state, setState] = useState({ items: [] as string[], count: 0 });

@@ -5,12 +5,28 @@ import { JS_LANGUAGES } from './_helpers.js'
 
 const HOOK_NAMES = /^use[A-Z]/
 
-// Check if a call is a React hook call
+// Check if a call is a React hook call.
+//
+// Hooks are invoked as either a plain identifier (`useState()`) or as a
+// member access whose property is the hook (`React.useState()`). They are
+// NOT invoked as `<hook>.<staticMethod>()` — patterns like Zustand's
+// `useStore.getState().setSomething(...)` are *not* hook calls; the leaf
+// being invoked is `getState` / `setSomething`, while `useStore` is just
+// the receiver. We distinguish by inspecting the node shape rather than
+// the full callee text.
 function isHookCall(node: SyntaxNode): boolean {
   if (node.type !== 'call_expression') return false
   const fn = node.childForFieldName('function')
   if (!fn) return false
-  return HOOK_NAMES.test(fn.text)
+  if (fn.type === 'identifier') {
+    return HOOK_NAMES.test(fn.text)
+  }
+  if (fn.type === 'member_expression') {
+    const property = fn.childForFieldName('property')
+    if (!property) return false
+    return HOOK_NAMES.test(property.text)
+  }
+  return false
 }
 
 // Check if the node is inside a conditional block (if/else/ternary/loop)
