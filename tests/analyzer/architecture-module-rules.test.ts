@@ -136,6 +136,68 @@ describe('checkModuleRules', () => {
     expect(deadViolations).toHaveLength(0);
   });
 
+  // Cross-service internal import: de-facto-shared detection.
+  //
+  // The rule treats a service consumed by 3+ other services as shared
+  // infrastructure (its internals are designed to be consumed broadly).
+  // The consumer count must come from FILE-level dependencies, not just
+  // module-level: source files without exported modules (test files,
+  // scripts, barrel-only files) still count as consumers.
+  it('counts test-file consumers when computing de-facto-shared status', () => {
+    // Target service `ui` is consumed by:
+    //   - svc-a (has a module that imports Dialog)        ← module-level dep
+    //   - svc-b (has a module that imports Dialog)        ← module-level dep
+    //   - svc-c-tests (only has a test file, no modules)  ← FILE-level dep only
+    // Module-level alone sees 2 consumers (under threshold);
+    // file-level sees 3 consumers (at threshold), so `ui` is shared.
+    const modules = [
+      makeModule({ name: 'Dialog', serviceName: 'ui', layerName: 'service', filePath: '/repo/ui/dialog.ts' }),
+      makeModule({ name: 'AppA', serviceName: 'svc-a', filePath: '/repo/svc-a/app.ts' }),
+      makeModule({ name: 'AppB', serviceName: 'svc-b', filePath: '/repo/svc-b/app.ts' }),
+    ];
+    const moduleLevelDeps: ModuleLevelDependency[] = [
+      { sourceModule: 'AppA', sourceService: 'svc-a', targetModule: 'Dialog', targetService: 'ui', importedNames: ['Dialog'] },
+      { sourceModule: 'AppB', sourceService: 'svc-b', targetModule: 'Dialog', targetService: 'ui', importedNames: ['Dialog'] },
+    ];
+    // File-level deps include the test file from svc-c-tests
+    const fileDependencies: ModuleDependency[] = [
+      { source: '/repo/svc-a/app.ts', target: '/repo/ui/dialog.ts', importedNames: ['Dialog'] },
+      { source: '/repo/svc-b/app.ts', target: '/repo/ui/dialog.ts', importedNames: ['Dialog'] },
+      { source: '/repo/svc-c-tests/dialog.test.ts', target: '/repo/ui/dialog.ts', importedNames: ['Dialog'] },
+    ];
+    const fileToService = new Map<string, string>([
+      ['/repo/ui/dialog.ts', 'ui'],
+      ['/repo/svc-a/app.ts', 'svc-a'],
+      ['/repo/svc-b/app.ts', 'svc-b'],
+      ['/repo/svc-c-tests/dialog.test.ts', 'svc-c-tests'],
+    ]);
+
+    const violations = checkModuleRules(
+      modules, [], fileDependencies, enabledRules, moduleLevelDeps,
+      undefined, undefined, undefined, undefined, undefined, fileToService,
+    );
+
+    const csi = violations.filter(v => v.ruleKey === 'architecture/deterministic/cross-service-internal-import');
+    expect(csi).toHaveLength(0);
+  });
+
+  it('flags imports from a service consumed by only 2 services (under threshold)', () => {
+    const modules = [
+      makeModule({ name: 'AuthInternal', serviceName: 'auth', layerName: 'service', filePath: '/repo/auth/internal.ts' }),
+      makeModule({ name: 'AppA', serviceName: 'svc-a', filePath: '/repo/svc-a/app.ts' }),
+      makeModule({ name: 'AppB', serviceName: 'svc-b', filePath: '/repo/svc-b/app.ts' }),
+    ];
+    const moduleLevelDeps: ModuleLevelDependency[] = [
+      { sourceModule: 'AppA', sourceService: 'svc-a', targetModule: 'AuthInternal', targetService: 'auth', importedNames: ['AuthInternal'] },
+      { sourceModule: 'AppB', sourceService: 'svc-b', targetModule: 'AuthInternal', targetService: 'auth', importedNames: ['AuthInternal'] },
+    ];
+
+    const violations = checkModuleRules(modules, [], [], enabledRules, moduleLevelDeps);
+
+    const csi = violations.filter(v => v.ruleKey === 'architecture/deterministic/cross-service-internal-import');
+    expect(csi.length).toBeGreaterThanOrEqual(1);
+  });
+
   // Orphan file detection
   function makeFileAnalysis(filePath: string): FileAnalysis {
     return {

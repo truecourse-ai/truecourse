@@ -159,6 +159,7 @@ export function checkModuleRules(
   libraryServiceNames?: Set<string>,
   entryPointFiles?: Set<string>,
   methodLevelDeps?: MethodLevelDependency[],
+  fileToService?: Map<string, string>,
 ): ModuleViolation[] {
   const violations: ModuleViolation[] = []
   const ruleKeys = new Set(enabledRules.filter(r => r.type === 'deterministic' && r.enabled).map(r => r.key))
@@ -622,12 +623,27 @@ export function checkModuleRules(
         }
       }
 
-      // Detect de facto shared services: if a service is imported by the
-      // majority (>50%) of other services, it's a shared foundation (like
-      // Python's `core/` or JS's `shared/`), not an independent microservice.
-      // Cross-service imports FROM shared services are always legitimate.
+      // Detect de facto shared services: if a service is imported by 3+
+      // other services, it's a shared foundation (like Python's `core/`
+      // or JS's `shared/`), not an independent microservice. Cross-service
+      // imports FROM shared services are always legitimate.
+      //
+      // Consumer count comes from FILE-level deps (when available), not
+      // module-level: source files without exported modules — test files,
+      // scripts, barrel-only files — are missing from moduleLevelDeps and
+      // would otherwise undercount real shared usage.
       const serviceConsumers = new Map<string, Set<string>>()
-      if (moduleLevelDeps) {
+      if (fileToService && fileDependencies.length > 0) {
+        for (const dep of fileDependencies) {
+          const srcService = fileToService.get(dep.source)
+          const tgtService = fileToService.get(dep.target)
+          if (!srcService || !tgtService || srcService === tgtService) continue
+          if (!serviceConsumers.has(tgtService)) {
+            serviceConsumers.set(tgtService, new Set())
+          }
+          serviceConsumers.get(tgtService)!.add(srcService)
+        }
+      } else if (moduleLevelDeps) {
         for (const dep of moduleLevelDeps) {
           if (dep.sourceService === dep.targetService) continue
           if (!serviceConsumers.has(dep.targetService)) {

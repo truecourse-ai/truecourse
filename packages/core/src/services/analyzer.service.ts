@@ -72,6 +72,17 @@ export function runDeterministicModuleChecks(
     result.services.filter((s) => s.type === 'library').map((s) => s.name),
   );
 
+  // Build file → service lookup for the cross-service-internal-import rule.
+  // Includes EVERY file in every service (test files, scripts, etc.), so
+  // the de-facto-shared check counts all consumers, not just files with
+  // exported modules.
+  const fileToService = new Map<string, string>();
+  for (const svc of result.services) {
+    for (const file of svc.files) {
+      fileToService.set(file, svc.name);
+    }
+  }
+
   return checkModuleRules(
     result.modules,
     result.methods,
@@ -83,6 +94,7 @@ export function runDeterministicModuleChecks(
     libraryServiceNames,
     result.entryPointFiles,
     result.methodLevelDependencies || [],
+    fileToService,
   );
 }
 
