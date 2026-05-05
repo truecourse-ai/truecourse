@@ -22,6 +22,33 @@ function collectLoopVarNames(node: SyntaxNode): Set<string> {
   return names
 }
 
+/**
+ * Collect names walrus-assigned inside `if`/`for` clauses of a
+ * comprehension. PEP 572 walrus binds the LHS at the enclosing function
+ * scope, so a walrus-bound name used as the dict-comp key changes per
+ * iteration just like a loop variable.
+ */
+function collectWalrusBoundNames(comprehension: SyntaxNode): Set<string> {
+  const names = new Set<string>()
+  function walk(n: SyntaxNode) {
+    if (n.type === 'named_expression') {
+      const nameNode = n.childForFieldName('name')
+      if (nameNode && nameNode.type === 'identifier') {
+        names.add(nameNode.text)
+      }
+    }
+    for (const child of n.namedChildren) {
+      walk(child)
+    }
+  }
+  for (const clause of comprehension.namedChildren) {
+    if (clause.type === 'if_clause' || clause.type === 'for_in_clause') {
+      walk(clause)
+    }
+  }
+  return names
+}
+
 export const pythonDuplicateDictKeyVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/duplicate-dict-key',
   languages: ['python'],
@@ -40,13 +67,20 @@ export const pythonDuplicateDictKeyVisitor: CodeRuleVisitor = {
     const leftNode = forInClause?.childForFieldName('left')
     const loopVarNames = leftNode ? collectLoopVarNames(leftNode) : new Set<string>()
 
-    // A constant key is a literal or an identifier that is NOT any loop variable.
+    // Walrus-bound names (`if (x := expr) in container`) also vary per
+    // iteration and are valid dynamic keys.
+    const walrusNames = collectWalrusBoundNames(node)
+
+    // A constant key is a literal or an identifier that is NOT any loop
+    // variable AND NOT walrus-bound in any clause.
     // F-strings parse as `string` but are dynamic per iteration when they
     // interpolate values, so peek at the children to tell them apart.
     const LITERAL_TYPES = new Set(['string', 'integer', 'float', 'true', 'false', 'none'])
     const isStaticLiteral = LITERAL_TYPES.has(keyNode.type) && !isFStringWithInterpolation(keyNode)
     const isConstantKey = isStaticLiteral ||
-      (keyNode.type === 'identifier' && loopVarNames.size > 0 && !loopVarNames.has(keyNode.text))
+      (keyNode.type === 'identifier' && loopVarNames.size > 0
+        && !loopVarNames.has(keyNode.text)
+        && !walrusNames.has(keyNode.text))
 
     if (isConstantKey) {
       return makeViolation(
