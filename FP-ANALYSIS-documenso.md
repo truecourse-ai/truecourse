@@ -2,17 +2,17 @@
 
 Source: `truecourse@latest analyze --no-llm --no-skills --no-stash` against shallow clone of `documenso/documenso` at `/tmp/tc-targets/documenso`. Run after the FP fixes from commits `97fcc99..0c816bd` (the v0.5.7 → fp-fixes delta).
 
-## Current totals
+## Current totals (post FP #21)
 
-| Tier | Count |
-|---|---|
-| critical | 0 |
-| high | 1,123 |
-| medium | 47,724 |
-| low | 4,222 |
-| **total** | **53,069** |
+| Tier | v0.5.7 baseline | Current | Δ |
+|---|---|---|---|
+| critical | 18 | **0** | -18 |
+| high | 4,929 | **604** | -88% |
+| medium | 47,724 | 47,481 | -243 |
+| low | 4,222 | 3,989 | -233 |
+| **total** | **57,351** | **52,074** | -5,277 |
 
-214 distinct rules firing.
+214 distinct rules firing initially → many fewer effective FP-class rules now.
 
 ## Classification
 
@@ -27,7 +27,7 @@ Format: `Verdict — rule-key (count)`. Verdicts are:
 
 | Verdict | Rule | Count | Notes |
 |---|---|---|---|
-| MIXED | `code-quality/deterministic/unsafe-any-usage` | 44,203 | Flags every expression typed as `any`. Many are real (ill-typed third-party / explicit `any`). Some are FPs where TS *can* infer a type but the analyzer doesn't see it. Needs deeper investigation — biggest single noise source. |
+| TP/CALIBRATION | `code-quality/deterministic/unsafe-any-usage` | 44,203 | After investigation: every flagged value is genuinely typed as `any` per TS — rule is technically correct. Volume comes from library-induced `any` (Prisma, `req.body`, `process.env` etc.) propagating through every member access / call. Distribution: 64% member-access, 24% call, 13% assignment. Top file 484 findings (`packages/api/v1/implementation.ts`). Reducing noise is **calibration**, not strict FP-fix: candidates are (a) aggregate per-symbol-per-file (~95% reduction), (b) skip when the `any` originates from a third-party import, (c) demote severity. NOT in the FP queue. |
 | TP | `code-quality/deterministic/too-many-lines` | 976 | Function/file length measurement — fires correctly. |
 | TP | `code-quality/deterministic/magic-number` | 544 | Real magic numbers (`429`, `4000`). Pedantic but TPs. |
 | TODO | `architecture/deterministic/cross-service-internal-import` | 433 | Original report suspected FP. Not investigated this pass. |
@@ -59,7 +59,7 @@ Format: `Verdict — rule-key (count)`. Verdicts are:
 | TODO | `database/deterministic/unvalidated-external-data` | 87 | Not investigated — needs check whether all are real Prisma writes from un-Zod-validated input. |
 | TP | `reliability/deterministic/unchecked-array-access` | 80 | `arr[index]` without bounds check. Real. |
 | TP | `code-quality/deterministic/todo-fixme` | 79 | Real TODO/FIXME comments. |
-| **FP** | `code-quality/deterministic/dot-notation-enforcement` | 76 | Flags `obj['key']` where bracket notation is intentional — keys with special characters (`signer['nativeId']`), reserved-name disambiguation, or framework-specific access (`client['accounts'].$get()` in Hono client). |
+| STYLE | `code-quality/deterministic/dot-notation-enforcement` | 76 | Initial classification was FP, but on review the cases (`signer['nativeId']`, `errors['signers__root']`, `__OWNER__`, `client['sessions']`) are all valid JS identifiers. Bracket notation is stylistic, dot notation works equally. Real TPs that some teams disable as a style preference. |
 | TP | `bugs/deterministic/generic-error-message` | 69 | Real "An error occurred"-style messages. Style. |
 | TP | `bugs/deterministic/await-in-loop` | 69 | Real serial `await` in loops. Some are intentional. Style. |
 | TP | `code-quality/deterministic/cognitive-complexity` | 68 | Measurement. |
@@ -85,7 +85,7 @@ Built from FP-classified rules above, ordered by total findings.
 |---|---|---|---|
 | 1 | `code-quality/deterministic/no-void` + `bugs/deterministic/void-zero-argument` | 201 + 201 = **402** | `void someAsync()` (fire-and-forget Promise pattern). |
 | 2 | `security/deterministic/timing-attack-comparison` | 95 | Non-credential equality checks flagged. Restrict to known credential/token operands. |
-| 3 | `code-quality/deterministic/dot-notation-enforcement` | 76 | Bracket notation when key has special chars / is intentional. |
+| ~~3~~ | ~~`code-quality/deterministic/dot-notation-enforcement`~~ | ~~76~~ | RECLASSIFIED as STYLE, not FP. See above. |
 | 4 | `code-quality/deterministic/computed-enum-value` | 32 | TS string enum members. |
 
 **Not yet in queue (TODO investigation):**

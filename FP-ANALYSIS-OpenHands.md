@@ -2,15 +2,15 @@
 
 Source: `truecourse@latest analyze --no-llm --no-skills --no-stash` against shallow clone of `All-Hands-AI/OpenHands` at `/tmp/tc-targets/OpenHands`. Run after the FP fixes from commits `97fcc99..0c816bd`.
 
-## Current totals
+## Current totals (post FP #21)
 
-| Tier | Count |
-|---|---|
-| critical | 5 (all real — see below) |
-| high | 362 |
-| medium | 14,053 |
-| low | 9,515 |
-| **total** | **23,935** |
+| Tier | v0.5.7 baseline | Current | Δ |
+|---|---|---|---|
+| critical | 69 | **5** (all real) | -64 |
+| high | 1,014 | **362** | -64% |
+| medium | 14,115 | 14,053 | -62 |
+| low | 9,515 | 7,996 | -1,519 (mostly computed-enum-value) |
+| **total** | **25,115** | **22,416** | -2,699 |
 
 297 distinct rules firing.
 
