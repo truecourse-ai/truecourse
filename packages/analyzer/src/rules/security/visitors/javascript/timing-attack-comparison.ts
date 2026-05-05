@@ -82,6 +82,10 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
         left.type === 'member_expression' && right.type === 'member_expression' &&
         left.childForFieldName('object')?.text === right.childForFieldName('object')?.text
       ) return null
+      // Skip `typeof <X> === '<primitiveTypeName>'` — type checks always
+      // compare a primitive type-name string, never a credential value.
+      if (left.type === 'unary_expression' && left.children[0]?.text === 'typeof') return null
+      if (right.type === 'unary_expression' && right.children[0]?.text === 'typeof') return null
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Timing attack via string comparison',

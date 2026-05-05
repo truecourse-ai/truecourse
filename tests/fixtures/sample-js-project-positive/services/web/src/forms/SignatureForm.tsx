@@ -41,3 +41,18 @@ export function isTypedSignatureOff(p: FormProps): boolean {
 export function passwordsMatch(data: { password: string; repeatedPassword: string }): boolean {
   return data.password === data.repeatedPassword;
 }
+
+// `typeof <varWithKeyword>` returns a primitive type string ('string',
+// 'undefined', etc.) — comparing against another primitive string is a
+// TYPE CHECK, not a credential comparison.
+export function logTokenType(presignToken: unknown): void {
+  if (typeof presignToken === 'string') {
+    console.warn('token present');
+  }
+}
+
+export function logCsrfTokenStatus(csrfToken: unknown): void {
+  if (typeof csrfToken !== 'string') {
+    console.warn('csrf missing');
+  }
+}
