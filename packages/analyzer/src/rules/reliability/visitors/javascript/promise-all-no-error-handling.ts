@@ -24,6 +24,17 @@ export const promiseAllNoErrorHandlingVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (parent?.type === 'await_expression' && isInsideTryCatch(parent)) return null
 
+    // Skip when the Promise.all is RETURNED to the caller — the caller
+    // takes ownership of error handling. Covers explicit return, return-await,
+    // and implicit-return arrow bodies.
+    if (parent?.type === 'return_statement') return null
+    if (parent?.type === 'arrow_function') return null
+    if (parent?.type === 'await_expression') {
+      const grandParent = parent.parent
+      if (grandParent?.type === 'return_statement') return null
+      if (grandParent?.type === 'arrow_function') return null
+    }
+
     // Skip framework-managed routes where the framework catches thrown
     // errors and renders an error boundary / 500 response:
     //   - Next.js app router: page.tsx, layout.tsx, route.ts(x)
