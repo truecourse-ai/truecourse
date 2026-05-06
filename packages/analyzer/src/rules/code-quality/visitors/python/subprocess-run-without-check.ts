@@ -11,8 +11,23 @@ export const pythonSubprocessRunWithoutCheckVisitor: CodeRuleVisitor = {
 
     let isSubprocessRun = false
     if (fn.type === 'identifier' && fn.text === 'run') {
-      // Could be subprocess.run or just run()
-      isSubprocessRun = true
+      // Bare `run(...)` could be `subprocess.run` (after `from
+      // subprocess import run`) OR an unrelated local helper. Skip
+      // when the file does NOT import `run` from subprocess. Common
+      // FP: `result = run()` calling a local `run` lambda/function.
+      const root = (() => {
+        let cur: typeof node | null = node
+        while (cur && cur.parent) cur = cur.parent
+        return cur
+      })()
+      if (root) {
+        const text = root.text
+        // Look for `from subprocess import ... run ...` or `import subprocess`.
+        const importsRun =
+          /\bfrom\s+subprocess\s+import\b[^\n]*\brun\b/.test(text) ||
+          /\bimport\s+subprocess\b/.test(text)
+        if (importsRun) isSubprocessRun = true
+      }
     } else if (fn.type === 'attribute') {
       const obj = fn.childForFieldName('object')
       const attr = fn.childForFieldName('attribute')
