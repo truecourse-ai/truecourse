@@ -12,7 +12,7 @@
  *     `const nextItem = parsedData.pop();`
  */
 
-interface Signer { readonly id: string; readonly name: string }
+import type { Signer } from '../../../user-service/src/models/signing.model';
 
 export function reorderSigners(signers: readonly Signer[], from: number, to: number): Signer[] {
   // Canonical splice idiom: remove one element, get it, insert elsewhere.

@@ -8,8 +8,10 @@
  *   apps/remix/server/api/files/files.ts:38,64,161
  */
 
-const STATUS_NOT_FOUND = STATUS_NOT_FOUND;
-const STATUS_SERVER_ERROR = STATUS_SERVER_ERROR;
+import type { Envelope } from '../../../user-service/src/models/signing.model';
+
+const STATUS_NOT_FOUND = 404;
+const STATUS_SERVER_ERROR = 500;
 
 interface HonoContext {
   readonly json: (body: unknown, status?: number) => Response;
@@ -62,6 +64,6 @@ export async function loadCachedLicense(
   }
 }
 
-function fetchEnvelopeFromDb(): Promise<{ readonly id: string } | null> {
+function fetchEnvelopeFromDb(): Promise<Envelope | null> {
   return Promise.resolve({ id: 'env-1' });
 }

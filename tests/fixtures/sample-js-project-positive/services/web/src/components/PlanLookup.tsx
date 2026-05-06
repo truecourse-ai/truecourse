@@ -4,34 +4,28 @@
  * should NOT flag these — Records keyed by a finite union are
  * exhaustive by construction.
  *
+ * Domain types (`PlanId`, `Role`, `Permission`) and lookup tables
+ * (`PLANS`, `ORGANISATION_MEMBER_ROLE_MAP`, `ROLE_PERMISSIONS`,
+ * `AGENT_STATUS_MAP`) are imported from the shared user-service models
+ * to keep the fixture project coherent across services.
+ *
  * Mirrors documenso's
  *   apps/remix/app/components/dialogs/organisation-create-dialog.tsx:306 (`plans[planId]`)
  *   apps/remix/app/components/dialogs/organisation-leave-dialog.tsx:92  (`ORGANISATION_MEMBER_ROLE_MAP[role]`)
+ * and OpenHands'
+ *   frontend/src/utils/org/permissions.ts (`rolePermissions: Record<Role, Permission[]>`)
+ *   frontend/src/utils/status.ts (`AGENT_STATUS_MAP: { [k: string]: string }`)
  */
 
-type PlanId = 'free' | 'pro' | 'team';
-type Role = 'owner' | 'admin' | 'member';
+import { AGENT_STATUS_MAP, ORGANISATION_MEMBER_ROLE_MAP, PLANS, ROLE_PERMISSIONS } from '../../../user-service/src/models/billing.model';
+import type { Permission, PlanId, Role } from '../../../user-service/src/models/billing.model';
 
-interface PlanInfo { readonly label: string; readonly priceCents: number }
-
-const plans: Record<PlanId, PlanInfo> = {
-  free: { label: 'Free', priceCents: 0 },
-  pro: { label: 'Pro', priceCents: 1900 },
-  team: { label: 'Team', priceCents: 4900 },
-};
-
-const ORGANISATION_MEMBER_ROLE_MAP: Record<Role, string> = {
-  owner: 'Owner',
-  admin: 'Administrator',
-  member: 'Member',
-};
-
-// `.map((planId) => { const plan = plans[planId]; ... })` — exact
+// `.map((planId) => { const plan = PLANS[planId]; ... })` — exact
 // documenso shape (organisation-create-dialog.tsx:306).
 export function describePlans(): { name: string; price: number }[] {
   const ids: PlanId[] = ['free', 'pro', 'team'];
   return ids.map((planId) => {
-    const plan = plans[planId];
+    const plan = PLANS[planId];
     return { name: plan.label, price: plan.priceCents };
   });
 }
@@ -58,31 +52,13 @@ export function dispatch(action: 'add' | 'remove' | 'reset', n: number): number 
 
 // Record<K, V[]> — Record values that are themselves arrays. The receiver
 // is still a Record (map), not an array. Mirrors OpenHands'
-//   frontend/src/utils/org/permissions.ts (`rolePermissions: Record<Role, PermissionKey[]>`)
 //   frontend/src/hooks/organizations/use-permissions.ts:8 (`rolePermissions[role]`)
-type Permission = 'permRead' | 'permWrite' | 'permAdmin';
-const PERM_READ: Permission = 'permRead';
-const PERM_WRITE: Permission = 'permWrite';
-const PERM_ADMIN: Permission = 'permAdmin';
-const rolePermissions: Record<Role, Permission[]> = {
-  owner: [PERM_READ, PERM_WRITE, PERM_ADMIN],
-  admin: [PERM_READ, PERM_WRITE],
-  member: [PERM_READ],
-};
-
 export function permissionsFor(role: Role): readonly Permission[] {
-  return rolePermissions[role];
+  return ROLE_PERMISSIONS[role];
 }
 
 // `{ [k: string]: V }` index-signature object. Same shape category as
-// Record — a map. Mirrors OpenHands'
-//   frontend/src/utils/status.ts (`AGENT_STATUS_MAP: { [k: string]: string }`)
-const AGENT_STATUS_MAP: { [k: string]: string } = {
-  loading: 'Status: Initializing',
-  ready: 'Status: Ready',
-  error: 'Status: Error',
-};
-
+// Record — a map.
 export function statusLabel(state: string): string {
   return AGENT_STATUS_MAP[state];
 }
