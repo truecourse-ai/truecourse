@@ -23,6 +23,8 @@ export function buildAnalysisSteps(
 ): { key: string; label: string }[] {
   const steps: { key: string; label: string }[] = [
     { key: 'parse', label: 'Parsing repository' },
+    { key: 'semantics', label: 'Type-checking' },
+    { key: 'graph', label: 'Building dependency graph' },
   ];
 
 

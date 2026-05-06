@@ -192,11 +192,29 @@ export async function analyzeCore(
     // Parse the code
     // ------------------------------------------------------------
     options.tracker?.start('parse', isDiff ? 'Analyzing working tree...' : 'Starting analysis...');
+    // analyzer.service emits one of three phase keys: 'discover'/'analyze'
+    // (parse phase), 'semantics' (TS Compiler), or 'graph' (dependency
+    // graph + service split + save). Translate phase transitions into
+    // tracker.done(prev) + tracker.start(next) so each silent stretch
+    // shows under its own checklist row in both UI and CLI.
+    let activePhase: 'parse' | 'semantics' | 'graph' = 'parse';
+    const phaseFor = (step: string): 'parse' | 'semantics' | 'graph' => {
+      if (step === 'semantics') return 'semantics';
+      if (step === 'graph') return 'graph';
+      return 'parse';
+    };
     const result: AnalysisResult = await runAnalysis(
       project.path,
       branch ?? undefined,
       (progress) => {
-        options.tracker?.detail('parse', progress.detail ?? 'Analyzing...');
+        const next = phaseFor(progress.step);
+        if (next !== activePhase) {
+          options.tracker?.done(activePhase);
+          options.tracker?.start(next, progress.detail);
+          activePhase = next;
+        } else {
+          options.tracker?.detail(activePhase, progress.detail ?? 'Analyzing...');
+        }
         options.onProgress?.({ detail: progress.detail });
       },
       { signal },
@@ -266,8 +284,12 @@ export async function analyzeCore(
       touchProject(project.slug);
     }
 
+    // Close out whichever phase was last active. runAnalysis ends in 'graph',
+    // but if scopedOptions was empty (no tsconfig in repo) we may still be in
+    // 'parse'. Close the trailing one with the summary so CLI/UI both show
+    // the file count on the final phase row.
     options.tracker?.done(
-      'parse',
+      activePhase,
       `${result.services.length} services, ${result.fileAnalyses?.length ?? 0} files`,
     );
 

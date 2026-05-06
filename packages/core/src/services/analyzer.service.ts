@@ -183,10 +183,15 @@ export async function runAnalysis(
     }
   }
 
+  // Phase boundary: tree-sitter parsing done, TS Compiler semantic analysis
+  // begins. analyzeSemantics() builds a single ts.Program over every source
+  // file, which on large repos with heavy .d.ts deps (Prisma, Next, Remix)
+  // can dominate runtime. Emitting a new step lets the UI/CLI show progress
+  // instead of sticking on the last parse-loop detail.
   onProgress({
-    step: 'dependencies',
-    percent: 65,
-    detail: 'Building dependency graph...',
+    step: 'semantics',
+    percent: 62,
+    detail: `Type-checking ${fileAnalyses.length} files...`,
   });
 
   // Use TS compiler for accurate export detection — corrects isExported flags
@@ -251,10 +256,18 @@ export async function runAnalysis(
     }
   }
 
+  // Phase boundary: semantic analysis done, dependency graph + service split
+  // begin. These are normally fast but the silent gap matters when LSP
+  // analyses ran above.
+  onProgress({
+    step: 'graph',
+    percent: 70,
+    detail: 'Building dependency graph...',
+  });
   const moduleDependencies = analyzer.buildDependencyGraph(fileAnalyses, repoPath);
 
   onProgress({
-    step: 'services',
+    step: 'graph',
     percent: 75,
     detail: 'Detecting services...',
   });
@@ -265,7 +278,7 @@ export async function runAnalysis(
   );
 
   onProgress({
-    step: 'saving',
+    step: 'graph',
     percent: 80,
     detail: `Saving results: ${splitResult.services.length} services detected`,
   });

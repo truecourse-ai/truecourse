@@ -35,7 +35,7 @@ function resolveOrInitProject(): RegistryEntry {
 // ---------------------------------------------------------------------------
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const PRE_LLM_STEPS = new Set(["parse", "scan"]);
+const PRE_LLM_STEPS = new Set(["parse", "semantics", "graph", "scan"]);
 let spinnerFrame = 0;
 let spinnerInterval: ReturnType<typeof setInterval> | null = null;
 let renderedLineCount = 0;
