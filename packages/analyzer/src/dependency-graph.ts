@@ -243,10 +243,40 @@ export function buildDependencyGraph(
 }
 
 /**
- * Find entry points — files that are not imported by anyone.
- * These are structural entry points: framework-routed files (page.tsx, layout.tsx),
- * scripts, CLI entry points, etc. Used by deterministic rules to avoid flagging
- * framework entry files as dead/unused.
+ * Filesystem-routed framework conventions. A file matching one of these
+ * patterns is consumed by the framework's auto-discovery mechanism rather
+ * than via static imports — it's still an entry point even if some other
+ * file imports it (e.g., Remix `_dynamic_*+/X.tsx` re-exporting an X.tsx
+ * sibling). Source-static analysis can't see the framework's dispatch.
+ */
+const FRAMEWORK_ENTRY_PATTERNS: RegExp[] = [
+  // Remix v2: `app/routes/**` are filesystem-routed.
+  /\/app\/routes\//,
+  // Remix client/server entry hooks.
+  /\/app\/entry\.(server|client)\.(ts|tsx|js|jsx)$/,
+  // Remix custom server.
+  /\/(remix|app)\/server\//,
+  /\/server\/(load-context|index)\.(ts|js)$/,
+  // Next.js app router conventions: app/**/(page|layout|route|template|…).
+  /\/app\/.*\/(page|layout|route|template|loading|error|not-found|default|head|opengraph-image|twitter-image|icon|apple-icon|sitemap|robots|manifest)\.(ts|tsx|js|jsx)$/,
+  // Next.js pages router (legacy).
+  /\/pages\//,
+  // BullMQ-style auto-loaded jobs (documenso, hatchet, common patterns).
+  /\/jobs\/definitions\//,
+  /\/jobs\/handlers\//,
+]
+
+function isFrameworkEntry(filePath: string): boolean {
+  for (const pattern of FRAMEWORK_ENTRY_PATTERNS) {
+    if (pattern.test(filePath)) return true
+  }
+  return false
+}
+
+/**
+ * Find entry points — files that are not imported by anyone OR that match
+ * a filesystem-routed framework convention. Used by deterministic rules to
+ * avoid flagging framework entry files as dead/unused.
  */
 export function findEntryPoints(
   files: FileAnalysis[],
@@ -259,7 +289,7 @@ export function findEntryPoints(
 
   const entryPoints: string[] = []
   for (const file of files) {
-    if (!importedFiles.has(file.filePath)) {
+    if (!importedFiles.has(file.filePath) || isFrameworkEntry(file.filePath)) {
       entryPoints.push(file.filePath)
     }
   }

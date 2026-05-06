@@ -222,6 +222,60 @@ describe('findEntryPoints — structural detection', () => {
     expect(entryPoints).toContain('/project/scripts/migrate.ts');
     expect(entryPoints).not.toContain('/project/lib/db.ts');
   });
+
+  // FP #33 — Filesystem-routed framework files. Remix discovers routes by
+  // filesystem path; even when one route file imports another (the
+  // `_dynamic_personal_routes+` re-export pattern), the original route is
+  // still consumed by the framework and its exports are framework-invoked.
+  it('treats Remix `app/routes/**` files as entry points even if imported', () => {
+    const files: FileAnalysis[] = [
+      makeFileAnalysis('/project/apps/remix/app/routes/billing.tsx', []),
+      makeFileAnalysis('/project/apps/remix/app/routes/_dynamic+/billing-personal.tsx', [
+        { source: '../billing' },
+      ]),
+    ];
+    const deps = buildDependencyGraph(files);
+    const entryPoints = findEntryPoints(files, deps);
+    expect(entryPoints).toContain('/project/apps/remix/app/routes/billing.tsx');
+    expect(entryPoints).toContain('/project/apps/remix/app/routes/_dynamic+/billing-personal.tsx');
+  });
+
+  it('treats Remix server entry files as entry points', () => {
+    const files: FileAnalysis[] = [
+      makeFileAnalysis('/project/apps/remix/server/load-context.ts', []),
+      makeFileAnalysis('/project/apps/remix/app/entry.server.ts', []),
+      makeFileAnalysis('/project/apps/remix/app/entry.client.tsx', []),
+    ];
+    const deps = buildDependencyGraph(files);
+    const entryPoints = findEntryPoints(files, deps);
+    expect(entryPoints).toContain('/project/apps/remix/server/load-context.ts');
+    expect(entryPoints).toContain('/project/apps/remix/app/entry.server.ts');
+    expect(entryPoints).toContain('/project/apps/remix/app/entry.client.tsx');
+  });
+
+  it('treats BullMQ-style `jobs/definitions/**` files as entry points', () => {
+    const files: FileAnalysis[] = [
+      makeFileAnalysis('/project/packages/lib/jobs/definitions/emails/send-welcome.ts', []),
+      makeFileAnalysis('/project/packages/lib/jobs/definitions/cleanup.ts', []),
+    ];
+    const deps = buildDependencyGraph(files);
+    const entryPoints = findEntryPoints(files, deps);
+    expect(entryPoints).toContain('/project/packages/lib/jobs/definitions/emails/send-welcome.ts');
+    expect(entryPoints).toContain('/project/packages/lib/jobs/definitions/cleanup.ts');
+  });
+
+  it('treats Next.js `app/**/(page|layout|route)` files as entry points', () => {
+    const files: FileAnalysis[] = [
+      makeFileAnalysis('/project/app/blog/[slug]/page.tsx', []),
+      makeFileAnalysis('/project/app/api/users/route.ts', []),
+      makeFileAnalysis('/project/app/dashboard/layout.tsx', []),
+    ];
+    const deps = buildDependencyGraph(files);
+    const entryPoints = findEntryPoints(files, deps);
+    expect(entryPoints).toContain('/project/app/blog/[slug]/page.tsx');
+    expect(entryPoints).toContain('/project/app/api/users/route.ts');
+    expect(entryPoints).toContain('/project/app/dashboard/layout.tsx');
+  });
 });
 
 describe('extractJsxReferences', () => {
