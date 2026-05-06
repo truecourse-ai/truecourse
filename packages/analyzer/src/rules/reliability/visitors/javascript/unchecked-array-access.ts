@@ -11,7 +11,8 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
   // is implicitly `T | undefined` and flagging it is pure noise.
   languages: ['typescript', 'tsx'],
   nodeTypes: ['subscript_expression'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     const object = node.childForFieldName('object')
     const index = node.childForFieldName('index')
     if (!object || !index) return null
@@ -25,6 +26,23 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     // Skip when object is a Record/Map type assertion (property access, not array)
     if (object.type === 'parenthesized_expression' && object.text.includes('Record<')) return null
     if (object.type === 'as_expression' && object.text.includes('Record<')) return null
+
+    // Type-aware skip: when the receiver's type is known and is NOT
+    // array/tuple (i.e., Record / Map / plain object), it's a map lookup,
+    // not array indexing. `Record<UnionKey, V>` is exhaustive by
+    // construction — bracket access can't return undefined. The TS
+    // compiler also surfaces `noUncheckedIndexedAccess` for those cases
+    // separately, so flagging them here is pure FP.
+    if (typeQuery) {
+      const classification = typeQuery.classifyArrayLikeAtPosition(
+        filePath,
+        object.startPosition.row,
+        object.startPosition.column,
+        object.endPosition.row,
+        object.endPosition.column,
+      )
+      if (classification === 'non-array') return null
+    }
 
     // Skip if the index is a well-known safe pattern like .length - 1
     const indexText = index.text

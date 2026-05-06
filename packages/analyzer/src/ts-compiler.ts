@@ -251,6 +251,22 @@ export interface TypeQueryService {
     endLine: number,
     codes?: ReadonlySet<number>,
   ): boolean
+  /**
+   * Classify an expression's type as array-like (Array, ReadonlyArray, tuple)
+   * vs non-array-like (Record, Map, plain object, primitive).
+   *   - 'array'    — Array<T>, ReadonlyArray<T>, T[], or tuple types.
+   *   - 'non-array' — anything else with a known shape (Record, Map, object, …).
+   *   - 'unknown'  — couldn't determine (any/unknown/error type, no node, etc.).
+   * Rules that need to distinguish "real array indexing" from "Map lookup"
+   * should treat 'unknown' as a fall-through (preserve pre-type behavior).
+   */
+  classifyArrayLikeAtPosition(
+    filePath: string,
+    line: number,
+    column: number,
+    endLine?: number,
+    endColumn?: number,
+  ): 'array' | 'non-array' | 'unknown'
 }
 
 /**
@@ -503,6 +519,58 @@ export function createTypeQueryService(
       const sp = getProgramForFile(filePath)
       if (!sp) return false
       return sp.checker.isTypeAssignableTo(type1, type2) || sp.checker.isTypeAssignableTo(type2, type1)
+    },
+
+    classifyArrayLikeAtPosition(filePath, line, column, endLine?, endColumn?) {
+      const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
+      if (!type) return 'unknown'
+      // Any / unknown / error → can't classify
+      if (type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return 'unknown'
+
+      function classifyOne(t: ts.Type): 'array' | 'non-array' | 'unknown' {
+        // Primitives can't be indexed in this rule's sense.
+        if (t.flags & (ts.TypeFlags.String | ts.TypeFlags.StringLiteral)) return 'non-array'
+        if (t.flags & (ts.TypeFlags.Number | ts.TypeFlags.NumberLiteral)) return 'non-array'
+        if (t.flags & (ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral)) return 'non-array'
+        if (t.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) return 'non-array'
+        if (t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return 'unknown'
+
+        const symbol = t.getSymbol() ?? t.aliasSymbol
+        const name = symbol?.getName()
+        if (name === 'Array' || name === 'ReadonlyArray') return 'array'
+
+        // Tuples and array references via ObjectFlags.
+        if (t.flags & ts.TypeFlags.Object) {
+          const objType = t as ts.ObjectType
+          if (objType.objectFlags & ts.ObjectFlags.Tuple) return 'array'
+          if (objType.objectFlags & ts.ObjectFlags.Reference) {
+            const target = (objType as ts.TypeReference).target
+            if (target) {
+              if (target.objectFlags & ts.ObjectFlags.Tuple) return 'array'
+              const targetName = target.getSymbol?.()?.getName?.()
+              if (targetName === 'Array' || targetName === 'ReadonlyArray') return 'array'
+            }
+          }
+        }
+        return 'non-array'
+      }
+
+      // Union: array iff every variant is array; non-array iff every variant
+      // is non-array; otherwise unknown.
+      if (type.isUnion()) {
+        let sawArray = false
+        let sawNonArray = false
+        for (const t of type.types) {
+          const c = classifyOne(t)
+          if (c === 'unknown') return 'unknown'
+          if (c === 'array') sawArray = true
+          if (c === 'non-array') sawNonArray = true
+        }
+        if (sawArray && !sawNonArray) return 'array'
+        if (sawNonArray && !sawArray) return 'non-array'
+        return 'unknown'
+      }
+      return classifyOne(type)
     },
 
     hasTypeErrorInRange(filePath, startLine, endLine, codes) {
