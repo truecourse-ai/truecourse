@@ -2,15 +2,27 @@
 
 Source: `truecourse@latest analyze --no-llm --no-skills --no-stash` against shallow clone of `documenso/documenso` at `/tmp/tc-targets/documenso`. Run after the FP fixes from commits `97fcc99..0c816bd` (the v0.5.7 → fp-fixes delta).
 
-## Current totals (post FP #26)
+## Current totals (post FP #31)
 
 | Tier | v0.5.7 baseline | Current | Δ |
 |---|---|---|---|
 | critical | 18 | **0** | -18 |
 | high | 4,929 | **577** | -88% |
-| medium | 47,724 | 47,438 | -286 |
-| low | 4,222 | 3,989 | -233 |
-| **total** | **57,351** | **52,004** | -5,347 |
+| total | 57,351 | **19,197** | -38,154 |
+
+NOTE: post-FP #29 onward analyses run with `node_modules` installed in the
+target. With cross-package types resolving, many type-aware rules now correctly
+filter their findings (a side-effect of the env, not the rules), which explains
+the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
+
+## Per-rule FP-fix progress (this session: FP #28–#31)
+
+| Rule | Pre-fix | Post-fix | Δ |
+|---|---|---|---|
+| `bugs/deterministic/missing-error-boundary` | 91 | **1** | -90 (FP #28) |
+| `reliability/deterministic/unchecked-array-access` | 80 | **30** | -50 (FP #29; remaining are real array indexes) |
+| `performance/deterministic/runtime-cast-overhead` | 0 | **0** | (Python-only rule, no JS effect) |
+| `code-quality/deterministic/filename-class-mismatch` | 41 | **3** | -38 (FP #31; remaining are genuine name divergence) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 

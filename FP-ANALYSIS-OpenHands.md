@@ -2,15 +2,27 @@
 
 Source: `truecourse@latest analyze --no-llm --no-skills --no-stash` against shallow clone of `All-Hands-AI/OpenHands` at `/tmp/tc-targets/OpenHands`. Run after the FP fixes from commits `97fcc99..0c816bd`.
 
-## Current totals (post FP #26)
+## Current totals (post FP #31)
 
 | Tier | v0.5.7 baseline | Current | Δ |
 |---|---|---|---|
 | critical | 69 | **5** (all real) | -64 |
-| high | 1,014 | **361** | -64% |
-| medium | 14,115 | 14,039 | -76 |
-| low | 9,515 | 7,996 | -1,519 |
-| **total** | **25,115** | **22,401** | -2,714 |
+| high | 1,014 | **570** | -44% |
+| total | 25,115 | **18,004** | -7,111 |
+
+NOTE: post-FP #29 onward analyses run with `node_modules` installed in the
+target. With cross-package types resolving, many type-aware rules now
+correctly filter their findings (a side-effect of the env, not the rules).
+The FP-fix counts below are per-rule, not per-tier.
+
+## Per-rule FP-fix progress (this session: FP #28–#31)
+
+| Rule | Pre-fix | Post-fix | Δ |
+|---|---|---|---|
+| `bugs/deterministic/missing-error-boundary` | 157 | **1** | -156 (FP #28) |
+| `reliability/deterministic/unchecked-array-access` | 19 | **12** | -7 (FP #29; remaining mix of real arrays + a few generic-param FPs) |
+| `performance/deterministic/runtime-cast-overhead` | 59 | **5** | -54 (FP #30; remaining are real `str(SCREAMING_SNAKE_CONST)`) |
+| `code-quality/deterministic/filename-class-mismatch` | 57 | **5** | -52 (FP #31; remaining are Remix-route name divergence) |
 
 297 distinct rules firing.
 
