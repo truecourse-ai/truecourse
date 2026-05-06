@@ -78,6 +78,47 @@ export const pythonAsyncUnusedAsyncVisitor: CodeRuleVisitor = {
     // be async even without await to satisfy the base class protocol.
     if (isAsyncInterfaceMethod(node)) return null
 
+    // Skip any async method of a class that extends a parent — the
+    // parent's contract may require the async signature even when this
+    // particular implementation has no await internally. Common with
+    // ABC / Protocol / Generic[T] base classes where the abstract
+    // method is `async def`.
+    {
+      const parent = node.parent
+      if (parent?.type === 'block') {
+        const grand = parent.parent
+        if (grand?.type === 'class_definition') {
+          const supers = grand.childForFieldName('superclasses')
+          // If the class has ANY base, conservatively assume the async
+          // signature is contractual.
+          if (supers && supers.namedChildCount > 0) return null
+        }
+      }
+    }
+
+    // Skip async fixtures and test functions — pytest-asyncio,
+    // anyio, trio, asyncio.run pattern. The async keyword is
+    // required by the test runner even if no await is currently
+    // used.
+    // Python test-file naming conventions: `test_*.py`, `*_test.py`,
+    // `conftest.py`. Match only these, not directories that happen to
+    // contain "test" (e.g., `tests/fixtures/`).
+    if (/\/test_[^/]+\.py$/.test(filePath)) return null
+    if (/_test\.py$/.test(filePath)) return null
+    if (/\/conftest\.py$/.test(filePath)) return null
+    // Decorators like @pytest_asyncio.fixture, @pytest.fixture, @anyio.fixture
+    {
+      const parent = node.parent
+      if (parent?.type === 'decorated_definition') {
+        for (const child of parent.children) {
+          if (child.type === 'decorator') {
+            const text = child.text
+            if (/(?:asyncio|anyio|trio)\.fixture\b|pytest\.fixture\b|pytest_asyncio/.test(text)) return null
+          }
+        }
+      }
+    }
+
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 
