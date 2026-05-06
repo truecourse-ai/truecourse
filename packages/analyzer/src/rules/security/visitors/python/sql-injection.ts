@@ -45,6 +45,19 @@ export const pythonSqlInjectionVisitor: CodeRuleVisitor = {
         const nonInterpolationText = queryText.replace(/\{[^}]*\}/g, '').replace(/^f['"`]{1,3}|['"`]{1,3}$/g, '').trim()
         if (interpolations.length === 1 && nonInterpolationText === '') return null
 
+        // Skip when EVERY interpolation is a SCREAMING_SNAKE_CASE
+        // module-level constant or a numeric literal — these are
+        // compile-time-known values, not user input. Common shape:
+        // `text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT_SECONDS}s'")`.
+        const allCompileTime = interpolations.every((interp) => {
+          const inner = interp.namedChildren.find((c) => c.type !== 'comment')
+          if (!inner) return false
+          if (inner.type === 'integer' || inner.type === 'float' || inner.type === 'true' || inner.type === 'false' || inner.type === 'none') return true
+          if (inner.type === 'identifier' && /^[A-Z][A-Z0-9_]*$/.test(inner.text)) return true
+          return false
+        })
+        if (allCompileTime) return null
+
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Potential SQL injection',
