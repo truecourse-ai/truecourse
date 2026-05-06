@@ -19,8 +19,17 @@ export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
     // tree-sitter mis-parses tagged templates with type arguments
     // (`sql<boolean>\`1=1\``) as a chain of binary_expressions because
     // `<` and `>` look like comparison operators. The `\`` (backtick)
-    // following the apparent comparison is the smoking gun. Skip.
-    if (node.text.includes('`')) return null
+    // following the apparent comparison is the smoking gun. Skip when
+    // the node OR any ancestor (up to 4 levels) contains a backtick —
+    // the inner `sql<boolean` binary_expression doesn't include the
+    // backtick itself, but its parent does.
+    let probe = node as ReturnType<typeof node.parent>
+    let depth = 0
+    while (probe && depth < 4) {
+      if (probe.text.includes('`')) return null
+      probe = probe.parent
+      depth++
+    }
 
     const operator = node.children.find(c => RELATIONAL_OPS.has(c.text))
     if (!operator) return null
