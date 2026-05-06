@@ -24,6 +24,21 @@ const VALID_DUNDERS = new Set([
   '__setstate__', '__copy__', '__deepcopy__', '__class__', '__doc__',
   '__name__', '__qualname__', '__module__', '__dict__', '__slots__',
   '__bases__', '__mro__', '__subclasses__', '__weakref__',
+  // dataclasses
+  '__post_init__',
+  // pickle / copy protocol additions
+  '__getnewargs__', '__getnewargs_ex__',
+  // descriptor / attribute hooks
+  '__set_name__',
+  // numpy / array protocol
+  '__array__', '__array_ufunc__', '__array_function__',
+  '__array_finalize__', '__array_wrap__', '__array_prepare__',
+  // pandas / scientific
+  '__dataframe__',
+  // sklearn / sequence
+  '__sklearn_clone__', '__sklearn_tags__',
+  // pytest / framework hooks
+  '__test__',
 ])
 
 export const pythonBadDunderMethodNameVisitor: CodeRuleVisitor = {
