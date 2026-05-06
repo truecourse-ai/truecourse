@@ -243,27 +243,47 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
             }
           }
         }
-        // Skip when the string is the second arg of a `replace()` /
-        // `replaceAll()` call — `url.replace('http://', 'https://')` is
-        // an https-enforcer, not a clear-text usage.
-        if (parent?.type === 'arguments') {
+        // Skip when the string is an arg of a string-rewriting call:
+        //   JS: `url.replace('http://', 'https://')`
+        //   Python: `url.removeprefix('http://')`, `url.replace('http://', 'https://')`
+        // These rewrite/strip the protocol — they don't connect with it.
+        if (parent?.type === 'arguments' || parent?.type === 'argument_list') {
           const args = parent.namedChildren
           const idx = args.findIndex((c) => c.id === node.id)
           const grandparent = parent.parent
-          if (grandparent?.type === 'call_expression') {
+          if (grandparent?.type === 'call_expression' || grandparent?.type === 'call') {
             const fn = grandparent.childForFieldName('function')
-            if (fn?.type === 'member_expression') {
-              const prop = fn.childForFieldName('property')?.text
-              // Any positional arg of replace/replaceAll
-              if ((prop === 'replace' || prop === 'replaceAll') && idx >= 0) return null
+            if (fn?.type === 'member_expression' || fn?.type === 'attribute') {
+              const prop = (fn.childForFieldName('property') ?? fn.childForFieldName('attribute'))?.text
+              if (
+                (prop === 'replace' || prop === 'replaceAll' ||
+                 prop === 'removeprefix' || prop === 'removesuffix' ||
+                 prop === 'startsWith' || prop === 'endsWith' ||
+                 prop === 'lstrip' || prop === 'rstrip' || prop === 'strip')
+                && idx >= 0
+              ) return null
+            }
+          }
+        }
+        // Skip when the string is in a tuple/list/array alongside an
+        // `https://` peer — the pair is a protocol-rewrite mapping
+        // (`('http://', 'https://')` / `[http_url, https_url]`).
+        if (parent?.type === 'tuple' || parent?.type === 'array' || parent?.type === 'list') {
+          for (const sibling of parent.namedChildren) {
+            if (sibling.id === node.id) continue
+            if (sibling.type === 'string' || sibling.type === 'template_string') {
+              const sibStripped = sibling.text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '').toLowerCase()
+              if (sibStripped.startsWith('https://') || sibStripped.startsWith('sftp://') || sibStripped.startsWith('ssh://')) {
+                return null
+              }
             }
           }
         }
         // Skip URL-validation helpers — files that look like SSRF
         // sanitizers, URL allow-lists, or protocol-checking utilities.
-        // Strong signal: file name contains "ssrf", "url-validator",
-        // "url-check", "is-safe-url", or similar.
-        if (/(?:ssrf|url-?valid|safe-?url|url-?check|allow-?list|check-?url|sanitize-?url|protocol-?check)/i.test(filePath)) {
+        // Strong signals: filename contains "ssrf", "is-private-url",
+        // "is-safe-url", "validate-url", "assert-*-url", "webhook-url".
+        if (/(?:ssrf|url-?valid|validate-?url|safe-?url|url-?check|allow-?list|check-?url|sanitize-?url|protocol-?check|is-?private-?url|assert-[a-z-]*url|webhook-?url)/i.test(filePath)) {
           return null
         }
         return makeViolation(
