@@ -32,6 +32,20 @@ The FP-fix counts below are per-rule, not per-tier.
 | `code-quality/deterministic/unnecessary-type-parameter` | 7 | **0** | -7 (FP #40; default-value, body-usage, parametric-input shapes) |
 | `code-quality/deterministic/react-useless-set-state` | 2 | **0** | -2 (FP #41; local-decl shadowing in catch block) |
 | `security/deterministic/insecure-random` | 3 | **0** | -3 (FP #45; mocks/ paths) |
+| `code-quality/deterministic/restricted-api-usage` | 25 | **2** | -23 (FP #39; outer-scope param walk) |
+| `code-quality/deterministic/unnecessary-type-parameter` | 7 | **0** | -7 (FP #40) |
+| `bugs/deterministic/invalid-void-type` | 33 | **0** | -33 (FP #35) |
+| `code-quality/deterministic/getattr-with-constant` | 28 | **5** | -23 (FP #36) |
+| `code-quality/deterministic/class-as-data-structure` | 28 | **1** | -27 (FP #37) |
+| `code-quality/deterministic/use-decorator-syntax` | 21 | **0** | -21 (FP #59; wrapped-callable assignments) |
+| `bugs/deterministic/abstract-class-without-abstract-method` | 14 | **1** | -13 (FP #60; generic type-binding) |
+| `code-quality/deterministic/unnecessary-pass` | 45 | **33** | -12 (FP #62; ABC stubs) |
+| `code-quality/deterministic/unnecessary-placeholder-statement` | 49 | **37** | -12 (FP #62) |
+| `code-quality/deterministic/implicit-global-declaration` | 8 | **2** | -6 (FP #65; service workers) |
+| `architecture/deterministic/unused-import` | 87 | **4** | -83 (FP #56; React in tsx + TYPE_CHECKING) |
+| `security/deterministic/clear-text-protocol` | 19 | **9** | -10 (FP #64; replace/SSRF/upgrade-pair) |
+| `bugs/deterministic/empty-pattern` | 8 | **0** | -8 (FP #63; storybook) |
+| `bugs/deterministic/values-not-convertible-to-number` | (small) | **0** | -all (FP #50) |
 
 297 distinct rules firing.
 

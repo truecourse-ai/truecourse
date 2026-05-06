@@ -36,8 +36,19 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `reliability/deterministic/express-async-no-wrapper` | 5 | **0** | -5 (FP #46; Hono/Fastify/Koa import detection) |
 | `code-quality/deterministic/unused-private-member` + `unused-private-method` | 6+6 | **2+2** | -8 (FP #47; private constructor never called as `this.constructor()`) |
 | `code-quality/deterministic/prefer-const` | 8 | **1** | -7 (FP #48; destructured-binding reassignment) |
-| `bugs/deterministic/function-return-type-varies` | 9 | TBD | (FP #49; React components + object-shape returns + Hono response calls) |
+| `bugs/deterministic/function-return-type-varies` | 9 | **3** | -6 (FP #49; React components + object-shape returns + Hono response calls) |
+| `bugs/deterministic/values-not-convertible-to-number` | 6 | **0** | -6 (FP #50; nested tagged-template binary_expr) |
 | `security/deterministic/hardcoded-ip` | 6 | **0** | -6 (FP #51; SVG path data + multiple-IP coordinate streams) |
+| `architecture/deterministic/data-layer-depends-on-api` | 12 | **2** | -10 (FP #52; UI files never data) |
+| `architecture/deterministic/data-layer-depends-on-external` | 12 | **5** | -7 (FP #52) |
+| `performance/deterministic/sync-fs-in-request-handler` | 10 | **7** | -3 (FP #53) |
+| `bugs/deterministic/use-before-define` | 8 | **0** | -8 (FP #54) |
+| `bugs/deterministic/inconsistent-return` | 11 | **9** | -2 (FP #55; further work for documenso loaders) |
+| `architecture/deterministic/unused-import` | 11 | **2** | -9 (FP #56) |
+| `architecture/deterministic/route-without-auth-middleware` | 24 | **3** | -21 (FP #57) |
+| `code-quality/deterministic/undefined-passed-as-optional` | 8 | **1** | -7 (FP #58) |
+| `code-quality/deterministic/identical-functions` | 43 | **13** | -30 (FP #61) |
+| `reliability/deterministic/missing-null-check-after-find` | 13 | **2** | -11 (FP #66; Konva/jQuery imports) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 
