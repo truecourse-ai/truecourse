@@ -35,6 +35,31 @@ export const promiseAllNoErrorHandlingVisitor: CodeRuleVisitor = {
       if (grandParent?.type === 'arrow_function') return null
     }
 
+    // Skip when `await Promise.all(...)` is inside an `async` function —
+    // the await re-throws on rejection, which propagates to the caller's
+    // try/catch via the function's returned Promise. The rule's intent is
+    // catching fire-and-forget promises, not async functions whose error
+    // path is the standard await-propagation chain.
+    if (parent?.type === 'await_expression') {
+      let asyncAncestor: import('web-tree-sitter').Node | null = parent.parent
+      while (asyncAncestor) {
+        if (
+          asyncAncestor.type === 'function_declaration' ||
+          asyncAncestor.type === 'arrow_function' ||
+          asyncAncestor.type === 'function_expression' ||
+          asyncAncestor.type === 'method_definition' ||
+          asyncAncestor.type === 'function'
+        ) {
+          // Tree-sitter records the `async` keyword as a leading child
+          // (or in the function's text prefix). Detecting it via
+          // text-prefix is the simplest stable check.
+          if (asyncAncestor.text.startsWith('async ') || asyncAncestor.text.startsWith('async(')) return null
+          break
+        }
+        asyncAncestor = asyncAncestor.parent
+      }
+    }
+
     // Skip framework-managed routes where the framework catches thrown
     // errors and renders an error boundary / 500 response:
     //   - Next.js app router: page.tsx, layout.tsx, route.ts(x)

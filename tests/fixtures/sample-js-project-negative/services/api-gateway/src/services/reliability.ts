@@ -54,9 +54,12 @@ export async function commitWithoutAwait() {
 }
 
 // VIOLATION: reliability/deterministic/promise-all-no-error-handling
-export async function fetchAll(urls: string[]) {
-  const results = await Promise.all(urls.map((url) => fetch(url)));
-  return results;
+export function fetchAll(urls: string[]) {
+  // Fire-and-forget: not async, not returned, not awaited, no .catch().
+  // If any promise rejects, this is a true unhandled rejection.
+  Promise.all(urls.map((url) => fetch(url))).then((results) => {
+    void results;
+  });
 }
 
 // VIOLATION: reliability/deterministic/missing-error-event-handler
