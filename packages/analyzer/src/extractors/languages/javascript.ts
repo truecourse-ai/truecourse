@@ -48,6 +48,16 @@ function isNestedInFunction(node: SyntaxNode): boolean {
  * named, exported method).
  */
 function extractFunctionName(node: SyntaxNode): string {
+  // Object-literal shorthand methods (`{ onSuccess() {…} }`) are dispatched
+  // by the receiver via property lookup — the receiver invokes them by key,
+  // not by name. They must NOT be extracted as named functions because the
+  // dead-method / unused-export rules can't see the dispatch and would
+  // flag every framework callback (`useMutation({ onSuccess() {…} })`,
+  // `useForm({ onSubmit() {…} })`, etc.) as dead.
+  if (node.type === 'method_definition' && node.parent?.type === 'object') {
+    return 'anonymous'
+  }
+
   const nameNode = node.childForFieldName('name')
   if (nameNode?.text) return nameNode.text
 

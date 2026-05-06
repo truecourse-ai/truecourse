@@ -23,6 +23,7 @@ The FP-fix counts below are per-rule, not per-tier.
 | `reliability/deterministic/unchecked-array-access` | 19 | **12** | -7 (FP #29; remaining mix of real arrays + a few generic-param FPs) |
 | `performance/deterministic/runtime-cast-overhead` | 59 | **5** | -54 (FP #30; remaining are real `str(SCREAMING_SNAKE_CONST)`) |
 | `code-quality/deterministic/filename-class-mismatch` | 57 | **5** | -52 (FP #31; remaining are Remix-route name divergence) |
+| `architecture/deterministic/dead-method` | (not in queue, baseline ~18) | **18** | unchanged (no FP #32 shape on this target) |
 
 297 distinct rules firing.
 

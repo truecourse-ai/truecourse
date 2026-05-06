@@ -23,6 +23,7 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `reliability/deterministic/unchecked-array-access` | 80 | **30** | -50 (FP #29; remaining are real array indexes) |
 | `performance/deterministic/runtime-cast-overhead` | 0 | **0** | (Python-only rule, no JS effect) |
 | `code-quality/deterministic/filename-class-mismatch` | 41 | **3** | -38 (FP #31; remaining are genuine name divergence) |
+| `architecture/deterministic/dead-method` | 47 | **42** | -5 (FP #32; remaining are FP #33 shapes — BullMQ/Remix routes) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 

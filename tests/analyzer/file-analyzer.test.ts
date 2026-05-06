@@ -179,6 +179,47 @@ export const world = 42;`;
     expect(httpCall!.method).toBe('GET');
   });
 
+  // FP #32 — dead-method on shorthand methods inside hook config objects.
+  // Patterns like `useMutation({ onSuccess() {} })` were extracting
+  // `onSuccess` as a named function, which the architecture analyzer
+  // then flagged as dead because no static call site exists.
+  it('does not extract shorthand methods inside object-literal call args as named functions', () => {
+    const code = `import { useMutation } from '@tanstack/react-query';
+
+function TokenDeleteDialog() {
+  const m = useMutation({
+    onSuccess() {
+      return 1;
+    },
+    onError() {
+      return 2;
+    },
+  });
+  return m;
+}`;
+    const result = analyzeFileContent('/test/dialog.tsx', code, 'typescript');
+    const onSuccess = result.functions.find((f) => f.name === 'onSuccess');
+    const onError = result.functions.find((f) => f.name === 'onError');
+    expect(onSuccess).toBeUndefined();
+    expect(onError).toBeUndefined();
+  });
+
+  it('still extracts class methods named onSuccess/onError', () => {
+    const code = `class JobHandlerImpl {
+  onSuccess() {
+    return 1;
+  }
+  onError() {
+    return 2;
+  }
+}`;
+    const result = analyzeFileContent('/test/job.ts', code, 'typescript');
+    const cls = result.classes.find((c) => c.name === 'JobHandlerImpl');
+    expect(cls).toBeDefined();
+    expect(cls!.methods.find((m) => m.name === 'onSuccess')).toBeDefined();
+    expect(cls!.methods.find((m) => m.name === 'onError')).toBeDefined();
+  });
+
   it('extracts axios HTTP calls', () => {
     const code = `import axios from 'axios';
 
