@@ -1,6 +1,6 @@
 
-import { Copy, Check, ChevronDown, ChevronUp, Crosshair, FileCode, BellOff } from 'lucide-react';
-import { Fragment, useState } from 'react';
+import { Copy, Check, ChevronDown, ChevronUp, Crosshair, FileCode, BellOff, MoreVertical } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -60,6 +60,17 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
   const [copied, setCopied] = useState(false);
   const [showFix, setShowFix] = useState(false);
   const [disablingRule, setDisablingRule] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [menuOpen]);
 
   const handleCopyFix = async () => {
     if (!violation.fixPrompt) return;
@@ -73,6 +84,7 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
 
   const handleDisableRule = async () => {
     if (!repoId || !ruleKey) return;
+    setMenuOpen(false);
     setDisablingRule(true);
     try {
       await setRuleEnabled(repoId, ruleKey, false);
@@ -149,18 +161,42 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
               </Button>
             ) : null}
             {canDisableRule && (
-              <Button
-                variant="outline"
-                size="xs"
-                onClick={handleDisableRule}
-                disabled={disablingRule}
-                className="text-[10px] text-muted-foreground hover:text-foreground"
-                title={`Disable rule for this repo: ${ruleKey}\n\nHides every violation from this rule, now and on future analyses. Re-enable from the Rules panel.`}
-                aria-label={`Disable rule ${ruleKey} for this repo`}
-              >
-                <BellOff className="h-3 w-3" />
-                Disable rule
-              </Button>
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  disabled={disablingRule}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  aria-label="More actions"
+                  title="More actions"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                >
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </button>
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-popover py-1 shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={handleDisableRule}
+                      className="flex w-full items-start gap-2 px-3 py-2 text-left text-xs hover:bg-accent"
+                    >
+                      <BellOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-medium text-foreground">Disable rule for this repo</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{ruleKey}</span>
+                        <span className="mt-0.5 text-[10px] text-muted-foreground">
+                          Hides every violation from this rule. Re-enable from the Rules panel.
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
