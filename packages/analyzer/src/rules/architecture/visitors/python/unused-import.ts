@@ -51,11 +51,38 @@ export const pythonUnusedImportVisitor: CodeRuleVisitor = {
     const importLine = sourceCode.split('\n')[node.startPosition.row] ?? ''
     if (/# *noqa\b/.test(importLine)) return null
 
+    // Skip imports inside an `if TYPE_CHECKING:` block — those are
+    // referenced only in string annotations (`def f(x: "MyType") → …`)
+    // or in forward-reference type hints, which our identifier walk
+    // can't see.
+    let p = node.parent
+    while (p) {
+      if (p.type === 'if_statement') {
+        const cond = p.childForFieldName('condition')
+        if (cond && /TYPE_CHECKING/.test(cond.text)) return null
+      }
+      p = p.parent
+    }
+
     // Check if names are used in the rest of the file via AST walk
     const moduleNode = getPythonModuleNode(node)
+
+    // Forward-reference names are referenced inside string annotations
+    // (`x: "MyClass"`, `Callable[..., "Result"]`). Build a regex that
+    // also catches such references.
+    function nameReferencedInStrings(root: SyntaxNode, name: string): boolean {
+      if (root.type === 'string') {
+        if (new RegExp(`\\b${name}\\b`).test(root.text)) return true
+      }
+      for (const child of root.namedChildren) {
+        if (nameReferencedInStrings(child, name)) return true
+      }
+      return false
+    }
+
     for (const name of names) {
       if (!name) continue
-      if (!hasIdentifierOutside(moduleNode, name, node)) {
+      if (!hasIdentifierOutside(moduleNode, name, node) && !nameReferencedInStrings(moduleNode, name)) {
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           `Unused import: ${name}`,

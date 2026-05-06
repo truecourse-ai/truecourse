@@ -42,7 +42,16 @@ export const unusedImportVisitor: CodeRuleVisitor = {
       ...lines.slice(importLineEnd + 1),
     ].join('\n')
 
+    // `import React` in `.tsx`/`.jsx` files is a no-op under the
+    // automatic JSX runtime but the legacy classic JSX runtime requires
+    // the `React` symbol in scope for `<X />` to compile. Without
+    // tsconfig inspection we can't tell which runtime is in use, so
+    // never flag `React` in JSX-bearing files.
+    const isTsx = /\.(tsx|jsx)$/.test(filePath)
+
     for (const name of names) {
+      if (isTsx && name === 'React') continue
+
       // Check if name appears in the rest of the code (as a word boundary)
       const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)
       if (!regex.test(codeWithoutImport)) {
