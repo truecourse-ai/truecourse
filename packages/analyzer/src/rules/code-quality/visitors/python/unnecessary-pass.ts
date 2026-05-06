@@ -28,6 +28,18 @@ export const pythonUnnecessaryPassVisitor: CodeRuleVisitor = {
       })
       // If there's no docstring and pass is the only statement, it's needed
       if (!hasDocstring && siblings.length <= 1) return null
+
+      // Function body that is exactly `docstring + pass` is the canonical
+      // abstract-method / Protocol-method stub pattern. The `pass` is
+      // intentional — it signals "no implementation here" alongside the
+      // contract docstring. (Python permits docstring-alone, but the
+      // `pass` is conventional for explicit stubs.) Skip when the body
+      // is just docstring + pass and we're inside a `function_definition`.
+      if (
+        grandparent.type === 'function_definition' &&
+        hasDocstring &&
+        siblings.length === 2
+      ) return null
     }
 
     return makeViolation(

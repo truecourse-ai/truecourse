@@ -11,6 +11,26 @@ export const pythonUnnecessaryPlaceholderStatementVisitor: CodeRuleVisitor = {
       const parent = node.parent
       if (!parent || parent.type !== 'block') return null
 
+      // Skip docstring-only abstract-method-stub pattern:
+      //   def get(...) -> X:
+      //       """docstring."""
+      //       pass
+      // The pass is conventional for "explicitly empty body" alongside
+      // the contract docstring. Python permits docstring-only bodies but
+      // the explicit pass reads as deliberate "no implementation here".
+      const grandparent = parent.parent
+      if (grandparent?.type === 'function_definition') {
+        const siblings = parent.namedChildren.filter((c) => c.type !== 'comment')
+        const hasDocstring = siblings.some((c) => {
+          if (c.type === 'expression_statement') {
+            const inner = c.namedChildren[0]
+            return inner?.type === 'string'
+          }
+          return false
+        })
+        if (hasDocstring && siblings.length === 2) return null
+      }
+
       // Count non-pass statements in the block
       const nonPass = parent.namedChildren.filter((c) => c.type !== 'pass_statement')
       if (nonPass.length > 0) {
