@@ -105,6 +105,8 @@ export interface ViolationPipelineInput {
   enabledCategories?: string[];
   /** Enable LLM-powered rules (default true) */
   enableLlmRules?: boolean;
+  /** Rule keys explicitly disabled for this repo. */
+  disabledRules?: string[];
   /** Optional pre-created provider (for usage tracking) */
   provider?: LLMProvider;
   /** Abort signal for cancellation */
@@ -185,8 +187,10 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     provider: externalProvider,
     enabledCategories,
     enableLlmRules,
+    disabledRules,
     signal,
   } = input;
+  const disabledRuleSet = new Set<string>(disabledRules ?? []);
 
   const added: ViolationRecord[] = [];
   const unchanged: ViolationRecord[] = [];
@@ -212,7 +216,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   // ---------------------------------------------------------------------------
   let allRules = (await getEnabledRules())
     .filter((r) => !enabledCategories || enabledCategories.includes(r.domain ?? r.category))
-    .filter((r) => enableLlmRules !== false || r.type !== 'llm');
+    .filter((r) => enableLlmRules !== false || r.type !== 'llm')
+    .filter((r) => !disabledRuleSet.has(r.key));
 
   let llmSkipped = false;
   const enabledDeterministic = allRules.filter((r) => r.type === 'deterministic');

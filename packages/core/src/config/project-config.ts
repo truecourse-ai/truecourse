@@ -6,6 +6,8 @@ export interface ProjectConfig {
   enabledCategories?: string[] | null;
   /** Whether LLM-powered rules are enabled. null/undefined = use default (true). */
   enableLlmRules?: boolean | null;
+  /** Rule keys explicitly disabled for this project. Defaults are enabled. */
+  disabledRules?: string[];
 }
 
 const EMPTY: ProjectConfig = {};

@@ -232,7 +232,7 @@ export function HomePanel({
                 title="Rules"
                 description="Browse the catalog of rules this repo is analyzed against."
               >
-                <RulesPanel />
+                <RulesPanel repoId={repoId} />
               </SheetContent>
             </Sheet>
           }

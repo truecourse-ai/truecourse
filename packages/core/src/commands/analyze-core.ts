@@ -305,6 +305,7 @@ export async function analyzeCore(
       tracker: options.tracker,
       enabledCategories: effectiveCategories,
       enableLlmRules: effectiveLlmRules,
+      disabledRules: projectConfig.disabledRules,
       provider,
       signal,
       onLlmEstimate: options.onLlmEstimate

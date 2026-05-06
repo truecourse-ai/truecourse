@@ -1,5 +1,6 @@
 import { getAllDefaultRules } from '@truecourse/analyzer';
 import { type AnalysisRule, DOMAIN_ORDER } from '@truecourse/shared';
+import { readProjectConfig } from '../config/project-config.js';
 
 /** Derive domain from rule key (e.g., 'architecture/deterministic/foo' → 'architecture'). */
 function deriveDomain(key: string): AnalysisRule['domain'] {
@@ -10,7 +11,10 @@ function deriveDomain(key: string): AnalysisRule['domain'] {
   return validDomains.has(prefix) ? (prefix as AnalysisRule['domain']) : undefined;
 }
 
-function toAnalysisRule(rule: ReturnType<typeof getAllDefaultRules>[number]): AnalysisRule {
+function toAnalysisRule(
+  rule: ReturnType<typeof getAllDefaultRules>[number],
+  enabled: boolean = rule.enabled,
+): AnalysisRule {
   return {
     key: rule.key,
     category: rule.category,
@@ -18,7 +22,7 @@ function toAnalysisRule(rule: ReturnType<typeof getAllDefaultRules>[number]): An
     name: rule.name,
     description: rule.description,
     prompt: rule.prompt ?? undefined,
-    enabled: rule.enabled,
+    enabled,
     severity: rule.severity,
     type: rule.type,
     contextRequirement: rule.contextRequirement,
@@ -26,18 +30,22 @@ function toAnalysisRule(rule: ReturnType<typeof getAllDefaultRules>[number]): An
 }
 
 /**
- * Return the full rule catalogue. Rules are now TypeScript constants in the
- * analyzer package — no DB persistence, no seed step. Per-repo on/off
- * preferences will be overlaid via `<repo>/.truecourse/config.json` when
- * that feature lands; for now every shipped rule is enabled.
+ * Return the full rule catalogue. When `repoPath` is provided, the `enabled`
+ * flag reflects per-repo overrides from `<repo>/.truecourse/config.json`
+ * (`disabledRules`). Without `repoPath`, every shipped rule is enabled.
  */
-export async function getRules(): Promise<AnalysisRule[]> {
-  return getAllDefaultRules().map(toAnalysisRule);
+export async function getRules(repoPath?: string): Promise<AnalysisRule[]> {
+  const disabled = repoPath
+    ? new Set<string>(readProjectConfig(repoPath).disabledRules ?? [])
+    : null;
+  return getAllDefaultRules().map((r) =>
+    toAnalysisRule(r, disabled ? r.enabled && !disabled.has(r.key) : r.enabled),
+  );
 }
 
 /** Return the subset of rules with `enabled: true`. */
 export async function getEnabledRules(): Promise<AnalysisRule[]> {
   return getAllDefaultRules()
     .filter((r) => r.enabled)
-    .map(toAnalysisRule);
+    .map((r) => toAnalysisRule(r));
 }

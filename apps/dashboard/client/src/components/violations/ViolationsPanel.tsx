@@ -104,12 +104,31 @@ export function ViolationsPanel({
   const normalListRef = useRef<VirtuosoHandle>(null);
   const diffListRef = useRef<VirtuosoHandle>(null);
 
+  // Rules disabled in-session via the per-card "Disable rule" action. The
+  // server has already persisted the change; this set just hides their
+  // violations from the current view until the next analysis re-runs.
+  const [hiddenRuleKeys, setHiddenRuleKeys] = useState<Set<string>>(() => new Set());
+
   // Reset scroll to top whenever the active filter set changes — otherwise the
   // user is left at an offset that no longer maps to meaningful content.
   useEffect(() => {
     normalListRef.current?.scrollTo({ top: 0 });
     diffListRef.current?.scrollTo({ top: 0 });
   }, [categoryFilter, severityFilter, typeFilter, search, selectedPath, isDiffMode]);
+
+  // When the underlying violations list changes (new analysis fetched), drop
+  // the in-session hidden set — the server now reflects the updated state.
+  useEffect(() => {
+    setHiddenRuleKeys(new Set());
+  }, [violations]);
+
+  const handleRuleDisabled = useCallback((ruleKey: string) => {
+    setHiddenRuleKeys((prev) => {
+      const next = new Set(prev);
+      next.add(ruleKey);
+      return next;
+    });
+  }, []);
 
   // Resizable ER panel
   const [erHeight, setErHeight] = useState(264);
@@ -229,11 +248,13 @@ export function ViolationsPanel({
   // Pre-category filtered: applies search + severity + type + violationType but not category
   const preCategoryFiltered = useMemo(() => {
     let result = pathFilteredViolations;
+    if (hiddenRuleKeys.size > 0)
+      result = result.filter((v) => !v.ruleKey || !hiddenRuleKeys.has(v.ruleKey));
     if (severityFilter !== 'all') result = result.filter((v) => v.severity === severityFilter);
     if (typeFilter !== 'all') result = result.filter((v) => getDetectionType(v) === typeFilter);
     if (search) result = result.filter((v) => matchesSearch(v, search));
     return result;
-  }, [pathFilteredViolations, severityFilter, typeFilter, search]);
+  }, [pathFilteredViolations, hiddenRuleKeys, severityFilter, typeFilter, search]);
 
   // Apply category filter on top
   const fullyFilteredViolations = useMemo(() => {
@@ -265,10 +286,12 @@ export function ViolationsPanel({
   const preCategoryDiffCards = useMemo(() => {
     if (!diffViolationCards) return null;
     let result = diffViolationCards;
+    if (hiddenRuleKeys.size > 0)
+      result = result.filter((c) => !c.violation.ruleKey || !hiddenRuleKeys.has(c.violation.ruleKey));
     if (severityFilter !== 'all') result = result.filter((c) => c.violation.severity === severityFilter);
     if (search) result = result.filter((c) => matchesSearch(c.violation, search));
     return result;
-  }, [diffViolationCards, severityFilter, search]);
+  }, [diffViolationCards, hiddenRuleKeys, severityFilter, search]);
 
   const filteredDiffCards = useMemo(() => {
     if (!preCategoryDiffCards) return null;
@@ -400,6 +423,8 @@ export function ViolationsPanel({
                         onOpenFile={onOpenFile}
                         isResolved={diffStatus === 'resolved'}
                         diffStatus={diffStatus}
+                        repoId={repoId}
+                        onRuleDisabled={handleRuleDisabled}
                       />
                     </div>
                   )}
@@ -546,6 +571,8 @@ export function ViolationsPanel({
                         violation={violation}
                         onLocateNode={onLocateNode}
                         onOpenFile={onOpenFile}
+                        repoId={repoId}
+                        onRuleDisabled={handleRuleDisabled}
                       />
                     </div>
                   )}

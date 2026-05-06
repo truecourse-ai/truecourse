@@ -1,10 +1,10 @@
 
-import { Copy, Check, ChevronDown, ChevronUp, Crosshair, FileCode } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronUp, Crosshair, FileCode, BellOff } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import type { ViolationResponse } from '@/lib/api';
+import { setRuleEnabled, type ViolationResponse } from '@/lib/api';
 
 /**
  * Render a violation string that uses markdown-style backticks around code
@@ -34,6 +34,10 @@ type ViolationCardProps = {
   onOpenFile?: (path: string, pinned: boolean, scrollToLine?: number) => void;
   isResolved?: boolean;
   diffStatus?: 'new' | 'resolved';
+  /** When set, enables the "Disable rule" action which calls the rules API for this repo. */
+  repoId?: string;
+  /** Called after a successful disable so the panel can hide same-rule violations. */
+  onRuleDisabled?: (ruleKey: string) => void;
 };
 
 const severityColors: Record<string, string> = {
@@ -52,15 +56,30 @@ const severityBadgeColors: Record<string, string> = {
   critical: 'bg-red-600/10 text-red-700 dark:text-red-500',
 };
 
-export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved, diffStatus }: ViolationCardProps) {
+export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved, diffStatus, repoId, onRuleDisabled }: ViolationCardProps) {
   const [copied, setCopied] = useState(false);
   const [showFix, setShowFix] = useState(false);
+  const [disablingRule, setDisablingRule] = useState(false);
 
   const handleCopyFix = async () => {
     if (!violation.fixPrompt) return;
     await navigator.clipboard.writeText(violation.fixPrompt);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const ruleKey = violation.ruleKey;
+  const canDisableRule = !!repoId && !!ruleKey && !isResolved && diffStatus !== 'resolved';
+
+  const handleDisableRule = async () => {
+    if (!repoId || !ruleKey) return;
+    setDisablingRule(true);
+    try {
+      await setRuleEnabled(repoId, ruleKey, false);
+      onRuleDisabled?.(ruleKey);
+    } catch {
+      setDisablingRule(false);
+    }
   };
 
   const isCodeViolation = violation.type === 'code';
@@ -101,33 +120,49 @@ export function ViolationCard({ violation, onLocateNode, onOpenFile, isResolved,
           >
             {violation.severity}
           </Badge>
-          {/* Locate button: open file for code violations, focus graph node for arch violations */}
-          {isCodeViolation && violation.filePath && onOpenFile ? (
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={() => onOpenFile(violation.filePath!, true, violation.lineStart)}
-              className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
-              title={`Open ${violation.filePath}:${violation.lineStart}`}
-            >
-              <FileCode className="h-3 w-3" />
-              Open
-            </Button>
-          ) : onLocateNode && locateTargetId ? (
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={() => onLocateNode(locateTargetId, locateDepth, {
-                serviceId: violation.targetServiceId ?? null,
-                moduleId: violation.targetModuleId ?? null,
-              })}
-              className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
-              title={`Locate ${locateTargetName || 'target'} in graph`}
-            >
-              <Crosshair className="h-3 w-3" />
-              Locate
-            </Button>
-          ) : null}
+          <div className="ml-auto flex items-center gap-1">
+            {/* Locate button: open file for code violations, focus graph node for arch violations */}
+            {isCodeViolation && violation.filePath && onOpenFile ? (
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => onOpenFile(violation.filePath!, true, violation.lineStart)}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+                title={`Open ${violation.filePath}:${violation.lineStart}`}
+              >
+                <FileCode className="h-3 w-3" />
+                Open
+              </Button>
+            ) : onLocateNode && locateTargetId ? (
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => onLocateNode(locateTargetId, locateDepth, {
+                  serviceId: violation.targetServiceId ?? null,
+                  moduleId: violation.targetModuleId ?? null,
+                })}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+                title={`Locate ${locateTargetName || 'target'} in graph`}
+              >
+                <Crosshair className="h-3 w-3" />
+                Locate
+              </Button>
+            ) : null}
+            {canDisableRule && (
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={handleDisableRule}
+                disabled={disablingRule}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+                title={`Disable rule for this repo: ${ruleKey}\n\nHides every violation from this rule, now and on future analyses. Re-enable from the Rules panel.`}
+                aria-label={`Disable rule ${ruleKey} for this repo`}
+              >
+                <BellOff className="h-3 w-3" />
+                Disable rule
+              </Button>
+            )}
+          </div>
         </div>
 
         <h4 className={`text-sm font-bold ${isResolved ? 'line-through opacity-60 text-muted-foreground' : 'text-foreground'}`}>

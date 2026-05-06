@@ -1,8 +1,8 @@
 
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Shield, Bug, Network, Zap, HeartPulse, Code2, Database, Paintbrush, Loader2, Search } from 'lucide-react';
-import { getRules, type RuleResponse } from '@/lib/api';
+import { getRules, setRuleEnabled, type RuleResponse } from '@/lib/api';
 import { SeverityDropdown, type SeverityFilter } from '@/components/ui/SeverityDropdown';
 
 type DomainFilter = 'all' | 'security' | 'bugs' | 'architecture' | 'performance' | 'reliability' | 'code-quality' | 'database' | 'style';
@@ -60,22 +60,54 @@ const domainTabs: { value: DomainFilter; label: string; icon: React.ReactNode }[
   { value: 'style', label: 'Style', icon: <Paintbrush className="h-3.5 w-3.5" /> },
 ];
 
-export function RulesPanel() {
+export interface RulesPanelProps {
+  repoId?: string;
+}
+
+export function RulesPanel({ repoId }: RulesPanelProps = {}) {
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<DomainFilter>('all');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'deterministic' | 'llm'>('all');
   const [search, setSearch] = useState('');
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
 
   const listRef = useRef<VirtuosoHandle>(null);
 
   useEffect(() => {
-    getRules()
+    setLoading(true);
+    getRules(repoId)
       .then(setRules)
       .catch(() => setRules([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [repoId]);
+
+  const handleToggle = useCallback(
+    async (rule: RuleResponse) => {
+      if (!repoId) return;
+      const next = !rule.enabled;
+      setRules((prev) => prev.map((r) => (r.key === rule.key ? { ...r, enabled: next } : r)));
+      setPendingKeys((prev) => {
+        const s = new Set(prev);
+        s.add(rule.key);
+        return s;
+      });
+      try {
+        await setRuleEnabled(repoId, rule.key, next);
+      } catch {
+        // Revert on failure.
+        setRules((prev) => prev.map((r) => (r.key === rule.key ? { ...r, enabled: !next } : r)));
+      } finally {
+        setPendingKeys((prev) => {
+          const s = new Set(prev);
+          s.delete(rule.key);
+          return s;
+        });
+      }
+    },
+    [repoId],
+  );
 
   // Reset scroll when the active filter set changes.
   useEffect(() => {
@@ -219,17 +251,43 @@ export function RulesPanel() {
             }}
             itemContent={(_, rule) => {
               const domain = getDomain(rule);
+              const isPending = pendingKeys.has(rule.key);
+              const canToggle = !!repoId;
               return (
                 <div className="px-3 pb-2">
-                  <div className="rounded-lg border border-border bg-card p-3">
+                  <div
+                    className={`rounded-lg border border-border bg-card p-3 transition-opacity ${
+                      rule.enabled ? '' : 'opacity-55'
+                    }`}
+                  >
                     <div className="mb-1.5 flex items-start justify-between gap-2">
                       <h4 className="text-sm font-medium text-foreground">{rule.name}</h4>
-                      <div className="flex shrink-0 gap-1.5">
+                      <div className="flex shrink-0 items-center gap-1.5">
                         <span
                           className={`rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase ${severityColors[rule.severity] || ''}`}
                         >
                           {rule.severity}
                         </span>
+                        {canToggle && (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={rule.enabled}
+                            aria-label={rule.enabled ? `Disable ${rule.name}` : `Enable ${rule.name}`}
+                            disabled={isPending}
+                            onClick={() => handleToggle(rule)}
+                            title={rule.enabled ? 'Click to disable' : 'Click to enable'}
+                            className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
+                              rule.enabled ? 'bg-emerald-500/70' : 'bg-muted'
+                            } ${isPending ? 'opacity-50' : 'hover:opacity-90'}`}
+                          >
+                            <span
+                              className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                                rule.enabled ? 'translate-x-3.5' : 'translate-x-0.5'
+                              }`}
+                            />
+                          </button>
+                        )}
                       </div>
                     </div>
                     <p className="text-xs leading-relaxed text-muted-foreground">{rule.description}</p>
@@ -244,6 +302,11 @@ export function RulesPanel() {
                       >
                         {rule.type === 'deterministic' ? 'Deterministic' : 'LLM'}
                       </span>
+                      {!rule.enabled && (
+                        <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                          Disabled
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

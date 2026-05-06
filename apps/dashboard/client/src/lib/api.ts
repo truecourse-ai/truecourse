@@ -370,8 +370,20 @@ export type RuleResponse = {
   type: string;
 };
 
-export function getRules(): Promise<RuleResponse[]> {
-  return fetchApi<RuleResponse[]>('/api/rules');
+export function getRules(repoId?: string): Promise<RuleResponse[]> {
+  const path = repoId ? `/api/repos/${encodeURIComponent(repoId)}/rules` : '/api/rules';
+  return fetchApi<RuleResponse[]>(path);
+}
+
+export function setRuleEnabled(
+  repoId: string,
+  ruleKey: string,
+  enabled: boolean,
+): Promise<{ key: string; enabled: boolean }> {
+  return fetchApi(`/api/repos/${encodeURIComponent(repoId)}/rules/${encodeURIComponent(ruleKey)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ enabled }),
+  });
 }
 
 // Diff Check

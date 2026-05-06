@@ -4,6 +4,7 @@ import {
   readProjectConfig,
   updateProjectConfig,
 } from "@truecourse/core/config/project-config";
+import { getRules } from "@truecourse/core/services/rules";
 import { requireRegisteredRepo } from "./helpers.js";
 
 const ALL_CATEGORIES = [...DOMAIN_ORDER] as string[];
@@ -93,4 +94,114 @@ export async function runRulesLlm(options: RulesLlmOptions): Promise<void> {
   if (!isOverride) {
     p.log.info("Override with: truecourse rules llm --enable/--disable");
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-rule enable/disable
+// ---------------------------------------------------------------------------
+
+const COLOR_ENABLED = "\x1b[32menabled\x1b[0m";
+const COLOR_DISABLED = "\x1b[31mdisabled\x1b[0m";
+const COLOR_DIM = (text: string) => `\x1b[2m${text}\x1b[0m`;
+
+function setRuleEnabled(repoPath: string, ruleKey: string, enabled: boolean): void {
+  const current = readProjectConfig(repoPath);
+  const set = new Set<string>(current.disabledRules ?? []);
+  if (enabled) set.delete(ruleKey);
+  else set.add(ruleKey);
+  updateProjectConfig(repoPath, { disabledRules: [...set].sort() });
+}
+
+async function requireRuleKey(ruleKey: string): Promise<void> {
+  const all = await getRules();
+  if (!all.some((r) => r.key === ruleKey)) {
+    p.log.error(`Unknown rule: ${ruleKey}. Run 'truecourse rules list' to see available rules.`);
+    process.exit(1);
+  }
+}
+
+export interface RulesEnableOptions {
+  ruleKey: string;
+}
+
+export async function runRulesEnable({ ruleKey }: RulesEnableOptions): Promise<void> {
+  const repo = requireRegisteredRepo();
+  await requireRuleKey(ruleKey);
+  setRuleEnabled(repo.path, ruleKey, true);
+  p.log.success(`Enabled rule '${ruleKey}' for ${repo.name}.`);
+}
+
+export async function runRulesDisable({ ruleKey }: RulesEnableOptions): Promise<void> {
+  const repo = requireRegisteredRepo();
+  await requireRuleKey(ruleKey);
+  setRuleEnabled(repo.path, ruleKey, false);
+  p.log.success(`Disabled rule '${ruleKey}' for ${repo.name}.`);
+}
+
+export interface RulesListOptions {
+  domain?: string;
+  disabled?: boolean;
+  enabled?: boolean;
+  search?: string;
+}
+
+export async function runRulesList(options: RulesListOptions): Promise<void> {
+  const repo = requireRegisteredRepo();
+  const rules = await getRules(repo.path);
+
+  const search = options.search?.toLowerCase();
+  let filtered = rules;
+  if (options.domain) {
+    filtered = filtered.filter((r) => (r.domain ?? r.category) === options.domain);
+  }
+  if (options.enabled) filtered = filtered.filter((r) => r.enabled);
+  if (options.disabled) filtered = filtered.filter((r) => !r.enabled);
+  if (search) {
+    filtered = filtered.filter(
+      (r) =>
+        r.key.toLowerCase().includes(search) ||
+        r.name.toLowerCase().includes(search) ||
+        r.description?.toLowerCase().includes(search),
+    );
+  }
+
+  if (filtered.length === 0) {
+    p.log.info("No rules match the given filters.");
+    return;
+  }
+
+  const enabledCount = filtered.filter((r) => r.enabled).length;
+  const disabledCount = filtered.length - enabledCount;
+  p.log.info(
+    `Rules for ${repo.name}: ${filtered.length} shown (${enabledCount} enabled, ${disabledCount} disabled).`,
+  );
+
+  const keyWidth = Math.min(
+    60,
+    filtered.reduce((max, r) => Math.max(max, r.key.length), 0),
+  );
+
+  for (const r of filtered) {
+    const status = r.enabled ? COLOR_ENABLED : COLOR_DISABLED;
+    const domain = r.domain ?? r.category;
+    console.log(`  ${r.key.padEnd(keyWidth)}  ${status}  ${COLOR_DIM(`[${domain}/${r.severity}]`)}  ${r.name}`);
+  }
+  console.log("");
+  p.log.info("Toggle with: truecourse rules enable <key> | truecourse rules disable <key>");
+}
+
+export interface RulesResetOptions {
+  ruleKey?: string;
+}
+
+export async function runRulesReset({ ruleKey }: RulesResetOptions): Promise<void> {
+  const repo = requireRegisteredRepo();
+  if (ruleKey) {
+    await requireRuleKey(ruleKey);
+    setRuleEnabled(repo.path, ruleKey, true);
+    p.log.success(`Re-enabled '${ruleKey}' for ${repo.name}.`);
+    return;
+  }
+  updateProjectConfig(repo.path, { disabledRules: [] });
+  p.log.success(`Cleared per-rule overrides for ${repo.name}.`);
 }
