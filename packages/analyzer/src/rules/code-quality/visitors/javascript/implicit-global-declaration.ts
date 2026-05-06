@@ -11,6 +11,18 @@ export const implicitGlobalDeclarationVisitor: CodeRuleVisitor = {
     if (!parent) return null
     if (parent.type !== 'program') return null
 
+    // Skip service workers and standalone scripts. Service workers run
+    // in a dedicated `ServiceWorkerGlobalScope` (or DedicatedWorkerGlobalScope)
+    // where top-level declarations are local to the worker, not the
+    // page's global scope. Detect by filename or by `self.addEventListener`/
+    // `importScripts` usage at the top of the file.
+    const lowerPath = filePath.toLowerCase()
+    if (
+      /(?:service|sw|worker|service-worker|mockServiceWorker)\b/i.test(lowerPath) ||
+      /\.(?:sw|worker|service-worker)\.[jt]sx?$/i.test(filePath)
+    ) return null
+    if (/\bself\.addEventListener\b|\bimportScripts\(/.test(sourceCode)) return null
+
     if (node.type === 'variable_declaration') {
       const kind = node.children[0]
       if (!kind || kind.text !== 'var') return null
