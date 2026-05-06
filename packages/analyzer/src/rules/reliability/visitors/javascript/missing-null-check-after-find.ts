@@ -12,6 +12,16 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     const prop = fn.childForFieldName('property')
     if (prop?.text !== 'find') return null
 
+    // Konva and jQuery `.find()` return COLLECTIONS, not `undefined`.
+    // Skip when the file imports either, or when the receiver looks
+    // Konva-shaped (`stage`, `layer`, `group`, …).
+    if (
+      /\bfrom\s+['"]konva\b/.test(sourceCode) ||
+      /\bfrom\s+['"]jquery\b/.test(sourceCode) ||
+      /\brequire\(['"]konva/.test(sourceCode) ||
+      /\brequire\(['"]jquery/.test(sourceCode)
+    ) return null
+
     // Check how the result is used — look at parent
     const parent = node.parent
     if (!parent) return null
