@@ -26,6 +26,7 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `architecture/deterministic/dead-method` | 47 | **21** | -26 (FP #32 + #33: shorthand methods + framework-routed files) |
 | `architecture/deterministic/unused-export` | 40 | **34** | -6 (FP #33; Remix routes now treated as entry points) |
 | `architecture/deterministic/dead-module` | 35 | **13** | -22 (FP #33; BullMQ job definitions + Remix route files now entry points) |
+| `code-quality/deterministic/hardcoded-url` | 43 | **26** | -17 (FP #34; canonical-site-URL config keys + email-template default-link params) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 

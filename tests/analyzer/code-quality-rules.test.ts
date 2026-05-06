@@ -3708,6 +3708,56 @@ describe('code-quality/deterministic/hardcoded-url', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
     expect(matches).toHaveLength(0);
   });
+
+  // FP #34 — framework canonical-URL config keys
+  it('does not flag URL value of `metadataBase` Next.js config key', () => {
+    const code = `export const metadata = {
+  metadataBase: new URL('https://docs.documenso.com'),
+  title: 'Docs',
+};`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag URL value of `host` / `sitemap` robots.ts keys', () => {
+    const code = `export default function robots() {
+  return {
+    host: 'https://docs.documenso.com',
+    sitemap: 'https://docs.documenso.com/sitemap.xml',
+  };
+}`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag SCREAMING_SNAKE *_URL constants', () => {
+    const code = `const BASE_URL = 'https://docs.documenso.com';
+const SITE_URL = 'https://www.documenso.com';
+const CANONICAL_URL = 'https://documenso.com';`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag URL value of `wellKnownUrl` OIDC config key', () => {
+    const code = `const config = {
+  wellKnownUrl: 'https://accounts.google.com/.well-known/openid-configuration',
+};`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag URL default in destructured email-template parameter', () => {
+    const code = `function ConfirmEmail({ baseUrl = 'https://documenso.com', signDocumentLink = 'https://documenso.com' }: { baseUrl?: string; signDocumentLink?: string }) {
+  return null;
+}`;
+    const violations = check(code, 'tsx');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/hardcoded-url');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 describe('code-quality/deterministic/hardcoded-port', () => {
