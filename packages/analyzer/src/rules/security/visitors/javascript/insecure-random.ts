@@ -9,6 +9,17 @@ export const insecureRandomVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
+    // Skip non-production code paths. Math.random() in seed scripts,
+    // MSW mock handlers, fixtures, and test files is intentional —
+    // those values aren't shipped to production users and security
+    // requirements don't apply. Match whole path segments only — `/seed/`
+    // not `/seeders/`, `/mocks/` not `/mocksey/` — to avoid skipping
+    // legitimate paths that happen to contain the substring.
+    if (
+      /(?:^|\/)(?:seeds?|mocks?|__mocks__|storybook|stories)\//i.test(filePath) ||
+      /\.(?:spec|test|stories|fixture|mock)\.[jt]sx?$/i.test(filePath)
+    ) return null
+
     const fn = node.childForFieldName('function')
     if (!fn) return null
 

@@ -31,6 +31,7 @@ The FP-fix counts below are per-rule, not per-tier.
 | `code-quality/deterministic/restricted-api-usage` | 25 | **2** | -23 (FP #39; outer-scope param binding now found) |
 | `code-quality/deterministic/unnecessary-type-parameter` | 7 | **0** | -7 (FP #40; default-value, body-usage, parametric-input shapes) |
 | `code-quality/deterministic/react-useless-set-state` | 2 | **0** | -2 (FP #41; local-decl shadowing in catch block) |
+| `security/deterministic/insecure-random` | 3 | **0** | -3 (FP #45; mocks/ paths) |
 
 297 distinct rules firing.
 

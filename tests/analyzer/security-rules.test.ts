@@ -1058,6 +1058,11 @@ describe('security/deterministic/production-debug-enabled', () => {
 describe('security/deterministic/insecure-random', () => {
   const ruleKey = 'security/deterministic/insecure-random';
 
+  function checkAt(code: string, filePath: string, lang: 'typescript' | 'python' = 'typescript') {
+    const tree = parseCode(code, lang);
+    return checkCodeRules(tree, filePath, code, enabledRules, lang);
+  }
+
   it('detects Math.random() for token generation in JS', () => {
     const violations = check(`const token = Math.random().toString(36);`);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
@@ -1066,6 +1071,47 @@ describe('security/deterministic/insecure-random', () => {
   it('detects random.random() for token generation in Python', () => {
     const violations = check(`token = random.random()`, 'python');
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+  });
+
+  // FP #45 — non-production code paths
+  it('does not flag Math.random() in seed/ scripts', () => {
+    const violations = checkAt(
+      `const token = Math.random().toString(36).slice(2, 9);`,
+      '/repo/packages/prisma/seed/initial-seed.ts',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag Math.random() in mocks/ handlers', () => {
+    const violations = checkAt(
+      `const key = \`oh_\${id}_sk_mock_\${Math.random().toString(36).slice(2, 14)}\`;`,
+      '/repo/frontend/src/mocks/api-keys-handlers.ts',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag Math.random() in *.test.ts file', () => {
+    const violations = checkAt(
+      `const sessionToken = Math.random().toString();`,
+      '/repo/src/auth/session.test.ts',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag Math.random() in __mocks__/ directory', () => {
+    const violations = checkAt(
+      `const apiKey = Math.random().toString(36);`,
+      '/repo/src/lib/__mocks__/auth.ts',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag Math.random() in *.fixture.ts file', () => {
+    const violations = checkAt(
+      `const token = Math.random().toString();`,
+      '/repo/src/users.fixture.ts',
+    );
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
 

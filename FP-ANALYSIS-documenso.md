@@ -32,6 +32,7 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `bugs/deterministic/void-return-value-used` | 7 | **0** | -7 (FP #42; splice/pop/shift/delete return useful values) |
 | `bugs/deterministic/missing-return-await` | 10 | **2** | -8 (FP #43; Hono context + Zod parse + stream helpers) |
 | `reliability/deterministic/process-exit-in-library` | 11 | **2** | -9 (FP #44; examples/ + bin/ + shebang) |
+| `security/deterministic/insecure-random` | 6 | **0** | -6 (FP #45; seed/mocks/test/storybook paths) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 
