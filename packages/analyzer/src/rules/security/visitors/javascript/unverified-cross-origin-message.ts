@@ -6,6 +6,19 @@ export const unverifiedCrossOriginMessageVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
+    // Skip service workers and MSW mock handlers — message events
+    // there are intra-origin (worker ↔ controller) and don't need
+    // origin checks. Also skip files that explicitly look like
+    // playgrounds / demos where the cross-origin check is a known
+    // limitation.
+    if (
+      /(?:service|sw|worker|mockServiceWorker)\b/i.test(filePath) ||
+      /\.(?:sw|worker|service-worker)\.[jt]sx?$/i.test(filePath) ||
+      /\bself\.addEventListener\b|\bimportScripts\(/.test(sourceCode) ||
+      /\/playground\//.test(filePath) ||
+      /\bplayground\.[jt]sx?$/i.test(filePath)
+    ) return null
+
     const fn = node.childForFieldName('function')
     if (!fn) return null
 
