@@ -17,6 +17,30 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
     }
     if (!expr) return null
 
+    // Unwrap parenthesized_expression so `return (<X/>)` is recognized.
+    while (expr && expr.type === 'parenthesized_expression') {
+      expr = expr.namedChildren[0] ?? null
+    }
+    if (!expr) return null
+
+    // Skip when `expr` itself is a function or JSX subtree. Their inner
+    // statements / embedded expressions are visited as their own
+    // expression_statement / return_statement / variable_declarator nodes,
+    // and counted there. Counting them again at the outer site sums every
+    // nested operator across the entire component into one finding —
+    // which is the bug, not a feature.
+    const SKIP_TOP_LEVEL_TYPES = new Set([
+      'arrow_function',
+      'function_expression',
+      'function',
+      'generator_function',
+      'class_expression',
+      'jsx_element',
+      'jsx_self_closing_element',
+      'jsx_fragment',
+    ])
+    if (SKIP_TOP_LEVEL_TYPES.has(expr.type)) return null
+
     let operatorCount = 0
     const BINARY_TYPES = new Set(['binary_expression', 'logical_expression'])
     // Don't recurse into nested function bodies. Each nested function's
