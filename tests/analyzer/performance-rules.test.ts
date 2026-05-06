@@ -635,10 +635,20 @@ for item in items:
 describe('performance/deterministic/runtime-cast-overhead', () => {
   const KEY = 'performance/deterministic/runtime-cast-overhead';
 
-  it('detects int() in loop', () => {
+  it('detects int() of a literal in loop (hoistable)', () => {
     const code = `
 for item in items:
-    val = int(item)
+    val = int("42")
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('detects str() of a SCREAMING_SNAKE constant in loop (hoistable)', () => {
+    const code = `
+PER_PAGE = 100
+for item in items:
+    s = str(PER_PAGE)
 `;
     const violations = only(check(code, 'python'), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
@@ -646,6 +656,43 @@ for item in items:
 
   it('does not flag int() outside loop', () => {
     const code = `val = int(x)`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does not flag str() of loop variable (varies per iteration)', () => {
+    const code = `
+for item in items:
+    val = str(item)
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does not flag str() of attribute access (varies per iteration)', () => {
+    const code = `
+for workflow in workflows:
+    rid = str(workflow.id)
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does not flag str() of subscript (varies per iteration)', () => {
+    const code = `
+for record in records:
+    rid = str(record["id"])
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does not flag str() of method call (varies per iteration)', () => {
+    const code = `
+for member in members:
+    if str(member.get("id")) == "1":
+        pass
+`;
     const violations = only(check(code, 'python'), KEY);
     expect(violations).toHaveLength(0);
   });

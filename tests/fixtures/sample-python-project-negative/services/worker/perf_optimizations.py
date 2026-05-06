@@ -25,22 +25,29 @@ class UserEvent(BaseEvent):
 
 # ---- Runtime cast overhead in loop ----
 
-def normalize_ids(raw_ids: List[str]) -> List[int]:
-    """Convert string IDs to integers inside a loop."""
-    result = []
-    for raw in raw_ids:
-        # VIOLATION: performance/deterministic/runtime-cast-overhead
-        result.append(int(raw))
-    return result
+DEFAULT_LIMIT = 100
+DEFAULT_PREFIX = 42
 
 
-def build_label_map(records: List[Dict[str, Any]]) -> Dict[str, str]:
-    """Build a lookup mapping labels with in-loop casting."""
-    label_map = {}
+def emit_default_limits(records: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Cast a module-level constant inside a loop. The cast is loop-invariant
+    and can be hoisted above the loop — this is the rule's real TP shape."""
+    out = []
     for record in records:
         # VIOLATION: performance/deterministic/runtime-cast-overhead
-        label_map[str(record["id"])] = str(record["name"])
-    return label_map
+        limit_str = str(DEFAULT_LIMIT)
+        out.append({"id": record["id"], "limit": limit_str})
+    return out
+
+
+def double_each(records: List[Dict[str, Any]]) -> List[int]:
+    """Cast a literal inside a loop — also hoistable."""
+    out = []
+    for record in records:
+        # VIOLATION: performance/deterministic/runtime-cast-overhead
+        base = int("42")
+        out.append(base + record.get("offset", 0))
+    return out
 
 
 # ---- torch DataLoader without num_workers ----
