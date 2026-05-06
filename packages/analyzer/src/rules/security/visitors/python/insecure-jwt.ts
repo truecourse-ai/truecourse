@@ -26,13 +26,19 @@ export const pythonInsecureJwtVisitor: CodeRuleVisitor = {
         const value = arg.childForFieldName('value')
         if (name?.text === 'algorithm' || name?.text === 'algorithms') {
           const algText = value?.text.replace(/['"]/g, '').toLowerCase() ?? ''
-          if (algText === 'none' || algText === 'hs256') {
+          // Only `none` is genuinely insecure — it disables signature
+          // verification entirely. HS256 is industry-standard symmetric
+          // signing (used by GitHub, Google, etc. with proper secrets);
+          // flagging it as "insecure" misleads users into changing
+          // algorithms when their actual concern would be weak/reused
+          // secrets. Reject only `none`.
+          if (algText === 'none') {
             return makeViolation(
               this.ruleKey, node, filePath, 'high',
               'Insecure JWT configuration',
-              `JWT ${methodName}() with algorithm "${value?.text.replace(/['"]/g, '')}" is insecure.`,
+              `JWT ${methodName}() with algorithm "none" disables signature verification entirely.`,
               sourceCode,
-              'Use RS256, ES256, or another strong asymmetric algorithm.',
+              'Use HS256 (with a strong secret) or RS256/ES256 (asymmetric) to enforce signature verification.',
             )
           }
         }

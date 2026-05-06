@@ -1,7 +1,10 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-const INSECURE_JWT_ALGORITHMS = new Set(['none', 'hs256'])
+// Only `none` genuinely disables signature verification. HS256 is
+// industry-standard symmetric signing — flagging it misleads users
+// about their real concern (secret strength).
+const INSECURE_JWT_ALGORITHMS = new Set(['none'])
 
 export const insecureJwtVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/insecure-jwt',
