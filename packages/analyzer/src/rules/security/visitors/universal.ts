@@ -158,12 +158,32 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     const ip = match[1]
     if (EXCLUDED_IPS.has(ip)) return null
 
+    // Skip JSX SVG path-data attributes — SVG path coordinates often
+    // look like dotted-decimal IPs (`d="M10.5 20.3 L 100.0 200.5"`).
+    // Also skip `viewBox`, `points`, `transform` and other SVG numeric
+    // attributes for the same reason.
+    const parent = node.parent
+    if (parent?.type === 'jsx_attribute') {
+      const name = parent.namedChildren.find((c) => c.type === 'property_identifier' || c.type === 'jsx_identifier')
+      const attrName = name?.text
+      if (attrName === 'd' || attrName === 'viewBox' || attrName === 'points' || attrName === 'transform') return null
+    }
+
     // Skip version-like numbers in User-Agent strings, semver, etc.
     if (/Mozilla|Chrome|Safari|Firefox|AppleWebKit|Gecko/i.test(stripped)) return null
 
     // Validate each octet is 0-255
     const octets = ip.split('.')
     if (octets.some((o) => parseInt(o, 10) > 255)) return null
+
+    // Treat strings with multiple IPv4-shaped substrings (typical SVG path
+    // data: `M10.5 20.3 L 100.0 200.5 ...`) as non-IP coordinate streams.
+    const allMatches = stripped.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g) ?? []
+    if (allMatches.length >= 2) {
+      // Multiple "IP-like" tokens in a single string is overwhelmingly
+      // SVG path data, not a list of real IPs.
+      return null
+    }
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
