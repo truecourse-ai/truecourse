@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { readLatest } from '@truecourse/core/lib/analysis-store';
+import { readProjectConfig } from '@truecourse/core/config/project-config';
 import {
   listViolations,
   readActiveViolationsAt,
@@ -75,6 +76,10 @@ router.get(
         return;
       }
 
+      const disabled = new Set<string>(readProjectConfig(repo.path).disabledRules ?? []);
+      const filterDisabled = <T extends { ruleKey: string }>(rows: T[]): T[] =>
+        disabled.size === 0 ? rows : rows.filter((v) => !disabled.has(v.ruleKey));
+
       if (analysisIdParam && latest.analysis.id !== analysisIdParam) {
         // Historical analysis: reconstruct the active set as of that analysis
         // (replay the delta chain) so the summary matches what the violations
@@ -84,11 +89,11 @@ router.get(
           res.json({ total: 0, byFile: {}, bySeverity: {}, highestSeverityByFile: {} });
           return;
         }
-        res.json(summarizeViolations(historical));
+        res.json(summarizeViolations(filterDisabled(historical)));
         return;
       }
 
-      res.json(summarizeViolations(latest.violations));
+      res.json(summarizeViolations(filterDisabled(latest.violations)));
     } catch (error) {
       next(error);
     }

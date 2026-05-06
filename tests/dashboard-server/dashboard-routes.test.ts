@@ -45,6 +45,7 @@ import {
   getProjectBySlug,
 } from '../../packages/core/src/config/registry';
 import { getRepoTruecourseDir } from '../../packages/core/src/config/paths';
+import { updateProjectConfig } from '../../packages/core/src/config/project-config';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
@@ -462,6 +463,33 @@ describe('dashboard routes (seeded store)', () => {
       expect(res.body.total).toBe(2);
       expect(res.body.bySeverity.critical).toBe(1);
       expect(res.body.bySeverity.high).toBe(1);
+    });
+
+    it('disabled rule hides matching violations from list and summary', async () => {
+      const ruleKey = seed.violations[0].ruleKey;
+      // Write directly to config — the PATCH endpoint validates against the
+      // real rule catalogue, but the seeded violations use a synthetic key.
+      // What we want to verify here is the read-side filtering, not PATCH.
+      updateProjectConfig(fixture.repoPath, { disabledRules: [ruleKey] });
+      clearLatestCache();
+
+      const list = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations`)
+        .expect(200);
+      expect(list.body.length).toBe(0);
+
+      const summary = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations/summary`)
+        .expect(200);
+      expect(summary.body.total).toBe(0);
+      expect(summary.body.bySeverity).toEqual({});
+
+      // Re-enable restores them without re-running analysis.
+      updateProjectConfig(fixture.repoPath, { disabledRules: [] });
+      const restored = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations`)
+        .expect(200);
+      expect(restored.body.length).toBe(2);
     });
   });
 

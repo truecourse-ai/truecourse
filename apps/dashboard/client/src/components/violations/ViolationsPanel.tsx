@@ -271,16 +271,19 @@ export function ViolationsPanel({
     return counts;
   }, [preCategoryFiltered]);
 
-  // Severity counts reflect search + path filters (not severity filter itself)
+  // Severity counts reflect search + path filters + in-session disabled rules
+  // (not the severity filter itself).
   const severityCounts = useMemo(() => {
     let result = pathFilteredViolations;
+    if (hiddenRuleKeys.size > 0)
+      result = result.filter((v) => !v.ruleKey || !hiddenRuleKeys.has(v.ruleKey));
     if (search) result = result.filter((v) => matchesSearch(v, search));
     const counts: Record<string, number> = {};
     for (const v of result) {
       counts[v.severity] = (counts[v.severity] || 0) + 1;
     }
     return counts;
-  }, [pathFilteredViolations, search]);
+  }, [pathFilteredViolations, hiddenRuleKeys, search]);
 
   // Diff mode: pre-category filtered
   const preCategoryDiffCards = useMemo(() => {
@@ -311,13 +314,15 @@ export function ViolationsPanel({
   const diffSeverityCounts = useMemo(() => {
     if (!diffViolationCards) return {};
     let result = diffViolationCards;
+    if (hiddenRuleKeys.size > 0)
+      result = result.filter((c) => !c.violation.ruleKey || !hiddenRuleKeys.has(c.violation.ruleKey));
     if (search) result = result.filter((c) => matchesSearch(c.violation, search));
     const counts: Record<string, number> = {};
     for (const c of result) {
       counts[c.violation.severity] = (counts[c.violation.severity] || 0) + 1;
     }
     return counts;
-  }, [diffViolationCards, search]);
+  }, [diffViolationCards, hiddenRuleKeys, search]);
 
   const activeSeverityCounts = isDiffMode ? diffSeverityCounts : severityCounts;
 

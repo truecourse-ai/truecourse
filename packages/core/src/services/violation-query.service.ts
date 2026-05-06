@@ -23,6 +23,28 @@ import {
   readDiff,
   readLatest,
 } from '../lib/analysis-store.js';
+import { readProjectConfig } from '../config/project-config.js';
+
+/**
+ * Per-repo set of rule keys the user has disabled. Read at every query so
+ * toggling a rule takes effect on the next request without a server restart.
+ *
+ * Filtering is non-destructive: violations from disabled rules stay in the
+ * stored snapshot — they just don't surface in views. Re-enabling brings
+ * them back without re-running analysis.
+ */
+function getDisabledRuleKeys(repoPath: string): Set<string> {
+  return new Set<string>(readProjectConfig(repoPath).disabledRules ?? []);
+}
+
+function filterDisabled<T extends { ruleKey: string }>(
+  repoPath: string,
+  violations: T[],
+): T[] {
+  const disabled = getDisabledRuleKeys(repoPath);
+  if (disabled.size === 0) return violations;
+  return violations.filter((v) => !disabled.has(v.ruleKey));
+}
 
 export const SEVERITY_ORDER: Record<string, number> = {
   critical: 0,
@@ -79,6 +101,8 @@ export function listViolations(
     if (!historical) return { violations: [], total: 0 };
     violations = historical;
   }
+
+  violations = filterDisabled(repoPath, violations);
 
   const statusMode = options.status ?? 'active';
   let filtered: ViolationWithNames[];
@@ -182,7 +206,10 @@ export function readActiveViolationsForAnalysisId(
   // LATEST (default or explicit match).
   if (!analysisId || (latest && latest.analysis.id === analysisId)) {
     if (!latest) return null;
-    return latest.violations.filter((v) => v.status === 'new' || v.status === 'unchanged');
+    return filterDisabled(
+      repoPath,
+      latest.violations.filter((v) => v.status === 'new' || v.status === 'unchanged'),
+    );
   }
 
   // Diff — compose "active set if committed" from the LATEST baseline plus
@@ -195,11 +222,12 @@ export function readActiveViolationsForAnalysisId(
     const carried = latest.violations.filter(
       (v) => !resolvedIds.has(v.id) && (v.status === 'new' || v.status === 'unchanged'),
     );
-    return [...carried, ...diff.newViolations];
+    return filterDisabled(repoPath, [...carried, ...diff.newViolations]);
   }
 
   // Historical — replay the delta chain up to and including target analysis.
-  return readActiveViolationsAt(repoPath, analysisId);
+  const historical = readActiveViolationsAt(repoPath, analysisId);
+  return historical ? filterDisabled(repoPath, historical) : null;
 }
 
 // ---------------------------------------------------------------------------
