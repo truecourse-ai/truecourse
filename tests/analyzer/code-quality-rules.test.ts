@@ -3855,6 +3855,60 @@ describe('code-quality/deterministic/filename-class-mismatch', () => {
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
     expect(matches).toHaveLength(0);
   });
+
+  it('does not flag re-exported imported identifier (no class declared in file)', () => {
+    const code = `import BrandingPage from '../page';
+export default BrandingPage;`;
+    const violations = checkWithPath(code, '/src/branding.tsx');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag aliased re-export', () => {
+    const code = `import { Page as BrandingPage } from '../page';
+export default BrandingPage;`;
+    const violations = checkWithPath(code, '/src/branding.tsx');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag suffixed kebab-case filename matching PascalCase class', () => {
+    const code = `export default class AuthService {}`;
+    const violations = checkWithPath(code, '/src/auth-service.api.ts');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag suffixed double-dot filename', () => {
+    const code = `export default class ConversationService {}`;
+    const violations = checkWithPath(code, '/src/conversation-service.api.ts');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag class-name role suffix (Client) over kebab filename', () => {
+    const code = `class ApiKeysClient {}
+export default ApiKeysClient;`;
+    const violations = checkWithPath(code, '/src/api-keys.ts');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag class-name compound role suffix (EmailTemplate)', () => {
+    const code = `class ConfirmEmailTemplate {}
+export default ConfirmEmailTemplate;`;
+    const violations = checkWithPath(code, '/src/confirm-email.tsx');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag lowercase framework-convention export (route)', () => {
+    const code = `const route = createRoute({});
+export default route;`;
+    const violations = checkWithPath(code, '/src/get-envelope-by-token.ts');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/filename-class-mismatch');
+    expect(matches).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
