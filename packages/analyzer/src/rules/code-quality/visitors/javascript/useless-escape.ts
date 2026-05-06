@@ -6,6 +6,16 @@ export const uselessEscapeVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['string'],
   visit(node, filePath, sourceCode) {
+    // Skip strings in JSX attributes named `pattern` / `inputmode` —
+    // those are HTML regex `pattern="^\d+$"` strings. The string
+    // syntax doesn't escape them; they're regex bodies passed to the
+    // browser as attribute values.
+    const parent = node.parent
+    if (parent?.type === 'jsx_attribute') {
+      const attrName = parent.namedChildren.find((c) => c.type === 'property_identifier' || c.type === 'jsx_identifier')?.text
+      if (attrName === 'pattern' || attrName === 'inputmode' || attrName === 'autocomplete') return null
+    }
+
     const text = node.text
     const quoteChar = text[0]
     if (quoteChar !== '"' && quoteChar !== "'") return null
