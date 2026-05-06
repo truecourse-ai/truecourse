@@ -52,7 +52,16 @@ The FP-fix counts below are per-rule, not per-tier.
 | `code-quality/deterministic/require-await` | 248 | **241** | -7 (FP #70; Promise return contracts + JSX) |
 | `code-quality/deterministic/import-outside-top-level` | 240 | **197** | -43 (FP #71; TYPE_CHECKING + version_info) |
 | `code-quality/deterministic/async-unused-async` | 182 | **114** | -68 (FP #72; class-with-bases + test files) |
-| `code-quality/deterministic/non-empty-init-module` | 2 | **TBD** | (FP #73; __path__ + module logger) |
+| `code-quality/deterministic/non-empty-init-module` | 2 | **0** | -2 (FP #73; __path__ + module logger) |
+| `code-quality/deterministic/useless-escape` | 2 | **0** | -2 (FP #74; JSX pattern attrs) |
+| `code-quality/deterministic/subprocess-run-without-check` | 1 | **0** | -1 (FP #75; require subprocess import) |
+| `bugs/deterministic/comparison-to-none-constant` | 1 | **0** | -1 (FP #76; bare-identifier only) |
+| `security/deterministic/unverified-cross-origin-message` | 1 | **0** | -1 (FP #77; service worker skip) |
+| `code-quality/deterministic/indexed-loop-over-for-of` | 1 | **0** | -1 (FP #78; require .length) |
+| `security/deterministic/sql-injection` | 1 | **0** | -1 (FP #79; SCREAMING_SNAKE constants) |
+| `security/deterministic/insecure-jwt` | 1 | **0** | -1 (FP #80; HS256 is fine) |
+| `code-quality/deterministic/unused-variable` (Python) | 2 | **0** | -2 (FP #81; class-attr metaclass reads) |
+| `code-quality/deterministic/bad-dunder-method-name` | 1 | **0** | -1 (FP #82; framework dunders) |
 
 297 distinct rules firing.
 

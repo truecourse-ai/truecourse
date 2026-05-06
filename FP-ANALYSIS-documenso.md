@@ -53,6 +53,9 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `bugs/deterministic/argument-type-mismatch` | 140 | **69** | -71 (FP #68; unpinpointed-fallback removal) |
 | `code-quality/deterministic/require-await` | 177 | **116** | -61 (FP #70; Promise return contracts + JSX handlers) |
 | `security/deterministic/clear-text-protocol` | 3 | **0** | -3 (FP #64; SSRF helpers + tuple-pair) |
+| `code-quality/deterministic/useless-escape` | 1 | **0** | -1 (FP #74) |
+| `security/deterministic/unverified-cross-origin-message` | 1 | **0** | -1 (FP #77) |
+| `code-quality/deterministic/indexed-loop-over-for-of` | 5 | **1** | -4 (FP #78) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 
