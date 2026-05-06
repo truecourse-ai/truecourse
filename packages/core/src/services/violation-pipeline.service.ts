@@ -235,6 +235,15 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     ? [...changedFileSet].map((relPath) => ({ filePath: relPath, resolve: true }))
     : (result.fileAnalyses || []).map((fa) => ({ filePath: fa.filePath, resolve: !path.isAbsolute(fa.filePath) }));
 
+  // Sort by file path so files in the same tsconfig scope (same package
+  // directory) cluster together. The TypeQueryService caches one
+  // ts.Program at a time and rebuilds when the scope changes — without
+  // this sort, the rule loop would thrash, rebuilding programs O(scopes)
+  // times instead of once per scope. Path-based sort is a clean proxy
+  // for scope grouping in monorepos: apps/web/* all sort together,
+  // packages/ui/* cluster together, etc.
+  filesToScan.sort((a, b) => a.filePath.localeCompare(b.filePath));
+
   // ---------------------------------------------------------------------------
   // 2. Scan files + build TypeQuery
   // ---------------------------------------------------------------------------

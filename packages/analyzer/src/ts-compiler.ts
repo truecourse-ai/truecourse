@@ -346,64 +346,76 @@ export function createTypeQueryService(
   filePaths: string[],
   scopedOptions: ScopedCompilerOptions[],
 ): TypeQueryService {
-  // Create one TS program per scoped option (per package) so that each file
-  // gets its own tsconfig's paths, baseUrl, and module resolution settings.
-  // A single global program fails because path aliases like @/* resolve
-  // relative to each package's directory.
+  // Each tsconfig scope (per package in a monorepo) needs its own ts.Program
+  // because path aliases like @/* resolve relative to each package's
+  // directory. On a turborepo with ~15 apps/* + packages/*, that's ~15
+  // scoped programs.
+  //
+  // Holding all of them simultaneously is what caused the rule pass to
+  // OOM on documenso (each program loads its transitive .d.ts graph —
+  // Prisma client alone is ~100MB of generated types, plus React, Next,
+  // Remix, etc. — so 15 × ~300MB ≈ 4.5GB just for the type-aware-rule
+  // infrastructure).
+  //
+  // Strategy: build programs LAZILY on first query, and keep at most ONE
+  // program alive at a time (LRU size 1). When a query crosses scopes,
+  // the previous program is released so the next program's allocation
+  // doesn't double-up. Callers (the rule pass) sort files by scope so
+  // consecutive queries hit the cached program — without that, every
+  // query would rebuild and the cure would be worse than the disease.
   interface ScopedProgram {
     program: ts.Program
     checker: ts.TypeChecker
-    files: Set<string>
   }
 
-  const scopedPrograms: ScopedProgram[] = []
-  const fileToProgram = new Map<string, ScopedProgram>()
-
-  // Group files by their matching scoped options
-  const filesByScope = new Map<ScopedCompilerOptions, string[]>()
-  const fallbackFiles: string[] = []
-
+  // Pre-compute file → scope-index mapping. Cheap (just startsWith checks),
+  // and lets us skip the scoped-options scan on every query.
+  const fileToScopeIdx = new Map<string, number>()
   for (const fp of filePaths) {
-    const scope = scopedOptions.find((s) => fp.startsWith(s.dir + '/'))
-    if (scope) {
-      if (!filesByScope.has(scope)) filesByScope.set(scope, [])
-      filesByScope.get(scope)!.push(fp)
+    let idx = scopedOptions.findIndex((s) => fp.startsWith(s.dir + '/'))
+    if (idx < 0) idx = scopedOptions.length - 1 // fallback to root scope
+    fileToScopeIdx.set(fp, idx)
+  }
+
+  // Group files by scope-index for program creation. Built once, read-only.
+  const filesByScopeIdx = new Map<number, string[]>()
+  for (const [fp, idx] of fileToScopeIdx) {
+    let bucket = filesByScopeIdx.get(idx)
+    if (!bucket) { bucket = []; filesByScopeIdx.set(idx, bucket) }
+    bucket.push(fp)
+  }
+
+  let currentSp: ScopedProgram | null = null
+  let currentScopeIdx = -2 // -1 is the "no scopes available" sentinel
+
+  function getProgramForFile(filePath: string): ScopedProgram | null {
+    const idx = fileToScopeIdx.get(filePath)
+    if (idx === undefined) return null
+    if (currentSp && currentScopeIdx === idx) return currentSp
+
+    // Drop the previous scope's program before building the next one.
+    // Setting to null isn't enough on its own — we also need the local
+    // bindings inside the previous program to fall out of scope so V8 can
+    // reclaim. The old object becomes unreferenced as soon as we reassign.
+    currentSp = null
+
+    let options: ts.CompilerOptions
+    let scopeFiles: string[]
+    if (idx === -1 || scopedOptions.length === 0) {
+      // No tsconfig in repo: build a single program over all files.
+      options = { skipLibCheck: true, noEmit: true }
+      scopeFiles = filePaths
     } else {
-      fallbackFiles.push(fp)
+      const scope = scopedOptions[idx]
+      options = { ...scope.options, skipLibCheck: true, noEmit: true }
+      scopeFiles = filesByScopeIdx.get(idx) ?? []
     }
-  }
 
-  // Add fallback files to the last scope (root-level tsconfig)
-  if (fallbackFiles.length > 0 && scopedOptions.length > 0) {
-    const fallbackScope = scopedOptions[scopedOptions.length - 1]
-    if (!filesByScope.has(fallbackScope)) filesByScope.set(fallbackScope, [])
-    filesByScope.get(fallbackScope)!.push(...fallbackFiles)
-  }
-
-  for (const [scope, files] of filesByScope) {
-    const options: ts.CompilerOptions = {
-      ...scope.options,
-      skipLibCheck: true,
-      noEmit: true,
-    }
-    const program = ts.createProgram(files, options)
+    const program = ts.createProgram(scopeFiles, options)
     const checker = program.getTypeChecker()
-    const sp: ScopedProgram = { program, checker, files: new Set(files) }
-    scopedPrograms.push(sp)
-    for (const f of files) fileToProgram.set(f, sp)
-  }
-
-  // Fallback if no scoped options at all
-  if (scopedPrograms.length === 0) {
-    const program = ts.createProgram(filePaths, { skipLibCheck: true, noEmit: true })
-    const checker = program.getTypeChecker()
-    const sp: ScopedProgram = { program, checker, files: new Set(filePaths) }
-    scopedPrograms.push(sp)
-    for (const f of filePaths) fileToProgram.set(f, sp)
-  }
-
-  function getProgramForFile(filePath: string): ScopedProgram | undefined {
-    return fileToProgram.get(filePath)
+    currentSp = { program, checker }
+    currentScopeIdx = idx
+    return currentSp
   }
 
   function getTypeAtNode(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): ts.Type | null {
