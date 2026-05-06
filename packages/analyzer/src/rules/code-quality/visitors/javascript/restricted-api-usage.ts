@@ -39,19 +39,25 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
       if (parent.type === 'property_identifier') return null
       if (parent.type === 'import_specifier' || parent.type === 'export_specifier') return null
 
-      // Skip if identifier is declared as a local variable or parameter in scope
+      // Skip if identifier is declared as a local variable or parameter in
+      // any enclosing scope. The previous loop broke after the FIRST
+      // function-scope check, missing parameters of outer functions when
+      // the identifier was referenced from an inner callback (e.g.,
+      // `(event) => arr.map((x) => x === event.id)` — the `event`
+      // belongs to the outer arrow but the rule only saw the inner one's
+      // empty params and flagged it as the implicit global).
       const declPattern = new RegExp(`\\b(?:const|let|var)\\s+${node.text}\\b`)
       let scope: typeof node.parent = node.parent
       while (scope) {
         if (scope.type === 'statement_block' || scope.type === 'program') {
           if (declPattern.test(scope.text)) return null
         }
-        // Also check function parameters
         if (scope.type === 'arrow_function' || scope.type === 'function_declaration' ||
-            scope.type === 'function_expression' || scope.type === 'method_definition') {
+            scope.type === 'function_expression' || scope.type === 'method_definition' ||
+            scope.type === 'function') {
           const params = scope.childForFieldName('parameters')
           if (params && params.text.includes(node.text)) return null
-          break
+          // Continue walking — outer scope may have the binding.
         }
         scope = scope.parent
       }

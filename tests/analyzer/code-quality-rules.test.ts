@@ -7763,15 +7763,46 @@ describe('Python: code-quality/deterministic/airflow-3-migration', () => {
 // ---------------------------------------------------------------------------
 
 describe('code-quality/deterministic/restricted-api-usage', () => {
+  const KEY = 'code-quality/deterministic/restricted-api-usage';
+
   it('detects deprecated property usage', () => {
     const violations = check(`obj.__defineGetter__('prop', () => 42);`);
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/restricted-api-usage');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag normal property access', () => {
     const violations = check(`const x = obj.normalProp;`);
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/restricted-api-usage');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('detects truly implicit-global event usage', () => {
+    const violations = check(`function handle() { console.log(event.target); }`);
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // FP #39 — `event` parameter on the OUTER function is in scope of an
+  // inner callback. Walking only the innermost function misses the binding.
+  it('does not flag event referenced from inner callback when outer fn has `event` param', () => {
+    const code = `function Comp({ messages, event }: { messages: any[]; event: { id: string } }) {
+  const found = messages.find((msg) => msg.cause === event.id);
+  return found;
+}`;
+    const violations = check(code, 'tsx');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag event when outer arrow function takes `event` param', () => {
+    const code = `const onClick = (event: MouseEvent) => {
+  setTimeout(() => {
+    if (event.shiftKey) { /* … */ }
+  }, 0);
+};`;
+    const violations = check(code, 'tsx');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(0);
   });
 });

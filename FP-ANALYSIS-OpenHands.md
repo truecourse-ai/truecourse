@@ -28,6 +28,7 @@ The FP-fix counts below are per-rule, not per-tier.
 | `code-quality/deterministic/getattr-with-constant` | 28 | **5** | -23 (FP #36; getattr w/ default has different semantics from direct access) |
 | `code-quality/deterministic/class-as-data-structure` | 28 | **1** | -27 (FP #37; exception subclasses are polymorphism markers, not data containers) |
 | `code-quality/deterministic/commented-out-code` (Python) | 30 | **25** | -5 net, but composition improved (prose FPs gone, real commented code now caught) |
+| `code-quality/deterministic/restricted-api-usage` | 25 | **2** | -23 (FP #39; outer-scope param binding now found) |
 
 297 distinct rules firing.
 
