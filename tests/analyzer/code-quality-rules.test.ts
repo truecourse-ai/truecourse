@@ -1063,6 +1063,31 @@ describe('code-quality/deterministic/prefer-const', () => {
     expect(matches).toHaveLength(0);
   });
 
+  // FP #48 — destructuring reassignment.
+  it('does not flag let reassigned via array destructuring', () => {
+    const violations = check(`
+      function f() {
+        let a = 0, b = 0;
+        [a, b] = [1, 2];
+        return a + b;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-const');
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag let reassigned via object destructuring', () => {
+    const violations = check(`
+      function f(input: { a: number; b: number }) {
+        let a = 0, b = 0;
+        ({ a, b } = input);
+        return a + b;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/prefer-const');
+    expect(matches).toHaveLength(0);
+  });
+
   it('does not flag const', () => {
     const violations = check(`
       function foo() {
@@ -1667,6 +1692,29 @@ describe('code-quality/deterministic/unused-private-member', () => {
       }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/unused-private-member');
+    expect(matches).toHaveLength(0);
+  });
+
+  // FP #47 — singleton-style `private constructor()` is invoked via `new`
+  // from a static factory. The call site is `new ClassName()`, not a
+  // `this.constructor()` reference, so the rule's `this.X` walk misses
+  // it. Constructors aren't really "members" in the same sense — never
+  // flag them.
+  it('does not flag singleton private constructor', () => {
+    const violations = check(`
+      class JobProvider {
+        private static _instance: JobProvider;
+        private constructor() {}
+        static getInstance(): JobProvider {
+          if (!this._instance) this._instance = new JobProvider();
+          return this._instance;
+        }
+      }
+    `);
+    const matches = violations.filter((v) =>
+      v.ruleKey === 'code-quality/deterministic/unused-private-member' ||
+      v.ruleKey === 'code-quality/deterministic/unused-private-method'
+    );
     expect(matches).toHaveLength(0);
   });
 });

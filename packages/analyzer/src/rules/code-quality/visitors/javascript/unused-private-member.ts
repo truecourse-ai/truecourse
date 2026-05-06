@@ -20,6 +20,11 @@ export const unusedPrivateMemberVisitor: CodeRuleVisitor = {
         const nameNode = member.children.find((c) => c.type === 'property_identifier' || c.type === 'private_property_identifier')
         if (nameNode) {
           const name = nameNode.text.replace(/^#/, '')
+          // Constructor is invoked via `new ClassName()` — never as a
+          // method call on `this`. Singleton/factory classes use
+          // `private constructor()` to enforce going through a static
+          // `getInstance()`; that's used, just not as a `this.X()` call.
+          if (name === 'constructor') continue
           privateMembers.set(name, nameNode)
         }
       }

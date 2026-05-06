@@ -35,9 +35,13 @@ export const unusedPrivateMethodVisitor: CodeRuleVisitor = {
       // Skip getters/setters — they are "called" implicitly
       const hasGetSet = member.children.some((c) => c.text === 'get' || c.text === 'set')
       if (hasGetSet) continue
-      if (!isStatic || name !== 'constructor') {
-        privateMethods.set(name, nameNode)
-      }
+      // Constructors are invoked via `new ClassName()` — never as a
+      // method call. Singleton/factory classes commonly declare
+      // `private constructor()` to force callers through a static
+      // `getInstance()`. Such constructors are USED (by the factory)
+      // but the call site is `new ClassName()`, not `this.constructor()`.
+      if (name === 'constructor') continue
+      privateMethods.set(name, nameNode)
     }
 
     if (privateMethods.size === 0) return null

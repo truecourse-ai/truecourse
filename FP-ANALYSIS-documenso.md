@@ -34,6 +34,7 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `reliability/deterministic/process-exit-in-library` | 11 | **2** | -9 (FP #44; examples/ + bin/ + shebang) |
 | `security/deterministic/insecure-random` | 6 | **0** | -6 (FP #45; seed/mocks/test/storybook paths) |
 | `reliability/deterministic/express-async-no-wrapper` | 5 | **0** | -5 (FP #46; Hono/Fastify/Koa import detection) |
+| `code-quality/deterministic/unused-private-member` + `unused-private-method` | 6+6 | **2+2** | -8 (FP #47; private constructor never called as `this.constructor()`) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 
