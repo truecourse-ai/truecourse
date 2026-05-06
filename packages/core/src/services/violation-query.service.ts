@@ -283,5 +283,24 @@ export function getDiffResult(repoPath: string): DiffResultWithStale | null {
   if (!diff) return null;
   const latest = readLatest(repoPath);
   const isStale = latest ? latest.analysis.id !== diff.baseAnalysisId : false;
-  return { diff, isStale };
+  const disabled = getDisabledRuleKeys(repoPath);
+  if (disabled.size === 0) return { diff, isStale };
+
+  // Filter both new + resolved by disabled rules; recompute counts so the
+  // summary the diff exposes stays consistent with the rendered lists.
+  const newViolations = diff.newViolations.filter((v) => !disabled.has(v.ruleKey));
+  const resolvedViolations = diff.resolvedViolations.filter(
+    (v) => !disabled.has(v.ruleKey),
+  );
+  const filteredDiff: DiffSnapshot = {
+    ...diff,
+    newViolations,
+    resolvedViolations,
+    summary: {
+      ...diff.summary,
+      newCount: newViolations.length,
+      resolvedCount: resolvedViolations.length,
+    },
+  };
+  return { diff: filteredDiff, isStale };
 }

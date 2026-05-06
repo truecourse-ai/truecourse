@@ -37,6 +37,10 @@ type ViolationsPanelProps = {
   onOpenDatabaseInTab?: (dbId: string, dbName: string) => void;
   /** Slot at the right edge of the search/filter row — used by Home for the Browse Rules button. */
   headerRight?: React.ReactNode;
+  /** Notified after a violation card disables a rule. The parent should
+   * refetch any data derived from the violation set (analytics, sidebar
+   * counts) so the UI reflects the new disabled state immediately. */
+  onRuleDisabled?: (ruleKey: string) => void;
 };
 
 const categories: { value: CategoryFilter; label: string; icon: React.ReactNode }[] = [
@@ -100,6 +104,7 @@ export function ViolationsPanel({
   nodeFilePathMap,
   onOpenDatabaseInTab,
   headerRight,
+  onRuleDisabled,
 }: ViolationsPanelProps) {
   const normalListRef = useRef<VirtuosoHandle>(null);
   const diffListRef = useRef<VirtuosoHandle>(null);
@@ -122,13 +127,19 @@ export function ViolationsPanel({
     setHiddenRuleKeys(new Set());
   }, [violations]);
 
-  const handleRuleDisabled = useCallback((ruleKey: string) => {
-    setHiddenRuleKeys((prev) => {
-      const next = new Set(prev);
-      next.add(ruleKey);
-      return next;
-    });
-  }, []);
+  const handleRuleDisabled = useCallback(
+    (ruleKey: string) => {
+      setHiddenRuleKeys((prev) => {
+        const next = new Set(prev);
+        next.add(ruleKey);
+        return next;
+      });
+      // Notify the parent so it can refetch analytics / parent counts —
+      // the in-session hide is just for instant feedback while those land.
+      onRuleDisabled?.(ruleKey);
+    },
+    [onRuleDisabled],
+  );
 
   // Resizable ER panel
   const [erHeight, setErHeight] = useState(264);

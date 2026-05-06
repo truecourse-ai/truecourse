@@ -12,6 +12,7 @@ import {
   readHistory,
   readLatest,
 } from '@truecourse/core/lib/analysis-store';
+import { readProjectConfig } from '@truecourse/core/config/project-config';
 import { readActiveViolationsForAnalysisId } from '@truecourse/core/services/violation-query';
 import type { HistoryEntry, ViolationWithNames } from '@truecourse/core/types/snapshot';
 
@@ -40,16 +41,49 @@ export function getTrend(
 
   const entries = windowed.slice(-limit);
 
+  // Cached aggregates in `history.json` were frozen at analyze-time and
+  // include violations for rules the user has since disabled. When the
+  // project has any disabled rules, recompute each point against the live
+  // active set (slow path — one chain walk per point).
+  const disabled = new Set<string>(readProjectConfig(repoPath).disabledRules ?? []);
+
   const points: TrendDataPoint[] = entries.map((e) => {
-    const sev = e.counts.violations.bySeverity;
-    const total = e.counts.violations.new + e.counts.violations.unchanged;
+    if (disabled.size === 0) {
+      const sev = e.counts.violations.bySeverity;
+      const total = e.counts.violations.new + e.counts.violations.unchanged;
+      return {
+        analysisId: e.id,
+        date: e.createdAt,
+        branch: e.branch,
+        total,
+        new: e.counts.violations.new,
+        unchanged: e.counts.violations.unchanged,
+        resolved: e.counts.violations.resolved,
+        critical: sev.critical ?? 0,
+        high: sev.high ?? 0,
+        medium: sev.medium ?? 0,
+        low: sev.low ?? 0,
+        info: sev.info ?? 0,
+      };
+    }
+
+    // Slow path: reconstruct the active set as of this point — already
+    // filtered by `disabledRules` inside readActiveViolationsForAnalysisId.
+    // The `resolved` per-point delta stays as cached (filtering it would
+    // require resolving each ref's ruleKey through the prior chain) — minor
+    // inflation in the resolved bar; the prominent total/active line is
+    // correct.
+    const active = readActiveViolationsForAnalysisId(repoPath, e.id) ?? [];
+    const sev: Record<string, number> = {};
+    for (const v of active) sev[v.severity] = (sev[v.severity] ?? 0) + 1;
+
     return {
       analysisId: e.id,
       date: e.createdAt,
       branch: e.branch,
-      total,
+      total: active.length,
       new: e.counts.violations.new,
-      unchanged: e.counts.violations.unchanged,
+      unchanged: Math.max(0, active.length - e.counts.violations.new),
       resolved: e.counts.violations.resolved,
       critical: sev.critical ?? 0,
       high: sev.high ?? 0,
