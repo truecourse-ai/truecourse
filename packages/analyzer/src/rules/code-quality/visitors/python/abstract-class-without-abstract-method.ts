@@ -13,6 +13,24 @@ function inheritsFromABC(node: SyntaxNode): boolean {
   return false
 }
 
+/**
+ * Detect generic-parent-with-type-binding pattern:
+ *   class FooInjector(Injector[Foo], ABC): pass
+ *
+ * The user is providing a type parameter binding to a generic abstract
+ * parent. The abstract methods come from the generic — re-declaring
+ * them on every concrete instantiation would be noise.
+ */
+function inheritsFromGenericTypeBinding(node: SyntaxNode): boolean {
+  const supers = node.childForFieldName('superclasses')
+  if (!supers) return false
+  for (const child of supers.namedChildren) {
+    if (child.type === 'subscript') return true
+    if (child.type === 'keyword_argument') continue
+  }
+  return false
+}
+
 function extractBaseName(node: SyntaxNode): string | null {
   if (node.type === 'identifier') return node.text
   if (node.type === 'attribute') {
@@ -47,6 +65,11 @@ export const pythonAbstractClassWithoutAbstractMethodVisitor: CodeRuleVisitor = 
   nodeTypes: ['class_definition'],
   visit(node, filePath, sourceCode) {
     if (!inheritsFromABC(node)) return null
+
+    // Generic-parent-with-type-binding: `class FooInjector(Injector[Foo], ABC)`
+    // — abstractness comes from the generic parent, not from this
+    // intermediate type-binding class.
+    if (inheritsFromGenericTypeBinding(node)) return null
 
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
