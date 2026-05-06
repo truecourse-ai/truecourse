@@ -18,11 +18,55 @@ function getMethodNames(classBody: SyntaxNode): string[] {
   return names
 }
 
+// Built-in exception classes and common framework exception bases. A
+// subclass of one of these is a polymorphism marker for `except X`/`raise`,
+// not a data container — `@dataclass` would not be a meaningful migration.
+const EXCEPTION_BASE_NAMES = new Set<string>([
+  'Exception', 'BaseException', 'ArithmeticError', 'AssertionError',
+  'AttributeError', 'BufferError', 'EOFError', 'ImportError',
+  'IndexError', 'KeyError', 'KeyboardInterrupt', 'LookupError',
+  'MemoryError', 'NameError', 'NotImplementedError', 'OSError',
+  'OverflowError', 'ReferenceError', 'RuntimeError', 'StopIteration',
+  'StopAsyncIteration', 'SyntaxError', 'SystemError', 'SystemExit',
+  'TypeError', 'UnicodeError', 'ValueError', 'ZeroDivisionError',
+  'FileNotFoundError', 'FileExistsError', 'PermissionError',
+  'TimeoutError', 'IsADirectoryError', 'NotADirectoryError',
+  'BlockingIOError', 'BrokenPipeError', 'ChildProcessError',
+  'ConnectionError', 'ConnectionAbortedError', 'ConnectionRefusedError',
+  'ConnectionResetError', 'InterruptedError', 'ProcessLookupError',
+  // FastAPI / Starlette
+  'HTTPException', 'WebSocketException', 'StarletteHTTPException',
+  // Pydantic
+  'ValidationError', 'PydanticUserError',
+])
+
+function isExceptionSubclass(node: SyntaxNode): boolean {
+  // Class name ends with Error/Exception → strong convention for exception types.
+  const name = node.childForFieldName('name')?.text ?? ''
+  if (/(?:Error|Exception|Failure)$/.test(name)) return true
+
+  // Direct base in the EXCEPTION_BASE_NAMES set — handles
+  // `class Foo(Exception)`, `class Foo(HTTPException)`, etc.
+  const supers = node.childForFieldName('superclasses')
+  if (!supers) return false
+  for (const arg of supers.namedChildren) {
+    if (arg.type === 'identifier' && EXCEPTION_BASE_NAMES.has(arg.text)) return true
+    // Qualified bases like `starlette.exceptions.HTTPException`
+    if (arg.type === 'attribute') {
+      const tail = arg.childForFieldName('attribute')?.text
+      if (tail && EXCEPTION_BASE_NAMES.has(tail)) return true
+    }
+  }
+  return false
+}
+
 export const pythonClassAsDataStructureVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/class-as-data-structure',
   languages: ['python'],
   nodeTypes: ['class_definition'],
   visit(node, filePath, sourceCode) {
+    if (isExceptionSubclass(node)) return null
+
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 

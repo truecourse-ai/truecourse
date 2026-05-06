@@ -26,6 +26,7 @@ The FP-fix counts below are per-rule, not per-tier.
 | `architecture/deterministic/dead-method` | (not in queue, baseline ~18) | **18** | unchanged (no FP #32 shape on this target) |
 | `bugs/deterministic/invalid-void-type` | 33 | **0** | -33 (FP #35; `() => void` callback returns are legal) |
 | `code-quality/deterministic/getattr-with-constant` | 28 | **5** | -23 (FP #36; getattr w/ default has different semantics from direct access) |
+| `code-quality/deterministic/class-as-data-structure` | 28 | **1** | -27 (FP #37; exception subclasses are polymorphism markers, not data containers) |
 
 297 distinct rules firing.
 

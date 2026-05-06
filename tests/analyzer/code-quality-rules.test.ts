@@ -8213,6 +8213,61 @@ describe('code-quality/deterministic/getattr-with-constant', () => {
 });
 
 // ---------------------------------------------------------------------------
+// class-as-data-structure (Python)
+// ---------------------------------------------------------------------------
+
+describe('Python: code-quality/deterministic/class-as-data-structure', () => {
+  const KEY = 'code-quality/deterministic/class-as-data-structure';
+
+  it('detects pure data class with only __init__ assignments', () => {
+    const code = `class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // FP #37 — exception subclasses are polymorphism markers, not data
+  // structures. Their `__init__` does `super().__init__(message)` plus
+  // some attributes; converting to @dataclass would break `raise`/`except`.
+  it('does not flag exception subclass with __init__ + super().__init__', () => {
+    const code = `class JiraPayloadParseError(Exception):
+    def __init__(self, reason, event_type=None):
+        self.reason = reason
+        self.event_type = event_type
+        super().__init__(reason)
+`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag direct subclass of HTTPException', () => {
+    const code = `class RateLimitException(HTTPException):
+    def __init__(self, status_code=429, detail="rate limited"):
+        super().__init__(status_code=status_code, detail=detail)
+`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag class whose name ends with Error', () => {
+    const code = `class InvitationError(SomeBase):
+    def __init__(self, message):
+        self.message = message
+        super().__init__(message)
+`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // boolean-trap — getattr/Field FP fix
 // ---------------------------------------------------------------------------
 
