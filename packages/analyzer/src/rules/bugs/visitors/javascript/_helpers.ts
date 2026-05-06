@@ -48,9 +48,20 @@ export const KNOWN_ARG_ORDERS: Array<{ fn: string; params: string[][] }> = [
   { fn: 'substring', params: [['start', 'from', 'begin'], ['end', 'to', 'finish']] },
 ]
 
+// Methods whose return value is genuinely useless to assign. The earlier
+// list included `pop`/`shift`/`splice` (which return the removed element/s),
+// `push`/`unshift` (return new length), `fill`/`set`/`add` (return the
+// receiver — chainable), and `delete` (returns boolean). Assigning any
+// of these is intentional and idiomatic in TS/JS:
+//   const [removed] = arr.splice(i, 1)     // canonical splice idiom
+//   const last = arr.pop()                  // canonical pop idiom
+//   const domain = email.split('@').pop()  // last segment
+//   const has = mySet.delete(key)          // boolean check
+// Keep only methods that ALWAYS return undefined.
 export const VOID_RETURNING_METHODS = new Set([
-  'forEach', 'push', 'pop', 'shift', 'unshift', 'splice', 'fill',
-  'delete', 'clear', 'set', 'add',
+  'forEach',
+  // `clear()` on Map/Set/Storage returns undefined.
+  'clear',
 ])
 
 export const VOID_RETURNING_GLOBALS = new Set([

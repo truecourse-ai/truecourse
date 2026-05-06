@@ -2286,21 +2286,54 @@ describe('bugs/deterministic/empty-collection-access', () => {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/void-return-value-used', () => {
+  const KEY = 'bugs/deterministic/void-return-value-used';
+
   it('detects assigning forEach result', () => {
     const violations = check(`const result = arr.forEach(x => console.log(x));`);
-    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-return-value-used');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(1);
   });
 
   it('detects assigning console.log result', () => {
     const violations = check(`const x = console.log("hello");`);
-    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-return-value-used');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag arr.map() result', () => {
     const violations = check(`const result = arr.map(x => x * 2);`);
-    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/void-return-value-used');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  // FP #42 — splice/pop/shift return the removed element(s).
+  it('does not flag arr.splice() result', () => {
+    const violations = check(`const [removed] = items.splice(i, 1);`);
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag arr.pop() result', () => {
+    const violations = check(`const last = arr.pop();`);
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag arr.shift() result', () => {
+    const violations = check(`const first = arr.shift();`);
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag chained .split().pop()', () => {
+    const violations = check(`const domain = email.split('@').pop();`);
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag set.delete() boolean check', () => {
+    const violations = check(`const removed = mySet.delete(key);`);
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(0);
   });
 });

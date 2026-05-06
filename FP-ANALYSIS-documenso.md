@@ -29,6 +29,7 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `code-quality/deterministic/hardcoded-url` | 43 | **26** | -17 (FP #34; canonical-site-URL config keys + email-template default-link params) |
 | `code-quality/deterministic/unnecessary-type-parameter` | 26 | **2** | -24 (FP #40; default value, body usage, parametric input, inferred return) |
 | `code-quality/deterministic/react-useless-set-state` | 13 | **0** | -13 (FP #41; param/local-decl shadowing) |
+| `bugs/deterministic/void-return-value-used` | 7 | **0** | -7 (FP #42; splice/pop/shift/delete return useful values) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 
