@@ -64,12 +64,15 @@ export interface RulesPanelProps {
   repoId?: string;
 }
 
+type StatusFilter = 'all' | 'enabled' | 'disabled';
+
 export function RulesPanel({ repoId }: RulesPanelProps = {}) {
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<DomainFilter>('all');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'deterministic' | 'llm'>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
 
@@ -112,15 +115,17 @@ export function RulesPanel({ repoId }: RulesPanelProps = {}) {
   // Reset scroll when the active filter set changes.
   useEffect(() => {
     listRef.current?.scrollTo({ top: 0 });
-  }, [filter, severityFilter, typeFilter, search]);
+  }, [filter, severityFilter, typeFilter, statusFilter, search]);
 
   const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
-  // Pre-category: search + severity + type filtered
+  // Pre-category: search + severity + type + status filtered
   const preCategoryFiltered = useMemo(() => {
     let result = rules;
     if (severityFilter !== 'all') result = result.filter((r) => r.severity === severityFilter);
     if (typeFilter !== 'all') result = result.filter((r) => r.type === typeFilter);
+    if (statusFilter === 'enabled') result = result.filter((r) => r.enabled);
+    else if (statusFilter === 'disabled') result = result.filter((r) => !r.enabled);
     if (search) {
       const q = search.toLowerCase();
       result = result.filter((r) =>
@@ -130,7 +135,10 @@ export function RulesPanel({ repoId }: RulesPanelProps = {}) {
       );
     }
     return result;
-  }, [rules, severityFilter, typeFilter, search]);
+  }, [rules, severityFilter, typeFilter, statusFilter, search]);
+
+  // Disabled count surfaces a "you have N disabled" hint regardless of filters.
+  const disabledCount = useMemo(() => rules.filter((r) => !r.enabled).length, [rules]);
 
   const filtered = useMemo(() => {
     const result = filter === 'all' ? preCategoryFiltered : preCategoryFiltered.filter((r) => getDomain(r) === filter);
@@ -198,6 +206,24 @@ export function RulesPanel({ repoId }: RulesPanelProps = {}) {
                 }`}
               >
                 {t === 'all' ? 'All' : t === 'deterministic' ? 'Det' : 'LLM'}
+              </button>
+            ))}
+          </div>
+          <div className="flex rounded-md border border-border" title="Filter by enabled/disabled status">
+            {(['all', 'enabled', 'disabled'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`px-2 py-1 text-[10px] font-medium first:rounded-l-md last:rounded-r-md ${
+                  statusFilter === s
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                {s === 'all' ? 'All' : s === 'enabled' ? 'On' : 'Off'}
+                {s === 'disabled' && disabledCount > 0 && (
+                  <span className="ml-1 opacity-70">{disabledCount}</span>
+                )}
               </button>
             ))}
           </div>
