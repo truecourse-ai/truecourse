@@ -25,6 +25,29 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
 
     if (!body || body.type !== 'statement_block') return null
 
+    // Skip middleware functions — Hono `(c, next)` / Express `(req,
+    // res, next)` / Koa `(ctx, next)` middleware are
+    // `Promise<Response | void>`. They legitimately mix `return next()`,
+    // `return c.redirect(...)`, and an implicit-void path that runs
+    // post-handler code. The rule's value-vs-void check misfires here.
+    const middlewareParams = node.childForFieldName('parameters')
+    if (middlewareParams) {
+      const paramNames = middlewareParams.namedChildren.map((p) => {
+        if (p.type === 'identifier') return p.text
+        if (p.type === 'required_parameter' || p.type === 'optional_parameter') {
+          const inner = p.childForFieldName('pattern') ?? p.namedChildren[0]
+          return inner?.text ?? ''
+        }
+        return ''
+      })
+      const isHonoMiddleware = paramNames.length === 2 && /^(?:c|ctx)$/.test(paramNames[0]) && /^next$/.test(paramNames[1])
+      const isExpressMiddleware = paramNames.length >= 3 && /^req$/.test(paramNames[0]) && /^res$/.test(paramNames[1]) && /^next$/.test(paramNames[2])
+      if (isHonoMiddleware || isExpressMiddleware) return null
+      // Also skip when the body invokes `next(` — strong middleware
+      // signal even if the parameter names differ.
+      if (/\bnext\s*\(/.test(body.text)) return null
+    }
+
     // Skip when the function has an explicit return type annotation — the compiler enforces consistency
     const returnType = node.childForFieldName('return_type')
     if (returnType) return null
@@ -90,12 +113,40 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
         )
         if (cases.length === 0) continue
         const hasDefault = cases.some((c) => c.type === 'switch_default')
-        const allTerminate = cases.every((caseNode) => {
-          const stmts = caseNode.namedChildren.filter((s) => s.type !== 'comment')
-          return stmts.some(
-            (s) => s.type === 'return_statement' || s.type === 'throw_statement',
+        // A case "terminates" if either:
+        //   (a) it has a direct return/throw statement (case "x": return …),
+        //   (b) it falls through to the next case (no statements after the
+        //       label — `case "a": case "b": return …`), or
+        //   (c) it ends in a `statement_block` whose last statement is a
+        //       return/throw (case "x": { … return … }).
+        function caseStmtsTerminate(caseNode: SyntaxNode, idx: number): boolean {
+          const stmts = caseNode.namedChildren.filter((s) =>
+            s.type !== 'comment' &&
+            // The case's `value` (string/number/identifier label) shows up
+            // as a named child too — ignore it.
+            !(idx === 0 ? false : false) &&
+            s.type !== 'string' && s.type !== 'number' && s.type !== 'identifier' && s.type !== 'true' && s.type !== 'false' && s.type !== 'null'
           )
-        })
+          // Fall-through case (label-only): treat as terminating IF the
+          // next case in the switch terminates. Caller handles that by
+          // requiring all-cases-terminate; an empty case effectively
+          // delegates to the next.
+          if (stmts.length === 0) return true
+          if (stmts.some((s) => s.type === 'return_statement' || s.type === 'throw_statement')) return true
+          const last = stmts[stmts.length - 1]
+          if (last.type === 'statement_block') {
+            const inner = last.namedChildren.filter((c) => c.type !== 'comment')
+            if (inner.length === 0) return false
+            const lastInner = inner[inner.length - 1]
+            return lastInner.type === 'return_statement' || lastInner.type === 'throw_statement'
+          }
+          // `if/else` whose all branches return at end is also terminating.
+          if (last.type === 'if_statement') {
+            return /\breturn\b|\bthrow\b/.test(last.text) && /\belse\b/.test(last.text)
+          }
+          return false
+        }
+        const allTerminate = cases.every((c, i) => caseStmtsTerminate(c, i))
         if (allTerminate && hasDefault) return true
         // Without default: if all cases terminate AND a throw follows the switch,
         // the function is exhaustive (validated enum/union pattern)
