@@ -31,6 +31,19 @@ export const invalidVoidTypeVisitor: CodeRuleVisitor = {
 
 function findVoidType(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
   for (const child of node.children) {
+    // Don't recurse into a function-type literal (`() => T` /
+    // `(x: T) => U` / constructor types). Inside the function-type, `void`
+    // is legal: it's the function's RETURN type. The rule is about `void`
+    // in invalid value-type positions (e.g., a parameter typed `void`),
+    // not about the return type of a callback parameter.
+    if (
+      child.type === 'function_type' ||
+      child.type === 'constructor_type'
+    ) continue
+    // Don't recurse into Promise<void> / Awaited<void> generic positions —
+    // void inside a generic argument is also legal.
+    if (child.type === 'type_arguments') continue
+
     if (child.type === 'void_type') return child
     if (child.type === 'predefined_type' && child.text === 'void') return child
     const found = findVoidType(child)

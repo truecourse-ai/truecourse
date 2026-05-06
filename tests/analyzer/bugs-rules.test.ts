@@ -1692,6 +1692,39 @@ describe('bugs/deterministic/void-zero-argument', () => {
 });
 
 // ---------------------------------------------------------------------------
+// JS/TS: invalid-void-type
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/invalid-void-type', () => {
+  const KEY = 'bugs/deterministic/invalid-void-type';
+
+  it('detects void as a direct parameter type', () => {
+    const violations = check(`function f(x: void) { return x; }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // FP #35 — `() => void` callback parameter is correct TS.
+  it('does not flag callback parameter typed as `() => void`', () => {
+    const violations = check(`function f(cb: () => void) { cb(); }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag callback parameter with arguments returning void', () => {
+    const violations = check(`function on(handler: (e: Event) => void) { /* … */ }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag callback returning Promise<void>', () => {
+    const violations = check(`function f(cb: () => Promise<void>) { void cb(); }`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // JS/TS: exception-reassignment
 // ---------------------------------------------------------------------------
 
