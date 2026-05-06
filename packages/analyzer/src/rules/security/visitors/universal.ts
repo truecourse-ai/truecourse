@@ -230,13 +230,41 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
             if (fn?.type === 'member_expression') {
               const prop = fn.childForFieldName('property')
               const methodName = prop?.text
-              if (methodName === 'startsWith' || methodName === 'includes' ||
-                  methodName === 'match' || methodName === 'test' ||
-                  methodName === 'endsWith' || methodName === 'indexOf') {
+              if (
+                methodName === 'startsWith' || methodName === 'includes' ||
+                methodName === 'match' || methodName === 'test' ||
+                methodName === 'endsWith' || methodName === 'indexOf' ||
+                methodName === 'replace' || methodName === 'replaceAll' ||
+                methodName === 'split' || methodName === 'lastIndexOf' ||
+                methodName === 'search'
+              ) {
                 return null
               }
             }
           }
+        }
+        // Skip when the string is the second arg of a `replace()` /
+        // `replaceAll()` call — `url.replace('http://', 'https://')` is
+        // an https-enforcer, not a clear-text usage.
+        if (parent?.type === 'arguments') {
+          const args = parent.namedChildren
+          const idx = args.findIndex((c) => c.id === node.id)
+          const grandparent = parent.parent
+          if (grandparent?.type === 'call_expression') {
+            const fn = grandparent.childForFieldName('function')
+            if (fn?.type === 'member_expression') {
+              const prop = fn.childForFieldName('property')?.text
+              // Any positional arg of replace/replaceAll
+              if ((prop === 'replace' || prop === 'replaceAll') && idx >= 0) return null
+            }
+          }
+        }
+        // Skip URL-validation helpers — files that look like SSRF
+        // sanitizers, URL allow-lists, or protocol-checking utilities.
+        // Strong signal: file name contains "ssrf", "url-validator",
+        // "url-check", "is-safe-url", or similar.
+        if (/(?:ssrf|url-?valid|safe-?url|url-?check|allow-?list|check-?url|sanitize-?url|protocol-?check)/i.test(filePath)) {
+          return null
         }
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
