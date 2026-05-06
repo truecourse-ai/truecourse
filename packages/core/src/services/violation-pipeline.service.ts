@@ -388,6 +388,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     let lastYieldMs = Date.now();
     let lastDetailMs = lastYieldMs;
     for (const { filePath, resolve } of filesToScan) {
+      // Tree must be hoisted out of the inner try so the finally below can
+      // see it. parseFile returns a web-tree-sitter Tree whose backing
+      // memory lives in the WASM heap and is NOT reclaimed by JS GC —
+      // tree.delete() is mandatory. Forgetting this leaks one tree per
+      // file analyzed, which on a 1700-file monorepo is enough to OOM
+      // the process during the rule pass.
+      let tree: ReturnType<typeof parseFile> | undefined;
       try {
         const lang = detectLanguage(filePath);
         if (!lang) continue;
@@ -396,11 +403,13 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         const fc = fileContents.get(key);
         if (!fc) continue;
 
-        const tree = parseFile(changedFileSet ? filePath : filePath, fc.content, lang);
+        tree = parseFile(changedFileSet ? filePath : filePath, fc.content, lang);
         const codeRuleViolations = checkCodeRules(tree, changedFileSet ? absPath : filePath, fc.content, enabledCodeRules, lang, typeQuery, schemaIndex);
         allCodeViolations.push(...codeRuleViolations);
       } catch {
         // Skip files that fail to parse
+      } finally {
+        tree?.delete();
       }
       processed++;
 
