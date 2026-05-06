@@ -39,6 +39,15 @@ export const unnecessaryTypeParameterVisitor: CodeRuleVisitor = {
       if (!nameNode) continue
       const paramName = nameNode.text
 
+      // Skip when the type parameter has a DEFAULT value (`<T = AppData>`).
+      // The default is the parametric return-type pattern: callers can
+      // override the default with their own type at the call site
+      // (`useSuperLoaderData<MySchema>()`). Without the type parameter
+      // there's no way to override.
+      const hasDefault = tp.namedChildren.some((c) => c.type === 'default_type')
+        || /=\s*\S/.test(tp.text.replace(/^[^=]*extends[^=]*/, ''))
+      if (hasDefault) continue
+
       // Skip when the type parameter has a constraint (extends clause) AND is used
       // in the return type — callers depend on it for type inference
       const hasConstraint = tp.namedChildren.some(c => c.type === 'constraint' || c.type === 'extends')
@@ -55,18 +64,38 @@ export const unnecessaryTypeParameterVisitor: CodeRuleVisitor = {
       const count = matches ? matches.length : 0
 
       if (count <= 1) {
-        // Skip when the type parameter appears in both the return type AND
-        // a type assertion (`as T`) in the function body — common pattern for
-        // typed HTTP request methods like `request<T>(): Promise<T>`
-        if (returnType) {
-          const returnText = returnType.text
-          const returnRegex = new RegExp(`\\b${paramName}\\b`)
-          if (returnRegex.test(returnText)) {
-            const body = node.childForFieldName('body')
-            if (body && new RegExp(`\\bas\\s+${paramName}\\b`).test(body.text)) {
-              continue
-            }
-          }
+        // Skip when the type parameter is used in the function BODY —
+        // common in React hooks (`useRef<T>(null)`), typed assertions
+        // (`as T`), and inferred-return helpers. These uses make the
+        // type parameter meaningful even when the explicit signature
+        // mentions it only once.
+        const body = node.childForFieldName('body')
+        if (body && new RegExp(`\\b${paramName}\\b`).test(body.text)) continue
+
+        // Skip when T appears in a parameter type AND the function has no
+        // explicit return-type annotation. TS will infer the return type
+        // from the parameter; the inferred return often uses T even
+        // though the AST doesn't show it. Without a type checker we
+        // can't verify, but flagging this shape produces too many FPs in
+        // typical hook code (`useDebouncedValue<T>(value: T)` returns T
+        // by inference).
+        if (count === 1 && !returnType) {
+          const paramRegex = new RegExp(`\\b${paramName}\\b`)
+          if (params && paramRegex.test(params.text)) continue
+        }
+
+        // Skip when the only occurrence of T in the signature is INSIDE
+        // a custom generic argument (`Props<T>`, `Result<T>`,
+        // `MyType<T>`). The outer generic parameterises a type that
+        // itself uses T internally — flagging this as "appears once" is
+        // the same shape false-positive that ts-eslint's pure-syntactic
+        // counterpart hits. Only fire when the single occurrence is a
+        // standalone reference (not inside a `<…>` bracket pair on a
+        // non-built-in identifier).
+        if (count === 1) {
+          // Find the single occurrence's surroundings.
+          const insideGenericArg = new RegExp(`\\b[A-Z][\\w]*<[^<>]*\\b${paramName}\\b[^<>]*>`).test(signatureText)
+          if (insideGenericArg) continue
         }
 
         return makeViolation(

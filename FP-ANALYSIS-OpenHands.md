@@ -29,6 +29,7 @@ The FP-fix counts below are per-rule, not per-tier.
 | `code-quality/deterministic/class-as-data-structure` | 28 | **1** | -27 (FP #37; exception subclasses are polymorphism markers, not data containers) |
 | `code-quality/deterministic/commented-out-code` (Python) | 30 | **25** | -5 net, but composition improved (prose FPs gone, real commented code now caught) |
 | `code-quality/deterministic/restricted-api-usage` | 25 | **2** | -23 (FP #39; outer-scope param binding now found) |
+| `code-quality/deterministic/unnecessary-type-parameter` | 7 | **0** | -7 (FP #40; default-value, body-usage, parametric-input shapes) |
 
 297 distinct rules firing.
 
