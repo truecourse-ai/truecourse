@@ -22,7 +22,16 @@ export const syncFsInRequestHandlerVisitor: CodeRuleVisitor = {
 
     // Skip standalone scripts (not request handlers)
     const lowerPath = filePath.toLowerCase()
-    if (lowerPath.includes('/scripts/') || lowerPath.includes('/bin/') || lowerPath.includes('/cli/')) return null
+    if (
+      lowerPath.includes('/scripts/') ||
+      lowerPath.includes('/bin/') ||
+      lowerPath.includes('/cli/') ||
+      lowerPath.includes('/seed/') ||
+      lowerPath.includes('/seeds/') ||
+      lowerPath.includes('/seeders/') ||
+      lowerPath.includes('/migrations/') ||
+      lowerPath.includes('/examples/')
+    ) return null
 
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 
