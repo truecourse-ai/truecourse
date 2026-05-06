@@ -77,12 +77,41 @@ export function toLayerDetectionResults(detection: InternalLayerDetection): Laye
 }
 
 /**
+ * UI / route file paths that should NEVER classify as data layer even
+ * when their names happen to match a data-layer file pattern (e.g.,
+ * `app/routes/.../org-invitation-models.tsx` — the suffix `models`
+ * matches `**\/*model*` but the file is a route component, not a
+ * persistence module).
+ */
+const UI_PATH_OVERRIDES: RegExp[] = [
+  /\/app\/components\//,        // Remix / Next app components
+  /\/app\/routes\//,             // Remix routes
+  /\/components\//,              // Generic component dirs
+  /\/pages\//,                   // Next.js pages router
+  /\/app\/.*\/(?:page|layout|route|template|loading|error|not-found|default|head)\.(?:ts|tsx|js|jsx)$/,  // Next.js app router files
+  /\/views\//,                   // MVC-style views
+  /\.tsx$/,                      // TSX files almost never represent the data layer
+]
+
+function isUiFilePath(filePath: string): boolean {
+  return UI_PATH_OVERRIDES.some((re) => re.test(filePath))
+}
+
+/**
  * Check if file matches data layer patterns
  */
 function hasDataLayerPatterns(
   analysis: FileAnalysis,
 ): { match: boolean; reasons: string[] } {
   const reasons: string[] = []
+
+  // UI files (components, routes, pages, views, all .tsx) are NEVER data
+  // layer — even when their filenames coincidentally match a data
+  // pattern like `**/*model*` (e.g., `org-invitation-models.tsx` is a
+  // route component, not a persistence module).
+  if (isUiFilePath(analysis.filePath)) {
+    return { match: false, reasons }
+  }
 
   // Check ORM imports
   for (const imp of analysis.imports) {
