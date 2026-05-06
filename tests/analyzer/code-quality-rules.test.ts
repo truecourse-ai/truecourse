@@ -8172,6 +8172,47 @@ class MyList(list):
 });
 
 // ---------------------------------------------------------------------------
+// getattr-with-constant
+// ---------------------------------------------------------------------------
+
+describe('code-quality/deterministic/getattr-with-constant', () => {
+  const KEY = 'code-quality/deterministic/getattr-with-constant';
+
+  it('detects getattr(obj, "name") with no default (use direct access instead)', () => {
+    const violations = check(`name = getattr(obj, "name")`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(1);
+  });
+
+  it('detects setattr(obj, "name", val) (use direct assignment)', () => {
+    const violations = check(`setattr(obj, "name", val)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(1);
+  });
+
+  // FP #36 — getattr with default is the safe-access pattern; direct
+  // attribute access would AttributeError on missing attrs. The 3-arg
+  // form has DIFFERENT semantics from `obj.name`.
+  it('does not flag getattr(self, "name", None) with default', () => {
+    const violations = check(`def get_branch(self): return getattr(self, "branch_name", None)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag getattr(request.state, "user_auth", None)', () => {
+    const violations = check(`user = getattr(request.state, "user_auth", None)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag getattr with non-None default', () => {
+    const violations = check(`flag = getattr(args, "verbose", False)`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // boolean-trap — getattr/Field FP fix
 // ---------------------------------------------------------------------------
 

@@ -19,6 +19,14 @@ export const pythonGetattrWithConstantVisitor: CodeRuleVisitor = {
     if (!attrArg) return null
     if (attrArg.type !== 'string') return null
 
+    // `getattr(obj, "name", default)` (3 positional args) is the safe-access
+    // pattern — `obj.name` would raise AttributeError when the attribute is
+    // missing. The default-value form has DIFFERENT semantics from direct
+    // attribute access; flagging it as "could be written as obj.name" is
+    // wrong. setattr/delattr take 3rd arg as the value to set, not a
+    // default, so they remain flagged.
+    if (fn.text === 'getattr' && positional.length >= 3) return null
+
     // Check it's a simple identifier-like string
     const inner = attrArg.text.slice(1, -1)
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(inner)) return null
