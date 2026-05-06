@@ -16,6 +16,12 @@ export const pythonUnusedVariableVisitor: CodeRuleVisitor = {
 
     function collectDeclarations(n: SyntaxNode) {
       if (n.type === 'function_definition' && n.id !== node.id) return
+      // Don't descend into nested class bodies. Class attributes (e.g.,
+      // SQLAlchemy `TypeDecorator.impl = JSON`, Pydantic `model_config
+      // = …`) are read via metaclass / framework reflection, not by a
+      // regular Python identifier read. Treating them as function-local
+      // declarations produces false unused-variable warnings.
+      if (n.type === 'class_definition') return
       if (n.type === 'assignment') {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier') {
