@@ -25,6 +25,26 @@ export const undefinedPassedAsOptionalVisitor: CodeRuleVisitor = {
     }
     if (/^use[A-Z]/.test(fnName)) return null
 
+    // React `createContext<T | undefined>(undefined)` — canonical idiom
+    // for "no default; throw inside provider when consumed without one".
+    if (fnName === 'createContext') return null
+
+    // Form-library setters where `undefined` is meaningful as "clear":
+    //   form.setValue('field', undefined)   — react-hook-form
+    //   field.onChange(undefined)           — controlled inputs
+    //   setError(undefined), reset(undefined)
+    // These take REQUIRED positional args, so the trailing `undefined`
+    // is not "redundant optional" — it's the actual cleared value.
+    if (
+      /^set[A-Z]/.test(fnName) ||
+      fnName === 'onChange' ||
+      fnName === 'reset' ||
+      fnName === 'mutate' ||
+      fnName === 'mutateAsync' ||
+      fnName === 'dispatch' ||
+      fnName === 'send'
+    ) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Explicit undefined as optional argument',
