@@ -62,11 +62,14 @@ const domainTabs: { value: DomainFilter; label: string; icon: React.ReactNode }[
 
 export interface RulesPanelProps {
   repoId?: string;
+  /** Notified after a successful toggle so the host page can refetch
+   * violations/analytics — counts and lists update without a manual reload. */
+  onRuleToggled?: (ruleKey: string, enabled: boolean) => void;
 }
 
 type StatusFilter = 'all' | 'enabled' | 'disabled';
 
-export function RulesPanel({ repoId }: RulesPanelProps = {}) {
+export function RulesPanel({ repoId, onRuleToggled }: RulesPanelProps = {}) {
   const [rules, setRules] = useState<RuleResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<DomainFilter>('all');
@@ -98,6 +101,7 @@ export function RulesPanel({ repoId }: RulesPanelProps = {}) {
       });
       try {
         await setRuleEnabled(repoId, rule.key, next);
+        onRuleToggled?.(rule.key, next);
       } catch {
         // Revert on failure.
         setRules((prev) => prev.map((r) => (r.key === rule.key ? { ...r, enabled: !next } : r)));
@@ -109,7 +113,7 @@ export function RulesPanel({ repoId }: RulesPanelProps = {}) {
         });
       }
     },
-    [repoId],
+    [repoId, onRuleToggled],
   );
 
   // Reset scroll when the active filter set changes.
