@@ -40,6 +40,36 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
           // The audit found ~100% of remaining FPs were these patterns.
           if (right && isFullyEscapedRhs(right)) return null
 
+          // Skip the detached-textarea HTML-entity decoder pattern:
+          //   const textarea = document.createElement('textarea');
+          //   textarea.innerHTML = text;
+          //   return textarea.value;
+          // The textarea is never attached to the DOM. innerHTML just
+          // parses entities for value-extraction; nothing renders.
+          const obj = left.childForFieldName('object')
+          if (obj?.type === 'identifier') {
+            const receiverName = obj.text
+            const decoderRe = new RegExp(
+              `\\b(?:const|let|var)\\s+${receiverName}\\b\\s*=\\s*document\\.createElement\\(\\s*['"\`]textarea['"\`]\\s*\\)`,
+            )
+            let scope: typeof node.parent = node.parent
+            while (scope) {
+              if (scope.type === 'statement_block' || scope.type === 'program') {
+                if (decoderRe.test(scope.text)) return null
+              }
+              if (
+                scope.type === 'function_declaration' ||
+                scope.type === 'arrow_function' ||
+                scope.type === 'function_expression' ||
+                scope.type === 'method_definition'
+              ) {
+                if (decoderRe.test(scope.text)) return null
+                break
+              }
+              scope = scope.parent
+            }
+          }
+
           return makeViolation(
             this.ruleKey, node, filePath, 'high',
             'Disabled auto-escaping',
