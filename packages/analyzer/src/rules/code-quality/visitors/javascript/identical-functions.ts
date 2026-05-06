@@ -14,6 +14,18 @@ export const identicalFunctionsVisitor: CodeRuleVisitor = {
       if (JS_FUNCTION_TYPES.includes(n.type)) {
         // Skip functions that are arguments to calls (e.g., Drizzle column defs)
         if (n.parent?.type === 'arguments') { return }
+        // Skip tiny inline arrow callbacks used as JSX prop values
+        // (`onClose={() => setOpen(false)}`,
+        // `onClick={() => navigate('/')}`). They're independent prop
+        // handlers per element instance, not shared logic worth
+        // extracting. The same handler shape appears many times in a
+        // component file by design.
+        if (n.type === 'arrow_function') {
+          const inJsxAttribute =
+            n.parent?.type === 'jsx_expression' &&
+            n.parent.parent?.type === 'jsx_attribute'
+          if (inJsxAttribute && n.text.length < 60) return
+        }
         const body = getFunctionBody(n)
         if (body && body.namedChildCount > 0) {
           const normalized = body.text.replace(/\s+/g, ' ').trim()
