@@ -279,7 +279,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       );
     if (tsFiles.length > 0) {
       const scoped = buildScopedCompilerOptions(repoPath);
-      typeQuery = createTypeQueryService(tsFiles, scoped);
+      typeQuery = createTypeQueryService(tsFiles, scoped, repoPath);
     }
   }
 

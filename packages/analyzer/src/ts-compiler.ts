@@ -30,6 +30,25 @@ const moduleResolutionHost: ts.ModuleResolutionHost = {
 }
 
 /**
+ * Build a CompilerHost anchored at `repoPath` instead of `process.cwd()`.
+ *
+ * Without this, `ts.createProgram(files, options)` falls back to
+ * `ts.createCompilerHost(options)` which uses `ts.sys.getCurrentDirectory()`
+ * (i.e. `process.cwd()`). That makes typeRoots / `@types` lookup pull from
+ * the *parent process's* `node_modules` — so the same analyzer call returns
+ * different counts depending on where the CLI / dashboard server was
+ * launched. Anchoring at the analyzed repo makes results CWD-independent.
+ */
+function createRepoScopedCompilerHost(
+  repoPath: string,
+  options: ts.CompilerOptions,
+): ts.CompilerHost {
+  const host = ts.createCompilerHost(options)
+  host.getCurrentDirectory = () => repoPath
+  return host
+}
+
+/**
  * Find and parse all tsconfig.json files in the repo. Returns scoped compiler
  * options sorted by directory depth (most specific first) so file lookups
  * match the correct package.
@@ -139,6 +158,7 @@ export interface SemanticAnalysisResult {
 export function analyzeSemantics(
   filePaths: string[],
   scoped: ScopedCompilerOptions[],
+  repoPath: string,
 ): SemanticAnalysisResult {
   const baseOptions = scoped[scoped.length - 1]?.options ?? {}
   const options: ts.CompilerOptions = {
@@ -147,7 +167,8 @@ export function analyzeSemantics(
     noEmit: true,
   }
 
-  const program = ts.createProgram(filePaths, options)
+  const host = createRepoScopedCompilerHost(repoPath, options)
+  const program = ts.createProgram(filePaths, options, host)
   const checker = program.getTypeChecker()
 
   const exportMap = new Map<string, Set<string>>()
@@ -321,6 +342,7 @@ function getNodeAtPosition(
 export function createTypeQueryService(
   filePaths: string[],
   scopedOptions: ScopedCompilerOptions[],
+  repoPath: string,
 ): TypeQueryService {
   // Create one TS program per scoped option (per package) so that each file
   // gets its own tsconfig's paths, baseUrl, and module resolution settings.
@@ -362,7 +384,8 @@ export function createTypeQueryService(
       skipLibCheck: true,
       noEmit: true,
     }
-    const program = ts.createProgram(files, options)
+    const host = createRepoScopedCompilerHost(repoPath, options)
+    const program = ts.createProgram(files, options, host)
     const checker = program.getTypeChecker()
     const sp: ScopedProgram = { program, checker, files: new Set(files) }
     scopedPrograms.push(sp)
@@ -371,7 +394,9 @@ export function createTypeQueryService(
 
   // Fallback if no scoped options at all
   if (scopedPrograms.length === 0) {
-    const program = ts.createProgram(filePaths, { skipLibCheck: true, noEmit: true })
+    const options: ts.CompilerOptions = { skipLibCheck: true, noEmit: true }
+    const host = createRepoScopedCompilerHost(repoPath, options)
+    const program = ts.createProgram(filePaths, options, host)
     const checker = program.getTypeChecker()
     const sp: ScopedProgram = { program, checker, files: new Set(filePaths) }
     scopedPrograms.push(sp)
