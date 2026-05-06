@@ -66,6 +66,33 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
     const returnStmts = collectReturnStatements(body)
     if (returnStmts.length < 2) return null
 
+    // Skip React component functions — they return JSX, fragments,
+    // strings, numbers, arrays, and `null` interchangeably; all are
+    // valid `React.ReactNode`. The rule's type-string comparison
+    // doesn't know that. Detect by ANY return value that contains
+    // JSX, or by PascalCase function name in a TSX file.
+    function containsJsx(n: SyntaxNode): boolean {
+      if (
+        n.type === 'jsx_element' ||
+        n.type === 'jsx_self_closing_element' ||
+        n.type === 'jsx_fragment'
+      ) return true
+      for (let i = 0; i < n.childCount; i++) {
+        const c = n.child(i)
+        if (c && containsJsx(c)) return true
+      }
+      return false
+    }
+    if (filePath.endsWith('.tsx') || filePath.endsWith('.jsx')) {
+      const fnName = node.childForFieldName('name')?.text ?? ''
+      const isPascal = /^[A-Z][a-zA-Z0-9]*$/.test(fnName)
+      const anyReturnIsJsx = returnStmts.some((ret) => {
+        const v = ret.namedChildren[0]
+        return v ? containsJsx(v) : false
+      })
+      if (isPascal || anyReturnIsJsx) return null
+    }
+
     // Get types of each return value
     const returnTypes = new Set<string>()
     for (const ret of returnStmts) {
@@ -106,32 +133,33 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
     }
     if (allReturnsAreCallsToSameFunction && returnCallNames.size === 1) return null
 
-    // Skip when all return expressions are object literals with the same set of keys
-    // (discriminated unions like {isNew: true} vs {isNew: false} are consistent shapes)
+    // Skip when all return expressions are object literals. This is the
+    // standard "discriminated union" / "result-shape" pattern — different
+    // branches return objects with overlapping but not identical keys
+    // (Remix loaders, tRPC procedures, response builders). Without a real
+    // type checker we can't tell a meaningful shape mismatch from a
+    // legitimate union, and the rule was firing on every Remix loader
+    // and every API handler with optional fields.
     const allObjectLiterals = returnStmts.every(ret => {
       const value = ret.namedChildren[0]
-      return value && value.type === 'object'
+      return value && (value.type === 'object' || value.type === 'as_expression')
     })
-    if (allObjectLiterals && returnStmts.length >= 2) {
-      const keySets = returnStmts.map(ret => {
-        const value = ret.namedChildren[0]!
-        const keys: string[] = []
-        for (let i = 0; i < value.namedChildCount; i++) {
-          const prop = value.namedChild(i)
-          if (prop?.type === 'pair') {
-            const key = prop.childForFieldName('key')
-            if (key) keys.push(key.text)
-          } else if (prop?.type === 'shorthand_property_identifier' || prop?.type === 'shorthand_property_identifier_pattern') {
-            keys.push(prop.text)
-          } else if (prop?.type === 'spread_element') {
-            keys.push(`...${prop.text}`)
-          }
-        }
-        return keys.sort().join(',')
-      })
-      const allSameKeys = keySets.every(k => k === keySets[0])
-      if (allSameKeys) return null
-    }
+    if (allObjectLiterals && returnStmts.length >= 2) return null
+
+    // Skip when all returns are calls to obviously-wrapping functions
+    // like `Response.json` / `c.json` / `NextResponse.json` that build a
+    // typed wire response — different argument shapes are expected.
+    const allResponseCalls = returnStmts.every(ret => {
+      const value = ret.namedChildren[0]
+      if (!value || value.type !== 'call_expression') return false
+      const callee = value.childForFieldName('function')
+      if (callee?.type !== 'member_expression') return false
+      const obj = callee.childForFieldName('object')?.text
+      const prop = callee.childForFieldName('property')?.text
+      return /^(?:Response|NextResponse|c|ctx|res|reply)$/.test(obj ?? '') &&
+        /^(?:json|text|redirect|html|notFound|body)$/.test(prop ?? '')
+    })
+    if (allResponseCalls) return null
 
     // Normalize void-like return types: void, Promise<void>, and undefined are semantically equivalent
     const VOID_LIKE = new Set(['void', 'Promise<void>', 'undefined'])
