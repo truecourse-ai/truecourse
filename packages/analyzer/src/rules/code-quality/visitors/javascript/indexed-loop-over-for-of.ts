@@ -29,10 +29,20 @@ export const indexedLoopOverForOfVisitor: CodeRuleVisitor = {
     const condText = condition.text
     if (!condText.includes(indexName)) return null
 
+    // Only fire when the condition compares against a `.length` — that's
+    // the array-iteration shape for-of replaces. Plain count loops
+    // (`i < window`, `i < n`, `i < someConst`) don't have an array to
+    // iterate; for-of doesn't apply.
+    if (!/\.length\b/.test(condText)) return null
+
     // Skip when the loop condition uses arithmetic on .length (e.g., arr.length - 1)
     // indicating a partial range iteration that for-of cannot replicate
     const lengthArithmeticRe = /\.length\s*[-+*/]/
     if (lengthArithmeticRe.test(condText)) return null
+
+    // Skip when condition uses Math.max/min on multiple .length values —
+    // multi-array index loops can't be replaced by for-of cleanly.
+    if (/Math\.(?:max|min)\s*\(/.test(condText)) return null
 
     let usedOutsideIndex = false
     function checkIndexUsage(n: SyntaxNode) {
