@@ -1864,6 +1864,44 @@ describe('code-quality/deterministic/useless-computed-key', () => {
   });
 });
 
+describe('code-quality/deterministic/react-useless-set-state', () => {
+  const KEY = 'code-quality/deterministic/react-useless-set-state';
+
+  it('detects setX(x) where x reads the state variable', () => {
+    const code = `function C() {
+  const [value, setValue] = useState('initial');
+  useEffect(() => { setValue(value); }, []);
+  return null;
+}`;
+    const violations = check(code, 'tsx');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // FP #41 — `value` here is the callback parameter, NOT the state.
+  it('does not flag setX(x) where x is a callback parameter', () => {
+    const code = `function C() {
+  const [value, setValue] = useState('initial');
+  const onChange = (value: string) => {
+    setValue(value);
+  };
+  return onChange;
+}`;
+    const violations = check(code, 'tsx');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag setX(x) where x is a function parameter (declaration form)', () => {
+    const code = `function handleSelect(selectedOption: string) {
+  setSelectedOption(selectedOption);
+}`;
+    const violations = check(code, 'tsx');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+});
+
 describe('code-quality/deterministic/useless-concat', () => {
   it('detects adjacent string literals in mixed concatenation chain', () => {
     const violations = check(`const x = "hello" + " world" + name;`);
