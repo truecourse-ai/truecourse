@@ -17,6 +17,25 @@ export const pythonImportOutsideTopLevelVisitor: CodeRuleVisitor = {
     let parent = node.parent
     while (parent) {
       if (blockingTypes.has(parent.type)) {
+        // Skip `if TYPE_CHECKING:` and `if sys.version_info >= …:`
+        // blocks — these are conventional Python idioms for type-only
+        // imports and version-conditional imports. Both are intentional
+        // top-level-of-the-module imports gated by a static condition,
+        // not "imports inside business logic."
+        if (parent.type === 'if_statement') {
+          const condition = parent.childForFieldName('condition')
+          if (condition) {
+            const t = condition.text
+            if (
+              /\bTYPE_CHECKING\b/.test(t) ||
+              /\bsys\.version_info\b/.test(t) ||
+              /\bplatform\.system\b/.test(t)
+            ) {
+              parent = parent.parent
+              continue
+            }
+          }
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Import outside top level',
