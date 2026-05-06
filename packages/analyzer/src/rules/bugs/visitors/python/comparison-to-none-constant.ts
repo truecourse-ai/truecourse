@@ -26,8 +26,15 @@ export const pythonComparisonToNoneConstantVisitor: CodeRuleVisitor = {
     // New object: a call expression that creates a new instance (constructor call)
     if (other.type === 'call') {
       const fn = other.childForFieldName('function')
-      // Heuristic: capitalized function name suggests a class constructor
-      if (fn && fn.text.charAt(0) === fn.text.charAt(0).toUpperCase() && fn.text.charAt(0) !== fn.text.charAt(0).toLowerCase()) {
+      // Heuristic: capitalized BARE-IDENTIFIER function name suggests a
+      // class constructor. Do NOT match attribute chains like
+      // `AgentContext.model_fields.get(...)` — those are method calls
+      // on dict-like objects whose return CAN be None.
+      if (
+        fn?.type === 'identifier' &&
+        fn.text.charAt(0) === fn.text.charAt(0).toUpperCase() &&
+        fn.text.charAt(0) !== fn.text.charAt(0).toLowerCase()
+      ) {
         const opText = children.find((c) => c.text === 'is' || c.text === 'is not')?.text ?? 'is'
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
