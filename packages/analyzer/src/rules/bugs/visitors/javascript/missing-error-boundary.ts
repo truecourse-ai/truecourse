@@ -20,13 +20,25 @@ export const missingErrorBoundaryVisitor: CodeRuleVisitor = {
     // Only check files that look like React components
     if (!sourceCode.includes('React') && !sourceCode.includes('react') && !sourceCode.includes('jsx')) return null
 
-    // Check for data-fetching patterns
-    // Only flag patterns where ErrorBoundary can actually catch errors:
-    // useQuery/useSWR throw during render (catchable), Suspense uses error boundaries.
-    // useEffect+fetch is NOT flagged — errors in useEffect are async and cannot be caught by ErrorBoundary.
+    // Check for data-fetching patterns where an ErrorBoundary can ACTUALLY
+    // catch the error.
+    //
+    //   useSuspenseQuery / useSuspenseInfiniteQuery / useSuspenseQueries
+    //     — TanStack Query suspense hooks. Always throw on error.
+    //   useSWRSuspense / useSWRInfiniteSuspense — SWR suspense variants.
+    //   <Suspense>          — Suspense component (signals suspense mode).
+    //
+    // Plain `useQuery` from `@tanstack/react-query` is NON-suspense by
+    // default — errors come back via `result.error`, not thrown during
+    // render. tRPC's `useQuery` (the highest-volume consumer of the name)
+    // is also non-suspense. Flagging plain useQuery is ~100% FP across
+    // every tRPC consumer file.
     const hasAsyncData =
-      /\buseQuery\b/.test(sourceCode) ||
-      /\buseSWR\b/.test(sourceCode) ||
+      /\buseSuspenseQuery\b/.test(sourceCode) ||
+      /\buseSuspenseQueries\b/.test(sourceCode) ||
+      /\buseSuspenseInfiniteQuery\b/.test(sourceCode) ||
+      /\buseSWRSuspense\b/.test(sourceCode) ||
+      /\buseSWRInfiniteSuspense\b/.test(sourceCode) ||
       /\bSuspense\b/.test(sourceCode)
 
     if (!hasAsyncData) return null

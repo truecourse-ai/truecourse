@@ -8805,13 +8805,13 @@ pattern = re.compile(r'a+b')
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/missing-error-boundary', () => {
-  it('detects missing error boundary with useQuery', () => {
+  it('detects missing error boundary with useSuspenseQuery', () => {
     const violations = check(`
 import React from 'react';
-import { useQuery } from 'react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 
 function UserList() {
-  const { data } = useQuery('users', fetchUsers);
+  const { data } = useSuspenseQuery({ queryKey: ['users'], queryFn: fetchUsers });
   return <div>{data}</div>;
 }
 `, 'typescript');
@@ -8819,14 +8819,29 @@ function UserList() {
     expect(matches).toHaveLength(1);
   });
 
+  it('does not flag plain non-suspense useQuery (errors come back via result.error)', () => {
+    const violations = check(`
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
+
+function UserList() {
+  const { data, error } = useQuery({ queryKey: ['users'], queryFn: fetchUsers });
+  if (error) return <div>Error</div>;
+  return <div>{data}</div>;
+}
+`, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/missing-error-boundary');
+    expect(matches).toHaveLength(0);
+  });
+
   it('does not flag when ErrorBoundary is present', () => {
     const violations = check(`
 import React from 'react';
-import { useQuery } from 'react-query';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
 
 function UserList() {
-  const { data } = useQuery('users', fetchUsers);
+  const { data } = useSuspenseQuery({ queryKey: ['users'], queryFn: fetchUsers });
   return <ErrorBoundary><div>{data}</div></ErrorBoundary>;
 }
 `, 'typescript');

@@ -89,10 +89,10 @@ export function MixedContentImage() {
   return <img src="http://cdn.example.com/logo.png" />;
 }
 
-declare function useQuery(opts: { queryKey: string[]; queryFn: () => Promise<unknown> }): { data: any };
+declare function useSuspenseQuery(opts: { queryKey: string[]; queryFn: () => Promise<unknown> }): { data: any };
 // VIOLATION: bugs/deterministic/missing-error-boundary
 export function TopLevelQuery() {
-  const { data } = useQuery({ queryKey: ['data'], queryFn: () => fetch('/api').then((r) => r.json()) });
+  const { data } = useSuspenseQuery({ queryKey: ['data'], queryFn: () => fetch('/api').then((r) => r.json()) });
   return (
     <div>
       <h1>{data?.title}</h1>
