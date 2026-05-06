@@ -35,6 +35,9 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `security/deterministic/insecure-random` | 6 | **0** | -6 (FP #45; seed/mocks/test/storybook paths) |
 | `reliability/deterministic/express-async-no-wrapper` | 5 | **0** | -5 (FP #46; Hono/Fastify/Koa import detection) |
 | `code-quality/deterministic/unused-private-member` + `unused-private-method` | 6+6 | **2+2** | -8 (FP #47; private constructor never called as `this.constructor()`) |
+| `code-quality/deterministic/prefer-const` | 8 | **1** | -7 (FP #48; destructured-binding reassignment) |
+| `bugs/deterministic/function-return-type-varies` | 9 | TBD | (FP #49; React components + object-shape returns + Hono response calls) |
+| `security/deterministic/hardcoded-ip` | 6 | **0** | -6 (FP #51; SVG path data + multiple-IP coordinate streams) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 
