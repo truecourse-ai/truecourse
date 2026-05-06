@@ -2116,16 +2116,54 @@ def foo():
 });
 
 describe('Python: code-quality/deterministic/commented-out-code', () => {
+  const KEY = 'code-quality/deterministic/commented-out-code';
+
   it('detects commented-out Python code', () => {
     const violations = check(`# x = get_value(); return x`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/commented-out-code');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(1);
   });
 
   it('does not flag regular text comments', () => {
     const violations = check(`# This function handles user authentication`, 'python');
-    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/commented-out-code');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
     expect(matches).toHaveLength(0);
+  });
+
+  // FP #38 — prose with embedded code-like fragments
+  it('does not flag prose with parenthetical aside and operator', () => {
+    const code = `# Check if the current user is in the members list with access level >= 40 (Maintainer or Owner)\nx = 1`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag prose with `keyword=value` mention', () => {
+    const code = `# Update user with enabled=False to disable the account\nx = 1`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag a prose explanation of a code condition', () => {
+    const code = `# A user with max_budget=0.0 is different from max_budget=None\nx = 1`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('still detects clearly commented-out assignment + call', () => {
+    const code = `# slack_view.saas_user_auth = await self._get_user_auth(user_id)\nx = 1`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('still detects commented-out def line', () => {
+    const code = `# def foo(x):\n#     return x\nx = 1`;
+    const violations = check(code, 'python');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });
 
