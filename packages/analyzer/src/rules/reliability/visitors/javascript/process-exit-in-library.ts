@@ -21,6 +21,10 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
       lowerPath.includes('cli.') ||
       lowerPath.includes('bin/') ||
       lowerPath.includes('scripts/') ||
+      lowerPath.includes('examples/') ||
+      lowerPath.includes('example/') ||
+      lowerPath.includes('demo/') ||
+      lowerPath.includes('demos/') ||
       lowerPath.includes('server.') ||
       lowerPath.includes('app.') ||
       lowerPath.endsWith('/worker.ts') || lowerPath.endsWith('/worker.js') ||
@@ -28,6 +32,10 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
     ) {
       return null
     }
+
+    // Allow in files with a shebang (`#!/usr/bin/env node`) — those are
+    // CLI entry points regardless of their location.
+    if (sourceCode.startsWith('#!')) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

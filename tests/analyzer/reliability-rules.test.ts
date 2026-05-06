@@ -284,6 +284,22 @@ describe('reliability/deterministic/process-exit-in-library', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 
+  // FP #44 — examples/ and bin/ directories.
+  it('does not flag process.exit() under examples/', () => {
+    const violations = check(`process.exit(1);`, 'typescript', '/packages/api/v1/examples/01-create.ts');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag process.exit() under bin/', () => {
+    const violations = check(`process.exit(1);`, 'typescript', '/bin/migrate.ts');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag process.exit() in file with shebang', () => {
+    const violations = check(`#!/usr/bin/env node\nprocess.exit(1);`, 'typescript', '/src/lib/some-utility.ts');
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
   it('detects sys.exit() in Python library code', () => {
     const violations = check(`sys.exit(1)`, 'python', '/src/utils/helper.py');
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
