@@ -8,6 +8,17 @@ export const expressAsyncNoWrapperVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
+    // Skip Hono routers — Hono catches async errors natively via its
+    // own middleware pipeline. Detect by `from 'hono'` / `from "hono/..."`
+    // imports anywhere in the file. Same for Fastify (handles async)
+    // and Koa (handles async via its middleware chain).
+    if (
+      /from\s+['"]hono(?:\/[^'"]*)?['"]/.test(sourceCode) ||
+      /from\s+['"]fastify['"]/.test(sourceCode) ||
+      /from\s+['"]koa['"]/.test(sourceCode) ||
+      /from\s+['"]@hono\//.test(sourceCode)
+    ) return null
+
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'member_expression') return null
 

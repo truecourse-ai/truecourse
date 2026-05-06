@@ -428,6 +428,31 @@ app.get("/users", async (req, res) => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 
+  // FP #46 — Hono handles async errors natively.
+  it('does not flag Hono async handler without try/catch', () => {
+    const violations = check(`
+import { Hono } from 'hono';
+const app = new Hono();
+app.get("/users", async (c) => {
+  const users = await db.query("SELECT * FROM users");
+  return c.json(users);
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag Fastify async handler without try/catch', () => {
+    const violations = check(`
+import Fastify from 'fastify';
+const app = Fastify();
+app.get("/users", async (req, reply) => {
+  const users = await db.query("SELECT * FROM users");
+  reply.send(users);
+});
+`);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
   it('does not flag non-async handler', () => {
     const violations = check(`
 app.get("/health", (req, res) => {
