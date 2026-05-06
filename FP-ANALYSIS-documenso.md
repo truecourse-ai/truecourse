@@ -49,6 +49,10 @@ the steep medium-tier drop. The FP-fix counts below are per-rule not per-tier.
 | `code-quality/deterministic/undefined-passed-as-optional` | 8 | **1** | -7 (FP #58) |
 | `code-quality/deterministic/identical-functions` | 43 | **13** | -30 (FP #61) |
 | `reliability/deterministic/missing-null-check-after-find` | 13 | **2** | -11 (FP #66; Konva/jQuery imports) |
+| `reliability/deterministic/promise-all-no-error-handling` | 123 | **3** | -120 (FP #67; await-in-async-fn propagation) |
+| `bugs/deterministic/argument-type-mismatch` | 140 | **69** | -71 (FP #68; unpinpointed-fallback removal) |
+| `code-quality/deterministic/require-await` | 177 | **116** | -61 (FP #70; Promise return contracts + JSX handlers) |
+| `security/deterministic/clear-text-protocol` | 3 | **0** | -3 (FP #64; SSRF helpers + tuple-pair) |
 
 214 distinct rules firing initially → many fewer effective FP-class rules now.
 

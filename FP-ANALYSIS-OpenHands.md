@@ -46,6 +46,13 @@ The FP-fix counts below are per-rule, not per-tier.
 | `security/deterministic/clear-text-protocol` | 19 | **9** | -10 (FP #64; replace/SSRF/upgrade-pair) |
 | `bugs/deterministic/empty-pattern` | 8 | **0** | -8 (FP #63; storybook) |
 | `bugs/deterministic/values-not-convertible-to-number` | (small) | **0** | -all (FP #50) |
+| `reliability/deterministic/promise-all-no-error-handling` | 2 | **0** | -2 (FP #67; await-in-async-fn propagation) |
+| `bugs/deterministic/argument-type-mismatch` | 7 | **6** | -1 (FP #68; remove unpinpointed fallback) |
+| `security/deterministic/disabled-auto-escaping` | 2 | **0** | -2 (FP #69; detached-textarea decoder) |
+| `code-quality/deterministic/require-await` | 248 | **241** | -7 (FP #70; Promise return contracts + JSX) |
+| `code-quality/deterministic/import-outside-top-level` | 240 | **197** | -43 (FP #71; TYPE_CHECKING + version_info) |
+| `code-quality/deterministic/async-unused-async` | 182 | **114** | -68 (FP #72; class-with-bases + test files) |
+| `code-quality/deterministic/non-empty-init-module` | 2 | **TBD** | (FP #73; __path__ + module logger) |
 
 297 distinct rules firing.
 
