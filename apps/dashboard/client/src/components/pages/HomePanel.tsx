@@ -36,6 +36,10 @@ type HomePanelProps = {
     hints?: { serviceId?: string | null; moduleId?: string | null },
   ) => void;
   onOpenFile: (path: string, pinned: boolean, scrollToLine?: number) => void;
+  /** Refetch violations from the parent. HomePanel chains its own analytics
+   * refetch alongside, so any "rule disabled" event refreshes both lists
+   * and chart numbers in one shot. */
+  onRefreshAfterDisable?: () => void;
 };
 
 const MIN_PANEL_WIDTH = 300;
@@ -52,6 +56,7 @@ export function HomePanel({
   diffResult,
   onLocateNode,
   onOpenFile,
+  onRefreshAfterDisable,
 }: HomePanelProps) {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all');
@@ -83,11 +88,16 @@ export function HomePanel({
     document.addEventListener('mouseup', onUp);
   }, [panelWidth]);
 
-  const { trend, breakdown, topOffenders, resolution, codeHotspots } = useAnalytics(
+  const { trend, breakdown, topOffenders, resolution, codeHotspots, refetch: refetchAnalytics } = useAnalytics(
     repoId,
     branch,
     analysisId,
   );
+
+  const handleRuleDisabled = useCallback(() => {
+    onRefreshAfterDisable?.();
+    refetchAnalytics();
+  }, [onRefreshAfterDisable, refetchAnalytics]);
 
   // Narrow the violations list by the currently-selected offender (service/module/method/database).
   // Code violations carry no node target so they're excluded by an offender selection —
@@ -232,7 +242,7 @@ export function HomePanel({
                 title="Rules"
                 description="Browse the catalog of rules this repo is analyzed against."
               >
-                <RulesPanel />
+                <RulesPanel repoId={repoId} onRuleToggled={handleRuleDisabled} />
               </SheetContent>
             </Sheet>
           }
@@ -255,6 +265,7 @@ export function HomePanel({
           diffResult={diffResult}
           onLocateNode={onLocateNode}
           onOpenFile={onOpenFile}
+          onRuleDisabled={handleRuleDisabled}
         />
         )}
       </main>

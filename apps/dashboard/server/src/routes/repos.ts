@@ -5,6 +5,7 @@ import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
 import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';
+import { getRules } from '@truecourse/core/services/rules';
 import {
   readRegistry,
   getProjectBySlug,
@@ -156,6 +157,44 @@ router.get('/:id/config', async (req: Request, res: Response, next: NextFunction
   try {
     const entry = requireRegistryEntry(req.params.id as string);
     res.json(readProjectConfig(entry.path));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/repos/:id/rules - Catalog with per-repo enabled overrides applied.
+router.get('/:id/rules', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const entry = requireRegistryEntry(req.params.id as string);
+    res.json(await getRules(entry.path));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/repos/:id/rules/:ruleKey - Toggle a single rule for this repo.
+// Rule keys contain slashes so the client must URL-encode the key segment.
+router.patch('/:id/rules/:ruleKey', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const entry = requireRegistryEntry(req.params.id as string);
+    const ruleKey = req.params.ruleKey as string;
+    const { enabled } = req.body as { enabled?: boolean };
+    if (typeof enabled !== 'boolean') {
+      throw createAppError('Body must include `enabled: boolean`', 400);
+    }
+
+    const all = await getRules();
+    if (!all.some((r) => r.key === ruleKey)) {
+      throw createAppError(`Unknown rule: ${ruleKey}`, 404);
+    }
+
+    const current = readProjectConfig(entry.path);
+    const set = new Set<string>(current.disabledRules ?? []);
+    if (enabled) set.delete(ruleKey);
+    else set.add(ruleKey);
+    updateProjectConfig(entry.path, { disabledRules: [...set].sort() });
+
+    res.json({ key: ruleKey, enabled });
   } catch (error) {
     next(error);
   }

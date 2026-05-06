@@ -45,6 +45,7 @@ import {
   getProjectBySlug,
 } from '../../packages/core/src/config/registry';
 import { getRepoTruecourseDir } from '../../packages/core/src/config/paths';
+import { updateProjectConfig } from '../../packages/core/src/config/project-config';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
@@ -463,6 +464,33 @@ describe('dashboard routes (seeded store)', () => {
       expect(res.body.bySeverity.critical).toBe(1);
       expect(res.body.bySeverity.high).toBe(1);
     });
+
+    it('disabled rule hides matching violations from list and summary', async () => {
+      const ruleKey = seed.violations[0].ruleKey;
+      // Write directly to config — the PATCH endpoint validates against the
+      // real rule catalogue, but the seeded violations use a synthetic key.
+      // What we want to verify here is the read-side filtering, not PATCH.
+      updateProjectConfig(fixture.repoPath, { disabledRules: [ruleKey] });
+      clearLatestCache();
+
+      const list = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations`)
+        .expect(200);
+      expect(list.body.length).toBe(0);
+
+      const summary = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations/summary`)
+        .expect(200);
+      expect(summary.body.total).toBe(0);
+      expect(summary.body.bySeverity).toEqual({});
+
+      // Re-enable restores them without re-running analysis.
+      updateProjectConfig(fixture.repoPath, { disabledRules: [] });
+      const restored = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/violations`)
+        .expect(200);
+      expect(restored.body.length).toBe(2);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -551,6 +579,56 @@ describe('dashboard routes (seeded store)', () => {
       const res = await request(app).get('/api/rules').expect(200);
       expect(Array.isArray(res.body)).toBe(true);
       expect(res.body.length).toBeGreaterThan(0);
+    });
+
+    it('GET /api/repos/:id/rules mirrors the catalogue when no overrides exist', async () => {
+      const res = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/rules`)
+        .expect(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.every((r: { enabled: boolean }) => r.enabled === true)).toBe(true);
+    });
+
+    it('PATCH /api/repos/:id/rules/:ruleKey toggles a rule and persists', async () => {
+      const list = await request(app).get('/api/rules').expect(200);
+      const target = list.body[0] as { key: string };
+      const encoded = encodeURIComponent(target.key);
+
+      const off = await request(app)
+        .patch(`/api/repos/${fixture.project.slug}/rules/${encoded}`)
+        .send({ enabled: false })
+        .expect(200);
+      expect(off.body).toEqual({ key: target.key, enabled: false });
+
+      const after = await request(app)
+        .get(`/api/repos/${fixture.project.slug}/rules`)
+        .expect(200);
+      const found = after.body.find((r: { key: string }) => r.key === target.key);
+      expect(found.enabled).toBe(false);
+
+      const on = await request(app)
+        .patch(`/api/repos/${fixture.project.slug}/rules/${encoded}`)
+        .send({ enabled: true })
+        .expect(200);
+      expect(on.body).toEqual({ key: target.key, enabled: true });
+    });
+
+    it('PATCH /api/repos/:id/rules/:ruleKey rejects unknown keys', async () => {
+      await request(app)
+        .patch(
+          `/api/repos/${fixture.project.slug}/rules/${encodeURIComponent('does/not/exist')}`,
+        )
+        .send({ enabled: false })
+        .expect(404);
+    });
+
+    it('PATCH /api/repos/:id/rules/:ruleKey requires a boolean enabled field', async () => {
+      const list = await request(app).get('/api/rules').expect(200);
+      const target = list.body[0] as { key: string };
+      await request(app)
+        .patch(`/api/repos/${fixture.project.slug}/rules/${encodeURIComponent(target.key)}`)
+        .send({})
+        .expect(400);
     });
   });
 });

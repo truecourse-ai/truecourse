@@ -182,7 +182,7 @@ export async function runAnalysis(
   const scopedOptions = buildScopedCompilerOptions(repoPath);
   if (scopedOptions.length > 0) {
     const filePaths = fileAnalyses.map((fa) => fa.filePath);
-    const { exportMap } = analyzeSemantics(filePaths, scopedOptions);
+    const { exportMap } = analyzeSemantics(filePaths, scopedOptions, repoPath);
 
     // Correct isExported flags on functions using the compiler's definitive export list.
     // The compiler reports default exports as 'default', so we also check if the function

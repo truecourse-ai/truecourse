@@ -114,7 +114,24 @@ truecourse rules categories --disable style    # Disable a category
 truecourse rules llm                           # Show LLM rules status
 truecourse rules llm --enable                  # Enable LLM rules
 truecourse rules llm --disable                 # Disable LLM rules
+
+# Individual rules
+truecourse rules list                          # List rules with on/off status
+truecourse rules list --disabled               # Show only disabled rules
+truecourse rules disable <ruleKey>             # Disable a single rule
+truecourse rules enable <ruleKey>              # Re-enable a single rule
+truecourse rules reset [ruleKey]               # Clear per-rule overrides (one or all)
 ```
+
+Disabled rules are skipped at analyze time (no detection cost, no LLM
+calls) and any existing violations from them are hidden from the
+dashboard and `truecourse list` until re-enabled. The list of disabled
+rule keys lives in `<repo>/.truecourse/config.json` under
+`disabledRules`, which is intended to be committed.
+
+In the dashboard you can also toggle rules from the Rules panel
+(Shield icon in the top-right) or silence a noisy rule directly from
+any violation card via the **⋮** menu → **Disable rule for this repo**.
 
 ### Git Hooks
 

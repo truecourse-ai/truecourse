@@ -12,7 +12,14 @@ import {
   runDashboardUninstall,
 } from "./commands/dashboard.js";
 import { runList, runListDiff, parseSeverityFlag } from "./commands/list.js";
-import { runRulesCategories, runRulesLlm } from "./commands/rules.js";
+import {
+  runRulesCategories,
+  runRulesDisable,
+  runRulesEnable,
+  runRulesList,
+  runRulesLlm,
+  runRulesReset,
+} from "./commands/rules.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -25,7 +32,7 @@ const program = new Command();
 
 program
   .name("truecourse")
-  .version("0.5.8")
+  .version("0.5.9")
   .description("TrueCourse CLI — analyze your repository and open the dashboard");
 
 const dashboardCmd = program
@@ -168,6 +175,38 @@ rulesCmd
   .option("--reset", "Reset to global default")
   .action(async (options) => {
     await runRulesLlm(options);
+  });
+
+rulesCmd
+  .command("list")
+  .description("List rules with their enabled/disabled status for this repository")
+  .option("--domain <name>", "Only show rules in this domain (e.g. security, bugs)")
+  .option("--enabled", "Only show enabled rules")
+  .option("--disabled", "Only show disabled rules")
+  .option("--search <text>", "Filter by key, name, or description")
+  .action(async (options) => {
+    await runRulesList(options);
+  });
+
+rulesCmd
+  .command("enable <ruleKey>")
+  .description("Enable a single rule for this repository")
+  .action(async (ruleKey: string) => {
+    await runRulesEnable({ ruleKey });
+  });
+
+rulesCmd
+  .command("disable <ruleKey>")
+  .description("Disable a single rule for this repository")
+  .action(async (ruleKey: string) => {
+    await runRulesDisable({ ruleKey });
+  });
+
+rulesCmd
+  .command("reset [ruleKey]")
+  .description("Clear per-rule overrides (one rule, or all if no key given)")
+  .action(async (ruleKey?: string) => {
+    await runRulesReset({ ruleKey });
   });
 
 // Telemetry management

@@ -1192,6 +1192,7 @@ export default function RepoGraphPage() {
                 diffResult={diffResult}
                 onLocateNode={handleLocateNodeFromHome}
                 onOpenFile={handleOpenFile}
+                onRefreshAfterDisable={refetchViolations}
               />
             )
           ) : leftTab === 'graphs' ? (
