@@ -140,6 +140,12 @@ export const routeWithoutAuthMiddlewareVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     if (!isRouteHandler(node)) return null
 
+    // `.use(middleware)` registers middleware globally — not a route
+    // handler. The shared `isRouteHandler` includes it because some rules
+    // care about middleware registration; this rule does NOT.
+    const fn = node.childForFieldName('function')
+    if (fn?.type === 'member_expression' && fn.childForFieldName('property')?.text === 'use') return null
+
     // Skip if we don't recognize the framework — can't reason about middleware
     // chains we don't understand.
     const framework = detectWebFramework(node)
@@ -160,6 +166,23 @@ export const routeWithoutAuthMiddlewareVisitor: CodeRuleVisitor = {
 
     // Check if the file has a global auth middleware applied via app.use(...)
     if (fileHasGlobalAuthMiddleware(node)) return null
+
+    // Check for INLINE auth inside the handler body — a handler that
+    // calls `getSession`, `getOptionalSession`, `requireAuth`,
+    // `getServerSession`, `auth()`, `useUser`, etc. and returns 401 on
+    // missing session. This is the modern pattern in Remix/Next/tRPC
+    // route handlers where middleware isn't available or wanted.
+    const args2 = node.childForFieldName('arguments')
+    const handler = args2?.namedChildren[args2.namedChildren.length - 1]
+    if (handler && (handler.type === 'arrow_function' || handler.type === 'function')) {
+      const handlerText = handler.text
+      // Auth function-name patterns commonly invoked inside handlers.
+      if (
+        /\b(?:getSession|getOptionalSession|requireSession|requireAuth|requireUser|getServerSession|getCurrentUser|getAuth|verifyToken|verifyJwt|verifySession|authenticate|isAuthenticated|currentUser|useUser|getUser|withAuth)\b/.test(handlerText)
+      ) return null
+      // 401-returning patterns also indicate handler-side auth gating.
+      if (/\b(?:401|Unauthorized|UNAUTHORIZED)\b/.test(handlerText)) return null
+    }
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
