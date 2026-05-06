@@ -73,13 +73,12 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
       }
     }
 
-    // Fallback: TS reports error but we can't pinpoint the argument
-    return makeViolation(
-      this.ruleKey, node, filePath, 'high',
-      'Argument type mismatch',
-      'TypeScript reports a type error at this call expression.',
-      sourceCode,
-      'Check the argument types against the function signature.',
-    )
+    // Fallback removed. Without a pinpointed argument-vs-parameter pair,
+    // the message is just "TS reports something at this call" — and most
+    // such reports in monorepos come from cross-package types that don't
+    // fully resolve (we don't have a complete program). The loop above
+    // returns a violation only when a concrete argType vs concrete
+    // expectedType mismatch can be named.
+    return null
   },
 }
