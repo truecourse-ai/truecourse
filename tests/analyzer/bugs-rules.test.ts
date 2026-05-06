@@ -2339,6 +2339,59 @@ describe('bugs/deterministic/void-return-value-used', () => {
 });
 
 // ---------------------------------------------------------------------------
+// JS/TS: missing-return-await
+// ---------------------------------------------------------------------------
+
+describe('bugs/deterministic/missing-return-await', () => {
+  const KEY = 'bugs/deterministic/missing-return-await';
+
+  it('detects bare return promise inside try/catch in async fn', () => {
+    const code = `async function f() {
+  try {
+    return doAsync();
+  } catch (e) { return null; }
+}`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // FP #43 — Hono context methods return Response synchronously.
+  it('does not flag return c.json(...) inside try/catch (Hono)', () => {
+    const code = `async function handler(c: { json: (b: unknown, s?: number) => Response }) {
+  try {
+    return c.json({ ok: true });
+  } catch (e) { return c.json({ error: 'failed' }, 500); }
+}`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag return Schema.parse(...) inside try/catch (Zod)', () => {
+    const code = `async function load(text: string) {
+  try {
+    return MySchema.parse(JSON.parse(text));
+  } catch (e) { return null; }
+}`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+
+  it('does not flag return streamText(c, ...) inside try/catch (Hono helper)', () => {
+    const code = `async function handler(c: any) {
+  try {
+    return streamText(c, async (stream) => { await stream.write('x'); });
+  } catch (e) { return null; }
+}`;
+    const violations = check(code, 'typescript');
+    const matches = violations.filter((v) => v.ruleKey === KEY);
+    expect(matches).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // JS/TS: new-operator-misuse
 // ---------------------------------------------------------------------------
 

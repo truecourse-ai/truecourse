@@ -65,10 +65,23 @@ function findReturnWithoutAwait(node: import('web-tree-sitter').Node): import('w
           const prop = callFn.childForFieldName('property')
           const objText = obj?.text ?? ''
           const propText = prop?.text ?? ''
-          // Skip known synchronous APIs (NextResponse.json, Response.json, res.json, etc.)
-          if (/^(NextResponse|Response|res|reply)$/.test(objText)) continue
+          // Skip known synchronous response APIs:
+          //   NextResponse.json / Response.json / res.json / reply.X (Fastify)
+          //   Hono context: `c.json` / `c.text` / `c.redirect` / `c.html`
+          //   `ctx.X` (alternative naming).
+          // All return a `Response` synchronously, not a Promise.
+          if (/^(NextResponse|Response|res|reply|c|ctx)$/.test(objText)) continue
+          // Skip schema/parser methods: `Schema.parse(...)` /
+          // `Schema.safeParse(...)` (Zod, Yup, ArkType, …) — synchronous.
+          if (/^(parse|safeParse|stringify|toJSON|toString)$/.test(propText)) continue
           // Skip known synchronous methods (array methods, etc.) — these never return Promises
-          if (/^(map|filter|reduce|find|findIndex|some|every|flatMap|forEach|sort|flat|join|slice|concat|includes|indexOf|lastIndexOf|toString|keys|values|entries)$/.test(propText)) continue
+          if (/^(map|filter|reduce|find|findIndex|some|every|flatMap|forEach|sort|flat|join|slice|concat|includes|indexOf|lastIndexOf|keys|values|entries)$/.test(propText)) continue
+        }
+        // Free-function calls like `streamText(c, …)` / `streamSSE(c, …)` —
+        // Hono's stream helpers return `Response` synchronously even
+        // though their callback is async.
+        if (callFn?.type === 'identifier') {
+          if (/^(streamText|streamSSE|stream|html|jsx|raw|text|redirect|notFound|body|json)$/.test(callFn.text)) continue
         }
         return child
       }
