@@ -50,12 +50,23 @@ export const pythonNonEmptyInitModuleVisitor: CodeRuleVisitor = {
         continue
       }
 
-      // Top-level assignments for __all__, __version__, __author__, type aliases
+      // Top-level assignments for __all__, __version__, __author__,
+      // namespace-package __path__ extension, type aliases, and
+      // module-level loggers (`logger = logging.getLogger(__name__)`).
       if (t === 'assignment') {
         const left = child.childForFieldName('left')
         const text = left?.text ?? ''
         if (text.startsWith('__all__') || text.startsWith('__version__') || text.startsWith('__author__')) {
           continue
+        }
+        // Namespace package extension: `__path__ = extend_path(__path__, __name__)`
+        if (text === '__path__') continue
+        // Module-level logger / event emitter: `logger = logging.getLogger(__name__)`
+        if (/^(?:logger|log|tracer|metrics)$/.test(text)) {
+          const right = child.childForFieldName('right')
+          if (right && /\b(?:logging\.getLogger|getLogger|getTracer|getMeter|EventEmitter)\b/.test(right.text)) {
+            continue
+          }
         }
       }
 
