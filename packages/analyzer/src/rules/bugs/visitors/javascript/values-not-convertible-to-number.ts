@@ -16,6 +16,12 @@ export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     if (!typeQuery) return null
 
+    // tree-sitter mis-parses tagged templates with type arguments
+    // (`sql<boolean>\`1=1\``) as a chain of binary_expressions because
+    // `<` and `>` look like comparison operators. The `\`` (backtick)
+    // following the apparent comparison is the smoking gun. Skip.
+    if (node.text.includes('`')) return null
+
     const operator = node.children.find(c => RELATIONAL_OPS.has(c.text))
     if (!operator) return null
 
