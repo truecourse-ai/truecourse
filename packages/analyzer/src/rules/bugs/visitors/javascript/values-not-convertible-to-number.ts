@@ -23,7 +23,7 @@ export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
     // the node OR any ancestor (up to 4 levels) contains a backtick —
     // the inner `sql<boolean` binary_expression doesn't include the
     // backtick itself, but its parent does.
-    let probe = node as ReturnType<typeof node.parent>
+    let probe: typeof node | null = node
     let depth = 0
     while (probe && depth < 4) {
       if (probe.text.includes('`')) return null
