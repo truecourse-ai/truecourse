@@ -1695,20 +1695,33 @@ describe('security/deterministic/missing-helmet-middleware', () => {
 
 describe('security/deterministic/jwt-no-expiry', () => {
   const ruleKey = 'security/deterministic/jwt-no-expiry';
+  // Rule is gated on a JWT-library import — without one, `.sign()` calls
+  // are presumed to be non-JWT (HMAC helpers, PDF/PKCS7 signing, etc).
+  const jwtImport = `import jwt from 'jsonwebtoken';\n`;
 
   it('detects jwt.sign() with only two args', () => {
-    const violations = check(`const token = jwt.sign({ userId: id }, secret);`);
+    const violations = check(`${jwtImport}const token = jwt.sign({ userId: id }, secret);`);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
 
   it('detects jwt.sign() options without expiresIn', () => {
-    const violations = check(`const token = jwt.sign({ userId: id }, secret, { algorithm: "RS256" });`);
+    const violations = check(`${jwtImport}const token = jwt.sign({ userId: id }, secret, { algorithm: "RS256" });`);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
 
   it('does not flag jwt.sign() with expiresIn', () => {
-    const violations = check(`const token = jwt.sign({ userId: id }, secret, { expiresIn: "1h" });`);
+    const violations = check(`${jwtImport}const token = jwt.sign({ userId: id }, secret, { expiresIn: "1h" });`);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag jose chained builder with setExpirationTime', () => {
+    const code = `import { SignJWT } from 'jose';\nconst t = new SignJWT(payload).setExpirationTime(exp).sign(secret);`;
+    expect(check(code).filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
+  });
+
+  it('does not flag .sign() in files that do not import a JWT library', () => {
+    const code = `const token = jwt.sign({ userId: id }, secret);`;
+    expect(check(code).filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 });
 

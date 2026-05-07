@@ -3,6 +3,7 @@
  */
 
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
@@ -30,11 +31,6 @@ export function generateToken() {
 export function generateSecureToken(length: number) {
   return crypto.randomBytes(length).toString('hex');
 }
-
-const jwt = {
-  sign: (payload: any, secret: string, opts?: any) => 'token',
-  verify: (token: string, secret: string, opts?: any) => ({}),
-};
 
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
