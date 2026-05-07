@@ -28,9 +28,11 @@ class NotificationQueue:
         self._processed = 0
 
     # VIOLATION: style/deterministic/docstring-completeness
-    def enqueue(self, payload: dict) -> None:
+    def enqueue(self, payload: dict, session) -> None:
+        # ORM-shaped receiver (`session`) so the rule recognises this
+        # as a real DB write, not a Pydantic / dict in-memory merge.
         # VIOLATION: database/deterministic/unvalidated-external-data
-        self._queue.save(payload)
+        session.save(payload)
 
     # VIOLATION: style/deterministic/docstring-completeness
     # VIOLATION: code-quality/deterministic/missing-type-hints

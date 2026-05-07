@@ -91,6 +91,14 @@ export const pythonMissingTransactionVisitor: CodeRuleVisitor = {
     // Gate: the triggering node itself must be an ORM write call
     if (!isOrmWriteCall(node)) return null
 
+    // Skip Alembic migration files — every migration runs inside a
+    // single transaction managed by Alembic per --transaction-per-migration
+    // (the default). `op.execute(...)`, `op.drop_table(...)`, etc. inside
+    // `def upgrade()` / `def downgrade()` are framework-managed.
+    // Path matches: enterprise/migrations/versions/, alembic/versions/,
+    // any */migrations/versions/*.py.
+    if (/\/migrations\/versions\/|\/alembic\/versions\//.test(filePath)) return null
+
     const body = getPythonEnclosingFunctionBody(node)
     if (!body) return null
 

@@ -11,6 +11,32 @@ const PYTHON_EXTERNAL_PROPERTIES = new Set([
   'data', 'json', 'body', 'payload', 'form', 'GET', 'POST',
 ])
 
+// Receiver names that signal an ORM/DB context. Pydantic
+// `BaseModel.update(payload)` is in-memory merge, not a DB write —
+// ignore .update() unless the receiver looks like an ORM session /
+// engine / queryset / model class.
+const ORM_RECEIVER_HINTS = new Set([
+  'session', 'db', 'conn', 'connection', 'cursor', 'engine', 'database',
+  'objects', 'manager', 'queryset', 'qs', 'tx', 'trx', 'transaction',
+])
+
+function hasOrmShapedReceiver(node: SyntaxNode): boolean {
+  const fn = node.childForFieldName('function')
+  if (fn?.type !== 'attribute') return false
+  let receiver: SyntaxNode | null = fn.childForFieldName('object')
+  while (receiver?.type === 'attribute') {
+    receiver = receiver.childForFieldName('object')
+  }
+  if (!receiver) return false
+  // PascalCase identifier — likely a Model class (Django ORM, Tortoise)
+  if (receiver.type === 'identifier' && /^[A-Z]/.test(receiver.text)) return true
+  // Lowercase identifier matching ORM-receiver allowlist
+  if (receiver.type === 'identifier' && ORM_RECEIVER_HINTS.has(receiver.text.toLowerCase())) return true
+  // call_expression: e.g. session.query(User).update(...) — receiver chain hits a call
+  if (receiver.type === 'call') return true
+  return false
+}
+
 function isPythonExternalDataAccess(node: SyntaxNode): boolean {
   if (node.type === 'attribute') {
     const obj = node.childForFieldName('object')
@@ -33,6 +59,10 @@ export const pythonUnvalidatedExternalDataVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const methodName = getPythonMethodName(node)
     if (!PYTHON_WRITE_METHODS.has(methodName) && !PYTHON_SQL_METHODS.has(methodName)) return null
+
+    // Receiver must be ORM-shaped — otherwise `.update(payload)` is
+    // most likely a Pydantic / dict in-memory merge, not a DB write.
+    if (!hasOrmShapedReceiver(node)) return null
 
     const args = node.childForFieldName('arguments')
     if (!args) return null

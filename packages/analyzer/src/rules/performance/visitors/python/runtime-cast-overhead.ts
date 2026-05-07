@@ -76,6 +76,21 @@ export const runtimeCastOverheadVisitor: CodeRuleVisitor = {
       if (!/^[A-Z][A-Z0-9_]*$/.test(firstArg.text)) return null
     }
 
+    // IO-bound loop body: when the loop does HTTP / DB / file IO,
+    // the cast cost is invisible next to the network round-trip and
+    // hoisting the SCREAMING_SNAKE cast saves microseconds at most.
+    // Same heuristic as try-except-in-loop.
+    let scope: import('web-tree-sitter').Node | null = node.parent
+    while (scope) {
+      if (scope.type === 'for_statement' || scope.type === 'while_statement') {
+        const body = scope.childForFieldName('body') ?? scope
+        const IO_PATTERNS = /\bawait\b|\brequests\.|\bhttpx\.|\bsession\.|\bsubprocess\.|\burllib\.|\burlopen\b|\.read\(|\.write\(|\.execute\(|\bopen\s*\(|\bjson\.loads?\b|\bjson\.dumps?\b/
+        if (IO_PATTERNS.test(body.text)) return null
+        break
+      }
+      scope = scope.parent
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Type casting in loop',

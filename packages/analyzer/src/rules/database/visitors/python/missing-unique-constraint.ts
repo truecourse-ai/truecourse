@@ -74,7 +74,8 @@ function extractColumnName(node: SyntaxNode): string | null {
       const fn = cur.childForFieldName('function')
       const methodName = fn?.type === 'attribute' ? fn.childForFieldName('attribute')?.text : null
       if (methodName === 'filter' || methodName === 'filter_by' || methodName === 'get' ||
-          methodName === 'get_or_create' || methodName === 'get_or_none') {
+          methodName === 'get_or_create' || methodName === 'get_or_none' ||
+          methodName === 'where') {
         const args = cur.childForFieldName('arguments')
         if (!args) { cur = cur.parent; continue }
 
@@ -121,7 +122,8 @@ function extractColumnFromChain(node: SyntaxNode): string | null {
       const callFn = cur.childForFieldName('function')
       const methodName = callFn?.type === 'attribute' ? callFn.childForFieldName('attribute')?.text : null
       if (methodName === 'filter' || methodName === 'filter_by' || methodName === 'get' ||
-          methodName === 'get_or_create' || methodName === 'get_or_none') {
+          methodName === 'get_or_create' || methodName === 'get_or_none' ||
+          methodName === 'where') {
         const args = cur.childForFieldName('arguments')
         if (args) {
           // Keyword argument: filter_by(email=val) → 'email'
@@ -199,7 +201,23 @@ export const pythonMissingUniqueConstraintVisitor: CodeRuleVisitor = {
 
     // Skip lookups by primary key fields — these are inherently unique and
     // a .first() by id/pk is a standard read, not a uniqueness check.
-    if (column && /^(id|pk|_id|uuid)$/.test(column)) return null
+    // Includes `<entity>_id` foreign-key / primary-key compound names
+    // (e.g., `conversation_id`, `user_id`) which by SQLAlchemy convention
+    // are usually FK columns referencing a unique parent column.
+    if (column && /^(id|pk|uuid|_id|[a-z][a-z0-9_]*_id)$/.test(column)) return null
+
+    // SQLAlchemy 2.0 splits query construction from execution:
+    //   query  = select(User).where(User.id == uid)
+    //   result = await session.execute(query)
+    //   user   = result.scalar_one_or_none()    ← rule fires here
+    // The column info lives in the previous `.where(...)` clause in
+    // the same function — the receiver-walk above can't see it because
+    // the find call's receiver is `result`, not the select chain.
+    // Scan the enclosing function body for a `.where(<X>.id == ...)` /
+    // `.where(<X>._id == ...)` / `.where(<X>.<foo>_id == ...)` pattern.
+    // If found, treat as primary-key / FK lookup and skip.
+    const bodyForPkScan = body.text
+    if (/\.where\(\s*\w+\.(?:id|pk|_id|[a-z][a-z0-9_]*_id)\s*[=!<>]/.test(bodyForPkScan)) return null
 
     if (schemaIndex && schemaIndex.hasSchemas() && column) {
       if (table) {
