@@ -70,6 +70,16 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
     ) return null
     if (FIRE_AND_FORGET_METHODS.has(funcName)) return null
 
+    // i18next chained-builder init pattern:
+    //   `i18n.use(Backend).use(LanguageDetector).init({...})`
+    // The chained `.use(...)` calls are i18next's plugin-builder
+    // signature; library docs position this as fire-and-forget at
+    // module top level.
+    if (funcName === 'init' && fn.type === 'member_expression') {
+      const receiver = fn.childForFieldName('object')
+      if (receiver && /\.use\s*\(/.test(receiver.text)) return null
+    }
+
     // Use real type info to check if the call returns a Promise.
     // Replaces the previous ASYNC_PREFIXES name heuristic which:
     //   - missed async calls without a known prefix (commit, dispatch, query, publish, ...)

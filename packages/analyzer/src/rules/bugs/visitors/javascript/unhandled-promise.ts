@@ -41,6 +41,21 @@ export const unhandledPromiseVisitor: CodeRuleVisitor = {
       if (fn?.type === 'member_expression') {
         const prop = fn.childForFieldName('property')
         if (prop?.text === 'catch' || prop?.text === 'then') return null
+        // Library fire-and-forget: TanStack Query / React Router /
+        // analytics SDKs / i18next chained init. Same allowlist as
+        // reliability/floating-promise.
+        const FIRE_AND_FORGET_METHODS = new Set([
+          'invalidateQueries', 'refetchQueries', 'removeQueries',
+          'cancelQueries', 'resetQueries', 'fetchNextPage', 'fetchPreviousPage',
+          'refetch', 'revalidate',
+          'capture', 'identify', 'track',
+        ])
+        if (prop && FIRE_AND_FORGET_METHODS.has(prop.text)) return null
+        // i18next `i18n.use(...).use(...).init({...})` chained builder
+        if (prop?.text === 'init') {
+          const receiver = fn.childForFieldName('object')
+          if (receiver && /\.use\s*\(/.test(receiver.text)) return null
+        }
       }
     }
 
