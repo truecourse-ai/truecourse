@@ -102,6 +102,22 @@ export const missingUseMemoExpensiveVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Cost-threshold check for `.filter`. Plain `.filter` over a small
+    // list with a simple equality/string predicate is O(N) and rarely
+    // expensive enough to warrant memoizing — most lists are <100
+    // items in real apps. Documenso's audit found ~75% FPs on shapes
+    // like `.filter((x) => x.name.includes(q))`. Other methods in the
+    // EXPENSIVE_ARRAY_METHODS set (`sort` is O(N log N), `reduce` /
+    // `flatMap` / `flat` are open-ended) carry inherent cost above O(N)
+    // and continue to fire unconditionally.
+    if (prop.text === 'filter') {
+      const args = node.childForFieldName('arguments')
+      if (!args) return null
+      const callbackText = args.text
+      const NESTED_EXPENSIVE = /\.(?:filter|map|reduce|sort|flatMap|flat|forEach|find|findIndex|some|every)\s*\(|\bnew\s+RegExp\b|\bJSON\.parse\s*\(|\.matchAll\s*\(|\.exec\s*\(|\.match\s*\(|\.replaceAll\s*\(/
+      if (!NESTED_EXPENSIVE.test(callbackText)) return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       `Expensive .${prop.text}() in render without useMemo`,

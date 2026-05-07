@@ -61,8 +61,10 @@ export function BatchUpdate({ items }: { items: string[] }) {
 
 // VIOLATION: performance/deterministic/missing-usememo-expensive
 export function ExpensiveFilter({ items }: { items: Array<{ active: boolean; name: string }> }) {
-  const activeItems = items.filter((item) => item.active);
-  return <ul>{activeItems.map((i) => <li key={i.name}>{i.name}</li>)}</ul>;
+  // .sort with a comparator is O(N log N) — inherently above plain
+  // O(N) and worth memoizing for stable renders.
+  const sortedItems = items.slice().sort((a, b) => a.name.localeCompare(b.name));
+  return <ul>{sortedItems.map((i) => <li key={i.name}>{i.name}</li>)}</ul>;
 }
 
 // VIOLATION: performance/deterministic/unnecessary-context-provider

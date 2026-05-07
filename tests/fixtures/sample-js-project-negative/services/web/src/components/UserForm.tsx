@@ -27,7 +27,10 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
   const [submitting, setSubmitting] = useState(false);
 
   // VIOLATION: performance/deterministic/missing-usememo-expensive
-  const filteredRoles = roles.filter((r) => r !== 'superadmin');
+  // sort with a comparator is O(N log N) — flagged regardless of list
+  // size. (Plain `.filter` with a simple predicate no longer fires;
+  // see ReactPerformance.tsx for the cost-threshold rationale.)
+  const sortedRoles = roles.slice().sort();
 
   // VIOLATION: code-quality/deterministic/missing-return-type
   function validate() {
