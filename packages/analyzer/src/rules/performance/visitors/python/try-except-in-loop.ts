@@ -43,6 +43,24 @@ export const tryExceptInLoopVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // IO-bound loop body: when the try block does network/DB/file IO,
+    // the per-iteration cost is dominated by the IO call (microseconds
+    // to seconds) and try/except setup (nanoseconds) is invisible.
+    // Flagging is pure noise — every paginated HTTP fetch, GraphQL
+    // pagination loop, and per-page decode has this shape.
+    //
+    // Heuristic: scan the try block's body for `await ...` (async IO)
+    // or canonical IO-library call shapes (`requests.`, `httpx.`,
+    // `session.`, `urlopen`, `urllib.`, `subprocess.`, file-handle
+    // methods, base64 decode, etc.). Cheap textual scan — false
+    // negatives are acceptable since this rule is style-leaning.
+    const tryBody = node.childForFieldName('body')
+    if (tryBody) {
+      const bodyText = tryBody.text
+      const IO_PATTERNS = /\bawait\b|\brequests\.|\bhttpx\.|\bsession\.|\bsubprocess\.|\burllib\.|\burlopen\b|\bbase64\.|\.read\(|\.write\(|\.execute\(|\bopen\s*\(|\bjson\.loads?\b|\bjson\.dumps?\b|\bos\.(?:remove|stat|getenv|environ)/
+      if (IO_PATTERNS.test(bodyText)) return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'try/except inside loop',

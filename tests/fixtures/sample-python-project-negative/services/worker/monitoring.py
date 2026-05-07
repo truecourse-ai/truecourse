@@ -300,12 +300,19 @@ def after_return():
 # VIOLATION: style/deterministic/docstring-completeness
 # VIOLATION: code-quality/deterministic/missing-type-hints
 def risky_loop(items):
+    # CPU-bound try with a non-skip-only handler — the rule's
+    # canonical TP shape. (Skip-only `except X: pass` is filtered by
+    # isTypedSkipOnlyHandler; IO-bound bodies are filtered by the
+    # io-loop guard.) Compute is pure CPU and the handler appends
+    # so it isn't a skip.
+    results = []
     # VIOLATION: performance/deterministic/try-except-in-loop
     for item in items:
         try:
-            process(item)
-        except ValueError:
-            pass
+            results.append(item.compute())
+        except Exception:  # noqa: BLE001
+            results.append(None)
+    return results
 
 
 # ---- Batch writes in loop ----
