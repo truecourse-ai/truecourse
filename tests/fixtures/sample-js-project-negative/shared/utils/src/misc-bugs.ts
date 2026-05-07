@@ -192,8 +192,12 @@ export function negationPrecedence(obj: any) {
 }
 
 // VIOLATION: bugs/deterministic/unsafe-type-assertion
-export function broadAssert(input: unknown) {
-  return input as string;
+export function broadAssert(input: string) {
+  // Concrete-to-concrete unsafe: a string asserted as a number — these
+  // types share no overlap, so the assertion silently masks a real
+  // type error. (`unknown as T` is the rule's documented escape
+  // hatch; `[] as T[]` is the empty-array idiom — both skipped.)
+  return input as number;
 }
 
 // VIOLATION: bugs/deterministic/unsafe-unary-minus

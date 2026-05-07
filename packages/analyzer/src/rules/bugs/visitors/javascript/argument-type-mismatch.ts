@@ -79,6 +79,24 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
       const expectedType = paramTypes?.[i]?.type
       const expectedName = paramTypes?.[i]?.name ?? `param ${i + 1}`
       if (expectedType && !isUnresolvedType(expectedType)) {
+        // Identity-type "mismatch" — the rule reports `X` not assignable
+        // to `X`. Symptom of the TS-compiler symbol-identity drift across
+        // scoped programs in monorepos: same nominal type appears as
+        // distinct symbol identities so isAssignable returns false. Skip.
+        if (argType === expectedType) continue
+
+        // useCallback / useMemo / useEffect deps array. The expected
+        // parameter type is `DependencyList = ReadonlyArray<unknown>`
+        // which accepts ANY array. The mismatch report ("Argument is
+        // `(string|number)[]` but parameter `deps` expects `unknown[]`")
+        // is spurious — `unknown[]` is the universal supertype.
+        if (
+          expectedType === 'DependencyList' ||
+          expectedType === 'readonly unknown[]' ||
+          expectedType === 'unknown[]' ||
+          expectedType === 'ReadonlyArray<unknown>'
+        ) continue
+
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Argument type mismatch',

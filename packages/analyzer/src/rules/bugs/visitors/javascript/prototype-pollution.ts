@@ -66,6 +66,16 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     // demonstrably considered the issue.
     if (isAssignmentGuardedByKeyInObject(node, keyName, obj.text)) return null
 
+    // Skip when the receiver is a LOCAL object-literal aggregate. The
+    // shape `const stats = { READ: 0, SIGN: 0, ... }; stats[status] += n`
+    // is an aggregator over known enum keys, and even if `status` were
+    // `__proto__` the developer's literal's prototype chain is already
+    // bounded by Object.prototype — but more importantly, the key in
+    // these patterns comes from a typed enum (TS string-literal union /
+    // Prisma enum), not user input. The agent audit on documenso found
+    // 7/7 prototype-pollution hits were this exact aggregator pattern.
+    if (obj.type === 'identifier' && isLocalObjectLiteral(node, obj.text)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Prototype pollution',
@@ -206,6 +216,49 @@ function isAssignmentGuardedByKeyInObject(
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// True when `objName` is declared in an enclosing scope as
+// `const|let|var objName = { ... }` — i.e., a local object-literal
+// aggregator with developer-controlled prototype chain.
+function isLocalObjectLiteral(assignmentNode: SyntaxNode, objName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return false
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'identifier' && name.text === objName && value?.type === 'object') {
+        found = true
+        return
+      }
+    }
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'arrow_function' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
+  return found
 }
 
 function isObjectEntriesOrKeys(node: SyntaxNode): boolean {

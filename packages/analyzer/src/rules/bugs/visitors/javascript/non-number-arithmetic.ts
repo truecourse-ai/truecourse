@@ -28,8 +28,12 @@ export const nonNumberArithmeticVisitor: CodeRuleVisitor = {
     if (!leftType || !rightType) return null
 
     const numericTypes = new Set(['number', 'bigint', 'any'])
-    const leftOk = numericTypes.has(leftType) || /^\d+$/.test(leftType)
-    const rightOk = numericTypes.has(rightType) || /^\d+$/.test(rightType)
+    // Numeric-literal types in TypeScript are reported as the value itself —
+    // `19.125`, `-1`, `1e10`, `0xff`. Accept all of these as numeric, not
+    // just integer literals.
+    const NUMERIC_LITERAL_RE = /^-?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|0x[0-9a-fA-F]+|0o[0-7]+|0b[01]+)n?$/
+    const leftOk = numericTypes.has(leftType) || NUMERIC_LITERAL_RE.test(leftType)
+    const rightOk = numericTypes.has(rightType) || NUMERIC_LITERAL_RE.test(rightType)
 
     // Skip if either operand is a numeric literal — it's definitely a number
     if (left.type === 'number' || right.type === 'number') return null

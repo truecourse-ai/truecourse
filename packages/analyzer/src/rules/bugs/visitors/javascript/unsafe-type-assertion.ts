@@ -57,6 +57,31 @@ export const unsafeTypeAssertionVisitor: CodeRuleVisitor = {
         typeAnnotation.endPosition.row,
         typeAnnotation.endPosition.column,
       )
+      // Identity assertion: source and target render to the same string.
+      // Caused by structural-equivalent globals (`VisibilityState`/
+      // `DocumentVisibilityState`) or message-extraction span issues
+      // where we recompute the source type and it matches the target.
+      // Either way, an "X to X" assertion is not "incompatible" by any
+      // useful definition.
+      if (exprType && targetType && exprType === targetType) return null
+
+      // Empty-array literal `[] as T[]` — the empty array has type
+      // `never[]` which the checker reports as incompatible with
+      // `T[]`, but it's the standard idiom for explicitly-typed
+      // empty array literals.
+      if (expr.type === 'array' && expr.namedChildCount === 0) return null
+
+      // EventTarget → Node / HTMLElement and similar DOM-lattice
+      // upcasts. React refs and DOM event handlers conventionally
+      // assert from EventTarget to a more specific Node subtype;
+      // the runtime guarantee comes from the surrounding event /
+      // ref context, not from the declared type.
+      const DOM_UPCAST_PAIRS = new Set([
+        'EventTarget→Node', 'EventTarget→HTMLElement', 'EventTarget→Element',
+        'Node→HTMLElement', 'Node→Element', 'Element→HTMLElement',
+      ])
+      if (exprType && targetType && DOM_UPCAST_PAIRS.has(`${exprType}→${targetType}`)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'Unsafe type assertion',
