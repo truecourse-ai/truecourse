@@ -108,26 +108,42 @@ function findUsages(root: SyntaxNode, name: string, importNode: SyntaxNode): Usa
 }
 
 function isInAnnotation(node: SyntaxNode): boolean {
-  let current = node.parent
+  // Find the OUTERMOST `type` ancestor — annotations nest via
+  // generic_type / type_parameter wrappers. For `dict[str, Any]` in a
+  // parameter, the AST chain is:
+  //   identifier(Any) → type → type_parameter → generic_type → type → typed_parameter
+  // Stopping at the first `type` makes the walker see `type_parameter`
+  // as the host, which is wrong — the actual annotation context is
+  // the OUTER `type`'s parent (typed_parameter, function_definition,
+  // assignment in a class body, etc.).
+  let outermostType: SyntaxNode | null = null
+  let current: SyntaxNode | null = node.parent
   while (current) {
-    if (current.type === 'type') {
-      // In Python, function parameter and return type annotations are evaluated at runtime
-      // (unless `from __future__ import annotations` is in effect).
-      // So usage in a function signature is a RUNTIME use, not typing-only.
-      const typeParent = current.parent
-      if (typeParent) {
-        // Parameter annotation: type -> typed_parameter/typed_default_parameter -> parameters -> function_definition
-        if (typeParent.type === 'typed_parameter' || typeParent.type === 'typed_default_parameter') {
-          return false // runtime use — function parameter annotation
-        }
-        // Return type annotation: type -> function_definition (return_type field)
-        if (typeParent.type === 'function_definition') {
-          return false // runtime use — function return type annotation
-        }
-      }
-      return true // other type annotation contexts (variable annotations, etc.)
-    }
+    if (current.type === 'type') outermostType = current
     current = current.parent
   }
-  return false
+  if (!outermostType) return false
+
+  const typeParent = outermostType.parent
+  if (!typeParent) return true
+
+  // Runtime annotation contexts. Imports used here cannot be moved
+  // under TYPE_CHECKING without breaking the program.
+  switch (typeParent.type) {
+    // Function parameter / return annotations — evaluated when the
+    // function is defined.
+    case 'typed_parameter':
+    case 'typed_default_parameter':
+    case 'function_definition':
+      return false
+    // Class-body annotations evaluated at class-creation time.
+    // SQLAlchemy 2.0's `id: Mapped[int]` and Pydantic's
+    // `field: T = Field(...)` both rely on the runtime annotation
+    // dictionary to build mappers/models — moving the import out
+    // breaks model construction at import time.
+    case 'assignment':
+      return false
+    default:
+      return true
+  }
 }
