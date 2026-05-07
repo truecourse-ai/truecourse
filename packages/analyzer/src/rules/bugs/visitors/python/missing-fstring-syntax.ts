@@ -141,6 +141,38 @@ function isLikelyFormatTemplate(node: SyntaxNode): boolean {
     }
   }
 
+  // Case 3: String is a value in a dict / pair whose key is a
+  // class-member access (`SlackErrorCode.REDIS_FAILED: '...{code}...'`).
+  // These are canonical error / message lookup tables consumed via
+  // `.format(...)` downstream. Climb past concatenated_string and
+  // parenthesized_expression wrappers since multi-part templates are
+  // common.
+  let cursor: SyntaxNode | null = node.parent
+  while (cursor && (cursor.type === 'concatenated_string' || cursor.type === 'parenthesized_expression')) {
+    cursor = cursor.parent
+  }
+  if (cursor?.type === 'pair') {
+    const keyNode = cursor.childForFieldName('key')
+    if (keyNode?.type === 'attribute') return true
+    if (keyNode?.type === 'identifier') {
+      const k = keyNode.text.toLowerCase()
+      if (TEMPLATE_NAME_EXACT.has(k)) return true
+      for (const suffix of TEMPLATE_NAME_SUFFIXES) if (k.endsWith(suffix)) return true
+    }
+  }
+
+  // Case 4: String is the value of `description=` / `help=` /
+  // `placeholder=` / `doc=` keyword argument. Help-text and
+  // Pydantic Field descriptions frequently include `{placeholder}`
+  // examples that aren't meant to be formatted.
+  if (cursor?.type === 'keyword_argument') {
+    const name = cursor.childForFieldName('name')
+    const k = name?.text.toLowerCase() ?? ''
+    if (k === 'description' || k === 'help' || k === 'placeholder' || k === 'doc' || k === 'docstring') {
+      return true
+    }
+  }
+
   return false
 }
 
