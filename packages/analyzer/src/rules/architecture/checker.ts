@@ -473,6 +473,14 @@ export function checkModuleRules(
         // Skip classes used as type annotations (params, return types, superclasses)
         if (usedAsType.has(mod.name)) continue
 
+        // Skip classes constructed in their own file. logger.py-style
+        // modules define internal Filter/Formatter classes and only use
+        // them via `addFilter(StackInfoFilter())` / `setFormatter(...)`
+        // inside the same file — the class is "exported" by being top-
+        // level but is genuinely internal. Same rationale as the
+        // calledInOwnFile skip on the methods branch above.
+        if (calledInOwnFile.get(mod.filePath)?.has(mod.name)) continue
+
         violations.push({
           ruleKey: 'architecture/deterministic/unused-export',
           title: `Unused export: \`${mod.name}\``,

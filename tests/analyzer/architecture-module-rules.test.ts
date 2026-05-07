@@ -75,6 +75,47 @@ describe('checkModuleRules', () => {
     expect(unusedViolations).toHaveLength(0);
   });
 
+  // Same-file class instantiation: a class defined in `logger.py` and
+  // only used inside `logger.py` (e.g., `addFilter(StackInfoFilter())`)
+  // is NOT unused — it's just used internally by its own file.
+  it('does not flag exported class that is only constructed in its own file', () => {
+    const modules = [
+      makeModule({
+        name: 'StackInfoFilter',
+        kind: 'class',
+        filePath: '/repo/svc/src/logger.py',
+        exportCount: 1,
+      }),
+    ];
+    const fileAnalyses: FileAnalysis[] = [
+      {
+        filePath: '/repo/svc/src/logger.py',
+        language: 'python',
+        functions: [],
+        classes: [],
+        imports: [],
+        exports: [],
+        calls: [
+          {
+            callee: 'StackInfoFilter',
+            arguments: [],
+            location: { line: 384, column: 0, endLine: 384, endColumn: 20 },
+          },
+        ],
+        httpCalls: [],
+      },
+    ];
+
+    const violations = checkModuleRules(
+      modules, [], [], enabledRules, undefined, undefined, fileAnalyses,
+    );
+
+    const unused = violations.filter(
+      (v) => v.ruleKey === 'architecture/deterministic/unused-export' && v.moduleName === 'StackInfoFilter'
+    );
+    expect(unused).toHaveLength(0);
+  });
+
   it('respects disabled rules', () => {
     const allDisabled = enabledRules.map((r) => ({ ...r, enabled: false }));
     const modules = [makeModule({ methodCount: 100 })];
