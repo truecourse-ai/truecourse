@@ -29,11 +29,14 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     // Skip if optional chaining is used: arr.find(...)?.property
     if (parent.type === 'optional_chain_expression') return null
 
-    // Skip when the parent is a member_expression using optional chaining (?.)
+    // Skip when the parent is a member_expression using optional chaining (?.).
+    // Multi-line chains (`arr\n  .find(...)\n  ?.x`) have whitespace between
+    // the find call's `)` and the `?.` operator — trim it before the prefix
+    // check, otherwise the skip path misses the canonical formatted shape.
     if (parent.type === 'member_expression' && parent.childForFieldName('object')?.id === node.id) {
       const parentText = parent.text
       const findCallEnd = node.endIndex - parent.startIndex
-      const afterFind = parentText.slice(findCallEnd)
+      const afterFind = parentText.slice(findCallEnd).trimStart()
       if (afterFind.startsWith('?.')) return null
     }
 
