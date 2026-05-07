@@ -201,6 +201,42 @@ export function isScriptLikeFile(node: SyntaxNode, filePath: string): boolean {
       }
     }
   }
+
+  // Top-level imperative code IS a script signal even without `__main__`
+  // guard. A file with top-level `for`/`while` loops, `if` blocks (not
+  // a TYPE_CHECKING / __main__ guard), or top-level `sys.exit(...)`
+  // calls runs at import time — that's script behavior, not library.
+  if (!found) {
+    for (const child of module.namedChildren) {
+      // Top-level for / while
+      if (child.type === 'for_statement' || child.type === 'while_statement') {
+        found = true
+        break
+      }
+      // Top-level if NOT a __main__ / TYPE_CHECKING guard
+      if (child.type === 'if_statement') {
+        const condition = child.childForFieldName('condition')
+        if (condition && /TYPE_CHECKING/.test(condition.text)) continue
+        // Already covered the __main__ case above; any OTHER top-level if
+        // is imperative branching = script.
+        found = true
+        break
+      }
+      // Top-level sys.exit / exit / quit call
+      if (child.type === 'expression_statement') {
+        const expr = child.namedChildren[0]
+        if (expr?.type === 'call') {
+          const fn = expr.childForFieldName('function')
+          const callText = fn?.text ?? ''
+          if (callText === 'sys.exit' || callText === 'exit' || callText === 'quit' || callText === 'os._exit') {
+            found = true
+            break
+          }
+        }
+      }
+    }
+  }
+
   scriptLikeCache.set(module, found)
   return found
 }

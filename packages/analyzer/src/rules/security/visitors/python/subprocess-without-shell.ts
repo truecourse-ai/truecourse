@@ -29,6 +29,15 @@ export const pythonSubprocessWithoutShellVisitor: CodeRuleVisitor = {
 
     // Flag when first argument is a variable (could be user-controlled), not a literal list
     if (firstArg.type === 'identifier') {
+      // Skip when the identifier is a parameter of the enclosing
+      // function whose type annotation is `list[str]` /
+      // `Sequence[str]` / `tuple[str, ...]`. The annotation
+      // structurally rules out shell injection — there's no shell
+      // interpolation when the first arg is a sequence of strings,
+      // and the param type guarantees that shape.
+      const paramName = firstArg.text
+      if (isStringSequenceTypedParam(node, paramName)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Subprocess call without shell review',
@@ -40,4 +49,27 @@ export const pythonSubprocessWithoutShellVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+function isStringSequenceTypedParam(callNode: import('web-tree-sitter').Node, paramName: string): boolean {
+  // Walk to enclosing function_definition.
+  let scope: import('web-tree-sitter').Node | null = callNode.parent
+  while (scope) {
+    if (scope.type === 'function_definition') break
+    scope = scope.parent
+  }
+  if (!scope) return false
+  const params = scope.childForFieldName('parameters')
+  if (!params) return false
+  for (const p of params.namedChildren) {
+    if (p.type !== 'typed_parameter' && p.type !== 'typed_default_parameter') continue
+    const inner = p.childForFieldName('pattern') ?? p.namedChildren[0]
+    if (inner?.type !== 'identifier' || inner.text !== paramName) continue
+    const typeNode = p.childForFieldName('type') ?? p.namedChildren[1]
+    if (!typeNode) continue
+    const annotText = typeNode.text
+    // list[str] / List[str] / Sequence[str] / tuple[str, ...] / Iterable[str]
+    if (/\b(?:list|List|Sequence|Iterable|tuple|Tuple)\s*\[\s*str/i.test(annotText)) return true
+  }
+  return false
 }

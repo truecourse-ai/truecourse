@@ -1,6 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isScriptLikeFile } from '../../../_shared/python-helpers.js'
 
 // Schema-migration directories: Alembic / Django / generic migration files
 // are essentially top-down scripts whose canonical structure includes
@@ -53,6 +54,13 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
   nodeTypes: ['assignment'],
   visit(node, filePath, sourceCode) {
     if (MIGRATION_PATH_RE.test(filePath)) return null
+
+    // Script-like files (top-level imperative code, sys.exit at module
+    // top, __main__ guard, scripts/ / bin/ / cli/ directories): the
+    // "global mutable state" concern doesn't apply — the file IS the
+    // entry point and module-level vars are local to that script's
+    // execution, not shared across multiple importers.
+    if (isScriptLikeFile(node, filePath)) return null
 
     // tree-sitter wraps assignments in expression_statement, so check both:
     // assignment → module  OR  assignment → expression_statement → module

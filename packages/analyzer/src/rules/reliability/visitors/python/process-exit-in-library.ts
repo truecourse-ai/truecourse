@@ -26,6 +26,21 @@ export const pythonProcessExitInLibraryVisitor: CodeRuleVisitor = {
     // Allow in entry-point / script-like files
     if (isScriptLikeFile(node, filePath)) return null
 
+    // Allow when the call sits at MODULE TOP LEVEL (no enclosing function
+    // definition). Module-level `sys.exit(1)` is necessarily script
+    // code — it executes at import time and terminates the process.
+    // No library would do this; the file is implicitly a script even
+    // without a `__main__` guard.
+    let scope: import('web-tree-sitter').Node | null = node.parent
+    while (scope) {
+      if (scope.type === 'function_definition') break
+      if (scope.type === 'module') {
+        // Reached module without crossing a function — top-level call.
+        return null
+      }
+      scope = scope.parent
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'sys.exit() in non-entry-point code',

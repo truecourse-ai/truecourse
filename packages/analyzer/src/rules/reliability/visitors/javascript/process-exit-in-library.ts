@@ -32,6 +32,12 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
     ) {
       return null
     }
+    // Seed / migrate scripts. `seed-database.ts`, `seed.ts`, `*.seed.ts`,
+    // `migrate.ts` are CLI entry points even without `cli.` / `bin/` in
+    // the path — they're invoked via `pnpm seed` or similar.
+    const basename = lowerPath.split('/').pop() ?? ''
+    if (/^(?:seed|seeds|seeder|seed-[\w-]+|migrate|cli)\.[cm]?[jt]sx?$/.test(basename)) return null
+    if (/\.seed\.[cm]?[jt]sx?$/.test(basename)) return null
 
     // Allow in files with a shebang (`#!/usr/bin/env node`) — those are
     // CLI entry points regardless of their location.

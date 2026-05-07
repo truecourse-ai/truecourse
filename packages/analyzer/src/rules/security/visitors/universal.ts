@@ -172,6 +172,12 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     // Skip version-like numbers in User-Agent strings, semver, etc.
     if (/Mozilla|Chrome|Safari|Firefox|AppleWebKit|Gecko/i.test(stripped)) return null
 
+    // Skip strings that contain example/help-text markers — `e.g.`,
+    // `for example`, `<your-X>`. The IP is illustrative, not configured.
+    // Pydantic Field descriptions and CLI help strings frequently embed
+    // example IPs (e.g. `'For remote access, set to e.g. http://192.168.1.100'`).
+    if (/\b(?:e\.g\.|for example|example:|<your-?|placeholder|\.example\b)/i.test(stripped)) return null
+
     // Validate each octet is 0-255
     const octets = ip.split('.')
     if (octets.some((o) => parseInt(o, 10) > 255)) return null

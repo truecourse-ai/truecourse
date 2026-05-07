@@ -301,7 +301,13 @@ describe('reliability/deterministic/process-exit-in-library', () => {
   });
 
   it('detects sys.exit() in Python library code', () => {
-    const violations = check(`sys.exit(1)`, 'python', '/src/utils/helper.py');
+    // Module-level `sys.exit(1)` is treated as a script signal — the
+    // file runs and terminates at import time, which no library does.
+    // Library code calls sys.exit INSIDE a function definition.
+    const violations = check(`
+def cleanup_and_exit():
+    sys.exit(1)
+`, 'python', '/src/utils/helper.py');
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
 
