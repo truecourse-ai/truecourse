@@ -534,6 +534,57 @@ export function checkModuleRules(
           if (sameFileRefs.has(mod.name) || modMethods.some((m) => sameFileRefs.has(m))) continue
         }
 
+        // Cross-package fallback. moduleLevelDeps misses workspace-
+        // package imports on real monorepos (documenso's audit showed
+        // ~11/13 dead-module hits were modules consumed across
+        // packages/* and apps/* boundaries — `adminFindDocuments`,
+        // `updateUser`, `transferTeamEnvelopes`, etc.).
+        //
+        // For each flagged module, look across fileAnalyses for an
+        // importer that:
+        //   1. imports a name matching the module (mod.name or any of
+        //      its method names) — by specifier OR via a source path
+        //      whose basename matches this file's basename.
+        //   2. then ACTUALLY CALLS that imported name in the file.
+        //
+        // The "actually calls" check matters: a barrel `index.ts`
+        // re-exporting a module with `export { logger } from './logger'`
+        // would otherwise falsely "rescue" a truly dead module.
+        const fileBasename = mod.filePath.split('/').pop()?.replace(/\.\w+$/, '')
+        const modMethods = moduleMethodNames.get(key) ?? []
+        const candidateNames = new Set<string>([mod.name, ...modMethods])
+        let liveByImport = false
+        if (fileAnalyses && fileBasename) {
+          for (const fa of fileAnalyses) {
+            if (fa.filePath === mod.filePath) continue
+            let importedName: string | null = null
+            for (const imp of fa.imports) {
+              const impBasename = imp.source.split('/').pop()?.replace(/\.\w+$/, '')
+              const sourceMatches = impBasename === fileBasename
+              for (const spec of imp.specifiers) {
+                if (candidateNames.has(spec.name) && (sourceMatches || imp.source.includes(fileBasename))) {
+                  importedName = spec.name
+                  break
+                }
+              }
+              if (importedName) break
+            }
+            if (!importedName) continue
+            for (const call of fa.calls) {
+              if (call.callee === importedName || call.callee.endsWith('.' + importedName)) {
+                liveByImport = true
+                break
+              }
+              if (call.arguments?.some((a) => a === importedName)) {
+                liveByImport = true
+                break
+              }
+            }
+            if (liveByImport) break
+          }
+        }
+        if (liveByImport) continue
+
         violations.push({
           ruleKey: 'architecture/deterministic/dead-module',
           title: `Dead module: \`${mod.name}\``,
