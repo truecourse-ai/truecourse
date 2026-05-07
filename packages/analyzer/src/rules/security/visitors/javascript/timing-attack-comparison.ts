@@ -13,7 +13,15 @@ const SENSITIVE_COMPARISON_PATTERNS = /(?:token|secret|hmac|signature|apikey|api
 function isEnumLikeReference(node: SyntaxNode): boolean {
   if (node.type === 'string') {
     const inner = node.text.replace(/^[fFbBrRuU]*['"`]{1,3}|['"`]{1,3}$/g, '')
+    // SCREAMING_SNAKE_CASE — `'TOKEN'`, `'API_KEY'`
     if (/^[A-Z][A-Z0-9_]*$/.test(inner)) return true
+    // kebab-case state names — `'add-secret-form'`, `'edit-mode'`,
+    // `'rate-limited'`. Real credentials never contain hyphens; a
+    // hyphenated string compared with `===` is a UI/state dispatch
+    // key, not a credential.
+    if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(inner)) return true
+    // dotted state-name — `'user.signed-in'`, `'env.prod'`
+    if (/^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)+$/.test(inner)) return true
   }
   if (node.type === 'member_expression') {
     const property = node.childForFieldName('property')
@@ -68,6 +76,20 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
       // Skip presence/state checks: `signature !== ''`, `token === null`,
       // `enabled === false`, `length === 0`. Sentinel operand carries no secret.
       if (isPresenceCheckOperand(left) || isPresenceCheckOperand(right)) return null
+
+      // Skip when one operand uses `??` fallback: `value !== (settings.x ?? "")`.
+      // The `??` operator widens the comparison to include the fallback
+      // value (typically empty string / 0 / null), which is incompatible
+      // with cryptographic equality. The presence of `??` signals a
+      // form-dirty / equality-with-default check, not a credential
+      // comparison.
+      const isNullishCoalesce = (n: SyntaxNode): boolean => {
+        let inner: SyntaxNode | null = n
+        if (inner.type === 'parenthesized_expression') inner = inner.namedChildren[0] ?? null
+        return !!inner && inner.type === 'binary_expression' &&
+          inner.children.some((c) => c.text === '??')
+      }
+      if (isNullishCoalesce(left) || isNullishCoalesce(right)) return null
       // Skip object identity comparisons via `.id` or any `*Id`-suffixed
       // property (`token.id`, `apiToken.teamId`, `event.userId`,
       // `record.organisationId`). DB IDs are application-controlled,
