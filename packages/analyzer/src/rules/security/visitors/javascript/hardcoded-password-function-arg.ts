@@ -22,6 +22,13 @@ export const hardcodedPasswordFunctionArgVisitor: CodeRuleVisitor = {
 
     if (!PASSWORD_FUNCTION_NAMES.test(funcName)) return null
 
+    // Skip React state setters / Redux dispatch / event-channel setters
+    // — these aren't auth functions even when their name happens to
+    // contain a token from the credential-function regex (e.g.,
+    // `setMainConnectionState("CONNECTING")` matches "connect"). The
+    // `setX` / `dispatchX` / `emitX` prefix is the canonical signal.
+    if (/^(?:set|dispatch|emit|on|use|with)[A-Z]/.test(funcName)) return null
+
     const args = node.childForFieldName('arguments')
     if (!args) return null
 

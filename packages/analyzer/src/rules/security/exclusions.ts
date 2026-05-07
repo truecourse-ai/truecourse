@@ -43,6 +43,17 @@ export const GLOBAL_ALLOWLIST: RegExp[] = [
   /^x+$/i, // All x's (placeholder)
   /^\.{3,}$/, // Ellipsis placeholders
 
+  // Public-by-design API keys. PostHog's `phc_` prefix denotes a
+  // project API key explicitly designed to ship in browser bundles
+  // (publicly documented). Flagging it as a secret is wrong — the
+  // documented usage is to expose it. Other public-by-design vendor
+  // prefixes (Stripe pk_test/pk_live, Mapbox pk., Google AIza) are
+  // intentionally NOT in this allowlist because the existing
+  // secret-scanner tests treat them as secrets per maintainer policy
+  // (test keys shouldn't appear in production code, browser-restricted
+  // keys still leak quota/abuse, etc.).
+  /^phc_[A-Za-z0-9_-]+$/,        // PostHog project API key (browser-shipped)
+
   // Filenames with a recognized document / media / archive / data
   // extension. Composed object keys like `<hash>__<date>__<batch>.pdf`
   // look like high-entropy tokens to pattern detectors, but the
