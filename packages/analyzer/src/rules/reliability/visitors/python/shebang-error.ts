@@ -7,16 +7,29 @@ export const pythonShebangErrorVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['module'],
   visit(node, filePath, sourceCode) {
-    // Only check files that are clearly meant to be directly executed:
-    // 1. __main__.py files, OR
-    // 2. files with a `if __name__ == "__main__":` guard
-    // Don't fire just because a file is in scripts/ or bin/ — it could be a helper module.
     if (filePath.endsWith('__init__.py')) return null
     const segments = filePath.split('/')
     const fileName = segments[segments.length - 1] ?? ''
-    const isMainFile = fileName === '__main__.py'
+
+    // `__main__.py` is the canonical entry for `python -m package`,
+    // which does NOT use the shebang. Only `./script.py`-style direct
+    // execution does. Skip __main__.py entirely.
+    if (fileName === '__main__.py') return null
+
+    // The shebang only matters for files invoked AS executables
+    // (`./file.py`). That requires both a shebang AND the executable
+    // bit — and is conventionally restricted to `bin/`-shaped
+    // directories. A file with `if __name__ == "__main__":` alone is
+    // most often a module that's ALSO runnable via `python -m` or
+    // `pytest`, neither of which need a shebang.
+    //
+    // Restrict firing to files whose path segment is `bin/`, `bins/`,
+    // or `cli/` — the canonical executable-script locations.
+    const isExecutablePath = /(?:^|\/)(?:bin|bins|cli)\//.test(filePath)
+    if (!isExecutablePath) return null
+
     // Check for __main__ guard using the shared helper's AST check
-    const hasMainGuard = !isMainFile && (() => {
+    const hasMainGuard = (() => {
       const module = node.type === 'module' ? node : null
       if (!module) return false
       for (const child of module.namedChildren) {
@@ -27,7 +40,7 @@ export const pythonShebangErrorVisitor: CodeRuleVisitor = {
       }
       return false
     })()
-    if (!isMainFile && !hasMainGuard) return null
+    if (!hasMainGuard) return null
 
     const firstLine = sourceCode.split('\n')[0]
     if (!firstLine) return null
