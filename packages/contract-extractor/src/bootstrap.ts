@@ -2,11 +2,10 @@
  * Bootstrap — propose `.truecourse/specs.yaml` when the user runs
  * `truecourse contracts generate` for the first time.
  *
- * Phase 8 ships a deterministic heuristic so the system works without
- * a network call. Phase 10 will swap in an LLM call (one shot via Claude
- * Code) that reads candidate file headers and infers ranks. The two
- * implementations share this module's input shape; the LLM variant will
- * just replace `proposeWithHeuristic`.
+ * The deterministic heuristic exported here is the offline fallback used
+ * when `claude` is unavailable, the call fails, or its output doesn't
+ * pass schema validation. The primary path is `proposeWithLlm` in
+ * `llm-bootstrap.ts`; both produce the same `BootstrapProposal` shape.
  */
 
 import fs from 'node:fs';
@@ -120,12 +119,11 @@ function readPreview(absPath: string): string {
 }
 
 /**
- * Heuristic proposer — used when no LLM is available or the user passes
- * `--no-llm-bootstrap`. Phase 10 will add an LLM-driven sibling.
+ * Deterministic heuristic proposer. Maps candidate kinds to ranks:
  *
- * Ranking convention:
  *   rank 0: base spec
- *   rank 1: ADR series (sorted by filename)
+ *   rank 1: ADR series (sorted by filename; collapsed to a glob when
+ *           multiple ADRs share a directory)
  *   rank 2: RFCs (sorted by filename)
  */
 export function proposeWithHeuristic(candidates: BootstrapCandidate[]): BootstrapProposal {

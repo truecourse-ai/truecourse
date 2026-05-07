@@ -1,15 +1,15 @@
 /**
  * Operation comparator — diff spec-side vs code-side OperationContract.
  *
- * v1 covers the four Operation-only drift classes from the bug catalog:
+ * Drift classes emitted here:
  *   1. response.<N> missing                       (status declared, code never emits N)
  *   2. response.<N>.headers.<name> missing        (header required, code never sets)
  *   3. response.<N>.body.shape mismatch           (shape: bare-array vs structured)
  *   4. forbidden status emission                  (e.g. `forbid status 200 when resource-missing`)
  *
- * Cross-cutting concerns (auth-bearer presence, pagination scheme/limit,
- * error-envelope shape) are handled by their own comparators in Phase 2;
- * Operation here only diffs what the Operation artifact itself declares.
+ * Cross-cutting concerns (auth presence, pagination scheme/limit, error-
+ * envelope shape) are handled by their own comparators; Operation here
+ * only diffs what the Operation artifact itself declares.
  */
 
 import { randomUUID } from 'node:crypto';

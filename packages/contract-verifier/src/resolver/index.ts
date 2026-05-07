@@ -1,13 +1,14 @@
 /**
- * Phase-0 resolver. Walks the parsed statement tree, lifts each top-level
- * artifact into a typed envelope (`kind`, `ref`, `origin`, `declarationLoc`),
- * builds a `(type, identity) → artifact` index, and validates every
- * cross-reference appearing anywhere in any file resolves to a known
- * artifact.
+ * Resolver. Walks the parsed statement tree, lifts each top-level
+ * artifact into a typed envelope (`kind`, `ref`, `origin`,
+ * `declarationLoc`), builds a `(type, identity) → artifact` index, and
+ * validates that every cross-reference resolves to a known artifact.
  *
- * Phase-1 lifters will fill in `contract` per artifact kind. For now the
- * resolver leaves it as an opaque pointer to the parsed statement so a
- * later pass can do the typed lifting without re-parsing.
+ * Per-kind lifters populate `contract` with the typed body. Artifact
+ * kinds without an implemented lifter (e.g. `Enum`,
+ * `UnenforceableObligation`) keep `contract` undefined and act as
+ * resolution-only entries — references to them resolve, but no
+ * structural body is exposed downstream.
  */
 
 import type {
@@ -65,12 +66,13 @@ export interface ResolvedArtifact {
   ref: ArtifactRef;
   origin: SpecOrigin | null;
   declarationLoc: SourceLocation;
-  /** Pointer back to the parsed statement so Phase-1 lifters can interpret. */
+  /** Pointer back to the parsed statement, kept so per-kind lifters
+   *  (and any future re-interpretation pass) can re-read the body. */
   body: StatementNode;
   /**
-   * Typed per-kind contract. Only populated for artifact kinds whose
-   * lifter is implemented. Phase 1 implements `Operation`; later phases
-   * fill in the rest.
+   * Typed per-kind contract. Populated only for artifact kinds whose
+   * lifter is implemented; left undefined for kinds that exist purely
+   * to satisfy cross-references (`Enum`, `UnenforceableObligation`).
    */
   contract?:
     | OperationContract
@@ -154,10 +156,10 @@ export function resolve(files: FileNode[]): ResolveResult {
     });
   }
 
-  // Filter against the index. A ref like `Entity:Order.subtotalCents` is a
-  // field-path on the parent artifact; resolve by stripping the field
-  // suffix and looking up the parent. Field-level existence is validated
-  // by the per-artifact lifter in Phase 1.
+  // Filter against the index. A ref like `Entity:Order.subtotalCents` is
+  // a field-path on the parent artifact; resolve by stripping the field
+  // suffix and looking up the parent. Field-level existence is checked
+  // downstream by the per-artifact lifter, not here.
   const filtered = unresolvedRefs.filter(({ ref }) => {
     if (index.has(refKey(ref))) return false;
     const parentIdentity = stripFieldPath(ref.identity);
@@ -256,9 +258,10 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     lineEnd: stmt.loc.line, // refined later when lifters compute end-of-block
   };
 
-  // Phase 1: Operation. Phase 2: ErrorEnvelope, PaginationContract,
-  // AuthRequirement. Phase 3: Entity, StateMachine. Phase 4:
-  // AuthorizationRule, EffectGroup, Formula.
+  // Per-kind lifter dispatch. Kinds without a typed lifter (Enum,
+  // UnenforceableObligation, Effect — the last lives inside EffectGroup)
+  // leave `contract` undefined and rely on the resolver's index for
+  // cross-reference resolution.
   let contract:
     | OperationContract
     | ErrorEnvelopeContract

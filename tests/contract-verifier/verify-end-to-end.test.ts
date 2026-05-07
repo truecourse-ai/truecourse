@@ -68,12 +68,12 @@ describe('Contract verifier — end-to-end on fixture (Operation slice only)', (
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
     const expected = new Set([
-      // Phase 1 — Operation drifts
+      // Operation drifts
       'Operation:POST /api/orders / response.201',                                                  // bug #1
       'Operation:GET /api/orders / response.200.body.shape',                                       // bug #3
       'Operation:GET /api/orders/{id} / response.404',                                              // bug #4a
       'Operation:GET /api/orders/{id} / response.404.forbid.status-200-when-resource-missing',     // bug #4b
-      // Phase 2 — cross-cutting
+      // Cross-cutting (envelope + pagination + auth)
       'ErrorEnvelope:error.envelope.standard / POST /api/orders/response.400.shape',                // bug #12
       'PaginationContract:pagination.cursor.standard / GET /api/orders/forbid.query-param-offset', // bug #5a
       'PaginationContract:pagination.cursor.standard / GET /api/orders/forbid.query-param-page',   // bug #5b
@@ -85,18 +85,18 @@ describe('Contract verifier — end-to-end on fixture (Operation slice only)', (
       'AuthRequirement:auth.bearer.api / GET /api/customers/unprotected',                          // #11 cascade
       'AuthRequirement:auth.bearer.api / GET /api/customers/{id}/unprotected',                     // #11 cascade
       'AuthRequirement:auth.role.admin / POST /api/customers/unprotected',                          // #11 cascade
-      // Phase 3 — Entity + StateMachine
+      // Entity + StateMachine
       'Entity:Order / field.placedAt.mutability',                                                   // bug #9
       'Entity:Customer / field.email.normalize',                                                    // bug #10
       'StateMachine:Order.status / transition.illegal.shipped-to-cancelled',                        // bug #7
       'StateMachine:Order.status / transition.unguarded-terminal-regression.to-paid',               // bug #8
-      // Phase 4 — Effect / AuthorizationRule / Formula
+      // AuthorizationRule + EffectGroup + Formula
       'AuthorizationRule:order.owner-only / GET /api/orders/{id} / missing-ownership-check',        // bug #15
       'EffectGroup:order.lifecycle.events / Effect:order.cancelled / missing-emission',             // bug #13
       'EffectGroup:order.lifecycle.events / Effect:order.placed / forbidden-emission-on-failure',   // bug #14
       'Formula:order.discount-cents / expression.threshold-operator.10000',                         // bug #16
       'Formula:order.tax-cents / inputs.discountCents.unused',                                       // bug #17
-      // Phase 5 — IdempotencyContract
+      // IdempotencyContract
       'IdempotencyContract:idempotency.key.standard / POST /api/orders/missing-idempotency-key-handling', // bug #18
     ]);
     const unexpected = result.drifts

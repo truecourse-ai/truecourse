@@ -51,12 +51,9 @@ export type FragmentOrigin = z.infer<typeof FragmentOriginSchema>;
 /**
  * A single artifact extracted from a slice. `tcSource` is the raw .tc
  * body the LLM produced; the validator parses it before the writer
- * commits it to disk.
- *
- * `obligationKeys` is the LLM-declared list of obligations this fragment
- * covers — used by Phase 11's layered merge to decide field-level
- * precedence. For Phase 8 (single spec, no layering) it's recorded but
- * not consumed.
+ * commits it to disk. `obligationKeys` is recorded for diagnostics and
+ * future field-level layering — currently the merger operates at the
+ * artifact level and ignores this field.
  */
 export const FragmentSchema = z.object({
   kind: z.string(),                           // ArtifactKind, validated downstream
@@ -123,8 +120,7 @@ export type Manifest = z.infer<typeof ManifestSchema>;
 export const SpecsConfigEntrySchema = z.object({
   /** Path or glob, relative to the repo root. */
   file: z.string(),
-  /** Layering rank — higher overrides lower for the same artifact + obligation.
-   *  Only used in Phase 11+; Phase 8 honours order, not rank. */
+  /** Layering rank — higher rank overrides lower for the same artifact. */
   rank: z.number().int().nonnegative().default(0),
 });
 export type SpecsConfigEntry = z.infer<typeof SpecsConfigEntrySchema>;

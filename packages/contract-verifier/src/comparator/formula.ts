@@ -17,9 +17,9 @@
  *     output field (`computeDiscountCents` for `discountCents`, etc.) OR
  *   - find an exported method whose name contains the field name.
  *
- * v1 trades precision for tractability: only catch the planted patterns
- * in the fixture cleanly. False negatives on uncommon naming patterns
- * are acceptable.
+ * The matcher is conservative: when no obvious implementation function
+ * is found, the comparator emits no drift. False negatives on uncommon
+ * naming patterns are preferred over false positives.
  */
 
 import { randomUUID } from 'node:crypto';

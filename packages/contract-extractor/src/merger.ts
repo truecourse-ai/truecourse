@@ -14,12 +14,11 @@
  *     the merger picks the first encountered (deterministic order from
  *     the slicer) and flags it for human review.
  *
- * Phase 11 limitation (documented): layering is artifact-level, not
- * obligation-level. A higher-rank spec wholly replaces a lower-rank
- * artifact. Field-level layering (where a later spec only overrides one
- * `response.201` clause) is structurally tractable but not in this cut —
- * the writer's stacked origin lines still preserve the lineage so a
- * future obligation-level merger can reuse the same input shape.
+ * Layering granularity is artifact-level: a higher-rank spec wholly
+ * replaces a lower-rank artifact body. Field-level overrides (e.g. a
+ * later spec that only redefines one `response.201` clause) are not
+ * supported — the writer stacks `origin` lines so the lineage stays
+ * visible regardless.
  */
 
 import type { Fragment } from './types.js';
@@ -122,9 +121,9 @@ export function mergeRankedFragments(input: RankedFragment[]): MergeResult {
 }
 
 /**
- * Phase 8 compatibility shim — accept un-ranked Fragments (rank=0 implicit)
- * so existing tests and callers keep working without forcing them into
- * the rank-aware shape.
+ * Convenience wrapper for callers that don't track ranks — every
+ * fragment is treated as rank 0, so same-(kind, identity) duplicates
+ * with different bodies surface as same-rank conflicts.
  */
 export function mergeFragments(fragments: Fragment[]): MergeResult {
   return mergeRankedFragments(fragments.map((fragment) => ({ fragment, rank: 0 })));
