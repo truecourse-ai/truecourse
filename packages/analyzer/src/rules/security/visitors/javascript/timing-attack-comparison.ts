@@ -68,10 +68,20 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
       // Skip presence/state checks: `signature !== ''`, `token === null`,
       // `enabled === false`, `length === 0`. Sentinel operand carries no secret.
       if (isPresenceCheckOperand(left) || isPresenceCheckOperand(right)) return null
-      // Skip object identity comparisons via `.id`: `token.id === otherToken.id`
-      // — IDs are application-controlled, not credentials.
-      if (left.type === 'member_expression' && left.childForFieldName('property')?.text === 'id') return null
-      if (right.type === 'member_expression' && right.childForFieldName('property')?.text === 'id') return null
+      // Skip object identity comparisons via `.id` or any `*Id`-suffixed
+      // property (`token.id`, `apiToken.teamId`, `event.userId`,
+      // `record.organisationId`). DB IDs are application-controlled,
+      // numeric or short-uuid, and carry no timing-attack surface
+      // even when the surrounding scope mentions "token". On documenso
+      // this was the dominant FP shape: `audienceId !== apiToken.teamId
+      // && audienceId !== apiToken.userId` flagged because the chain
+      // contains "token", but the comparison is on numeric IDs.
+      const isIdProperty = (n: SyntaxNode): boolean => {
+        if (n.type !== 'member_expression') return false
+        const p = n.childForFieldName('property')?.text ?? ''
+        return p === 'id' || /Id$/.test(p)
+      }
+      if (isIdProperty(left) || isIdProperty(right)) return null
       // Skip `.length` comparisons (`signatureTypes.length === 0`).
       if (left.type === 'member_expression' && left.childForFieldName('property')?.text === 'length') return null
       if (right.type === 'member_expression' && right.childForFieldName('property')?.text === 'length') return null
@@ -86,6 +96,40 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
       // compare a primitive type-name string, never a credential value.
       if (left.type === 'unary_expression' && left.children[0]?.text === 'typeof') return null
       if (right.type === 'unary_expression' && right.children[0]?.text === 'typeof') return null
+
+      // Skip when comparison is inside an `Array.find` / `.findIndex` /
+      // `.findLast` / `.filter` predicate callback. Those iterate a
+      // small in-memory list looking for an entry — short-circuit
+      // semantics. The attacker doesn't observe per-comparison timing
+      // for individual array entries; only the total dispatch time of
+      // the whole find call. documenso shape:
+      //   const recipient = envelope.recipients.find((r) => r.token === token)
+      let scope: SyntaxNode | null = node.parent
+      while (scope) {
+        if (
+          scope.type === 'arrow_function' ||
+          scope.type === 'function_expression'
+        ) {
+          // Is this function an arg to a list-search method?
+          const grandparent = scope.parent
+          if (grandparent?.type === 'arguments') {
+            const call = grandparent.parent
+            if (call?.type === 'call_expression') {
+              const callee = call.childForFieldName('function')
+              if (callee?.type === 'member_expression') {
+                const method = callee.childForFieldName('property')?.text ?? ''
+                if (/^(find|findIndex|findLast|findLastIndex|filter|some|every)$/.test(method)) return null
+              }
+            }
+          }
+          break
+        }
+        if (
+          scope.type === 'function_declaration' ||
+          scope.type === 'method_definition'
+        ) break
+        scope = scope.parent
+      }
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Timing attack via string comparison',
