@@ -1,5 +1,33 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+
+/**
+ * Walk subtree looking for a variable declaration whose initializer
+ * is a call_expression with `paramName` passed as one of the argument
+ * identifiers. This is the canonical project-specific narrowing
+ * pattern: `const error = AppError.parseError(err)`,
+ * `const e = normalizeError(err)`, etc. — the call inspects the
+ * untyped error and returns a discriminated wrapper.
+ */
+function hasNarrowingAssignment(root: SyntaxNode, paramName: string): boolean {
+  if (root.type === 'lexical_declaration' || root.type === 'variable_declaration') {
+    for (const decl of root.namedChildren) {
+      if (decl.type !== 'variable_declarator') continue
+      const value = decl.childForFieldName('value')
+      if (!value || value.type !== 'call_expression') continue
+      const args = value.childForFieldName('arguments')
+      if (!args) continue
+      for (const arg of args.namedChildren) {
+        if (arg.type === 'identifier' && arg.text === paramName) return true
+      }
+    }
+  }
+  for (const child of root.namedChildren) {
+    if (hasNarrowingAssignment(child, paramName)) return true
+  }
+  return false
+}
 
 export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/catch-without-error-type',
@@ -19,8 +47,18 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     const bodyText = body.text
     if (bodyText.includes('instanceof') || bodyText.includes('typeof')) return null
 
-    const hasTypeAnnotation = node.childForFieldName('type') !== null
-    if (hasTypeAnnotation) return null
+    // Type annotation skip — but only for specific types that ARE
+    // narrowing on their own (`: Error`, `: SomeError`). The TS 4.0+
+    // idiom `catch (err: unknown)` is not narrowing — it just spells
+    // out what TypeScript would infer anyway, and the body still
+    // needs to discriminate. Treating `: unknown` as a skip path
+    // misses real findings AND also broke the only fixture path for
+    // demonstrating the documenso-style narrowing-helper pattern.
+    const annot = node.childForFieldName('type')
+    if (annot) {
+      const annotText = annot.text.replace(/^:\s*/, '').trim()
+      if (annotText !== 'unknown' && annotText !== 'any') return null
+    }
 
     // Short handlers - one statement that logs, returns a default, or
     // re-throws - aren't doing branching work that benefits from type
@@ -33,6 +71,16 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
       (c) => c.type !== 'comment',
     )
     if (stmts.length <= 1) return null
+
+    // Project-specific narrowing helpers. When the body's first action
+    // (or any subsequent action) binds the catch parameter to a new
+    // local via a function call — `const error = AppError.parseError(err)`,
+    // `const e = normalizeError(err)`, `const ae = toAppError(err)` —
+    // narrowing is happening inside that call. The `instanceof`/`typeof`
+    // textual heuristic above can't see across the call boundary, but
+    // the param-passed-to-call shape is reliable signal.
+    const paramName = param.type === 'identifier' ? param.text : null
+    if (paramName && hasNarrowingAssignment(body, paramName)) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
