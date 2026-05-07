@@ -9,6 +9,18 @@ export const jsStylePreferenceVisitor: CodeRuleVisitor = {
     // Flag use of var
     const firstChild = node.children[0]
     if (firstChild?.text === 'var') {
+      // `var` is REQUIRED inside ambient declarations
+      // (`declare global { var ... }`, `declare module 'x' { var ... }`).
+      // TypeScript only binds `var` declarations to globalThis — `let`
+      // and `const` cannot augment the global object. The rule must not
+      // flag these. Walk ancestors looking for an enclosing
+      // `ambient_declaration` node, which tree-sitter emits for every
+      // `declare …` block.
+      let scope: typeof node.parent = node.parent
+      while (scope) {
+        if (scope.type === 'ambient_declaration') return null
+        scope = scope.parent
+      }
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Use of var instead of const/let',
