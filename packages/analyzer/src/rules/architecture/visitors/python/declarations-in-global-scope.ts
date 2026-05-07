@@ -108,6 +108,36 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
     // shape: a `subscript` whose value is a typing construct.
     if (right?.type === 'subscript' && isTypingConstruct(right)) return null
 
+    // PEP 604 type aliases: `GithubViewType = GithubIssueView | GithubPRView`
+    // — tree-sitter parses these as `binary_operator` with `|`. The whole
+    // expression is a type expression, not mutable state.
+    if (right?.type === 'binary_operator') {
+      const op = right.children.find((c) => c.text === '|')
+      if (op) return null
+    }
+    // Module-level `Any` aliases / direct typing references:
+    //   `User = UserGitInfo`  (backward-compat alias)
+    //   `Status = Any`        (relax helper)
+    // RHS is a bare identifier that's PascalCase or matches a typing
+    // primitive. Treat as type alias.
+    if (right?.type === 'identifier') {
+      if (/^[A-Z]/.test(right.text)) return null
+      if (TYPING_NAMES.has(right.text)) return null
+    }
+
+    // Multi-line query / template / SQL string constants. Module-level
+    // `xxx_query = """..."""` / `xxx_template = "..."` / `xxx_sql`,
+    // `xxx_pattern`, `xxx_html`, `xxx_xml` are immutable text resources
+    // by convention even when the variable name is lowercase. The rule's
+    // mutable-state concern doesn't apply.
+    if (right?.type === 'string') {
+      if (/_(?:query|template|sql|pattern|regex|html|xml|css|prompt|message)s?$/.test(name)) return null
+    }
+    // Concatenated strings with same suffix
+    if (right?.type === 'concatenated_string') {
+      if (/_(?:query|template|sql|pattern|regex|html|xml|css|prompt|message)s?$/.test(name)) return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Mutable variable in global scope',

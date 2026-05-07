@@ -7,6 +7,28 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
+    // First pass: collect every string literal value that appears inside
+    // a TypeScript literal_type node. These are members of string-literal
+    // union types — `type DialogState = 'PROMPT' | 'PROCESSING' | 'DONE'`,
+    // `function f(t: 'count' | 'cumulative' = 'count')`, `z.enum([...])`,
+    // etc. Default values, useState<X>('lit') generic arg defaults, and
+    // function-arg literals matching one of these shapes can't be
+    // extracted to a constant without breaking type narrowing.
+    const literalTypeMembers = new Set<string>()
+    function collectLiteralTypeMembers(n: SyntaxNode) {
+      if (n.type === 'literal_type') {
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child?.type === 'string') literalTypeMembers.add(child.text)
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectLiteralTypeMembers(child)
+      }
+    }
+    collectLiteralTypeMembers(node)
+
     const stringCounts = new Map<string, { count: number; firstNode: SyntaxNode }>()
 
     function walk(n: SyntaxNode) {
@@ -22,6 +44,11 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
         // Skip type annotations and type contexts
         if (parent?.type === 'type_annotation' || parent?.type === 'type_alias_declaration'
           || parent?.type === 'property_signature' || parent?.type === 'literal_type') return
+
+        // Skip when the literal appears in a string-literal union
+        // somewhere in the file. The literal is type-bound; extracting
+        // it would break narrowing.
+        if (literalTypeMembers.has(content)) return
 
         const existing = stringCounts.get(content)
         if (existing) {
