@@ -406,7 +406,7 @@ export function checkModuleRules(
     // Generic `tests/` and `fixtures/` are too broad: they match this
     // analyzer's own negative fixture project (`tests/fixtures/...`)
     // and would silence the rule's regression-guard markers.
-    const TEST_INFRA_PATH = /(?:^|\/)(?:__tests__|__mocks__|__fixtures__|e2e|cypress|playwright|test-helpers?)(?:\/|$)/
+    const TEST_INFRA_PATH = /(?:^|\/)(?:__tests__|__mocks__|__fixtures__|e2e|cypress|playwright|test-helpers?|seed|seeds|seeders)(?:\/|$)/
 
     for (const method of methods) {
       if (method.isExported && !importedTargets.has(method.name)) {

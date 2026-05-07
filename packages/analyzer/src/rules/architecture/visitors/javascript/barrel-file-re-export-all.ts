@@ -15,13 +15,19 @@ export const barrelFileReExportAllVisitor: CodeRuleVisitor = {
     // Look for export * from '...'
     const text = node.text
     if (text.startsWith('export *') && text.includes('from')) {
-      // Count how many export * statements in this file
       const program = node.parent
       if (!program) return null
 
-      const reExportCount = program.namedChildren.filter((c) =>
+      const reExports = program.namedChildren.filter((c) =>
         c.type === 'export_statement' && c.text.startsWith('export *'),
-      ).length
+      )
+      const reExportCount = reExports.length
+
+      // Only emit ONE finding per file — fire on the FIRST `export *`
+      // statement and skip subsequent ones. Pre-fix the rule emitted
+      // N findings for an N-line barrel file (9-for-1 noise on a single
+      // file when N=9).
+      if (reExports.length > 0 && reExports[0].id !== node.id) return null
 
       if (reExportCount > 5) {
         return makeViolation(
