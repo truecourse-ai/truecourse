@@ -20,6 +20,11 @@ import {
   runRulesLlm,
   runRulesReset,
 } from "./commands/rules.js";
+import {
+  runContractsGenerate,
+  runContractsList,
+  runContractsValidate,
+} from "./commands/contracts.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -150,6 +155,33 @@ program
         severity: parseSeverityFlag(options.severity),
       });
     }
+  });
+
+// Contract framework — spec → .tc extraction + validation.
+const contractsCmd = program
+  .command("contracts")
+  .description("Manage spec-driven contract artifacts");
+
+contractsCmd
+  .command("generate")
+  .description("Extract .tc artifacts from prose specs (LLM, cached)")
+  .option("--diff", "Dry run — show what would change without writing")
+  .action(async (options) => {
+    await runContractsGenerate({ diff: !!options.diff });
+  });
+
+contractsCmd
+  .command("list")
+  .description("List the .tc artifacts in this repo")
+  .action(async () => {
+    await runContractsList();
+  });
+
+contractsCmd
+  .command("validate")
+  .description("Parse and resolve all .tc files, report any issues")
+  .action(async () => {
+    await runContractsValidate();
   });
 
 // Rules management — reads/writes per-repo config.json directly. No server needed.

@@ -1,0 +1,13 @@
+auth-requirement auth.role.admin {
+  origin SPEC.md "Authentication" 18..20
+  scheme Role
+  required-role admin
+
+  selector operations [Operation:"POST /api/customers"]
+
+  on-violation {
+    status 403
+    error-code forbidden
+    body ErrorEnvelope:error.envelope.standard
+  }
+}

@@ -1,0 +1,22 @@
+state-machine Order.status {
+  origin SPEC.md "Order lifecycle" 81..96
+
+  scope {
+    entity Entity:Order
+    field status
+  }
+
+  states Enum:OrderStatus
+  initial [placed]
+  terminal [delivered, cancelled]
+
+  transitions {
+    placed -> [paid, cancelled]
+    paid -> [shipped, cancelled]
+    shipped -> delivered
+  }
+
+  // Note: `out_of_terminal: critical` and `illegal_transition: critical`
+  // are tier-2 defaults baked into the state-machine artifact type, so
+  // user files don't restate them.
+}

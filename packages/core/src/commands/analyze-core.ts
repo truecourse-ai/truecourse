@@ -25,6 +25,7 @@ import { runAnalysis, type AnalysisResult } from '../services/analyzer.service.j
 import { buildGraph } from '../services/analysis-persistence.service.js';
 import { detectFlows } from '../services/flow.service.js';
 import { runViolationPipeline } from '../services/violation-pipeline.service.js';
+import { runContractPipeline } from '../services/contract-pipeline.service.js';
 import { createLLMProvider, type LLMProvider } from '../services/llm/provider.js';
 import { toUsageRecords } from '../services/usage.service.js';
 import { readLatest } from '../lib/analysis-store.js';
@@ -327,6 +328,31 @@ export async function analyzeCore(
 
     // Drain LLM usage before the pipelineResult is frozen into a snapshot.
     const usage = provider ? toUsageRecords(provider.flushUsage()) : [];
+
+    // ------------------------------------------------------------
+    // Contract verification pipeline — runs the deterministic verifier
+    // against `.truecourse/contracts/*.tc`, maps drifts into the
+    // unified violation lifecycle, and merges the result alongside the
+    // rule-engine output. No-op when the project hasn't adopted
+    // contracts (no `.truecourse/contracts/` directory).
+    // ------------------------------------------------------------
+    const contractResult = await runContractPipeline({
+      repoPath: project.path,
+      analysisId,
+      now,
+      previousActiveViolations,
+    });
+    if (contractResult.ran) {
+      pipelineResult.added.push(...contractResult.added);
+      pipelineResult.unchanged.push(...contractResult.unchanged);
+      pipelineResult.resolved.push(...contractResult.resolved);
+      pipelineResult.resolvedRefs.push(...contractResult.resolvedRefs);
+      log.info(
+        `[Contract] ${contractResult.counts.newCount} added, ` +
+          `${contractResult.counts.unchangedCount} unchanged, ` +
+          `${contractResult.counts.resolvedCount} resolved`,
+      );
+    }
 
     // Enforce the location invariant on every violation: a filePath always
     // comes with a line range, or neither. Any partial gets normalized here

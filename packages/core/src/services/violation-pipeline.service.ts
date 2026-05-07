@@ -689,6 +689,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         unchanged.push({
           id: randomUUID(),
           type: prev.type,
+          category: prev.category ?? 'rule',
+          subcategory: prev.subcategory ?? null,
           title: prev.title,
           content: prev.content,
           severity: prev.severity,
@@ -723,6 +725,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         resolved.push({
           id: randomUUID(),
           type: prev.type,
+          category: prev.category ?? 'rule',
+          subcategory: prev.subcategory ?? null,
           title: prev.title,
           content: prev.content,
           severity: prev.severity,
@@ -758,6 +762,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       added.push({
         id: randomUUID(),
         type: det.violationType,
+        category: 'rule',
+        subcategory: null,
         title: det.title,
         content: det.description,
         severity: det.severity as ViolationRecord['severity'],
@@ -1010,6 +1016,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
           dbSchemaViolations.push({
             id: randomUUID(),
             type: 'database',
+            category: 'rule',
+            subcategory: null,
             title: v.title,
             content: v.content,
             severity: v.severity as ViolationRecord['severity'],
@@ -1119,6 +1127,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         added.push({
           id: randomUUID(),
           type: v.type,
+          category: 'rule',
+          subcategory: null,
           title: v.title,
           content: v.content,
           severity: v.severity as ViolationRecord['severity'],
@@ -1234,6 +1244,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     unchanged.push({
       id: randomUUID(),
       type: 'code',
+      category: prev.category ?? 'rule',
+      subcategory: prev.subcategory ?? null,
       title: prev.title,
       content: prev.content,
       severity: prev.severity,
@@ -1295,6 +1307,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       unchanged.push({
         id: randomUUID(),
         type: 'code',
+        category: prev.category ?? 'rule',
+        subcategory: prev.subcategory ?? null,
         title: prev.title,
         content: prev.content,
         severity: prev.severity,
@@ -1328,6 +1342,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       resolved.push({
         id: randomUUID(),
         type: 'code',
+        category: prev.category ?? 'rule',
+        subcategory: prev.subcategory ?? null,
         title: prev.title,
         content: prev.content,
         severity: prev.severity,
@@ -1402,6 +1418,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       unchanged.push({
         id: randomUUID(),
         type: 'code',
+        category: prev.category ?? 'rule',
+        subcategory: prev.subcategory ?? null,
         title: prev.title,
         content: prev.content,
         severity: prev.severity,

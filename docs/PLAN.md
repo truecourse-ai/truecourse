@@ -1,5 +1,10 @@
 # TrueCourse Implementation Plan
 
+> **Contract Framework** (spec-driven verification) has its own design doc:
+> [`docs/contracts/PLAN.md`](contracts/PLAN.md). It tracks the verifier
+> (built) and the extraction layer (planned) separately from the phases
+> below.
+
 ## Context
 
 TrueCourse is a local web app that helps developers understand AI-generated code by visualizing repositories as interactive graphs. Users select a repo folder, the system analyzes it with tree-sitter, renders a React Flow graph showing services/layers/files, and provides LLM-powered architectural insights. The user owns SpecMind (github.com/specmind/specmind) which has a mature tree-sitter analysis pipeline we'll reuse directly.

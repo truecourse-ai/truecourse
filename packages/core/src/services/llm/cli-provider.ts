@@ -359,6 +359,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       violations: object.violations.map((v) => ({
         id: randomUUID(),
         type: v.type,
+        category: 'rule' as const,
         title: v.title,
         content: v.content,
         severity: v.severity,
@@ -394,6 +395,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
       violations: object.violations.map((v) => ({
         id: randomUUID(),
         type: v.type,
+        category: 'rule' as const,
         title: v.title,
         content: v.content,
         severity: v.severity,
@@ -436,6 +438,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         return {
           id: randomUUID(),
           type: v.type,
+          category: 'rule' as const,
           title: v.title,
           content: v.content,
           severity: v.severity,

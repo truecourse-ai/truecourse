@@ -9,7 +9,7 @@ import { getGit } from "@truecourse/core/lib/git";
 import { closeLogger, configureLogger } from "@truecourse/core/lib/logger";
 import { isCliBinaryAvailable } from "@truecourse/core/lib/cli-binary";
 import { config } from "@truecourse/core/config";
-import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
+import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary, syncShippedTcSyntax } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 import { recordAnalyzeAndMaybePrompt } from "../community-prompts.js";
@@ -238,6 +238,11 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   // `--no-skills` bypasses the prompt; non-interactive runs skip silently.
   await promptInstallSkills(project.path, { install: options.installSkills });
 
+  // Silently install the bundled VS Code grammar for `.tc` files into the
+  // user's editor extension dir(s). No prompt, no logs — purely additive
+  // editor sugar that's safe to ship on every analyze.
+  syncShippedTcSyntax();
+
   // All internal pipeline logs (`[Pipeline]`, `[LLM]`, `[CLI]`, `[Analyzer]`,
   // `[Flows]`, `[Violations]`) go to this repo's analyze.log. The terminal
   // stays clean for the clack checklist + LLM estimate prompt + final
@@ -343,6 +348,11 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
 
   // Same first-run skill convenience as `runAnalyze`.
   await promptInstallSkills(project.path, { install: options.installSkills });
+
+  // Silently install the bundled VS Code grammar for `.tc` files into the
+  // user's editor extension dir(s). No prompt, no logs — purely additive
+  // editor sugar that's safe to ship on every analyze.
+  syncShippedTcSyntax();
 
   configureLogger({
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),

@@ -1,0 +1,37 @@
+operation POST "/api/orders" {
+  origin SPEC.md "Operations — Orders / POST /api/orders" 100..113
+
+  request {
+    header content-type required value "application/json"
+    body {
+      subtotalCents: integer >= 0
+      customerId: uuid references Entity:Customer
+    }
+  }
+
+  response 201 on success {
+    body Entity:Order
+    header location required format "/api/orders/{id}"
+    effect emits Effect:order.placed
+    effect persist Entity:Order {
+      writes {
+        status = "placed"
+        placedAt = now
+        updatedAt = now
+        discountCents = applies Formula:order.discount-cents
+        taxCents = applies Formula:order.tax-cents
+        totalCents = applies Formula:order.total-cents
+      }
+    }
+  }
+
+  response 400 on validation_failure {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code one-of [validation_failed, customer_not_found]
+    }
+  }
+
+  response 401 inherits AuthRequirement:auth.bearer.api
+
+  tags [idempotent]
+}
