@@ -24,11 +24,15 @@ export const importFormattingVisitor: CodeRuleVisitor = {
         }
         return null
       }
-      // Skip comments and type imports
+      // Skip comments, type imports, and shebang lines. tree-sitter parses
+      // `#!/usr/bin/env node` at the top of a script as `hash_bang_line` —
+      // it's neither code nor a comment, but it doesn't displace the
+      // imports below it from being "at the top of the file."
       if (
         child.type !== 'import_statement' &&
         child.type !== 'comment' &&
-        child.type !== 'empty_statement'
+        child.type !== 'empty_statement' &&
+        child.type !== 'hash_bang_line'
       ) {
         // Skip directive prologues — string-literal expression statements that
         // appear before any code (per the ECMAScript "directive prologue" spec).
