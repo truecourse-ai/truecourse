@@ -901,6 +901,14 @@ export function checkMethodRules(
             classesWithImplements.add(cls.name)
             const modName = fa.filePath.split('/').pop()?.replace(/\.\w+$/, '')
             if (modName) classesWithImplements.add(modName)
+            // Mark the SUPERCLASS as polymorphic-root too. Methods on the
+            // base class are typically overridden by subclasses and called
+            // via `this._provider.method(...)` polymorphic dispatch — the
+            // method-level dep graph can't see across the polymorphism.
+            // documenso shape: BaseJobProvider's defineJob/triggerJob/
+            // startCron/getApiHandler all flagged dead because the static
+            // graph only sees Inngest/Local/BullMQ provider call sites.
+            classesWithImplements.add(cls.superClass)
           }
         }
         // Collect all exported names and imported names for cross-reference
