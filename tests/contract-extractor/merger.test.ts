@@ -10,7 +10,7 @@ const make = (kind: string, identity: string, source = 'SPEC.md', lines: [number
   obligationKeys: [],
 });
 
-describe('fragment merger (Phase 8 compatibility shim)', () => {
+describe('fragment merger (un-ranked convenience wrapper)', () => {
   it('groups fragments by (kind, identity) and picks the first as winner', () => {
     const a = make('Operation', 'POST /api/orders', 'SPEC.md', [10, 20]);
     const b = make('Entity', 'Order');
@@ -63,7 +63,7 @@ describe('fragment merger (Phase 8 compatibility shim)', () => {
   });
 });
 
-describe('rank-aware merger (Phase 11)', () => {
+describe('rank-aware merger', () => {
   function rf(rank: number, kind: string, identity: string, body: string, source = 'SPEC.md'): { fragment: Fragment; rank: number } {
     return {
       rank,

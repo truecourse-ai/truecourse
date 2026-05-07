@@ -1,9 +1,9 @@
 /**
  * `.truecourse/specs.yaml` reader/writer + glob-aware spec resolver.
  *
- * The file declares which prose specs the extractor reads, in what
- * layering order. Phase 8 only handles the first spec entry (no
- * layering); Phase 11 honours rank-based override.
+ * The file declares which prose specs the extractor reads, with each
+ * entry carrying a rank that determines layering precedence (higher
+ * rank wins on conflict).
  */
 
 import fs from 'node:fs';

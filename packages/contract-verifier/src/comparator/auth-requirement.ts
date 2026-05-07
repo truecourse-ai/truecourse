@@ -4,9 +4,8 @@
  * matched route's containing file is auth-protected (auth presence
  * detector reports it). Operations whose file is NOT protected drift.
  *
- * v1 supports `selector path-glob`, `selector tag`, and `selector
- * operations [...]`. Compound selectors (`all-of`, etc.) work via the
- * shared matcher.
+ * Supported selector forms: `path-glob`, `tag`, `operations [...]`,
+ * plus the compound combinators (`all-of`, `any-of`, `none-of`, `not`).
  */
 
 import { randomUUID } from 'node:crypto';

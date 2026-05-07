@@ -1,7 +1,6 @@
 /**
  * Writer — turns merged artifacts into `.tc` files under
- * `.truecourse/contracts/`. File layout mirrors the fixture's
- * domain-organized structure:
+ * `.truecourse/contracts/`. Layout:
  *
  *   contracts/
  *     _shared/                  cross-cutting (auth, error envelope, pagination, idempotency)
@@ -9,10 +8,10 @@
  *       <slug>.tc               one file per artifact
  *       operations/<slug>.tc    one per HTTP endpoint
  *
- * Phase 8 keeps the heuristic conservative: domain = first path segment
- * after `/api/` for operations, or the entity's lowercase name for
- * entities. Cross-cutting kinds (AuthRequirement, ErrorEnvelope,
- * PaginationContract, IdempotencyContract) land in `_shared/`.
+ * Domain inference: first path segment after `/api/` for operations, or
+ * the entity's lowercase name for entities. Cross-cutting kinds
+ * (AuthRequirement, AuthorizationRule, ErrorEnvelope, PaginationContract,
+ * IdempotencyContract) land in `_shared/` regardless of identity.
  */
 
 import fs from 'node:fs';
@@ -46,9 +45,10 @@ export interface WriteResult {
 export interface WriteOptions {
   /** When true, don't actually write — return the would-be paths in `proposed`. */
   dryRun?: boolean;
-  /** When true, delete `.tc` files in the contracts dir that aren't in the
-   *  current artifact set (i.e. spec was changed and the artifact removed).
-   *  Phase 9 (--diff) sets this to false; the regular flow sets it true. */
+  /** When true, delete `.tc` files in the contracts dir that aren't in
+   *  the current artifact set (e.g. the spec was edited and an artifact
+   *  removed). The regular flow enables this; `--diff` (dry run)
+   *  disables it. */
   prune?: boolean;
 }
 

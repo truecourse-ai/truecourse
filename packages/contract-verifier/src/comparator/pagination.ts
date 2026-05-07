@@ -7,8 +7,8 @@
  *   2. `limit.max` clamping — spec says `limit: max N`, code must apply
  *      a `Math.min(<*>, N)` clamp on the limit param.
  *
- * Selector matching: v1 supports `selector { tag: <name> }`. The spec's
- * Operation contract carries `tags: string[]`, so we check membership.
+ * Selector matching: `selector tag <name>` is the supported form;
+ * membership is checked against the Operation's `tags: string[]`.
  */
 
 import { randomUUID } from 'node:crypto';
