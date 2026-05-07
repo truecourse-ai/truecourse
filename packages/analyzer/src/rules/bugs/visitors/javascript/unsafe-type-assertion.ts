@@ -21,10 +21,21 @@ export const unsafeTypeAssertionVisitor: CodeRuleVisitor = {
     const typeAnnotation = node.namedChildren[1]
     if (!expr || !typeAnnotation) return null
 
+    // Pass the FULL span so the TypeChecker resolves the WHOLE expression's
+    // type, not just the type at its start position. With start-only,
+    // `Object.keys(x) as Keyof[]` resolves at the `Object` token, returning
+    // `ObjectConstructor` (the static side) instead of the call's return
+    // type `string[]`. Same for `searchParams.get(k) as string` — the
+    // start was at `searchParams` and reported `URLSearchParams`. The
+    // detection logic was already correct via `areTypesCompatible`; only
+    // the message strings were wrong, which the agent audit flagged as
+    // a cosmetic bug across documenso's 70 hits.
     const exprType = typeQuery.getTypeAtPosition(
       filePath,
       expr.startPosition.row,
       expr.startPosition.column,
+      expr.endPosition.row,
+      expr.endPosition.column,
     )
     if (!exprType) return null
 
@@ -43,6 +54,8 @@ export const unsafeTypeAssertionVisitor: CodeRuleVisitor = {
         filePath,
         typeAnnotation.startPosition.row,
         typeAnnotation.startPosition.column,
+        typeAnnotation.endPosition.row,
+        typeAnnotation.endPosition.column,
       )
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
