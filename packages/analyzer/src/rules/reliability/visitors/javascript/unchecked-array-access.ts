@@ -60,6 +60,57 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     // Skip when the result is used with a fallback (|| default, ?? default)
     if (node.parent?.type === 'binary_expression' && /\|\||&&|\?\?/.test(node.parent.text.slice(node.text.length))) return null
 
+    // Skip when the index is a parameter of an enclosing anonymous
+    // callback (arrow_function / function_expression) that is itself
+    // passed as an argument to another call — `.map((x, i) => …)`,
+    // `useCallback((node, index) => …)`, `useFieldArray((field, idx) => …)`,
+    // etc. The caller controls the iteration and is responsible for
+    // bounds; the analyzer can't see across the call boundary, but
+    // firing here produced ~70% of the documenso unchecked-array-access
+    // FPs (pdf-viewer onPageRender, configure-fields-view onFieldResize,
+    // recipient-form re-orderers). Declared functions
+    // (`function getElement(arr, i)`) are NOT skipped — those still
+    // need bounds checks because their callers can pass anything.
+    {
+      const indexBaseVar = indexText.split(/[+\-*/\s]/)[0].trim()
+      let scope: SyntaxNode | null = node.parent
+      let enclosingCallback: SyntaxNode | null = null
+      while (scope) {
+        if (scope.type === 'arrow_function' || scope.type === 'function_expression') {
+          enclosingCallback = scope
+          break
+        }
+        if (scope.type === 'function_declaration' || scope.type === 'method_definition') break
+        scope = scope.parent
+      }
+      if (enclosingCallback) {
+        // Walk parent chain — callback may be wrapped in `useCallback`,
+        // `useMemo`, etc. — until we hit a call_expression argument
+        // position OR a different function boundary.
+        let p: SyntaxNode | null = enclosingCallback.parent
+        while (p) {
+          if (p.type === 'call_expression') {
+            const params = enclosingCallback.childForFieldName('parameters')
+            if (params) {
+              for (const param of params.namedChildren) {
+                let paramName: string | null = null
+                if (param.type === 'identifier') paramName = param.text
+                else if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
+                  const inner = param.childForFieldName('pattern') ?? param.namedChildren[0]
+                  if (inner?.type === 'identifier') paramName = inner.text
+                }
+                if (paramName && paramName === indexBaseVar) return null
+              }
+            }
+            break
+          }
+          if (p.type === 'function_declaration' || p.type === 'method_definition' ||
+              p.type === 'arrow_function' || p.type === 'function_expression') break
+          p = p.parent
+        }
+      }
+    }
+
     // Check if there is a bounds check nearby (same block)
     const statement = findContainingStatement(node)
     if (!statement || !statement.parent) return null
