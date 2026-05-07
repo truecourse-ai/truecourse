@@ -393,6 +393,21 @@ export function checkModuleRules(
       }
     }
 
+    // Path patterns indicating a file consumed by test code that the
+    // analyzer excludes (`*.spec.ts`, `*.test.ts`, `__tests__/`). When
+    // a fixture / helper / mock lives under one of these directories,
+    // its consumers aren't in our dependency graph, so its exports
+    // appear unused even when sibling spec files import them heavily.
+    // Skip reporting for these — the analyzer simply can't see the
+    // call sites and firing produces ~25-35% FPs on documenso
+    // (the e2e/fixtures/authentication.ts case).
+    // Use explicit-convention directory names only — `__tests__/`,
+    // `__mocks__/`, `__fixtures__/`, `e2e/`, `cypress/`, `playwright/`.
+    // Generic `tests/` and `fixtures/` are too broad: they match this
+    // analyzer's own negative fixture project (`tests/fixtures/...`)
+    // and would silence the rule's regression-guard markers.
+    const TEST_INFRA_PATH = /(?:^|\/)(?:__tests__|__mocks__|__fixtures__|e2e|cypress|playwright|test-helpers?)(?:\/|$)/
+
     for (const method of methods) {
       if (method.isExported && !importedTargets.has(method.name)) {
         // Skip exports from entry point files — they're consumed by the framework/runtime
@@ -400,6 +415,10 @@ export function checkModuleRules(
 
         // Skip exports from shadcn/ui component library directories — these export all variants for consumer use
         if (/\/components\/ui\//.test(method.filePath)) continue
+
+        // Skip exports from test infrastructure paths whose consumers
+        // (`*.spec.ts`, `*.test.ts`) the analyzer excluded entirely.
+        if (TEST_INFRA_PATH.test(method.filePath)) continue
 
         // Skip class methods — they're accessed via the class, not individually imported
         if (classModuleNames.has(method.moduleName)) continue
@@ -447,6 +466,9 @@ export function checkModuleRules(
     for (const mod of modules) {
       if (mod.kind === 'class' && mod.exportCount > 0 && !importedTargets.has(mod.name)) {
         if (entryPointFiles?.has(mod.filePath)) continue
+
+        // Same test-infrastructure skip rationale as for methods above.
+        if (TEST_INFRA_PATH.test(mod.filePath)) continue
 
         // Skip classes used as type annotations (params, return types, superclasses)
         if (usedAsType.has(mod.name)) continue
