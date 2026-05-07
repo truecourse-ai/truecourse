@@ -201,6 +201,17 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
 
 const CLEARTEXT_PROTOCOLS = ['http://', 'ftp://', 'telnet://']
 const LOCALHOST_PREFIXES = ['http://localhost', 'http://127.0.0.1', 'http://0.0.0.0']
+// Internal-network hostnames. These never leave the host or container,
+// so the cleartext "risk" is moot — the connection is loopback-equivalent.
+// `host.docker.internal` is the canonical Docker bridge from a container
+// to its host.
+const INTERNAL_NETWORK_HOSTNAMES = [
+  'host.docker.internal',
+  'docker.internal',
+  '.local',     // mDNS / Bonjour
+  '.lan',       // common LAN domain
+  '.internal',  // common internal-network suffix
+]
 
 export const clearTextProtocolVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/clear-text-protocol',
@@ -214,6 +225,14 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
       if (lower.startsWith(protocol)) {
         // Exclude localhost/loopback for local development
         if (LOCALHOST_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
+          return null
+        }
+        // Exclude internal-network hostnames. host.docker.internal,
+        // *.local mDNS, *.lan, *.internal — these never traverse a
+        // public network so cleartext is fine.
+        if (INTERNAL_NETWORK_HOSTNAMES.some((host) =>
+          lower.includes(host) || lower.includes('://' + host),
+        )) {
           return null
         }
         // Exclude well-known namespace URIs (SVG xmlns, W3C, schema.org, etc.)
@@ -259,7 +278,9 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
                 (prop === 'replace' || prop === 'replaceAll' ||
                  prop === 'removeprefix' || prop === 'removesuffix' ||
                  prop === 'startsWith' || prop === 'endsWith' ||
-                 prop === 'lstrip' || prop === 'rstrip' || prop === 'strip')
+                 prop === 'startswith' || prop === 'endswith' || // Python lowercase
+                 prop === 'lstrip' || prop === 'rstrip' || prop === 'strip' ||
+                 prop === 'find' || prop === 'index' || prop === 'count')
                 && idx >= 0
               ) return null
             }
