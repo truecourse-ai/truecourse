@@ -56,6 +56,26 @@ export const batchWritesInLoopVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // Skip writes inside an `except` branch — those re-raise / fallback
+    // paths fire AT MOST once per outer call, not N times. The agent's
+    // saas_user_auth.py:242 case showed this exact pattern (delete inside
+    // except, re-raised after).
+    let scope: import('web-tree-sitter').Node | null = node.parent
+    while (scope) {
+      if (scope.type === 'except_clause') return null
+      // Skip retry-on-uniqueness-collision shape: a loop whose body has
+      // a successful insert path that returns / breaks. The body
+      // contains a `try` whose successful path exits the loop, and
+      // the `except` retries. The write is at most once per outer call.
+      if (scope.type === 'try_statement') {
+        // Look for `return`/`break` inside the try body.
+        const tryBody = scope.childForFieldName('body')
+        if (tryBody && /\b(return|break)\b/.test(tryBody.text)) return null
+      }
+      if (scope.type === 'function_definition') break
+      scope = scope.parent
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Database write inside loop',

@@ -3,11 +3,15 @@
  * Remaining bug patterns not covered elsewhere.
  */
 
-// VIOLATION: bugs/deterministic/async-void-function
+// async-void-function deduplicates with unhandled-promise — both
+// rules fired on the same shape. async-void-function is now scoped
+// to its canonical bug (async callback in void context, future
+// project) and unhandled-promise covers the floating-promise case.
 async function backgroundTask(): Promise<Response> {
   return fetch('/api');
 }
 export function fireAndForget() {
+  // VIOLATION: bugs/deterministic/unhandled-promise
   backgroundTask();
 }
 
