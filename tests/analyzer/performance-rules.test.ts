@@ -729,14 +729,30 @@ def merge_records(records):
     expect(violations).toHaveLength(0);
   });
 
-  it('flags session.add() in a loop (true positive — ORM write)', () => {
+  it('flags session.add() with per-iter commit (true positive — N round-trips)', () => {
+    // Per-iter commit forces a DB round-trip on every iteration —
+    // this IS the bulk-insert anti-pattern. Bare `session.add` in a
+    // loop with one trailing commit is the unit-of-work idiom and
+    // should NOT fire (separate test case).
     const code = `
 def save_users(session, users):
     for user in users:
         session.add(user)
+        session.commit()
 `;
     const violations = only(check(code, 'python'), KEY);
     expect(violations).toHaveLength(1);
+  });
+
+  it('does NOT flag session.add() unit-of-work pattern (one commit OUTSIDE loop)', () => {
+    const code = `
+def save_users(session, users):
+    for user in users:
+        session.add(user)
+    session.commit()
+`;
+    const violations = only(check(code, 'python'), KEY);
+    expect(violations).toHaveLength(0);
   });
 
   it('flags db.insert() in a loop (true positive — ORM write)', () => {

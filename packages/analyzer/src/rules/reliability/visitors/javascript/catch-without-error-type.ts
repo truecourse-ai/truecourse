@@ -47,6 +47,23 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     const bodyText = body.text
     if (bodyText.includes('instanceof') || bodyText.includes('typeof')) return null
 
+    // Library type-guard narrowing. Axios, ts-rest, react-query, and
+    // most HTTP / RPC libraries ship type-guard helpers like
+    // `axios.isAxiosError(e)`, `isAppError(e)`, `isHttpError(e)`,
+    // `Error.isError(e)`, etc. The textual `instanceof`/`typeof`
+    // check above can't see these as narrowing, so handlers that
+    // discriminate via a library type-guard fire as if untyped.
+    if (/\bis[A-Z]\w*Error\b/.test(bodyText)) return null
+    if (/\baxios\.isAxiosError\b/.test(bodyText)) return null
+    // String-conversion handlers: `String(e)`, `e?.message`, `e instanceof
+    // Error ? e.message : String(e)` (already covered by instanceof above).
+    // `String(e)` alone suffices for log paths and shouldn't fire.
+    const paramNameForString = param.type === 'identifier' ? param.text : ''
+    if (paramNameForString) {
+      const stringConvertRe = new RegExp(`\\bString\\s*\\(\\s*${paramNameForString}\\s*\\)`)
+      if (stringConvertRe.test(bodyText)) return null
+    }
+
     // Type annotation skip — but only for specific types that ARE
     // narrowing on their own (`: Error`, `: SomeError`). The TS 4.0+
     // idiom `catch (err: unknown)` is not narrowing — it just spells

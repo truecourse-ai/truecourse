@@ -42,6 +42,27 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
         object.endPosition.column,
       )
       if (classification === 'non-array') return null
+
+      // Index-type fallback: when the receiver's array-like classification
+      // is `unknown` (cross-package generic that didn't resolve), check
+      // the INDEX's type. A non-number index — string union / `keyof T` /
+      // template literal — means this is an object-key lookup, not
+      // numeric array indexing. `rolePermissions[role]` where role is
+      // `OrganizationUserRole` (string union) collapses to 'unknown' for
+      // the receiver but the index is provably non-numeric.
+      if (classification === 'unknown') {
+        const indexType = typeQuery.getTypeAtPosition(
+          filePath,
+          index.startPosition.row,
+          index.startPosition.column,
+          index.endPosition.row,
+          index.endPosition.column,
+        )
+        if (indexType && indexType !== 'number' && indexType !== 'any' && indexType !== 'unknown') {
+          // string / string-literal union / keyof T → non-array index
+          if (!/^\d+$/.test(indexType)) return null
+        }
+      }
     }
 
     // Skip if the index is a well-known safe pattern like .length - 1

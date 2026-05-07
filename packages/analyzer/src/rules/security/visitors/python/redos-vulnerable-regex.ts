@@ -1,8 +1,12 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-// Patterns indicative of catastrophic backtracking: nested quantifiers like (a+)+, (a*)*
-const REDOS_PATTERN = /\([^)]*[+*]\)[+*]|\([^)]*[+*]\)[{][0-9]/
+// Patterns indicative of catastrophic backtracking: nested UNBOUNDED
+// quantifiers like (a+)+, (a*)*, (a+){N,}. Bounded quantifiers
+// `{0,2}`, `{1,5}`, etc. cap the iteration count and CAN'T blow up
+// exponentially — exclude them. The previous regex `[{][0-9]` matched
+// any `{<digit>` which mis-fired on bounded forms like `(;\d+){0,2}`.
+const REDOS_PATTERN = /\([^)]*[+*]\)[+*]|\([^)]*[+*]\)\{\d+,\}/
 
 export const pythonRedosVulnerableRegexVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/redos-vulnerable-regex-python',

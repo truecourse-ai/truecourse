@@ -17,6 +17,20 @@ export const unsafeJsonParseVisitor: CodeRuleVisitor = {
 
     if (isInsideTryCatch(node)) return null
 
+    // Skip the deep-clone idiom `JSON.parse(JSON.stringify(x))`. The
+    // input to `JSON.parse` is the output of `JSON.stringify` which
+    // produces valid JSON by construction — `parse` cannot throw.
+    const args = node.childForFieldName('arguments')
+    const firstArg = args?.namedChildren[0]
+    if (firstArg?.type === 'call_expression') {
+      const innerFn = firstArg.childForFieldName('function')
+      if (innerFn?.type === 'member_expression') {
+        const innerObj = innerFn.childForFieldName('object')
+        const innerProp = innerFn.childForFieldName('property')
+        if (innerObj?.text === 'JSON' && innerProp?.text === 'stringify') return null
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Unsafe JSON.parse',

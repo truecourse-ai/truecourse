@@ -307,6 +307,30 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
         if (/(?:ssrf|url-?valid|validate-?url|safe-?url|url-?check|allow-?list|check-?url|sanitize-?url|protocol-?check|is-?private-?url|assert-[a-z-]*url|webhook-?url)/i.test(filePath)) {
           return null
         }
+
+        // Skip when the literal sits inside an opt-in insecure branch
+        // gated by an explicit flag (`if not secure:`,
+        // `if IS_LOCAL_DEPLOYMENT:`, `if ALLOW_INSECURE_GIT_ACCESS:`,
+        // ternary `secure ? 'https://X' : 'http://X'`). The maintainer
+        // has deliberately designed the cleartext fallback.
+        let optInScope: typeof node.parent = node.parent
+        while (optInScope) {
+          if (optInScope.type === 'if_statement' || optInScope.type === 'else_clause') {
+            const cond = optInScope.childForFieldName('condition')
+            const condText = cond?.text ?? ''
+            if (
+              /\b(?:not\s+)?(?:secure|tls|https|ssl|encrypted)\b/i.test(condText) ||
+              /\bIS_LOCAL_DEPLOYMENT\b/i.test(condText) ||
+              /\bALLOW_INSECURE\w*/i.test(condText) ||
+              /\b(?:secure|tls|https|ssl)\s*(?:=|===|==)\s*(?:false|False)\b/i.test(condText)
+            ) return null
+          }
+          if (optInScope.type === 'ternary_expression' || optInScope.type === 'conditional_expression') {
+            const condText = optInScope.childForFieldName('condition')?.text ?? ''
+            if (/\b(?:secure|tls|https|ssl|local|IS_LOCAL_DEPLOYMENT|ALLOW_INSECURE)\b/i.test(condText)) return null
+          }
+          optInScope = optInScope.parent
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Clear-text protocol',

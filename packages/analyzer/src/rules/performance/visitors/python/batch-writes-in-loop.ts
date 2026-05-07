@@ -76,6 +76,29 @@ export const batchWritesInLoopVisitor: CodeRuleVisitor = {
       scope = scope.parent
     }
 
+    // SQLAlchemy unit-of-work pattern. The canonical idiom is:
+    //   for x in items:
+    //       session.add(x)         # in-memory queue, no DB round-trip
+    //   await session.commit()      # ONE flush at the end
+    // `session.add` / `session.delete` / `session.merge` only mutate
+    // session state. The actual DB writes happen at the trailing
+    // commit/flush, NOT per iteration. The rule should only fire when
+    // a flush/commit/execute happens INSIDE the loop body — that's when
+    // each iteration genuinely does a round-trip.
+    if (attr.text === 'add' || attr.text === 'delete' || attr.text === 'merge') {
+      let loopScope: import('web-tree-sitter').Node | null = node.parent
+      while (loopScope) {
+        if (loopScope.type === 'for_statement' || loopScope.type === 'while_statement') {
+          const loopBody = loopScope.childForFieldName('body') ?? loopScope
+          const FLUSH_INSIDE = /\b(?:session|db|conn|connection|cursor|tx)\.(?:commit|flush|execute|executemany)\s*\(/
+          if (!FLUSH_INSIDE.test(loopBody.text)) return null
+          break
+        }
+        if (loopScope.type === 'function_definition') break
+        loopScope = loopScope.parent
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Database write inside loop',

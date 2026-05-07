@@ -513,6 +513,10 @@ from sqlalchemy.orm import Session as _Session
 
 # VIOLATION: performance/deterministic/batch-writes-in-loop
 def save_all_records(session: _Session, records: list) -> None:
-    """Individual session.add() in loop instead of bulk insert."""
+    """Per-iter commit forces N round-trips. The unit-of-work shape
+    (session.add inside loop + ONE commit AFTER the loop) is fine and
+    the rule no longer fires on it; this fixture demonstrates the
+    actual anti-pattern."""
     for record in records:
         session.add(record)
+        session.commit()
