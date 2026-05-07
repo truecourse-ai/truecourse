@@ -32,6 +32,16 @@ export const ormLazyLoadInLoopVisitor: CodeRuleVisitor = {
     if (ORM_LAZY_TRIGGER_METHODS.has(methodName)) {
       const fn = node.childForFieldName('function')
       if (fn?.type === 'member_expression') {
+        // Skip Class.staticMethod() patterns. ORM lazy-load is invoked on
+        // an instance (`model.related('posts')`, `item.load()`); a
+        // PascalCase receiver is almost always a class with a static
+        // factory — `PDFDocument.load(bytes)`, `URL.parse(s)`,
+        // `Buffer.from(b)` etc. Without this guard the rule fires on
+        // any pdf-lib / parsing-library `.load()` call inside a loop
+        // whenever an ORM happens to be imported in the same file.
+        const obj = fn.childForFieldName('object')
+        if (obj?.type === 'identifier' && /^[A-Z]/.test(obj.text)) return null
+
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'ORM lazy loading in loop (N+1)',
