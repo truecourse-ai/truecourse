@@ -47,6 +47,22 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
       fn.startPosition.column,
     )
 
+    // A type is "unresolved" — i.e., TS's scoped-program type-check
+    // bailed out — when it equals `unknown`, `any`, or is a bare
+    // single-uppercase-letter generic placeholder like `T`, `U`, `K`,
+    // `T1`, etc. that escaped instantiation. Reporting a mismatch in
+    // either direction when one side is unresolved produces noisy
+    // accusations like `Argument is \`unknown\`` or `expects \`T\``
+    // that the developer can't act on (the real type IS resolved in
+    // their IDE and editor — just not in our scoped program).
+    const isUnresolvedType = (t: string | undefined | null): boolean => {
+      if (!t) return true
+      if (t === 'any' || t === 'unknown') return true
+      // Bare generic placeholder: single uppercase + optional digits
+      if (/^[A-Z]\d*$/.test(t)) return true
+      return false
+    }
+
     const argNodes = args.namedChildren
     // Find the first mismatched argument for the message
     for (let i = 0; i < argNodes.length; i++) {
@@ -58,11 +74,11 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
         argNode.endPosition.row,
         argNode.endPosition.column,
       )
-      if (!argType || argType === 'any') continue
+      if (isUnresolvedType(argType)) continue
 
       const expectedType = paramTypes?.[i]?.type
       const expectedName = paramTypes?.[i]?.name ?? `param ${i + 1}`
-      if (expectedType && expectedType !== 'any') {
+      if (expectedType && !isUnresolvedType(expectedType)) {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Argument type mismatch',
