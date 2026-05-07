@@ -20,6 +20,19 @@ export const pythonHttpCallNoTimeoutVisitor: CodeRuleVisitor = {
     if (objName !== 'requests' && objName !== 'httpx' && objName !== 'session') return null
     if (!PYTHON_HTTP_METHODS.has(attr.text)) return null
 
+    // `session` is heavily overloaded — SQLAlchemy AsyncSession /
+    // sessionmaker bind to the same identifier and use the same
+    // `.delete()` / `.commit()` / `.get()` method names. Only treat
+    // `session.X()` as HTTP when the file actually imports `requests`
+    // or `httpx`. Without this gate, every OpenHands `enterprise/
+    // storage/*.py` file produced FPs on `await session.delete(record)`
+    // SQLAlchemy ORM deletions.
+    if (objName === 'session') {
+      if (!/\b(?:import\s+requests|from\s+requests\b|import\s+httpx|from\s+httpx\b)/.test(sourceCode)) {
+        return null
+      }
+    }
+
     // Check for timeout keyword argument
     const args = node.childForFieldName('arguments')
     if (args) {
