@@ -60,6 +60,26 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
     const methodName = getMethodName(node)
     if (!ORM_WRITE_METHODS.has(methodName)) return null
 
+    // Skip seed / migration scripts. These do multi-table writes by
+    // design (populating test data, schema migrations) and don't need
+    // transactions — if a run fails halfway, the typical recovery is
+    // re-running it from scratch.
+    //
+    // Use only explicit-convention path segments. Generic `fixtures/`
+    // is too broad (matches this analyzer's own negative fixture
+    // tree at `tests/fixtures/sample-js-project-negative/...`).
+    const lowerPath = filePath.toLowerCase()
+    if (
+      lowerPath.includes('/seed/') ||
+      lowerPath.includes('/seeds/') ||
+      lowerPath.includes('/seeders/') ||
+      lowerPath.includes('/migrations/') ||
+      lowerPath.includes('/scripts/')
+    ) return null
+    const basename = lowerPath.split('/').pop() ?? ''
+    if (/^(seed|seeds|seeder|seed-[\w-]+|migrate)\.[cm]?[jt]sx?$/.test(basename)) return null
+    if (/\.seed\.[cm]?[jt]sx?$/.test(basename)) return null
+
     // Trigger call must itself be ORM-shaped + outside any transaction
     if (!isOrmShapedWriteCall(node)) return null
 
