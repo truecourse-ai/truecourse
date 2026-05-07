@@ -628,3 +628,110 @@ export async function promptInstallSkills(
 
   copySkills(repoPath, missing);
 }
+
+// --------------------------------------------------------------------------
+// VS Code / Cursor / Windsurf extension install — silent .tc syntax highlight
+// --------------------------------------------------------------------------
+//
+// Mirrors the skills-sync pattern but runs silently (no prompts, no logs)
+// and installs into every editor extensions dir we can detect. Source is
+// the bundled `vscode-extension/` tree shipped next to the CLI entry; the
+// destination is `<editor>/extensions/truecourse.tc-syntax-<version>/`.
+//
+// Idempotent: re-running with the same shipped version no-ops. Bumping
+// the version installs the new dir alongside; old dirs stay until the
+// next sync removes them (cleanup handled below).
+// --------------------------------------------------------------------------
+
+const TC_EXT_PUBLISHER = "truecourse";
+const TC_EXT_NAME = "tc-syntax";
+
+function resolveTcExtSrcDir(): string | null {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const candidate = resolve(__dirname, "vscode-extension");
+  return existsSync(candidate) ? candidate : null;
+}
+
+function readTcExtVersion(srcDir: string): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(srcDir, "package.json"), "utf-8"));
+    return typeof pkg.version === "string" ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Editor extension dirs we attempt to populate. The list is union of the
+ * common cross-platform conventions; non-existent ones are silently
+ * skipped. Adding a new editor here is a one-line change.
+ */
+function candidateEditorExtDirs(): string[] {
+  const home = os.homedir();
+  const dirs = [
+    resolve(home, ".vscode", "extensions"),
+    resolve(home, ".vscode-insiders", "extensions"),
+    resolve(home, ".vscode-server", "extensions"),
+    resolve(home, ".cursor", "extensions"),
+    resolve(home, ".windsurf", "extensions"),
+    resolve(home, ".windsurf-next", "extensions"),
+  ];
+  return dirs.filter((d) => existsSync(d));
+}
+
+function tcExtDestPath(extensionsDir: string, version: string): string {
+  return resolve(extensionsDir, `${TC_EXT_PUBLISHER}.${TC_EXT_NAME}-${version}`);
+}
+
+/**
+ * Remove older versions of our extension from the given editor's
+ * extensions dir. Only touches dirs we own (matching `truecourse.tc-syntax-*`).
+ */
+function cleanupOldTcExtVersions(extensionsDir: string, currentVersion: string): void {
+  if (!existsSync(extensionsDir)) return;
+  const prefix = `${TC_EXT_PUBLISHER}.${TC_EXT_NAME}-`;
+  for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (!entry.name.startsWith(prefix)) continue;
+    if (entry.name === `${prefix}${currentVersion}`) continue;
+    try {
+      rmSync(resolve(extensionsDir, entry.name), { recursive: true, force: true });
+    } catch {
+      // Editor might have a file lock — try again next analyze. Silent.
+    }
+  }
+}
+
+/**
+ * Silently sync the bundled VS Code extension into every detected editor
+ * extensions dir. Never prompts, never logs. Errors are swallowed — a
+ * failure to install editor highlighting must not break analyze.
+ *
+ * Called from `analyze` (and `add`) the same place `syncShippedSkills`
+ * runs, so the user gets `.tc` highlighting without any opt-in step.
+ */
+export function syncShippedTcSyntax(): void {
+  try {
+    const src = resolveTcExtSrcDir();
+    if (!src) return;
+    const version = readTcExtVersion(src);
+    if (!version) return;
+
+    const editorDirs = candidateEditorExtDirs();
+    if (editorDirs.length === 0) return;
+
+    for (const editorDir of editorDirs) {
+      try {
+        cleanupOldTcExtVersions(editorDir, version);
+        const dest = tcExtDestPath(editorDir, version);
+        if (existsSync(dest)) continue; // current version already there
+        mkdirSync(dest, { recursive: true });
+        cpSync(src, dest, { recursive: true });
+      } catch {
+        // Per-editor failures don't propagate. Move on.
+      }
+    }
+  } catch {
+    // Top-level swallow: under no circumstances should this break analyze.
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "tc-syntax",
+  "displayName": "TrueCourse IL",
+  "description": "Syntax highlighting for TrueCourse Intent IL (.tc) files. Installed silently by `truecourse analyze`.",
+  "version": "0.0.2",
+  "publisher": "truecourse",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "tc",
+        "aliases": [
+          "TrueCourse IL",
+          "tc"
+        ],
+        "extensions": [
+          ".tc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "tc",
+        "scopeName": "source.tc",
+        "path": "./syntaxes/tc.tmLanguage.json"
+      }
+    ]
+  }
+}

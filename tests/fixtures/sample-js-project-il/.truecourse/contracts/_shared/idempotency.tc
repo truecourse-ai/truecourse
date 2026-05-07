@@ -1,0 +1,8 @@
+idempotency-contract idempotency.key.standard {
+  origin SPEC.md "Idempotency" 51..54
+
+  request-header Idempotency-Key
+  semantics short-circuit-on-repeat   // original response replayed; side effects skipped
+
+  selector tag idempotent
+}

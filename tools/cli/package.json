@@ -17,6 +17,8 @@
   "dependencies": {
     "@clack/prompts": "^1.2.0",
     "@truecourse/core": "workspace:*",
+    "@truecourse/contract-extractor": "workspace:*",
+    "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/shared": "workspace:^",
     "commander": "^12.1.0",
     "js-yaml": "^4.1.0"

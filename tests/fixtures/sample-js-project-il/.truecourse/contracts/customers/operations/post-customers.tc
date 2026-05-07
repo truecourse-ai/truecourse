@@ -1,0 +1,39 @@
+operation POST "/api/customers" {
+  origin SPEC.md "Operations — Customers / POST /api/customers" 144..152
+
+  request {
+    header content-type required value "application/json"
+    body {
+      email: string format email
+      name: string constraint non-empty
+    }
+  }
+
+  response 201 on success {
+    body Entity:Customer
+    header location required format "/api/customers/{id}"
+    effect persist Entity:Customer {
+      writes {
+        email = "lowercased(input.email)"
+        createdAt = now
+      }
+    }
+  }
+
+  response 400 on validation_failure {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code validation_failed
+    }
+  }
+
+  response 409 on conflict {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code email_taken
+    }
+  }
+
+  response 401 inherits AuthRequirement:auth.bearer.api
+  response 403 inherits AuthRequirement:auth.role.admin
+
+  tags [admin-only]
+}

@@ -216,11 +216,58 @@ importers:
         specifier: ^0.23.2
         version: 0.23.2
 
+  packages/contract-extractor:
+    dependencies:
+      '@truecourse/contract-verifier':
+        specifier: workspace:*
+        version: link:../contract-verifier
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/contract-verifier:
+    dependencies:
+      '@truecourse/analyzer':
+        specifier: workspace:*
+        version: link:../analyzer
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      web-tree-sitter:
+        specifier: ^0.26.0
+        version: 0.26.8
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/core:
     dependencies:
       '@truecourse/analyzer':
         specifier: workspace:*
         version: link:../analyzer
+      '@truecourse/contract-verifier':
+        specifier: workspace:*
+        version: link:../contract-verifier
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared
@@ -280,6 +327,12 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
+      '@truecourse/contract-extractor':
+        specifier: workspace:*
+        version: link:../../packages/contract-extractor
+      '@truecourse/contract-verifier':
+        specifier: workspace:*
+        version: link:../../packages/contract-verifier
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../packages/core

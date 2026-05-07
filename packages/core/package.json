@@ -115,6 +115,7 @@
   },
   "dependencies": {
     "@truecourse/analyzer": "workspace:*",
+    "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "cross-spawn": "^7.0.6",
     "dagre": "^0.8.5",

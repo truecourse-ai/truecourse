@@ -1,0 +1,46 @@
+effect-group order.lifecycle.events {
+  origin SPEC.md "Effects" 160..174
+  channel event-bus
+
+  payload-shape {
+    id: uuid
+    status: Enum:OrderStatus
+    at: iso-8601
+  }
+
+  effect order.placed {
+    emit-when {
+      operation Operation:"POST /api/orders"
+      on-status 201
+    }
+    payload-constraint status = "placed"
+  }
+
+  effect order.paid {
+    emit-when {
+      operation Operation:"POST /api/orders/{id}/pay"
+      on-status 200
+    }
+    payload-constraint status = "paid"
+  }
+
+  effect order.shipped {
+    emit-when {
+      operation Operation:"POST /api/orders/{id}/ship"
+      on-status 200
+    }
+    payload-constraint status = "shipped"
+  }
+
+  effect order.cancelled {
+    emit-when {
+      operation Operation:"POST /api/orders/{id}/cancel"
+      on-status 200
+    }
+    payload-constraint status = "cancelled"
+  }
+
+  forbids {
+    forbid emission when-response-status [4xx, 5xx]
+  }
+}
