@@ -193,6 +193,15 @@ export async function runAnalysis(
     percent: 62,
     detail: `Type-checking ${fileAnalyses.length} files...`,
   });
+  // Yield to the event loop so the queued progress emit (which goes
+  // through Socket.io for the dashboard) actually flushes BEFORE the
+  // synchronous TS-Compiler work below blocks the loop for 30-60s.
+  // Without this yield, the dashboard sees step transitions arrive in
+  // batches when each blocking phase ends, not at its actual start.
+  // The CLI is unaffected — it writes to stderr synchronously inside
+  // the StepTracker callback, so its render lands before the next
+  // blocking call.
+  await new Promise<void>((r) => setImmediate(r));
 
   // Use TS compiler for accurate export detection — corrects isExported flags
   // set by tree-sitter which can't handle grouped exports, re-exports, or barrels
@@ -264,6 +273,8 @@ export async function runAnalysis(
     percent: 70,
     detail: 'Building dependency graph...',
   });
+  // Same yield rationale as the 'semantics' transition above.
+  await new Promise<void>((r) => setImmediate(r));
   const moduleDependencies = analyzer.buildDependencyGraph(fileAnalyses, repoPath);
 
   onProgress({
@@ -271,6 +282,7 @@ export async function runAnalysis(
     percent: 75,
     detail: 'Detecting services...',
   });
+  await new Promise<void>((r) => setImmediate(r));
   const splitResult = analyzer.performSplitAnalysis(
     repoPath,
     fileAnalyses,
