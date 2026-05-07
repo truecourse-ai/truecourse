@@ -57,9 +57,11 @@ async function sendEmailJob(job: Job) {
 // VIOLATION: code-quality/deterministic/require-await
 // VIOLATION: code-quality/deterministic/missing-return-type
 async function sendSmsJob(job: Job) {
+  // 0 is a valid quantity (e.g., zero retries means "don't retry"), so
+  // truthiness here silently treats it like "missing" — a real bug.
   // VIOLATION: bugs/deterministic/loose-boolean-expression
-  const recipient: string = job.payload.phone ?? '';
-  if (recipient) {
+  const retryCount: number = job.payload.retryCount ?? 3;
+  if (retryCount) {
     return { jobId: job.id, sent: true };
   }
   return { jobId: job.id, sent: false };

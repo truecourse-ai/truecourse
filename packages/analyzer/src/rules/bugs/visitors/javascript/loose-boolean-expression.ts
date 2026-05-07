@@ -63,6 +63,27 @@ export const looseBooleanExpressionVisitor: CodeRuleVisitor = {
       const baseType = typeStr.replace(/\s*\|.*/, '') // first type in union
       if (/^[A-Z]/.test(baseType) && !['Number', 'String', 'Boolean'].includes(baseType)) return null
 
+      // Skip idiomatic guards on string-only and boolean-only unions
+      // (with optional null/undefined). For these primitives the falsy
+      // non-undefined values (`''`, `false`) are conventionally
+      // equivalent to "absent" in business logic — `if (str)` and
+      // `if (bool)` are the standard guard pattern across the JS
+      // ecosystem and produce massive FPs when strict-flagged.
+      //
+      // Numeric guards STILL fire: `0` has different semantics from
+      // "absent" in most numeric contexts (count, retry-count, page,
+      // size, etc.) and the warning carries real signal.
+      const PRIMITIVE_UNION = /^[\w\s|]+$/
+      if (PRIMITIVE_UNION.test(typeStr)) {
+        const parts = typeStr.split('|').map((s) => s.trim())
+        const allStringOrNullish = parts.every((p) => p === 'string' || p === 'undefined' || p === 'null')
+        if (allStringOrNullish) return null
+        const allBooleanOrNullish = parts.every((p) =>
+          p === 'true' || p === 'false' || p === 'boolean' || p === 'undefined' || p === 'null',
+        )
+        if (allBooleanOrNullish) return null
+      }
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Non-boolean in boolean context',
