@@ -10,6 +10,15 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
     if (node.type === 'jsx_attribute') {
       const name = node.namedChildren[0]
       if (name && name.text === 'dangerouslySetInnerHTML') {
+        // Skip when the `__html` value is a static string literal with
+        // no dynamic interpolation. Same rationale as the innerHTML
+        // path below: a hard-coded CSS / HTML fragment carries no
+        // XSS risk because there's nothing for the attacker to inject.
+        // documenso's app/root.tsx:132 ships a static animation-disable
+        // CSS string this way.
+        const htmlValue = findDangerousHtmlValue(node)
+        if (htmlValue && isStaticStringLiteral(htmlValue)) return null
+        if (htmlValue && isFullyEscapedRhs(htmlValue)) return null
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Disabled auto-escaping',
@@ -83,6 +92,28 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+// Walk a `dangerouslySetInnerHTML={{...}}` jsx_attribute to extract the
+// VALUE expression of the inner `__html` property. Returns null if the
+// shape doesn't match. We need this because the attribute parses as
+// `jsx_attribute > jsx_expression > object > pair{key:__html, value:X}`
+// — the rule wants X.
+function findDangerousHtmlValue(jsxAttr: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
+  // Walk children: name, then jsx_expression containing the value
+  for (const child of jsxAttr.namedChildren) {
+    if (child.type === 'jsx_expression') {
+      const obj = child.namedChildren[0]
+      if (obj?.type !== 'object') return null
+      for (const pair of obj.namedChildren) {
+        if (pair.type !== 'pair') continue
+        const key = pair.childForFieldName('key')
+        const keyText = key?.text.replace(/^['"`]|['"`]$/g, '') ?? ''
+        if (keyText === '__html') return pair.childForFieldName('value')
+      }
+    }
+  }
+  return null
 }
 
 function isStaticStringLiteral(node: import('web-tree-sitter').Node): boolean {
