@@ -212,9 +212,32 @@ export function findUserInputAccess(
         ) {
           const value = findVariableInitializerValue(variable)
           if (value) {
-            const source = walk(value)
-            if (source) {
-              return { kind: 'aliased-identifier', accessor: n.text }
+            // Stop the taint walk at function-call boundaries. A
+            // variable assigned from a call holds the call's RETURN
+            // value, not its arguments — and the called function is
+            // free to return whatever it wants (typically sanitized
+            // DB rows, validated DTOs, etc.). Recursing into the call's
+            // args produced massive transitive false positives like
+            // `const template = await createEnvelope({ requestMetadata:
+            // metadata, ... }); db.create({ data: template.id })`
+            // flagging `template.id` because the walk reaches `metadata`
+            // (or req anywhere upstream) through the createEnvelope
+            // arguments. Direct uses (`db.create({ data: req.body })`)
+            // are still caught — the rule visitor enters walk() on the
+            // call's args directly, not via this aliased path.
+            //
+            // Member-expression and identifier initializers (alias
+            // chains like `const x = req.body` or `const y = x`) DO
+            // propagate taint and continue the walk.
+            if (
+              value.type !== 'call_expression' &&
+              value.type !== 'await_expression' &&
+              value.type !== 'new_expression'
+            ) {
+              const source = walk(value)
+              if (source) {
+                return { kind: 'aliased-identifier', accessor: n.text }
+              }
             }
           }
         }
