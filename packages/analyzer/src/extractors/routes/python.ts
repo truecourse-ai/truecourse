@@ -57,6 +57,28 @@ export function extractPythonRoutes(
   return { routes, mounts }
 }
 
+// Frameworks that register handlers via decorator. The route's
+// HTTP method may not be meaningful (MCP `tool`, Slack `event`,
+// Click `command`, etc.) but the handler-name binding is — the
+// architecture checker uses route handler names to skip the
+// dead-method / unused-export rules. Coerce non-HTTP framework
+// decorators to httpMethod='ALL' so the entry still tracks the
+// handler.
+const HTTP_VERBS = new Set(['get', 'post', 'put', 'delete', 'patch', 'route'])
+const FRAMEWORK_HANDLER_DECORATORS = new Set([
+  // FastAPI / Flask shorthand HTTP verbs handled by HTTP_VERBS above.
+  // MCP: @mcp_server.tool() / @mcp_server.resource() / @mcp_server.prompt()
+  'tool', 'resource', 'prompt',
+  // Slack Bolt / general event-driven decorators
+  'event', 'message', 'command', 'shortcut', 'action', 'view', 'options',
+  // Click CLI
+  'group',
+  // Celery / RQ
+  'task', 'periodic_task',
+  // FastAPI app lifecycle
+  'on_event', 'middleware',
+])
+
 function extractDecoratorRoute(
   decorator: SyntaxNode,
   definition: SyntaxNode,
@@ -64,17 +86,29 @@ function extractDecoratorRoute(
 ): RouteRegistration | null {
   const decoratorText = decorator.text
 
-  const methodMatch = decoratorText.match(/@\w+\.(get|post|put|delete|patch|route)\s*\(/)
+  const methodMatch = decoratorText.match(/@\w+\.(\w+)\s*\(/)
   if (!methodMatch) return null
+  const decoratorMethod = methodMatch[1]
+  const isHttp = HTTP_VERBS.has(decoratorMethod)
+  const isFrameworkHandler = FRAMEWORK_HANDLER_DECORATORS.has(decoratorMethod)
+  if (!isHttp && !isFrameworkHandler) return null
 
-  let method = methodMatch[1].toUpperCase()
-  if (method === 'ROUTE') {
-    const methodsMatch = decoratorText.match(/methods\s*=\s*\[\s*['"](\w+)['"]/)
-    method = methodsMatch ? methodsMatch[1].toUpperCase() : 'GET'
+  let method: string
+  if (isHttp) {
+    method = decoratorMethod.toUpperCase()
+    if (method === 'ROUTE') {
+      const methodsMatch = decoratorText.match(/methods\s*=\s*\[\s*['"](\w+)['"]/)
+      method = methodsMatch ? methodsMatch[1].toUpperCase() : 'GET'
+    }
+  } else {
+    method = 'ALL' // non-HTTP framework handler
   }
 
+  // Path is required for HTTP routes; framework handlers may have no path
+  // (MCP @tool(), @on_event('startup')). Provide a placeholder when missing
+  // so the handler-name binding still propagates to the architecture checker.
   const pathMatch = decoratorText.match(/\(\s*['"]([^'"]+)['"]/)
-  if (!pathMatch) return null
+  const routePath = pathMatch ? pathMatch[1] : `__decorated_${decoratorMethod}__`
 
   let handlerName: string | null = null
   for (const child of definition.namedChildren) {
@@ -86,7 +120,7 @@ function extractDecoratorRoute(
 
   return {
     httpMethod: method as RouteRegistration['httpMethod'],
-    path: pathMatch[1],
+    path: routePath,
     handlerName: handlerName || 'anonymous',
     location: {
       filePath,
