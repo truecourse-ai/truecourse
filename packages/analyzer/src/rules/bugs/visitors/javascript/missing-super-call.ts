@@ -12,6 +12,11 @@ export const missingSuperCallVisitor: CodeRuleVisitor = {
     const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
     if (!heritage) return null
 
+    // Skip implements-only heritage — no superclass to call.
+    const hasExtends = heritage.children.some((c) => c.type === 'extends_clause' || c.text === 'extends') ||
+      /\bextends\b/.test(heritage.text)
+    if (!hasExtends) return null
+
     const body = node.childForFieldName('body')
     if (!body) return null
 
