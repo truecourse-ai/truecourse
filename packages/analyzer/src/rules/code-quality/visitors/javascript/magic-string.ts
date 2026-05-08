@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList, isInTanstackQueryKeyArray, isClsxArg, isMockFixturePath } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList, isInTanstackQueryKeyArray, isClsxArg, isMockFixturePath, isInSqlBuilderCall } from './_helpers.js'
 
 // Minimum string length to be considered "magic"
 const MIN_LENGTH = 4
@@ -78,6 +78,9 @@ export const magicStringVisitor: CodeRuleVisitor = {
           if (isInTanstackQueryKeyArray(n)) return
           // Skip cn / clsx / cva / classnames / twMerge args.
           if (isClsxArg(n)) return
+          // Skip SQL query-builder string-literal args (Kysely
+          // / Knex / Drizzle table/column/function names).
+          if (isInSqlBuilderCall(n)) return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings

@@ -126,6 +126,49 @@ export function isMockFixturePath(filePath: string): boolean {
 }
 
 /**
+ * SQL query-builder methods (Kysely, Knex, Drizzle, Prisma
+ * `$kysely`) that take string literals as table/column/SQL
+ * function names. Repeating these strings across builder
+ * chains is structural — the strings are SQL identifiers
+ * required by the API and often type-bound to the schema.
+ */
+const SQL_BUILDER_METHODS = new Set([
+  'selectFrom', 'from', 'into', 'with',
+  'select', 'distinct', 'distinctOn',
+  'where', 'whereIn', 'whereNotIn', 'whereRef', 'whereExists',
+  'andWhere', 'orWhere', 'having',
+  'innerJoin', 'leftJoin', 'rightJoin', 'crossJoin',
+  'fullJoin', 'outerJoin', 'join',
+  'groupBy', 'orderBy',
+  'lit', 'fn',
+  'returning', 'on', 'onConflict', 'onDuplicate',
+  'as',
+])
+
+/**
+ * True if `node` is a string-literal argument to a SQL
+ * query-builder method, either as a direct argument or as an
+ * element inside an array argument: `fn('DATE_TRUNC', [..., 'col'])`.
+ */
+export function isInSqlBuilderCall(node: SyntaxNode): boolean {
+  // Direct arg: string -> arguments -> call_expression
+  let argsContainer = node.parent
+  // Array element: string -> array -> arguments -> call_expression
+  if (argsContainer?.type === 'array') argsContainer = argsContainer.parent
+  if (argsContainer?.type !== 'arguments') return false
+  const call = argsContainer.parent
+  if (call?.type !== 'call_expression') return false
+  const fn = call.childForFieldName('function')
+  if (!fn) return false
+  let name = ''
+  if (fn.type === 'identifier') name = fn.text
+  else if (fn.type === 'member_expression') {
+    name = fn.childForFieldName('property')?.text ?? ''
+  }
+  return SQL_BUILDER_METHODS.has(name)
+}
+
+/**
  * True if `node` is the first argument of a method call whose
  * method name is a known field-key accessor (form / storage /
  * translation libs).

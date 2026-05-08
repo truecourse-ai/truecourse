@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList, isInTanstackQueryKeyArray, isClsxArg, isMockFixturePath } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList, isInTanstackQueryKeyArray, isClsxArg, isMockFixturePath, isInSqlBuilderCall } from './_helpers.js'
 
 export const duplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
@@ -88,6 +88,9 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
         if (isInTanstackQueryKeyArray(n)) return
         // Skip cn / clsx / cva / classnames / twMerge args.
         if (isClsxArg(n)) return
+        // Skip SQL query-builder string-literal args (Kysely
+        // / Knex / Drizzle table/column/function names).
+        if (isInSqlBuilderCall(n)) return
 
         const existing = stringCounts.get(content)
         if (existing) {
