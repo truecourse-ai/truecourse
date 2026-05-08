@@ -78,6 +78,24 @@ export const pythonImportFormattingVisitor: CodeRuleVisitor = {
         }
       }
 
+      // `with warnings.catch_warnings(): warnings.simplefilter(...)`
+      // blocks — suppresses import-time DeprecationWarning from
+      // upstream packages. The block itself is a prologue idiom;
+      // imports may appear before AND after.
+      if (child.type === 'with_statement') {
+        const text = child.text
+        if (/\bwarnings\.catch_warnings\b/.test(text)) continue
+      }
+
+      // `__path__ = pkgutil.extend_path(__path__, __name__)` —
+      // namespace-package setup that must execute before
+      // submodule imports.
+      if (child.type === 'expression_statement' || child.type === 'assignment') {
+        const text = child.text
+        if (/\b__path__\s*=\s*pkgutil\.extend_path\b/.test(text) ||
+            /\bpkgutil\.extend_path\b/.test(text)) continue
+      }
+
       sawNonImport = true
     }
 
