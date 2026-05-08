@@ -5,7 +5,8 @@ export const dynamicDeleteVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/dynamic-delete',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['unary_expression'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     const op = node.children[0]
     if (op?.text !== 'delete') return null
 
@@ -17,6 +18,19 @@ export const dynamicDeleteVisitor: CodeRuleVisitor = {
       if (!index) return null
 
       if (index.type === 'string' || index.type === 'number') return null
+
+      // Skip when the LHS object's type is a Record / index-signature
+      // map — `delete obj[key]` on a string-indexed dictionary is the
+      // canonical pattern, not a smell.
+      const objExpr = operand.childForFieldName('object')
+      if (objExpr && typeQuery) {
+        const t = typeQuery.getTypeAtPosition(
+          filePath,
+          objExpr.startPosition.row, objExpr.startPosition.column,
+          objExpr.endPosition.row, objExpr.endPosition.column,
+        )
+        if (t && /Record<|^\{\s*\[/.test(t)) return null
+      }
 
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

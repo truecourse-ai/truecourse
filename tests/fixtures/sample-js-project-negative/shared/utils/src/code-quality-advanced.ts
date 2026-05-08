@@ -170,6 +170,11 @@ export class OnlyStatic {
 }
 
 // VIOLATION: code-quality/deterministic/dynamic-delete
-export function deleteDynamic(obj: Record<string, any>, key: string) {
-  delete obj[key];
+// `delete obj[key]` where `obj` is typed as a regular interface
+// with known fields is the dynamic-delete antipattern. Records /
+// index-signature maps are skipped because the shape is designed
+// for it.
+interface UserPrefs { theme: string; locale: string; }
+export function deleteDynamic(prefs: UserPrefs, key: keyof UserPrefs) {
+  delete prefs[key];
 }
