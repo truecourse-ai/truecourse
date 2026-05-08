@@ -292,6 +292,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
       skipStash: stashDecision.skipStash,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
+      source: "cli",
       onLlmEstimate: async (estimate) => {
         stopSpinner();
         const proceed = await promptLlmEstimate(estimate, {
@@ -383,6 +384,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
       signal: abortController.signal,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
+      source: "cli",
       onLlmEstimate: async (estimate) => {
         stopSpinner();
         const proceed = await promptLlmEstimate(estimate, {

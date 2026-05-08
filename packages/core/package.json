@@ -1,6 +1,6 @@
 {
   "name": "@truecourse/core",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "private": true,
   "type": "module",
   "exports": {
@@ -100,6 +100,10 @@
       "types": "./dist/services/llm/provider.d.ts",
       "import": "./dist/services/llm/provider.js"
     },
+    "./services/telemetry": {
+      "types": "./dist/services/telemetry.service.d.ts",
+      "import": "./dist/services/telemetry.service.js"
+    },
     "./types/snapshot": {
       "types": "./dist/types/snapshot.d.ts",
       "import": "./dist/types/snapshot.js"
@@ -116,6 +120,7 @@
     "dagre": "^0.8.5",
     "dotenv": "^16.4.0",
     "p-limit": "^7.3.0",
+    "posthog-node": "^4.0.0",
     "simple-git": "^3.27.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1"
