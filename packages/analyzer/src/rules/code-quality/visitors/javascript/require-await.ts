@@ -60,6 +60,68 @@ export const requireAwaitVisitor: CodeRuleVisitor = {
       if (body && body.type !== 'statement_block') return null
     }
 
+    // Skip async functions passed as values of known
+    // async-callback option keys (`mutationFn`, `queryFn`,
+    // `handler`, `loader`, `action`, `resolver`, `subscribe`,
+    // `transition`). The framework's option-bag type expects an
+    // async function regardless of whether the body uses await.
+    const ASYNC_OPTION_KEYS = new Set([
+      'mutationFn', 'queryFn', 'handler', 'resolver',
+      'fetch', 'fetcher',
+      'subscribe', 'unsubscribe', 'connect', 'disconnect',
+      'onLoad', 'onUnload', 'onMount',
+    ])
+    {
+      const pair = node.parent?.type === 'pair' ? node.parent : null
+      if (pair) {
+        const key = pair.childForFieldName('key')
+        const keyName = key?.type === 'property_identifier' ? key.text :
+          (key?.type === 'string' ? key.text.replace(/^['"]|['"]$/g, '') : '')
+        if (keyName && ASYNC_OPTION_KEYS.has(keyName)) return null
+      }
+    }
+
+    // Skip async arrow passed as the last positional argument
+    // to a router method call: `app.get('/path', async (c) =>
+    // …)`, `http.get('/api', async () => HttpResponse.json(...))`,
+    // `router.post(p, async (req) => …)`. The router contract
+    // expects an async handler.
+    {
+      const args = node.parent?.type === 'arguments' ? node.parent : null
+      const call = args?.parent?.type === 'call_expression' ? args.parent : null
+      if (call) {
+        const fn = call.childForFieldName('function')
+        let methodName = ''
+        if (fn?.type === 'member_expression') {
+          methodName = fn.childForFieldName('property')?.text ?? ''
+        } else if (fn?.type === 'identifier') {
+          methodName = fn.text
+        }
+        // Common HTTP / route-handler verbs.
+        const HTTP_VERB_RE = /^(?:get|post|put|patch|delete|head|options|all|use|route|on|handle|fetch|all)$/i
+        if (methodName && HTTP_VERB_RE.test(methodName)) return null
+        // MSW / undici handler factories.
+        if (methodName === 'http' || methodName === 'rest' || methodName === 'graphql') return null
+      }
+    }
+
+    // Skip exported async functions named after framework
+    // conventions (`loader`, `action`, `meta`, `links`,
+    // `headers`, `clientLoader`, `clientAction`, `default`).
+    // Their async signature is required by the framework even
+    // when the implementation has no await.
+    if (node.type === 'function_declaration') {
+      const name = node.childForFieldName('name')?.text ?? ''
+      const FRAMEWORK_ASYNC_FN = new Set([
+        'loader', 'action', 'meta', 'links', 'headers',
+        'clientLoader', 'clientAction', 'shouldRevalidate',
+        'middleware',
+        'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
+        'generateMetadata', 'generateStaticParams', 'generateViewport',
+      ])
+      if (FRAMEWORK_ASYNC_FN.has(name)) return null
+    }
+
     // Skip async methods of a class that has an `implements` clause —
     // those are interface/contract implementations.
     if (node.type === 'method_definition') {
