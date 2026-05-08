@@ -2756,7 +2756,15 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'String literal in exception constructor',
     description: 'Passing string literal directly to exception — use variable to avoid duplicate string in traceback',
-    enabled: true,
+    // Disabled by default: this is Ruff's EM101/EM102 preference,
+    // off by default in `ruff check`'s baseline. Modern Python
+    // style (Google, PEP 8) does NOT require extracting exception
+    // messages to local variables. The "message duplicated in
+    // traceback" claim is technically true but the duplication is
+    // single-line and rarely meaningful. Firing on every
+    // `raise X("...")` produces hundreds of stylistic hits with
+    // negligible signal. Users who want the EM lint can flip on.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },
