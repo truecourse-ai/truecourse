@@ -38,7 +38,7 @@ const BYTE_FACTORS = new Set([1024, 1048576, 1073741824, 1099511627776])
 const VALIDATOR_CHAIN_METHODS = new Set([
   'min', 'max', 'length', 'gte', 'lte', 'gt', 'lt', 'step',
   'multipleOf', 'positive', 'nonnegative', 'finite', 'safe',
-  'int', 'integer', 'precision',
+  'int', 'integer', 'precision', 'default',
 ])
 
 // Standard HTTP status codes. When compared against `.status`,
@@ -181,6 +181,20 @@ export const magicNumberVisitor: CodeRuleVisitor = {
             methodName = fnNode.text
           }
           if (STATUS_METHOD_NAMES.has(methodName)) return null
+          // Constructor / call-form errors with status code:
+          // `new HTTPException(429, …)`, `new AiApiError(msg, 429)`,
+          // `throw new ConflictError(…, 409)`. Match by class name
+          // ending in `Error` / `Exception`.
+          const newExpr = parent.parent?.parent  // arguments → call → new_expression
+          let ctorName = ''
+          if (newExpr?.type === 'new_expression') {
+            const ctor = newExpr.childForFieldName('constructor')
+            if (ctor?.type === 'identifier') ctorName = ctor.text
+            else if (ctor?.type === 'member_expression') {
+              ctorName = ctor.childForFieldName('property')?.text ?? ''
+            }
+          }
+          if (ctorName && /(?:Error|Exception)$/.test(ctorName)) return null
         }
       }
     }
