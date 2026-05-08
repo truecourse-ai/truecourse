@@ -3,6 +3,29 @@ import { makeViolation } from '../../../types.js'
 
 type SyntaxNode = import('web-tree-sitter').Node
 
+/**
+ * True if the file path looks like a CLI / script entry point —
+ * basename is `__main__.py` / `manage.py`, OR an ancestor
+ * directory name is `scripts`, `bin`, `tools`, `cli`, `cmd`.
+ *
+ * Tighter than the general `isScriptLikeFile` check: this only
+ * uses path conventions, not "top-level imperative code in
+ * module body". Worker modules like `data_pipeline.py` that
+ * happen to have top-level setup are NOT considered scripts —
+ * type hints there still help downstream callers.
+ */
+function isCliScriptByPath(filePath: string): boolean {
+  const segments = filePath.split('/')
+  const fileName = segments[segments.length - 1]?.toLowerCase() ?? ''
+  if (fileName === '__main__.py' || fileName === 'manage.py') return true
+
+  const SCRIPT_DIRS = new Set(['scripts', 'bin', 'tools', 'cli', 'cmd'])
+  for (let i = 1; i < segments.length - 1; i++) {
+    if (SCRIPT_DIRS.has(segments[i].toLowerCase())) return true
+  }
+  return false
+}
+
 function isPublicFunction(node: SyntaxNode): boolean {
   const name = node.childForFieldName('name')?.text ?? ''
   // Only check public functions (not starting with _)
@@ -26,6 +49,12 @@ export const pythonMissingTypeHintsVisitor: CodeRuleVisitor = {
   nodeTypes: ['function_definition'],
   visit(node, filePath, sourceCode) {
     if (!isPublicFunction(node)) return null
+
+    // CLI / script entry-point files (`__main__.py`, `manage.py`,
+    // anything inside `scripts/` / `bin/` / `tools/` / `cli/` /
+    // `cmd/`). Type hints there add little value — the code is the
+    // entry point, not an API surface for callers.
+    if (isCliScriptByPath(filePath)) return null
 
     const params = node.childForFieldName('parameters')
     if (!params) return null
