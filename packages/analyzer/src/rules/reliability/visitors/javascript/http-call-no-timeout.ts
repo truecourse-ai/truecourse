@@ -26,6 +26,13 @@ export const httpCallNoTimeoutVisitor: CodeRuleVisitor = {
     if (funcName === 'fetch') {
       // Skip client-side React components fetching own API — browser fetch has default timeouts
       if (/\.tsx$/.test(filePath) && /\/components\//.test(filePath)) return null
+      // Skip Playwright APIRequestContext.fetch — `request.fetch(...)`,
+      // `apiRequest.fetch(...)`, `page.context().request.fetch(...)`.
+      // Playwright manages the timeout via the test config; the
+      // framework cancels the request automatically.
+      if (objectName === 'request' || objectName === 'apiRequest') return null
+      // Also skip e2e / playwright fixture file paths.
+      if (/(?:[\\/]|^)(?:e2e|playwright|app-tests)[\\/]/.test(filePath)) return null
       const args = node.childForFieldName('arguments')
       if (args) {
         const optionsArg = args.namedChildren[1]

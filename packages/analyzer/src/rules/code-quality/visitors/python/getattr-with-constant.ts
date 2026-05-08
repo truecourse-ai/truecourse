@@ -31,6 +31,17 @@ export const pythonGetattrWithConstantVisitor: CodeRuleVisitor = {
     const inner = attrArg.text.slice(1, -1)
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(inner)) return null
 
+    // Skip setattr/getattr on stdlib `logging.LogRecord` objects.
+    // Logging filters / formatters discover fields via
+    // `record.__dict__` and `getattr(record, name)`; the setattr
+    // form is conventional and lets later code parameterize the
+    // field name without code change.
+    const targetName = positional[0]?.text ?? ''
+    const LOG_RECORD_TARGETS = new Set([
+      'record', 'new_record', 'log_record', 'rec', 'new_rec',
+    ])
+    if (LOG_RECORD_TARGETS.has(targetName)) return null
+
     const fnName = fn.text
     const objText = positional[0]?.text || 'obj'
 
