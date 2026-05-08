@@ -4011,20 +4011,25 @@ describe('code-quality/deterministic/magic-number', () => {
 });
 
 describe('code-quality/deterministic/async-promise-function', () => {
-  it('detects non-async function returning new Promise', () => {
-    const violations = check(`function fetchData() { return new Promise(resolve => resolve(42)); }`);
+  it('detects async function returning new Promise (rewritable as await)', () => {
+    // An async function building \`return new Promise(...)\` is the
+    // antipattern — \`await\` is the readable form.
+    const violations = check(`async function fetchData() { return new Promise(resolve => resolve(42)); }`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-promise-function');
     expect(matches).toHaveLength(1);
   });
 
-  it('does not flag async function', () => {
-    const violations = check(`async function fetchData() { return 42; }`);
+  it('does not flag non-async function returning new Promise (callback bridge)', () => {
+    // The Promise constructor is the canonical adapter for callback
+    // APIs (setTimeout, addEventListener, MessageChannel) — there is
+    // no async equivalent.
+    const violations = check(`function delay(ms) { return new Promise(r => setTimeout(r, ms)); }`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-promise-function');
     expect(matches).toHaveLength(0);
   });
 
-  it('does not flag non-Promise return', () => {
-    const violations = check(`function getData() { return { x: 1 }; }`);
+  it('does not flag plain async function', () => {
+    const violations = check(`async function fetchData() { return 42; }`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/async-promise-function');
     expect(matches).toHaveLength(0);
   });

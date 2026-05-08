@@ -19,6 +19,11 @@ export const unhandledPromiseVisitor: CodeRuleVisitor = {
     // Skip if already handled: void expr, expr.catch(), await expr
     if (expr.type === 'await_expression') return null
     if (expr.type === 'void_expression') return null
+    // Skip assignments — \`ref.current = somePromise()\` stores
+    // the promise into a binding for later use, not "fire and
+    // forget". The assigned value is referenced through the
+    // binding.
+    if (expr.type === 'assignment_expression') return null
     // Skip resolve/reject calls inside Promise constructors
     if (expr.type === 'call_expression') {
       const fn = expr.childForFieldName('function')

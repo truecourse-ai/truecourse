@@ -11,7 +11,11 @@ export function confirmDialog() {
 }
 
 // VIOLATION: code-quality/deterministic/async-promise-function
-export function promiseInstead() {
+// async fn returning `new Promise(...)` is the antipattern — await is
+// the readable form. A NON-async function would be the canonical
+// callback-bridge use of the Promise constructor and is no longer
+// flagged.
+export async function promiseInstead() {
   return new Promise((resolve) => {
     resolve(42);
   });

@@ -38,6 +38,22 @@ export const nonNumberArithmeticVisitor: CodeRuleVisitor = {
     // Skip if either operand is a numeric literal — it's definitely a number
     if (left.type === 'number' || right.type === 'number') return null
 
+    // Skip when an operand is wrapped in \`?? <number>\` — the
+    // nullish-coalesce supplies a numeric fallback, guaranteeing
+    // numeric type at runtime regardless of TS's reported type.
+    function isNumericNullishCoalesce(n: import('web-tree-sitter').Node): boolean {
+      let inner = n
+      if (inner.type === 'parenthesized_expression') inner = inner.namedChild(0) ?? inner
+      if (inner.type !== 'binary_expression') return false
+      const op = inner.children.find((c) => c.text === '??')
+      if (!op) return false
+      const rhs = inner.childForFieldName('right')
+      if (rhs?.type === 'number') return true
+      if (rhs?.type === 'unary_expression' && rhs.namedChildren[0]?.type === 'number') return true
+      return false
+    }
+    if (isNumericNullishCoalesce(left) || isNumericNullishCoalesce(right)) return null
+
     if (!leftOk || !rightOk) {
       const badSide = !leftOk ? `left operand is \`${leftType}\`` : `right operand is \`${rightType}\``
       return makeViolation(

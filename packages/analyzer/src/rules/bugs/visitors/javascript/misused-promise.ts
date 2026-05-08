@@ -31,6 +31,26 @@ export const misusedPromiseVisitor: CodeRuleVisitor = {
     // Skip if the condition is an await expression
     if (condition.type === 'await_expression') return null
 
+    // Skip ref-truthy checks: \`if (someRef.current) { ... }\`. The
+    // ref may hold a Promise, but the truthy check is asking
+    // "is the ref populated?" — testing for non-null, not
+    // awaiting the inner value.
+    if (condition.type === 'member_expression') {
+      const prop = condition.childForFieldName('property')
+      if (prop?.text === 'current') return null
+    }
+    // Skip when the condition's type is a union of Promise|null
+    // / Promise|undefined — the user is testing for "ref/cache
+    // populated?" rather than "promise resolved?".
+    {
+      const t = typeQuery.getTypeAtPosition(
+        filePath,
+        condition.startPosition.row, condition.startPosition.column,
+        condition.endPosition.row, condition.endPosition.column,
+      )
+      if (t && /Promise<.*>/.test(t) && /\|/.test(t) && /\b(?:null|undefined)\b/.test(t)) return null
+    }
+
     const isPromise = typeQuery.isPromiseLike(
       filePath,
       condition.startPosition.row,

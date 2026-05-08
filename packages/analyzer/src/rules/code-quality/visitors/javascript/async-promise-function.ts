@@ -6,9 +6,13 @@ export const asyncPromiseFunctionVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['function_declaration', 'function_expression', 'arrow_function', 'method_definition'],
   visit(node, filePath, sourceCode) {
-    // Skip async functions — already fine
+    // Only flag ASYNC functions that return \`new Promise(...)\`.
+    // A non-async function building a Promise from a callback API
+    // (\`setTimeout\`, \`addEventListener\`, MessageChannel, etc.)
+    // is the canonical legitimate use of the Promise constructor —
+    // there is no async equivalent.
     const isAsync = node.children.some((c) => c.type === 'async' || c.text === 'async')
-    if (isAsync) return null
+    if (!isAsync) return null
 
     const body = node.childForFieldName('body')
     if (!body) return null
