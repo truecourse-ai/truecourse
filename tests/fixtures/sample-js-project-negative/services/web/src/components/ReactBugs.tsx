@@ -70,9 +70,7 @@ export function UselessSetState() {
   return <div>{value}</div>;
 }
 
-// react-readonly-props is disabled by default — modern React/TS
-// convention does not add explicit `readonly` to every Props
-// field. Users who want that style can opt in per-project.
+// VIOLATION: code-quality/deterministic/react-readonly-props
 interface MutatingComponentProps {
   items: string[];
 }

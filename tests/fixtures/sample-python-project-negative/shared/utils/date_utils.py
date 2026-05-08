@@ -16,8 +16,7 @@ format = "%Y-%m-%d %H:%M:%S"
 class DateParser:
     """Parses date strings in various formats."""
 
-    # python-minor-style-preference is disabled by default — this
-    # overlaps with what `ruff format` / `black` enforce.
+    # VIOLATION: style/deterministic/python-minor-style-preference
     SUPPORTED_FORMATS = [
         "%Y-%m-%d",
         "%Y/%m/%d",

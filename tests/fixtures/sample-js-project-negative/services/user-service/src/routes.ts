@@ -1,5 +1,5 @@
 import { Router } from 'express';
-// sorting-style is disabled by default — formatter responsibility.
+// VIOLATION: style/deterministic/sorting-style
 import { getUsers, getUserById, createUser, deleteUser } from './handlers/user.handler';
 
 export const userRoutes = Router();

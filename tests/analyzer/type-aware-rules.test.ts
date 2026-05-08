@@ -476,9 +476,7 @@ describe('type-aware rule registration', () => {
     'code-quality/deterministic/unnecessary-type-parameter',
     'code-quality/deterministic/prefer-this-return-type',
     'code-quality/deterministic/unnecessary-namespace-qualifier',
-    // readonly-parameter-types is registered but disabled by
-    // default — typescript-eslint's prefer-readonly-parameter-types
-    // is famously over-strict and off by default upstream.
+    'code-quality/deterministic/readonly-parameter-types',
     // Bugs — Python heuristic-based
     'bugs/deterministic/undefined-name',
     'bugs/deterministic/undefined-local-variable',

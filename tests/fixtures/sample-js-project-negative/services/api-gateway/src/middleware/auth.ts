@@ -1,4 +1,4 @@
-// sorting-style is disabled by default — formatter responsibility.
+// VIOLATION: style/deterministic/sorting-style
 import { Request, Response, NextFunction } from 'express';
 
 // VIOLATION: code-quality/deterministic/missing-return-type

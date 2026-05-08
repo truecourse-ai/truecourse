@@ -337,14 +337,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Redundant return await',
     description: 'return await is redundant in async functions — the promise is already unwrapped.',
-    // Disabled by default: ESLint's `no-return-await` was officially
-    // deprecated in v8.19 (2022) — `return await` is now RECOMMENDED
-    // for better Node async stack traces (V8 zero-cost since Node
-    // 12), and in `try/catch` blocks it's required for the catch to
-    // fire. The rule's premise (saving one microtask) doesn't hold
-    // on modern V8 and conflicts with stack-trace best practice.
-    // Users who prefer the old style can flip this on.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -2096,13 +2089,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'FastAPI non-annotated dependency',
     description: 'FastAPI dependency declared without Annotated — should use Annotated[type, Depends(...)]',
-    // Disabled by default: `Annotated[T, Depends(...)]` is
-    // FastAPI's RECOMMENDED form since 0.95, but the legacy
-    // `: T = Depends(...)` form remains officially supported and
-    // is universally used in older codebases (80 OH). Modern
-    // codebases mix both styles. Treating the legacy form as a
-    // violation is a "consider upgrading" hint, not a defect.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -2742,15 +2729,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Long message in exception constructor',
     description: 'Long message passed directly to exception — should define custom exception class for reusable error messages',
-    // Disabled by default: same rationale as
-    // `raw-string-in-exception` — Ruff EM-class style preferences,
-    // off by default upstream. Most production Python codebases
-    // raise `ValueError("long contextual message")` directly
-    // rather than declaring custom exception classes per
-    // condition. Defining custom classes is sometimes the right
-    // call for SDK / library boundaries, but flagging every
-    // inline raise produces stylistic noise (89 OH).
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -2770,15 +2749,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'String literal in exception constructor',
     description: 'Passing string literal directly to exception — use variable to avoid duplicate string in traceback',
-    // Disabled by default: this is Ruff's EM101/EM102 preference,
-    // off by default in `ruff check`'s baseline. Modern Python
-    // style (Google, PEP 8) does NOT require extracting exception
-    // messages to local variables. The "message duplicated in
-    // traceback" claim is technically true but the duplication is
-    // single-line and rarely meaningful. Firing on every
-    // `raise X("...")` produces hundreds of stylistic hits with
-    // negligible signal. Users who want the EM lint can flip on.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -3118,14 +3089,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Logic in try body instead of else',
     description: 'Code in try block that should be in else clause — only guard the risky operation',
-    // Disabled by default: this is Pylint's `try-consider-else`
-    // (W1204) — disabled by default in modern Pylint configs.
-    // Most production Python codebases keep all of the success
-    // path inside the try without an `else:` clause for
-    // readability; introducing `else:` to "narrow" the guarded
-    // region adds nesting without clear bug value. Users who
-    // specifically want this style can flip on.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -3565,14 +3529,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Mixed type and value imports',
     description: 'Type-only imports should use `import type` for better tree-shaking and clarity.',
-    // Disabled by default: the inline form
-    // `import { type X, Y } from 'mod'` is the MODERN TS 5+
-    // recommendation (typescript-eslint's `consistent-type-imports`
-    // with `fixStyle: 'inline-type-imports'`). Splitting into two
-    // statements adds duplicate-import noise. Both forms have
-    // identical tree-shaking semantics under `verbatimModuleSyntax`.
-    // Users who prefer split imports can flip this on.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -4226,13 +4183,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Undocumented HTTPException',
     description: 'HTTPException raised in route handler but not documented in `responses` metadata.',
-    // Disabled by default: documenting every HTTPException in a
-    // route's `responses={…}` metadata is FastAPI's optional
-    // OpenAPI-spec polish — most projects don't bother for
-    // internal APIs and only add it for public SDKs. Firing on
-    // every undocumented raise produces 98 hits with no
-    // bug-detection value.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -4584,16 +4535,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Readonly parameter types',
     description: 'Function parameters typed as mutable array that should be readonly to prevent mutation.',
-    // Disabled by default: typescript-eslint's
-    // `prefer-readonly-parameter-types` is OFF by default — it's
-    // famously over-strict, requiring `readonly` on every array
-    // and object parameter. Modern TS codebases (Next.js, Remix,
-    // shadcn/ui, react-hook-form) consistently write
-    // `(items: T[])` without `readonly`. Firing on every mutable
-    // array param produces 100+ stylistic hits with negligible
-    // bug-detection value. Users who enforce ts-immutable can
-    // flip on.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -4734,15 +4676,7 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'React props not readonly',
     description: 'React props interface has mutable properties — should use readonly.',
-    // Disabled by default: modern React/TS convention does NOT add
-    // explicit `readonly` to every Props field. React already treats
-    // props as immutable at runtime, and the ecosystem (Next.js,
-    // Remix, shadcn/ui, react-hook-form, etc.) consistently writes
-    // `interface XProps { foo: string }` without `readonly`. Firing
-    // this rule on a normal codebase produces hundreds of stylistic
-    // hits with zero bug value. Users who want this style can flip
-    // it on per-project.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },

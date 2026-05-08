@@ -16,7 +16,7 @@ interface Job {
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
 export async function processJobs(
-  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
+  // VIOLATION: code-quality/deterministic/readonly-parameter-types
   jobs: Job[],
 ) {
   const results: any[] = [];
@@ -95,7 +95,7 @@ export function createJob(type: string, payload: any) {
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 export function sortJobsByPriority(
-  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
+  // VIOLATION: code-quality/deterministic/readonly-parameter-types
   jobs: Job[],
 ) {
   // VIOLATION: bugs/deterministic/ignored-return-value
@@ -106,7 +106,7 @@ export function sortJobsByPriority(
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 export function getJobResults(
-  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
+  // VIOLATION: code-quality/deterministic/readonly-parameter-types
   results: Array<{ jobId: string; status: string }>,
 ) {
   // VIOLATION: bugs/deterministic/void-return-value-used

@@ -49,7 +49,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 export function getRequestLogs(
-  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
+  // VIOLATION: code-quality/deterministic/readonly-parameter-types
   filters: string[],
 ) {
   if (filters.length === 0) return logs;
@@ -59,8 +59,7 @@ export function getRequestLogs(
 }
 
 // VIOLATION: code-quality/deterministic/missing-return-type
-// no-return-await is disabled by default — modern Node best practice
-// recommends `return await` for stack traces.
+// VIOLATION: code-quality/deterministic/no-return-await
 export async function clearLogs(): Promise<void> {
   return await new Promise<void>((resolve) => {
     logs.length = 0;

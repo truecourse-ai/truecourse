@@ -79,8 +79,7 @@ def clear_admin_cache(cache: list) -> None:
     del cache[:]
 
 
-# raw-string-in-exception is disabled by default — Ruff's EM101/EM102
-# preference, not part of PEP 8 / Google style. Users can flip on.
+# VIOLATION: code-quality/deterministic/raw-string-in-exception
 def validate_admin_email(email: str) -> None:
     if "@" not in email:
         raise ValueError(r"Invalid email: must contain \@ symbol")

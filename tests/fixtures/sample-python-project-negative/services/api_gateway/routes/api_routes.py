@@ -38,13 +38,13 @@ async def list_items():
     return {"items": []}
 
 
-# fastapi-non-annotated-dependency disabled by default — legacy `: T = Depends(...)` form remains officially supported.
+# VIOLATION: code-quality/deterministic/fastapi-non-annotated-dependency
 @app.get("/api/items/{item_id}")
 async def get_item(item_id: int, db=Depends(lambda: None)):
     return {"id": item_id}
 
 
-# fastapi-undocumented-exception disabled by default — optional OpenAPI polish, not a defect.
+# VIOLATION: code-quality/deterministic/fastapi-undocumented-exception
 @app.get("/api/items/{item_id}/details", response_model=ItemResponse)
 async def get_item_details(item_id: int):
     raise HTTPException(status_code=404, detail="Item not found")

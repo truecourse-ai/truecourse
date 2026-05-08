@@ -278,8 +278,7 @@ def process_events_safe(events: List[dict]) -> List[dict]:
 def aggregate_metrics(raw_data: List[dict]) -> dict:
     """Aggregate raw metric data."""
     result = {}
-    # try-consider-else is disabled by default — Pylint W1204
-    # (off by default in modern Pylint).
+    # VIOLATION: code-quality/deterministic/try-consider-else
     try:
         totals = {}
         for item in raw_data:
@@ -398,7 +397,7 @@ def shutdown_analytics():
     exit(0)
 
 
-# raise-vanilla-args disabled by default — Ruff EM-style preference, off by default upstream.
+# VIOLATION: code-quality/deterministic/raise-vanilla-args
 def fail_with_message():
     raise ValueError("This is a very long error message that exceeds the threshold for inline exception messages and should be extracted to a constant or custom exception class")
 

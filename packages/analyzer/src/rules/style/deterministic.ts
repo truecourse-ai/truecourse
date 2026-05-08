@@ -77,14 +77,7 @@ export const STYLE_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'style',
     name: 'Unsorted imports',
     description: 'Import statements not sorted alphabetically.',
-    // Disabled by default: import ordering is a formatter
-    // responsibility (`ruff format` / Ruff's `I` rules /
-    // `eslint-plugin-import/order` / Prettier's organize-imports).
-    // Modern projects rely on the formatter to enforce a
-    // consistent order; flagging it in a separate review tool
-    // produces duplicate diagnostics. Users who don't run a
-    // formatter can flip on per-project.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },
@@ -124,14 +117,7 @@ export const STYLE_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'style',
     name: 'Python minor style issue',
     description: 'Python minor style preference (e.g., missing trailing comma in multi-line collections).',
-    // Disabled by default: this overlaps entirely with what
-    // `ruff format` / `black` enforce automatically. Modern Python
-    // projects rely on a formatter for trailing-comma + similar
-    // micro-style decisions; flagging them in a separate review
-    // tool produces hundreds of duplicate diagnostics with no
-    // additional signal. Users who don't run a formatter can flip
-    // this on per-project.
-    enabled: false,
+    enabled: true,
     severity: 'low',
     type: 'deterministic',
   },

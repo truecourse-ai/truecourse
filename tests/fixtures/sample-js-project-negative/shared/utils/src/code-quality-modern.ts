@@ -23,8 +23,7 @@ export function* noYield() {
   return 42;
 }
 
-// no-return-await is disabled by default — modern Node best practice
-// recommends `return await` for stack traces.
+// VIOLATION: code-quality/deterministic/no-return-await
 export async function extraAwait() {
   return await Promise.resolve(42);
 }
