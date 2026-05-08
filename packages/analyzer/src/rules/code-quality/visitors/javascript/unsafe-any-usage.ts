@@ -25,8 +25,15 @@ function hasExplicitAnyOrigin(name: string, sourceCode: string): boolean {
   if (new RegExp(`\\b(?:const|let|var)\\s+${name}\\s*:\\s*any\\b`).test(sourceCode)) return true
   // (<name>: any) — function/arrow/method parameter annotation
   if (new RegExp(`[(,]\\s*${name}\\s*:\\s*any\\b`).test(sourceCode)) return true
-  // <name> as any  (cast at any assignment)
-  if (new RegExp(`\\b${name}\\b[^\\n;]*?\\bas\\s+any\\b`).test(sourceCode)) return true
+  // `<name> as any` — cast applied directly to the identifier.
+  // Must be the IDENTIFIER itself being cast, not any expression
+  // containing it. `fn(...) as any` does NOT count — the cast is
+  // on the call result, the identifier `fn` retains its real
+  // type. (Without this restriction, Kysely / Prisma fluent
+  // chains that legitimately have one `as any` cast on a
+  // sub-expression would flood the file with FPs on every use
+  // of the chained variable.)
+  if (new RegExp(`\\b${name}\\s+as\\s+any\\b`).test(sourceCode)) return true
   // <name> = JSON.parse(...) / eval(...) / new Function(...)
   if (new RegExp(`\\b${name}\\s*=\\s*(?:JSON\\.parse|eval|new\\s+Function)\\s*\\(`).test(sourceCode)) return true
   // const/let <name> = JSON.parse(...) / eval(...) / new Function(...)
