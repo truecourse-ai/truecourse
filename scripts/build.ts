@@ -67,6 +67,10 @@ run('pnpm --filter @truecourse/dashboard-client build');
 // stay external so their package metadata (and asset files like the WASM
 // runtime) can be resolved at runtime from installed node_modules.
 console.log('\n=== Bundling dashboard server ===');
+const cliPkgForVersion = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'),
+);
+const versionDefine = `--define:__TRUECOURSE_VERSION__=${JSON.stringify(JSON.stringify(cliPkgForVersion.version))}`;
 run(
   [
     'npx esbuild apps/dashboard/server/src/index.ts',
@@ -78,6 +82,7 @@ run(
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
+    versionDefine,
     '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
   ].join(' '),
 );
@@ -102,6 +107,7 @@ run(
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
+    versionDefine,
     '--banner:js="import { createRequire as __cR } from \'node:module\'; const require = __cR(import.meta.url);"',
   ].join(' '),
 );
