@@ -64,6 +64,39 @@ export const staticMethodCandidateVisitor: CodeRuleVisitor = {
     // Check if `this` or `super` is used in the body
     if (usesThisOrSuper(body)) return null
 
+    // Skip when ANY peer method on the same class uses `this`
+    // or `super`. The class is a coherent stateful API; promoting
+    // one method to static would split the namespace and degrade
+    // cohesion. Only fire on classes whose ALL non-static methods
+    // are stateless (those are genuinely-utility classes that
+    // should be a module of standalone functions).
+    {
+      const classBody = node.parent
+      if (classBody?.type === 'class_body') {
+        let anyPeerUsesThis = false
+        for (const peer of classBody.namedChildren) {
+          if (peer.id === node.id) continue
+          if (peer.type !== 'method_definition') continue
+          const peerName = peer.childForFieldName('name')?.text ?? ''
+          if (peerName === 'constructor') continue
+          // Skip already-static peers — those don't define
+          // instance-API cohesion.
+          let isStatic = false
+          for (let i = 0; i < peer.childCount; i++) {
+            const c = peer.child(i)
+            if (c && c.type === 'static') { isStatic = true; break }
+          }
+          if (isStatic) continue
+          const peerBody = peer.childForFieldName('body')
+          if (peerBody && usesThisOrSuper(peerBody)) {
+            anyPeerUsesThis = true
+            break
+          }
+        }
+        if (anyPeerUsesThis) return null
+      }
+    }
+
     // Skip universal Object.prototype methods that are intentional overrides.
     // Framework lifecycle methods (React, Vue, Angular, Svelte) are already
     // handled by the heritage check above — those classes always extend a

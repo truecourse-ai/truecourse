@@ -24,7 +24,7 @@ export class NotificationProcessor {
 
   // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
-  // VIOLATION: code-quality/deterministic/static-method-candidate
+  // static-method-candidate skips methods on classes with stateful peers (cohesion preservation).
   async enqueue(data: { type: string; recipient: string; subject?: string; body: string }) {
     const notification: Notification = {
       id: Math.random().toString(36).substring(7),
@@ -41,7 +41,7 @@ export class NotificationProcessor {
   }
 
   // VIOLATION: code-quality/deterministic/missing-return-type
-  // VIOLATION: code-quality/deterministic/static-method-candidate
+  // static-method-candidate skips methods on classes with stateful peers (cohesion preservation).
   async getStatus(id: string) {
     return this.queue.items.find((n) => n.id === id) ?? null;
   }
@@ -129,7 +129,7 @@ export class NotificationProcessor {
    */
   // VIOLATION: architecture/deterministic/dead-method
   // VIOLATION: code-quality/deterministic/missing-return-type
-  // VIOLATION: code-quality/deterministic/static-method-candidate
+  // static-method-candidate skips methods on classes with stateful peers (cohesion preservation).
   async cleanup(notifications: Notification[]) {
     const now = Date.now();
     // VIOLATION: code-quality/deterministic/magic-number
