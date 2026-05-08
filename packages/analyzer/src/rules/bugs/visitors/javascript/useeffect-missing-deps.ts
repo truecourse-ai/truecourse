@@ -217,6 +217,38 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Collect names imported at the top of the file. Imported
+    // bindings are module-scope and stable across renders;
+    // referencing them in a mount-only effect is fine.
+    const importedNames = new Set<string>()
+    {
+      let program: SyntaxNode | null = node.parent
+      while (program && program.type !== 'program') program = program.parent
+      if (program) {
+        for (let i = 0; i < program.namedChildCount; i++) {
+          const stmt = program.namedChild(i)
+          if (!stmt || stmt.type !== 'import_statement') continue
+          function walkImport(n: SyntaxNode): void {
+            if (n.type === 'identifier' && n.parent?.type !== 'string') {
+              importedNames.add(n.text)
+            }
+            if (n.type === 'import_specifier') {
+              const alias = n.childForFieldName('alias')
+              const name = n.childForFieldName('name')
+              if (alias?.type === 'identifier') importedNames.add(alias.text)
+              else if (name?.type === 'identifier') importedNames.add(name.text)
+              return
+            }
+            for (let i = 0; i < n.childCount; i++) {
+              const c = n.child(i)
+              if (c) walkImport(c)
+            }
+          }
+          walkImport(stmt)
+        }
+      }
+    }
+
     // Filter to only include identifiers that look like state/props variables
     // Heuristic: identifiers that aren't all-caps (constants), that start with lowercase
     const suspiciousIds = [...usedIds].filter(id =>
@@ -226,7 +258,8 @@ export const useeffectMissingDepsVisitor: CodeRuleVisitor = {
       !EXCLUDED_IDENTIFIERS.has(id) &&
       !refAccessedIds.has(id) &&
       !stableFunctions.has(id) &&
-      !componentBodyFunctions.has(id)
+      !componentBodyFunctions.has(id) &&
+      !importedNames.has(id)
     )
 
     // Skip when the source code anywhere within (or near) the useEffect call

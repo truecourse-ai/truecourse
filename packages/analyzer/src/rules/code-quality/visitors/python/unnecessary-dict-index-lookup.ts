@@ -33,10 +33,33 @@ export const pythonUnnecessaryDictIndexLookupVisitor: CodeRuleVisitor = {
     if (loopVars.length !== 2) return null
     const keyVar = loopVars[0].text
 
-    // Check if body accesses dict[key]
+    // Check if body accesses dict[key] in a READ position. The
+    // rule's intent is "value is already bound; don't re-lookup".
+    // Writes (\`dict[key] = newValue\`, \`dict[key] += x\`,
+    // \`del dict[key]\`) are mutations, not redundant lookups.
+    const escDict = dictName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const escKey = keyVar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const subscriptRe = new RegExp(`\\b${escDict}\\s*\\[\\s*${escKey}\\s*\\]`, 'g')
+    // Find every occurrence and require at least one to be a read
+    // (not directly followed by an assignment-like operator, not
+    // preceded by \`del \`).
     const bodyText = body.text
-    const pattern = new RegExp(`\\b${dictName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\[\\s*${keyVar.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\]`)
-    if (!pattern.test(bodyText)) return null
+    let m: RegExpExecArray | null
+    let hasReadUse = false
+    while ((m = subscriptRe.exec(bodyText)) !== null) {
+      const before = bodyText.slice(Math.max(0, m.index - 4), m.index)
+      const afterIdx = m.index + m[0].length
+      // Look ahead past optional whitespace; if next non-space is
+      // \`=\` (and not \`==\`) or one of \`+=\`, \`-=\`, ..., it's a write.
+      const after = bodyText.slice(afterIdx).match(/^\s*([+\-*/%&|^@]?=|<<=|>>=|\*\*=|\/\/=)/)
+      const isWrite = !!after && (after[1] === '=' ? bodyText[afterIdx + after[0].length] !== '=' : true)
+      const isDel = /\bdel\s+$/.test(before)
+      if (!isWrite && !isDel) {
+        hasReadUse = true
+        break
+      }
+    }
+    if (!hasReadUse) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

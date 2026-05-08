@@ -36,6 +36,11 @@ export const unnecessaryTypeAssertionVisitor: CodeRuleVisitor = {
 
     // Skip when source type is `any` — narrowing from any is a meaningful assertion
     if (exprType === 'any') return null
+    // Same for `unknown` — narrowing unknown to a typed shape
+    // (`body.X as Record<string, unknown>`) is required, not
+    // unnecessary, even when TS happens to resolve both sides to
+    // the same string.
+    if (exprType === 'unknown') return null
 
     if (exprType && targetType && exprType === targetType) {
       // Skip narrowing via keyof — `key as keyof T` provides a useful type constraint

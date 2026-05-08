@@ -31,6 +31,29 @@ export const unnecessaryIterableAllocationVisitor: CodeRuleVisitor = {
     if (args.type === 'argument_list') {
       const firstArg = args.namedChildren[0]
       if (firstArg && (firstArg.type === 'generator_expression' || firstArg.type === 'call')) {
+        // Skip when the wrapped call is \`<x>.items()\` / \`.keys()\` /
+        // \`.values()\` and the loop body mutates \`<x>\`. The
+        // \`list(...)\` snapshot is required to avoid RuntimeError.
+        if (firstArg.type === 'call') {
+          const innerFn = firstArg.childForFieldName('function')
+          if (innerFn?.type === 'attribute') {
+            const innerObj = innerFn.childForFieldName('object')
+            const innerAttr = innerFn.childForFieldName('attribute')
+            const dictMethods = new Set(['items', 'keys', 'values'])
+            if (innerObj?.type === 'identifier' && innerAttr?.text && dictMethods.has(innerAttr.text)) {
+              const body = node.childForFieldName('body')
+              if (body) {
+                const escaped = innerObj.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                const mutationRe = new RegExp(
+                  `\\bdel\\s+${escaped}\\s*\\[|` +
+                  `\\b${escaped}\\s*\\.\\s*(?:pop|popitem|clear|update|setdefault)\\s*\\(|` +
+                  `\\b${escaped}\\s*\\[[^\\]]*\\]\\s*=`,
+                )
+                if (mutationRe.test(body.text)) return null
+              }
+            }
+          }
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Unnecessary list() allocation in for loop',

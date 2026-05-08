@@ -59,6 +59,32 @@ export const dotNotationEnforcementVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip when a sibling expression in the same logical AND uses
+    // \`<key> in <obj>\` referring to the same object/key:
+    //   'foo' in obj && obj['foo']
+    // Mirroring the bracket form on both sides keeps the pair
+    // visually parallel; rewriting one side to dot notation
+    // makes the comparison harder to read.
+    if (obj) {
+      let cursor = node.parent
+      while (cursor) {
+        if (cursor.type === 'binary_expression') {
+          const op = cursor.children.find((c) => c.text === '&&' || c.text === '||')
+          if (op) {
+            const condText = cursor.text
+            const inRe = new RegExp(
+              `["']${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']\\s+in\\s+${obj.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+            )
+            if (inRe.test(condText)) return null
+          }
+        }
+        if (cursor.type === 'statement_block' || cursor.type === 'function_declaration' ||
+            cursor.type === 'arrow_function' || cursor.type === 'function_expression' ||
+            cursor.type === 'method_definition' || cursor.type === 'program') break
+        cursor = cursor.parent
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Bracket notation when dot notation is available',
