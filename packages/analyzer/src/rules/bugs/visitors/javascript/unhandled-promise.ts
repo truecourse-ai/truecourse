@@ -40,7 +40,7 @@ export const unhandledPromiseVisitor: CodeRuleVisitor = {
       const fn = expr.childForFieldName('function')
       if (fn?.type === 'member_expression') {
         const prop = fn.childForFieldName('property')
-        if (prop?.text === 'catch' || prop?.text === 'then') return null
+        if (prop?.text === 'catch' || prop?.text === 'then' || prop?.text === 'finally') return null
         // Library fire-and-forget: TanStack Query / React Router /
         // analytics SDKs / i18next chained init. Same allowlist as
         // reliability/floating-promise.
