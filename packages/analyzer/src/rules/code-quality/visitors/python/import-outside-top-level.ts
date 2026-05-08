@@ -1,11 +1,69 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+type SyntaxNode = import('web-tree-sitter').Node
+
+/**
+ * True if `node` lives inside a `function_definition` whose
+ * containing scope (skipping decorator/parameters/return-type
+ * fields) is a `class_definition`. Method-local imports are the
+ * canonical Python pattern for breaking cyclic imports between
+ * domain modules; flagging them is high-noise.
+ */
+function isInsideClassMethod(node: SyntaxNode): boolean {
+  let cursor: SyntaxNode | null = node.parent
+  let inFunction: SyntaxNode | null = null
+  while (cursor) {
+    if (cursor.type === 'function_definition' || cursor.type === 'async_function_definition') {
+      inFunction = cursor
+      break
+    }
+    if (cursor.type === 'module') return false
+    cursor = cursor.parent
+  }
+  if (!inFunction) return false
+  // Walk up from the function's parent until we hit a class /
+  // module / outer function. Direct parent of a method's def is
+  // `block` whose parent is `class_definition`.
+  let p: SyntaxNode | null = inFunction.parent
+  while (p) {
+    if (p.type === 'class_definition') return true
+    if (p.type === 'module' || p.type === 'function_definition' || p.type === 'async_function_definition') return false
+    p = p.parent
+  }
+  return false
+}
+
+/**
+ * True if `node` lives inside a `try_statement`. The canonical
+ * optional-dependency pattern:
+ *   try:
+ *       import optional_lib
+ *   except ImportError:
+ *       optional_lib = None
+ * Also covers platform-specific best-effort imports.
+ */
+function isInsideTryBlock(node: SyntaxNode): boolean {
+  let cursor: SyntaxNode | null = node.parent
+  while (cursor) {
+    if (cursor.type === 'try_statement') return true
+    if (cursor.type === 'function_definition' || cursor.type === 'class_definition' || cursor.type === 'module') return false
+    cursor = cursor.parent
+  }
+  return false
+}
+
 export const pythonImportOutsideTopLevelVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/import-outside-top-level',
   languages: ['python'],
   nodeTypes: ['import_statement', 'import_from_statement'],
   visit(node, filePath, sourceCode) {
+    // Optional-dependency / platform-specific best-effort import.
+    if (isInsideTryBlock(node)) return null
+
+    // Method-local import — canonical circular-import break point.
+    if (isInsideClassMethod(node)) return null
+
     // An import is "outside top level" if any ancestor is a function/class/if/for/while/try
     const blockingTypes = new Set([
       'function_definition', 'async_function_definition', 'class_definition',
