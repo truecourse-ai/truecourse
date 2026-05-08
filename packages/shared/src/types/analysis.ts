@@ -172,6 +172,13 @@ export const FileAnalysisSchema = z.object({
   httpCalls: z.array(HttpCallSchema),
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
+  // Bare identifier references in non-call value positions —
+  // assignment RHS (`sys.excepthook = handler`), decorator
+  // identifiers (`@my_decorator`), default parameter values, etc.
+  // Used by architecture rules to determine whether an exported
+  // symbol is referenced (without being called) by its own file
+  // or another file.
+  referencedNames: z.array(z.string()).optional(),
 })
 
 export type FileAnalysis = z.infer<typeof FileAnalysisSchema>

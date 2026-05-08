@@ -2,7 +2,7 @@ import { readFile } from 'fs/promises'
 import type { FileAnalysis, SupportedLanguage, ExportStatement } from '@truecourse/shared'
 import { detectLanguage } from './language-config.js'
 import { parseFile } from './parser.js'
-import { extractCalls, buildFunctionContext } from './extractors/calls.js'
+import { extractCalls, buildFunctionContext, extractIdentifierReferences } from './extractors/calls.js'
 import { extractHttpCalls } from './extractors/http-calls.js'
 import { extractRouteRegistrations } from './extractors/route-registrations.js'
 import {
@@ -78,6 +78,7 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
       const calls = extractCalls(tree, filePath, language, functionContext)
       const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
       const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
+      const referencedNames = extractIdentifierReferences(tree, language)
 
       return {
         filePath,
@@ -90,6 +91,7 @@ export async function analyzeFile(filePath: string): Promise<FileAnalysis | null
         httpCalls,
         ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
         ...(routerMounts.length > 0 ? { routerMounts } : {}),
+        ...(referencedNames.length > 0 ? { referencedNames } : {}),
       }
     } finally {
       tree.delete()
@@ -142,6 +144,7 @@ export function analyzeFileContent(
     const calls = extractCalls(tree, filePath, language, functionContext)
     const httpCalls = extractHttpCalls(tree, filePath, language, functions, classes)
     const { routes: routeRegistrations, mounts: routerMounts } = extractRouteRegistrations(tree, filePath, language)
+    const referencedNames = extractIdentifierReferences(tree, language)
 
     return {
       filePath,
@@ -154,6 +157,7 @@ export function analyzeFileContent(
       httpCalls,
       ...(routeRegistrations.length > 0 ? { routeRegistrations } : {}),
       ...(routerMounts.length > 0 ? { routerMounts } : {}),
+      ...(referencedNames.length > 0 ? { referencedNames } : {}),
     }
   } finally {
     tree.delete()

@@ -4,6 +4,115 @@ import { extractJsxReferences } from '../ts-compiler.js'
 import { getLanguageConfig } from '../language-config.js'
 
 /**
+ * Walk the AST collecting bare-identifier references that are NOT
+ * call expressions — assignment RHS, decorator targets, default
+ * parameter values, return values that are pure identifiers.
+ *
+ * Used by architecture/unused-export to recognize functions
+ * registered as callbacks without being invoked at the def site
+ * (`sys.excepthook = handler`, `@my_decorator`, etc.).
+ *
+ * Conservative: only includes positions where an identifier is
+ * unambiguously a value reference. Type-annotation contexts are
+ * skipped — they're tracked separately by `usedAsType`.
+ */
+export function extractIdentifierReferences(
+  tree: Tree,
+  language: SupportedLanguage,
+): string[] {
+  const refs = new Set<string>()
+  if (language !== 'python') return [] // currently Python-only; TS uses TS-compiler-driven cross-references
+
+  const root = tree.rootNode
+
+  function isInsideCallCallee(node: SyntaxNode): boolean {
+    // Skip identifiers that are themselves the function position
+    // of a call_expression — those are already captured as calls.
+    const parent = node.parent
+    if (!parent) return false
+    if (parent.type === 'call' && parent.childForFieldName('function')?.id === node.id) return true
+    return false
+  }
+
+  function isInsideTypeAnnotation(node: SyntaxNode): boolean {
+    // Walk up to the nearest containing typed_parameter / typed_default_parameter
+    // and check whether `node` is inside the type field, not the value field.
+    let cursor: SyntaxNode | null = node.parent
+    while (cursor) {
+      if (cursor.type === 'typed_parameter' || cursor.type === 'typed_default_parameter') {
+        const typeNode = cursor.childForFieldName('type')
+        if (typeNode) {
+          let probe: SyntaxNode | null = node
+          while (probe) {
+            if (probe.id === typeNode.id) return true
+            if (probe.id === cursor.id) break
+            probe = probe.parent
+          }
+        }
+        return false
+      }
+      if (cursor.type === 'function_definition' || cursor.type === 'class_definition' || cursor.type === 'module') break
+      cursor = cursor.parent
+    }
+    return false
+  }
+
+  function visit(node: SyntaxNode): void {
+    // Assignment RHS: `sys.excepthook = handler`
+    if (node.type === 'assignment') {
+      const right = node.childForFieldName('right')
+      if (right) collectFromValue(right)
+    }
+    // Augmented assignment too: `x += handler` (rare for unused-export).
+    if (node.type === 'augmented_assignment') {
+      const right = node.childForFieldName('right')
+      if (right) collectFromValue(right)
+    }
+    // Decorator targets: `@my_decorator` — the decorator's child is
+    // the identifier or call. We want the bare identifier ref.
+    if (node.type === 'decorator') {
+      // decorator child[1] is the expression (skip the '@' anonymous child)
+      for (const c of node.namedChildren) {
+        collectFromValue(c)
+      }
+    }
+    // Default parameter values: `def f(x=handler)` — value field of
+    // default_parameter / typed_default_parameter / lambda_parameters.
+    if (node.type === 'default_parameter' || node.type === 'typed_default_parameter') {
+      const value = node.childForFieldName('value')
+      if (value) collectFromValue(value)
+    }
+    for (const c of node.namedChildren) visit(c)
+  }
+
+  function collectFromValue(node: SyntaxNode): void {
+    if (node.type === 'identifier') {
+      if (!isInsideCallCallee(node) && !isInsideTypeAnnotation(node)) {
+        refs.add(node.text)
+      }
+      return
+    }
+    // Tuples / lists of identifiers: `[h1, h2]` / `(a, b)`
+    if (node.type === 'tuple' || node.type === 'list') {
+      for (const c of node.namedChildren) collectFromValue(c)
+      return
+    }
+    // Conditional expression: `a if cond else b`
+    if (node.type === 'conditional_expression') {
+      for (const c of node.namedChildren) collectFromValue(c)
+      return
+    }
+    // Don't descend into arbitrary expressions — only direct value
+    // shapes count. Calls / attribute accesses / subscripts are NOT
+    // counted as references for this purpose; they have their own
+    // handling.
+  }
+
+  visit(root)
+  return [...refs]
+}
+
+/**
  * Extract all function/method calls from an AST
  */
 export function extractCalls(

@@ -138,6 +138,16 @@ function buildSameFileCalls(fileAnalyses?: FileAnalysis[]): Map<string, Set<stri
         }
       }
     }
+    // Include identifier references in non-call value positions —
+    // assignment RHS (`sys.excepthook = handler`), decorator targets,
+    // default parameter values. The Python file-analyzer populates
+    // `referencedNames` for these positions; without merging them
+    // here, hooks like `excepthook` and `@register_callback` would
+    // cause `unused-export` to fire on functions that ARE referenced
+    // in their own file, just not via a call expression.
+    if (fa.referencedNames) {
+      for (const name of fa.referencedNames) callees.add(name)
+    }
     if (callees.size > 0) result.set(fa.filePath, callees)
   }
   return result
@@ -444,6 +454,9 @@ export function checkModuleRules(
               if (call.arguments?.some((a) => a.includes(method.name))) { referencedAnywhere = true; break }
             }
             if (referencedAnywhere) break
+            // Cross-file value references — `from x import handler` then
+            // `sys.excepthook = handler`, or `@handler` as a decorator.
+            if (fa.referencedNames?.includes(method.name)) { referencedAnywhere = true; break }
           }
           if (referencedAnywhere) continue
         }

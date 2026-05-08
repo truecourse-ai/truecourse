@@ -73,6 +73,14 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
     const left = node.childForFieldName('left')
     if (!left) return null
 
+    // Attribute-LHS assignments like `sys.excepthook = handler`,
+    // `app.config['X'] = …`, `Class.attr = …` are NOT declaring a
+    // module-level mutable variable — they're mutating an existing
+    // object's attribute. The rule's "shared mutable state" concern
+    // doesn't apply, and `sys.excepthook` style hooks are idiomatic
+    // module-level wiring that the rule was incorrectly flagging.
+    if (left.type === 'attribute' || left.type === 'subscript') return null
+
     const name = left.text
 
     // Skip UPPER_CASE constants (intentional module-level constants)
