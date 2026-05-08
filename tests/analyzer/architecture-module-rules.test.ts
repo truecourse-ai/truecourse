@@ -417,6 +417,33 @@ describe('checkMethodRules', () => {
     expect(deadViolations[0].title).toContain('deadMethod');
   });
 
+  it('does not flag exported helpers in library/utils paths', () => {
+    // documenso/openhands shape: an exported function in a /lib/, /utils/,
+    // /helpers/, /seed/, /trpc/, or /packages/<x>/lib/ path with no
+    // statically resolvable caller. Real callers live outside the
+    // analyzed entrypoint set (consumed by another package, framework,
+    // build pipeline). The rule should treat these as live exports.
+    const methods = [
+      makeMethod({
+        name: 'unusedHelper',
+        moduleName: 'helpers',
+        serviceName: 'svc',
+        filePath: '/repo/packages/lib/utils/helpers.ts',
+        isExported: true,
+      }),
+      makeMethod({
+        name: 'seedTeams',
+        moduleName: 'teams',
+        serviceName: 'svc',
+        filePath: '/repo/packages/prisma/seed/teams.ts',
+        isExported: true,
+      }),
+    ];
+    const violations = checkMethodRules(methods, enabledRules, []);
+    const deadViolations = violations.filter((v) => v.ruleKey === 'architecture/deterministic/dead-method');
+    expect(deadViolations).toHaveLength(0);
+  });
+
   it('does not flag method that appears as caller or callee', () => {
     const methods = [
       makeMethod({ name: 'caller', moduleName: 'A', serviceName: 'svc' }),

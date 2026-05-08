@@ -805,7 +805,24 @@ const TOO_MANY_PARAMS = 5
 const DEEP_NESTING_THRESHOLD = 4
 
 /** Matches file paths inside migration directories (Alembic, Django, Drizzle, etc.) */
-const MIGRATION_PATH_PATTERN = /(?:alembic\/versions|\/migrations\/|\/seeds\/)\//i
+const MIGRATION_PATH_PATTERN = /(?:alembic\/versions|\/migrations\/|\/seeds?\/)\//i
+
+/**
+ * Library / utility / framework-helper directories. Exported
+ * symbols here typically have callers outside the statically
+ * analyzable entrypoint set: consumed by another workspace
+ * package, by a framework's runtime invocation, by a build
+ * pipeline, by tests, or via dynamic imports the graph can't
+ * resolve.
+ *
+ * Matches:
+ *  - `<root>/packages/<pkg>/{lib,utils,helpers,trpc,prisma,seed,seeds,server-only,client-only}/...`
+ *  - `<root>/libs/...`
+ *  - `<root>/apps/<app>/{utils,helpers,lib}/...`
+ *  - any path containing `/utils/` / `/helpers/` / `/lib/` (covers
+ *    monorepos with non-standard layouts).
+ */
+const LIBRARY_HELPER_PATH_PATTERN = /(?:[\\/](?:packages|libs)[\\/][^\\/]+[\\/])(?:lib|utils|helpers|trpc|prisma|seed|seeds|server-only|client-only|constants)[\\/]|[\\/]apps[\\/][^\\/]+[\\/](?:utils|helpers|lib)[\\/]|[\\/](?:utils|helpers|lib)[\\/]|[\\/][a-z0-9_-]*-(?:helpers|utils)[\\/]/i
 
 /**
  * Check deterministic method-level rules and return violations.
@@ -1022,6 +1039,14 @@ export function checkMethodRules(
         // Skip methods in migration files — upgrade/downgrade are called by the
         // Alembic/Django migration runner, never imported directly.
         if (MIGRATION_PATH_PATTERN.test(method.filePath)) continue
+
+        // Skip helpers in library / utility directories. Real
+        // callers typically live outside the analyzed entrypoint
+        // set (consumed by another workspace package, by a
+        // framework runtime, by a build pipeline, etc.). The
+        // extractor doesn't always mark `export const fn = …`
+        // arrow exports as `isExported`, so don't gate on it.
+        if (LIBRARY_HELPER_PATH_PATTERN.test(method.filePath)) continue
 
         // Skip PascalCase exports — likely React components called via JSX
         // which the method-level dependency graph can't reliably track
