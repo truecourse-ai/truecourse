@@ -13,6 +13,27 @@ export const magicStringVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node: SyntaxNode, filePath, sourceCode) {
+    // First pass: collect every string literal that appears as a
+    // member of a TypeScript `literal_type` somewhere in the file.
+    // `type Status = 'idle' | 'loading' | 'done'`,
+    // `function f(t: 'count' | 'cumulative' = 'count')`. Default
+    // values and call-site references that match a literal-type
+    // member can't be extracted without breaking type narrowing.
+    const literalTypeMembers = new Set<string>()
+    function collectLiteralTypeMembers(n: SyntaxNode) {
+      if (n.type === 'literal_type') {
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child?.type === 'string') literalTypeMembers.add(child.text)
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectLiteralTypeMembers(child)
+      }
+    }
+    collectLiteralTypeMembers(node)
+
     const counts = new Map<string, SyntaxNode[]>()
 
     function walk(n: SyntaxNode) {
@@ -40,6 +61,12 @@ export const magicStringVisitor: CodeRuleVisitor = {
           if (isDesignTokenValue(n)) return
           // Skip useState / useReducer / useRef initializers.
           if (isReactStateInitializer(n)) return
+          // Skip strings that appear as members of a string-literal
+          // union somewhere in the file. Default values, generic
+          // arg defaults, and call-site references that match a
+          // literal-type member are type-bound; extracting them
+          // would break narrowing.
+          if (literalTypeMembers.has(n.text)) return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings
