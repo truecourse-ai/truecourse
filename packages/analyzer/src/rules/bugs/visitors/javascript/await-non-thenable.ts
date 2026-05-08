@@ -65,6 +65,12 @@ export const awaitNonThenableVisitor: CodeRuleVisitor = {
       awaitedExpr.endPosition.column,
     )
     if (!isPromise) {
+      // Skip when the type is a union containing `Promise<...>` —
+      // the await-on-maybe-promise idiom (`text: string | Promise<string>`)
+      // is safe-by-spec: awaiting a non-promise value resolves to
+      // that value. Common in libraries that accept either form.
+      if (/\bPromise\s*</.test(typeStr) && /\|/.test(typeStr)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Awaiting non-thenable value',
