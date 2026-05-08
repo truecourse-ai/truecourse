@@ -189,6 +189,43 @@ describe('code → contract extractor (Operation)', () => {
     expect(statuses).not.toContain('200');
   });
 
+  it('captures ES6 shorthand keys in res.json({ x }) as body fields', () => {
+    // `res.json({ tags })` is sugar for `res.json({ tags: tags })`. The
+    // extractor must surface `tags` as a body field — otherwise every
+    // realworld-style controller using shorthand would produce
+    // false-positive "missing key" drifts at the comparator.
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/tags', (req, res) => {
+        const tags = [];
+        res.json({ tags });
+      });
+    `;
+    const ops = extract(source);
+    const r200 = ops[0].contract.responses.find((r) => r.status === '200')!;
+    expect(r200.body?.fields).toBeDefined();
+    expect(Object.keys(r200.body!.fields!)).toContain('tags');
+  });
+
+  it('mixes shorthand and explicit keys cleanly', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/list', (req, res) => {
+        const items = [];
+        const nextCursor = null;
+        res.json({ items, nextCursor, total: 0 });
+      });
+    `;
+    const ops = extract(source);
+    const r200 = ops[0].contract.responses.find((r) => r.status === '200')!;
+    const keys = Object.keys(r200.body!.fields!);
+    expect(keys).toContain('items');
+    expect(keys).toContain('nextCursor');
+    expect(keys).toContain('total');
+  });
+
   it('emits one ExtractedOperation per route, with declarationLine pinned', () => {
     const source = [
       `import express from 'express';`,
