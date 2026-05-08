@@ -114,6 +114,26 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
     // Skip well-known stable third-party API domains — these are fixed endpoints, not environment-specific
     if (/googleapis\.com|maps\.google|api\.stripe\.com|api\.twilio\.com|api\.sendgrid\.com|api\.github\.com|cdn\.|fonts\.googleapis|cloudflare|unpkg\.com|cdnjs\.cloudflare|jsdelivr\.net/.test(text)) return null
 
+    // Skip third-party deep-link / dashboard / share / hosting
+    // domains. These are fixed external services we link to or
+    // call; hardcoding them is correct because the SaaS owns
+    // the endpoint, not us.
+    if (/dashboard\.stripe\.com|billing\.stripe\.com|connect\.stripe\.com/.test(text)) return null
+    if (/(?:^|\W)(?:us|eu|app)\.(?:i\.)?posthog\.com|posthog\.com\/(?:capture|decide|engage|s\b)/.test(text)) return null
+    if (/(?:onrender\.com|vercel\.app|vercel\.com|render\.com|netlify\.app|fly\.dev|railway\.app|heroku\.com)/.test(text)) return null
+    if (/twitter\.com\/intent|x\.com\/intent|linkedin\.com\/sharing|linkedin\.com\/share|facebook\.com\/sharer|reddit\.com\/submit/.test(text)) return null
+    if (/discord\.gg|t\.me\/|telegram\.me\/|slack\.com\/api|hooks\.slack\.com/.test(text)) return null
+    if (/api\.mailchannels\.net|api\.mailgun\.net|api\.postmarkapp\.com|api\.resend\.com/.test(text)) return null
+    if (/api\.openai\.com|api\.anthropic\.com|api\.together\.ai|api\.cohere\.ai|api\.groq\.com/.test(text)) return null
+    if (/api\.gitlab\.com|gitlab\.com\/api|api\.bitbucket\.org|bitbucket\.org\/api/.test(text)) return null
+
+    // Skip MSW handler files — fixture URLs by design. Only the
+    // `__mocks__/` directory and `mocks/handlers*.ts` /
+    // `mocks/server*.ts` files; bare `fixtures/` is too broad
+    // (matches this analyzer's own test-fixture project).
+    if (/(?:[\\/]|^)__mocks__[\\/]/.test(filePath)) return null
+    if (/(?:[\\/]|^)mocks[\\/](?:handlers|server|api-)/i.test(filePath)) return null
+
     // Skip URLs assigned to variables whose names suggest placeholder/example/default values
     if (parent?.type === 'variable_declarator' || parent?.type === 'assignment_expression' || parent?.type === 'pair') {
       const nameNode2 = parent.type === 'pair'
