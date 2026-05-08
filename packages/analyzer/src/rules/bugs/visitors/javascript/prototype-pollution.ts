@@ -60,6 +60,17 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     // user input, and aggregation loops are the most common shape.
     if (isKeyFromForOfLoopVarMember(node, keyName)) return null
 
+    // Skip when the key was destructured INSIDE the body of an
+    // iteration callback or for-of loop:
+    //   rows.forEach((row) => {
+    //     const { readStatus, ... } = row;
+    //     stats[readStatus] += n;
+    //   })
+    // The field is statically typed (Prisma enum / TS literal
+    // union); the rule has no way to taint-trace back to user
+    // input, and aggregation loops are routine.
+    if (isKeyDestructuredFromIterationVar(node, keyName)) return null
+
     // Skip when the assignment sits inside an `if (key in obj)` guard
     // that explicitly checks the same object - this is the canonical
     // prototype-pollution mitigation. Writers who add the guard have
@@ -319,6 +330,127 @@ function containsDestructuredName(params: SyntaxNode, keyName: string): boolean 
     }
   }
   walk(params)
+  return found
+}
+
+/**
+ * True if `keyName` is bound by a destructuring \`const { keyName,
+ * ... } = <iterVar>\` declaration in an enclosing scope, where
+ * \`<iterVar>\` is a forEach/map callback parameter or a for-of
+ * loop binding. Aggregation loops over typed rows derive bucket
+ * keys this way; the iteration value is structured by the
+ * caller, not pulled from user input.
+ */
+function isKeyDestructuredFromIterationVar(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return false
+
+  // Iteration-bound names: callback params of array methods AND
+  // for-of loop bindings within the scope.
+  const iterVars = new Set<string>()
+  function collectIterVars(n: SyntaxNode): void {
+    if (n.type === 'for_in_statement') {
+      const left = n.childForFieldName('left')
+      if (left?.type === 'identifier') iterVars.add(left.text)
+    }
+    if (n.type === 'arrow_function' || n.type === 'function_expression') {
+      // If this function is the callback arg of an array method call,
+      // its first identifier param is an iteration item.
+      const parent = n.parent
+      const callExpr = parent?.type === 'arguments' ? parent.parent : null
+      if (callExpr?.type === 'call_expression') {
+        const fn = callExpr.childForFieldName('function')
+        const prop = fn?.type === 'member_expression' ? fn.childForFieldName('property') : null
+        const ITER = new Set([
+          'forEach', 'map', 'filter', 'reduce', 'reduceRight',
+          'every', 'some', 'find', 'findIndex', 'findLast', 'findLastIndex', 'flatMap',
+          'sort', 'flat',
+        ])
+        if (prop && ITER.has(prop.text)) {
+          const params = n.childForFieldName('parameters') ?? n.childForFieldName('parameter')
+          if (params) {
+            for (let i = 0; i < params.namedChildCount; i++) {
+              const p = params.namedChild(i)
+              if (!p) continue
+              const ident = p.type === 'identifier' ? p :
+                p.type === 'required_parameter' ? p.childForFieldName('pattern') : null
+              if (ident?.type === 'identifier') {
+                iterVars.add(ident.text)
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+    if (n !== scope &&
+        (n.type === 'function_declaration' ||
+         n.type === 'function_expression' ||
+         n.type === 'arrow_function' ||
+         n.type === 'method_definition')) {
+      // Descend ONE level to allow callbacks defined inside scope —
+      // their bodies inherit scope as the destructure context.
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) collectIterVars(ch)
+    }
+  }
+  collectIterVars(scope)
+  if (iterVars.size === 0) return false
+
+  // Find a `const { keyName, ... } = <iterVar>` declarator anywhere
+  // in scope.
+  let found = false
+  function findDestructure(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'object_pattern' && value?.type === 'identifier' && iterVars.has(value.text)) {
+        // Look for keyName inside the object pattern.
+        let inPattern = false
+        function walkPattern(p: SyntaxNode): void {
+          if (inPattern) return
+          if (p.type === 'shorthand_property_identifier_pattern' && p.text === keyName) {
+            inPattern = true
+            return
+          }
+          if (p.type === 'pair_pattern') {
+            const value = p.childForFieldName('value')
+            if (value?.type === 'identifier' && value.text === keyName) {
+              inPattern = true
+              return
+            }
+          }
+          for (let i = 0; i < p.childCount; i++) {
+            const ch = p.child(i)
+            if (ch) walkPattern(ch)
+          }
+        }
+        walkPattern(name)
+        if (inPattern) {
+          found = true
+          return
+        }
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) findDestructure(ch)
+    }
+  }
+  findDestructure(scope)
   return found
 }
 
