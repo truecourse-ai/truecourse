@@ -97,6 +97,57 @@ export function isSubscriptIndex(node: SyntaxNode): boolean {
 }
 
 /**
+ * Function names whose return-type contract is fixed by a
+ * framework / runtime. Adding `: T` annotations on these adds
+ * noise without strengthening any API surface — the framework
+ * already enforces the type at the call boundary.
+ *
+ * Includes:
+ *  - Next.js App Router conventions (`Page`, `Layout`, `Loading`,
+ *    `NotFound`, `Error`, `Template`, `generateMetadata`,
+ *    `generateStaticParams`, `generateViewport`, `revalidate`).
+ *  - HTTP route-handler exports (`GET`, `POST`, `PUT`, `DELETE`,
+ *    `PATCH`, `HEAD`, `OPTIONS`).
+ *  - Remix conventions (`loader`, `action`, `meta`, `links`,
+ *    `headers`, `clientLoader`, `clientAction`,
+ *    `shouldRevalidate`, `ErrorBoundary`).
+ *  - Common framework hooks / handlers (`middleware`, `default`).
+ */
+export const FRAMEWORK_FUNCTION_NAMES = new Set([
+  // Next.js App Router
+  'Page', 'Layout', 'Loading', 'NotFound', 'Error', 'Template',
+  'generateMetadata', 'generateStaticParams', 'generateViewport',
+  'revalidate',
+  // HTTP method handlers
+  'GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS',
+  // Remix conventions
+  'loader', 'action', 'meta', 'links', 'headers',
+  'clientLoader', 'clientAction', 'shouldRevalidate',
+  'ErrorBoundary', 'HydrateFallback', 'Component',
+  // Generic framework names
+  'middleware',
+])
+
+/**
+ * True if `name` looks like a React component — PascalCase
+ * identifier. The convention `function MyButton()` returning
+ * JSX is universally recognized; explicit return types on
+ * components are rarely written and add little value beyond
+ * the JSX inference TypeScript already does.
+ */
+export function isReactComponentName(name: string): boolean {
+  return /^[A-Z][A-Za-z0-9_]*$/.test(name)
+}
+
+/**
+ * True if `name` is a framework-convention function — its
+ * return-type contract is fixed by the runtime / framework.
+ */
+export function isFrameworkFunctionName(name: string): boolean {
+  return FRAMEWORK_FUNCTION_NAMES.has(name)
+}
+
+/**
  * True if `node` is a member of an array passed to a `.enum(...)`
  * call (Zod-style enum).
  */

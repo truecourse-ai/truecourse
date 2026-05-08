@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isFrameworkFunctionName, isReactComponentName } from './_helpers.js'
 
 export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-boundary-types',
@@ -27,6 +28,14 @@ export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
 
     const nameNode = funcNode.childForFieldName('name')
     const name = nameNode?.text ?? 'function'
+
+    // Skip framework-convention functions and React components —
+    // their return type is fixed by the runtime / framework
+    // (`Page`, `Layout`, `GET`, `loader`, `action`, etc.) or by
+    // a universally-understood convention (PascalCase = React
+    // component returning JSX).
+    if (isFrameworkFunctionName(name)) return null
+    if (isReactComponentName(name)) return null
 
     return makeViolation(
       this.ruleKey, funcNode, filePath, 'low',

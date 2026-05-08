@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isFrameworkFunctionName, isReactComponentName } from './_helpers.js'
 
 export const missingReturnTypeVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-return-type',
@@ -18,6 +19,17 @@ export const missingReturnTypeVisitor: CodeRuleVisitor = {
 
     // Skip constructors
     if (name === 'constructor') return null
+
+    // Skip framework-convention functions whose return type is
+    // fixed by the runtime (Next.js Page/Layout/route handlers,
+    // Remix loaders/actions, HTTP method exports). Annotating
+    // them adds noise without strengthening any API surface.
+    if (isFrameworkFunctionName(name)) return null
+
+    // Skip React components — PascalCase functions are
+    // overwhelmingly components; their return type (`JSX.Element`
+    // / `ReactNode`) is conventional and well-inferred.
+    if (isReactComponentName(name)) return null
 
     return makeViolation(
       this.ruleKey, nameNode, filePath, 'low',
