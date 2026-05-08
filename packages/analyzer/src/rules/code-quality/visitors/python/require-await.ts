@@ -39,6 +39,32 @@ function isAsyncInterfaceMethod(funcNode: SyntaxNode): boolean {
   return true
 }
 
+/**
+ * True if the function is a method of a class that declares a
+ * non-trivial superclass. The body may not happen to await
+ * anything in this implementation, but the contract (defined by
+ * the base) is async — `async def` is required for the override
+ * to satisfy `runtime_checkable` protocols, ABC `@abstractmethod`
+ * shapes, framework `Manager[T]` interfaces, etc.
+ *
+ * Same rationale as the no-self-use subclass skip.
+ */
+function isMethodOfSubclass(funcNode: SyntaxNode): boolean {
+  const parent = funcNode.parent
+  if (parent?.type !== 'block') return false
+  const cls = parent.parent
+  if (cls?.type !== 'class_definition') return false
+  const supers = cls.childForFieldName('superclasses')
+  if (!supers) return false
+  for (const c of supers.namedChildren) {
+    const text = c.text.trim()
+    if (!text) continue
+    if (text === 'object') continue
+    return true
+  }
+  return false
+}
+
 export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/require-await',
   languages: ['python'],
@@ -61,6 +87,11 @@ export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
 
     // Skip methods that implement known async interface contracts.
     if (isAsyncInterfaceMethod(node)) return null
+
+    // Skip async methods on classes with a non-trivial base — the
+    // base may declare the method as async and the override has to
+    // match. Same rationale as no-self-use's subclass skip.
+    if (isMethodOfSubclass(node)) return null
 
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
