@@ -32,6 +32,26 @@ export const pythonUnnecessaryAssignBeforeReturnVisitor: CodeRuleVisitor = {
     const rhs = prevExpr.childForFieldName('right')
     if (!rhs) return null
 
+    // Skip when the RHS is an `await` expression. Naming the
+    // awaited result is conventional in async pipelines for
+    // stack-trace clarity; collapsing to `return await x`
+    // works but the inline-assignment form is widely accepted
+    // and not a refactor worth surfacing.
+    if (rhs.type === 'await') return null
+
+    // Skip when the RHS is a `cast(T, …)` — the named-result
+    // pattern is conventional for documenting the post-cast
+    // type at the return site.
+    if (rhs.type === 'call') {
+      const fn = rhs.childForFieldName('function')
+      if (fn?.type === 'identifier' && fn.text === 'cast') return null
+    }
+
+    // Skip annotated assignments (`x: int = compute(); return x`).
+    // The annotation has documentation / type-refinement value
+    // that's lost when collapsed to `return compute()`.
+    if (prevExpr.childForFieldName('type')) return null
+
     return makeViolation(
       this.ruleKey, prev, filePath, 'low',
       'Unnecessary assignment before return',
