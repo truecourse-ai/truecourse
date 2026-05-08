@@ -50,6 +50,15 @@ export const redundantTypeArgumentVisitor: CodeRuleVisitor = {
     // Set<any>, Map<any, any>
     const lastArg = typeArgs[typeArgs.length - 1]
     if (lastArg) {
+      // Skip non-trivial type expressions — intersections,
+      // explicit literal-union tags, generic instantiations,
+      // object literals, function types. These carry user
+      // intent that cannot be recovered from the default.
+      // Only flag when the user wrote a primitive `any`/`unknown`
+      // that matches the default.
+      const argText = lastArg.text.trim()
+      if (argText !== 'any' && argText !== 'unknown') return null
+
       const argType = typeQuery.getTypeAtPosition(
         filePath,
         lastArg.startPosition.row,

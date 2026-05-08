@@ -43,6 +43,12 @@ export const pythonIdiomSimplificationVisitor: CodeRuleVisitor = {
         if (sliceChildren.length === 0) {
           // Only flag when used as a value (not in del statement)
           const parent = node.parent
+          // Skip when the slice IS the iterable of a `for` loop —
+          // `for x in arr[:]` is the canonical mutation-safe iteration
+          // pattern (copy the list to iterate while modifying the
+          // original via remove / append / etc.).
+          if (parent?.type === 'for_statement' &&
+              parent.childForFieldName('right')?.id === node.id) return null
           if (parent && parent.type !== 'delete_statement') {
             return makeViolation(
               this.ruleKey, node, filePath, 'low',

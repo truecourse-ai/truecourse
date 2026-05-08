@@ -16,6 +16,27 @@ export const pythonUnnecessaryListInIterationVisitor: CodeRuleVisitor = {
     const args = right.childForFieldName('arguments')
     if (!args || args.namedChildCount === 0) return null
 
+    // Skip when the loop body mutates the wrapped iterable. Iterating
+    // a dict / set directly while popping / deleting raises
+    // RuntimeError; the `list(...)` snapshot is the canonical fix.
+    const wrappedArg = args.namedChildren[0]
+    const wrappedName = wrappedArg?.text ?? ''
+    if (wrappedName) {
+      const body = node.childForFieldName('body')
+      if (body) {
+        // Look for `del wrappedName[...]`, `wrappedName.pop(...)`,
+        // `wrappedName.popitem()`, `wrappedName.clear()`,
+        // `wrappedName[k] = ...` (setitem) inside the body.
+        const escaped = wrappedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const mutationRe = new RegExp(
+          `\\bdel\\s+${escaped}\\s*\\[|` +
+          `\\b${escaped}\\s*\\.\\s*(?:pop|popitem|clear|update|setdefault)\\s*\\(|` +
+          `\\b${escaped}\\s*\\[[^\\]]*\\]\\s*=`,
+        )
+        if (mutationRe.test(body.text)) return null
+      }
+    }
+
     return makeViolation(
       this.ruleKey, right, filePath, 'low',
       'Unnecessary list() in iteration',
