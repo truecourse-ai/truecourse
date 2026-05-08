@@ -1,83 +1,69 @@
 # Eval candidates
 
-Suggested open-source repos for testing the contract framework with
-`scripts/eval-on-repo.ts`. Picked for: TS/JS, HTTP service, prose docs,
-manageable size on the first run.
+How to pick repos for `tests/eval/repo.test.ts`. The framework verifies
+**code against a prose contract spec**, so a useful target needs both:
 
-## Tier 1 — small, tractable
+1. A TypeScript / JavaScript HTTP service (the verifier's code-side
+   extractors target Express-style routing).
+2. A **prose contract spec inside the same repo** — typically a
+   `SPEC.md` / `API.md` / `CONTRACT.md` describing endpoints, entities,
+   business rules. README install instructions don't count. OpenAPI
+   YAML doesn't count either — the framework reads markdown prose, not
+   structured machine specs.
 
-Start here. Each should produce a meaningful report on first run with
-a bounded LLM cost.
+If a repo doesn't have an in-repo prose spec, we skip it. There is no
+value in eval-ing the framework against half its inputs.
 
-### `gothinkster/node-express-realworld-example-app`
-- URL: <https://github.com/gothinkster/node-express-realworld-example-app>
-- Why: Express + JS, the README ships a structured API spec
-  (auth, articles, comments, profiles, tags) with concrete request /
-  response shapes. Closest in spirit to our planted-bug fixture.
-- Risk: README is the only spec — slicer will produce one input file.
-- Expected cost: ~10–15 LLM calls.
+## What we learned trying Tier 1 / Tier 2 OSS candidates
 
-### `tabler/tabler-api`
-- URL: <https://github.com/tabler/tabler-api>
-- Why: TS, REST API for the Tabler dashboard, has docs and a clean
-  controller layout.
-- Risk: docs may be on the website rather than in the repo.
+| Repo                                            | Result                                                |
+|-------------------------------------------------|-------------------------------------------------------|
+| `gothinkster/node-express-realworld-example-app`| ✓ Worked after manually pulling the spec from upstream `gothinkster/realworld`. 0 drifts on the final run. |
+| `tabler/tabler-api`                             | ✗ Repository doesn't exist.                           |
+| `cypress-io/cypress-realworld-app`              | ✗ README is install instructions only.                |
+| `directus/directus`                             | ✗ Docs moved out of the monorepo.                     |
+| `payloadcms/payload`                            | ✗ Docs are external; in-repo markdown is changesets.  |
 
-### `cypress-io/cypress-realworld-app`
-- URL: <https://github.com/cypress-io/cypress-realworld-app>
-- Why: TS Express + React, has business rules described in the README
-  (transfers, contacts, notifications).
-- Risk: monorepo-shaped; the harness's auto-detect picks one of `src/`
-  / `app/` — may need explicit `codeDir`.
+The pattern: most OSS APIs ship an OpenAPI document or external docs
+site, not in-repo markdown prose. Real value for the framework comes
+from **internal projects** where the team writes contractual prose
+alongside the code.
 
-## Tier 2 — bigger, structured docs
+## Where to look next
 
-Run after Tier 1 reports confirm the harness works. These have real
-documentation but extraction will cost more.
+Better odds of finding a usable target:
 
-### `payloadcms/payload`
-- URL: <https://github.com/payloadcms/payload>
-- Why: TS-first headless CMS with `/docs` directory full of structured
-  markdown.
-- Risk: ~hundreds of slices → real money. Use `--max-slices 20` first.
+- **Your own private services** with a hand-written API.md / SPEC.md.
+  Point the harness at the local path; it'll copy into
+  `tests/.eval-repos/` so the original isn't touched.
+- **Repos using a "spec-first" workflow** like Stoplight Studio's
+  output, or Smartbear's projects — they sometimes export prose
+  alongside the YAML.
+- **University / textbook projects** that ship a written API
+  specification as part of the assignment.
+- **Internal company docs** for any team running this — the framework
+  is most useful where *humans wrote prose for humans*, then asked for
+  it to be machine-verified.
 
-### `directus/directus`
-- URL: <https://github.com/directus/directus>
-- Why: TS, REST + GraphQL, clean OpenAPI spec.
-- Risk: large monorepo.
-
-## Tier 3 — local services
-
-If you have a private service with a SPEC.md handy, that's the best
-benchmark — feed the harness an absolute path:
+If you find a candidate, just point at it:
 
 ```bash
-pnpm tsx scripts/eval-on-repo.ts ~/code/my-service
-```
+# Git URL — clones into tests/.eval-repos/<slug>/
+EVAL_TARGET=https://github.com/foo/bar pnpm vitest run tests/eval/repo.test.ts
 
-## Workflow
+# Local path — copies into tests/.eval-repos/<slug>-local/
+EVAL_TARGET=~/code/my-service pnpm vitest run tests/eval/repo.test.ts
 
-The harness is a vitest test gated by `EVAL_TARGET`. It runs only when
-that env var is set — no risk of accidentally invoking it during a
-normal test run.
+# First-time scoping run — cap LLM calls at 10:
+EVAL_TARGET=<...> EVAL_MAX_SLICES=10 pnpm vitest run tests/eval/repo.test.ts
 
-```bash
-# First run (cost: one LLM call per slice):
-EVAL_TARGET=<url-or-path> pnpm vitest run tests/eval/repo.test.ts
+# Verify-only (no extraction) — assumes contracts already exist:
+EVAL_TARGET=<...> EVAL_NO_LLM=1 pnpm vitest run tests/eval/repo.test.ts
 
-# Skip extraction; just verify what's already there:
-EVAL_TARGET=<url-or-path> EVAL_NO_LLM=1 \
-  pnpm vitest run tests/eval/repo.test.ts
-
-# Cap LLM calls when scoping a new repo:
-EVAL_TARGET=<url-or-path> EVAL_MAX_SLICES=5 \
-  pnpm vitest run tests/eval/repo.test.ts
-
-# Compare against a known-good corpus (e.g. our fixture):
-EVAL_TARGET=<url-or-path> \
-EVAL_GOLDEN=tests/fixtures/sample-js-project-il/.truecourse/contracts \
+# Diff produced .tc against a known-good corpus:
+EVAL_TARGET=<...> EVAL_GOLDEN=tests/fixtures/sample-js-project-il/.truecourse/contracts \
   pnpm vitest run tests/eval/repo.test.ts
 ```
 
-Reports land in `tests/.eval-reports/<slug>.md` (gitignored).
-Cloned repos cache under `tests/.eval-repos/<slug>/`.
+Reports land in `tests/.eval-reports/<slug>.md` (gitignored). Cloned
+repos cache under `tests/.eval-repos/<slug>/`.
