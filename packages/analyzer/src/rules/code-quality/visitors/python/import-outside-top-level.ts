@@ -64,6 +64,22 @@ export const pythonImportOutsideTopLevelVisitor: CodeRuleVisitor = {
     // Method-local import — canonical circular-import break point.
     if (isInsideClassMethod(node)) return null
 
+    // Function-local import (module-level function as well as
+    // class methods) — Python's canonical lazy-load /
+    // circular-break pattern. The analyzer can't statically
+    // verify the cycle exists, but the location signal is
+    // strong enough that flagging produces ~80% FPs in real
+    // codebases. Top-level conditional / loop / context-manager
+    // imports outside any function still flag.
+    {
+      let cursor: SyntaxNode | null = node.parent
+      while (cursor) {
+        if (cursor.type === 'function_definition' || cursor.type === 'async_function_definition') return null
+        if (cursor.type === 'module') break
+        cursor = cursor.parent
+      }
+    }
+
     // An import is "outside top level" if any ancestor is a function/class/if/for/while/try
     const blockingTypes = new Set([
       'function_definition', 'async_function_definition', 'class_definition',

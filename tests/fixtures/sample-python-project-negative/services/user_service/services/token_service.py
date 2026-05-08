@@ -65,6 +65,7 @@ def get_token_service() -> TokenService:
 
 def call_with_retry():
     """Uses should_retry as a function reference, not a call."""
-    # VIOLATION: code-quality/deterministic/import-outside-top-level
+    # import-outside-top-level now skips function-local imports
+    # (lazy-load / circular-break pattern).
     import tenacity
     return tenacity.retry(retry=should_retry)(lambda: None)()

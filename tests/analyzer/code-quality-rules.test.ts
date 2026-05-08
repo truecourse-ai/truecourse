@@ -4759,10 +4759,20 @@ describe('code-quality/deterministic/prefer-pathlib (Python)', () => {
 });
 
 describe('code-quality/deterministic/import-outside-top-level (Python)', () => {
-  it('detects import inside function', () => {
-    const violations = check(`def foo():\n  import os\n  return os.getcwd()`, 'python');
+  it('detects import inside conditional outside any function', () => {
+    // Function-local imports are now skipped (lazy-load /
+    // circular-break pattern). Imports inside top-level
+    // conditionals (NOT TYPE_CHECKING / sys.version_info /
+    // platform.system) still flag.
+    const violations = check(`x = True\nif x:\n  import os`, 'python');
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/import-outside-top-level');
     expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag function-local lazy import', () => {
+    const violations = check(`def foo():\n  import os\n  return os.getcwd()`, 'python');
+    const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/import-outside-top-level');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag top-level import', () => {
