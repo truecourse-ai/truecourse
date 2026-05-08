@@ -20,6 +20,24 @@ export const collapsibleIfVisitor: CodeRuleVisitor = {
     const innerHasElse = innerIf.children.some((c) => c.type === 'else_clause')
     if (innerHasElse) return null
 
+    // Skip if either condition is already multi-line / compound.
+    // Merging two long compound conditions with && produces a
+    // single expression with 3+ binary expressions across multiple
+    // lines that's harder to read than the nested form.
+    const outerCond = node.childForFieldName('condition')
+    const innerCond = innerIf.childForFieldName('condition')
+    function isComplexCondition(c: import('web-tree-sitter').Node | null): boolean {
+      if (!c) return false
+      // Multi-line.
+      if (c.endPosition.row > c.startPosition.row) return true
+      // 3+ logical operators in the condition (counting && / ||).
+      const text = c.text
+      const opCount = (text.match(/&&|\|\|/g) ?? []).length
+      if (opCount >= 3) return true
+      return false
+    }
+    if (isComplexCondition(outerCond) || isComplexCondition(innerCond)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Collapsible if statements',
