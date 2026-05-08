@@ -64,19 +64,37 @@ function containsTypeNarrowingCheck(bodyNode: SyntaxNode): boolean {
 function hasBooleanReturn(bodyNode: SyntaxNode): boolean {
   let found = false
 
+  function isBooleanish(val: SyntaxNode): boolean {
+    if (val.type === 'true' || val.type === 'false') return true
+    if (val.type === 'binary_expression') {
+      const hasInstanceof = val.children.some((c) => c.text === 'instanceof')
+      const hasBoolOp = val.children.some((c) => c.text === '===' || c.text === '!==')
+      return hasInstanceof || hasBoolOp
+    }
+    if (val.type === 'unary_expression') {
+      const op = val.child(0)
+      if (op?.text === '!') return true
+    }
+    if (val.type === 'parenthesized_expression') {
+      const inner = val.namedChild(0)
+      if (inner) return isBooleanish(inner)
+    }
+    return false
+  }
+
   function walk(n: SyntaxNode) {
     if (found) return
+    // Don't recurse into nested functions / JSX subtrees — a
+    // typeof check inside a render expression isn't the
+    // function's return value.
+    if (n.type === 'jsx_element' || n.type === 'jsx_self_closing_element' ||
+        n.type === 'jsx_fragment' || n.type === 'arrow_function' ||
+        n.type === 'function_declaration' || n.type === 'function_expression') {
+      if (n !== bodyNode) return
+    }
     if (n.type === 'return_statement') {
       const val = n.namedChildren[0]
-      if (!val) return
-      if (val.type === 'true' || val.type === 'false') { found = true; return }
-      // return x instanceof Foo or return typeof x === 'string'
-      if (val.type === 'binary_expression') {
-        const hasInstanceof = val.children.some((c) => c.text === 'instanceof')
-        const hasBoolOp = val.children.some((c) => c.text === '===' || c.text === '!==')
-        if (hasInstanceof || hasBoolOp) { found = true; return }
-      }
-      if (val.type === 'parenthesized_expression') { found = true; return }
+      if (val && isBooleanish(val)) { found = true; return }
     }
     for (let i = 0; i < n.childCount; i++) {
       const child = n.child(i)
@@ -123,8 +141,22 @@ export const typeGuardPreferenceVisitor: CodeRuleVisitor = {
     collectReturns(body)
     if (returnStatements.length > 1) return null
 
-    const nameNode = node.childForFieldName('name')
+    let nameNode = node.childForFieldName('name')
+    // Arrow functions don't have a `name` field. Recover the binding
+    // name from a parent `variable_declarator`'s `name` field.
+    if (!nameNode && node.type === 'arrow_function') {
+      const parent = node.parent
+      if (parent?.type === 'variable_declarator') {
+        nameNode = parent.childForFieldName('name')
+      }
+    }
     const name = nameNode?.text ?? 'function'
+
+    // Skip React components (PascalCase name returning JSX).
+    // Components have a typeof check inside JSX (e.g.
+    // `typeof value === 'number' ? ...`) but their return type
+    // is JSX, not boolean — not a type-guard candidate.
+    if (/^[A-Z]/.test(name)) return null
 
     // Only flag functions that look like type guard candidates:
     // - Named with is/has/check prefix (convention for type guards)

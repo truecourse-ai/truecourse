@@ -31,6 +31,23 @@ export const redundantOptionalVisitor: CodeRuleVisitor = {
     }
 
     if (hasUndefinedMember(typeAnnotation)) {
+      // Skip when this property belongs to a variant of a
+      // discriminated union: `type T = { a: X } | { b?: undefined }`.
+      // The `?: undefined` form is the exclusivity-pattern convention
+      // that keeps the variants visually parallel; readers can see at
+      // a glance which keys each variant carries.
+      let cursor: SyntaxNode | null = node.parent
+      while (cursor) {
+        if (cursor.type === 'union_type') {
+          // Multi-variant union (the type author likely made this
+          // explicit on purpose).
+          if (cursor.namedChildCount >= 2) return null
+        }
+        if (cursor.type === 'type_alias_declaration' || cursor.type === 'class_body' ||
+            cursor.type === 'interface_declaration' || cursor.type === 'function_declaration') break
+        cursor = cursor.parent
+      }
+
       const nameNode = node.childForFieldName('name') ?? node.childForFieldName('pattern')
       const name = nameNode?.text ?? 'property'
       return makeViolation(
