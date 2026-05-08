@@ -224,7 +224,12 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
         },
       };
     }
-    identity = `${head[1].value} ${head[2].value}`;
+    // Normalize path params to RFC 6570 curly-brace form so spec-side and
+    // code-side identities match regardless of which syntax the source
+    // used. Express's `:name`, NestJS's `:name`, and others all collapse
+    // to `{name}` here.
+    const normalizedPath = canonicalizePathParams(head[2].value);
+    identity = `${head[1].value} ${normalizedPath}`;
     quoted = true;
   } else {
     if (head.length < 2 || head[1].kind !== 'ident') {
@@ -275,7 +280,11 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     | FormulaContract
     | undefined;
   if (kind === 'Operation' && head[1].kind === 'ident' && head[2].kind === 'string') {
-    const lifted = liftOperation(head[1].value, head[2].value, stmt.block);
+    // Pass the normalized path so OperationContract.path matches the
+    // canonical identity. Without this, lookups against the path field
+    // (e.g. selector matching, downstream tooling) would diverge from
+    // identities the resolver indexes by.
+    const lifted = liftOperation(head[1].value, canonicalizePathParams(head[2].value), stmt.block);
     contract = lifted.contract;
   } else if (kind === 'ErrorEnvelope') {
     contract = liftErrorEnvelope(stmt.block);
@@ -340,12 +349,13 @@ function collectRefs(
   out: Array<{ ref: ArtifactRef; usedAt: SourceLocation }>,
 ): void {
   if (t.kind === 'reference') {
+    const refType = (t.refType as ArtifactKind) ?? 'Unknown';
+    // Normalize Operation cross-refs the same way operation declarations
+    // are normalized — otherwise `Operation:"GET /api/x/:slug"` wouldn't
+    // resolve to the indexed `Operation:GET /api/x/{slug}`.
+    const identity = refType === 'Operation' ? canonicalizePathParams(t.identity) : t.identity;
     out.push({
-      ref: {
-        type: (t.refType as ArtifactKind) ?? 'Unknown',
-        identity: t.identity,
-        quoted: t.quoted,
-      },
+      ref: { type: refType, identity, quoted: t.quoted },
       usedAt: { filePath, lineStart: t.loc.line, lineEnd: t.loc.line },
     });
   } else if (t.kind === 'list') {
@@ -366,6 +376,20 @@ function visitAllStatements(stmts: StatementNode[], visit: (s: StatementNode) =>
 
 export function refKey(ref: ArtifactRef): string {
   return `${ref.type}:${ref.identity}`;
+}
+
+/**
+ * Convert framework-specific path-param syntaxes to RFC 6570 curly-brace
+ * form so spec-side identities match what the code-side extractor
+ * produces. Currently recognizes Express / NestJS / Fastify style:
+ *
+ *   /api/orders/:id        → /api/orders/{id}
+ *   /users/:slug/posts     → /users/{slug}/posts
+ *
+ * Idempotent: input that's already RFC form is returned unchanged.
+ */
+export function canonicalizePathParams(p: string): string {
+  return p.replace(/:([A-Za-z_][\w]*)/g, '{$1}');
 }
 
 /**

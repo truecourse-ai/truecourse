@@ -384,6 +384,22 @@ type ResEvent =
   | (ResEventBase & { kind: 'set-header'; headerName: string })
   | (ResEventBase & { kind: 'status'; status: string; bodyShape?: BodyShape });
 
+/**
+ * Express response methods that emit a body. The default status is 200
+ * unless the call chain includes `.status(N)` — that's documented Express
+ * behavior, not a heuristic. `sendStatus(N)` is the special case that
+ * carries its own status as the first argument.
+ *
+ * We deliberately don't try to track `res.statusCode = N` assignments or
+ * `res.statusCode` stickiness across statements — that's path-sensitive
+ * and uncommon in modern code. The chain-based rule covers the common
+ * cases (`res.json(x)` → 200, `res.status(404).json(x)` → 404) without
+ * false negatives on the implicit-200 path that motivates this.
+ */
+const RES_SEND_METHODS = new Set([
+  'json', 'send', 'end', 'jsonp', 'sendFile', 'render',
+]);
+
 function describeResCall(call: SyntaxNode, source: string): ResEvent | null {
   const fn = call.childForFieldName('function');
   if (!fn || fn.type !== 'member_expression') return null;
@@ -405,20 +421,66 @@ function describeResCall(call: SyntaxNode, source: string): ResEvent | null {
     return null;
   }
 
-  // res.status(N) / res.status(N).json(...) / res.status(N).send(...)
-  // We unwrap the chain and find the .status(N) anchor.
-  const statusInfo = findStatusInChain(call, source);
-  if (!statusInfo) return null;
+  // res.sendStatus(N) — explicit numeric status with no body.
+  if (propName === 'sendStatus' && obj.type === 'identifier' && sliceText(obj, source) === 'res') {
+    const args = call.childForFieldName('arguments');
+    const arg = args?.namedChild(0);
+    if (arg && arg.type === 'number') {
+      return { kind: 'status', status: sliceText(arg, source), line, col };
+    }
+    return null;
+  }
 
-  // Body shape (if any) from a .json(...) chained on the same call.
-  const jsonInfo = findJsonInChain(call, source);
-  return {
-    kind: 'status',
-    status: statusInfo.status,
-    bodyShape: jsonInfo ? classifyJsonArg(jsonInfo.arg) : undefined,
-    line,
-    col,
-  };
+  // res.status(N) / res.status(N).json(...) / res.status(N).send(...) —
+  // explicit numeric status anywhere in the chain.
+  const statusInfo = findStatusInChain(call, source);
+  if (statusInfo) {
+    const jsonInfo = findJsonInChain(call, source);
+    return {
+      kind: 'status',
+      status: statusInfo.status,
+      bodyShape: jsonInfo ? classifyJsonArg(jsonInfo.arg) : undefined,
+      line,
+      col,
+    };
+  }
+
+  // Implicit-200 path: a bare body-emitting send (`res.json(...)`,
+  // `res.send(...)`, etc.) with no chained `.status(N)`. Express defaults
+  // to 200 in this case, so the extractor records 200 as the response
+  // status — without this, modern handlers that just call `res.json(data)`
+  // would appear to emit no responses at all.
+  if (RES_SEND_METHODS.has(propName) && isResReceiver(obj, source)) {
+    const bodyShape = propName === 'json' || propName === 'jsonp'
+      ? classifyJsonArg(call.childForFieldName('arguments')?.namedChild(0) ?? undefined)
+      : undefined;
+    return { kind: 'status', status: '200', bodyShape, line, col };
+  }
+
+  return null;
+}
+
+/**
+ * True when the chain root resolves to the `res` parameter — either the
+ * direct identifier `res` or any member expression rooted at it (so
+ * `res.json(...)` and `someObj.res.json(...)` are distinguishable).
+ */
+function isResReceiver(node: SyntaxNode, source: string): boolean {
+  let cur: SyntaxNode | null = node;
+  while (cur) {
+    if (cur.type === 'identifier') return sliceText(cur, source) === 'res';
+    if (cur.type === 'member_expression') {
+      cur = cur.childForFieldName('object');
+      continue;
+    }
+    if (cur.type === 'call_expression') {
+      const fn = cur.childForFieldName('function');
+      cur = fn?.type === 'member_expression' ? fn.childForFieldName('object') : null;
+      continue;
+    }
+    return false;
+  }
+  return false;
 }
 
 /**
