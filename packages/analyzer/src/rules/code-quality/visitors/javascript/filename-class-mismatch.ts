@@ -187,6 +187,22 @@ export const filenameClassMismatchVisitor: CodeRuleVisitor = {
       if (normalizeName(candidate) === normFile) return null
     }
 
+    // react-email convention: \`templates/document-rejected.tsx\`
+    // exports \`DocumentRejectedEmail\`. Try the additional strip
+    // of bare \`Email\` ONLY when the path indicates an email
+    // template directory — otherwise the strip is too eager
+    // (\`UserEmail\` is a user's email value, not a "User" template).
+    if (/[\\/]emails?[\\/]templates?[\\/]|[\\/]templates?[\\/]emails?[\\/]/i.test(filePath) ||
+        /[\\/]email[\\/]templates?[\\/]/i.test(filePath) ||
+        /[\\/](?:emails?|email-templates?)[\\/]/i.test(filePath)) {
+      for (const candidate of candidates) {
+        if (candidate.endsWith('Email') && candidate.length > 5) {
+          const stripped = candidate.slice(0, -5)
+          if (normalizeName(stripped) === normFile) return null
+        }
+      }
+    }
+
     const normClass = normalizeName(exportedName)
     if (normClass) {
       return makeViolation(

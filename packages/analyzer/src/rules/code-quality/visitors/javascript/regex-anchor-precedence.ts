@@ -24,6 +24,26 @@ export const regexAnchorPrecedenceVisitor: CodeRuleVisitor = {
       })()
 
       if (topLevelHasAlternation && (hasStartAnchorWithoutGroup || hasEndAnchorWithoutGroup)) {
+        // Skip when EVERY top-level alternative is independently
+        // anchored: \`^/api/|^/__\` — both alternatives carry their
+        // own \`^\`, so the precedence is correct (each branch
+        // anchors itself). Same for trailing \`$\` on every branch.
+        const branches: string[] = []
+        let depth = 0
+        let buf = ''
+        for (const ch of src) {
+          if (ch === '(') { depth++; buf += ch; continue }
+          if (ch === ')') { depth--; buf += ch; continue }
+          if (ch === '|' && depth === 0) { branches.push(buf); buf = ''; continue }
+          buf += ch
+        }
+        branches.push(buf)
+        if (branches.length >= 2) {
+          const allStartAnchored = branches.every((b) => /^\s*\^/.test(b))
+          const allEndAnchored = branches.every((b) => /\$\s*$/.test(b))
+          if (allStartAnchored || allEndAnchored) return null
+        }
+
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Regex anchor precedence issue',

@@ -66,6 +66,30 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
     const returnStmts = collectReturnStatements(body)
     if (returnStmts.length < 2) return null
 
+    // Skip framework convention exports whose return type is
+    // dictated by the framework, not the function body. Remix /
+    // React Router \`meta\` / \`headers\` / \`links\` / \`shouldRevalidate\`
+    // exports return framework-defined union types; flagging
+    // their per-branch shapes is noise.
+    {
+      const fnName = node.childForFieldName('name')?.text ?? ''
+      const FRAMEWORK_EXPORT_NAMES = new Set([
+        'meta', 'headers', 'links', 'shouldRevalidate',
+        'loader', 'action', 'clientLoader', 'clientAction',
+        'generateMetadata', 'generateStaticParams', 'generateViewport',
+        'middleware', 'config',
+      ])
+      if (FRAMEWORK_EXPORT_NAMES.has(fnName)) {
+        // Confirm the function is exported and the file is a route /
+        // page entry — minimizes the false-skip risk for unrelated
+        // \`meta\` helper functions.
+        const isExported = node.parent?.type === 'export_statement'
+        const isRouteFile = /[\\/]app[\\/]routes[\\/]/.test(filePath) ||
+          /[\\/]app[\\/]/.test(filePath) && /\/(?:page|layout|route|loading|error|not-found|default|head|template)\.[^./]+$/.test(filePath)
+        if (isExported || isRouteFile) return null
+      }
+    }
+
     // Skip React component functions — they return JSX, fragments,
     // strings, numbers, arrays, and `null` interchangeably; all are
     // valid `React.ReactNode`. The rule's type-string comparison

@@ -19,15 +19,33 @@ export const selectorParameterVisitor: CodeRuleVisitor = {
 
     for (const param of paramList) {
       let paramName: string | null = null
+      let paramTypeText = ''
 
       if (param.type === 'identifier') {
         paramName = param.text
       } else if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
         const p = param.childForFieldName('pattern') ?? param.namedChildren[0]
         if (p?.type === 'identifier') paramName = p.text
+        const typeAnno = param.childForFieldName('type') ??
+          param.namedChildren.find((c) => c.type === 'type_annotation')
+        if (typeAnno) paramTypeText = typeAnno.text
       }
 
       if (!paramName) continue
+
+      // Skip when the parameter is annotated with a non-boolean
+      // type. The selector-parameter rule's "split into two
+      // functions" guidance only applies to boolean flags. A
+      // \`string | string[]\` (CORS allowed-headers) or
+      // \`'asc' | 'desc'\` (sort direction) carries data, not a
+      // selector.
+      if (paramTypeText) {
+        const t = paramTypeText.replace(/^\s*:\s*/, '').trim()
+        const isBoolean = t === 'boolean' || t === 'Boolean' ||
+          /^(?:boolean|Boolean)\b/.test(t) ||
+          /^\s*(?:true|false)\s*\|\s*(?:true|false)\s*$/.test(t)
+        if (t && !isBoolean) continue
+      }
 
       function isUsedAsSelector(n: SyntaxNode): boolean {
         if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return false

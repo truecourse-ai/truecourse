@@ -6,6 +6,19 @@ export const redundantTemplateExpressionVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['template_string'],
   visit(node, filePath, sourceCode) {
+    // Skip tagged-template literals (\`msg\\\`\${x}\\\`\`,
+    // \`gql\\\`\${q}\\\`\`, \`css\\\`\${color}\\\`\`). The literal IS
+    // the macro's argument; the tag interprets it. Tree-sitter
+    // parses this as a \`call_expression\` whose \`arguments\`
+    // field IS the template_string itself.
+    {
+      const parent = node.parent
+      if (parent?.type === 'call_expression') {
+        const args = parent.childForFieldName('arguments')
+        if (args?.id === node.id) return null
+      }
+    }
+
     const children = node.children
     const namedChildren = node.namedChildren
     if (namedChildren.length !== 1) return null

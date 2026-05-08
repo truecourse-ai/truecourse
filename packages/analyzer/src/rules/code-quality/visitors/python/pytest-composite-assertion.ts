@@ -6,6 +6,17 @@ export const pythonPytestCompositeAssertionVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['assert_statement'],
   visit(node, filePath, sourceCode) {
+    // Only relevant in test files. Outside \`tests/\`,
+    // \`__tests__/\`, or files matching \`test_*.py\`/\`*_test.py\`,
+    // an \`assert\` is a runtime invariant check and the
+    // "split for clearer pytest output" guidance does not apply.
+    const isTestFile =
+      /(?:[\\/]|^)(?:tests?|__tests__)[\\/]/.test(filePath) ||
+      /(?:[\\/]|^)test_[^\\/]+\.py$/.test(filePath) ||
+      /_test\.py$/.test(filePath) ||
+      /\/conftest\.py$/.test(filePath)
+    if (!isTestFile) return null
+
     // assert_statement: assert <expression> [, <message>]
     const expr = node.namedChildren[0]
     if (!expr) return null
