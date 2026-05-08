@@ -208,6 +208,30 @@ export const pythonMissingFstringSyntaxVisitor: CodeRuleVisitor = {
       // likely to be used as `.format()` templates — URL paths, templates, etc.
       if (isLikelyFormatTemplate(node)) return null
 
+      // Skip the 2nd-and-after argument to \`re.sub\` / \`re.subn\` —
+      // it's the replacement TEMPLATE where \`\\1\` etc. are
+      // backrefs and \`{...}\` segments are LITERAL text.
+      {
+        const parent = node.parent
+        if (parent?.type === 'argument_list') {
+          const callExpr = parent.parent
+          if (callExpr?.type === 'call') {
+            const fn = callExpr.childForFieldName('function')
+            let name = ''
+            if (fn?.type === 'identifier') name = fn.text
+            else if (fn?.type === 'attribute') name = fn.childForFieldName('attribute')?.text ?? ''
+            if (name === 'sub' || name === 'subn') {
+              // Position of node within argument_list.
+              const positionalArgs = parent.namedChildren.filter(
+                (c) => c.type !== 'keyword_argument',
+              )
+              const idx = positionalArgs.findIndex((c) => c.id === node.id)
+              if (idx >= 1) return null
+            }
+          }
+        }
+      }
+
       // Skip triple-quoted strings containing SQL keywords — these are raw
       // SQL queries with `.format()` placeholders like `{org_filter}`.
       if (node.text.startsWith('"""') || node.text.startsWith("'''")) {

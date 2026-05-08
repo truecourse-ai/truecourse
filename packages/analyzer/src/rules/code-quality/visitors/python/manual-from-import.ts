@@ -13,6 +13,18 @@ export const pythonManualFromImportVisitor: CodeRuleVisitor = {
   languages: ['python'],
   nodeTypes: ['import_statement'],
   visit(node, filePath, sourceCode) {
+    // Skip side-effect imports marked \`# noqa: F401\` —
+    // \`import openhands.app_server.event_callback  # noqa: F401\`
+    // is intentional module-registration import; the user has
+    // explicitly suppressed the linter and the dotted name is
+    // a deliberate side-effect-only side-step.
+    {
+      const lines = sourceCode.split('\n')
+      const line = lines[node.startPosition.row] ?? ''
+      if (/#\s*noqa\b.*\bF401\b/.test(line) || /#\s*noqa\s*:\s*F401\b/.test(line) ||
+          /#\s*noqa\b\s*$/.test(line)) return null
+    }
+
     // Look for `import a.b` or `import a.b.c` — dotted imports
     // These are typically better expressed as `from a import b` or `from a.b import c`
     for (const child of node.namedChildren) {

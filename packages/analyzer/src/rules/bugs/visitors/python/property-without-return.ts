@@ -13,6 +13,22 @@ export const pythonPropertyWithoutReturnVisitor: CodeRuleVisitor = {
     })
     if (!isProperty) return null
 
+    // Skip when also \`@abstractmethod\` / \`@abstractproperty\`. The
+    // body is intentionally a stub (\`...\` or \`pass\`) — overrides
+    // supply the return.
+    const isAbstract = decorators.some((d) => {
+      const expr = d.namedChildren[0]
+      if (expr?.type === 'identifier') {
+        return expr.text === 'abstractmethod' || expr.text === 'abstractproperty'
+      }
+      if (expr?.type === 'attribute') {
+        const attr = expr.childForFieldName('attribute')
+        return attr?.text === 'abstractmethod' || attr?.text === 'abstractproperty'
+      }
+      return false
+    })
+    if (isAbstract) return null
+
     const funcDef = node.namedChildren.find((c) => c.type === 'function_definition')
     if (!funcDef) return null
 

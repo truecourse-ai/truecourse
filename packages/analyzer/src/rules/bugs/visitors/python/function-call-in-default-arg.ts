@@ -23,6 +23,15 @@ export const pythonFunctionCallInDefaultArgVisitor: CodeRuleVisitor = {
     // and don't suffer from the mutable-default-arg problem.
     if (isFastApiDependsCall(value)) return null
 
+    // Calls to user-defined dependency factories whose name starts with
+    // \`depends_\` / \`get_\` / \`provide_\` (\`def get_db()\`,
+    // \`def depends_session()\`) — conventional FastAPI dependency
+    // factories meant to be invoked at the binding site or wrapped in
+    // \`Depends(...)\`.
+    if (fn.type === 'identifier' && /^(?:depends_|get_|provide_)/.test(fn.text)) return null
+    // Trailing \`_dependency\` suffix is also a FastAPI factory convention.
+    if (fn.type === 'identifier' && /_dependency$/.test(fn.text)) return null
+
     // Flag any other function call — it runs once at definition time
     const paramName = node.childForFieldName('name')?.text ?? 'parameter'
     return makeViolation(

@@ -22,10 +22,14 @@ function countBranches(node: SyntaxNode): number {
 
 function checksTemplateOrString(condition: SyntaxNode): boolean {
   const text = condition.text
-  // Check for Template-related patterns or isinstance checks on template types
-  return text.includes('Template') || text.includes('template') ||
-    text.includes('isinstance') || text.includes('.safe_substitute') ||
-    text.includes('.substitute')
+  // Specifically Template usage: \`Template\` class reference,
+  // string Template methods (\`safe_substitute\` / \`substitute\`),
+  // or \`isinstance(x, Template)\` / \`isinstance(x, ...Template...)\`.
+  // Bare \`isinstance\` matches were too broad — \`isinstance(x, str)\`
+  // / \`isinstance(x, MyClass)\` aren't template-string code.
+  if (text.includes('.safe_substitute') || text.includes('.substitute')) return true
+  if (/\bTemplate\b/.test(text)) return true
+  return false
 }
 
 export const pythonTemplateStringPatternMatchingVisitor: CodeRuleVisitor = {

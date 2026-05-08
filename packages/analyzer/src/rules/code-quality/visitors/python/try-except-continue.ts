@@ -13,6 +13,19 @@ export const pythonTryExceptContinueVisitor: CodeRuleVisitor = {
     if (stmts.length !== 1) return null
     if (stmts[0].type !== 'continue_statement') return null
 
+    // Skip when the body has a sibling explanatory comment in the
+    // raw text. The comment is the intentional-skip signal —
+    // typical for best-effort scans over external resources.
+    {
+      const lines = sourceCode.split('\n')
+      const startRow = body.startPosition.row
+      const endRow = body.endPosition.row
+      for (let r = startRow; r <= endRow; r++) {
+        const line = lines[r] ?? ''
+        if (/^\s*#/.test(line)) return null
+      }
+    }
+
     // A typed exception narrows the suppression to one specific recoverable
     // error - `except TimeoutError: continue` is the canonical Python idiom
     // for "drop this iteration when this specific thing fails." Only fire

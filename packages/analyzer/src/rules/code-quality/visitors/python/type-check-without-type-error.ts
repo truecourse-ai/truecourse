@@ -54,6 +54,23 @@ export const pythonTypeCheckWithoutTypeErrorVisitor: CodeRuleVisitor = {
       // Skip ValueError, HTTPException, etc. — these are valid for external data validation
       if (VALID_DATA_VALIDATION_EXCEPTIONS.some((e) => raisedType === e || raisedType.endsWith(e))) continue
 
+      // Skip domain-specific Error subclasses: \`SlackError\`,
+      // \`StripeError\`, \`AuthError\`, \`PaymentError\`, etc.
+      // These describe the failure DOMAIN ("authentication
+      // failed", "Slack API rejected"), not "wrong type passed".
+      // Heuristic: any name ending in \`Error\` that's not in the
+      // generic Python exception set is a domain class.
+      const GENERIC_PY_EXCEPTIONS = new Set([
+        'TypeError', 'ValueError', 'KeyError', 'IndexError',
+        'AttributeError', 'RuntimeError', 'NotImplementedError',
+        'NameError', 'OSError', 'IOError', 'Exception',
+        'ZeroDivisionError', 'StopIteration', 'AssertionError',
+        'ArithmeticError', 'LookupError', 'ImportError',
+        'UnboundLocalError', 'SystemError', 'FileNotFoundError',
+        'PermissionError', 'TimeoutError',
+      ])
+      if (/Error$/.test(raisedType) && !GENERIC_PY_EXCEPTIONS.has(raisedType)) continue
+
       if (raisedType) {
         return makeViolation(
           this.ruleKey, stmt, filePath, 'low',
