@@ -31,6 +31,19 @@ export const unnecessaryTypeConversionVisitor: CodeRuleVisitor = {
     const expectedType = conversionMap[fn.text]
     if (!expectedType) return null
 
+    // `Boolean(a || b)` and `Boolean(a && b)` are normalization
+    // calls. Even when TypeScript narrows one operand to boolean,
+    // the OTHER operand may evaluate to its raw value (`Team | 0 | ""`),
+    // and the wrapper guarantees a strict boolean for JSX-conditional
+    // rendering / equality contexts. Same for `String(...)` over
+    // `??`/`||` chains where one branch is non-string.
+    if (fn.text === 'Boolean' || fn.text === 'String') {
+      if (arg.type === 'binary_expression') {
+        const op = arg.children.find((c) => c.text === '||' || c.text === '&&' || c.text === '??')
+        if (op) return null
+      }
+    }
+
     const argType = typeQuery.getTypeAtPosition(
       filePath,
       arg.startPosition.row,
