@@ -1,7 +1,56 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { getPythonDecoratorName } from '../../../_shared/python-helpers.js'
 
 type SyntaxNode = import('web-tree-sitter').Node
+
+/**
+ * True if `node` is a `function_definition` defined inside another
+ * function's body (nested closure / helper). The closure captures
+ * its outer scope's locals — type information already exists in
+ * the enclosing function's signature, so explicit annotations on
+ * the closure are mostly redundant noise.
+ *
+ * Walks up the parent chain, ignoring `decorated_definition`,
+ * `block`, and conditional/with/try wrappers, until it hits a
+ * `function_definition` (closure) or `class_definition` (method).
+ */
+function isNestedClosure(node: SyntaxNode): boolean {
+  let cursor: SyntaxNode | null = node.parent
+  while (cursor) {
+    if (cursor.type === 'function_definition') return true
+    if (cursor.type === 'class_definition') return false
+    cursor = cursor.parent
+  }
+  return false
+}
+
+/**
+ * Pydantic / dataclass-style validator decorators. The framework
+ * convention is `(cls, v)` — `v` is the field value whose type is
+ * declared on the field, not on the parameter. Explicit
+ * annotation on `v` is rarely written and adds no information.
+ */
+const PYDANTIC_VALIDATOR_DECORATORS = new Set([
+  'validator', 'field_validator', 'model_validator',
+  'root_validator', 'serializer', 'field_serializer',
+  'model_serializer', 'computed_field',
+])
+
+/**
+ * True if the function (or its decorated wrapper) has a Pydantic
+ * validator / serializer decorator.
+ */
+function hasPydanticValidatorDecorator(funcNode: SyntaxNode): boolean {
+  const parent = funcNode.parent
+  if (!parent || parent.type !== 'decorated_definition') return false
+  for (const child of parent.children) {
+    if (child.type !== 'decorator') continue
+    const name = getPythonDecoratorName(child)
+    if (name && PYDANTIC_VALIDATOR_DECORATORS.has(name)) return true
+  }
+  return false
+}
 
 /**
  * True if the file path looks like a CLI / script entry point —
@@ -55,6 +104,16 @@ export const pythonMissingTypeHintsVisitor: CodeRuleVisitor = {
     // `cmd/`). Type hints there add little value — the code is the
     // entry point, not an API surface for callers.
     if (isCliScriptByPath(filePath)) return null
+
+    // Nested closures / inner helper functions inherit type
+    // context from the enclosing function — annotations are
+    // mostly redundant.
+    if (isNestedClosure(node)) return null
+
+    // Pydantic / Marshmallow validators & serializers — the
+    // `(cls, v)` convention deliberately leaves `v` untyped
+    // because the field's declared type is the source of truth.
+    if (hasPydanticValidatorDecorator(node)) return null
 
     const params = node.childForFieldName('parameters')
     if (!params) return null
