@@ -65,6 +65,20 @@ export const syncFsInRequestHandlerVisitor: CodeRuleVisitor = {
     if (/^(seed|seeds|seeder|seed-[\w-]+|migrate|cli)\.[cm]?[jt]sx?$/.test(basename)) return null
     if (/\.seed\.[cm]?[jt]sx?$/.test(basename)) return null
 
+    // Skip files whose role is offline rendering (PDF / certificate
+    // / template / image / font generators) and signing-transport
+    // initializers. The sync read pulls a static brand asset / PEM
+    // chain once per render or per-transport-init; the enclosing
+    // function is async only because the rest of the pipeline (PDF
+    // library, signing transport, image wrapper) is async. The cost
+    // is the render's hot path, not request blocking — switching to
+    // `fs.promises.readFile` adds no concurrency benefit.
+    if (
+      /\/(?:pdf|certificates?|render(?:ers?)?|templates?|fonts?|assets?)\//.test(lowerPath) ||
+      /\/signing\/transports?\//.test(lowerPath) ||
+      /^render-[a-z0-9-]+\.[cm]?[jt]sx?$/.test(basename)
+    ) return null
+
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 
     // Module-level cached-singleton init pattern. When the enclosing
