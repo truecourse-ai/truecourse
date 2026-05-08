@@ -24,6 +24,13 @@ export const pythonIfElseDictLookupVisitor: CodeRuleVisitor = {
         else return null
       }
       if (assignNode.type !== 'assignment') return null
+      // Skip when the RHS is a method-chain call. The dict-lookup
+      // rewrite (\`x = { "k": fn(...), ... }[key]\`) evaluates
+      // every branch eagerly — wrong when each branch builds a
+      // different query (\`qs = qs.order_by(...)\`) or has side
+      // effects.
+      const right = assignNode.childForFieldName('right')
+      if (right?.type === 'call' || right?.type === 'await') return null
       return assignNode.childForFieldName('left')?.text ?? null
     }
 

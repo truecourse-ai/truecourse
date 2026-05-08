@@ -25,6 +25,31 @@ export const unusedExpressionVisitor: CodeRuleVisitor = {
     if (expr.type === 'template_string') return null
     if (expr.type === 'new_expression') return null
 
+    // Ternary used as a statement when both arms are themselves
+    // side-effect expressions (call / await / assignment). The
+    // statement-form ternary dispatches one of two effects:
+    //   `cond ? doA(x) : doB(x);`
+    // is equivalent to `if (cond) doA(x); else doB(x);` — neither
+    // arm is unused, the result is intentionally discarded.
+    if (expr.type === 'ternary_expression') {
+      const consequence = expr.namedChildren[1]
+      const alternative = expr.namedChildren[2]
+      const isEffectful = (n: import('web-tree-sitter').Node | null): boolean => {
+        if (!n) return false
+        if (n.type === 'call_expression' || n.type === 'await_expression' ||
+            n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression' ||
+            n.type === 'update_expression' || n.type === 'yield_expression' ||
+            n.type === 'new_expression') return true
+        if (n.type === 'parenthesized_expression') return isEffectful(n.namedChildren[0] ?? null)
+        if (n.type === 'unary_expression') {
+          const op = n.children[0]?.text
+          if (op === 'void' || op === 'delete') return true
+        }
+        return false
+      }
+      if (isEffectful(consequence) && isEffectful(alternative)) return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Unused expression',
