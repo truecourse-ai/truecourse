@@ -9,7 +9,11 @@ export const defaultCaseLastVisitor: CodeRuleVisitor = {
     const body = node.childForFieldName('body')
     if (!body) return null
 
-    const cases = body.namedChildren
+    // Filter out trailing comments / whitespace — only switch_case
+    // and switch_default are meaningful for "is default last?".
+    const cases = body.namedChildren.filter(
+      (c) => c.type === 'switch_case' || c.type === 'switch_default',
+    )
     if (cases.length === 0) return null
 
     let defaultIndex = -1

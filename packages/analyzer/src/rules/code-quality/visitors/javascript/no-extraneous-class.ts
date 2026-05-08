@@ -24,6 +24,15 @@ export const noExtraneousClassVisitor: CodeRuleVisitor = {
     })
     if (hasConstructor) return null
 
+    // Skip when the class has at least one static FIELD (not method).
+    // Static fields hold shared mutable / cached state — singleton
+    // pattern, not pure namespace. A namespace-only class would
+    // contain only static methods.
+    const hasStaticField = members.some((m) =>
+      m.type === 'field_definition' || m.type === 'public_field_definition',
+    )
+    if (hasStaticField) return null
+
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text ?? 'class'
 

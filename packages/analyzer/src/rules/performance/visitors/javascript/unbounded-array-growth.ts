@@ -29,6 +29,14 @@ export const unboundedArrayGrowthVisitor: CodeRuleVisitor = {
     if (loopNode.type === 'while_statement') {
       const condition = loopNode.childForFieldName('condition')
       if (condition && /\.exec\s*\(/.test(condition.text)) return null
+      // Comparison-bounded loops (\`while (next <= now)\`,
+      // \`while (i < limit)\`, \`while (cursor.size > 0)\`) terminate
+      // when the predicate flips. The rule's "unbounded" claim
+      // doesn't apply to any \`<\`/\`<=\`/\`>\`/\`>=\` predicate.
+      if (condition && /[<>]=?/.test(condition.text)) return null
+      // Queue/iterator drains: \`while (queue.length)\`,
+      // \`while (it.hasNext())\` — bounded by the source.
+      if (condition && /\.length\b|\bhasNext\s*\(|\bsize\b/.test(condition.text)) return null
     }
 
     const loopText = loopNode.text

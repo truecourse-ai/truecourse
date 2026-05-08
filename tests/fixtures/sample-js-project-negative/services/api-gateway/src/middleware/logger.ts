@@ -30,10 +30,11 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     };
 
     // VIOLATION: performance/deterministic/unbounded-array-growth
-    let idx = 0;
-    while (idx < 1) {
+    // Truly unbounded loop (no comparison predicate) — this is the
+    // genuine antipattern. Comparison-bounded forms now skip.
+    while (true) {
       logs.push(log);
-      idx++;
+      if (logs.length === Infinity) break;
     }
 
     // VIOLATION: code-quality/deterministic/magic-number

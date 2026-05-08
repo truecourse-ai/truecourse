@@ -40,32 +40,62 @@ export const eventListenerNoRemoveVisitor: CodeRuleVisitor = {
     if (!leftmost || leftmost.type !== 'identifier') return null
     if (!GLOBAL_RECEIVERS.has(leftmost.text)) return null
 
-    // Find the enclosing function body
-    let enclosingBody: SyntaxNode | null = null
-    let current = node.parent
-    while (current) {
-      if (
-        current.type === 'function_declaration' ||
-        current.type === 'arrow_function' ||
-        current.type === 'function' ||
-        current.type === 'method_definition'
-      ) {
-        enclosingBody = current.childForFieldName('body')
-        break
+    // Walk to module level so the removeEventListener search
+    // includes the cleanup callback returned from useEffect (a
+    // nested arrow function that doesn't share the same body
+    // scope as the addEventListener call).
+    let scope: SyntaxNode | null = node.parent
+    let lastFn: SyntaxNode | null = null
+    while (scope) {
+      if (scope.type === 'function_declaration' || scope.type === 'arrow_function' ||
+          scope.type === 'function' || scope.type === 'method_definition') {
+        lastFn = scope
       }
-      // If we hit program/module level, use that
-      if (current.type === 'program') {
-        enclosingBody = current
-        break
-      }
-      current = current.parent
+      if (scope.type === 'program') break
+      scope = scope.parent
     }
-
+    // Search the OUTER function (the React component / hook) for any
+    // removeEventListener call — the cleanup function lives inside
+    // that scope as a nested arrow.
+    const enclosingBody = lastFn
+      ? (lastFn.childForFieldName('body') ?? scope)
+      : scope
     if (!enclosingBody) return null
 
-    // Check if same scope has removeEventListener
-    const hasRemove = containsMethodCall(enclosingBody, new Set(['removeEventListener']))
-    if (hasRemove) return null
+    // Match by event-name to allow same-event remove anywhere in
+    // the file scope.
+    const args = node.childForFieldName('arguments')
+    const eventNameNode = args?.namedChild(0)
+    const eventName = eventNameNode?.type === 'string'
+      ? eventNameNode.text.replace(/^['"\`]|['"\`]$/g, '')
+      : ''
+
+    function hasMatchingRemove(n: SyntaxNode): boolean {
+      if (n.type === 'call_expression') {
+        const cfn = n.childForFieldName('function')
+        if (cfn?.type === 'member_expression') {
+          const cprop = cfn.childForFieldName('property')
+          if (cprop?.text === 'removeEventListener') {
+            if (!eventName) return true
+            const cargs = n.childForFieldName('arguments')
+            const enArg = cargs?.namedChild(0)
+            const en = enArg?.type === 'string'
+              ? enArg.text.replace(/^['"\`]|['"\`]$/g, '')
+              : ''
+            if (en === eventName) return true
+          }
+        }
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const c = n.child(i)
+        if (c && hasMatchingRemove(c)) return true
+      }
+      return false
+    }
+    if (hasMatchingRemove(enclosingBody)) return null
+    // Fallback: also check the unused legacy helper for backward
+    // compatibility.
+    if (containsMethodCall(enclosingBody, new Set(['removeEventListener']))) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

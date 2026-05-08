@@ -158,6 +158,14 @@ export const routeWithoutAuthMiddlewareVisitor: CodeRuleVisitor = {
     if (firstArg?.type === 'string') {
       const path = firstArg.text.replace(/^['"`]|['"`]$/g, '')
       if (isPublicPath(path)) return null
+      // Token-bound routes (\`/:token\`, \`/:accessToken\`,
+      // \`/recipients/:token/...\`) — the token IS the auth.
+      // Recognize \`:<x>token\` / \`:<x>Token\` / \`:<x>signature\`
+      // / \`:<x>Signature\` segments anywhere in the path.
+      if (/:[a-zA-Z_][a-zA-Z0-9_]*(?:[Tt]oken|[Ss]ignature)\b/.test(path)) return null
+      // Also recognize \`{token}\` / \`{accessToken}\` style for
+      // FastAPI-shaped path patterns that bleed into JS.
+      if (/\{[a-zA-Z_][a-zA-Z0-9_]*(?:[Tt]oken|[Ss]ignature)\}/.test(path)) return null
     }
 
     // Check this specific route's middleware chain

@@ -50,6 +50,20 @@ function checkFunctionDeclaration(
 
   if (!fnNode) return null
 
+  // Skip arrow / function expressions when the enclosing
+  // \`variable_declarator\` is annotated with a function type
+  // (\`const fn: SuperJsonFunction = (data, init = {}) => {...}\`).
+  // The types come from the binding's annotation, not from the
+  // arrow's params.
+  if (decl.type === 'lexical_declaration') {
+    const declarator = decl.namedChildren.find((c) => c.type === 'variable_declarator')
+    if (declarator) {
+      const typeAnno = declarator.childForFieldName('type') ??
+        declarator.namedChildren.find((c) => c.type === 'type_annotation')
+      if (typeAnno) return null
+    }
+  }
+
   const params = fnNode.childForFieldName('parameters')
   if (!params) return null
 
