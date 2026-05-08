@@ -79,6 +79,83 @@ function isMembershipTestKey(node: SyntaxNode): boolean {
   return false
 }
 
+// Function names whose string argument is a SQL/schema/regex/etc.
+// fragment that's structurally bound to the surrounding code,
+// not a refactor candidate. Repeating `text('CURRENT_TIMESTAMP')`
+// across `server_default` / `onupdate` is canonical SQLAlchemy.
+const STRUCTURAL_STRING_CALLEES = new Set([
+  // SQLAlchemy
+  'text', 'literal', 'literal_column', 'column', 'table',
+  'relationship', 'foreign_key', 'ForeignKey', 'CheckConstraint',
+  'Index', 'UniqueConstraint', 'PrimaryKeyConstraint',
+  // Regex
+  'compile', 'match', 'fullmatch', 'search', 'findall', 'finditer',
+  'sub', 'subn', 'split',
+])
+
+/**
+ * True if the string is the first argument to a function whose
+ * name marks it as a structural / schema callee — `text(...)`,
+ * `relationship(...)`, `re.compile(...)`. The string is bound to
+ * the SQL/regex semantics, not refactorable.
+ */
+function isStructuralStringArg(node: SyntaxNode): boolean {
+  const parent = node.parent
+  if (parent?.type !== 'argument_list') return false
+  if (parent.namedChildren[0]?.id !== node.id) return false
+  const call = parent.parent
+  if (call?.type !== 'call') return false
+  const fn = call.childForFieldName('function')
+  if (!fn) return false
+  let name = ''
+  if (fn.type === 'identifier') name = fn.text
+  else if (fn.type === 'attribute') name = fn.childForFieldName('attribute')?.text ?? ''
+  return STRUCTURAL_STRING_CALLEES.has(name)
+}
+
+/**
+ * True if the string is the value of a keyword argument whose
+ * name marks it as schema / contract metadata: `back_populates=`,
+ * `foreign_keys=`, `secondary=`, `__tablename__`,
+ * `server_default=text('...')` (covered above), `onupdate=`,
+ * `default=`, `description=`, `title=`. The keyword name binds
+ * the string semantically.
+ */
+function isStructuralKwargValue(node: SyntaxNode): boolean {
+  const parent = node.parent
+  if (parent?.type !== 'keyword_argument') return false
+  if (parent.childForFieldName('value')?.id !== node.id) return false
+  const name = parent.childForFieldName('name')
+  const text = name?.text ?? ''
+  return [
+    'back_populates', 'foreign_keys', 'secondary',
+    'server_default', 'onupdate', 'default',
+    'description', 'title', 'help', 'doc', 'docstring',
+    'mode', 'kind', 'type', 'role',
+  ].includes(text)
+}
+
+/**
+ * True if the string is `'true'` or `'false'` (case-insensitive)
+ * and is being compared via `==` / `!=` to an env-var lookup
+ * result. `os.getenv('X', 'false') == 'true'` is the canonical
+ * env-flag pattern.
+ */
+function isEnvFlagComparison(node: SyntaxNode): boolean {
+  const inner = node.text.replace(/^['"]|['"]$/g, '').toLowerCase()
+  if (inner !== 'true' && inner !== 'false' && inner !== 'yes' && inner !== 'no' &&
+      inner !== '1' && inner !== '0') return false
+  const parent = node.parent
+  if (parent?.type !== 'comparison_operator') return false
+  for (const c of parent.children) {
+    if (c.type === 'identifier' || c.type === 'attribute' || c.type === 'call') {
+      // Other operand contains an env-flavored identifier.
+      if (/(?:env|environ|getenv|getconf)/i.test(c.text)) return true
+    }
+  }
+  return false
+}
+
 // Schema-migration directories: column / table name strings are
 // inherently repeated across upgrade / downgrade and constraint
 // declarations. Extracting to constants doesn't help and breaks
@@ -113,6 +190,20 @@ export const pythonDuplicateStringVisitor: CodeRuleVisitor = {
 
         // Skip membership test keys: `'k' in payload`.
         if (isMembershipTestKey(n)) return
+
+        // Skip SQLAlchemy / regex / SQL structural callees:
+        // `text('CURRENT_TIMESTAMP')`, `relationship('User')`,
+        // `re.compile(r'...')`. The string is bound to the
+        // schema / regex semantics.
+        if (isStructuralStringArg(n)) return
+
+        // Skip kwarg values for schema / contract metadata
+        // (`back_populates='...'`, `description='...'`,
+        // `default='...'`).
+        if (isStructuralKwargValue(n)) return
+
+        // Skip env-flag comparisons: `os.getenv('X', 'false') == 'true'`.
+        if (isEnvFlagComparison(n)) return
 
         const existing = stringCounts.get(content)
         if (existing) {
