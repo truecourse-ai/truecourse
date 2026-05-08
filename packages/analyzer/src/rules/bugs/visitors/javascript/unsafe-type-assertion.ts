@@ -71,6 +71,23 @@ export const unsafeTypeAssertionVisitor: CodeRuleVisitor = {
       // empty array literals.
       if (expr.type === 'array' && expr.namedChildCount === 0) return null
 
+      // `arr.filter(Boolean) as T[]` — TypeScript doesn't infer
+      // the type-guard semantics of `Boolean` as a predicate, so
+      // the result type still includes null/undefined. The cast
+      // is the canonical workaround until inferred predicate
+      // types land. Flagging it produces noise at every use.
+      if (expr.type === 'call_expression') {
+        const fn = expr.childForFieldName('function')
+        if (fn?.type === 'member_expression') {
+          const prop = fn.childForFieldName('property')
+          if (prop?.text === 'filter') {
+            const args = expr.childForFieldName('arguments')
+            const firstArg = args?.namedChild(0)
+            if (firstArg?.type === 'identifier' && firstArg.text === 'Boolean') return null
+          }
+        }
+      }
+
       // EventTarget → Node / HTMLElement and similar DOM-lattice
       // upcasts. React refs and DOM event handlers conventionally
       // assert from EventTarget to a more specific Node subtype;
