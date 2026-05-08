@@ -79,11 +79,19 @@ function isMembershipTestKey(node: SyntaxNode): boolean {
   return false
 }
 
+// Schema-migration directories: column / table name strings are
+// inherently repeated across upgrade / downgrade and constraint
+// declarations. Extracting to constants doesn't help and breaks
+// the migration's self-contained convention.
+const MIGRATION_PATH_RE = /(?:[\\/]|^)(?:alembic|migrations)[\\/]versions[\\/]/i
+
 export const pythonDuplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
   languages: ['python'],
   nodeTypes: ['module'],
   visit(node, filePath, sourceCode) {
+    if (MIGRATION_PATH_RE.test(filePath)) return null
+
     const stringCounts = new Map<string, { count: number; firstNode: SyntaxNode }>()
 
     function walk(n: SyntaxNode) {
