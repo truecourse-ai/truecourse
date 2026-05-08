@@ -36,6 +36,24 @@ export const statefulRegexVisitor: CodeRuleVisitor = {
       ancestor = ancestor.parent
     }
 
+    // Skip when the regex constant is never used statefully (no
+    // \`<name>.test(\` / \`<name>.exec(\` anywhere in the file).
+    // \`.replace()\` / \`.match()\` / \`.matchAll()\` / \`.split()\` /
+    // pdf-lib \`.findText()\` don't share \`lastIndex\` across calls.
+    {
+      const declName = parent.childForFieldName('name') ?? parent.childForFieldName('left')
+      const constName = declName?.text ?? ''
+      if (constName) {
+        let scope: import('web-tree-sitter').Node | null = parent.parent
+        while (scope && scope.type !== 'program') scope = scope.parent
+        if (scope) {
+          const escaped = constName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          const usageRe = new RegExp(`\\b${escaped}\\s*\\.\\s*(test|exec)\\s*\\(`)
+          if (!usageRe.test(scope.text)) return null
+        }
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Stateful regex',

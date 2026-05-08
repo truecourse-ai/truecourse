@@ -2627,10 +2627,24 @@ describe('bugs/deterministic/stateful-regex', () => {
     expect(matches).toHaveLength(0);
   });
 
-  it('detects global regex stored at module scope (reused across calls)', () => {
-    const violations = check(`const re = /abc/g;`);
+  it('detects global regex used with .test()/.exec() (lastIndex carried)', () => {
+    const violations = check(`
+      const re = /abc/g;
+      function check(s) { return re.test(s); }
+    `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag /g regex used only with .replace()/.match()', () => {
+    // .replace / .match / .matchAll / .split / pdf-lib .findText
+    // don't share lastIndex across calls.
+    const violations = check(`
+      const re = /abc/g;
+      function fill(s) { return s.replace(re, 'X'); }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/stateful-regex');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag regex without global/sticky flag', () => {
