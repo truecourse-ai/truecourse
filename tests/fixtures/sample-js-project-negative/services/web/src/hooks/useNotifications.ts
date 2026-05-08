@@ -10,13 +10,15 @@ interface Notification {
   read: boolean;
 }
 
-// VIOLATION: code-quality/deterministic/missing-return-type
-// VIOLATION: code-quality/deterministic/missing-boundary-types
+// React custom hooks (useX) are skipped by missing-return-type
+// and missing-boundary-types — return type is inferred from
+// the body's hook calls and changes when underlying lib types
+// change.
 export function useNotifications(userId: string) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // VIOLATION: code-quality/deterministic/missing-return-type
+  // missing-return-type skips nested local functions.
   async function fetchNotifications() {
     setLoading(true);
     try {
@@ -37,7 +39,6 @@ export function useNotifications(userId: string) {
     fetchNotifications();
   }, [userId]);
 
-  // VIOLATION: code-quality/deterministic/missing-return-type
   // VIOLATION: code-quality/deterministic/require-await
   const markAsRead = useCallback(async (id: string) => {
     setNotifications((prev) =>

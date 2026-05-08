@@ -32,7 +32,8 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
   // see ReactPerformance.tsx for the cost-threshold rationale.)
   const sortedRoles = roles.slice().sort();
 
-  // VIOLATION: code-quality/deterministic/missing-return-type
+  // missing-return-type skips nested local functions — local
+  // helpers aren't part of the public API surface.
   function validate() {
     const newErrors: Record<string, string> = {};
     // VIOLATION: code-quality/deterministic/magic-number
@@ -46,7 +47,7 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
     return Object.keys(newErrors).length === 0;
   }
 
-  // VIOLATION: code-quality/deterministic/missing-return-type
+  // missing-return-type skips nested local functions.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;

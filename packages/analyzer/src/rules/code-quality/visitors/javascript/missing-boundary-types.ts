@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { isFrameworkFunctionName, isReactComponentName } from './_helpers.js'
+import { isFrameworkFunctionName, isReactComponentName, isReactCustomHookName } from './_helpers.js'
 
 export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-boundary-types',
@@ -36,6 +36,7 @@ export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
     // component returning JSX).
     if (isFrameworkFunctionName(name)) return null
     if (isReactComponentName(name)) return null
+    if (isReactCustomHookName(name)) return null
 
     return makeViolation(
       this.ruleKey, funcNode, filePath, 'low',

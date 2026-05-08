@@ -143,6 +143,18 @@ export function isReactComponentName(name: string): boolean {
 }
 
 /**
+ * True if `name` looks like a React custom hook — `use` prefix
+ * followed by an uppercase letter (`useUserPrefs`,
+ * `useDebouncedValue`). Custom hooks return inferred objects
+ * (often from `useMutation` / `useQuery` calls); explicit
+ * annotations duplicate the inference and break when the
+ * underlying lib types change.
+ */
+export function isReactCustomHookName(name: string): boolean {
+  return /^use[A-Z]/.test(name)
+}
+
+/**
  * True if `name` is a framework-convention function — its
  * return-type contract is fixed by the runtime / framework.
  */

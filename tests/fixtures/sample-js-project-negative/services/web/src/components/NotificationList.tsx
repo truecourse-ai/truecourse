@@ -37,7 +37,9 @@ export function NotificationList({ userId, onDismiss, style }: NotificationListP
     loadNotifications();
   }, [userId]);
 
-  // VIOLATION: code-quality/deterministic/missing-return-type
+  // missing-return-type now skips nested local functions — they
+  // aren't part of the public API surface. The component's hooks
+  // and effects manage them locally.
   async function loadNotifications() {
     setLoading(true);
     const res = await fetch(`/api/notifications/${userId}`);
