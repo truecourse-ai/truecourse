@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer } from './_helpers.js'
 
 export const duplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
@@ -60,6 +60,15 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
 
         // Skip strings that are members of `z.enum([...])` arrays.
         if (isInZodEnumArray(n)) return
+
+        // Skip design-token property values: `{ variant: 'default' }`,
+        // `{ size: 'lg' }`, `{ severity: 'error' }`. The value is
+        // type-bound via the consumer's prop union.
+        if (isDesignTokenValue(n)) return
+
+        // Skip useState / useReducer / useRef initializers — the
+        // generic arg constrains the literal type.
+        if (isReactStateInitializer(n)) return
 
         const existing = stringCounts.get(content)
         if (existing) {

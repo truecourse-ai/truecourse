@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer } from './_helpers.js'
 
 // Minimum string length to be considered "magic"
 const MIN_LENGTH = 4
@@ -36,6 +36,10 @@ export const magicStringVisitor: CodeRuleVisitor = {
           if (isSubscriptIndex(n)) return
           // Skip Zod enum array members: `z.enum(['OWNER', 'ADMIN'])`.
           if (isInZodEnumArray(n)) return
+          // Skip design-token property values: `{ variant: 'default' }`.
+          if (isDesignTokenValue(n)) return
+          // Skip useState / useReducer / useRef initializers.
+          if (isReactStateInitializer(n)) return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings
