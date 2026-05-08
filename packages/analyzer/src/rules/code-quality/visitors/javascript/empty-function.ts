@@ -33,6 +33,32 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
           }
         }
       }
+      // Skip default-value position in destructuring / parameter
+      // defaults: `({ onSelect = () => {} })`,
+      // `function f(cb = () => {})`. Empty arrow defaults are the
+      // canonical "no-op default" idiom.
+      if (parent?.type === 'object_assignment_pattern' || parent?.type === 'assignment_pattern') return null
+      // Skip empty arrows whose property key is an event-handler /
+      // callback prop name (`{ onSelect: () => {}, onError: () => {} }`).
+      if (parent?.type === 'pair') {
+        const key = parent.childForFieldName('key')
+        const keyName = key?.type === 'property_identifier' ? key.text :
+          (key?.type === 'string' ? key.text.replace(/^['"]|['"]$/g, '') : '')
+        if (/^on[A-Z]/.test(keyName) || /^(?:default|noop|null|empty)/i.test(keyName)) return null
+      }
+      // Skip empty arrows assigned to noop / NOOP / NOP constants.
+      if (parent?.type === 'variable_declarator') {
+        const nameNode2 = parent.childForFieldName('name')
+        const name = nameNode2?.text ?? ''
+        if (/^(?:NO_?OP|noop|NOOP|EMPTY_FN|emptyFn|identity)$/i.test(name)) return null
+      }
+      // Skip default param value position:
+      // `function f(cb = () => {})`. Tree-sitter TS shape:
+      // `required_parameter` / `optional_parameter` directly
+      // contains the arrow as a value child.
+      if (parent?.type === 'required_parameter' ||
+          parent?.type === 'optional_parameter' ||
+          parent?.type === 'default_parameter') return null
     }
 
     // Get the function name for a clearer message
