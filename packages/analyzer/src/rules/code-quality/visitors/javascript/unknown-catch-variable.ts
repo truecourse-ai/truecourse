@@ -21,6 +21,33 @@ function isReferencedInBody(body: SyntaxNode, name: string): boolean {
   return false
 }
 
+/**
+ * True if all references to `name` in the body are arguments to
+ * function calls (no property access or member access). Passing
+ * an untyped error to a parser like
+ * `AppError.parseError(err)` / `normalizeError(err)` /
+ * `String(err)` / `console.error(err)` doesn't require type
+ * narrowing — the receiver handles it.
+ */
+function onlyReferencedAsCallArgument(body: SyntaxNode, name: string): boolean {
+  let referenced = false
+  const queue: SyntaxNode[] = [body]
+  while (queue.length > 0) {
+    const n = queue.pop()!
+    if (n.type === 'identifier' && n.text === name) {
+      referenced = true
+      // Parent must be `arguments` (a function call's argument list).
+      const parent = n.parent
+      if (parent?.type !== 'arguments') return false
+    }
+    for (let i = 0; i < n.namedChildCount; i++) {
+      const c = n.namedChild(i)
+      if (c) queue.push(c)
+    }
+  }
+  return referenced
+}
+
 export const unknownCatchVariableVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/unknown-catch-variable',
   languages: ['typescript', 'tsx'],
@@ -44,6 +71,15 @@ export const unknownCatchVariableVisitor: CodeRuleVisitor = {
     // noise on those projects regardless of compiler config.
     const body = node.childForFieldName('body')
     if (body && !isReferencedInBody(body, paramName)) return null
+
+    // Skip when the catch variable is only ever passed as an
+    // argument to a function call — `AppError.parseError(err)`,
+    // `normalizeError(err)`, `String(err)`, `console.error(err)`,
+    // `logger.error('msg', err)`. The narrowing happens inside
+    // the receiver; the catch site doesn't itself access any
+    // property on the untyped error, so type discrimination at
+    // this level isn't required.
+    if (body && onlyReferencedAsCallArgument(body, paramName)) return null
 
     return makeViolation(
       this.ruleKey, param, filePath, 'low',

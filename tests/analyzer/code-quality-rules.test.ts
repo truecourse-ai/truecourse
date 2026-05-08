@@ -360,11 +360,16 @@ describe('code-quality/deterministic/unknown-catch-variable', () => {
   const ruleKey = 'code-quality/deterministic/unknown-catch-variable';
 
   it('detects untyped catch parameter', () => {
+    // Body must access a PROPERTY on the error variable — bare
+    // `console.error(e)` is now treated as an FP because the
+    // narrowing happens inside the receiver. Property access
+    // (`e.message`, `e.code`) is what genuinely benefits from
+    // `: unknown` discrimination.
     const violations = check(`
 try {
   doSomething();
 } catch (e) {
-  console.error(e);
+  console.error(e.message);
 }
 `);
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);

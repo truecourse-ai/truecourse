@@ -43,7 +43,9 @@ export function catchUntyped() {
   try {
     throw new Error('test');
   } catch (e) {
-    console.error(e);
+    // Property access on the untyped error is what makes
+    // `: unknown` discrimination meaningful.
+    console.error(e.message);
   }
 }
 
