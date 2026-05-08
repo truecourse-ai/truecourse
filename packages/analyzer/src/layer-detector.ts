@@ -91,6 +91,9 @@ const UI_PATH_OVERRIDES: RegExp[] = [
   /\/app\/.*\/(?:page|layout|route|template|loading|error|not-found|default|head)\.(?:ts|tsx|js|jsx)$/,  // Next.js app router files
   /\/views\//,                   // MVC-style views
   /\.tsx$/,                      // TSX files almost never represent the data layer
+  /\/hooks\//,                   // React custom hooks (use-*.ts) live in lib/, not data
+  /\/client-only\//,             // Files explicitly scoped to the browser
+  /\/universal\//,               // Cross-target shared helpers (uploads, fetchers)
 ]
 
 function isUiFilePath(filePath: string): boolean {

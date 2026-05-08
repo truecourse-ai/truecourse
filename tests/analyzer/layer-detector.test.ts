@@ -73,6 +73,32 @@ describe('detectLayers', () => {
     const result = detectLayers(analysis);
     expect(result.confidence).toBe(0.5);
   });
+
+  it("does not classify '/hooks/' files as data layer", () => {
+    // React custom hooks live in lib/hooks/ and may import a Prisma
+    // type for return-type narrowing, but they are presentation
+    // glue, not the persistence layer.
+    const analysis = makeAnalysis(
+      [{ source: '@prisma/client' }],
+      '/repo/packages/lib/client-only/hooks/use-field-page-coords.ts',
+    );
+    const result = detectLayers(analysis);
+    expect(result.layers).not.toContain('data');
+  });
+
+  it("does not classify '/client-only/' or '/universal/' files as data layer", () => {
+    const a = makeAnalysis(
+      [{ source: '@prisma/client' }],
+      '/repo/packages/lib/universal/upload/put-file.server.ts',
+    );
+    expect(detectLayers(a).layers).not.toContain('data');
+
+    const b = makeAnalysis(
+      [{ source: '@prisma/client' }],
+      '/repo/packages/lib/client-only/something.ts',
+    );
+    expect(detectLayers(b).layers).not.toContain('data');
+  });
 });
 
 describe('toLayerDetectionResults', () => {
