@@ -10,8 +10,14 @@ export const unnamedRegexCaptureVisitor: CodeRuleVisitor = {
     const src = pattern?.text ?? ''
 
     let hasUnnamed = false
+    let inCharClass = false
     for (let i = 0; i < src.length; i++) {
       if (src[i] === '\\') { i++; continue }
+      // Track \`[...]\` character classes. Inside a character class
+      // \`(\` and \`)\` are LITERAL characters, not groups.
+      if (src[i] === '[') { inCharClass = true; continue }
+      if (src[i] === ']') { inCharClass = false; continue }
+      if (inCharClass) continue
       if (src[i] === '(') {
         const next = src[i + 1]
         if (next !== '?') {

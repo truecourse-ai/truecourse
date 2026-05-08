@@ -10,7 +10,12 @@ export const regexEmptyGroupVisitor: CodeRuleVisitor = {
     const src = getRegexSource(node)
     if (!src) return null
 
-    if (/(?<!\?[=!<])\(\)/.test(src)) {
+    // Strip character classes (\`[...]\`) before scanning. Inside a
+    // character class, \`(\` and \`)\` are literal characters, not
+    // groups. \`[(){}]\` and \`[`~<>?,./!@#$%^&*()...]\` are common.
+    const withoutCharClasses = src.replace(/\\.|\[[^\]]*\]/g, '')
+
+    if (/(?<!\?[=!<])\(\)/.test(withoutCharClasses)) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Empty regex group',
