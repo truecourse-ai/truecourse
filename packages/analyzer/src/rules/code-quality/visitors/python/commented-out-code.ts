@@ -55,6 +55,17 @@ export const pythonCommentedOutCodeVisitor: CodeRuleVisitor = {
     // Strip simple inline comment markers like `# noqa: ...` or `# type: ...`
     if (/^(?:noqa|type|fmt|pyright|pylint|flake8|mypy):/i.test(inner)) return null
 
+    // Value-legend comments: `# False = not migrated, True = migrated`,
+    // `# None = undecided`, `# 0 = pending, 1 = active`. The LHS is a
+    // Python literal (True/False/None/integer), the RHS is prose. This
+    // is a docstring-style explanation, not an assignment.
+    if (/^\s*(?:True|False|None|\d+)\s*=\s*[A-Za-z]/.test(inner)) return null
+
+    // Prose illustration markers: "for example", "given", "yields",
+    // "such as", "e.g." — natural-language documentation that may
+    // contain code-like fragments coincidentally.
+    if (/\b(?:for example|given (?:a|an|the)|yields|such as|e\.g\.|i\.e\.)\b/i.test(inner)) return null
+
     // A single strong signal is enough — those forms are highly
     // unambiguous code.
     if (STRONG_CODE_PATTERNS.some((p) => p.test(inner))) {
