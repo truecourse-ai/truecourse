@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { JS_FUNCTION_TYPES, getFunctionBody } from './_helpers.js'
+import { JS_FUNCTION_TYPES, getFunctionBody, isDispatchTableSwitch } from './_helpers.js'
 
 export const tooManyReturnStatementsVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/too-many-return-statements',
@@ -22,6 +22,13 @@ export const tooManyReturnStatementsVisitor: CodeRuleVisitor = {
       // Don't descend into nested functions
       if (n !== bodyNode && (n.type === 'function_declaration' || n.type === 'function_expression'
         || n.type === 'arrow_function' || n.type === 'method_definition')) return
+      // Dispatch-table switch: returns inside dispatch arms are
+      // a single lookup result, not multiple exit paths. Count
+      // the whole switch as one return.
+      if (n.type === 'switch_statement' && isDispatchTableSwitch(n)) {
+        returnCount++
+        return
+      }
 
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

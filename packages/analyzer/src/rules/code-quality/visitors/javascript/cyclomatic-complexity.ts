@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { JS_FUNCTION_TYPES, getFunctionBody, getFunctionName } from './_helpers.js'
+import { JS_FUNCTION_TYPES, getFunctionBody, getFunctionName, isDispatchTableSwitch } from './_helpers.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const cyclomaticComplexityVisitor: CodeRuleVisitor = {
@@ -16,6 +16,13 @@ export const cyclomaticComplexityVisitor: CodeRuleVisitor = {
 
     function walk(n: SyntaxNode) {
       if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
+      // Dispatch-table switch: count the switch itself as 1 (the
+      // single decision "which key am I?"), not N for each case.
+      // Equivalent to a `Map<key, value>` lookup.
+      if (n.type === 'switch_statement' && isDispatchTableSwitch(n)) {
+        complexity++
+        return
+      }
       if (DECISION_TYPES.has(n.type)) complexity++
       if (n.type === 'switch_case') complexity++
       if (n.type === 'binary_expression') {

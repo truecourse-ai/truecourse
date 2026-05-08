@@ -126,6 +126,72 @@ export function isMockFixturePath(filePath: string): boolean {
 }
 
 /**
+ * True if the switch_statement is a "dispatch table": each
+ * non-default case body is at most a single dispatch
+ * statement (return / throw / single call expression / break),
+ * possibly empty for fall-through cases. The switch is
+ * structurally equivalent to a `Map<key, value>` lookup — its
+ * fan-out should not be counted as cyclomatic complexity,
+ * branches, or "too many" cases. Real complexity is 1.
+ *
+ * Accepts:
+ *  - bare fall-through cases (`case "a":` with no body, falling
+ *    into the next case)
+ *  - `case X: return ...;`
+ *  - `case X: throw ...;`
+ *  - `case X: someCall(); break;`
+ *  - `case X: break;`
+ *
+ * Rejects any case containing nested control flow
+ * (if/for/while/try/switch) or multiple non-trivial statements.
+ */
+export function isDispatchTableSwitch(switchNode: SyntaxNode): boolean {
+  const body = switchNode.childForFieldName('body')
+  if (!body) return false
+  let cases = 0
+  let dispatchArms = 0
+  for (const c of body.namedChildren) {
+    if (c.type !== 'switch_case' && c.type !== 'switch_default') continue
+    cases++
+    let hasDispatch = false
+    let hasComplexStatement = false
+    // Walk children of the case (excluding the case label).
+    for (let i = 0; i < c.namedChildCount; i++) {
+      const child = c.namedChild(i)
+      if (!child) continue
+      // The label expression is also a namedChild — skip primitives.
+      if (child.type === 'string' || child.type === 'number' ||
+          child.type === 'identifier' || child.type === 'member_expression' ||
+          child.type === 'undefined' || child.type === 'null' ||
+          child.type === 'true' || child.type === 'false' ||
+          child.type === 'unary_expression' || child.type === 'template_string') continue
+      if (child.type === 'return_statement') { hasDispatch = true; continue }
+      if (child.type === 'throw_statement') { hasDispatch = true; continue }
+      if (child.type === 'break_statement') continue
+      if (child.type === 'expression_statement') {
+        // A single function call (`doX()`) is a dispatch result.
+        const expr = child.namedChild(0)
+        if (expr?.type === 'call_expression' || expr?.type === 'await_expression' ||
+            expr?.type === 'assignment_expression' || expr?.type === 'update_expression') {
+          hasDispatch = true
+          continue
+        }
+        hasComplexStatement = true
+        continue
+      }
+      // if_statement, for_statement, while_statement, try_statement,
+      // switch_statement (nested), variable_declaration: real logic.
+      hasComplexStatement = true
+    }
+    if (hasComplexStatement) return false
+    if (hasDispatch) dispatchArms++
+  }
+  // Need ≥4 cases AND at least one of them must be a real dispatch
+  // arm (the rest can be fall-throughs).
+  return cases >= 4 && dispatchArms >= 1
+}
+
+/**
  * SQL query-builder methods (Kysely, Knex, Drizzle, Prisma
  * `$kysely`) that take string literals as table/column/SQL
  * function names. Repeating these strings across builder

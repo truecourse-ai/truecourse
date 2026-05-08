@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { isDispatchTableSwitch } from './_helpers.js'
 
 export const tooManySwitchCasesVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/too-many-switch-cases',
@@ -8,6 +9,10 @@ export const tooManySwitchCasesVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const body = node.childForFieldName('body')
     if (!body) return null
+
+    // A dispatch-table switch is structurally a lookup — fan-out
+    // is a feature, not a smell.
+    if (isDispatchTableSwitch(node)) return null
 
     const caseCount = body.namedChildren.filter((c) => c.type === 'switch_case').length
     if (caseCount > 10) {

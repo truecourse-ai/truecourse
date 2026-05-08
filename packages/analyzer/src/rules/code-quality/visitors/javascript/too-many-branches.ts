@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { JS_FUNCTION_TYPES, getFunctionBody, getFunctionName } from './_helpers.js'
+import { JS_FUNCTION_TYPES, getFunctionBody, getFunctionName, isDispatchTableSwitch } from './_helpers.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 
 export const tooManyBranchesVisitor: CodeRuleVisitor = {
@@ -17,6 +17,12 @@ export const tooManyBranchesVisitor: CodeRuleVisitor = {
 
     function walk(n: SyntaxNode) {
       if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return
+      // Dispatch-table switch: count as 1 branch, not N — the
+      // switch is a lookup, not a chain of decisions.
+      if (n.type === 'switch_statement' && isDispatchTableSwitch(n)) {
+        branchCount++
+        return
+      }
       if (BRANCH_TYPES.has(n.type)) branchCount++
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)

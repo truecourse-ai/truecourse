@@ -208,14 +208,25 @@ export function manyReturns(x: number) {
 }
 
 // VIOLATION: code-quality/deterministic/too-many-switch-cases
-export function bigSwitch(x: number) {
+// Each case has real logic (not a single return), so this is not a
+// dispatch table — fan-out is genuine branching complexity.
+export function bigSwitch(x: number, log: (s: string) => void) {
+  let r = '';
   switch (x) {
-    case 1: return 'a'; case 2: return 'b'; case 3: return 'c';
-    case 4: return 'd'; case 5: return 'e'; case 6: return 'f';
-    case 7: return 'g'; case 8: return 'h'; case 9: return 'i';
-    case 10: return 'j'; case 11: return 'k';
-    default: return 'other';
+    case 1: { log('a'); r = 'a'; break; }
+    case 2: { log('b'); r = 'b'; break; }
+    case 3: { log('c'); r = 'c'; break; }
+    case 4: { log('d'); r = 'd'; break; }
+    case 5: { log('e'); r = 'e'; break; }
+    case 6: { log('f'); r = 'f'; break; }
+    case 7: { log('g'); r = 'g'; break; }
+    case 8: { log('h'); r = 'h'; break; }
+    case 9: { log('i'); r = 'i'; break; }
+    case 10: { log('j'); r = 'j'; break; }
+    case 11: { log('k'); r = 'k'; break; }
+    default: { log('other'); r = 'other'; }
   }
+  return r;
 }
 
 // VIOLATION: code-quality/deterministic/too-many-lines
