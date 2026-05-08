@@ -9,7 +9,7 @@ import {
   bucketDuration,
   detectLanguages,
   getSystemInfo,
-} from '../../apps/dashboard/server/src/services/telemetry.service';
+} from '../../packages/core/src/services/telemetry.service';
 import type { AnalysisResult } from '../../packages/core/src/services/analyzer.service';
 
 let tmpDir: string;

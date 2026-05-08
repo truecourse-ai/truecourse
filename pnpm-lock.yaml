@@ -159,9 +159,6 @@ importers:
       express:
         specifier: ^4.21.0
         version: 4.22.1
-      posthog-node:
-        specifier: ^4.0.0
-        version: 4.18.0
       socket.io:
         specifier: ^4.8.0
         version: 4.8.3
@@ -239,6 +236,9 @@ importers:
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
+      posthog-node:
+        specifier: ^4.0.0
+        version: 4.18.0
       simple-git:
         specifier: ^3.27.0
         version: 3.33.0

@@ -13,6 +13,13 @@ import { analyzeCore, type LlmEstimate } from './analyze-core.js';
 import { persistFullAnalysis, type PersistFullResult } from './analyze-persist.js';
 import { config } from '../config/index.js';
 import { log } from '../lib/logger.js';
+import {
+  bucketDuration,
+  bucketFileCount,
+  detectLanguages,
+  trackEvent,
+  type TelemetrySource,
+} from '../services/telemetry.service.js';
 
 export type { LlmEstimate };
 
@@ -35,6 +42,11 @@ export interface AnalyzeInProcessOptions {
   onLlmResolved?: (proceed: boolean) => void;
   provider?: LLMProvider;
   signal?: AbortSignal;
+  /**
+   * Adapter that triggered this run. Auto-emitted in the telemetry payload so
+   * we can attribute analyses to CLI vs dashboard. Omit to skip telemetry.
+   */
+  source?: TelemetrySource;
 }
 
 export type AnalyzeInProcessResult = PersistFullResult;
@@ -48,7 +60,21 @@ export async function analyzeInProcess(
     `[LLM] Provider: claude-code, model: ${config.claudeCodeModel || 'default'}, maxConcurrency: ${config.claudeCodeMaxConcurrency}`,
   );
   const core = await analyzeCore(project, { ...options, mode: 'full' });
-  return persistFullAnalysis(project, core, startedAt);
+  const result = persistFullAnalysis(project, core, startedAt);
+
+  if (options.source) {
+    await trackEvent('analyze', {
+      source: options.source,
+      mode: 'full',
+      serviceCount: result.serviceCount,
+      fileCountRange: bucketFileCount(result.fileCount),
+      languages: detectLanguages(core.analysisResult),
+      architecture: result.architecture,
+      durationRange: bucketDuration(result.durationMs),
+    });
+  }
+
+  return result;
 }
 
 // Re-export so the route can detect and remove a specific analysis's history entry.

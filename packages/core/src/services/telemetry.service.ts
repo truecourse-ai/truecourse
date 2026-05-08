@@ -1,26 +1,42 @@
+/**
+ * Anonymous usage telemetry — single source of truth.
+ *
+ * Used automatically by `analyzeInProcess` / `diffInProcess`, so every adapter
+ * (CLI, dashboard server, future hooks) reports without having to wire its own
+ * call. Adapters only pass `source: 'cli' | 'dashboard'` so the event includes
+ * the surface that triggered it.
+ *
+ * Config lives at `~/.truecourse/telemetry.json`. Set `TRUECOURSE_TELEMETRY=0`
+ * or `CI=true` to disable for a process. `truecourse telemetry disable`
+ * persists the opt-out.
+ */
+
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { PostHog } from 'posthog-node';
-import type { AnalysisResult } from '@truecourse/core/services/analyzer';
+import type { AnalysisResult } from './analyzer.service.js';
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-interface TelemetryConfig {
+export interface TelemetryConfig {
   enabled: boolean;
   anonymousId: string;
+  /** CLI-only — tracks whether the first-run notice has been printed. */
+  noticeShown: boolean;
 }
 
 const DEFAULT_CONFIG: TelemetryConfig = {
   enabled: true,
   anonymousId: '',
+  noticeShown: false,
 };
 
 const POSTHOG_API_KEY = 'phc_ys9Ykf49KmNqAC3fhq3jugTejc4BDqyKqRS8qRoYZYew';
-const TOOL_VERSION = '0.2.2';
 
 function getTelemetryConfigPath(): string {
   return path.join(os.homedir(), '.truecourse', 'telemetry.json');
@@ -32,17 +48,16 @@ export function readTelemetryConfig(): TelemetryConfig {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
     const config = { ...DEFAULT_CONFIG, ...parsed };
-    // Ensure anonymousId is always set
     if (!config.anonymousId) {
       config.anonymousId = crypto.randomUUID();
       writeTelemetryConfig(config);
     }
     return config;
   } catch {
-    // First time — generate config with new anonymous ID
     const config: TelemetryConfig = {
       enabled: true,
       anonymousId: crypto.randomUUID(),
+      noticeShown: false,
     };
     writeTelemetryConfig(config);
     return config;
@@ -67,7 +82,7 @@ export function writeTelemetryConfig(partial: Partial<TelemetryConfig>): void {
 }
 
 // ---------------------------------------------------------------------------
-// Telemetry state
+// PostHog client
 // ---------------------------------------------------------------------------
 
 let posthogClient: PostHog | null = null;
@@ -143,10 +158,25 @@ export function detectLanguages(result: AnalysisResult): string[] {
 // System info
 // ---------------------------------------------------------------------------
 
+let cachedVersion: string | null = null;
+
+function readToolVersion(): string {
+  if (cachedVersion) return cachedVersion;
+  try {
+    const here = fileURLToPath(import.meta.url);
+    const pkgPath = path.resolve(path.dirname(here), '..', '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    cachedVersion = String(pkg.version ?? '0.0.0');
+  } catch {
+    cachedVersion = '0.0.0';
+  }
+  return cachedVersion;
+}
+
 export function getSystemInfo(): { os: string; version: string } {
   return {
     os: `${process.platform}-${process.arch}`,
-    version: TOOL_VERSION,
+    version: readToolVersion(),
   };
 }
 
@@ -154,7 +184,12 @@ export function getSystemInfo(): { os: string; version: string } {
 // Event tracking
 // ---------------------------------------------------------------------------
 
-export function trackEvent(event: string, properties: Record<string, unknown>): void {
+export type TelemetrySource = 'cli' | 'dashboard';
+
+export async function trackEvent(
+  event: string,
+  properties: Record<string, unknown>,
+): Promise<void> {
   try {
     if (!isTelemetryEnabled()) return;
 
@@ -171,7 +206,20 @@ export function trackEvent(event: string, properties: Record<string, unknown>): 
         os: systemInfo.os,
       },
     });
+    // PostHog buffers + flushes async; await flush so short-lived CLI
+    // processes don't exit before the event hits the wire.
+    await client.flush();
   } catch {
-    // Silently ignore — telemetry must never break the app
+    // Silently ignore — telemetry must never break the app.
   }
+}
+
+export async function shutdownTelemetry(): Promise<void> {
+  if (!posthogClient) return;
+  try {
+    await posthogClient.shutdown();
+  } catch {
+    // ignore
+  }
+  posthogClient = null;
 }

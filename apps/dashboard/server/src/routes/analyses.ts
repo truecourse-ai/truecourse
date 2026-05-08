@@ -37,7 +37,6 @@ import {
   unregisterAnalysis,
 } from '@truecourse/core/services/analysis-registry';
 import { createLLMProvider, type LLMProvider } from '@truecourse/core/services/llm/provider';
-import { trackEvent, bucketFileCount, bucketDuration } from '../services/telemetry.service.js';
 import { getDiffResult } from '@truecourse/core/services/violation-query';
 import {
   deleteAnalysis as deleteAnalysisFile,
@@ -330,25 +329,19 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
     tracker: opts.tracker,
     signal: opts.signal,
     provider,
+    source: 'dashboard',
     onLlmEstimate: createSocketLlmEstimateHandler(id),
   });
 
   emitViolationsReady(id, outcome.analysisId);
   emitAnalysisComplete(id, outcome.analysisId);
-
-  trackEvent('analyze', {
-    serviceCount: outcome.serviceCount,
-    fileCountRange: bucketFileCount(outcome.fileCount),
-    languages: [],
-    architecture: outcome.architecture,
-    durationRange: bucketDuration(outcome.durationMs),
-  });
 }
 
 async function runDiffAnalyze(id: string, repo: RegistryEntry, opts: Pick<StartRunOptions, 'tracker' | 'signal'>): Promise<void> {
   const { diff } = await diffInProcess(repo, {
     tracker: opts.tracker,
     signal: opts.signal,
+    source: 'dashboard',
     onLlmEstimate: createSocketLlmEstimateHandler(id),
   });
 
