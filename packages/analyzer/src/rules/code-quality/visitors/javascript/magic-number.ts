@@ -6,6 +6,25 @@ import { MAGIC_NUMBER_WHITELIST } from './_helpers.js'
 // Time conversion factors: only skip when 2+ appear together in a multiplication chain
 const TIME_FACTORS = new Set([24, 60, 3600, 86400])
 
+// Byte-size powers — universally-known KB/MB/GB/TB constants.
+// Same skip rationale as TIME_FACTORS but allow standalone uses
+// too (e.g. `bytes < 1024`) since 1024 has no other plausible
+// meaning in a byte/size context.
+const BYTE_FACTORS = new Set([1024, 1048576, 1073741824, 1099511627776])
+
+// Validator-style chain method names whose numeric arguments
+// are schema CONSTRAINTS, not magic values:
+//   z.string().min(3).max(64), z.number().gte(13).lte(120),
+//   yup.string().length(10), Joi.number().integer().min(0)
+// Extracting these to constants only obscures the schema. We
+// match by method name when the call's function is a member
+// expression — the receiver may be deeply chained.
+const VALIDATOR_CHAIN_METHODS = new Set([
+  'min', 'max', 'length', 'gte', 'lte', 'gt', 'lt', 'step',
+  'multipleOf', 'positive', 'nonnegative', 'finite', 'safe',
+  'int', 'integer', 'precision',
+])
+
 // Standard HTTP status codes. When compared against `.status`,
 // `statusCode`, or passed as the second argument to a `.json()` /
 // `.send()` / `.redirect()` / `.status()` call (Express / Hono / Koa /
@@ -78,6 +97,12 @@ export const magicNumberVisitor: CodeRuleVisitor = {
     // Only flag in binary expressions and function arguments
     if (parentType !== 'binary_expression' && parentType !== 'arguments') return null
 
+    // Skip standalone byte-size constants — `1024`, `1024 * 1024`,
+    // etc. are universally known KB/MB/GB constants. Comparison
+    // against these is unambiguously a size check, not a magic
+    // numeric value to extract.
+    if (BYTE_FACTORS.has(val)) return null
+
     // Skip parseInt radix argument — parseInt(value, 10) is a standard JS idiom
     if (parentType === 'arguments') {
       const callExpr = parent.parent
@@ -87,6 +112,16 @@ export const magicNumberVisitor: CodeRuleVisitor = {
           // Only skip if this is the second argument (radix)
           const args = parent.namedChildren
           if (args.length >= 2 && args[1]?.id === node.id) return null
+        }
+        // Validator-chain method arguments: `.min(3)`, `.max(64)`,
+        // `.gte(13)`, etc. Numbers are schema constraints, not
+        // magic. Match by method name when the call's function
+        // is a member expression; the receiver may be deeply
+        // chained (`z.string().min(3).max(64)`).
+        const fnNode = callExpr.childForFieldName('function')
+        if (fnNode?.type === 'member_expression') {
+          const method = fnNode.childForFieldName('property')?.text ?? ''
+          if (VALIDATOR_CHAIN_METHODS.has(method)) return null
         }
         // HTTP-status argument to a response method:
         //   res.status(404), c.json(body, 500), reply.code(401)
