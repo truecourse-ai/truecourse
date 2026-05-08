@@ -20,6 +20,39 @@ export const consoleLogVisitor: CodeRuleVisitor = {
     if (lowerPath.endsWith('.script.ts') || lowerPath.endsWith('.script.js')) return null
     if (/\.(test|spec|e2e)\.[jt]sx?$/.test(lowerPath)) return null
 
+    // Logger adapter glue: this call is the body of an arrow that is
+    // the value of an object property whose key matches a logger
+    // method name. The arrow IS the logger's implementation — flagging
+    // its `console.log` is circular.
+    {
+      let cursor: import('web-tree-sitter').Node | null = node.parent
+      // Allow a wrapping return_statement / parenthesized_expression / statement_block
+      while (cursor && (
+        cursor.type === 'return_statement' ||
+        cursor.type === 'parenthesized_expression' ||
+        cursor.type === 'expression_statement' ||
+        cursor.type === 'statement_block'
+      )) {
+        cursor = cursor.parent
+      }
+      if (cursor && (cursor.type === 'arrow_function' || cursor.type === 'function_expression' ||
+                     cursor.type === 'method_definition')) {
+        const fnParent = cursor.parent
+        if (fnParent?.type === 'pair') {
+          const key = fnParent.childForFieldName('key')
+          const keyText = key?.type === 'property_identifier' ? key.text :
+            (key?.type === 'string' ? key.text.replace(/^['"]|['"]$/g, '') : '')
+          const LOGGER_METHODS = new Set(['log', 'debug', 'info', 'warn', 'error', 'trace'])
+          if (LOGGER_METHODS.has(keyText)) return null
+        }
+        if (cursor.type === 'method_definition') {
+          const nameNode = cursor.childForFieldName('name')
+          const LOGGER_METHODS = new Set(['log', 'debug', 'info', 'warn', 'error', 'trace'])
+          if (nameNode && LOGGER_METHODS.has(nameNode.text)) return null
+        }
+      }
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       `console.${prop.text} call`,

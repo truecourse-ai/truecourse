@@ -9,7 +9,8 @@ export const logger = {
   info: (message: string) => {
     const meta: any = {};
     meta.timestamp;
-    // VIOLATION: code-quality/deterministic/console-log
+    // console.log inside a logger adapter is the implementation surface,
+    // not a stray log — flagging it would be circular.
     console.log(`[INFO] ${message}`);
   },
   // VIOLATION: code-quality/deterministic/unsafe-any-usage
