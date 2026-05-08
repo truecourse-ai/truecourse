@@ -38,7 +38,7 @@ async def list_items():
     return {"items": []}
 
 
-# VIOLATION: code-quality/deterministic/fastapi-non-annotated-dependency
+# fastapi-non-annotated-dependency disabled by default — legacy `: T = Depends(...)` form remains officially supported.
 @app.get("/api/items/{item_id}")
 async def get_item(item_id: int, db=Depends(lambda: None)):
     return {"id": item_id}

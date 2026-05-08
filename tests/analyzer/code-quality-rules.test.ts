@@ -4885,14 +4885,23 @@ describe('code-quality/deterministic/isinstance-type-none (Python)', () => {
 });
 
 describe('code-quality/deterministic/raise-vanilla-args (Python)', () => {
+  // Rule disabled by default — Ruff EM-class style preference.
+  const checkWithEnabled = (code: string) => {
+    const overridden = ALL_DEFAULT_RULES.map((r) =>
+      r.key === 'code-quality/deterministic/raise-vanilla-args' ? { ...r, enabled: true } : r,
+    ).filter((r) => r.enabled);
+    const tree = parseCode(code, 'python');
+    return checkCodeRules(tree, '/test/file.py', code, overridden, 'python');
+  };
+
   it('detects long string in exception constructor', () => {
-    const violations = check(`raise ValueError("This is a very long error message that exceeds fifty chars limit")`, 'python');
+    const violations = checkWithEnabled(`raise ValueError("This is a very long error message that exceeds fifty chars limit")`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/raise-vanilla-args');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag short error message', () => {
-    const violations = check(`raise ValueError("short")`, 'python');
+    const violations = checkWithEnabled(`raise ValueError("short")`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/raise-vanilla-args');
     expect(matches).toHaveLength(0);
   });
@@ -6149,13 +6158,23 @@ describe('code-quality/deterministic/blanket-type-ignore (Python)', () => {
 });
 
 describe('code-quality/deterministic/fastapi-non-annotated-dependency (Python)', () => {
+  // Rule disabled by default — legacy `: T = Depends(...)` form
+  // is officially supported by FastAPI; visitor logic preserved.
+  const checkWithEnabled = (code: string) => {
+    const overridden = ALL_DEFAULT_RULES.map((r) =>
+      r.key === 'code-quality/deterministic/fastapi-non-annotated-dependency' ? { ...r, enabled: true } : r,
+    ).filter((r) => r.enabled);
+    const tree = parseCode(code, 'python');
+    return checkCodeRules(tree, '/test/file.py', code, overridden, 'python');
+  };
+
   it('detects non-Annotated Depends() parameter', () => {
     const code = `
 from fastapi import FastAPI, Depends
 def route(db = Depends(get_db)):
     pass
 `.trim();
-    const violations = check(code, 'python');
+    const violations = checkWithEnabled(code);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
@@ -6167,18 +6186,17 @@ from typing import Annotated
 def route(db: Annotated[Session, Depends(get_db)]):
     pass
 `.trim();
-    const violations = check(code, 'python');
+    const violations = checkWithEnabled(code);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
     expect(matches).toHaveLength(0);
   });
 
   it('does NOT flag Depends() in non-FastAPI files', () => {
-    // Custom `Depends` helpers in non-FastAPI codebases should not trigger.
     const code = `
 def route(db = Depends(get_db)):
     pass
 `.trim();
-    const violations = check(code, 'python');
+    const violations = checkWithEnabled(code);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
     expect(matches).toHaveLength(0);
   });
@@ -6189,7 +6207,7 @@ from fastapi import FastAPI, Query
 def route(limit = Query(default=10)):
     pass
 `.trim();
-    const violations = check(code, 'python');
+    const violations = checkWithEnabled(code);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/fastapi-non-annotated-dependency');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });

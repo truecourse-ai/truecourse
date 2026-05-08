@@ -2096,7 +2096,13 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'FastAPI non-annotated dependency',
     description: 'FastAPI dependency declared without Annotated — should use Annotated[type, Depends(...)]',
-    enabled: true,
+    // Disabled by default: `Annotated[T, Depends(...)]` is
+    // FastAPI's RECOMMENDED form since 0.95, but the legacy
+    // `: T = Depends(...)` form remains officially supported and
+    // is universally used in older codebases (80 OH). Modern
+    // codebases mix both styles. Treating the legacy form as a
+    // violation is a "consider upgrading" hint, not a defect.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },
@@ -2736,7 +2742,15 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Long message in exception constructor',
     description: 'Long message passed directly to exception — should define custom exception class for reusable error messages',
-    enabled: true,
+    // Disabled by default: same rationale as
+    // `raw-string-in-exception` — Ruff EM-class style preferences,
+    // off by default upstream. Most production Python codebases
+    // raise `ValueError("long contextual message")` directly
+    // rather than declaring custom exception classes per
+    // condition. Defining custom classes is sometimes the right
+    // call for SDK / library boundaries, but flagging every
+    // inline raise produces stylistic noise (89 OH).
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },

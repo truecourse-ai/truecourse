@@ -398,7 +398,7 @@ def shutdown_analytics():
     exit(0)
 
 
-# VIOLATION: code-quality/deterministic/raise-vanilla-args
+# raise-vanilla-args disabled by default — Ruff EM-style preference, off by default upstream.
 def fail_with_message():
     raise ValueError("This is a very long error message that exceeds the threshold for inline exception messages and should be extracted to a constant or custom exception class")
 
