@@ -12,9 +12,14 @@ export const deeplyNestedFunctionsVisitor: CodeRuleVisitor = {
     while (parent) {
       if (parent.type === 'function_declaration' || parent.type === 'function_expression'
         || parent.type === 'arrow_function' || parent.type === 'method_definition') {
-        // Don't count arrow functions passed as callback arguments as nesting levels
+        // Don't count arrow functions passed as callback arguments
+        // OR JSX prop expressions (event handlers, render props) as
+        // nesting levels. JSX-heavy components legitimately hit
+        // depth=3+ via FormField → render → child arrows; those
+        // are structural, not "deeply nested business logic".
         const isCallbackArrow = parent.type === 'arrow_function' && parent.parent?.type === 'arguments'
-        if (!isCallbackArrow) {
+        const isJsxExpressionArrow = parent.type === 'arrow_function' && parent.parent?.type === 'jsx_expression'
+        if (!isCallbackArrow && !isJsxExpressionArrow) {
           depth++
         }
       }
