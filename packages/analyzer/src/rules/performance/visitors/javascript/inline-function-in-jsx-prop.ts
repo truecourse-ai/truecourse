@@ -62,6 +62,28 @@ export const inlineFunctionInJsxPropVisitor: CodeRuleVisitor = {
 
     // jsx_attribute has a name child and a value child
     // The value for expression props is jsx_expression containing the actual expression
+    const attrName = node.namedChildren[0]
+    const attrNameText = attrName?.type === 'property_identifier' ? attrName.text : ''
+
+    // Skip render-prop attribute names — `render` / `renderItem` /
+    // `renderRow` / `renderCell` / `children`. These props
+    // require a function-as-children pattern; the function MUST
+    // be inline because it closes over per-row state from the
+    // parent's render scope (e.g., react-hook-form's
+    // `<FormField render={({ field }) => ...}>`,
+    // virtualized-list `renderRow`).
+    if (
+      attrNameText === 'render' ||
+      attrNameText === 'renderItem' ||
+      attrNameText === 'renderRow' ||
+      attrNameText === 'renderCell' ||
+      attrNameText === 'renderHeader' ||
+      attrNameText === 'renderFooter' ||
+      attrNameText === 'children'
+    ) {
+      return null
+    }
+
     const value = node.namedChildren[1]
     if (!value) return null
 
