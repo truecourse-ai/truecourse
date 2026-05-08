@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList } from './_helpers.js'
 
 export const duplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
@@ -69,6 +69,17 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
         // Skip useState / useReducer / useRef initializers — the
         // generic arg constrains the literal type.
         if (isReactStateInitializer(n)) return
+
+        // Skip `typeof X === "string"` style comparisons — runtime
+        // sentinel values, not refactor candidates.
+        if (isTypeofComparisonString(n)) return
+
+        // Skip strings that look like CSS class lists (Tailwind
+        // utilities) — `"flex h-full w-1/2"`. These appear in
+        // object-literal style configs (chat-message variants,
+        // table column widths, etc.) where extracting to a const
+        // duplicates the design intent.
+        if (looksLikeCssClassList(n)) return
 
         const existing = stringCounts.get(content)
         if (existing) {

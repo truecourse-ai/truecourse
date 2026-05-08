@@ -206,6 +206,56 @@ export function isReactStateInitializer(node: SyntaxNode): boolean {
 }
 
 /**
+ * Common typeof-comparison string literals. The set Python's
+ * `typeof` returns and that JS code constantly compares against.
+ */
+const TYPEOF_VALUES = new Set([
+  '"string"', '"number"', '"boolean"', '"object"', '"function"',
+  '"undefined"', '"symbol"', '"bigint"',
+  "'string'", "'number'", "'boolean'", "'object'", "'function'",
+  "'undefined'", "'symbol'", "'bigint'",
+])
+
+/**
+ * True if `node` is a string that's part of a `typeof X === "Y"`
+ * comparison. The literal IS a JS-runtime sentinel value, not a
+ * refactor candidate.
+ */
+export function isTypeofComparisonString(node: SyntaxNode): boolean {
+  if (!TYPEOF_VALUES.has(node.text)) return false
+  const parent = node.parent
+  if (parent?.type !== 'binary_expression') return false
+  const left = parent.childForFieldName('left')
+  const right = parent.childForFieldName('right')
+  const sibling = left?.id === node.id ? right : left
+  if (sibling?.type !== 'unary_expression') return false
+  // unary_expression with operator `typeof`
+  for (let i = 0; i < sibling.childCount; i++) {
+    const c = sibling.child(i)
+    if (c?.type === 'typeof' || c?.text === 'typeof') return true
+  }
+  return false
+}
+
+/**
+ * True if the string content looks like a CSS class list:
+ * multiple space-separated tokens, each containing only word
+ * characters and dashes/colons/slashes (matches Tailwind utility
+ * names like `flex h-full w-1/2 text-sm`). Single-class strings
+ * (e.g. `"flex"`) aren't matched — those are too short to be
+ * unambiguously CSS classes.
+ */
+export function looksLikeCssClassList(node: SyntaxNode): boolean {
+  if (node.type !== 'string') return false
+  const inner = node.text.slice(1, -1)
+  if (!/\s/.test(inner)) return false
+  // Each whitespace-delimited token must look like a CSS utility.
+  const tokens = inner.trim().split(/\s+/)
+  if (tokens.length < 2) return false
+  return tokens.every((t) => /^[!@-]?[\w/:[\]%.\-]+$/.test(t))
+}
+
+/**
  * True if `node` is a member of an array passed to a `.enum(...)`
  * call (Zod-style enum).
  */

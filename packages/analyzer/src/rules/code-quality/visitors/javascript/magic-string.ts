@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList } from './_helpers.js'
 
 // Minimum string length to be considered "magic"
 const MIN_LENGTH = 4
@@ -67,6 +67,10 @@ export const magicStringVisitor: CodeRuleVisitor = {
           // literal-type member are type-bound; extracting them
           // would break narrowing.
           if (literalTypeMembers.has(n.text)) return
+          // Skip `typeof X === "string"` style comparisons.
+          if (isTypeofComparisonString(n)) return
+          // Skip strings that look like CSS class lists.
+          if (looksLikeCssClassList(n)) return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings
