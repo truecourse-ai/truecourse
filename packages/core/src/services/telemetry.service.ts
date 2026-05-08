@@ -158,10 +158,19 @@ export function detectLanguages(result: AnalysisResult): string[] {
 // System info
 // ---------------------------------------------------------------------------
 
+// Set by esbuild --define when building the published bundle (see
+// scripts/build.ts). Workspace/dev runs have no replacement, so the
+// `typeof` guard falls through to the file walk below.
+declare const __TRUECOURSE_VERSION__: string;
+
 let cachedVersion: string | null = null;
 
 function readToolVersion(): string {
   if (cachedVersion) return cachedVersion;
+  if (typeof __TRUECOURSE_VERSION__ !== 'undefined') {
+    cachedVersion = __TRUECOURSE_VERSION__;
+    return cachedVersion;
+  }
   try {
     const here = fileURLToPath(import.meta.url);
     const pkgPath = path.resolve(path.dirname(here), '..', '..', 'package.json');
