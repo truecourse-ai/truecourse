@@ -6,6 +6,22 @@ import { MAGIC_NUMBER_WHITELIST } from './_helpers.js'
 // Time conversion factors: only skip when 2+ appear together in a multiplication chain
 const TIME_FACTORS = new Set([24, 60, 3600, 86400])
 
+// Tailwind / responsive breakpoint values (sm, md, lg, xl, 2xl).
+// These are universally-known viewport widths; comparing against
+// `window.innerWidth < 768` is unambiguously a media-query check,
+// not a magic value.
+const TAILWIND_BREAKPOINTS = new Set([640, 768, 1024, 1280, 1536])
+
+// ID-generation helpers whose first numeric argument is the
+// requested length — `nanoid(8)`, `cuid(12)`,
+// `randomBytes(16)`, `randomUUID()` / `uuid(...)`. The number is
+// a parameter to the helper, not a magic constant in business
+// logic.
+const ID_GENERATION_NAMES = new Set([
+  'nanoid', 'cuid', 'cuid2', 'createId', 'ulid',
+  'randomBytes', 'pseudoRandomBytes',
+])
+
 // Byte-size powers — universally-known KB/MB/GB/TB constants.
 // Same skip rationale as TIME_FACTORS but allow standalone uses
 // too (e.g. `bytes < 1024`) since 1024 has no other plausible
@@ -102,6 +118,34 @@ export const magicNumberVisitor: CodeRuleVisitor = {
     // against these is unambiguously a size check, not a magic
     // numeric value to extract.
     if (BYTE_FACTORS.has(val)) return null
+
+    // Skip Tailwind / responsive breakpoint values when used in
+    // a comparison: `window.innerWidth < 768`, `media >= 1024`.
+    if (parentType === 'binary_expression' && TAILWIND_BREAKPOINTS.has(val)) {
+      const op = parent.children.find((c) =>
+        c.text === '<' || c.text === '>' || c.text === '<=' || c.text === '>=' ||
+        c.text === '===' || c.text === '!==',
+      )
+      if (op) return null
+    }
+
+    // Skip first-argument numbers to ID-generation helpers:
+    // `nanoid(8)`, `cuid(12)`, `randomBytes(16)`. The number IS
+    // the requested length — a parameter, not a magic constant.
+    if (parentType === 'arguments') {
+      const callExpr = parent.parent
+      if (callExpr?.type === 'call_expression') {
+        const fn = callExpr.childForFieldName('function')
+        let fnName = ''
+        if (fn?.type === 'identifier') fnName = fn.text
+        else if (fn?.type === 'member_expression') {
+          fnName = fn.childForFieldName('property')?.text ?? ''
+        }
+        if (ID_GENERATION_NAMES.has(fnName)) {
+          if (parent.namedChildren[0]?.id === node.id) return null
+        }
+      }
+    }
 
     // Skip parseInt radix argument — parseInt(value, 10) is a standard JS idiom
     if (parentType === 'arguments') {
