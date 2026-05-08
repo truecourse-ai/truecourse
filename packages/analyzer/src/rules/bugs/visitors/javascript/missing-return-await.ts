@@ -76,6 +76,8 @@ function findReturnWithoutAwait(node: import('web-tree-sitter').Node): import('w
           if (/^(parse|safeParse|stringify|toJSON|toString)$/.test(propText)) continue
           // Skip known synchronous methods (array methods, etc.) — these never return Promises
           if (/^(map|filter|reduce|find|findIndex|some|every|flatMap|forEach|sort|flat|join|slice|concat|includes|indexOf|lastIndexOf|keys|values|entries)$/.test(propText)) continue
+          // Skip synchronous String.prototype methods.
+          if (/^(trim|trimStart|trimEnd|trimLeft|trimRight|toUpperCase|toLowerCase|toLocaleUpperCase|toLocaleLowerCase|substring|substr|charAt|charCodeAt|codePointAt|repeat|padStart|padEnd|normalize|startsWith|endsWith|split|replace|replaceAll|match|matchAll|search|at)$/.test(propText)) continue
         }
         // Free-function calls like `streamText(c, …)` / `streamSSE(c, …)` —
         // Hono's stream helpers return `Response` synchronously even

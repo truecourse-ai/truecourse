@@ -10,6 +10,22 @@ export const syncRequireInHandlerVisitor: CodeRuleVisitor = {
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'identifier' || fn.text !== 'require') return null
 
+    // Skip seed / migration / CLI script files. These run once
+    // at command-line invocation, not on every request.
+    const lowerPath = filePath.toLowerCase()
+    if (
+      lowerPath.includes('/scripts/') ||
+      lowerPath.includes('/bin/') ||
+      lowerPath.includes('/cli/') ||
+      lowerPath.includes('/seed/') ||
+      lowerPath.includes('/seeds/') ||
+      lowerPath.includes('/seeders/') ||
+      lowerPath.includes('/migrations/')
+    ) return null
+    const basename = lowerPath.split('/').pop() ?? ''
+    if (/^(?:seed|seed-[\w-]+|migrate|cli)\.[cm]?[jt]sx?$/.test(basename)) return null
+    if (/\.seed\.[cm]?[jt]sx?$/.test(basename)) return null
+
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 
     return makeViolation(

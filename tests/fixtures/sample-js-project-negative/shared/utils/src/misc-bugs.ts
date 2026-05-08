@@ -87,10 +87,12 @@ export function returnAndIncrement(x: number) {
 }
 
 // VIOLATION: bugs/deterministic/element-overwrite
-export function overwriteElement() {
+// Computed-RHS overwrite — distinct primitive transitions skip
+// (state-machine pattern); computed values still flag.
+export function overwriteElement(compute: () => number) {
   const obj: Record<string, number> = {};
-  obj['key'] = 1;
-  obj['key'] = 2;
+  obj['key'] = compute();
+  obj['key'] = compute();
   return obj;
 }
 

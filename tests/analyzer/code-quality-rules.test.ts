@@ -3116,8 +3116,13 @@ describe('code-quality/deterministic/undefined-passed-as-optional', () => {
 });
 
 describe('code-quality/deterministic/undefined-assignment', () => {
-  it('detects assignment to undefined', () => {
-    const violations = check(`x = undefined;`);
+  it('detects assignment to undefined inside a function', () => {
+    // Module-scope \`let X = undefined\` is the canonical reset
+    // pattern (\`delete\` doesn't apply to bindings) and now skips.
+    // Inside a function, the assignment IS confusing.
+    const violations = check(`
+      function f() { x = undefined; }
+    `);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/undefined-assignment');
     expect(matches).toHaveLength(1);
   });

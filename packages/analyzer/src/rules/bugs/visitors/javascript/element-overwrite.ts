@@ -50,6 +50,24 @@ export const elementOverwriteVisitor: CodeRuleVisitor = {
             break
           }
         }
+        // Skip when the two assignments hold DIFFERENT literal
+        // values — that's a state-machine transition, not an
+        // overwrite of the same just-assigned value.
+        const prevAssignment = prev.node
+        const prevRight = prevAssignment.childForFieldName('right')
+        const currRight = expr.childForFieldName('right')
+        const isStateTransition = prevRight && currRight &&
+          (prevRight.type === 'true' || prevRight.type === 'false' ||
+           prevRight.type === 'null' || prevRight.type === 'undefined' ||
+           prevRight.type === 'string' || prevRight.type === 'number') &&
+          (currRight.type === 'true' || currRight.type === 'false' ||
+           currRight.type === 'null' || currRight.type === 'undefined' ||
+           currRight.type === 'string' || currRight.type === 'number') &&
+          prevRight.text !== currRight.text
+        if (isStateTransition) {
+          assigns.set(key, { node: expr, idx: i })
+          continue
+        }
         if (!wasRead) {
           return makeViolation(
             this.ruleKey, expr, filePath, 'high',

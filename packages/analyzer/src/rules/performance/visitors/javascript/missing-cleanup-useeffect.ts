@@ -6,11 +6,33 @@ import { containsMethodCall } from './_helpers.js'
 const NEEDS_CLEANUP_METHODS = new Set(['addEventListener', 'setInterval', 'setTimeout'])
 
 function hasReturnStatement(body: SyntaxNode): boolean {
-  // Direct children of the statement_block that are return_statement
-  for (const child of body.namedChildren) {
-    if (child.type === 'return_statement') return true
+  // Search recursively. The cleanup function is sometimes returned
+  // from inside an if/try block (\`if (canceled) return; ...; return
+  // () => removeEventListener(...);\`) — top-level-only matching
+  // missed those.
+  function walk(n: SyntaxNode): boolean {
+    if (n.type === 'return_statement') {
+      // Only count returns whose value is a function expression /
+      // arrow / identifier (a cleanup function reference). A bare
+      // \`return;\` early-exit isn't a cleanup.
+      const val = n.namedChild(0)
+      if (!val) return false
+      if (val.type === 'arrow_function' || val.type === 'function_expression' ||
+          val.type === 'function' || val.type === 'identifier') return true
+      return false
+    }
+    // Don't descend into NESTED functions (other than the body itself)
+    // — their returns belong to themselves.
+    if (n !== body && (n.type === 'arrow_function' ||
+        n.type === 'function_expression' || n.type === 'function' ||
+        n.type === 'method_definition')) return false
+    for (let i = 0; i < n.childCount; i++) {
+      const c = n.child(i)
+      if (c && walk(c)) return true
+    }
+    return false
   }
-  return false
+  return walk(body)
 }
 
 export const missingCleanupUseEffectVisitor: CodeRuleVisitor = {

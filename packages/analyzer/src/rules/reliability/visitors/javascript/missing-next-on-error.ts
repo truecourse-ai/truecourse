@@ -27,6 +27,15 @@ export const missingNextOnErrorVisitor: CodeRuleVisitor = {
     const hasNext = paramNames.some((n) => n === 'next')
     if (!hasNext) return null
 
+    // Skip Hono / Koa / Elysia middleware. Express signature is
+    // \`(req, res, next)\`; Hono/Koa is \`(c, next)\` (2 params,
+    // first is the context). Both use \`await next()\` to pass
+    // through, NOT \`next(error)\` to forward errors. The
+    // not-calling-next(error) signal doesn't apply.
+    if (paramNames.length === 2) return null
+    if (paramNames[0] === 'c' || paramNames[0] === 'ctx' ||
+        paramNames[0] === 'context') return null
+
     // Check the catch body for next(
     const body = node.childForFieldName('body')
     if (!body) return null

@@ -10,6 +10,24 @@ export const undefinedAssignmentVisitor: CodeRuleVisitor = {
       const right = node.childForFieldName('right')
       if (right?.text === 'undefined') {
         const left = node.childForFieldName('left')
+        // Skip module-scope \`let\` reset: \`let timer = ...; timer =
+        // undefined;\` after a clear-call. \`delete\` doesn't apply
+        // to bindings, and the binding can't go out of scope.
+        if (left?.type === 'identifier') {
+          let scope = node.parent
+          while (scope) {
+            if (scope.type === 'function_declaration' ||
+                scope.type === 'arrow_function' ||
+                scope.type === 'function_expression' ||
+                scope.type === 'method_definition') break
+            if (scope.type === 'program') {
+              // Truly module-scope assignment to a let binding —
+              // canonical reset pattern.
+              return null
+            }
+            scope = scope.parent
+          }
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Assignment to undefined',

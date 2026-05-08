@@ -2011,15 +2011,28 @@ describe('bugs/deterministic/await-in-loop', () => {
 // ---------------------------------------------------------------------------
 
 describe('bugs/deterministic/element-overwrite', () => {
-  it('detects array element overwritten before read', () => {
+  it('detects array element overwritten before read (computed RHS)', () => {
+    // The state-machine-transition skip only applies to two distinct
+    // primitive literals. Computed expressions are flagged.
     const violations = check(`
       {
-        arr[0] = 1;
-        arr[0] = 2;
+        arr[0] = compute();
+        arr[0] = otherCompute();
       }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/element-overwrite');
     expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag distinct literal-value transitions (state machine)', () => {
+    const violations = check(`
+      {
+        ref.flag = true;
+        ref.flag = false;
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/element-overwrite');
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag when element is read between assignments', () => {

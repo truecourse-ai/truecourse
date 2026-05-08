@@ -44,11 +44,16 @@ export const unreadPrivateAttributeVisitor: CodeRuleVisitor = {
       if (n.type === 'member_expression') {
         const obj = n.childForFieldName('object')
         const prop = n.childForFieldName('property')
-        if ((obj?.text === 'this' || obj?.type === 'this') && prop) {
+        if (prop) {
           const fieldName = prop.text.replace(/^#/, '')
-          const parent = n.parent
-          if (parent) {
-            const isWriteLeft =
+          // Track reads/writes only when the property is one of our
+          // private fields. The receiver doesn't have to be \`this\` —
+          // a singleton may be accessed via \`Class.instance.field\`
+          // / \`instance.field\` from a static method or external
+          // module.
+          if (privateFields.has(fieldName)) {
+            const parent = n.parent
+            const isWriteLeft = !!parent &&
               (parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression') &&
               parent.childForFieldName('left')?.id === n.id
             if (isWriteLeft) {
@@ -56,9 +61,10 @@ export const unreadPrivateAttributeVisitor: CodeRuleVisitor = {
             } else {
               readNames.add(fieldName)
             }
-          } else {
-            readNames.add(fieldName)
           }
+          // Suppress the "uncovered receiver" branch — if it's not
+          // a known private field name, we don't care.
+          void obj
         }
       }
       // Handle #field style
