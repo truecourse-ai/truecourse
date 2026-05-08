@@ -17,6 +17,13 @@ export const unusedPrivateMemberVisitor: CodeRuleVisitor = {
         const isPrivate = member.children.some((c) => c.type === 'accessibility_modifier' && c.text === 'private')
           || member.children.some((c) => c.type === 'private_property_identifier')
         if (!isPrivate) continue
+        // Skip static private members. Static fields/methods are
+        // accessed via `ClassName.X` from static factory methods
+        // (lazy-init singleton, cached config, named constructors).
+        // This visitor only tracks `this.X` / `#x` uses, so a
+        // legitimately-used static would falsely look unused.
+        const isStatic = member.children.some((c) => c.type === 'static')
+        if (isStatic) continue
         const nameNode = member.children.find((c) => c.type === 'property_identifier' || c.type === 'private_property_identifier')
         if (nameNode) {
           const name = nameNode.text.replace(/^#/, '')

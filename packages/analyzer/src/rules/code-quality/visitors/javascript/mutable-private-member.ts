@@ -68,6 +68,16 @@ export const mutablePrivateMemberVisitor: CodeRuleVisitor = {
       )
       if (!hasPrivate) continue
 
+      // Skip static fields. Static fields are written via
+      // `ClassName.field = ...` from static methods (lazy-init
+      // singleton, cached factory). The rule's `this.X` tracker
+      // can't see those writes, and `readonly static` would
+      // prevent the lazy assignment.
+      const isStatic = member.children.some(
+        (c) => c.type === 'static' || (c.type !== 'accessibility_modifier' && c.text === 'static'),
+      )
+      if (isStatic) continue
+
       // Skip if already `readonly`
       const hasReadonly = member.children.some((c) => c.text === 'readonly')
       if (hasReadonly) continue
