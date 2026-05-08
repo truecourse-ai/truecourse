@@ -554,12 +554,24 @@ function classifyJsonArg(arg: SyntaxNode | undefined): BodyShape | undefined {
   if (arg.type === 'object') {
     const fields: Record<string, never> = {} as Record<string, never>;
     for (const child of arg.namedChildren) {
+      // Standard form: `{ name: value }` — tree-sitter emits a `pair`
+      // node with key/value fields.
       if (child.type === 'pair') {
         const key = child.childForFieldName('key');
         if (!key) continue;
         const name = key.text.replace(/^['"]|['"]$/g, '');
-        // store presence only — the comparator currently checks key set
         (fields as Record<string, unknown>)[name] = undefined;
+        continue;
+      }
+      // ES6 shorthand: `{ tags }` is sugar for `{ tags: tags }`. Tree-
+      // sitter emits a `shorthand_property_identifier` (the bare name
+      // is both key and value). Without this branch the extractor sees
+      // an empty object — every realworld controller using
+      // `res.json({ x })` would produce a false-positive shape drift.
+      if (child.type === 'shorthand_property_identifier') {
+        const name = child.text.replace(/^['"]|['"]$/g, '');
+        (fields as Record<string, unknown>)[name] = undefined;
+        continue;
       }
     }
     return { fields: fields as Record<string, never> };
