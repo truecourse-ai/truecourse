@@ -127,9 +127,16 @@ export const pythonDeclarationsInGlobalScopeVisitor: CodeRuleVisitor = {
     // PEP 604 type aliases: `GithubViewType = GithubIssueView | GithubPRView`
     // — tree-sitter parses these as `binary_operator` with `|`. The whole
     // expression is a type expression, not mutable state.
-    if (right?.type === 'binary_operator') {
-      const op = right.children.find((c) => c.text === '|')
-      if (op) return null
+    // Also handle parenthesized form: `T = (A | B | C)`.
+    {
+      let unwrapped = right
+      if (unwrapped?.type === 'parenthesized_expression') {
+        unwrapped = unwrapped.namedChild(0) ?? unwrapped
+      }
+      if (unwrapped?.type === 'binary_operator') {
+        const op = unwrapped.children.find((c) => c.text === '|')
+        if (op) return null
+      }
     }
     // Module-level `Any` aliases / direct typing references:
     //   `User = UserGitInfo`  (backward-compat alias)
