@@ -126,6 +126,69 @@ describe('code → contract extractor (Operation)', () => {
     expect(ops).toEqual([]);
   });
 
+  it('treats a bare res.json(...) as implicit 200 (Express default)', () => {
+    // Modern Express handlers commonly omit res.status(200) before
+    // res.json(...) since Express defaults to 200. Without recognizing
+    // this, every such handler would appear to emit no responses at all.
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/articles', (req, res) => {
+        res.json({ articles: [] });
+      });
+    `;
+    const ops = extract(source);
+    const statuses = ops[0].contract.responses.map((r) => r.status);
+    expect(statuses).toContain('200');
+  });
+
+  it('treats bare res.send / res.end as implicit 200 too', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/healthz', (req, res) => {
+        res.send('OK');
+      });
+      router.get('/empty', (req, res) => {
+        res.end();
+      });
+    `;
+    const ops = extract(source);
+    expect(ops[0].contract.responses.some((r) => r.status === '200')).toBe(true);
+    expect(ops[1].contract.responses.some((r) => r.status === '200')).toBe(true);
+  });
+
+  it('honours an explicit res.status(N) chain over the implicit-200 default', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.post('/orders', (req, res) => {
+        res.status(201).json({ id: 'x' });
+      });
+    `;
+    const ops = extract(source);
+    const statuses = ops[0].contract.responses.map((r) => r.status);
+    expect(statuses).toContain('201');
+    // The chained .status(201) takes precedence — no spurious 200 from the
+    // .json(...) call (the chain walker resolves it before the implicit
+    // path triggers).
+    expect(statuses).not.toContain('200');
+  });
+
+  it('treats res.sendStatus(N) as an explicit numeric status', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.delete('/orders/:id', (req, res) => {
+        res.sendStatus(204);
+      });
+    `;
+    const ops = extract(source);
+    const statuses = ops[0].contract.responses.map((r) => r.status);
+    expect(statuses).toContain('204');
+    expect(statuses).not.toContain('200');
+  });
+
   it('emits one ExtractedOperation per route, with declarationLine pinned', () => {
     const source = [
       `import express from 'express';`,

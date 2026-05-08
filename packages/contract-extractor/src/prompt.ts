@@ -265,6 +265,22 @@ unenforceable-obligation encryption.at-rest {
   dots allowed for namespacing — e.g. \`auth.bearer.api\`).
 - StateMachine identity is \`<EntityName>.<field>\` (e.g. \`Order.status\`).
 
+# Path parameters — ALWAYS RFC 6570 curly-brace form
+
+Operation paths and Operation cross-references MUST use \`{name}\` for
+path parameters, NEVER the colon form \`:name\` — even when the source
+spec uses \`:name\`. This applies everywhere a path appears, including
+declarations and cross-references:
+
+    operation GET "/api/articles/{slug}" { … }            ✓
+    operation GET "/api/articles/:slug" { … }             ✗ WRONG
+    Operation:"POST /api/articles/{slug}/comments"        ✓
+    Operation:"POST /api/articles/:slug/comments"         ✗ WRONG
+
+If different sections of the spec mix \`:slug\` and \`{slug}\` for the
+same endpoint, normalize to \`{slug}\` so all references collapse onto
+the same Operation identity.
+
 # Few-shot
 
 Spec slice (under ## POST /api/orders, lines 100-115 of SPEC.md):

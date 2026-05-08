@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseFile } from '../../packages/contract-verifier/src/parser/index.js';
-import { resolve, refKey } from '../../packages/contract-verifier/src/resolver/index.js';
+import { resolve, refKey, canonicalizePathParams } from '../../packages/contract-verifier/src/resolver/index.js';
 
 const FIXTURE_IL = path.resolve(__dirname, '../fixtures/sample-js-project-il/.truecourse/contracts');
 
@@ -74,5 +74,62 @@ describe('Contract resolver — fixture corpus', () => {
     expect(order!.origin).toBeTruthy();
     expect(order!.origin!.source).toBe('SPEC.md');
     expect(order!.origin!.lines[0]).toBeGreaterThan(0);
+  });
+});
+
+describe('canonicalizePathParams', () => {
+  it('converts Express colon-form params to RFC 6570 curly-brace form', () => {
+    expect(canonicalizePathParams('/api/orders/:id')).toBe('/api/orders/{id}');
+    expect(canonicalizePathParams('/users/:slug/posts/:postId')).toBe('/users/{slug}/posts/{postId}');
+  });
+
+  it('leaves an already-canonical path unchanged', () => {
+    expect(canonicalizePathParams('/api/orders/{id}')).toBe('/api/orders/{id}');
+    expect(canonicalizePathParams('/api/orders')).toBe('/api/orders');
+  });
+
+  it('only touches valid identifier chars after the colon', () => {
+    // A colon followed by something that's not an identifier (e.g. a port,
+    // protocol, or punctuation) should NOT be rewritten.
+    expect(canonicalizePathParams('http://example.com:8080/foo')).toBe('http://example.com:8080/foo');
+  });
+});
+
+describe('Operation identity normalization', () => {
+  it('indexes operations with `:slug` syntax under their RFC 6570 identity', () => {
+    // The LLM (or a hand-written .tc) may use Express's `:slug` syntax in
+    // an operation path. The resolver must canonicalize it so cross-refs
+    // and code-side lookups land on the same identity.
+    const file = parseFile(
+      'in-memory.tc',
+      'operation GET "/api/articles/:slug" { tags [] }\n',
+    );
+    const resolution = resolve([file]);
+    expect(resolution.errors).toEqual([]);
+    expect(resolution.index.has('Operation:GET /api/articles/{slug}')).toBe(true);
+    expect(resolution.index.has('Operation:GET /api/articles/:slug')).toBe(false);
+  });
+
+  it('normalizes Operation cross-references with `:slug` syntax', () => {
+    // A reference like `Operation:"GET /api/articles/:slug"` should
+    // resolve to the same artifact as `Operation:"GET /api/articles/{slug}"`.
+    const decl = parseFile(
+      'decl.tc',
+      'operation GET "/api/articles/{slug}" { tags [] }\n',
+    );
+    const consumer = parseFile(
+      'consumer.tc',
+      'authorization-rule article.owner-only {\n' +
+        '  applies-to {\n' +
+        '    operations [Operation:"GET /api/articles/:slug"]\n' +
+        '  }\n' +
+        '  predicate "true"\n' +
+        '}\n',
+    );
+    const resolution = resolve([decl, consumer]);
+    // The consumer's cross-ref must resolve — no entry in unresolvedRefs
+    // for `Operation:GET /api/articles/:slug`.
+    const unresolved = resolution.unresolvedRefs.filter((u) => u.ref.type === 'Operation');
+    expect(unresolved).toEqual([]);
   });
 });
