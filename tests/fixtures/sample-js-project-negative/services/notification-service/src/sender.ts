@@ -34,7 +34,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // VIOLATION: code-quality/deterministic/missing-return-type
 export async function sendBulkEmails(
-  // VIOLATION: code-quality/deterministic/readonly-parameter-types
+  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
   recipients: string[],
   subject: string,
   html: string,

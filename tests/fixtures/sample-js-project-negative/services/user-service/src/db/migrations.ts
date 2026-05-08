@@ -65,7 +65,7 @@ const orm = {
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 // NOTE: missing-transaction now skipped for single-table operations
 export async function seedDatabase(
-  // VIOLATION: code-quality/deterministic/readonly-parameter-types
+  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
   users: Array<{ name: string; email: string }>,
 ) {
   for (const user of users) {

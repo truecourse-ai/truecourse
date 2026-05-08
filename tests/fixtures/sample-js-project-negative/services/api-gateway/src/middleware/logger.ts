@@ -49,7 +49,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 // VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
 export function getRequestLogs(
-  // VIOLATION: code-quality/deterministic/readonly-parameter-types
+  // readonly-parameter-types disabled by default — ts-eslint prefer-readonly-parameter-types is off by default
   filters: string[],
 ) {
   if (filters.length === 0) return logs;

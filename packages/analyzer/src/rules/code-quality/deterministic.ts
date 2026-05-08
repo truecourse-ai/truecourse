@@ -4564,7 +4564,16 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Readonly parameter types',
     description: 'Function parameters typed as mutable array that should be readonly to prevent mutation.',
-    enabled: true,
+    // Disabled by default: typescript-eslint's
+    // `prefer-readonly-parameter-types` is OFF by default — it's
+    // famously over-strict, requiring `readonly` on every array
+    // and object parameter. Modern TS codebases (Next.js, Remix,
+    // shadcn/ui, react-hook-form) consistently write
+    // `(items: T[])` without `readonly`. Firing on every mutable
+    // array param produces 100+ stylistic hits with negligible
+    // bug-detection value. Users who enforce ts-immutable can
+    // flip on.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },
