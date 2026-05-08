@@ -3536,7 +3536,14 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Mixed type and value imports',
     description: 'Type-only imports should use `import type` for better tree-shaking and clarity.',
-    enabled: true,
+    // Disabled by default: the inline form
+    // `import { type X, Y } from 'mod'` is the MODERN TS 5+
+    // recommendation (typescript-eslint's `consistent-type-imports`
+    // with `fixStyle: 'inline-type-imports'`). Splitting into two
+    // statements adds duplicate-import noise. Both forms have
+    // identical tree-shaking semantics under `verbatimModuleSyntax`.
+    // Users who prefer split imports can flip this on.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },

@@ -17,7 +17,8 @@ export default class WrongNameClass {
 // VIOLATION: code-quality/deterministic/internal-api-usage
 import { something } from 'lodash/internal/baseClone';
 
-// VIOLATION: code-quality/deterministic/mixed-type-imports
+// mixed-type-imports is disabled by default — inline
+// `import { type X, Y }` is the modern TS 5+ recommendation.
 import { type SomeType, someValue } from './helpers';
 
 // VIOLATION: code-quality/deterministic/type-import-side-effects

@@ -5410,14 +5410,25 @@ describe('code-quality/deterministic/inferrable-types (TS)', () => {
 });
 
 describe('code-quality/deterministic/mixed-type-imports (TS)', () => {
+  // Rule is disabled by default — inline `import { type X, Y }` is
+  // the modern TS 5+ recommendation. The visitor logic is preserved;
+  // tests opt-in by enabling the rule.
+  const checkWithEnabled = (code: string) => {
+    const overridden = ALL_DEFAULT_RULES.map((r) =>
+      r.key === 'code-quality/deterministic/mixed-type-imports' ? { ...r, enabled: true } : r,
+    ).filter((r) => r.enabled)
+    const tree = parseCode(code, 'typescript')
+    return checkCodeRules(tree, '/test/file.ts', code, overridden, 'typescript')
+  };
+
   it('detects mixed type and value imports', () => {
-    const violations = check(`import { Foo, type Bar } from './module';`);
+    const violations = checkWithEnabled(`import { Foo, type Bar } from './module';`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/mixed-type-imports');
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag pure type import', () => {
-    const violations = check(`import type { Foo, Bar } from './module';`);
+    const violations = checkWithEnabled(`import type { Foo, Bar } from './module';`);
     const matches = violations.filter((v) => v.ruleKey === 'code-quality/deterministic/mixed-type-imports');
     expect(matches).toHaveLength(0);
   });
