@@ -9,6 +9,8 @@ export const deeplyNestedFunctionsVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     let depth = 0
     let parent = node.parent
+    let outermostIsTopLevelArrow = false
+
     while (parent) {
       if (parent.type === 'function_declaration' || parent.type === 'function_expression'
         || parent.type === 'arrow_function' || parent.type === 'method_definition') {
@@ -22,11 +24,27 @@ export const deeplyNestedFunctionsVisitor: CodeRuleVisitor = {
         if (!isCallbackArrow && !isJsxExpressionArrow) {
           depth++
         }
+        // Track whether the outermost ancestor function is a
+        // module-level const-assigned arrow (typical React
+        // component shape `export const Foo = () => {...}`).
+        // When the depth count includes that component-scope
+        // arrow, we bump the threshold so the chain
+        // `component → helper → inner` (3 arrows) doesn't
+        // flag — but `outer → helper → inner → leaf` (4) still
+        // does.
+        if (parent.type === 'arrow_function' && parent.parent?.type === 'variable_declarator') {
+          const decl = parent.parent.parent  // lexical_declaration / variable_declaration
+          if (decl?.parent?.type === 'program' || decl?.parent?.type === 'export_statement') {
+            outermostIsTopLevelArrow = true
+          }
+        }
       }
       parent = parent.parent
     }
 
-    if (depth >= 3) {
+    const threshold = outermostIsTopLevelArrow ? 4 : 3
+
+    if (depth >= threshold) {
       const name = getFunctionName(node)
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
