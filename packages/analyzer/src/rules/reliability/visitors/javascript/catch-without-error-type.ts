@@ -99,6 +99,45 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     const paramName = param.type === 'identifier' ? param.text : null
     if (paramName && hasNarrowingAssignment(body, paramName)) return null
 
+    // Universal "log + return default" fallback shape. The body is a
+    // few statements where the non-final ones are all `console.*` /
+    // logger calls and the final statement is a `return` of a
+    // literal / sentinel value. This is a no-branching error path —
+    // type narrowing wouldn't change behaviour because the handler
+    // ignores the error type. Common in array map/filter callbacks
+    // where a parse failure should fall through to a default.
+    {
+      const nonFinal = stmts.slice(0, -1)
+      const final = stmts[stmts.length - 1]
+      const isLogCall = (n: SyntaxNode): boolean => {
+        if (n.type !== 'expression_statement') return false
+        const inner = n.namedChildren[0]
+        if (inner?.type !== 'call_expression') return false
+        const fn = inner.childForFieldName('function')
+        if (fn?.type !== 'member_expression') return false
+        const obj = fn.childForFieldName('object')?.text ?? ''
+        return obj === 'console' || /^(?:logger|log|tracer|metrics)$/i.test(obj)
+      }
+      const allLog = nonFinal.length > 0 && nonFinal.every(isLogCall)
+      const isLiteralReturn = (n: SyntaxNode): boolean => {
+        if (n.type !== 'return_statement') return false
+        const v = n.namedChildren[0]
+        if (!v) return true // bare return
+        return (
+          v.type === 'number' ||
+          v.type === 'string' ||
+          v.type === 'true' ||
+          v.type === 'false' ||
+          v.type === 'null' ||
+          v.type === 'undefined' ||
+          v.type === 'array' ||
+          v.type === 'object' ||
+          v.type === 'identifier' && (v.text === 'null' || v.text === 'undefined' || v.text === 'false' || v.text === 'true')
+        )
+      }
+      if (allLog && isLiteralReturn(final)) return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Catch without error type discrimination',
