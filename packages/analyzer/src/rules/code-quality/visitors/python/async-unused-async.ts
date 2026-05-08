@@ -83,14 +83,18 @@ export const pythonAsyncUnusedAsyncVisitor: CodeRuleVisitor = {
     // particular implementation has no await internally. Common with
     // ABC / Protocol / Generic[T] base classes where the abstract
     // method is `async def`.
+    //
+    // Handles both raw `async def` methods (parent: block) AND
+    // decorated ones (`@staticmethod async def …`) where the parent
+    // is `decorated_definition` and the block is the grandparent.
     {
-      const parent = node.parent
-      if (parent?.type === 'block') {
-        const grand = parent.parent
+      let cursor = node.parent
+      // Skip past decorated_definition wrapper.
+      if (cursor?.type === 'decorated_definition') cursor = cursor.parent
+      if (cursor?.type === 'block') {
+        const grand = cursor.parent
         if (grand?.type === 'class_definition') {
           const supers = grand.childForFieldName('superclasses')
-          // If the class has ANY base, conservatively assume the async
-          // signature is contractual.
           if (supers && supers.namedChildCount > 0) return null
         }
       }

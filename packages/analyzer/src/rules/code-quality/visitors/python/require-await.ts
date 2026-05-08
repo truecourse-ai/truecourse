@@ -50,9 +50,14 @@ function isAsyncInterfaceMethod(funcNode: SyntaxNode): boolean {
  * Same rationale as the no-self-use subclass skip.
  */
 function isMethodOfSubclass(funcNode: SyntaxNode): boolean {
-  const parent = funcNode.parent
-  if (parent?.type !== 'block') return false
-  const cls = parent.parent
+  // Handles both raw `async def` methods (parent: block) AND
+  // decorated methods (`@staticmethod async def …`) where the
+  // parent is `decorated_definition` and the block is the
+  // grandparent.
+  let cursor = funcNode.parent
+  if (cursor?.type === 'decorated_definition') cursor = cursor.parent
+  if (cursor?.type !== 'block') return false
+  const cls = cursor.parent
   if (cls?.type !== 'class_definition') return false
   const supers = cls.childForFieldName('superclasses')
   if (!supers) return false
