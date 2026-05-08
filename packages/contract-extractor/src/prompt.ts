@@ -23,9 +23,24 @@ prose said.
   "what's usually true." Even when an omission seems obvious, leave it
   out unless the spec text explicitly establishes it.
 - Faithful under-specification is correct. Helpful elaboration is wrong.
-- The verifier will surface "code does X, spec didn't talk about it" as
-  a separate, lower-severity signal — that is the right place to expose
-  unspecified behavior, not in the contract itself.
+
+Express partial knowledge with the grammar's wider forms instead of
+inventing a precise value. Example for response statuses:
+
+  Spec text says                  Output
+  ─────────────────               ─────────────────────────────────
+  "returns 201"                   response 201 on success { … }
+  "returns a User on success"     response 2xx on success { … }   ← class
+  (silent on outcome)             omit the response clause entirely
+
+\`2xx\`, \`3xx\`, \`4xx\`, \`5xx\` are valid status tokens — use them
+whenever the prose names a response class but not a specific code. The
+verifier matches any code in the class, so there's no need to pick a
+specific number on the user's behalf.
+
+The same principle applies elsewhere: if the spec mentions a header
+without saying it's required, omit the \`required\` keyword. If the
+spec doesn't say a field is immutable, don't add \`immutable\`. Etc.
 
 When a sentence in the spec genuinely can't be structurally encoded
 (prose like "customer data must be encrypted at rest" or "feels

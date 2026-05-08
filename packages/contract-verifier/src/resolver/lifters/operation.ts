@@ -90,15 +90,24 @@ function liftResponse(stmt: StatementNode, issues: LiftIssue[]): ResponseContrac
     issues.push({ message: `response declaration missing status`, line: stmt.loc.line, col: stmt.loc.col });
     return null;
   }
+  // Status may be a literal code (`200`, `404`) or a status class
+  // (`2xx`, `4xx`). The latter expresses "spec mentions a response of
+  // this class but doesn't pin a specific code" — used when the source
+  // prose says e.g. "returns a User" without naming a status. The
+  // comparator treats `Nxx` as matching any code in [N00, N99].
   const statusTok = head[1];
-  if (statusTok.kind !== 'number') {
+  let status: string;
+  if (statusTok.kind === 'number') {
+    status = String(statusTok.value);
+  } else if (statusTok.kind === 'ident' && /^[1-5]xx$/.test(statusTok.value)) {
+    status = statusTok.value;
+  } else {
     issues.push({
-      message: `response declaration: status must be a number, got ${statusTok.kind}`,
+      message: `response declaration: status must be a number or status class (e.g. 200, 2xx), got ${statusTok.kind}`,
       line: stmt.loc.line, col: stmt.loc.col,
     });
     return null;
   }
-  const status = String(statusTok.value);
 
   // Form 1: `response 401 inherits AuthRequirement:auth.bearer.api`
   // Form 2: `response 201 on success { … }`
