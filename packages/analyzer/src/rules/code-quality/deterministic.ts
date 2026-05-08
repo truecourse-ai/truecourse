@@ -3104,7 +3104,14 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Logic in try body instead of else',
     description: 'Code in try block that should be in else clause — only guard the risky operation',
-    enabled: true,
+    // Disabled by default: this is Pylint's `try-consider-else`
+    // (W1204) — disabled by default in modern Pylint configs.
+    // Most production Python codebases keep all of the success
+    // path inside the try without an `else:` clause for
+    // readability; introducing `else:` to "narrow" the guarded
+    // region adds nesting without clear bug value. Users who
+    // specifically want this style can flip on.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },

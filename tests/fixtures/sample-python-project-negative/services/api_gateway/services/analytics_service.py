@@ -278,7 +278,8 @@ def process_events_safe(events: List[dict]) -> List[dict]:
 def aggregate_metrics(raw_data: List[dict]) -> dict:
     """Aggregate raw metric data."""
     result = {}
-    # VIOLATION: code-quality/deterministic/try-consider-else
+    # try-consider-else is disabled by default — Pylint W1204
+    # (off by default in modern Pylint).
     try:
         totals = {}
         for item in raw_data:
