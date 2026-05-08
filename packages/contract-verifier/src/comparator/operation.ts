@@ -47,7 +47,11 @@ export function compareOperation(input: CompareInput): ContractDrift[] {
     // comparator (`AuthRequirement` / `AuthorizationRule`), not here.
     if (specResp.inheritedFrom) continue;
 
-    const codeResp = codeByStatus.get(specResp.status);
+    // Status-class match (`2xx`, `4xx`): the code satisfies the spec
+    // when ANY emitted code falls in the class. Pick the first match
+    // for downstream header / body / forbid checks. A literal status
+    // like `200` matches itself only — same call path.
+    const codeResp = matchStatus(specResp.status, codeByStatus);
 
     // (1) status missing
     if (!codeResp) {
@@ -226,6 +230,43 @@ function describeForbid(f: ForbidClause): string {
 function codeStatusList(code: OperationContract): string {
   if (code.responses.length === 0) return `no response status emissions detected`;
   return `code emits status: ${[...new Set(code.responses.map((r) => r.status))].sort().join(', ')}`;
+}
+
+// ---------------------------------------------------------------------------
+// Status matching — handles both literal codes and status classes
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a spec-side status against the code-side response set.
+ *
+ * - Literal code (`200`, `404`): exact lookup.
+ * - Status class (`2xx`, `4xx`, `5xx`): finds any code in [N00, N99].
+ *   Returns the first-emitted match by ascending numeric order so the
+ *   subsequent header/body/forbid checks pick a deterministic anchor.
+ */
+function matchStatus(
+  specStatus: string,
+  codeByStatus: Map<string, ResponseContract>,
+): ResponseContract | undefined {
+  const exact = codeByStatus.get(specStatus);
+  if (exact) return exact;
+
+  const classMatch = /^([1-5])xx$/.exec(specStatus);
+  if (!classMatch) return undefined;
+
+  const klass = Number(classMatch[1]);
+  const min = klass * 100;
+  const max = klass * 100 + 99;
+
+  const matches: { code: number; resp: ResponseContract }[] = [];
+  for (const [statusStr, resp] of codeByStatus) {
+    const n = Number(statusStr);
+    if (Number.isFinite(n) && n >= min && n <= max) {
+      matches.push({ code: n, resp });
+    }
+  }
+  matches.sort((a, b) => a.code - b.code);
+  return matches[0]?.resp;
 }
 
 // ---------------------------------------------------------------------------

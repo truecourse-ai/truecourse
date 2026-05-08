@@ -165,3 +165,65 @@ describe('Operation comparator — header-presence drift', () => {
     expect(drifts.map((d) => d.obligationKey)).toContain('response.201.headers.location');
   });
 });
+
+describe('Operation comparator — status-class matching', () => {
+  function specWithStatus(status: string): OperationContract {
+    return {
+      protocol: 'http',
+      method: 'POST',
+      path: '/api/things',
+      tags: [],
+      responses: [{ status, condition: { kind: 'success' } }],
+    };
+  }
+  function codeWithStatuses(statuses: string[]): OperationContract {
+    return {
+      protocol: 'http',
+      method: 'POST',
+      path: '/api/things',
+      tags: [],
+      responses: statuses.map((status) => ({ status })),
+    };
+  }
+  const specRef = { type: 'Operation' as const, identity: 'POST /api/things', quoted: true };
+  const compareArgs = { specRef, codeFilePath: '/fake.ts', codeDeclarationLine: 1 };
+
+  it('emits no drift when the spec asks for `2xx` and the code emits 201', () => {
+    const drifts = compareOperation({
+      spec: specWithStatus('2xx'),
+      code: codeWithStatuses(['201']),
+      ...compareArgs,
+    });
+    expect(drifts.filter((d) => d.obligationKey.startsWith('response.'))).toEqual([]);
+  });
+
+  it('emits no drift when the spec asks for `2xx` and the code emits 204', () => {
+    const drifts = compareOperation({
+      spec: specWithStatus('2xx'),
+      code: codeWithStatuses(['204']),
+      ...compareArgs,
+    });
+    expect(drifts.filter((d) => d.obligationKey.startsWith('response.'))).toEqual([]);
+  });
+
+  it('flags `2xx` as missing when the code only emits 4xx codes', () => {
+    const drifts = compareOperation({
+      spec: specWithStatus('2xx'),
+      code: codeWithStatuses(['400', '404']),
+      ...compareArgs,
+    });
+    expect(drifts.map((d) => d.obligationKey)).toContain('response.2xx');
+  });
+
+  it('flags a literal status mismatch even when code emits a sibling 2xx', () => {
+    // `response 200` is more specific than `2xx`. If the spec asks for
+    // exactly 200, a code that emits 201 should still drift — this is
+    // distinct from the class-match path.
+    const drifts = compareOperation({
+      spec: specWithStatus('200'),
+      code: codeWithStatuses(['201']),
+      ...compareArgs,
+    });
+    expect(drifts.map((d) => d.obligationKey)).toContain('response.200');
+  });
+});

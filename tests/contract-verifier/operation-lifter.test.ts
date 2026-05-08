@@ -73,4 +73,28 @@ describe('Contract Operation lifter', () => {
       expect(op.contract, `Operation:${op.ref.identity} missing contract`).toBeDefined();
     }
   });
+
+  it('lifts a status-class response (`response 2xx`) — used when the spec is silent on a specific code', () => {
+    // The lifter accepts 2xx/3xx/4xx/5xx as valid status tokens so the
+    // LLM has a faithful way to express "the spec mentions a success
+    // response but doesn't pin a specific code." Without this, the LLM
+    // had to invent a literal status (typically 200), generating
+    // false-positive drifts on creates that conventionally return
+    // 201/204.
+    const file = parseFile(
+      'inline.tc',
+      'operation POST "/api/things" {\n' +
+        '  response 2xx on success {\n' +
+        '    body Entity:Thing\n' +
+        '  }\n' +
+        '  tags []\n' +
+        '}\n',
+    );
+    const result = resolve([file]);
+    expect(result.errors).toEqual([]);
+    const op = result.index.get('Operation:POST /api/things')!;
+    const c = op.contract as OperationContract;
+    expect(c.responses[0].status).toBe('2xx');
+    expect(c.responses[0].condition?.kind).toBe('success');
+  });
 });
