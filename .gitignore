@@ -23,3 +23,7 @@ assets/*.pdf
 
 # Live LLM smoke test — dumps the most-recent generated contracts here for inspection
 tests/.llm-sample/
+
+# Eval harness — clones of test repos + per-repo markdown reports
+tests/.eval-repos/
+tests/.eval-reports/
