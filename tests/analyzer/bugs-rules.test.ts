@@ -33,12 +33,15 @@ describe('bugs/deterministic/empty-catch', () => {
     expect(matches).toHaveLength(0);
   });
 
-  it('flags catch blocks with only comments (no actual handling)', () => {
+  it('does not flag catch blocks with explanatory comments', () => {
+    // A comment in an otherwise-empty catch is the intentional-swallow
+    // signal. Removing the catch isn't an option (`try` requires
+    // `catch` or `finally`); re-throwing would defeat the purpose.
     const violations = check(`
-      try { doSomething(); } catch (e) { /* intentionally empty */ }
+      try { doSomething(); } catch (e) { /* tolerate transient network error */ }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/empty-catch');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 });
 

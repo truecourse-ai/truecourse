@@ -14,6 +14,23 @@ export const pythonGetterMissingReturnVisitor: CodeRuleVisitor = {
     })
     if (!isProperty) return null
 
+    // Skip when the property is also abstract — `@property
+    // @abstractmethod` declares a contract; the body is
+    // intentionally `...` or `pass` and the override supplies
+    // the return value.
+    const isAbstract = decorators.some((d) => {
+      const expr = d.namedChildren[0]
+      if (expr?.type === 'identifier') {
+        return expr.text === 'abstractmethod' || expr.text === 'abstractproperty'
+      }
+      if (expr?.type === 'attribute') {
+        const attr = expr.childForFieldName('attribute')
+        return attr?.text === 'abstractmethod' || attr?.text === 'abstractproperty'
+      }
+      return false
+    })
+    if (isAbstract) return null
+
     const funcDef = node.namedChildren.find((c) => c.type === 'function_definition')
     if (!funcDef) return null
 

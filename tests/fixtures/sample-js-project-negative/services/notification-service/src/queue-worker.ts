@@ -42,7 +42,8 @@ async function executeJob(job: Job) {
         throw new Error(`Unknown job type: ${job.type}`);
     }
   } catch (error) {
-    // VIOLATION: bugs/deterministic/empty-catch
+    // empty-catch with an explanatory comment is the canonical
+    // intentional-swallow shape; the rule no longer fires here.
   }
 }
 

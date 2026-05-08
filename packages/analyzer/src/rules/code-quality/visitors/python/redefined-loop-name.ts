@@ -27,7 +27,33 @@ function findAssignments(bodyNode: SyntaxNode, varNames: Set<string>): SyntaxNod
     }
     if (child.type === 'assignment') {
       const left = child.childForFieldName('left')
-      if (left?.type === 'identifier' && varNames.has(left.text)) return child
+      if (left?.type === 'identifier' && varNames.has(left.text)) {
+        // Skip in-place STRING-normalization: \`x = x.strip()\` /
+        // \`x = x.lower()\` / \`x = x.replace(...)\`. Restricted
+        // to a known whitelist of methods that return the same
+        // type — \`x = x.get(...)\` (which can change type
+        // entirely) is the bug the rule is designed to catch
+        // and is NOT in the list.
+        const NORMALIZATION_METHODS = new Set([
+          'strip', 'lstrip', 'rstrip', 'casefold',
+          'lower', 'upper', 'title', 'capitalize', 'swapcase',
+          'replace', 'removeprefix', 'removesuffix',
+          'expandtabs',
+        ])
+        const right = child.childForFieldName('right')
+        if (right?.type === 'call') {
+          const fn = right.childForFieldName('function')
+          if (fn?.type === 'attribute') {
+            const obj = fn.childForFieldName('object')
+            const attr = fn.childForFieldName('attribute')
+            if (obj?.type === 'identifier' && obj.text === left.text &&
+                attr?.text && NORMALIZATION_METHODS.has(attr.text)) {
+              continue
+            }
+          }
+        }
+        return child
+      }
     }
     if (child.type === 'augmented_assignment') {
       const left = child.childForFieldName('left')

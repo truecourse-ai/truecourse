@@ -5,6 +5,26 @@ import { JS_LANGUAGES } from './_helpers.js'
 
 const HOOK_NAMES = /^use[A-Z]/
 
+/**
+ * \`use*\` names that are NOT React hooks despite matching the
+ * naming convention. They're library primitives that compose
+ * into hook arguments but don't themselves call useState /
+ * useEffect.
+ *
+ *  - \`@floating-ui/react\` interaction descriptors:
+ *    useClick / useHover / useFocus / useDismiss / useRole /
+ *    useListNavigation / useTypeahead / useTransitionStatus
+ *    are pure factory functions returning interaction-config
+ *    objects; \`useInteractions([...])\` is the actual hook.
+ */
+const NON_HOOK_USE_NAMES = new Set([
+  // @floating-ui/react interaction descriptors — pure factories that
+  // build interaction-config objects passed to useInteractions; they
+  // do not themselves call useState/useEffect.
+  'useClick', 'useHover', 'useFocus', 'useDismiss', 'useRole',
+  'useListNavigation', 'useTypeahead',
+])
+
 // Check if a call is a React hook call.
 //
 // Hooks are invoked as either a plain identifier (`useState()`) or as a
@@ -19,11 +39,13 @@ function isHookCall(node: SyntaxNode): boolean {
   const fn = node.childForFieldName('function')
   if (!fn) return false
   if (fn.type === 'identifier') {
+    if (NON_HOOK_USE_NAMES.has(fn.text)) return false
     return HOOK_NAMES.test(fn.text)
   }
   if (fn.type === 'member_expression') {
     const property = fn.childForFieldName('property')
     if (!property) return false
+    if (NON_HOOK_USE_NAMES.has(property.text)) return false
     return HOOK_NAMES.test(property.text)
   }
   return false

@@ -11,6 +11,13 @@ export const emptyCatchVisitor: CodeRuleVisitor = {
     if (!body) return null
     const statements = body.namedChildren.filter((c) => c.type !== 'comment')
     if (statements.length === 0) {
+      // Skip empty catch when the body has explanatory comments —
+      // the comment is the intentional-swallow signal. Removing the
+      // catch isn't an option (`try` requires `catch` or `finally`),
+      // and re-throwing would defeat the purpose of the comment.
+      const hasComment = body.namedChildren.some((c) => c.type === 'comment')
+      if (hasComment) return null
+
       // Skip empty catch when the try body is a single JSON.parse() call (common tryParse pattern)
       const tryStmt = node.parent
       if (tryStmt?.type === 'try_statement') {

@@ -9,6 +9,13 @@ export const namespaceUsageVisitor: CodeRuleVisitor = {
     const keywordChild = node.children.find((c) => c.type === 'namespace' || c.text === 'namespace')
     if (!keywordChild) return null
 
+    // Skip namespace declarations inside .d.ts files. Module
+    // augmentation (`declare module 'x' { namespace Y { ... } }`)
+    // and ambient-type carve-outs are the only way to extend
+    // third-party type definitions; ES-module exports cannot
+    // express the same shape.
+    if (filePath.endsWith('.d.ts')) return null
+
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text ?? 'namespace'
 
