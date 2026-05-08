@@ -38,8 +38,31 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
       'jsx_element',
       'jsx_self_closing_element',
       'jsx_fragment',
+      // Object / array literal payloads: `return { foo: a ?? d, bar:
+      // b || d, baz: c }`. Each key carries an independent simple
+      // default chain; the SUM of operators across keys isn't a
+      // single complex expression. The audit identified
+      // payload/return object literals + react-hook config objects
+      // + render-call config + awaited-call config + fluent-query
+      // config as the dominant FP family here.
+      'object',
+      'array',
     ])
     if (SKIP_TOP_LEVEL_TYPES.has(expr.type)) return null
+
+    // Also skip when the expression is a `call_expression` whose
+    // last argument is an object literal — `mutate(input, { onSuccess,
+    // onError })`, `useQuery({ queryKey, queryFn, enabled, staleTime,
+    // ... })`, `await fetch(url, { method, headers, body, ... })`.
+    // The config-object's per-key operators are independent and
+    // shouldn't sum.
+    if (expr.type === 'call_expression') {
+      const args = expr.childForFieldName('arguments')
+      const lastArg = args?.namedChildren[args.namedChildren.length - 1]
+      if (lastArg && (lastArg.type === 'object' || lastArg.type === 'array')) {
+        return null
+      }
+    }
 
     let operatorCount = 0
     const BINARY_TYPES = new Set(['binary_expression', 'logical_expression'])
