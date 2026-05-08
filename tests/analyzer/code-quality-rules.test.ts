@@ -1208,8 +1208,21 @@ async def compute_total(items):
 });
 
 describe('code-quality/deterministic/no-return-await', () => {
+  // Rule is disabled by default — ESLint's no-return-await was
+  // deprecated in v8.19 (2022). Modern Node best practice
+  // recommends `return await` for stack traces. The visitor logic
+  // is preserved; users who want it can enable per-project. To
+  // exercise the visitor here we explicitly enable the rule.
+  const checkWithEnabled = (code: string) => {
+    const overridden = ALL_DEFAULT_RULES.map((r) =>
+      r.key === 'code-quality/deterministic/no-return-await' ? { ...r, enabled: true } : r,
+    ).filter((r) => r.enabled)
+    const tree = parseCode(code, 'typescript')
+    return checkCodeRules(tree, '/test/file.ts', code, overridden, 'typescript')
+  };
+
   it('detects return await in async function', () => {
-    const violations = check(`
+    const violations = checkWithEnabled(`
       async function fetchData() {
         return await fetch("/api");
       }

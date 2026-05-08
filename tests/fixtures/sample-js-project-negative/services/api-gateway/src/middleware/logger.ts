@@ -59,7 +59,8 @@ export function getRequestLogs(
 }
 
 // VIOLATION: code-quality/deterministic/missing-return-type
-// VIOLATION: code-quality/deterministic/no-return-await
+// no-return-await is disabled by default — modern Node best practice
+// recommends `return await` for stack traces.
 export async function clearLogs(): Promise<void> {
   return await new Promise<void>((resolve) => {
     logs.length = 0;

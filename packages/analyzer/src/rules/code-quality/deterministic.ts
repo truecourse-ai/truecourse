@@ -337,7 +337,14 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Redundant return await',
     description: 'return await is redundant in async functions — the promise is already unwrapped.',
-    enabled: true,
+    // Disabled by default: ESLint's `no-return-await` was officially
+    // deprecated in v8.19 (2022) — `return await` is now RECOMMENDED
+    // for better Node async stack traces (V8 zero-cost since Node
+    // 12), and in `try/catch` blocks it's required for the catch to
+    // fire. The rule's premise (saving one microtask) doesn't hold
+    // on modern V8 and conflicts with stack-trace best practice.
+    // Users who prefer the old style can flip this on.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },
