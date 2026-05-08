@@ -44,7 +44,7 @@ async def get_item(item_id: int, db=Depends(lambda: None)):
     return {"id": item_id}
 
 
-# VIOLATION: code-quality/deterministic/fastapi-undocumented-exception
+# fastapi-undocumented-exception disabled by default — optional OpenAPI polish, not a defect.
 @app.get("/api/items/{item_id}/details", response_model=ItemResponse)
 async def get_item_details(item_id: int):
     raise HTTPException(status_code=404, detail="Item not found")

@@ -4226,7 +4226,13 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'Undocumented HTTPException',
     description: 'HTTPException raised in route handler but not documented in `responses` metadata.',
-    enabled: true,
+    // Disabled by default: documenting every HTTPException in a
+    // route's `responses={…}` metadata is FastAPI's optional
+    // OpenAPI-spec polish — most projects don't bother for
+    // internal APIs and only add it for public SDKs. Firing on
+    // every undocumented raise produces 98 hits with no
+    // bug-detection value.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },
