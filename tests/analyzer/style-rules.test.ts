@@ -111,15 +111,26 @@ describe('style/deterministic/ts-declaration-style', () => {
 describe('style/deterministic/sorting-style', () => {
   const KEY = 'style/deterministic/sorting-style';
 
+  // Rule is disabled by default — formatters (`ruff format`,
+  // `eslint-plugin-import/order`, Prettier) own import order.
+  // The visitor logic is preserved; tests opt-in by enabling.
+  const checkWithEnabled = (code: string) => {
+    const overridden = ALL_DEFAULT_RULES.map((r) =>
+      r.key === KEY ? { ...r, enabled: true } : r,
+    ).filter((r) => r.enabled);
+    const tree = parseCode(code, 'typescript');
+    return checkCodeRules(tree, '/test/file.ts', code, overridden, 'typescript');
+  };
+
   it('detects unsorted named imports', () => {
     const code = `import { z, a, m } from 'lib';`;
-    const violations = only(check(code), KEY);
+    const violations = only(checkWithEnabled(code), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not flag sorted named imports', () => {
     const code = `import { a, m, z } from 'lib';`;
-    const violations = only(check(code), KEY);
+    const violations = only(checkWithEnabled(code), KEY);
     expect(violations).toHaveLength(0);
   });
 });

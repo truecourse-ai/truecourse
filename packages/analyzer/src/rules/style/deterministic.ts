@@ -77,7 +77,14 @@ export const STYLE_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'style',
     name: 'Unsorted imports',
     description: 'Import statements not sorted alphabetically.',
-    enabled: true,
+    // Disabled by default: import ordering is a formatter
+    // responsibility (`ruff format` / Ruff's `I` rules /
+    // `eslint-plugin-import/order` / Prettier's organize-imports).
+    // Modern projects rely on the formatter to enforce a
+    // consistent order; flagging it in a separate review tool
+    // produces duplicate diagnostics. Users who don't run a
+    // formatter can flip on per-project.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },

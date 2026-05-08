@@ -2,7 +2,7 @@
  * Style violations — formatting, naming, import organization.
  */
 
-// VIOLATION: style/deterministic/sorting-style
+// sorting-style is disabled by default — formatter responsibility.
 import { writeFileSync, readFileSync } from 'fs';
 
 const earlyConst = 42;
