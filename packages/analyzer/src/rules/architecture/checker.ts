@@ -846,6 +846,15 @@ export function checkMethodRules(
       // functions are long by design and shouldn't be flagged.
       if (MIGRATION_PATH_PATTERN.test(method.filePath)) continue
 
+      // Skip React component files (.tsx). React FCs have a single
+      // function body that contains: hook calls (each is a statement),
+      // memoized derivations, event handlers, and a return JSX. The
+      // statementCount easily exceeds 30 just from idiomatic hook
+      // usage; counting them as "too long" produces a false positive
+      // on every non-trivial component. Components are bound by their
+      // JSX shape, not their statement count.
+      if (method.filePath.endsWith('.tsx')) continue
+
       if (method.statementCount != null && method.statementCount > LONG_METHOD_STATEMENTS) {
         violations.push({
           ruleKey: 'architecture/deterministic/long-method',
