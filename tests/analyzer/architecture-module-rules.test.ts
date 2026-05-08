@@ -393,6 +393,41 @@ describe('checkMethodRules', () => {
     expect(nestViolations).toHaveLength(0);
   });
 
+  it('does not flag deeply-nested methods in .tsx files', () => {
+    // React components have JSX-conditional ladders that inflate the
+    // nesting metric without representing real branching logic.
+    const methods = [
+      makeMethod({
+        name: 'PdfViewer',
+        filePath: '/repo/app/components/pdf-viewer.tsx',
+        maxNestingDepth: 6,
+      }),
+    ];
+    const violations = checkMethodRules(methods, enabledRules);
+    const nest = violations.filter((v) => v.ruleKey === 'architecture/deterministic/deeply-nested-logic');
+    expect(nest).toHaveLength(0);
+  });
+
+  it('does not flag streamed-response handlers (detect/fetch/stream/parse/...)', () => {
+    // Try-catch + Promise-chain wrappers around streamed parsing
+    // inflate maxNestingDepth without nested business logic.
+    const methods = [
+      makeMethod({
+        name: 'detectFields',
+        filePath: '/repo/server/api/ai/detect-fields.ts',
+        maxNestingDepth: 6,
+      }),
+      makeMethod({
+        name: 'fetchAndStream',
+        filePath: '/repo/server/api/ai/fetch-and-stream.ts',
+        maxNestingDepth: 5,
+      }),
+    ];
+    const violations = checkMethodRules(methods, enabledRules);
+    const nest = violations.filter((v) => v.ruleKey === 'architecture/deterministic/deeply-nested-logic');
+    expect(nest).toHaveLength(0);
+  });
+
   it('detects dead method (no incoming or outgoing calls)', () => {
     const methods = [
       makeMethod({ name: 'activeMethod', moduleName: 'Mod', serviceName: 'svc' }),

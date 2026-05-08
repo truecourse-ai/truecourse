@@ -895,7 +895,19 @@ export function checkMethodRules(
 
   // Deeply nested logic
   if (ruleKeys.has('architecture/deterministic/deeply-nested-logic')) {
+    // Names whose nesting is dominated by streamed-response parsing,
+    // event dispatch, or framework-driven try/catch bookkeeping
+    // rather than business logic. The depth metric over-counts
+    // try-catch + Promise-chain wrappers as nesting.
+    const FRAMEWORK_DEPTH_NAMES = /^(?:detect|fetch|stream|parse|read|process|handle|consume|dispatch|render)[A-Z_]/
+
     for (const method of methods) {
+      // Skip React component files — JSX-conditional ladders inflate
+      // the nesting metric without representing real branching logic
+      // (cyclomatic-complexity captures genuine fan-out separately).
+      if (method.filePath.endsWith('.tsx')) continue
+      if (method.name && FRAMEWORK_DEPTH_NAMES.test(method.name)) continue
+
       if (method.maxNestingDepth != null && method.maxNestingDepth > DEEP_NESTING_THRESHOLD) {
         violations.push({
           ruleKey: 'architecture/deterministic/deeply-nested-logic',
