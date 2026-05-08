@@ -19,6 +19,20 @@ export const consoleErrorNoContextVisitor: CodeRuleVisitor = {
     // Only flag if there's exactly one argument that looks like an error variable
     if (args.namedChildren.length !== 1) return null
 
+    // Skip inside `try { … } catch (err) { console.error(err) }`
+    // — the surrounding try block makes the operation context
+    // self-evident, and adding a message duplicates the function /
+    // call-site information already in the stack trace.
+    {
+      let cursor: typeof node | null = node.parent
+      while (cursor) {
+        if (cursor.type === 'catch_clause') return null
+        if (cursor.type === 'function_declaration' || cursor.type === 'function_expression' ||
+            cursor.type === 'arrow_function' || cursor.type === 'method_definition') break
+        cursor = cursor.parent
+      }
+    }
+
     // Skip inside .catch() callbacks — the catch handler context is self-evident
     let parent = node.parent
     while (parent) {

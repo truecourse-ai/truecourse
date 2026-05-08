@@ -55,7 +55,7 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
     try {
       await onSubmit({ id: initialUser?.id, name, email, role });
     } catch (error) {
-      // VIOLATION: reliability/deterministic/console-error-no-context
+      // console-error-no-context now skips inside `catch` blocks — the surrounding try makes the operation context self-evident.
       console.error(error);
     } finally {
       setSubmitting(false);

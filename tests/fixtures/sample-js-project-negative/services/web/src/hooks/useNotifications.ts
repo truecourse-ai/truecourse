@@ -25,7 +25,7 @@ export function useNotifications(userId: string) {
       const data = await res.json();
       setNotifications(data);
     } catch (err) {
-      // VIOLATION: reliability/deterministic/console-error-no-context
+      // console-error-no-context now skips inside `catch` blocks — the surrounding try makes the operation context self-evident.
       console.error(err);
     } finally {
       setLoading(false);

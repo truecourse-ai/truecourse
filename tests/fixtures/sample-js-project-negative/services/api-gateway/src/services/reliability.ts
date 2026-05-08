@@ -112,7 +112,7 @@ export async function rethrowWithoutContext() {
   }
 }
 
-// VIOLATION: reliability/deterministic/console-error-no-context
+// console-error-no-context now skips inside `catch` blocks — the surrounding try makes the operation context self-evident.
 export function logError() {
   try {
     JSON.parse('invalid');
