@@ -19,6 +19,14 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
         const htmlValue = findDangerousHtmlValue(node)
         if (htmlValue && isStaticStringLiteral(htmlValue)) return null
         if (htmlValue && isFullyEscapedRhs(htmlValue)) return null
+        // Library-generated SVG / QR markup is the controlled output
+        // of a known generator (`mermaid.render`, `renderSVG`,
+        // `qrcode.toString`, `qrcode.toSVG`) — not user input.
+        if (htmlValue && isTrustedSvgSource(htmlValue, node)) return null
+        // SSR public-env script injection: `window.__ENV__ = ${JSON.stringify(env)}`.
+        // JSON.stringify is the safety boundary; the pattern is the
+        // canonical SSR public-env handoff.
+        if (htmlValue && isJsonStringifyScriptInjection(htmlValue)) return null
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Disabled auto-escaping',
@@ -114,6 +122,108 @@ function findDangerousHtmlValue(jsxAttr: import('web-tree-sitter').Node): import
     }
   }
   return null
+}
+
+/**
+ * True if `node` is the return value of a known SVG/QR/markup
+ * generator (\`mermaid.render(...).svg\`, \`renderSVG(...)\`,
+ * \`qrcode.toString(...)\`, \`qrcode.toSVG(...)\`) — either
+ * directly or via an identifier whose binding in the same
+ * function is one of those calls.
+ */
+const TRUSTED_GENERATOR_NAMES = new Set([
+  'renderSVG', 'renderSvg', 'render',
+  'toString', 'toSVG', 'toSvg',
+  'toDataURL', 'toDataUrl',
+  'highlight', 'highlightAuto',
+])
+const TRUSTED_GENERATOR_RECEIVERS = /^(?:mermaid|qrcode|qr|hljs|prism|markdownIt|marked|dompurify|DOMPurify)$/i
+const TRUSTED_GENERATOR_PROPS = /^(?:svg|html|markup|output)$/
+
+function isTrustedGeneratorCall(node: import('web-tree-sitter').Node): boolean {
+  if (node.type !== 'call_expression') return false
+  const fn = node.childForFieldName('function')
+  if (!fn) return false
+  if (fn.type === 'identifier') return TRUSTED_GENERATOR_NAMES.has(fn.text)
+  if (fn.type === 'member_expression') {
+    const prop = fn.childForFieldName('property')
+    if (prop && TRUSTED_GENERATOR_NAMES.has(prop.text)) return true
+    const obj = fn.childForFieldName('object')
+    if (obj?.type === 'identifier' && TRUSTED_GENERATOR_RECEIVERS.test(obj.text)) return true
+  }
+  return false
+}
+
+function isTrustedSvgSource(
+  value: import('web-tree-sitter').Node,
+  contextNode: import('web-tree-sitter').Node,
+): boolean {
+  // Direct: `__html: mermaid.render(...).svg` or `__html: renderSVG(...)`.
+  if (value.type === 'call_expression' && isTrustedGeneratorCall(value)) return true
+  if (value.type === 'member_expression') {
+    const prop = value.childForFieldName('property')
+    const obj = value.childForFieldName('object')
+    if (prop && TRUSTED_GENERATOR_PROPS.test(prop.text) &&
+        obj && isTrustedGeneratorCall(obj)) return true
+  }
+  // Identifier reference: walk up to the enclosing function and find
+  // a `const <name> = <trustedGeneratorCall>(...)` declaration.
+  if (value.type === 'identifier') {
+    const name = value.text
+    let scope: import('web-tree-sitter').Node | null = contextNode.parent
+    while (scope) {
+      if (
+        scope.type === 'arrow_function' ||
+        scope.type === 'function_declaration' ||
+        scope.type === 'function_expression' ||
+        scope.type === 'method_definition' ||
+        scope.type === 'program'
+      ) {
+        const text = scope.text
+        const re = new RegExp(
+          `\\b(?:const|let|var)\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=\\s*([^;\\n]+)`,
+        )
+        const m = re.exec(text)
+        if (m) {
+          const rhs = m[1]
+          if (TRUSTED_GENERATOR_RECEIVERS.test(rhs)) return true
+          for (const helper of TRUSTED_GENERATOR_NAMES) {
+            if (new RegExp(`\\b${helper}\\s*\\(`).test(rhs)) return true
+          }
+        }
+        if (scope.type === 'program') break
+        break
+      }
+      scope = scope.parent
+    }
+  }
+  return false
+}
+
+/**
+ * True if every dynamic interpolation in the template literal is
+ * a `JSON.stringify(...)` call. SSR public-env handoff
+ * (\`window.__ENV__ = ${JSON.stringify(env)}\`) — JSON.stringify
+ * is the XSS safety boundary because it serializes any object
+ * to a JS literal that can't be broken out of.
+ */
+function isJsonStringifyScriptInjection(value: import('web-tree-sitter').Node): boolean {
+  if (value.type !== 'template_string') return false
+  let sawStringify = false
+  for (let i = 0; i < value.namedChildCount; i++) {
+    const child = value.namedChild(i)
+    if (!child) continue
+    if (child.type !== 'template_substitution') continue
+    const inner = child.namedChild(0)
+    if (!inner || inner.type !== 'call_expression') return false
+    const fn = inner.childForFieldName('function')
+    if (fn?.type !== 'member_expression') return false
+    const obj = fn.childForFieldName('object')
+    const prop = fn.childForFieldName('property')
+    if (obj?.text !== 'JSON' || prop?.text !== 'stringify') return false
+    sawStringify = true
+  }
+  return sawStringify
 }
 
 function isStaticStringLiteral(node: import('web-tree-sitter').Node): boolean {
