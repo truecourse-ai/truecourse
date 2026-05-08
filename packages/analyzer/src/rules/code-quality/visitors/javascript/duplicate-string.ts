@@ -1,13 +1,16 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList, isInTanstackQueryKeyArray, isClsxArg, isMockFixturePath } from './_helpers.js'
 
 export const duplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
+    // Mock / fixture files: data not production constants.
+    if (isMockFixturePath(filePath)) return null
+
     // First pass: collect every string literal value that appears inside
     // a TypeScript literal_type node. These are members of string-literal
     // union types — `type DialogState = 'PROMPT' | 'PROCESSING' | 'DONE'`,
@@ -80,6 +83,11 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
         // table column widths, etc.) where extracting to a const
         // duplicates the design intent.
         if (looksLikeCssClassList(n)) return
+
+        // Skip TanStack queryKey / mutationKey array members.
+        if (isInTanstackQueryKeyArray(n)) return
+        // Skip cn / clsx / cva / classnames / twMerge args.
+        if (isClsxArg(n)) return
 
         const existing = stringCounts.get(content)
         if (existing) {

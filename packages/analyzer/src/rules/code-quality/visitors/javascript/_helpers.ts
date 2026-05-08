@@ -64,7 +64,66 @@ export const FIELD_KEY_METHODS = new Set([
   // URLSearchParams / Headers / FormData / Map / WeakMap APIs —
   // first string argument is the key, not a refactor candidate.
   'append',
+  // DOM event handlers / emitter APIs: `el.addEventListener('click', …)`,
+  // `socket.on('message', …)`, `emitter.off('event', …)`,
+  // `event.dispatchEvent(...)`. First arg is the event name.
+  'addEventListener', 'removeEventListener', 'on', 'off', 'once',
+  'emit', 'dispatchEvent',
+  // Hono / Express response header API: `c.header('X-Foo', val)`.
+  'header',
 ])
+
+/**
+ * True if `node` is an element of an array bound to a property
+ * named `queryKey` / `mutationKey` / `cacheKey` (TanStack Query,
+ * SWR, RTK Query). The strings in these arrays compose a
+ * cache-namespace path; repeating segments across read / write
+ * call sites is structural, not a refactor candidate.
+ */
+export function isInTanstackQueryKeyArray(node: SyntaxNode): boolean {
+  const parent = node.parent
+  if (parent?.type !== 'array') return false
+  const pair = parent.parent
+  if (pair?.type !== 'pair') return false
+  const key = pair.childForFieldName('key')
+  const keyName = key?.type === 'property_identifier' ? key.text :
+    (key?.type === 'string' ? key.text.replace(/^['"]|['"]$/g, '') : '')
+  return keyName === 'queryKey' || keyName === 'mutationKey' ||
+    keyName === 'cacheKey' || keyName === 'invalidateKeys'
+}
+
+/**
+ * True if `node` is an argument of a `cn` / `clsx` / `cva` /
+ * `classnames` / `twMerge` / `tw` call. These libraries expect
+ * tailwind class strings as args; repeating utility tokens is
+ * structural, not a refactor candidate.
+ */
+export function isClsxArg(node: SyntaxNode): boolean {
+  const parent = node.parent
+  if (parent?.type !== 'arguments') return false
+  const call = parent.parent
+  if (call?.type !== 'call_expression') return false
+  const fn = call.childForFieldName('function')
+  let name = ''
+  if (fn?.type === 'identifier') name = fn.text
+  else if (fn?.type === 'member_expression') {
+    name = fn.childForFieldName('property')?.text ?? ''
+  }
+  return name === 'cn' || name === 'clsx' || name === 'cva' ||
+    name === 'classnames' || name === 'twMerge' || name === 'tw'
+}
+
+/**
+ * True if `filePath` is in a known mock-fixture directory.
+ * Used to skip magic-string / duplicate-string in test mocks.
+ * Does NOT match bare `fixtures/` (matches the analyzer's own
+ * test-fixture project at `tests/fixtures/`).
+ */
+export function isMockFixturePath(filePath: string): boolean {
+  if (/(?:[\\/]|^)__mocks__[\\/]/.test(filePath)) return true
+  if (/(?:[\\/]|^)mocks[\\/](?:handlers|server|api-)/i.test(filePath)) return true
+  return false
+}
 
 /**
  * True if `node` is the first argument of a method call whose

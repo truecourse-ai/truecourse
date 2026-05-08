@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
-import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList } from './_helpers.js'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray, isDesignTokenValue, isReactStateInitializer, isTypeofComparisonString, looksLikeCssClassList, isInTanstackQueryKeyArray, isClsxArg, isMockFixturePath } from './_helpers.js'
 
 // Minimum string length to be considered "magic"
 const MIN_LENGTH = 4
@@ -13,6 +13,9 @@ export const magicStringVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node: SyntaxNode, filePath, sourceCode) {
+    // Mock / fixture files: data not production constants.
+    if (isMockFixturePath(filePath)) return null
+
     // First pass: collect every string literal that appears as a
     // member of a TypeScript `literal_type` somewhere in the file.
     // `type Status = 'idle' | 'loading' | 'done'`,
@@ -71,6 +74,10 @@ export const magicStringVisitor: CodeRuleVisitor = {
           if (isTypeofComparisonString(n)) return
           // Skip strings that look like CSS class lists.
           if (looksLikeCssClassList(n)) return
+          // Skip TanStack queryKey / mutationKey array members.
+          if (isInTanstackQueryKeyArray(n)) return
+          // Skip cn / clsx / cva / classnames / twMerge args.
+          if (isClsxArg(n)) return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings
