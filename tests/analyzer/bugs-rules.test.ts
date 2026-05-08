@@ -1961,16 +1961,34 @@ describe('bugs/deterministic/await-in-loop', () => {
     expect(matches).toHaveLength(1);
   });
 
-  it('detects await inside while loop', () => {
+  it('detects await inside while loop (counter-driven)', () => {
+    // Counter-driven iteration over a fixed array: per-item await IS
+    // the antipattern (items could be batched via Promise.all).
     const violations = check(`
-      async function process() {
+      async function process(items) {
+        let i = 0;
+        while (i < items.length) {
+          await processItem(items[i]);
+          i++;
+        }
+      }
+    `);
+    const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/await-in-loop');
+    expect(matches).toHaveLength(1);
+  });
+
+  it('does not flag queue-drain while loop (.shift/.pop)', () => {
+    // Queue-drain: items may be pushed during iteration and order
+    // matters; sequential is the explicit contract.
+    const violations = check(`
+      async function process(queue) {
         while (queue.length > 0) {
           await processItem(queue.pop());
         }
       }
     `);
     const matches = violations.filter((v) => v.ruleKey === 'bugs/deterministic/await-in-loop');
-    expect(matches).toHaveLength(1);
+    expect(matches).toHaveLength(0);
   });
 
   it('does not flag await outside a loop', () => {

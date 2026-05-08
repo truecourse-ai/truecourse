@@ -6,8 +6,14 @@ export const testWithHardcodedTimeoutVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
-    // Only flag in test files
-    if (!filePath.includes('test') && !filePath.includes('spec') && !filePath.includes('.test.') && !filePath.includes('.spec.')) return null
+    // Only flag in genuine test files. The previous check
+    // (`filePath.includes('test')`) over-matched any path
+    // containing the substring "test" (e.g., `tests/fixtures/...`,
+    // `protested/...`).
+    const isTestFile =
+      /\.(?:test|spec|e2e)\.[jt]sx?$/i.test(filePath) ||
+      /(?:[\\/]|^)(?:__tests__|__specs__)[\\/]/.test(filePath)
+    if (!isTestFile) return null
 
     const fn = node.childForFieldName('function')
     if (!fn) return null
