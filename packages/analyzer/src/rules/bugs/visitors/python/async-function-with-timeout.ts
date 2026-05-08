@@ -30,6 +30,23 @@ export const pythonAsyncFunctionWithTimeoutVisitor: CodeRuleVisitor = {
       }
 
       if (paramName && TIMEOUT_PARAM_NAMES.has(paramName)) {
+        // Skip when the body uses an explicit polling-deadline loop
+        // (\`while time.time() - start < timeout:\` /
+        // \`while time.monotonic() < deadline:\`). The wait is on
+        // external state (subprocess, port readiness, file presence)
+        // that can't be wrapped as a coroutine, so
+        // \`asyncio.wait_for\` doesn't apply.
+        const body = node.childForFieldName('body')
+        if (body) {
+          const t = body.text
+          const re1 = new RegExp(
+            `\\btime\\.(?:time|monotonic|perf_counter)\\s*\\(\\s*\\)\\s*-\\s*\\w+\\s*[<>]=?\\s*${paramName}\\b`,
+          )
+          const re2 = new RegExp(
+            `\\btime\\.(?:time|monotonic|perf_counter)\\s*\\(\\s*\\)\\s*[<>]=?\\s*\\w+\\s*\\+\\s*${paramName}\\b`,
+          )
+          if (re1.test(t) || re2.test(t)) return null
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'medium',
           'Async function accepting timeout parameter',
