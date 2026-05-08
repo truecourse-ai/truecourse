@@ -78,6 +78,28 @@ export const pythonAsyncUnusedAsyncVisitor: CodeRuleVisitor = {
     // be async even without await to satisfy the base class protocol.
     if (isAsyncInterfaceMethod(node)) return null
 
+    // Skip @classmethod async def factories — `async def
+    // get_instance(cls)`, `from_dict`, `create`, etc. Factory
+    // methods on async-protocol classes are conventionally
+    // async even when the implementation has no await.
+    {
+      const decorated = node.parent?.type === 'decorated_definition' ? node.parent : null
+      if (decorated) {
+        for (const c of decorated.children) {
+          if (c.type !== 'decorator') continue
+          const dec = c.namedChildren[0]
+          let decName = ''
+          if (dec?.type === 'identifier') decName = dec.text
+          else if (dec?.type === 'attribute') decName = dec.childForFieldName('attribute')?.text ?? ''
+          else if (dec?.type === 'call') {
+            const fn = dec.childForFieldName('function')
+            if (fn?.type === 'identifier') decName = fn.text
+          }
+          if (decName === 'classmethod') return null
+        }
+      }
+    }
+
     // Skip any async method of a class that extends a parent — the
     // parent's contract may require the async signature even when this
     // particular implementation has no await internally. Common with

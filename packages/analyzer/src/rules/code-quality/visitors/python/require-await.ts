@@ -98,6 +98,27 @@ export const pythonRequireAwaitVisitor: CodeRuleVisitor = {
     // match. Same rationale as no-self-use's subclass skip.
     if (isMethodOfSubclass(node)) return null
 
+    // Skip @classmethod async def factories — `async def
+    // get_instance(cls)`, `from_dict`, `create`, etc. Factory
+    // conventions on async-protocol classes.
+    {
+      const decorated = node.parent?.type === 'decorated_definition' ? node.parent : null
+      if (decorated) {
+        for (const c of decorated.children) {
+          if (c.type !== 'decorator') continue
+          const dec = c.namedChildren[0]
+          let decName = ''
+          if (dec?.type === 'identifier') decName = dec.text
+          else if (dec?.type === 'attribute') decName = dec.childForFieldName('attribute')?.text ?? ''
+          else if (dec?.type === 'call') {
+            const fn = dec.childForFieldName('function')
+            if (fn?.type === 'identifier') decName = fn.text
+          }
+          if (decName === 'classmethod') return null
+        }
+      }
+    }
+
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 
