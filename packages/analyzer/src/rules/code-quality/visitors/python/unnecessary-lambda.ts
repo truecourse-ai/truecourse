@@ -1,11 +1,42 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+/**
+ * Keyword-argument names whose value is a CALLABLE evaluated
+ * lazily (per-instance, per-row, per-call). Replacing the
+ * lambda with a direct call (\`default=foo()\`) invokes the
+ * call ONCE at import time and freezes the value — a semantic
+ * change, not a simplification.
+ *
+ *  - SQLAlchemy: \`default=\`, \`onupdate=\`, \`server_default=\`
+ *  - dataclasses / attrs / Pydantic: \`default_factory=\`, \`factory=\`
+ *  - argparse / config builders: \`default=\` (idem)
+ *  - retry libraries (tenacity, backoff): \`wait=\`, \`stop=\`
+ */
+const CALLABLE_KWARGS = new Set([
+  'default', 'default_factory', 'factory',
+  'onupdate', 'server_default', 'server_onupdate',
+  'getter', 'setter', 'callable', 'predicate',
+  'on_create', 'on_update', 'on_delete',
+  'wait', 'stop',
+])
+
 export const pythonUnnecessaryLambdaVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/unnecessary-lambda',
   languages: ['python'],
   nodeTypes: ['lambda'],
   visit(node, filePath, sourceCode) {
+    // Skip when the lambda is the value of a callable-kwarg
+    // (\`default=lambda: …\`). The kwarg expects a callable
+    // invoked per-use, not a precomputed value.
+    {
+      const parent = node.parent
+      if (parent?.type === 'keyword_argument') {
+        const keyName = parent.childForFieldName('name')?.text ?? ''
+        if (CALLABLE_KWARGS.has(keyName)) return null
+      }
+    }
+
     // Check if body is a single call
     const body = node.childForFieldName('body')
     if (!body || body.type !== 'call') return null

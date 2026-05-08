@@ -31,8 +31,15 @@ export const pythonUnnecessaryPlaceholderStatementVisitor: CodeRuleVisitor = {
         if (hasDocstring && siblings.length === 2) return null
       }
 
-      // Count non-pass statements in the block
-      const nonPass = parent.namedChildren.filter((c) => c.type !== 'pass_statement')
+      // Count non-pass, non-comment statements in the block. A
+      // comment alone alongside `pass` is still an empty body —
+      // removing the pass would leave only a comment, which is
+      // not an executable statement. Common in except / elif /
+      // case bodies where a trailing comment explains why the
+      // branch is intentionally a no-op.
+      const nonPass = parent.namedChildren.filter(
+        (c) => c.type !== 'pass_statement' && c.type !== 'comment',
+      )
       if (nonPass.length > 0) {
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
