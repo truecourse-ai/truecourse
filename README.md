@@ -157,6 +157,25 @@ pre-commit:
   llm: false                   # run LLM rules on every commit (tokens per commit)
 ```
 
+### Auto Mode
+
+Auto mode keeps `LATEST.json` fresh by re-running analyze whenever your trigger branch advances locally:
+
+```bash
+truecourse auto enable                # Prompts for the trigger branch (default detected)
+truecourse auto enable --branch main  # Skip the prompt and bake in a branch
+truecourse auto disable               # Remove the hooks
+truecourse auto status                # Show installation status + trigger branch
+```
+
+`auto enable` asks (or you pass `--branch`) which branch the hook should fire on, and bakes that name into the hook script. Auto-detection prefills the prompt from `origin/HEAD`, falling back to `main` then `master`. Teams using `develop`, `trunk`, or any other convention pass `--branch <name>`.
+
+Once enabled, every `git pull` (or `git pull --rebase`) that lands new commits on the trigger branch runs `truecourse analyze --no-llm --no-stash` in the background — your `git` command returns immediately, and the analysis writes to `.truecourse/LATEST.json` and logs to `.truecourse/logs/auto.log`. Pulls on other branches are unaffected, and the hook no-ops when another analyze is already running so concurrent pulls won't pile up.
+
+The typical PR workflow: open a PR from a feature branch → merge on GitHub → switch to the trigger branch locally and `git pull` → auto mode re-analyzes. No LLM tokens are spent and your working tree isn't stashed.
+
+If you later rename your main branch, re-run `truecourse auto enable` to update the baked-in name. `auto enable` also refuses to overwrite an existing non-TrueCourse hook — it prints the conflicting paths so you can fold the snippet into your hook manually.
+
 ### Telemetry
 
 TrueCourse collects anonymous usage data to improve the product. It is automatically disabled in CI environments.
