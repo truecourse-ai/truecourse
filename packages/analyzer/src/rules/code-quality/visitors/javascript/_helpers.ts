@@ -61,6 +61,9 @@ export const FIELD_KEY_METHODS = new Set([
   'getItem', 'setItem', 'removeItem',
   't',
   'get', 'set', 'has', 'delete',
+  // URLSearchParams / Headers / FormData / Map / WeakMap APIs —
+  // first string argument is the key, not a refactor candidate.
+  'append',
 ])
 
 /**
