@@ -159,16 +159,45 @@ export const magicNumberVisitor: CodeRuleVisitor = {
       }
     }
 
-    // Skip time conversion factors when they appear in a multiplication chain
-    // with at least one other time factor (e.g., 60 * 1000, 24 * 60 * 60)
-    if (parentType === 'binary_expression' && TIME_FACTORS.has(val)) {
+    // Skip when the number sits in a multiplication chain that
+    // contains at least one time-conversion factor (60, 3600,
+    // 24, 86400). `20 * 60 * 1000` (20 minutes), `5 * 60`
+    // (5 minutes), `24 * 60 * 60 * 1000` (1 day in ms) — the
+    // numeric is contextually a duration, not magic.
+    if (parentType === 'binary_expression') {
       const op = parent.children.find((c) => c.text === '*')
       if (op) {
-        // Check if the sibling operand is also a time factor or contains one
+        // Walk the entire multiplicative chain (parent + all
+        // ancestors that are still binary `*` expressions) and
+        // check if any operand anywhere in the tree is a time
+        // factor.
+        let chainRoot: typeof parent | null = parent
+        while (chainRoot?.parent?.type === 'binary_expression') {
+          const upOp = chainRoot.parent.children.find((c) => c.text === '*')
+          if (!upOp) break
+          chainRoot = chainRoot.parent
+        }
+        if (chainRoot && hasTimeFactorInChain(chainRoot)) return null
+      }
+    }
+
+    // Skip HTTP-status equality against a bare `status` /
+    // `statusCode` / `code` / `httpStatus` identifier:
+    // `if (status === 201)`, `return status === 200`. The
+    // existing skip handled member-access shapes (`res.status
+    // === 200`); this extends it to local-variable shapes.
+    if (parentType === 'binary_expression' && HTTP_STATUS_CODES.has(val)) {
+      const op = parent.children.find((c) =>
+        c.text === '===' || c.text === '!==' || c.text === '==' || c.text === '!=',
+      )
+      if (op) {
         const left = parent.childForFieldName('left')
         const right = parent.childForFieldName('right')
         const sibling = left?.id === node.id ? right : left
-        if (sibling && hasTimeFactorInChain(sibling)) return null
+        if (sibling?.type === 'identifier') {
+          const lower = sibling.text.toLowerCase()
+          if (STATUS_PROPERTY_NAMES.has(sibling.text) || lower === 'status' || lower === 'statuscode' || lower === 'httpstatus') return null
+        }
       }
     }
 
