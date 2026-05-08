@@ -7,14 +7,18 @@ import {
   isSqlAlchemyMappedAnnotation,
 } from '../../../_shared/python-framework-detection.js'
 
+// Genuine Python builtins (in `builtins.__dict__`). Excludes the
+// `site.py` interactive-prompt convenience aliases — `credits`,
+// `copyright`, `license`, `help`, `quit`, `exit` — which are NOT
+// callable from regular scripts and shadowing them is harmless.
 const PYTHON_BUILTINS = new Set([
   'abs', 'all', 'any', 'ascii', 'bin', 'bool', 'breakpoint', 'bytearray', 'bytes',
-  'callable', 'chr', 'classmethod', 'compile', 'complex', 'copyright', 'credits',
-  'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec', 'exit',
+  'callable', 'chr', 'classmethod', 'compile', 'complex',
+  'delattr', 'dict', 'dir', 'divmod', 'enumerate', 'eval', 'exec',
   'filter', 'float', 'format', 'frozenset', 'getattr', 'globals', 'hasattr',
-  'hash', 'help', 'hex', 'id', 'input', 'int', 'isinstance', 'issubclass',
-  'iter', 'len', 'license', 'list', 'locals', 'map', 'max', 'memoryview', 'min',
-  'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property', 'quit',
+  'hash', 'hex', 'id', 'input', 'int', 'isinstance', 'issubclass',
+  'iter', 'len', 'list', 'locals', 'map', 'max', 'memoryview', 'min',
+  'next', 'object', 'oct', 'open', 'ord', 'pow', 'print', 'property',
   'range', 'repr', 'reversed', 'round', 'set', 'setattr', 'slice', 'sorted',
   'staticmethod', 'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip',
 ])
