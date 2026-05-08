@@ -1,7 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
-const PYTHON_UNSAFE_TEMPFILE_FUNCTIONS = new Set(['mktemp', 'NamedTemporaryFile'])
+const PYTHON_UNSAFE_TEMPFILE_FUNCTIONS = new Set(['mktemp'])
 
 export const pythonUnsafeTempFileVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/unsafe-temp-file',
@@ -33,31 +33,11 @@ export const pythonUnsafeTempFileVisitor: CodeRuleVisitor = {
       )
     }
 
-    // tempfile.NamedTemporaryFile(delete=False) without mode restriction
-    if (methodName === 'NamedTemporaryFile' && (objectName === 'tempfile' || objectName === '')) {
-      const args = node.childForFieldName('arguments')
-      if (args) {
-        let hasDeleteFalse = false
-        for (const arg of args.namedChildren) {
-          if (arg.type === 'keyword_argument') {
-            const name = arg.childForFieldName('name')
-            const value = arg.childForFieldName('value')
-            if (name?.text === 'delete' && value?.text === 'False') {
-              hasDeleteFalse = true
-            }
-          }
-        }
-        if (hasDeleteFalse) {
-          return makeViolation(
-            this.ruleKey, node, filePath, 'medium',
-            'Unsafe temporary file creation',
-            'NamedTemporaryFile(delete=False) creates a persistent temp file that may not be cleaned up securely.',
-            sourceCode,
-            'Ensure the file is deleted securely after use, or use tempfile.mkstemp() and manage cleanup yourself.',
-          )
-        }
-      }
-    }
+    // \`tempfile.NamedTemporaryFile(delete=False)\` is the secure
+    // stdlib helper for creating a uniquely-named temp file with
+    // proper permissions; \`delete=False\` is for "preserve across
+    // close()" use cases (handing the path to a child process,
+    // long-running write phases). Not a security issue.
 
     return null
   },

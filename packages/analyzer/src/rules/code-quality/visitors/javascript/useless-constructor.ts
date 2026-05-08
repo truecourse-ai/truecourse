@@ -9,6 +9,15 @@ export const uselessConstructorVisitor: CodeRuleVisitor = {
     const nameNode = node.childForFieldName('name')
     if (nameNode?.text !== 'constructor') return null
 
+    // Skip \`private\` / \`protected\` constructors — visibility IS
+    // the point (singleton, factory-only construction). Removing
+    // the constructor would drop the visibility constraint.
+    const hasRestrictedVisibility = node.children.some(
+      (c) => c.type === 'accessibility_modifier' &&
+             (c.text === 'private' || c.text === 'protected'),
+    )
+    if (hasRestrictedVisibility) return null
+
     const body = node.namedChildren.find((c) => c.type === 'statement_block')
     if (!body) return null
 

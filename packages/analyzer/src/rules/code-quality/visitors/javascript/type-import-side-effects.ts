@@ -22,7 +22,10 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
 
     if (hasTopLevelType) return null // Already a type import, fine
 
-    // Check for inline type specifiers in named imports
+    // Check for inline type specifiers in named imports.
+    // Also track whether the import_clause has a DEFAULT or
+    // NAMESPACE specifier — those are value imports that force
+    // module load regardless of inline \`type\` on named members.
     let hasInlineType = false
     let hasValueImport = false
     function findNamedImports(n: any) {
@@ -40,6 +43,13 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
               hasValueImport = true
             }
           }
+        } else if (child.type === 'identifier') {
+          // Default specifier: \`import Foo from 'p'\` → identifier is
+          // a direct child of import_clause.
+          hasValueImport = true
+        } else if (child.type === 'namespace_import') {
+          // \`import * as Foo from 'p'\` → namespace_import is value.
+          hasValueImport = true
         } else if (child.type === 'import_clause') {
           findNamedImports(child)
         }

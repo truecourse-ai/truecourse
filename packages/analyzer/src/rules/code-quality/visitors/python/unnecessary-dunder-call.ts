@@ -50,6 +50,15 @@ export const pythonUnnecessaryDunderCallVisitor: CodeRuleVisitor = {
     const obj = fn.childForFieldName('object')
     const objText = obj?.text ?? 'x'
 
+    // Skip \`super().__dunder__(...)\` — the only way to delegate
+    // to the parent class's dunder. \`super() == other\` is NOT
+    // equivalent to \`super().__eq__(other)\`; the former calls
+    // the proxy's eq, the latter explicitly invokes the parent's.
+    if (obj?.type === 'call') {
+      const innerFn = obj.childForFieldName('function')
+      if (innerFn?.type === 'identifier' && innerFn.text === 'super') return null
+    }
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'Unnecessary dunder method call',

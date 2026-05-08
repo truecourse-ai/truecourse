@@ -13,6 +13,11 @@ export const typeAssertionOveruseVisitor: CodeRuleVisitor = {
 
     const typeName = typeNode.text
     if (typeName === 'any') {
+      // Skip polyfill files: \`globalThis.X as any = ...\` mutates a
+      // global with a shape that can't be expressed without \`any\`.
+      // The path itself indicates the intent.
+      if (/[\\/]polyfills?[\\/]/.test(filePath) ||
+          /(?:[\\/]|^)polyfill[-.]/.test(filePath.split('/').pop() ?? '')) return null
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Type assertion to any',

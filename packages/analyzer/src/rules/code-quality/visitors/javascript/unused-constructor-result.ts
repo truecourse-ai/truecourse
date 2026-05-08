@@ -17,6 +17,24 @@ export const unusedConstructorResultVisitor: CodeRuleVisitor = {
     // Skip standard validation patterns where the constructor throws on invalid input
     // and the object is intentionally unused (e.g., new URL(input), new RegExp(pattern))
     if (name === 'URL' || name === 'RegExp') return null
+    // Intl.* constructors used for input validation throw on
+    // invalid args (e.g., \`new Intl.Locale(language)\`).
+    if (/^Intl\./.test(name)) return null
+
+    // Skip when the \`new X(...)\` is inside a try block — the throw
+    // is clearly the intended side effect.
+    {
+      let cursor = node.parent
+      while (cursor) {
+        if (cursor.type === 'try_statement') return null
+        if (cursor.type === 'function_declaration' ||
+            cursor.type === 'arrow_function' ||
+            cursor.type === 'function_expression' ||
+            cursor.type === 'method_definition' ||
+            cursor.type === 'program') break
+        cursor = cursor.parent
+      }
+    }
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

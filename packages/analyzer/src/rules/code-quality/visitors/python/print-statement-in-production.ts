@@ -12,6 +12,10 @@ export const pythonPrintStatementInProductionVisitor: CodeRuleVisitor = {
     const fileName = filePath.split('/').pop()?.toLowerCase() ?? ''
     if (fileName.startsWith('test_') || fileName.endsWith('_test.py') || fileName === 'conftest.py') return null
 
+    // Skip Alembic / Django migrations — print() is the canonical
+    // way to surface progress in CLI runs.
+    if (/(?:[\\/]|^)(?:alembic|migrations)[\\/]versions[\\/]/.test(filePath)) return null
+
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'identifier' || fn.text !== 'print') return null
 

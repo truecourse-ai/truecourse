@@ -8,6 +8,15 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['function_declaration', 'function', 'arrow_function', 'method_definition'],
   visit(node, filePath, sourceCode) {
+    // Skip vendor / generated service-worker scripts — they have
+    // unusual control-flow patterns (\`return\` deep in async event
+    // handlers) the rule isn't designed for.
+    const basename = filePath.split('/').pop()?.toLowerCase() ?? ''
+    if (basename === 'mockserviceworker.js' ||
+        basename === 'sw.js' || basename === 'service-worker.js' ||
+        /\.sw\.js$/.test(basename)) return null
+    if (/Mock Service Worker|@generated\s/.test(sourceCode.slice(0, 4000))) return null
+
     let body: SyntaxNode | null = null
 
     if (node.type === 'method_definition') {

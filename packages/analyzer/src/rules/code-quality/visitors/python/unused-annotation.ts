@@ -18,29 +18,33 @@ export const pythonUnusedAnnotationVisitor: CodeRuleVisitor = {
     const annotatedOnly = new Set<string>()
     const assigned = new Set<string>()
 
-    for (const stmt of body.namedChildren) {
-      // Python grammar: `x: int` and `x: int = 5` both parse as expression_statement > assignment
-      // The assignment node has a `type` field for the annotation, and `right` only if assigned.
-      const inner = stmt.type === 'expression_statement' ? stmt.namedChildren[0] : stmt
+    // Walk the function body recursively to find ALL assignments
+    // (including those inside if/try/for/while blocks). The
+    // forward-decl pattern \`payload: dict[str, Any]\` followed by
+    // \`payload = ...\` inside a try block was previously missed.
+    function walk(n: import('web-tree-sitter').Node): void {
+      const inner = n.type === 'expression_statement' ? n.namedChildren[0] : n
       if (inner?.type === 'assignment') {
         const typeField = inner.childForFieldName('type')
         const val = inner.childForFieldName('right')
         const name = inner.childForFieldName('left')
         const nameText = name?.type === 'identifier' ? name.text : null
-        if (nameText && typeField) {
-          if (!val) {
-            annotatedOnly.add(nameText)
-          } else {
-            assigned.add(nameText)
-          }
+        if (nameText) {
+          if (val) assigned.add(nameText)
+          else if (typeField) annotatedOnly.add(nameText)
         }
       } else if (inner?.type === 'augmented_assignment') {
         const name = inner.childForFieldName('left')
-        if (name?.type === 'identifier') {
-          assigned.add(name.text)
-        }
+        if (name?.type === 'identifier') assigned.add(name.text)
+      }
+      // Don't descend into nested function definitions — they shadow.
+      if (n.type === 'function_definition' && n !== body) return
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) walk(child)
       }
     }
+    walk(body)
 
     // Find names that are annotated-only and never assigned
     for (const stmt of body.namedChildren) {

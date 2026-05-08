@@ -1885,9 +1885,12 @@ describe('security/deterministic/unsafe-temp-file', () => {
     expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
   });
 
-  it('detects NamedTemporaryFile(delete=False)', () => {
+  it('does not flag NamedTemporaryFile(delete=False)', () => {
+    // \`NamedTemporaryFile(delete=False)\` is the secure stdlib helper;
+    // \`delete=False\` is for "preserve across close()" use cases (handing
+    // the path to a child process), not a security issue.
     const violations = check(`f = tempfile.NamedTemporaryFile(delete=False)`, 'python');
-    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(1);
+    expect(violations.filter((v) => v.ruleKey === ruleKey)).toHaveLength(0);
   });
 
   it('does not flag NamedTemporaryFile() without delete=False', () => {

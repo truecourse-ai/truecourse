@@ -7,9 +7,13 @@ export const pythonBlanketTypeIgnoreVisitor: CodeRuleVisitor = {
   nodeTypes: ['comment'],
   visit(node, filePath, sourceCode) {
     const text = node.text
-    // Match: # type: ignore (without a specific error code in brackets)
-    // Valid with code: # type: ignore[attr-defined]
-    const blanketMatch = /# *type: *ignore(?!\[)/.test(text)
+    // Match: # type: ignore (without a specific error code in brackets).
+    // Valid with code: \`# type: ignore[attr-defined]\` (no space) or
+    // \`# type: ignore [attr-defined]\` (with space). Both forms have
+    // an explicit code list and should be considered scoped, not blanket.
+    const hasScopedCode = /# *type: *ignore\s*\[[^\]]+\]/.test(text)
+    if (hasScopedCode) return null
+    const blanketMatch = /# *type: *ignore\b/.test(text)
     if (blanketMatch) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

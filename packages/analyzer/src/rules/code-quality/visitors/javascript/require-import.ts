@@ -15,6 +15,12 @@ export const requireImportVisitor: CodeRuleVisitor = {
     const argList = args.namedChildren
     if (argList.length === 0) return null
 
+    // Skip when the argument is not a string literal — dynamic
+    // \`require(path.join(...))\` / \`require(\\\`./\${name}\\\`)\` cannot
+    // be expressed as a static ES import.
+    const firstArg = argList[0]
+    if (firstArg.type !== 'string') return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'require() in TypeScript',

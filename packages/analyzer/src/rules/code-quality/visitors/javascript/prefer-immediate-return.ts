@@ -29,6 +29,15 @@ export const preferImmediateReturnVisitor: CodeRuleVisitor = {
     const nameNode = decl.childForFieldName('name')
     if (nameNode?.text !== retName) return null
 
+    // Skip when the temp's initializer is a function/closure
+    // literal (\`const handler = (e) => { ... }; return handler;\`).
+    // The closure literal isn't a "tail temp" — it carries identity
+    // (named scope, possible later reassignment, debugging name).
+    const initValue = decl.childForFieldName('value')
+    if (initValue?.type === 'arrow_function' ||
+        initValue?.type === 'function_expression' ||
+        initValue?.type === 'function') return null
+
     let usageCount = 0
     function countUsages(n: SyntaxNode) {
       if (n.type === 'identifier' && n.text === retName) {

@@ -10,7 +10,21 @@ export const regexEmptyRepetitionVisitor: CodeRuleVisitor = {
     const src = getRegexSource(node)
     if (!src) return null
 
-    if (/\([^)]*[*+][^)]*\)[*+]/.test(src)) {
+    // Only flag groups that genuinely CAN match empty + outer
+    // quantifier: \`(X*)*\`, \`(X?)*\`, \`(X|)*\`, \`()*\`. Skip groups
+    // where the inner pattern requires at least one character
+    // (e.g., \`([-_][a-z0-9]+)*\` — the inner always matches 2+).
+    const FLAG_PATTERNS = [
+      /\(([^)]*)\*\)[*+]/,    // (X*)* / (X*)+
+      /\(([^)]*)\?\)[*+]/,    // (X?)*
+      /\([^)|]*\|\)[*+]/,     // (X|)*
+      /\(\)[*+]/,             // ()*
+      /\(\?:\)\s*[*+]/,       // (?:)*
+      /\(\?:[^)]*\*\)[*+]/,   // (?:X*)*
+      /\(\?:[^)]*\?\)[*+]/,   // (?:X?)*
+      /\(\?:[^)|]*\|\)[*+]/,  // (?:X|)*
+    ]
+    if (FLAG_PATTERNS.some((p) => p.test(src))) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Empty string repetition in regex',

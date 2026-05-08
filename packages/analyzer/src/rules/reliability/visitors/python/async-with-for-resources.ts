@@ -24,13 +24,39 @@ export const pythonAsyncWithForResourcesVisitor: CodeRuleVisitor = {
 
     // Check if inside async with
     let current: SyntaxNode | null = node.parent
+    let enclosingFunc: SyntaxNode | null = null
     while (current) {
       if (current.type === 'with_statement') {
         // Check if it's an async with
         if (current.text.startsWith('async with')) return null
       }
-      if (current.type === 'function_definition') break
+      if (current.type === 'function_definition') {
+        enclosingFunc = current
+        break
+      }
       current = current.parent
+    }
+
+    // Skip async-generator dependency injectors:
+    //   async def get_client() -> AsyncIterator[X]:
+    //       client = httpx.AsyncClient(...)
+    //       try:
+    //           yield client
+    //       finally:
+    //           await client.aclose()
+    // The function uses \`yield\` and a try/finally with explicit
+    // close — \`async with\` cannot wrap a yield-then-cleanup
+    // generator pattern.
+    if (enclosingFunc) {
+      const body = enclosingFunc.childForFieldName('body')
+      if (body) {
+        const text = body.text
+        if (/\byield\b/.test(text) &&
+            /\bfinally\s*:/.test(text) &&
+            /\b(?:aclose|close|__aexit__)\b/.test(text)) {
+          return null
+        }
+      }
     }
 
     return makeViolation(

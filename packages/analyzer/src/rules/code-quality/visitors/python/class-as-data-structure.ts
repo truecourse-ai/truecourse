@@ -67,6 +67,25 @@ export const pythonClassAsDataStructureVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     if (isExceptionSubclass(node)) return null
 
+    // Skip when the class composes Mixin base classes — its
+    // methods come from the mixins, not from its own body, so
+    // it is NOT a data container.
+    {
+      const supers = node.childForFieldName('superclasses')
+      if (supers) {
+        let mixinCount = 0
+        for (const arg of supers.namedChildren) {
+          const text = arg.type === 'identifier' ? arg.text :
+            arg.type === 'attribute' ? arg.childForFieldName('attribute')?.text ?? '' :
+            ''
+          if (/Mixin$/.test(text) || /Provider$/.test(text) || /Service$/.test(text)) {
+            mixinCount++
+          }
+        }
+        if (mixinCount >= 1) return null
+      }
+    }
+
     const bodyNode = node.childForFieldName('body')
     if (!bodyNode) return null
 

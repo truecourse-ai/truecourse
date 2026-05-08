@@ -45,6 +45,13 @@ export const pythonIfElseInsteadOfTernaryVisitor: CodeRuleVisitor = {
     const condition = node.childForFieldName('condition')
     const condText = condition?.text || 'condition'
 
+    // Skip \`if TYPE_CHECKING:\` / \`if typing.TYPE_CHECKING:\` —
+    // runtime/typing dispatch idiom (different evaluation contexts:
+    // type-only on one side, runtime value on the other). Cannot
+    // be expressed as a ternary because the type-only branch
+    // wouldn't run at runtime.
+    if (/^(?:typing\.)?TYPE_CHECKING$/.test(condText)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'if-else block instead of ternary',

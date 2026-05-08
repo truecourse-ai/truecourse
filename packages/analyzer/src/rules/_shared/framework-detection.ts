@@ -221,7 +221,16 @@ export function isAuthMiddlewareName(name: string): boolean {
  */
 export function isRateLimitMiddlewareName(name: string): boolean {
   if (!name) return false
-  return /^(rateLimit(?:er|Middleware)?|RateLimiter|throttle|slowDown|requestThrottle)/i.test(name)
+  // Match \`rateLimit\` / \`rateLimiter\` / \`rateLimitMiddleware\`,
+  // \`RateLimiter\`, \`throttle\`, \`slowDown\`, \`requestThrottle\`,
+  // and project-local conventions like \`createRateLimitMiddleware\`,
+  // \`apiV1RateLimit\`, \`aiRateLimit\`, \`<x>RateLimit\`,
+  // \`<x>Throttle\`.
+  if (/^(rateLimit(?:er|Middleware)?|RateLimiter|throttle|slowDown|requestThrottle)/i.test(name)) return true
+  if (/RateLimit|RateLimiter/.test(name)) return true
+  if (/Throttle$/i.test(name)) return true
+  if (/^create(?:RateLimit|Throttle|SlowDown)/i.test(name)) return true
+  return false
 }
 
 /**
@@ -243,6 +252,9 @@ export function importsRateLimiter(node: SyntaxNode): boolean {
     ) {
       return true
     }
+    // Project-local rate-limit modules: any path containing
+    // \`rate-limit\` / \`ratelimit\` / \`throttle\` (case-insensitive).
+    if (/(?:[\\/]|^)(?:rate-limit|ratelimit|throttle)(?:[\\/]|\.|-|$)/i.test(src)) return true
   }
   return false
 }

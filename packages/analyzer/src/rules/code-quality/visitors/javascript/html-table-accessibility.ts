@@ -61,16 +61,29 @@ export const htmlTableAccessibilityVisitor: CodeRuleVisitor = {
     // S5256: <table> should have <th> or <thead>
     if (tagName === 'table') {
       // Skip generic reusable table wrapper components that receive {children}
-      // and pass content through — accessibility is the consumer's responsibility
+      // OR {...props} — accessibility is the consumer's responsibility.
       let ancestor: SyntaxNode | null = node.parent
       while (ancestor) {
         if (ancestor.type === 'function_declaration' || ancestor.type === 'arrow_function'
           || ancestor.type === 'function' || ancestor.type === 'method_definition') {
           const params = ancestor.childForFieldName('parameters')
-          if (params && params.text.includes('children')) return null
+          if (params) {
+            if (params.text.includes('children')) return null
+            // Spread props (\`{ ...props }\`) is the primitive-component pattern.
+            if (/\.\.\.[a-zA-Z_$][\w$]*/.test(params.text)) return null
+          }
           break
         }
         ancestor = ancestor.parent
+      }
+      // Also skip when the table has a JSX expression child (e.g.,
+      // \`{children}\`) — content is supplied by callers.
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const c = node.namedChild(i)
+        if (c?.type === 'jsx_expression') {
+          const expr = c.namedChild(0)
+          if (expr?.type === 'identifier' && expr.text === 'children') return null
+        }
       }
 
       if (!hasDescendantWithTag(node, 'th') && !hasDescendantWithTag(node, 'thead')) {
