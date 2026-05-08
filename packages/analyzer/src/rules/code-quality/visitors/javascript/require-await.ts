@@ -46,6 +46,20 @@ export const requireAwaitVisitor: CodeRuleVisitor = {
       p = p.parent
     }
 
+    // Skip async arrow functions whose body is a single
+    // expression (no statement_block) — `async (x) => fn(x)`,
+    // `async () => something`. The body's value is the return
+    // value, and writing `async` ensures the result is wrapped
+    // in `Promise<T>` even when the inner expression already is
+    // one. Removing `async` could change the public type
+    // signature of the function from `Promise<T>` to `T`. This
+    // pattern is common for inline middleware factories,
+    // sync→async adapters, and tap/passthrough helpers.
+    if (node.type === 'arrow_function') {
+      const body = node.childForFieldName('body')
+      if (body && body.type !== 'statement_block') return null
+    }
+
     // Skip async methods of a class that has an `implements` clause —
     // those are interface/contract implementations.
     if (node.type === 'method_definition') {
