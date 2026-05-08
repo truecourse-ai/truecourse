@@ -4676,7 +4676,15 @@ export const CODE_QUALITY_DETERMINISTIC_RULES: AnalysisRule[] = [
     domain: 'code-quality',
     name: 'React props not readonly',
     description: 'React props interface has mutable properties — should use readonly.',
-    enabled: true,
+    // Disabled by default: modern React/TS convention does NOT add
+    // explicit `readonly` to every Props field. React already treats
+    // props as immutable at runtime, and the ecosystem (Next.js,
+    // Remix, shadcn/ui, react-hook-form, etc.) consistently writes
+    // `interface XProps { foo: string }` without `readonly`. Firing
+    // this rule on a normal codebase produces hundreds of stylistic
+    // hits with zero bug value. Users who want this style can flip
+    // it on per-project.
+    enabled: false,
     severity: 'low',
     type: 'deterministic',
   },
