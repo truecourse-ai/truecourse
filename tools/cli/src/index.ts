@@ -294,8 +294,12 @@ autoCmd
     "--branch <name>",
     "Branch the hook should fire on (auto-detects from origin/HEAD if omitted)",
   )
-  .action(async (options: { branch?: string }) => {
-    await runAutoEnable({ branch: options.branch });
+  .option(
+    "--commit",
+    "After analyze, also commit .truecourse/LATEST.json on the trigger branch (no push). Skips when HEAD has diverged from origin/<branch>",
+  )
+  .action(async (options: { branch?: string; commit?: boolean }) => {
+    await runAutoEnable({ branch: options.branch, commit: options.commit });
   });
 
 autoCmd

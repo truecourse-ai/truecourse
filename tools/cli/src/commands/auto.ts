@@ -10,6 +10,7 @@ import { isInteractive } from "./helpers.js";
 
 const HOOK_IDENTIFIER = "# TrueCourse auto-mode hook";
 const BRANCH_MARKER = "# truecourse-branch:";
+const COMMIT_MARKER = "# truecourse-commit:";
 
 // `post-merge` covers `git pull` (default merge mode) and local merges.
 // `post-rewrite` covers `git pull --rebase` and `pull.rebase=true`. Both
@@ -23,11 +24,34 @@ type HookName = (typeof HOOK_NAMES)[number];
  * detecting at runtime via `origin/HEAD`) keeps the hook short and avoids
  * surprises when `origin/HEAD` is stale or unset. The trade-off is that
  * renaming the main branch later requires re-running `truecourse auto enable`.
+ *
+ * When `commit` is true, after analyze finishes the hook also tries to
+ * commit `.truecourse/LATEST.json` on the trigger branch — but only if
+ * `HEAD == origin/<branch>` (no local divergence) and the file actually
+ * changed. It never pushes; the user does that manually. This gating
+ * keeps a 3-dev race ("everyone pulled main at once") from producing
+ * conflicting local-main commits: first dev's commit advances HEAD past
+ * origin, and the others' gates fail safely on next pull.
  */
-function buildHookScript(branch: string): string {
+function buildHookScript(branch: string, commit: boolean): string {
+  const commitBlock = commit
+    ? `
+  cur=\$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || exit 0
+  [ "\$cur" = "${branch}" ] || exit 0
+  head_sha=\$(git rev-parse HEAD 2>/dev/null) || exit 0
+  upstream_sha=\$(git rev-parse "origin/${branch}" 2>/dev/null) || exit 0
+  [ "\$head_sha" = "\$upstream_sha" ] || exit 0
+  git add .truecourse/LATEST.json 2>/dev/null || exit 0
+  if git diff --cached --quiet -- .truecourse/LATEST.json 2>/dev/null; then
+    exit 0
+  fi
+  git commit -q -m "chore: refresh LATEST.json [truecourse auto]" -- .truecourse/LATEST.json 2>/dev/null || true`
+    : "";
+
   return `#!/bin/sh
 ${HOOK_IDENTIFIER}
 ${BRANCH_MARKER} ${branch}
+${COMMIT_MARKER} ${commit ? "yes" : "no"}
 # Installed by: truecourse auto enable
 # Disable with: truecourse auto disable
 #
@@ -49,7 +73,10 @@ else
 fi
 
 mkdir -p "\$repo_root/.truecourse/logs"
-( cd "\$repo_root" && nohup \$cmd analyze --no-llm --no-stash >> "\$repo_root/.truecourse/logs/auto.log" 2>&1 < /dev/null & )
+(
+  cd "\$repo_root" || exit 0
+  \$cmd analyze --no-llm --no-stash${commitBlock}
+) >> "\$repo_root/.truecourse/logs/auto.log" 2>&1 </dev/null &
 
 exit 0
 `;
@@ -63,6 +90,13 @@ function readHookBranch(content: string): string | null {
   if (!content.includes(HOOK_IDENTIFIER)) return null;
   const match = content.match(new RegExp(`^${BRANCH_MARKER} (.+)$`, "m"));
   return match ? match[1].trim() : null;
+}
+
+function readHookCommit(content: string): boolean | null {
+  if (!content.includes(HOOK_IDENTIFIER)) return null;
+  const match = content.match(new RegExp(`^${COMMIT_MARKER} (yes|no)$`, "m"));
+  if (!match) return null;
+  return match[1] === "yes";
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +253,7 @@ interface HookState {
   exists: boolean;
   ours: boolean;
   branch: string | null;
+  commit: boolean | null;
 }
 
 function inspectHooks(gitDir: string): HookState[] {
@@ -227,7 +262,7 @@ function inspectHooks(gitDir: string): HookState[] {
     const hookPath = path.join(hooksDir, name);
     const exists = fs.existsSync(hookPath);
     if (!exists) {
-      return { name, path: hookPath, exists, ours: false, branch: null };
+      return { name, path: hookPath, exists, ours: false, branch: null, commit: null };
     }
     const content = fs.readFileSync(hookPath, "utf-8");
     const ours = content.includes(HOOK_IDENTIFIER);
@@ -237,6 +272,7 @@ function inspectHooks(gitDir: string): HookState[] {
       exists,
       ours,
       branch: ours ? readHookBranch(content) : null,
+      commit: ours ? readHookCommit(content) : null,
     };
   });
 }
@@ -247,6 +283,7 @@ function inspectHooks(gitDir: string): HookState[] {
 
 interface AutoEnableOptions {
   branch?: string;
+  commit?: boolean;
 }
 
 export async function runAutoEnable(options: AutoEnableOptions = {}): Promise<void> {
@@ -273,19 +310,29 @@ export async function runAutoEnable(options: AutoEnableOptions = {}): Promise<vo
   }
 
   const branch = await resolveBranch(repoRoot, options.branch);
-  const script = buildHookScript(branch);
+  const commit = options.commit === true;
+  const script = buildHookScript(branch, commit);
 
   for (const state of states) {
     fs.writeFileSync(state.path, script, { mode: 0o755 });
   }
 
-  p.log.success(`TrueCourse auto mode enabled (trigger branch: ${branch}).`);
+  p.log.success(
+    `TrueCourse auto mode enabled (trigger branch: ${branch}, commit: ${commit ? "yes" : "no"}).`,
+  );
   for (const s of states) console.log(`  ${s.path}`);
   console.log(
     `\nWhen "${branch}" advances locally (merge or rebase), TrueCourse will run\n` +
       "`analyze --no-llm --no-stash` in the background.\n" +
       "Logs: .truecourse/logs/auto.log",
   );
+  if (commit) {
+    console.log(
+      "\nCommit mode is on — after analyze, the hook will commit\n" +
+        `\`.truecourse/LATEST.json\` on ${branch} if HEAD still equals origin/${branch}\n` +
+        "and the file actually changed. It does NOT push; that stays manual.",
+    );
+  }
 }
 
 export function runAutoDisable(): void {
@@ -313,10 +360,17 @@ export function runAutoStatus(): void {
   const branches = new Set(
     states.filter((s) => s.ours && s.branch).map((s) => s.branch as string),
   );
+  const commits = new Set(
+    states.filter((s) => s.ours && s.commit !== null).map((s) => s.commit as boolean),
+  );
+  const commitMode =
+    commits.size === 1 ? ([...commits][0] ? "yes" : "no") : "?";
 
   if (ourCount === states.length) {
     if (branches.size === 1) {
-      console.log(`TrueCourse auto mode: enabled (branch: ${[...branches][0]})`);
+      console.log(
+        `TrueCourse auto mode: enabled (branch: ${[...branches][0]}, commit: ${commitMode})`,
+      );
     } else if (branches.size > 1) {
       // Hooks pointing at different branches — half-installed state from a
       // partial reinstall. Show both so the user can fix.
@@ -338,7 +392,10 @@ export function runAutoStatus(): void {
   for (const s of states) {
     let tag: string;
     if (s.ours) {
-      tag = s.branch ? `TrueCourse (branch: ${s.branch})` : "TrueCourse";
+      const parts: string[] = [];
+      if (s.branch) parts.push(`branch: ${s.branch}`);
+      if (s.commit !== null) parts.push(`commit: ${s.commit ? "yes" : "no"}`);
+      tag = parts.length ? `TrueCourse (${parts.join(", ")})` : "TrueCourse";
     } else if (s.exists) {
       tag = "non-TrueCourse (will not be touched)";
     } else {

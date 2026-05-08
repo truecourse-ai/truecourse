@@ -13,6 +13,7 @@ import {
 const HOOK_NAMES = ['post-merge', 'post-rewrite'] as const;
 const IDENTIFIER = '# TrueCourse auto-mode hook';
 const BRANCH_MARKER = '# truecourse-branch:';
+const COMMIT_MARKER = '# truecourse-commit:';
 
 function initRepo(dir: string): void {
   execSync('git init -q', { cwd: dir });
@@ -182,13 +183,13 @@ describe('truecourse auto', () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('not enabled'));
   });
 
-  it('status surfaces the configured branch when enabled', async () => {
+  it('status surfaces the configured branch and commit mode when enabled', async () => {
     initRepo(repoDir);
     await runAutoEnable({ branch: 'develop' });
     logSpy.mockClear();
     runAutoStatus();
     expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('TrueCourse auto mode: enabled (branch: develop)'),
+      expect.stringContaining('branch: develop, commit: no'),
     );
   });
 
@@ -267,6 +268,168 @@ describe('truecourse auto', () => {
       // bounded poll
     }
     expect(fs.existsSync(marker)).toBe(true);
+
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // --commit mode
+  // -------------------------------------------------------------------------
+
+  /**
+   * Set up a repo with a fake `origin` remote pointing at itself, both main
+   * branches at the same SHA, and an initial committed `LATEST.json`. That
+   * gives the hook's commit gate (`HEAD == origin/main`) a defined baseline
+   * we can advance or diverge in each test.
+   */
+  function seedRepoWithOrigin(dir: string): void {
+    initRepo(dir);
+    fs.mkdirSync(path.join(dir, '.truecourse'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.truecourse', 'LATEST.json'), '{"v": 1}');
+    fs.writeFileSync(path.join(dir, 'README'), 'hello');
+    execSync('git add README .truecourse/LATEST.json', { cwd: dir });
+    execSync('git commit -q -m initial', { cwd: dir });
+    execSync('git branch -M main', { cwd: dir });
+    // Fake an origin/main ref pointing at HEAD by writing the packed ref
+    // directly. This lets `git rev-parse origin/main` resolve without an
+    // actual remote round-trip.
+    const sha = execSync('git rev-parse HEAD', { cwd: dir, encoding: 'utf-8' }).trim();
+    const remotesDir = path.join(dir, '.git', 'refs', 'remotes', 'origin');
+    fs.mkdirSync(remotesDir, { recursive: true });
+    fs.writeFileSync(path.join(remotesDir, 'main'), sha + '\n');
+  }
+
+  /**
+   * Build a stub `truecourse` that mutates LATEST.json (so a commit becomes
+   * possible) and a stub `npx` that just exits. We shadow both via PATH so
+   * the hook never reaches a real CLI.
+   */
+  function makeStubs(repoDir: string, mutateLatest: boolean): {
+    stubDir: string;
+    env: NodeJS.ProcessEnv;
+  } {
+    const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-auto-stub-'));
+    const truecourseStub = mutateLatest
+      ? `#!/bin/sh\nmkdir -p "${repoDir}/.truecourse"\necho "{\\"v\\": 2}" > "${repoDir}/.truecourse/LATEST.json"\nexit 0\n`
+      : `#!/bin/sh\nexit 0\n`;
+    fs.writeFileSync(path.join(stubDir, 'truecourse'), truecourseStub, { mode: 0o755 });
+    fs.writeFileSync(path.join(stubDir, 'npx'), `#!/bin/sh\nexit 0\n`, { mode: 0o755 });
+    const env = { ...process.env, PATH: `${stubDir}:${process.env.PATH}` };
+    return { stubDir, env };
+  }
+
+  /** Wait until the hook's background subshell finishes (analyze + commit). */
+  function awaitBackgroundDone(repoDir: string, deadlineMs = 3000): void {
+    const deadline = Date.now() + deadlineMs;
+    // The background subshell appends to auto.log; once HEAD advances or the
+    // log mentions completion we're done. Simpler: just poll for HEAD to
+    // change, with a short ceiling so we don't hang on a no-op test.
+    const startHead = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    while (Date.now() < deadline) {
+      const cur = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+      if (cur !== startHead) return;
+    }
+  }
+
+  it('enable --commit bakes the commit marker into the hook', async () => {
+    initRepo(repoDir);
+    await runAutoEnable({ branch: 'main', commit: true });
+    const content = fs.readFileSync(hookPath('post-merge'), 'utf-8');
+    expect(content).toContain(`${COMMIT_MARKER} yes`);
+    expect(content).toContain('git commit -q -m "chore: refresh LATEST.json [truecourse auto]"');
+  });
+
+  it('enable without --commit bakes commit:no and omits the commit block', async () => {
+    initRepo(repoDir);
+    await runAutoEnable({ branch: 'main' });
+    const content = fs.readFileSync(hookPath('post-merge'), 'utf-8');
+    expect(content).toContain(`${COMMIT_MARKER} no`);
+    expect(content).not.toContain('git commit');
+  });
+
+  it('status reports the commit mode', async () => {
+    initRepo(repoDir);
+    await runAutoEnable({ branch: 'main', commit: true });
+    logSpy.mockClear();
+    runAutoStatus();
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('commit: yes'),
+    );
+  });
+
+  it('hook commits LATEST.json when HEAD == origin/main and the file changed', async () => {
+    seedRepoWithOrigin(repoDir);
+    await runAutoEnable({ branch: 'main', commit: true });
+
+    const startHead = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    const { stubDir, env } = makeStubs(repoDir, /* mutateLatest */ true);
+
+    execSync(`sh ${hookPath('post-merge')}`, { cwd: repoDir, env });
+    awaitBackgroundDone(repoDir);
+
+    const endHead = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    expect(endHead).not.toBe(startHead);
+    const lastMsg = execSync('git log -1 --pretty=%s', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    expect(lastMsg).toContain('refresh LATEST.json');
+
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  });
+
+  it('hook skips commit when HEAD has diverged from origin/main', async () => {
+    seedRepoWithOrigin(repoDir);
+    await runAutoEnable({ branch: 'main', commit: true });
+
+    // Add a local commit so HEAD advances past origin/main — the gate must skip.
+    fs.writeFileSync(path.join(repoDir, 'extra.txt'), 'local');
+    execSync('git add extra.txt && git commit -q -m local', { cwd: repoDir });
+    const headBefore = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+
+    const { stubDir, env } = makeStubs(repoDir, /* mutateLatest */ true);
+    execSync(`sh ${hookPath('post-merge')}`, { cwd: repoDir, env });
+    // Give the background process time to either commit (bug) or skip (correct).
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) { /* settle */ }
+
+    const headAfter = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    expect(headAfter).toBe(headBefore);
+
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  });
+
+  it('hook skips commit when LATEST.json did not change', async () => {
+    seedRepoWithOrigin(repoDir);
+    await runAutoEnable({ branch: 'main', commit: true });
+
+    const headBefore = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    const { stubDir, env } = makeStubs(repoDir, /* mutateLatest */ false);
+
+    execSync(`sh ${hookPath('post-merge')}`, { cwd: repoDir, env });
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) { /* settle */ }
+
+    const headAfter = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    expect(headAfter).toBe(headBefore);
+
+    fs.rmSync(stubDir, { recursive: true, force: true });
+  });
+
+  it('hook skips commit when origin/<branch> ref is missing', async () => {
+    initRepo(repoDir);
+    seedMain(repoDir); // no origin remote at all
+    await runAutoEnable({ branch: 'main', commit: true });
+
+    fs.mkdirSync(path.join(repoDir, '.truecourse'), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, '.truecourse', 'LATEST.json'), '{"v": 1}');
+    execSync('git add .truecourse/LATEST.json && git commit -q -m baseline', { cwd: repoDir });
+    const headBefore = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+
+    const { stubDir, env } = makeStubs(repoDir, /* mutateLatest */ true);
+    execSync(`sh ${hookPath('post-merge')}`, { cwd: repoDir, env });
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) { /* settle */ }
+
+    const headAfter = execSync('git rev-parse HEAD', { cwd: repoDir, encoding: 'utf-8' }).trim();
+    expect(headAfter).toBe(headBefore);
 
     fs.rmSync(stubDir, { recursive: true, force: true });
   });
