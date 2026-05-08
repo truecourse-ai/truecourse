@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray } from './_helpers.js'
 
 export const duplicateStringVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/duplicate-string',
@@ -49,6 +50,16 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
         // somewhere in the file. The literal is type-bound; extracting
         // it would break narrowing.
         if (literalTypeMembers.has(content)) return
+
+        // Skip field-key arguments to form / storage / translation
+        // libraries.
+        if (isFieldKeyArgument(n)) return
+
+        // Skip subscript indexes: `obj['key']` (computed key access).
+        if (isSubscriptIndex(n)) return
+
+        // Skip strings that are members of `z.enum([...])` arrays.
+        if (isInZodEnumArray(n)) return
 
         const existing = stringCounts.get(content)
         if (existing) {

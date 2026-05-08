@@ -1,6 +1,7 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
+import { isFieldKeyArgument, isSubscriptIndex, isInZodEnumArray } from './_helpers.js'
 
 // Minimum string length to be considered "magic"
 const MIN_LENGTH = 4
@@ -27,6 +28,14 @@ export const magicStringVisitor: CodeRuleVisitor = {
           if (n.parent?.type === 'jsx_attribute') return
           // Skip strings inside JSX expression containers that are attribute values
           if (n.parent?.type === 'jsx_expression' && n.parent.parent?.type === 'jsx_attribute') return
+          // Skip schema-field-key argument calls — `form.setValue('teamUrl', …)`,
+          // `t('common.greeting')`, `localStorage.getItem('user')`. Repeating the
+          // key across call sites is structural, not a refactor candidate.
+          if (isFieldKeyArgument(n)) return
+          // Skip computed property subscript indexes: `obj['key']`.
+          if (isSubscriptIndex(n)) return
+          // Skip Zod enum array members: `z.enum(['OWNER', 'ADMIN'])`.
+          if (isInZodEnumArray(n)) return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
           // Only flag non-trivial strings
