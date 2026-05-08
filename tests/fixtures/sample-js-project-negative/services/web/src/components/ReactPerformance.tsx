@@ -13,7 +13,11 @@ export function InlineCallback({ items }: { items: string[] }) {
   return (
     <div>
       {items.map((item) => (
-        <ListItem key={item} onClick={() => console.log(item)} label={item} />
+        <ListItem key={item} onClick={() => {
+          console.log(item);
+          console.log('twice');
+          console.log('thrice');
+        }} label={item} />
       ))}
     </div>
   );

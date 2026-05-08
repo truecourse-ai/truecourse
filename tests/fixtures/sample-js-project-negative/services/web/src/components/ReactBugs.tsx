@@ -112,7 +112,11 @@ export function ListWithIndexKey({ items }: { items: string[] }) {
 
 // VIOLATION: performance/deterministic/inline-function-in-jsx-prop
 export function InlineCallback() {
-  return <ChildComponent onClick={() => console.log('click')} />;
+  return <ChildComponent onClick={() => {
+    console.log('click');
+    console.log('clicked twice');
+    console.log('and a third time for good measure');
+  }} />;
 }
 
 // VIOLATION: code-quality/deterministic/html-table-accessibility

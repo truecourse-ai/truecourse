@@ -1,6 +1,56 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { isLikelyServerComponent } from './_helpers.js'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
+
+/**
+ * True if the arrow function's body is a "trivial passthrough":
+ *   onCopy={() => onCopy()}                       — call expression
+ *   onCopy={() => onCopy('Local', local)}         — call with args
+ *   onMouseEnter={() => { ref.current = true; }}  — single ref/state
+ *   onClick={() => void asyncFn()}                — fire-and-forget
+ *
+ * These wrappers are typically argument adapters: each render
+ * creates a new closure over different local values, so
+ * `useCallback` wouldn't help (deps would change). The wrapper
+ * cost is one allocation per render — overwhelmingly cheaper
+ * than the prop-comparison cost users would pay to add
+ * memoization.
+ *
+ * Real targets for this rule are arrow functions with non-trivial
+ * bodies (multi-statement blocks, branching, loops) — those have
+ * meaningful render-time cost and benefit from extraction.
+ */
+function isTrivialArrowBody(body: SyntaxNode): boolean {
+  // Expression-bodied arrow: `() => expr`
+  if (body.type === 'call_expression') return true
+  if (body.type === 'await_expression') return true
+  if (body.type === 'unary_expression') {
+    // `() => void fn()` — `void` operator on a call is a fire-
+    // and-forget pattern.
+    const operand = body.namedChildren[0]
+    if (operand && operand.type === 'call_expression') return true
+  }
+  if (body.type === 'identifier' || body.type === 'member_expression') return true
+  if (body.type === 'assignment_expression') return true
+  // Block-bodied arrow: `() => { statement; }` — only when there's
+  // exactly one trivial statement.
+  if (body.type === 'statement_block') {
+    const stmts = body.namedChildren.filter((c) => c.type !== 'comment')
+    if (stmts.length === 0) return true
+    if (stmts.length > 1) return false
+    const only = stmts[0]
+    if (only.type === 'expression_statement') {
+      const inner = only.namedChildren[0]
+      if (inner) return isTrivialArrowBody(inner)
+    }
+    if (only.type === 'return_statement') {
+      const inner = only.namedChildren[0]
+      if (inner) return isTrivialArrowBody(inner)
+    }
+  }
+  return false
+}
 
 export const inlineFunctionInJsxPropVisitor: CodeRuleVisitor = {
   ruleKey: 'performance/deterministic/inline-function-in-jsx-prop',
@@ -42,6 +92,15 @@ export const inlineFunctionInJsxPropVisitor: CodeRuleVisitor = {
 
     // Arrow function: () => ...
     if (expr.type === 'arrow_function') {
+      // Skip trivial passthroughs (`() => onCopy()`,
+      // `() => void asyncFn()`, `() => { ref.current = true }`).
+      // These are argument adapters that close over local
+      // values; `useCallback` deps would change every render
+      // anyway, so extraction has no benefit. Real targets are
+      // multi-statement bodies with branching / loops.
+      const body = expr.childForFieldName('body')
+      if (body && isTrivialArrowBody(body)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Inline function in JSX prop',

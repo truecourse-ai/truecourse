@@ -45,13 +45,21 @@ export function Dashboard({ userId, refreshInterval }: DashboardProps) {
         <NotificationList
           userId={userId}
           // VIOLATION: performance/deterministic/inline-function-in-jsx-prop
-          onDismiss={(id: string) => fetch(`/api/notifications/${id}`, { method: 'DELETE' })}
+          onDismiss={(id: string) => {
+            void fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+            console.log('dismissed', id);
+            count = (count ?? 0) - 1;
+          }}
           // VIOLATION: performance/deterministic/inline-object-in-jsx-prop
           style={{ padding: 16, margin: 8 }}
         />
         <UserSearch
           // VIOLATION: performance/deterministic/inline-function-in-jsx-prop
-          onSearch={(query: string) => console.log('searching:', query)}
+          onSearch={(query: string) => {
+            if (!query) return;
+            console.log('searching:', query);
+            console.log('again');
+          }}
         />
       </div>
     </div>

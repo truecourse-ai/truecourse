@@ -24,9 +24,24 @@ describe('performance/deterministic/inline-function-in-jsx-prop', () => {
   const KEY = 'performance/deterministic/inline-function-in-jsx-prop';
 
   it('detects arrow function in JSX prop on custom component', () => {
-    const code = `const App = () => <MyButton onClick={() => doSomething()}>Click</MyButton>;`;
+    // Non-trivial body — multi-statement / branching. Trivial
+    // passthroughs like `() => fn()` are skipped because
+    // useCallback can't help when deps change every render.
+    const code = `const App = () => <MyButton onClick={() => { if (x) { doSomething(); doMore(); } }}>Click</MyButton>;`;
     const violations = only(check(code, 'tsx'), KEY);
     expect(violations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not flag trivial passthrough arrow', () => {
+    const code = `const App = () => <MyButton onClick={() => doSomething()}>Click</MyButton>;`;
+    const violations = only(check(code, 'tsx'), KEY);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('does not flag arrow with single argument-adapter call', () => {
+    const code = `const App = () => <MyButton onClick={() => onCopy('Local', value)}>Click</MyButton>;`;
+    const violations = only(check(code, 'tsx'), KEY);
+    expect(violations).toHaveLength(0);
   });
 
   it('detects .bind() in JSX prop on custom component', () => {
