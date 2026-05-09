@@ -14,10 +14,12 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/supertest": "^7.2.0",
     "esbuild": "^0.24.0",
     "express": "^4.22.1",
+    "js-yaml": "^4.1.0",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",
