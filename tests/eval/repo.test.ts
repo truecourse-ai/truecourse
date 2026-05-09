@@ -297,9 +297,16 @@ function writeReport(input: ReportInput): string {
       hit: x.slices.filter((s) => s.cache === 'hit').length,
       miss: x.slices.filter((s) => s.cache === 'miss').length,
     };
-    const failed = x.slices.filter((s) => s.cache === 'miss' && s.run && !s.run.result).length;
+    const failedSlices = x.slices.filter((s) => s.cache === 'miss' && s.run && !s.run.result);
     lines.push(`- **Slices**: ${x.slices.length} total · ${slicesByCache.hit} cache hits · ${slicesByCache.miss} fresh LLM calls`);
-    if (failed > 0) lines.push(`- **Slice failures**: ${failed}`);
+    if (failedSlices.length > 0) {
+      lines.push(`- **Slice failures**: ${failedSlices.length}`);
+      for (const f of failedSlices) {
+        const heading = f.slice.headingPath.join(' / ') || '(root)';
+        const err = f.run?.error ? oneLine(f.run.error) : '(no error message)';
+        lines.push(`  - \`${heading}\`: ${err}`);
+      }
+    }
     lines.push(`- **Wall time**: ${(input.extractTimeMs! / 1000).toFixed(1)}s`);
     lines.push(`- **Files written**: ${x.write.written.length}`);
     if (x.validationIssues.length > 0) {
