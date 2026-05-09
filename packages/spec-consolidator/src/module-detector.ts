@@ -201,14 +201,56 @@ function buildManifest(name: string, claims: Claim[]): ModuleManifest {
     }
   }
   const sourceDocs = uniqueSorted(allSources);
+  // Negative spec (B.9): claims tagged out-of-scope don't render as
+  // prose endpoints — they're structural, listed on the manifest so
+  // the verifier can flag the opposite drift (code shipped something
+  // the spec said was excluded). Status and scope inference still
+  // see ALL claims — a module with only OoS claims rightly bubbles
+  // status='out-of-scope' to the module level, and its scope is
+  // derived from the OoS paths so the manifest still has a target.
+  const outOfScope = claims
+    .filter((c) => c.metadata.status === 'out-of-scope')
+    .map((c) => ({
+      id: claimIdSlug(c),
+      reason: extractOutOfScopeReason(c),
+      source: `${c.provenance.file}:${c.provenance.line}`,
+    }));
+
   const status = inferModuleStatus(claims);
   const scope = inferScope(name, claims);
-  return {
+  const manifest: ModuleManifest = {
     name,
     status,
     sourceDocs,
     scope,
   };
+  if (outOfScope.length > 0) manifest.outOfScope = outOfScope;
+  return manifest;
+}
+
+/**
+ * Subject → slug for the manifest's `outOfScope` list. Strips the
+ * leading "<METHOD> /api/v1/..." form down to a path-only slug so
+ * the entry reads naturally in YAML.
+ */
+function claimIdSlug(claim: Claim): string {
+  const subject = claim.subject;
+  // Try to extract a path from the subject and slugify it.
+  const methodMatch = /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+(\/.+)$/i.exec(subject);
+  const path = methodMatch ? methodMatch[2] : subject;
+  return path.replace(/[^a-z0-9-/{}]+/gi, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Try to pull a reason from the LLM-supplied content. Many PRDs add
+ * a parenthesized reason next to each excluded item ("(no SQL yet)").
+ * Falls back to undefined when nothing's available.
+ */
+function extractOutOfScopeReason(claim: Claim): string | undefined {
+  if (!claim.content || typeof claim.content !== 'object') return undefined;
+  const obj = claim.content as Record<string, unknown>;
+  if (typeof obj.reason === 'string') return obj.reason;
+  return undefined;
 }
 
 /**
