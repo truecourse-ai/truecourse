@@ -6,15 +6,14 @@ type Cell = boolean | string;
 type Row = { feature: string; oss: Cell; teams: Cell; hint?: string };
 
 const ROWS: Row[] = [
-  { feature: '1,200+ deterministic checks', oss: true, teams: true },
-  { feature: '100 LLM-powered checks', oss: true, teams: true },
+  { feature: 'Deterministic checks', oss: true, teams: true },
+  { feature: 'LLM-powered checks', oss: true, teams: true },
   { feature: 'Local CLI &amp; dashboard', oss: true, teams: true },
   { feature: 'Diff mode (review only AI-changed lines)', oss: true, teams: true },
   { feature: 'Pre-commit hook', oss: true, teams: true },
   { feature: 'TS / JS / Python support', oss: true, teams: true },
   { feature: 'Per-repo config in git', oss: true, teams: true },
-  { feature: 'Hallucinated-API &amp; fabricated-import detection', oss: true, teams: true },
-  { feature: 'Business-logic drift detection', oss: 'CLI preview', teams: 'PR + dashboard' },
+  { feature: 'Business-logic drift detection', oss: true, teams: true },
   { feature: 'GitHub App (auto-review every PR)', oss: false, teams: true },
   { feature: 'Inline PR comments on findings', oss: false, teams: true },
   { feature: 'Merge-blocking on critical findings', oss: false, teams: true },

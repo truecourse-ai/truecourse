@@ -89,16 +89,14 @@ export function Capabilities() {
             The bugs your AI is shipping every day.
           </h2>
           <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            <span className="text-foreground">1,200+ deterministic checks</span> running
-            in milliseconds.{' '}
-            <span className="text-foreground">100 LLM-powered checks</span> for the
-            semantic depth pattern-matchers can&apos;t reach: intent matching,
-            business-logic drift, reasoning about side effects. Whether the change came
-            from a human or a model, TrueCourse holds it to the same standard.
+            Deterministic checks run in milliseconds. LLM-powered checks add the semantic
+            depth pattern-matchers can&apos;t reach: intent matching, business-logic
+            drift, reasoning about side effects. Whether the change came from a human
+            or a model, TrueCourse holds it to the same standard.
           </p>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {CATEGORIES.map((cat, i) => (
             <CategoryCard key={cat.title} cat={cat} delayMs={i * 60} />
           ))}
@@ -115,7 +113,7 @@ function CategoryCard({ cat, delayMs }: { cat: Category; delayMs: number }) {
       ref={ref}
       style={{ ['--delay' as string]: `${delayMs}ms` }}
       className={cn(
-        'reveal group relative bg-background p-6 transition-colors hover:bg-card',
+        'reveal surface-hover group relative rounded-2xl border border-border bg-card/40 p-6 transition-colors hover:border-border-strong hover:bg-card',
         visible && 'visible',
       )}
     >
