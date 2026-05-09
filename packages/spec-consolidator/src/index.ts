@@ -43,3 +43,17 @@ export type { DocCandidate, DiscoveryOptions } from './discovery.js';
 
 export { sliceDoc } from './slicer.js';
 export type { Block } from './slicer.js';
+
+export { spawnRunner, defaultConcurrency } from './runner.js';
+export type { BlockRunner, BlockRunResult, SpawnRunnerOptions } from './runner.js';
+
+export {
+  SYSTEM_PROMPT,
+  buildUserPrompt,
+  LlmExtractionSchema,
+  LlmClaimSchema,
+} from './prompt.js';
+export type { LlmExtraction, LlmClaim } from './prompt.js';
+
+export { extractClaims } from './extractor.js';
+export type { ExtractOptions, ExtractResult } from './extractor.js';
