@@ -43,6 +43,13 @@ export interface ExtractedOperation {
   filePath: string;
   declarationLine: number;
   /**
+   * The local identifier of the router/app the route was registered on
+   * (`router`, `healthRouter`, `app`, …). Empty when the receiver is
+   * not a plain identifier — e.g. `getRouter().get(...)`. Used by the
+   * mount-graph resolver to compose full URLs across files.
+   */
+  routerName?: string;
+  /**
    * Code-side observations about the handler — used by cross-cutting
    * comparators (PaginationContract, AuthRequirement) that need facts
    * the OperationContract proper doesn't carry.
@@ -158,6 +165,15 @@ function tryExtractRouteCall(
   const method = sliceText(property, source).toLowerCase();
   if (!HTTP_METHODS.has(method)) return null;
 
+  // Receiver — the router/app identifier the route is registered on.
+  // Only captured when it's a plain identifier; computed receivers
+  // (`getRouter().get(...)`, `obj.api.get(...)`) leave routerName unset
+  // and the route falls through to the relative-path fallback in the
+  // mount-graph resolver.
+  const receiver = callee.childForFieldName('object');
+  const routerName =
+    receiver?.type === 'identifier' ? sliceText(receiver, source) : undefined;
+
   // Path is the first arg, must be a string literal.
   const firstArg = args.namedChild(0);
   if (!firstArg) return null;
@@ -193,6 +209,7 @@ function tryExtractRouteCall(
     },
     filePath,
     declarationLine: call.startPosition.row + 1,
+    routerName,
     observed,
     handlerBody: bodyToWalk,
     handlerSource: source,
