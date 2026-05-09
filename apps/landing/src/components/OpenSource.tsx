@@ -1,25 +1,48 @@
-import {
-  ArrowRight,
-  Check,
-  FileCode2,
-  GitPullRequest,
-  Github,
-  Server,
-  Star,
-  Terminal,
-} from 'lucide-react';
+import { ArrowRight, Check, Github, Minus, Star } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
 
-const FEATURES = [
-  'CLI: analyze, list, diff, hooks, rules',
-  'Diff mode that scopes review to the lines AI just changed',
-  'Pre-commit hook that blocks new high-severity findings',
-  'Per-repo rule toggles committed in .truecourse/config.json',
-  'Tree-sitter AST + Claude Code LLM-powered checks',
-  'Business-logic drift detection (preview)',
-  'TypeScript, JavaScript, Python (more languages coming)',
-  'Claude Code Skills for conversational review',
+type Cell = 'yes' | 'no' | 'partial' | string;
+
+type Row = { capability: string; tc: Cell; eslint: Cell; sonar: Cell };
+
+const ROWS: Row[] = [
+  {
+    capability: 'AI-aware (hallucinated APIs, fabricated imports)',
+    tc: 'yes',
+    eslint: 'no',
+    sonar: 'no',
+  },
+  {
+    capability: 'Cross-file architecture (circular deps, layer violations)',
+    tc: 'yes',
+    eslint: 'no',
+    sonar: 'partial',
+  },
+  {
+    capability: 'Business-logic drift detection',
+    tc: 'Preview',
+    eslint: 'no',
+    sonar: 'no',
+  },
+  {
+    capability: 'Setup',
+    tc: 'npx, zero config',
+    eslint: 'Config + plugins',
+    sonar: 'Server install',
+  },
+  {
+    capability: 'Where your code runs',
+    tc: 'Local',
+    eslint: 'Local',
+    sonar: 'Server / SaaS',
+  },
+  {
+    capability: 'License',
+    tc: 'MIT',
+    eslint: 'MIT',
+    sonar: 'LGPL',
+  },
 ];
 
 export function OpenSource() {
@@ -48,12 +71,12 @@ export function OpenSource() {
 
             {/* Install */}
             <div className="mt-8 space-y-3">
-              <CommandRow
-                label="One-shot analyze"
-                cmd="npx truecourse analyze"
-              />
+              <CommandRow label="One-shot analyze" cmd="npx truecourse analyze" />
               <CommandRow label="Open the dashboard" cmd="npx truecourse dashboard" />
-              <CommandRow label="Install the pre-commit hook" cmd="truecourse hooks install" />
+              <CommandRow
+                label="Install the pre-commit hook"
+                cmd="truecourse hooks install"
+              />
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -82,51 +105,98 @@ export function OpenSource() {
             </div>
           </div>
 
-          {/* Right: feature checklist + stats card */}
+          {/* Right: comparison table */}
           <div
             ref={right.ref}
             style={{ ['--delay' as string]: '120ms' }}
-            className={cn('reveal grid gap-4', right.visible && 'visible')}
+            className={cn('reveal', right.visible && 'visible')}
           >
-            <div className="surface rounded-2xl border border-border p-6">
-              <div className="grid grid-cols-3 gap-4">
-                <Stat icon={FileCode2} label="Files / sec" value="~300" />
-                <Stat icon={Server} label="No backend" value="Local" />
-                <Stat icon={GitPullRequest} label="PR-aware" value="Diff" />
+            <div className="surface overflow-hidden rounded-2xl border border-border">
+              {/* Header row */}
+              <div className="grid grid-cols-[1.5fr_repeat(3,1fr)] border-b border-border bg-background/30">
+                <div className="px-4 py-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  Capability
+                </div>
+                <ColHead label="TrueCourse" highlight />
+                <ColHead label="ESLint / Pylint" />
+                <ColHead label="SonarQube" />
               </div>
 
-              <div className="mt-6 grid gap-2.5 sm:grid-cols-2">
-                {FEATURES.map((line) => (
-                  <div
-                    key={line}
-                    className="flex items-start gap-2.5 rounded-lg border border-border bg-background/40 p-3 text-sm text-muted-foreground transition-colors hover:border-border-strong"
-                  >
-                    <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
-                      <Check className="h-2.5 w-2.5" />
-                    </span>
-                    <span>{line}</span>
+              {/* Rows */}
+              {ROWS.map((row, i) => (
+                <div
+                  key={row.capability}
+                  className={cn(
+                    'grid grid-cols-[1.5fr_repeat(3,1fr)] items-center text-sm transition-colors hover:bg-muted/15',
+                    i !== ROWS.length - 1 && 'border-b border-border',
+                  )}
+                >
+                  <div className="px-4 py-3 text-[12.5px] text-foreground/90">
+                    {row.capability}
                   </div>
-                ))}
-              </div>
+                  <CellView value={row.tc} highlight />
+                  <CellView value={row.eslint} />
+                  <CellView value={row.sonar} />
+                </div>
+              ))}
             </div>
-
-            <div className="surface flex items-start gap-3 rounded-2xl border border-border p-5">
-              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-accent">
-                <Terminal className="h-4 w-4" />
-              </span>
-              <div className="text-sm leading-relaxed text-muted-foreground">
-                <p className="font-medium text-foreground">Designed for the terminal first.</p>
-                <p className="mt-1">
-                  The dashboard is optional. <code className="font-mono text-xs text-foreground">truecourse list</code>{' '}
-                  prints findings the way <code className="font-mono text-xs text-foreground">grep</code> would:
-                  fast, scriptable, CI-friendly.
-                </p>
-              </div>
-            </div>
+            <p className="mt-3 text-center text-[11px] text-muted-foreground">
+              Comparison is illustrative; mileage varies by configuration. Run TrueCourse
+              alongside what you already use.
+            </p>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function ColHead({ label, highlight }: { label: string; highlight?: boolean }) {
+  return (
+    <div className="border-l border-border px-3 py-3 text-center">
+      <div
+        className={cn(
+          'text-[11px] font-semibold',
+          highlight ? 'text-accent' : 'text-foreground/80',
+        )}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function CellView({ value, highlight }: { value: Cell; highlight?: boolean }) {
+  return (
+    <div className="flex items-center justify-center border-l border-border px-3 py-3">
+      {value === 'yes' ? (
+        <span
+          className={cn(
+            'inline-flex h-5 w-5 items-center justify-center rounded-full ring-1 ring-inset',
+            highlight
+              ? 'bg-accent/15 text-accent ring-accent/30'
+              : 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/25',
+          )}
+        >
+          <Check className="h-3 w-3" />
+        </span>
+      ) : value === 'no' ? (
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/70 ring-1 ring-inset ring-border">
+          <Minus className="h-3 w-3" />
+        </span>
+      ) : value === 'partial' ? (
+        <span className="text-[11px] text-amber-300/90">Some</span>
+      ) : (
+        <span
+          className={cn(
+            'text-center text-[11px] leading-tight',
+            highlight ? 'text-accent' : 'text-muted-foreground',
+          )}
+        >
+          {value}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -149,26 +219,6 @@ function CommandRow({ label, cmd }: { label: string; cmd: string }) {
       >
         Copy
       </button>
-    </div>
-  );
-}
-
-function Stat({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof FileCode2;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-background/40 p-4">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Icon className="h-4 w-4" />
-        <span className="text-[11px] uppercase tracking-wider">{label}</span>
-      </div>
-      <div className="mt-2 font-mono text-xl font-medium">{value}</div>
     </div>
   );
 }
