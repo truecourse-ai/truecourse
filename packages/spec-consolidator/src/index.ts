@@ -57,3 +57,6 @@ export type { LlmExtraction, LlmClaim } from './prompt.js';
 
 export { extractClaims } from './extractor.js';
 export type { ExtractOptions, ExtractResult } from './extractor.js';
+
+export { mergeClaims, candidateFingerprint } from './merger.js';
+export type { MergeResult, DecidedConflict } from './merger.js';
