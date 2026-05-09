@@ -338,14 +338,16 @@ describe('fixture: sample-multi-doc-spec — scan mode', () => {
     });
 
     const conflictSubjects = result.merge.openConflicts.map((c) => c.subject).sort();
-    // POST /api/v1/orders → 200 vs 201
-    // GET /api/v1/orders → with/without nextCursor
-    // auth scheme → 4 claims, 2 distinct contents → 1 conflict
-    expect(conflictSubjects).toEqual([
-      'GET /api/v1/orders',
-      'POST /api/v1/orders',
-      'auth scheme',
-    ]);
+    // The PRDv1 → PRDv2 version chain shows up as one conflict
+    // (B.8). On top of that, three content conflicts surface:
+    //   - POST /api/v1/orders   → 200 vs 201
+    //   - GET /api/v1/orders    → with/without nextCursor
+    //   - auth scheme           → 4 claims, 2 distinct contents
+    expect(conflictSubjects).toHaveLength(4);
+    expect(conflictSubjects).toContain('GET /api/v1/orders');
+    expect(conflictSubjects).toContain('POST /api/v1/orders');
+    expect(conflictSubjects).toContain('auth scheme');
+    expect(conflictSubjects.some((s) => s.startsWith('version chain:'))).toBe(true);
 
     // Singleton claims that didn't conflict:
     const resolvedSubjects = result.merge.resolvedClaims.map((c) => c.subject).sort();
@@ -394,22 +396,45 @@ describe('fixture: sample-multi-doc-spec — scan mode', () => {
 
 describe('fixture: sample-multi-doc-spec — apply mode', () => {
   it('writes a canonical spec tree honoring resolved decisions', async () => {
-    const scan = await consolidate(workRoot, {
+    // Round 1: resolve all conflicts surfaced by the initial scan.
+    // The version chain (B.8) and the four-candidate auth-scheme
+    // conflict are both in this list. Picking the chain's default
+    // (newest = PRDv2) drops PRDv1's claims at the next scan, which
+    // changes the auth conflict's candidate set (4 → 3) and so
+    // produces a new conflict id (Q13 behavior — stale decisions
+    // don't silently apply).
+    const scan1 = await consolidate(workRoot, {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
     });
-    // Resolve every open conflict to its default pick (Q7: pre-pick + accept).
-    const decisions: DecisionsFile = {
-      version: 1,
-      decisions: scan.merge.openConflicts.map((c) => ({
+    const round1Decisions = scan1.merge.openConflicts.map((c) => ({
+      conflictId: c.id,
+      resolution: { kind: 'pick' as const, candidateIndex: c.defaultPick },
+      resolvedAt: '2026-05-09T00:00:00Z',
+      candidateFingerprint: candidateFingerprint(c),
+    }));
+    writeDecisions(workRoot, { version: 1, decisions: round1Decisions });
+
+    // Round 2: re-scan to see what's still pending. The chain decision
+    // is honored; the auth-scheme conflict re-surfaces under a new id
+    // (3 candidates instead of 4). User accepts the new default.
+    const scan2 = await consolidate(workRoot, {
+      materialize: false,
+      blockRunner: fixtureRunner(),
+      skipGit: true,
+    });
+    expect(scan2.merge.openConflicts.length).toBeGreaterThanOrEqual(1);
+    const round2Decisions = [
+      ...round1Decisions,
+      ...scan2.merge.openConflicts.map((c) => ({
         conflictId: c.id,
-        resolution: { kind: 'pick', candidateIndex: c.defaultPick },
+        resolution: { kind: 'pick' as const, candidateIndex: c.defaultPick },
         resolvedAt: '2026-05-09T00:00:00Z',
         candidateFingerprint: candidateFingerprint(c),
       })),
-    };
-    writeDecisions(workRoot, decisions);
+    ];
+    writeDecisions(workRoot, { version: 1, decisions: round2Decisions });
 
     const apply = await consolidate(workRoot, {
       materialize: true,

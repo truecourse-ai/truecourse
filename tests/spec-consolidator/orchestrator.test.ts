@@ -158,11 +158,15 @@ describe('consolidate — scan mode', () => {
       skipGit: true,
     });
 
-    expect(result.merge.openConflicts).toHaveLength(1);
-    expect(result.merge.openConflicts[0].subject).toBe('POST /api/v1/orders');
-    // /health agrees across both PRDs → auto-merged
-    expect(result.merge.resolvedClaims.some((c) => c.subject === 'GET /health')).toBe(true);
+    // Two conflicts now: the version chain (filename-detected
+    // PRDv1 → PRDv2) and the orders content conflict (200 vs 201).
+    // /health agrees across both PRDs → auto-merged.
+    expect(result.merge.openConflicts).toHaveLength(2);
+    const subjects = result.merge.openConflicts.map((c) => c.subject).sort();
+    expect(subjects).toContain('POST /api/v1/orders');
+    expect(subjects.some((s) => s.startsWith('version chain:'))).toBe(true);
 
+    expect(result.merge.resolvedClaims.some((c) => c.subject === 'GET /health')).toBe(true);
     // No canonical spec written.
     expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules'))).toBe(false);
   });
@@ -172,23 +176,23 @@ describe('consolidate — apply mode', () => {
   it('writes the canonical spec file tree honoring decisions.json', async () => {
     buildMiniRepo();
 
-    // First run: scan to discover the conflict id.
+    // First run: scan to discover the conflict ids.
     const scan = await consolidate(repo, {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
     });
-    const conflict = scan.merge.openConflicts[0];
-
-    // User picks the v2 candidate (the newer one).
+    // Resolve every open conflict to its default pick. The chain
+    // resolution (v2 supersedes v1) makes the content conflict
+    // disappear because v1's claims are dropped before merging.
     const decisions: DecisionsFile = {
       version: 1,
-      decisions: [{
-        conflictId: conflict.id,
-        resolution: { kind: 'pick', candidateIndex: conflict.defaultPick },
+      decisions: scan.merge.openConflicts.map((c) => ({
+        conflictId: c.id,
+        resolution: { kind: 'pick', candidateIndex: c.defaultPick },
         resolvedAt: '2026-05-01T00:00:00Z',
-        candidateFingerprint: candidateFingerprint(conflict),
-      }],
+        candidateFingerprint: candidateFingerprint(c),
+      })),
     };
     writeDecisions(repo, decisions);
 
@@ -201,7 +205,6 @@ describe('consolidate — apply mode', () => {
     });
 
     expect(apply.merge.openConflicts).toEqual([]);
-    expect(apply.merge.decidedConflicts).toHaveLength(1);
     expect(apply.materialize?.failures).toEqual([]);
 
     // Canonical spec landed.
@@ -210,9 +213,8 @@ describe('consolidate — apply mode', () => {
     expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules/health/module.yaml'))).toBe(true);
     expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules/health/endpoints.md'))).toBe(true);
 
-    // Orders module: user picked v2, so v1 is rejected — only v2 is
-    // a source. The /health module is auto-merged across both PRDs
-    // (no conflict), so its manifest lists both.
+    // With the chain resolved (v2 wins), v1's claims are dropped
+    // before merge. Both modules' manifests reflect v2 only.
     const ordersManifest = yaml.load(
       fs.readFileSync(path.join(repo, '.truecourse/spec/modules/orders/module.yaml'), 'utf-8'),
     ) as Record<string, unknown>;
@@ -222,9 +224,7 @@ describe('consolidate — apply mode', () => {
     const healthManifest = yaml.load(
       fs.readFileSync(path.join(repo, '.truecourse/spec/modules/health/module.yaml'), 'utf-8'),
     ) as Record<string, unknown>;
-    expect(healthManifest.sourceDocs).toEqual(
-      expect.arrayContaining(['docs/PRDs/backend_PRDv1.md', 'docs/PRDs/backend_PRDv2.md']),
-    );
+    expect(healthManifest.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
 
     // The orders endpoint section's content reflects what the section
     // runner was given — and the merger fed it the picked v2 claim.
