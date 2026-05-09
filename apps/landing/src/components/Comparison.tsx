@@ -13,7 +13,6 @@ const ROWS: Row[] = [
   { feature: 'Pre-commit hook', oss: true, teams: true },
   { feature: 'TS / JS / Python support', oss: true, teams: true },
   { feature: 'Per-repo config in git', oss: true, teams: true },
-  { feature: 'Hallucinated-API &amp; fabricated-import detection', oss: true, teams: true },
   { feature: 'Business-logic drift detection', oss: 'CLI preview', teams: 'PR + dashboard' },
   { feature: 'GitHub App (auto-review every PR)', oss: false, teams: true },
   { feature: 'Inline PR comments on findings', oss: false, teams: true },
