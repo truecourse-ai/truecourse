@@ -1,0 +1,272 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: dark;
+
+  --background: oklch(0.115 0.025 255);
+  --background-deep: oklch(0.085 0.025 258);
+  --background-soft: oklch(0.16 0.03 255);
+  --foreground: oklch(0.97 0.005 90);
+  --muted: oklch(0.20 0.025 255);
+  --muted-foreground: oklch(0.66 0.02 250);
+  --border: oklch(1 0 0 / 7%);
+  --border-strong: oklch(1 0 0 / 14%);
+  --card: oklch(0.145 0.028 255 / 75%);
+  --card-foreground: oklch(0.97 0.005 90);
+  --primary: oklch(0.78 0.10 245);
+  --primary-foreground: oklch(0.10 0.02 250);
+  --accent: oklch(0.80 0.09 245);
+  --ring: oklch(0.78 0.10 245);
+}
+
+@theme inline {
+  --font-sans: 'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-ring: var(--ring);
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.75rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: oklch(0.78 0.10 245 / 35%);
+    color: var(--foreground);
+  }
+}
+
+/* ----- Background grid + glow (monochrome blue, matches palette) ----- */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: -1px -1px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 80%);
+}
+
+.bg-radial-glow {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.55 0.15 245 / 38%), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 30%, oklch(0.50 0.10 240 / 18%), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 10% 40%, oklch(0.50 0.10 255 / 14%), transparent 70%);
+}
+
+/* ----- Gradient text (monochrome blue family) ----- */
+.text-gradient {
+  background: linear-gradient(
+    180deg,
+    oklch(0.99 0 0) 0%,
+    oklch(0.99 0 0) 40%,
+    oklch(0.78 0.05 245) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.text-gradient-accent {
+  background: linear-gradient(
+    90deg,
+    oklch(0.86 0.10 235) 0%,
+    oklch(0.78 0.10 245) 50%,
+    oklch(0.70 0.12 255) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ----- Glow border (shimmering accent ring) ----- */
+.glow-border {
+  position: relative;
+}
+.glow-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    oklch(0.78 0.10 245 / 45%),
+    oklch(0.78 0.10 245 / 18%) 35%,
+    transparent 65%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ----- Card surface ----- */
+.surface {
+  background:
+    linear-gradient(180deg, oklch(1 0 0 / 3%), oklch(1 0 0 / 0%)),
+    var(--card);
+  backdrop-filter: blur(8px);
+}
+
+.surface-hover {
+  transition:
+    border-color 200ms ease,
+    transform 200ms ease,
+    background 200ms ease;
+}
+.surface-hover:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  background:
+    linear-gradient(180deg, oklch(1 0 0 / 5%), oklch(1 0 0 / 0%)),
+    var(--card);
+}
+
+/* ----- Entrance animations ----- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  opacity: 0;
+  animation: fade-up 720ms cubic-bezier(0.16, 0.84, 0.3, 1) forwards;
+  animation-delay: var(--delay, 0ms);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-in {
+  opacity: 0;
+  animation: fade-in 900ms ease forwards;
+  animation-delay: var(--delay, 0ms);
+}
+
+/* Reveal-on-scroll: hidden by default, .visible class triggers transition */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity 700ms cubic-bezier(0.16, 0.84, 0.3, 1),
+    transform 700ms cubic-bezier(0.16, 0.84, 0.3, 1);
+  transition-delay: var(--delay, 0ms);
+  will-change: opacity, transform;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Blinking caret for terminal mock */
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.animate-blink {
+  animation: blink 1s steps(2, start) infinite;
+}
+
+/* Subtle pulsing ring for "new" pill */
+@keyframes pulse-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 oklch(0.78 0.10 245 / 0%),
+      0 0 0 0 oklch(0.78 0.10 245 / 0%);
+  }
+  50% {
+    box-shadow:
+      0 0 0 5px oklch(0.78 0.10 245 / 14%),
+      0 0 22px 0 oklch(0.78 0.10 245 / 22%);
+  }
+}
+.animate-pulse-ring {
+  animation: pulse-ring 3s ease-in-out infinite;
+}
+
+/* Severity bar fill */
+.severity-fill {
+  width: 0;
+  transition: width 900ms cubic-bezier(0.16, 0.84, 0.3, 1);
+  transition-delay: var(--delay, 0ms);
+}
+
+/* ----- Scrollbar ----- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 8%);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(1 0 0 / 18%);
+}
+
+/* ----- Reduced motion ----- */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .animate-fade-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .animate-blink,
+  .animate-pulse-ring,
+  .severity-fill {
+    animation: none !important;
+    transition: none !important;
+  }
+}

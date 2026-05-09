@@ -3,6 +3,10 @@ dist/
 .next/
 .turbo/
 .env
+.env.local
+.env.development.local
+.env.production.local
+.vercel/
 *.log
 .DS_Store
 coverage/

@@ -9,6 +9,7 @@
 
 - `apps/dashboard/client/` — Vite + React Router frontend (React Flow graph, Tailwind CSS, dark mode)
 - `apps/dashboard/server/` — Express + Socket.io HTTP layer that serves the dashboard. Thin adapter over `@truecourse/core`; contains routes, sockets, middleware, and dashboard-only services (analytics, watcher, telemetry).
+- `apps/landing/` — Public marketing site (Vite + React + Tailwind v4). Standalone, deployed separately from the local dashboard. `pnpm --filter @truecourse/landing dev` runs it on port 3100. Sample OSS analysis reports live in `apps/landing/src/data/analyses.ts`.
 - `packages/core/` — Framework-agnostic analysis engine: pipeline, graph/flow services, LLM providers, persistence (analysis-store), config, logger, errors. Consumed by both the CLI and the dashboard server.
 - `packages/analyzer/` — Tree-sitter (WASM via `web-tree-sitter`) + TypeScript Compiler analysis engine (TS/JS/Python)
 - `packages/shared/` — Shared Zod schemas and TypeScript types
