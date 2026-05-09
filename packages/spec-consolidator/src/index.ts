@@ -74,3 +74,19 @@ export type {
 
 export { materializeSpec } from './materializer.js';
 export type { MaterializeOptions, MaterializeResult } from './materializer.js';
+
+export {
+  cachePaths,
+  ensureCacheDirs,
+  readBlockCache,
+  writeBlockCache,
+  sectionId,
+  readSectionCache,
+  writeSectionCache,
+} from './cache.js';
+export type {
+  CachePaths,
+  BlockCacheEntry,
+  SectionCacheEntry,
+  SectionCacheKey,
+} from './cache.js';
