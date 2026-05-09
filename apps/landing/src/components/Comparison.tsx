@@ -6,8 +6,8 @@ type Cell = boolean | string;
 type Row = { feature: string; oss: Cell; teams: Cell; hint?: string };
 
 const ROWS: Row[] = [
-  { feature: '1,200+ deterministic checks', oss: true, teams: true },
-  { feature: '100 LLM-powered checks', oss: true, teams: true },
+  { feature: 'Deterministic checks', oss: true, teams: true },
+  { feature: 'LLM-powered checks', oss: true, teams: true },
   { feature: 'Local CLI &amp; dashboard', oss: true, teams: true },
   { feature: 'Diff mode (review only AI-changed lines)', oss: true, teams: true },
   { feature: 'Pre-commit hook', oss: true, teams: true },

@@ -89,12 +89,10 @@ export function Capabilities() {
             The bugs your AI is shipping every day.
           </h2>
           <p className="mt-4 text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-            <span className="text-foreground">1,200+ deterministic checks</span> running
-            in milliseconds.{' '}
-            <span className="text-foreground">100 LLM-powered checks</span> for the
-            semantic depth pattern-matchers can&apos;t reach: intent matching,
-            business-logic drift, reasoning about side effects. Whether the change came
-            from a human or a model, TrueCourse holds it to the same standard.
+            Deterministic checks run in milliseconds. LLM-powered checks add the semantic
+            depth pattern-matchers can&apos;t reach: intent matching, business-logic
+            drift, reasoning about side effects. Whether the change came from a human
+            or a model, TrueCourse holds it to the same standard.
           </p>
         </div>
 
