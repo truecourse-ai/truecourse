@@ -1,49 +1,6 @@
-import { ArrowRight, Check, Github, Minus, Star } from 'lucide-react';
+import { ArrowRight, Check, Github, Star } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
-
-type Cell = 'yes' | 'no' | 'partial' | string;
-
-type Row = { capability: string; tc: Cell; eslint: Cell; sonar: Cell };
-
-const ROWS: Row[] = [
-  {
-    capability: 'AI-aware (hallucinated APIs, fabricated imports)',
-    tc: 'yes',
-    eslint: 'no',
-    sonar: 'no',
-  },
-  {
-    capability: 'Cross-file architecture (circular deps, layer violations)',
-    tc: 'yes',
-    eslint: 'no',
-    sonar: 'partial',
-  },
-  {
-    capability: 'Business-logic drift detection',
-    tc: 'Preview',
-    eslint: 'no',
-    sonar: 'no',
-  },
-  {
-    capability: 'Setup',
-    tc: 'npx, zero config',
-    eslint: 'Config + plugins',
-    sonar: 'Server install',
-  },
-  {
-    capability: 'Where your code runs',
-    tc: 'Local',
-    eslint: 'Local',
-    sonar: 'Server / SaaS',
-  },
-  {
-    capability: 'License',
-    tc: 'MIT',
-    eslint: 'MIT',
-    sonar: 'LGPL',
-  },
-];
 
 export function OpenSource() {
   const left = useReveal<HTMLDivElement>();
@@ -51,7 +8,7 @@ export function OpenSource() {
   return (
     <section id="open-source" className="relative border-b border-border py-24 sm:py-32">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="grid gap-12 lg:grid-cols-[1fr_1.05fr] lg:gap-16">
+        <div className="grid gap-12 lg:grid-cols-[1fr_1fr] lg:gap-16">
           {/* Left: pitch */}
           <div ref={left.ref} className={cn('reveal', left.visible && 'visible')}>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
@@ -68,9 +25,15 @@ export function OpenSource() {
               your business-logic specs never leave your machine unless you explicitly
               enable LLM checks.
             </p>
+          </div>
 
-            {/* Install */}
-            <div className="mt-8 space-y-3">
+          {/* Right: install commands + GitHub / npm CTAs */}
+          <div
+            ref={right.ref}
+            style={{ ['--delay' as string]: '120ms' }}
+            className={cn('reveal', right.visible && 'visible')}
+          >
+            <div className="space-y-3">
               <CommandRow label="One-shot analyze" cmd="npx truecourse analyze" />
               <CommandRow label="Open the dashboard" cmd="npx truecourse dashboard" />
               <CommandRow
@@ -79,7 +42,7 @@ export function OpenSource() {
               />
             </div>
 
-            <div className="mt-8 flex flex-wrap items-center gap-3">
+            <div className="mt-6 flex flex-wrap items-center gap-3">
               <a
                 href="https://github.com/truecourse-ai/truecourse"
                 target="_blank"
@@ -104,99 +67,9 @@ export function OpenSource() {
               </a>
             </div>
           </div>
-
-          {/* Right: comparison table */}
-          <div
-            ref={right.ref}
-            style={{ ['--delay' as string]: '120ms' }}
-            className={cn('reveal', right.visible && 'visible')}
-          >
-            <div className="surface overflow-hidden rounded-2xl border border-border">
-              {/* Header row */}
-              <div className="grid grid-cols-[1.5fr_repeat(3,1fr)] border-b border-border bg-background/30">
-                <div className="px-4 py-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Capability
-                </div>
-                <ColHead label="TrueCourse" highlight />
-                <ColHead label="ESLint / Pylint" />
-                <ColHead label="SonarQube" />
-              </div>
-
-              {/* Rows */}
-              {ROWS.map((row, i) => (
-                <div
-                  key={row.capability}
-                  className={cn(
-                    'grid grid-cols-[1.5fr_repeat(3,1fr)] items-center text-sm transition-colors hover:bg-muted/15',
-                    i !== ROWS.length - 1 && 'border-b border-border',
-                  )}
-                >
-                  <div className="px-4 py-3 text-[12.5px] text-foreground/90">
-                    {row.capability}
-                  </div>
-                  <CellView value={row.tc} highlight />
-                  <CellView value={row.eslint} />
-                  <CellView value={row.sonar} />
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-center text-[11px] text-muted-foreground">
-              Comparison is illustrative; mileage varies by configuration. Run TrueCourse
-              alongside what you already use.
-            </p>
-          </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function ColHead({ label, highlight }: { label: string; highlight?: boolean }) {
-  return (
-    <div className="border-l border-border px-3 py-3 text-center">
-      <div
-        className={cn(
-          'text-[11px] font-semibold',
-          highlight ? 'text-accent' : 'text-foreground/80',
-        )}
-      >
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function CellView({ value, highlight }: { value: Cell; highlight?: boolean }) {
-  return (
-    <div className="flex items-center justify-center border-l border-border px-3 py-3">
-      {value === 'yes' ? (
-        <span
-          className={cn(
-            'inline-flex h-5 w-5 items-center justify-center rounded-full ring-1 ring-inset',
-            highlight
-              ? 'bg-accent/15 text-accent ring-accent/30'
-              : 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/25',
-          )}
-        >
-          <Check className="h-3 w-3" />
-        </span>
-      ) : value === 'no' ? (
-        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/70 ring-1 ring-inset ring-border">
-          <Minus className="h-3 w-3" />
-        </span>
-      ) : value === 'partial' ? (
-        <span className="text-[11px] text-amber-300/90">Some</span>
-      ) : (
-        <span
-          className={cn(
-            'text-center text-[11px] leading-tight',
-            highlight ? 'text-accent' : 'text-muted-foreground',
-          )}
-        >
-          {value}
-        </span>
-      )}
-    </div>
   );
 }
 
