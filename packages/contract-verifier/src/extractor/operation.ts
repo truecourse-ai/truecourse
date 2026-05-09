@@ -203,6 +203,15 @@ function tryExtractRouteCall(
 // Handler observations: query-param reads + numeric clamp expressions
 // ---------------------------------------------------------------------------
 
+/**
+ * Public re-export of the per-handler observation collector. Used by
+ * sibling extractors (e.g. file-based routes) that resolve a handler
+ * body via a different path but feed the same downstream comparators.
+ */
+export function collectHandlerObservationsFromBody(body: SyntaxNode, source: string): HandlerObservations {
+  return collectHandlerObservations(body, source);
+}
+
 function collectHandlerObservations(body: SyntaxNode, source: string): HandlerObservations {
   const queryParams = new Set<string>();
   const numericClamps: number[] = [];
@@ -329,10 +338,24 @@ interface ResponseAccumulator {
   effects: EffectEdge[];
 }
 
+/**
+ * Public re-export of the response extractor for sibling extractors
+ * (e.g. file-based routes). The downstream behaviour — implicit-200
+ * for bare sends, body-shape classification, header binding — is
+ * identical regardless of how the handler body was discovered.
+ */
+export function extractResponsesFromBody(body: SyntaxNode, source: string): ResponseContract[] {
+  return extractResponses(body, source);
+}
+
 function extractResponses(body: SyntaxNode, source: string): ResponseContract[] {
   // Two-phase walk in document order:
-  //   1. Collect every `res.*` call_expression as a typed event, in source
-  //      order, with its line number.
+  //   1. Collect every send-shaped node as a typed event:
+  //        - `res.*` call patterns (Express / Fastify / Hono)
+  //        - `new Response(...)` and `Response.json(...)` /
+  //          `NextResponse.json(...)` (Web API — used by Astro,
+  //          Next.js App Router, SvelteKit, and any framework that
+  //          adopts the Fetch API response idiom).
   //   2. Replay events: bind preceding `setHeader` events to the next
   //      status event seen on any subsequent line.
   const events: ResEvent[] = [];
@@ -340,6 +363,12 @@ function extractResponses(body: SyntaxNode, source: string): ResponseContract[] 
   const visit = (node: SyntaxNode): void => {
     if (node.type === 'call_expression') {
       const e = describeResCall(node, source);
+      if (e) events.push(e);
+      const w = describeWebResponseCall(node, source);
+      if (w) events.push(w);
+    }
+    if (node.type === 'new_expression') {
+      const e = describeWebResponseNew(node, source);
       if (e) events.push(e);
     }
     for (const child of node.namedChildren) visit(child);
@@ -458,6 +487,110 @@ function describeResCall(call: SyntaxNode, source: string): ResEvent | null {
   }
 
   return null;
+}
+
+/**
+ * Recognise Web API response constructions:
+ *   `new Response(body, init?)` — Fetch API. Default status 200; if
+ *   the second arg is an object literal with `status: <number>`, that
+ *   wins.
+ *
+ * Used by Astro, SvelteKit, Cloudflare Workers, and Next.js App Router
+ * handlers that return a `Response` directly. Bun and Deno's HTTP
+ * surface use the same constructor.
+ */
+function describeWebResponseNew(node: SyntaxNode, source: string): ResEvent | null {
+  const ctor = node.childForFieldName('constructor');
+  if (!ctor || ctor.type !== 'identifier' || sliceText(ctor, source) !== 'Response') return null;
+  const args = node.childForFieldName('arguments');
+  const status = readStatusFromInit(args?.namedChild(1) ?? null, source) ?? '200';
+  const bodyArg = args?.namedChild(0) ?? undefined;
+  return {
+    kind: 'status',
+    status,
+    bodyShape: classifyResponseBodyArg(bodyArg, source),
+    line: node.startPosition.row + 1,
+    col: node.startPosition.column + 1,
+  };
+}
+
+/**
+ * Recognise the static `Response.json(body, init?)` and
+ * `NextResponse.json(body, init?)` factories. Same shape as
+ * `new Response(...)` — default 200, status overridable via init.
+ */
+function describeWebResponseCall(call: SyntaxNode, source: string): ResEvent | null {
+  const fn = call.childForFieldName('function');
+  if (!fn || fn.type !== 'member_expression') return null;
+  const obj = fn.childForFieldName('object');
+  const prop = fn.childForFieldName('property');
+  if (!obj || !prop) return null;
+  if (sliceText(prop, source) !== 'json') return null;
+  if (obj.type !== 'identifier') return null;
+  const objName = sliceText(obj, source);
+  if (objName !== 'Response' && objName !== 'NextResponse') return null;
+
+  const args = call.childForFieldName('arguments');
+  const status = readStatusFromInit(args?.namedChild(1) ?? null, source) ?? '200';
+  const bodyArg = args?.namedChild(0);
+  return {
+    kind: 'status',
+    status,
+    bodyShape: classifyJsonArg(bodyArg ?? undefined),
+    line: call.startPosition.row + 1,
+    col: call.startPosition.column + 1,
+  };
+}
+
+/**
+ * Pull a numeric `status` field out of a Web API init object literal:
+ *   `{ status: 201, headers: ... }`  →  `"201"`
+ *   `{ status: 4xx }`                 →  null (non-numeric)
+ *   anything else / no init           →  null (caller defaults to 200)
+ */
+function readStatusFromInit(node: SyntaxNode | null, source: string): string | null {
+  if (!node || node.type !== 'object') return null;
+  for (const child of node.namedChildren) {
+    if (child.type !== 'pair') continue;
+    const key = child.childForFieldName('key');
+    if (!key) continue;
+    const keyName = key.text.replace(/^['"]|['"]$/g, '');
+    if (keyName !== 'status') continue;
+    const value = child.childForFieldName('value');
+    if (value?.type === 'number') return sliceText(value, source);
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Classify the body argument of a Web API response. For
+ * `new Response(JSON.stringify(x), …)` the inner shape isn't
+ * statically reachable, so we tag the body as opaque rather than
+ * inferring fields. `Response.json({ a, b })` flows through the
+ * existing object-literal classifier.
+ */
+function classifyResponseBodyArg(arg: SyntaxNode | undefined, source: string): BodyShape | undefined {
+  if (!arg) return undefined;
+  // `JSON.stringify(...)` — opaque object body. We don't try to read
+  // the argument because a string is what reaches the wire; the spec
+  // can use envelope refs or shape declarations to assert structure.
+  if (arg.type === 'call_expression') {
+    const fn = arg.childForFieldName('function');
+    if (fn?.type === 'member_expression') {
+      const obj = fn.childForFieldName('object');
+      const prop = fn.childForFieldName('property');
+      if (
+        obj?.type === 'identifier' &&
+        sliceText(obj, source) === 'JSON' &&
+        prop &&
+        sliceText(prop, source) === 'stringify'
+      ) {
+        return undefined; // opaque body — extract nothing
+      }
+    }
+  }
+  return classifyJsonArg(arg);
 }
 
 /**

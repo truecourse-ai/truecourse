@@ -226,6 +226,71 @@ describe('code → contract extractor (Operation)', () => {
     expect(keys).toContain('total');
   });
 
+  it('recognizes new Response(...) — Web API / Astro / SvelteKit pattern', () => {
+    // `return new Response(body, { status: 200 })` — the Fetch API
+    // shape used by Astro endpoints, SvelteKit +server.ts files,
+    // Cloudflare Workers, and Bun. Without recognition the handler
+    // would appear to emit no responses at all.
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/things', (req, res) => {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      });
+    `;
+    const ops = extract(source);
+    const statuses = ops[0].contract.responses.map((r) => r.status);
+    expect(statuses).toContain('200');
+  });
+
+  it('extracts a non-default status from new Response(body, { status: 201 })', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.post('/things', (req, res) => {
+        return new Response(JSON.stringify({ id: 'x' }), { status: 201 });
+      });
+    `;
+    const ops = extract(source);
+    expect(ops[0].contract.responses.map((r) => r.status)).toContain('201');
+  });
+
+  it('treats new Response() with no init as implicit 200', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/healthz', (req, res) => {
+        return new Response('ok');
+      });
+    `;
+    const ops = extract(source);
+    expect(ops[0].contract.responses.map((r) => r.status)).toContain('200');
+  });
+
+  it('recognizes Response.json(body, init) — Next.js / modern Web API', () => {
+    const source = `
+      import express from 'express';
+      const router = express.Router();
+      router.get('/list', (req, res) => {
+        return Response.json({ items: [] }, { status: 200 });
+      });
+    `;
+    const ops = extract(source);
+    expect(ops[0].contract.responses.map((r) => r.status)).toContain('200');
+  });
+
+  it('recognizes NextResponse.json(body, init)', () => {
+    const source = `
+      import { NextResponse } from 'next/server';
+      const router = expressRouter();
+      router.post('/items', (req, res) => {
+        return NextResponse.json({ ok: true }, { status: 201 });
+      });
+    `;
+    const ops = extract(source);
+    expect(ops[0].contract.responses.map((r) => r.status)).toContain('201');
+  });
+
   it('emits one ExtractedOperation per route, with declarationLine pinned', () => {
     const source = [
       `import express from 'express';`,
