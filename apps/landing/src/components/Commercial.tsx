@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Check, Github, Loader2, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { identifyUser, trackEvent } from '@/lib/posthog';
 import { cn } from '@/lib/cn';
 
 const PERKS = [
@@ -52,6 +53,11 @@ export function Commercial() {
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
+      identifyUser(email, { company, team_size: size });
+      trackEvent('waitlist_submitted', {
+        team_size: size || 'unspecified',
+        has_company: Boolean(company),
+      });
       setState('done');
     } catch {
       setState('error');
