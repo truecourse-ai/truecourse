@@ -58,7 +58,7 @@ export function defaultConcurrency(): number {
 export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const concurrency = opts.concurrency ?? defaultConcurrency();
-  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const timeoutMs = opts.timeoutMs ?? 240_000;
   const limit = pLimit(concurrency);
 
   return async (slices: SpecSlice[]): Promise<SliceRunResult[]> => {
