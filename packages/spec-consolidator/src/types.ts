@@ -88,6 +88,21 @@ export const ProvenanceSchema = z.object({
   line: z.number().int().nonnegative(),
   /** Verbatim quote of the source block — shown to the user during resolution. */
   quote: z.string(),
+  /**
+   * Additional sources that contributed an identical claim (auto-merge
+   * result). Set by the merger when 2+ docs agree on the same fact;
+   * absent on singletons. The materializer reads this so module
+   * manifests list every source that supports the merged content.
+   */
+  additionalSources: z
+    .array(
+      z.object({
+        file: z.string(),
+        line: z.number().int().nonnegative(),
+        quote: z.string(),
+      }),
+    )
+    .optional(),
 });
 export type Provenance = z.infer<typeof ProvenanceSchema>;
 

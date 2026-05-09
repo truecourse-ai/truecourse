@@ -166,20 +166,28 @@ function stableStringify(value: unknown): string {
 }
 
 function mergeIdentical(list: Claim[]): Claim {
-  // Keep the first (oldest) claim's id and content; stitch
-  // provenance from all sources into a multi-line quote so the
-  // canonical writer can show "this came from N docs".
+  // Keep the first (oldest) claim's id and content; surface every
+  // contributing source structurally so the materializer can list
+  // them in module manifests, and stitch the human-readable quote
+  // for dashboard display.
   const head = list[0];
-  const provenance = list.length === 1
-    ? head.provenance
-    : {
-        file: head.provenance.file,
-        line: head.provenance.line,
-        quote: list
-          .map((c) => `[${c.provenance.file}:${c.provenance.line}] ${c.provenance.quote}`)
-          .join('\n---\n'),
-      };
-  return { ...head, provenance };
+  if (list.length === 1) return head;
+  const additionalSources = list.slice(1).map((c) => ({
+    file: c.provenance.file,
+    line: c.provenance.line,
+    quote: c.provenance.quote,
+  }));
+  return {
+    ...head,
+    provenance: {
+      file: head.provenance.file,
+      line: head.provenance.line,
+      quote: list
+        .map((c) => `[${c.provenance.file}:${c.provenance.line}] ${c.provenance.quote}`)
+        .join('\n---\n'),
+      additionalSources,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

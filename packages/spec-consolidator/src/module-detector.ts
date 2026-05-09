@@ -190,7 +190,17 @@ function slugify(s: string): string {
 // ---------------------------------------------------------------------------
 
 function buildManifest(name: string, claims: Claim[]): ModuleManifest {
-  const sourceDocs = uniqueSorted(claims.map((c) => c.provenance.file));
+  // Every contributing source — primary provenance file plus any
+  // `additionalSources` left by the merger when multiple docs agreed
+  // on the same claim.
+  const allSources: string[] = [];
+  for (const c of claims) {
+    allSources.push(c.provenance.file);
+    for (const extra of c.provenance.additionalSources ?? []) {
+      allSources.push(extra.file);
+    }
+  }
+  const sourceDocs = uniqueSorted(allSources);
   const status = inferModuleStatus(claims);
   const scope = inferScope(name, claims);
   return {

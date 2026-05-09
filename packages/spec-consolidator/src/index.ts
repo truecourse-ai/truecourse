@@ -90,3 +90,12 @@ export type {
   SectionCacheEntry,
   SectionCacheKey,
 } from './cache.js';
+
+export {
+  consolidate,
+  readDecisions,
+  writeDecisions,
+  decisionsPath,
+  specRootPath,
+} from './orchestrator.js';
+export type { ConsolidateOptions, ConsolidateResult } from './orchestrator.js';
