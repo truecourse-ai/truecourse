@@ -75,12 +75,24 @@ export function Header() {
             <Github className="h-4 w-4" />
             GitHub
           </a>
-          <Link
-            to="/teams#waitlist"
-            className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
-          >
-            Join waitlist
-          </Link>
+          {/* Contextual CTA: anywhere except /teams it points to the teams
+              page (avoids the misleading "Join waitlist" framing on the OSS
+              hero); on /teams it scrolls to the actual form. */}
+          {pathname === '/teams' ? (
+            <a
+              href="#waitlist"
+              className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
+            >
+              Join waitlist
+            </a>
+          ) : (
+            <Link
+              to="/teams"
+              className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
+            >
+              For teams
+            </Link>
+          )}
           <button
             type="button"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border md:hidden"
