@@ -434,6 +434,59 @@ describe('fixture: sample-multi-doc-spec — apply mode', () => {
     expect(fs.existsSync(path.join(specRoot, 'decisions.json'))).toBe(true);
   });
 
+  it('orders manifest carries outOfScope entries (B.9 negative spec) and excludes them from prose', async () => {
+    const scan = await consolidate(workRoot, {
+      materialize: false,
+      blockRunner: fixtureRunner(),
+      skipGit: true,
+    });
+    writeDecisions(workRoot, {
+      version: 1,
+      decisions: scan.merge.openConflicts.map((c) => ({
+        conflictId: c.id,
+        resolution: { kind: 'pick', candidateIndex: c.defaultPick },
+        resolvedAt: '2026-05-09T00:00:00Z',
+        candidateFingerprint: candidateFingerprint(c),
+      })),
+    });
+    await consolidate(workRoot, {
+      materialize: true,
+      blockRunner: fixtureRunner(),
+      sectionRunner: fixtureSectionRunner(),
+      skipGit: true,
+    });
+
+    const ordersManifest = yaml.load(
+      fs.readFileSync(
+        path.join(workRoot, '.truecourse/spec/modules/orders/module.yaml'),
+        'utf-8',
+      ),
+    ) as Record<string, unknown>;
+
+    // The two PRDv2 "Out of Scope" items become manifest entries.
+    const outOfScope = ordersManifest.outOfScope as Array<{ id: string; source: string }>;
+    expect(outOfScope).toBeDefined();
+    expect(outOfScope.map((e) => e.id).sort()).toEqual([
+      '/api/v1/orders/{id}/cancel',
+      '/api/v1/orders/{id}/replace',
+    ]);
+    // Each entry traces back to the PRDv2 source.
+    for (const entry of outOfScope) {
+      expect(entry.source).toMatch(/^docs\/PRDs\/backend_PRDv2\.md:\d+$/);
+    }
+
+    // The endpoints.md prose lists shipped + planned ops, but NOT
+    // the out-of-scope ones (they're structural, not prose).
+    const endpointsMd = fs.readFileSync(
+      path.join(workRoot, '.truecourse/spec/modules/orders/endpoints.md'),
+      'utf-8',
+    );
+    expect(endpointsMd).toContain('POST /api/v1/orders');
+    expect(endpointsMd).toContain('POST /api/v1/orders/{id}/refund');
+    expect(endpointsMd).not.toContain('cancel');
+    expect(endpointsMd).not.toContain('replace');
+  });
+
   it('orders manifest sourceDocs reflects only the picked source for resolved conflicts', async () => {
     const scan = await consolidate(workRoot, {
       materialize: false,

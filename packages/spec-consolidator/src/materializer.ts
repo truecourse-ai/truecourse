@@ -170,7 +170,11 @@ function collectRenderableClaims(merge: MergeResult): Claim[] {
       out.push(synthesizeCustomClaim(decided.conflict, decided.decision.resolution.content, decided.decision.resolvedAt));
     }
   }
-  return out;
+  // Out-of-scope claims (B.9 negative spec) don't render as section
+  // prose — they live structurally on the module manifest's
+  // outOfScope[] array. The module detector picked them up before
+  // we got here.
+  return out.filter((c) => c.metadata.status !== 'out-of-scope');
 }
 
 function synthesizeCustomClaim(
