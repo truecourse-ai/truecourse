@@ -14,7 +14,7 @@ export function TeamsHero() {
           className="animate-fade-up animate-pulse-ring mx-auto inline-flex items-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent backdrop-blur-md transition-colors hover:bg-accent/15"
         >
           <Sparkles className="h-3 w-3" />
-          Coming soon &middot; Closed beta
+          Closed beta &middot; By invitation
         </Link>
 
         <h1
@@ -39,7 +39,7 @@ export function TeamsHero() {
           className="animate-fade-up mt-9 flex flex-wrap items-center justify-center gap-3"
         >
           <a
-            href="#waitlist"
+            href="#access"
             className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
           >
             Request access

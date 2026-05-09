@@ -54,9 +54,6 @@ export function Header() {
         >
           <img src="/logo.svg" alt="" className="h-7 w-7" />
           <span className="text-base font-semibold tracking-tight">TrueCourse</span>
-          <span className="ml-1 hidden rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium tracking-wider text-muted-foreground sm:inline-block">
-            BETA
-          </span>
         </Link>
 
         <nav className="hidden items-center gap-1 md:flex">
@@ -75,15 +72,14 @@ export function Header() {
             <Github className="h-4 w-4" />
             GitHub
           </a>
-          {/* Contextual CTA: anywhere except /teams it points to the teams
-              page (avoids the misleading "Join waitlist" framing on the OSS
-              hero); on /teams it scrolls to the actual form. */}
+          {/* Contextual CTA: on /teams it scrolls to the access form; on the
+              OSS-focused home page it routes to the teams page first. */}
           {pathname === '/teams' ? (
             <a
-              href="#waitlist"
+              href="#access"
               className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
             >
-              Join waitlist
+              Request access
             </a>
           ) : (
             <Link

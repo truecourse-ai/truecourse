@@ -7,7 +7,7 @@ import { Commercial } from '@/components/Commercial';
 export default function TeamsPage() {
   useEffect(() => {
     const prev = document.title;
-    document.title = 'TrueCourse for teams · join the waitlist';
+    document.title = 'TrueCourse for teams · request access';
     return () => {
       document.title = prev;
     };

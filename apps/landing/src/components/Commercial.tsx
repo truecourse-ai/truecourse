@@ -66,7 +66,7 @@ export function Commercial() {
   };
 
   return (
-    <section id="waitlist" className="relative scroll-mt-24 border-b border-border py-24 sm:py-32">
+    <section id="access" className="relative scroll-mt-24 border-b border-border py-24 sm:py-32">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="grid gap-12 lg:grid-cols-[1.1fr_1fr] lg:gap-16">
           {/* Left: pitch + perks */}
@@ -106,17 +106,17 @@ export function Commercial() {
             </div>
           </div>
 
-          {/* Right: waitlist form */}
+          {/* Right: access request form */}
           <div className="lg:sticky lg:top-24 lg:self-start">
             <div className="glow-border surface rounded-2xl border border-border p-6 shadow-2xl shadow-black/40 sm:p-8">
               {state === 'done' ? (
                 <SuccessState email={email} />
               ) : (
                 <>
-                  <h3 className="text-xl font-semibold">Join the waitlist</h3>
+                  <h3 className="text-xl font-semibold">Request access</h3>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    We&apos;re onboarding teams in waves. Drop your details and we&apos;ll
-                    be in touch when a slot opens.
+                    Teams is in closed beta and we&apos;re onboarding new orgs in waves.
+                    Drop your details and we&apos;ll be in touch when the next batch opens.
                   </p>
 
                   <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -248,11 +248,11 @@ function SuccessState({ email }: { email: string }) {
       <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
         <Check className="h-6 w-6" />
       </div>
-      <h3 className="mt-4 text-xl font-semibold">You&apos;re on the list</h3>
+      <h3 className="mt-4 text-xl font-semibold">Request received</h3>
       <p className="mt-2 text-sm text-muted-foreground">
         We&apos;ll reach out to{' '}
-        <span className="font-medium text-foreground">{email}</span> as soon as a slot opens
-        in the next onboarding wave. In the meantime, the open source CLI is yours to use today.
+        <span className="font-medium text-foreground">{email}</span> when the next batch
+        of teams gets access. In the meantime, the open source CLI is yours to use today.
       </p>
       <Link
         to="/#open-source"

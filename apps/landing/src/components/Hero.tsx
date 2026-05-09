@@ -86,10 +86,10 @@ export function Hero() {
             </button>
 
             <Link
-              to="/teams#waitlist"
+              to="/teams#access"
               className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
             >
-              Join the teams waitlist
+              Request access
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
           </div>
