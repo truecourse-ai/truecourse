@@ -44,6 +44,13 @@ const EVAL_TARGET = process.env.EVAL_TARGET;
 const EVAL_NO_LLM = process.env.EVAL_NO_LLM === '1';
 const EVAL_MAX_SLICES = process.env.EVAL_MAX_SLICES ? parseInt(process.env.EVAL_MAX_SLICES, 10) : undefined;
 const EVAL_GOLDEN = process.env.EVAL_GOLDEN;
+/**
+ * Override the code directory the verifier walks. Relative paths are
+ * resolved against the repo root. Use when the repo's backend lives
+ * somewhere other than the auto-detect can find (e.g. monorepos
+ * with `backend/`, `services/api/`, etc.).
+ */
+const EVAL_CODE = process.env.EVAL_CODE;
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const REPOS_DIR = path.join(REPO_ROOT, 'tests/.eval-repos');
@@ -116,7 +123,9 @@ describe.skipIf(!EVAL_TARGET)('eval harness', () => {
       let verifyResult: VerifyResult | null = null;
       let verifyTimeMs = 0;
       if (fs.existsSync(contractsDir)) {
-        const codeDir = autoDetectCodeDir(repoPath);
+        const codeDir = EVAL_CODE
+          ? path.resolve(repoPath, EVAL_CODE)
+          : autoDetectCodeDir(repoPath);
         const t0 = performance.now();
         try {
           verifyResult = await verify({ contractsDir, codeDir });
