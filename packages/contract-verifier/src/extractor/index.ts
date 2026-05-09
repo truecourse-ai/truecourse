@@ -9,10 +9,12 @@ import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
 import { extractOperationsFromFile, type ExtractedOperation } from './operation.js';
+import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 export { detectAuthPresence } from './auth-presence.js';
 export type { AuthPresenceResult } from './auth-presence.js';
 export { detectIdempotencyPresence } from './idempotency-presence.js';
 export type { IdempotencyPresenceResult } from './idempotency-presence.js';
+export { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 
 export type { ExtractedOperation } from './operation.js';
 
@@ -58,7 +60,22 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
   };
   visit(rootDir);
 
-  return applyMountPrefixes(out, [...new Set(mountPrefixes)]);
+  const expressOps = applyMountPrefixes(out, [...new Set(mountPrefixes)]);
+
+  // File-based routing (Astro / Next.js Pages / Next.js App / SvelteKit).
+  // Each framework's filesystem layout produces ExtractedOperation entries
+  // in the same shape Express does — they slot into the comparator pipeline
+  // without further normalization. Dedup by identity so a project with
+  // both styles doesn't double-count.
+  const fileOps = await extractFileBasedRoutesFromDir(rootDir);
+  const seen = new Set(expressOps.map((o) => o.identity));
+  for (const op of fileOps) {
+    if (!seen.has(op.identity)) {
+      expressOps.push(op);
+      seen.add(op.identity);
+    }
+  }
+  return expressOps;
 }
 
 // ---------------------------------------------------------------------------
