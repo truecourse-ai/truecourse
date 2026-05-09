@@ -98,7 +98,7 @@ export function Capabilities() {
           </p>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {CATEGORIES.map((cat, i) => (
             <CategoryCard key={cat.title} cat={cat} delayMs={i * 60} />
           ))}
@@ -115,7 +115,7 @@ function CategoryCard({ cat, delayMs }: { cat: Category; delayMs: number }) {
       ref={ref}
       style={{ ['--delay' as string]: `${delayMs}ms` }}
       className={cn(
-        'reveal group relative bg-background p-6 transition-colors hover:bg-card',
+        'reveal surface-hover group relative rounded-2xl border border-border bg-card/40 p-6 transition-colors hover:border-border-strong hover:bg-card',
         visible && 'visible',
       )}
     >
