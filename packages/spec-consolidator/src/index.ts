@@ -60,3 +60,6 @@ export type { ExtractOptions, ExtractResult } from './extractor.js';
 
 export { mergeClaims, candidateFingerprint } from './merger.js';
 export type { MergeResult, DecidedConflict } from './merger.js';
+
+export { detectModules, topicsInModule, SHARED_MODULE } from './module-detector.js';
+export type { DetectedModule, ModuleDetectionResult } from './module-detector.js';
