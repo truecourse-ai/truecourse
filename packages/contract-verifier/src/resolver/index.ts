@@ -321,13 +321,19 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
  * Pull the `origin SOURCE "section" lines..lines` line out of a body block.
  * Returns null when absent (the resolver tolerates absence; Phase-1
  * validation may upgrade to an error).
+ *
+ * `SOURCE` accepts either a bare identifier (e.g. `SPEC.md`) or a quoted
+ * string (e.g. `"docs/API.md"`). The string form is necessary because
+ * the lexer's ident rule doesn't allow `/` — and many real repos store
+ * their spec at a path like `docs/API.md` rather than at the root.
  */
 function extractOrigin(block: StatementNode[]): SpecOrigin | null {
   for (const stmt of block) {
     const head = stmt.head;
     if (head.length === 0 || head[0].kind !== 'ident' || head[0].value !== 'origin') continue;
-    // origin <source-ident> "<section>" <range>
-    const source = head[1]?.kind === 'ident' ? head[1].value : null;
+    let source: string | null = null;
+    if (head[1]?.kind === 'ident') source = head[1].value;
+    else if (head[1]?.kind === 'string') source = head[1].value;
     const section = head[2]?.kind === 'string' ? head[2].value : null;
     let lines: [number, number] = [-1, -1];
     if (head[3]?.kind === 'range') {
