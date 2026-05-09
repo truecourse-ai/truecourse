@@ -95,6 +95,42 @@ describe('canonicalizePathParams', () => {
   });
 });
 
+describe('origin source paths', () => {
+  it('accepts a quoted path with slashes as the origin source', () => {
+    // Specs commonly live at `docs/API.md` rather than at the root.
+    // The bare-ident form chokes on `/`; the quoted-string form must
+    // work so the LLM can faithfully encode where the obligation came
+    // from.
+    const file = parseFile(
+      'inline.tc',
+      'operation GET "/api/x" {\n' +
+        '  origin "docs/API.md" "Section" 5..20\n' +
+        '  tags []\n' +
+        '}\n',
+    );
+    const result = resolve([file]);
+    expect(result.errors).toEqual([]);
+    const op = result.index.get('Operation:GET /api/x')!;
+    expect(op.origin?.source).toBe('docs/API.md');
+    expect(op.origin?.section).toBe('Section');
+    expect(op.origin?.lines).toEqual([5, 20]);
+  });
+
+  it('still accepts the bare-ident form (back-compat)', () => {
+    const file = parseFile(
+      'inline.tc',
+      'operation GET "/api/x" {\n' +
+        '  origin SPEC.md "Section" 1..10\n' +
+        '  tags []\n' +
+        '}\n',
+    );
+    const result = resolve([file]);
+    expect(result.errors).toEqual([]);
+    const op = result.index.get('Operation:GET /api/x')!;
+    expect(op.origin?.source).toBe('SPEC.md');
+  });
+});
+
 describe('Operation identity normalization', () => {
   it('indexes operations with `:slug` syntax under their RFC 6570 identity', () => {
     // The LLM (or a hand-written .tc) may use Express's `:slug` syntax in

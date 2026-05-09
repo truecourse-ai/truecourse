@@ -272,6 +272,13 @@ unenforceable-obligation encryption.at-rest {
        Entity:Order                          ✓ (no special chars)
        AuthRequirement:auth.bearer.api       ✓ (dot is fine)
 
+   The same rule applies to the \`origin\` line's source name. Bare
+   filenames work; paths with \`/\` MUST be quoted:
+       origin SPEC.md "Section" 1..10                ✓
+       origin "docs/API.md" "Section" 1..10          ✓
+       origin docs/API.md "Section" 1..10            ✗ (parser chokes on slash)
+       origin "server/docs/CONTRACT.md" "P1" 5..20   ✓
+
 2. **Block forms are real blocks**, not inline lists. The fixture above
    shows the correct shape for each — copy it.
 
