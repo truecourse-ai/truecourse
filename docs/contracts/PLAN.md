@@ -1,57 +1,340 @@
 # Contract Framework — Plan
 
-Spec-driven verification: prose specs (SPEC.md, ADRs, RFCs) become typed
-contract artifacts (`.tc` files), extracted by Claude Code and verified
-deterministically against the implementation. Drift is reported as
-violations through the existing `truecourse analyze` pipeline.
+Three independent modules turn scattered docs into verified intent, each
+with its own CLI and dashboard UI. Code and prose stay in their own
+worlds; the modules talk to each other via committable artifacts on disk.
 
-This document owns the design and phasing of the contract framework. The
-top-level [PLAN.md](../PLAN.md) tracks all other product phases.
+```
+docs/                   .truecourse/spec/      .truecourse/contracts/    drifts
+─────────                ────────────────       ─────────────────────    ──────
+PRDs, ADRs,    Module 1   modules/<m>/    Module 2   *.tc        Module 3
+RFCs, tech ──▶ Spec    ──▶ module.yaml ─▶ Contract ─▶ (IL)   ──▶ Verify  ──▶ drift
+specs,         Consol.    endpoints.md     Generation                     report
+runbooks,      engine     auth.md
+README,                   data.md
+notes/*                   ...
+                          decisions.json
+                          shared/...
+                          overview.md
+                                                              code/        ▲
+                                                              ─────────────┘
+                                                              tree-sitter
+                                                              + mount graph
+```
+
+**One product, three independent modules:**
+
+| Module | Owns | CLI | UI |
+|--------|------|-----|-----|
+| **1. Spec Consolidation** | docs → `.truecourse/spec/` | `truecourse spec …` | "Spec" tab |
+| **2. Contract Generation** | spec → `.truecourse/contracts/` (IL) | `truecourse contracts …` | "Contracts" tab |
+| **3. Contract Verification** | IL + code → drifts | `truecourse verify …` | "Verification" tab |
+
+Each module is shippable on its own. Each has its own caches, its own
+LLM-call budget, and its own set of drift/diagnostic signals. They are
+**not** routed through `truecourse analyze`. `analyze` continues to be
+the rule-engine entrypoint and is unchanged by this work.
+
+> **Reversal note:** an earlier draft of this plan folded verification
+> into `analyze` (Phase 7, originally DONE). That decision is reversed —
+> a separate command + UI for verification is the right product surface.
+> The plumbing built in the original Phase 7 (the violation adapter, the
+> `LATEST.json` integration) is preserved as an *optional* fan-out, not
+> the canonical entrypoint.
 
 ---
 
-## Mental model
+## Module 1 — Spec Consolidation engine
+
+**Job:** read every doc in the repo (any kind, any format), extract
+**claims** about the system, merge them, surface conflicts to the user
+for resolution, and emit a canonical, structured, **committable** spec
+under `.truecourse/spec/`.
+
+### Design decisions (locked)
+
+| # | Decision | Choice |
+|---|---|---|
+| 1 | Topic taxonomy | Broad: `auth`, `endpoints`, `data`, `errors`, `effects`, `overview` |
+| 2 | What counts as a conflict | Any difference between claims on the same `(topic, subject)` — user confirms every one |
+| 3 | Canonical markdown shape | Free-form prose (PRD-style), not structured blocks |
+| 4 | LLM calls per doc section | One call does both classify + extract |
+| 5 | Who writes the final markdown | LLM, from resolved claims (third call per section) |
+| 6 | Where status lives | Both `module.yaml` (module-level) and per-operation (operation overrides module) |
+| 7 | Default-pick policy | Engine pre-picks a default for every conflict; user reviews/overrides |
+| 8 | Review surface | Dashboard-first; CLI keeps `--all-defaults`-style batch ops |
+| 9 | Dashboard organization | Flat sortable/filterable list of conflicts |
+| 10 | Default-pick rule | Newest source doc wins (git mtime) |
+| 11 | Custom answers | Allowed — free-text override per conflict, treated as authoritative |
+| 12 | Apply timing | Batch — resolutions stack in `decisions.json`; canonical regenerates only on explicit `spec apply` |
+| 13 | Resolution persistence across re-scans | Past decisions stay valid; only new conflicts surface |
+
+**Deferred (prototype with defaults, revisit after observation):**
+- How `module.yaml.scope` is derived when not stated explicitly in the docs.
+- What happens when a user manually edits a canonical spec file between consolidator runs.
+
+### Design rule: claim-extraction, not document-classification
+
+The engine has one pipeline regardless of doc kind:
 
 ```
-prose specs        contract DSL          live code
-─────────────      ────────────          ─────────
-SPEC.md       ┌─▶  .truecourse/    ┌─▶   src/**/*.ts
-adr/*.md   ───┤    contracts/   ───┤     src/**/*.js
-rfc/*.md      │    *.tc            │
-              │                    │
-        Claude Code            tree-sitter
-        (LLM extract)         (deterministic)
-              │                    │
-              └──────┬─────────────┘
-                     ▼
-              comparators
-              (10 enforced
-               artifact kinds)
-                     │
-                     ▼
-                Violation[]
-                (category:
-                 contract-drift)
-                     │
-                     ▼
-              LATEST.json
-              (existing baseline,
-               diffed by --diff)
+doc → ingest → classify blocks → extract claims → merge with peers → emit canonical
 ```
 
-**One concept** — violations.
-**Two sources** — rules (deterministic engine) and contract drift (this framework).
-**One output** — `truecourse analyze` and `truecourse analyze --diff`.
+Document kind (PRD, ADR, RFC, tech spec, runbook, README, design note,
+unknown) is a **signal** that bends merge weights and prior probabilities
+— it never gates which code path runs. New doc types onboard with zero
+engine changes.
+
+### Claim shape (the unit of consolidation)
+
+```ts
+interface Claim {
+  id: string;
+  topic: 'auth' | 'endpoints' | 'data' | 'errors' | 'effects' | 'rate-limits' | 'deps' | 'status' | 'overview';
+  subject: string;        // "POST /orders", "global error envelope", "auth scheme"
+  content: any;           // topic-specific shape (route, schema, rule)
+  provenance: {
+    file: string;
+    line: number;
+    quote: string;        // verbatim snippet for user review
+  };
+  metadata: {
+    docKind: DocKind;     // hint, not gate
+    status?: 'shipped' | 'planned' | 'deferred' | 'deprecated' | 'out-of-scope';
+    version?: string;     // "v1", "v2" if detectable
+    lastTouched: string;  // git mtime
+    supersedes?: string[]; // claim IDs this overrides (set during merge)
+  };
+}
+```
+
+### Pipeline steps
+
+1. **Ingest** — parse markdown, normalize headings, code blocks, tables,
+   lists, front-matter. Carry git mtime + last-author signals.
+2. **Classify blocks** — each section/block tagged with topics it
+   touches (`auth`, `endpoints`, `data`, ...). A block can touch
+   multiple topics; the LLM classifier returns a topic set.
+3. **Extract claims** — structured assertions per block, schema above.
+   Status markers (`Phase 1`, `V1 scope`, `Out of Scope`, `Future`,
+   `Deprecated`) are preserved as `metadata.status`.
+4. **Merge** — claims with same `topic + subject` collapse:
+   - **Identical** → kept once.
+   - **Compatible** (one subset of another) → richer wins, both kept as
+     provenance.
+   - **Conflicting** → emitted as a `Conflict` requiring user decision.
+   Default merge weights bias toward newer mtime, higher version, and
+   PRD/ADR/RFC over runbook/README — but the user always sees both in a
+   conflict.
+5. **Detect logical modules from spec content** — group claims by
+   `subject` scope (path prefix, tag, theme). A coherent group becomes a
+   module (e.g. `auth`, `memory`, `infractions`). Module names come from
+   the docs' own headings when present; otherwise the LLM proposes one
+   and the user confirms.
+6. **Materialize** — write `.truecourse/spec/modules/<name>/` honoring
+   `decisions.json`. Unresolved conflicts leave the section marked
+   *partial* but never block other sections.
+
+### Logical-module detection (spec-only, no code inputs)
+
+The engine detects modules from **spec content alone**. It does not look
+at `code/` to scaffold the spec layout — that would warp intent toward
+deployment shape.
+
+Each module declares its identity and how it claims surface area:
+
+```yaml
+# .truecourse/spec/modules/auth/module.yaml
+name: auth
+status: active
+description: Wallet-based authentication and session management.
+source-docs:
+  - docs/API.md#authentication
+  - docs/auth/wallet-flow.md
+scope:
+  paths:
+    - /api/auth/**
+  tags:
+    - auth
+last-reviewed: 2026-05-09
+```
+
+`scope` is what the verifier later uses to match this spec module to
+code-side detected modules. Code-side detection runs independently in
+the analyzer and stays unchanged.
+
+### Conflict resolution UX
+
+Same `decisions.json` is the canonical state — CLI and UI both read and
+write it.
+
+```ts
+// .truecourse/spec/decisions.json
+{
+  conflicts: [
+    {
+      id: "conflict-auth-scheme-001",
+      module: "auth",
+      topic: "auth",
+      subject: "POST /api/auth/wallet — auth scheme",
+      candidates: [
+        { source: "docs/PRDs/v1.md:42",  quote: "Session cookie", weight: "older" },
+        { source: "docs/PRDs/v2.md:88",  quote: "Bearer JWT",     weight: "newer" }
+      ],
+      resolution: { pickedCandidate: 1, note: "v2 supersedes v1" },
+      resolvedAt: "2026-05-09T12:00:00Z",
+      resolvedBy: "user@example.com"
+    }
+  ]
+}
+```
+
+**CLI:**
+
+```
+truecourse spec scan        # discover docs + run consolidator → produce conflicts
+truecourse spec resolve     # interactive prompt walks pending conflicts
+truecourse spec status      # what's resolved, what's pending, what changed
+truecourse spec apply       # writes .truecourse/spec/ from current decisions
+truecourse spec diff        # show unresolved drift between docs and canonical
+```
+
+**Dashboard UI:** a "Spec" tab — separate route from violations. Lists
+pending conflicts with side-by-side quoted snippets, "pick A / B /
+custom" buttons, write-back over WebSocket.
+
+### Negative spec
+
+Sections like `## Out of Scope` or `## Excluded from V1` produce
+**negative claims**: "the following operations are explicitly NOT in
+scope". The verifier later flags the *opposite* drift — code shipped
+something the spec said is out of scope.
+
+```yaml
+# modules/infractions/module.yaml
+out-of-scope:
+  - id: missing-existing-motor-sn-photo
+    reason: "SQL not yet written"
+    source: "docs/PRDs/backend_PRDv2.md:142"
+  - id: no-review-link-sent
+    reason: "no send-event data"
+    source: "docs/PRDs/backend_PRDv2.md:143"
+```
+
+### Version chain reconciliation
+
+When discovery finds `backend_PRDv1.md` + `backend_PRDv2.md` (suffix
+patterns, `Supersedes:` front-matter, sequential ADR numbers), the
+engine surfaces a single conflict: "v2 supersedes v1?" Default proposal:
+v2 wins. User can also pick "merge both" if they cover non-overlapping
+surface — sub-conflicts then surface as content collisions.
+
+### LLM cost and caching
+
+Per-section LLM call (one section = one slice of the consolidator's
+output). Cache key = `sha256(input docs hashes + topic + module-name)`.
+Re-runs after doc edits invalidate only the touched sections.
+
+```
+.truecourse/.cache/consolidator/        (gitignored)
+├── claims/<doc-hash>/<topic>.json      cached extracted claims per doc/topic
+└── manifest.json                       what was cached for which inputs
+```
 
 ---
 
-## What's already built (Phases 1–5)
+## Module 2 — Contract Generation (IL)
 
-The verification half is complete and lives in
-`packages/contract-verifier/`. Tests in `tests/contract-verifier/` —
-**41 passing, 0 false positives on the planted-bug fixture**.
+**Job:** read `.truecourse/spec/`, produce `.truecourse/contracts/*.tc`
+(the typed IL the verifier consumes).
 
-### Artifact catalog
+This is the existing `contract-extractor` package, repurposed:
+
+- **Input source changes** — reads `.truecourse/spec/modules/<name>/*.md`
+  + `module.yaml`, not `specs.yaml` + raw docs.
+- **Slicing changes** — the canonical spec is already structured; each
+  section file is a natural slice. No more heading-walk over arbitrary
+  prose.
+- **Status awareness** — operations marked `status: planned | deferred
+  | out-of-scope` get extracted but flagged so the verifier can suppress
+  `implementation.missing` drifts on them.
+- **Negative spec extraction** — `out-of-scope` lists become anti-spec
+  artifacts the verifier checks for the opposite drift signal.
+
+**CLI:**
+
+```
+truecourse contracts generate            # spec → IL
+truecourse contracts generate --diff     # dry run, show what would change
+truecourse contracts list                # enumerate current .tc artifacts
+truecourse contracts validate            # parse + resolve check
+```
+
+**Cache:** `.truecourse/.cache/contracts/slices/<sliceId>.json` —
+content-addressed by section-file hash. Re-runs only re-extract the
+sections whose canonical-spec source changed.
+
+`specs.yaml` becomes a legacy escape hatch — pointing the extractor at a
+hand-crafted spec instead of the consolidator's output. Default path
+ignores it.
+
+---
+
+## Module 3 — Contract Verification
+
+**Job:** match spec modules to code modules, diff them, emit drifts.
+
+The existing `contract-verifier` package, decoupled from `analyze`:
+
+- **Input:** `.truecourse/contracts/*.tc` + code tree.
+- **Match step:** for each spec module's `scope` selector, find code
+  modules from the analyzer's detection that match by path prefix, tag,
+  or explicit code-side annotation. Unmatched modules on either side
+  surface as module-level drifts:
+  - **`module.spec-without-impl`** — documented module nothing
+    implements.
+  - **`module.impl-without-spec`** — implemented module no spec
+    describes.
+- **Diff step:** within a matched pair, run the existing comparator
+  suite — Operation, AuthRequirement, ErrorEnvelope, Pagination,
+  Idempotency, Entity, StateMachine, AuthorizationRule, EffectGroup,
+  Formula. Drifts now carry a `module` field for grouping.
+- **Status-aware suppression:** `planned` / `deferred` operations don't
+  produce `implementation.missing` drifts (known gap).
+- **Negative-spec checks:** code shipping a route the spec says is
+  out-of-scope produces a new `out-of-scope.implemented` drift.
+
+**CLI:**
+
+```
+truecourse verify                        # IL + code → drift report
+truecourse verify --diff                 # diff vs LATEST.verify.json baseline
+truecourse verify --module <name>        # scoped to one module
+truecourse verify --json                 # machine-readable output
+```
+
+**Storage:** drifts written to `.truecourse/verify/LATEST.json` (own
+baseline, separate from `analyze`'s `LATEST.json`). The optional fan-out
+to `analyze`'s `Violation[]` (the original Phase 7 adapter) becomes a
+*publish* step — opt-in via `truecourse verify --publish-as-violations`.
+
+---
+
+## What's already built (the verifier half)
+
+`packages/contract-verifier/` — **53 tests passing on the planted-bug
+fixture, 0 FPs.** Recent work:
+
+- **Cross-file mount-graph resolver** (replaces the cartesian
+  prefix-cartesian hack) — resolves `app.use('/prefix', router)` across
+  files via import/export tracking. 15 dedicated tests.
+- **Per-slice timeout bump** (120s → 240s) for table-heavy spec
+  sections.
+- **EVAL_CODE harness env var** + **per-slice error surfacing** in eval
+  reports — debug failures without re-running.
+
+### Artifact catalog (unchanged)
 
 13 artifact kinds defined; **10 enforced** (have a comparator):
 
@@ -68,15 +351,7 @@ The verification half is complete and lives in
 | `EffectGroup`/`Effect` | missing emission · forbidden emission on failure paths   |
 | `Formula`              | wrong operator on threshold · unused inputs              |
 
-Modeled but not enforced (by design):
-
-| Not enforced             | Why                                                    |
-|--------------------------|--------------------------------------------------------|
-| `Enum`                   | type-only; consumed by other artifacts                 |
-| `Effect` (standalone)    | sub-artifact of `EffectGroup`                          |
-| `UnenforceableObligation`| explicit slot for spec sentences with no encoding form |
-
-### Pipeline (verifier half)
+### Verifier pipeline
 
 ```
 .tc files ─▶ parser ─▶ resolver ─▶ lifters ─▶ ResolvedArtifact[]
@@ -84,8 +359,8 @@ Modeled but not enforced (by design):
                                                       │
                                                       ▼
 src/**/*.ts ─▶ tree-sitter ─▶ extractors ─▶ ExtractedOperation[]
-                                              + AuthPresence
-                                              + IdempotencyPresence
+                              + mount-graph    + AuthPresence
+                                               + IdempotencyPresence
                                                       │
                                                       ▼
                                               comparators
@@ -94,125 +369,172 @@ src/**/*.ts ─▶ tree-sitter ─▶ extractors ─▶ ExtractedOperation[]
                                               ContractDrift[]
 ```
 
+### Validation gate (preserved)
+
+Before writing anything to `.truecourse/contracts/`:
+1. **Parse** the merged `.tc` — must succeed.
+2. **Resolve** the corpus — every cross-reference points to a known
+   artifact.
+3. **Identity uniqueness** — no duplicates after merge.
+4. **Zod-validate** every fragment shape.
+
+If any check fails: don't write. Surface the offending slice + the LLM's
+raw output. **Never let a bad LLM call corrupt the contract corpus.**
+
 ### Fixture & test gate
 
-`tests/fixtures/sample-js-project-il/` — realistic Express order-management
-service with **18 planted bugs** (`// IL-DRIFT:` markers). The end-to-end
-test asserts:
+`tests/fixtures/sample-js-project-il/` — Express order-management
+service with 18 planted bugs (`// IL-DRIFT:` markers). End-to-end test
+asserts:
 
 1. Every planted bug produces drift.
 2. Set of drifts emitted ⊆ set of expected drifts (hard 0% FP gate).
 
 ---
 
-## Surface (locked)
+## Storage layout (canonical)
 
 ```
-truecourse contracts generate              # specs → .tc (LLM, cached)
-truecourse contracts generate --diff       # dry run, show what would change
-truecourse contracts generate              # auto-bootstraps specs.yaml on first run
-                                           # (no separate --bootstrap flag — the
-                                           #  flow detects missing config and
-                                           #  proposes inline)
-
-truecourse contracts list                  # later: enumerate current .tc artifacts
-truecourse contracts validate              # later: parse + resolve check
-
-truecourse analyze                         # rules + verify (drifts as violations)
-truecourse analyze --diff                  # diffed against LATEST.json
+.truecourse/                                 (per-repo)
+├── spec/                                    ◀── canonical, committable
+│   ├── overview.md                              cross-repo product summary
+│   ├── shared/                                  cross-module rules
+│   │   ├── auth-scheme.md
+│   │   ├── error-envelope.md
+│   │   ├── pagination.md
+│   │   └── effects.md
+│   ├── modules/
+│   │   └── <module-name>/
+│   │       ├── module.yaml                      identity + scope selector
+│   │       ├── overview.md
+│   │       ├── endpoints.md
+│   │       ├── data.md
+│   │       ├── errors.md
+│   │       ├── effects.md
+│   │       └── deps.md                          upstream contracts
+│   └── decisions.json                           conflict resolutions
+├── contracts/                               ◀── IL (.tc), committable
+│   ├── _shared/                                 cross-cutting artifacts
+│   ├── unenforceable/                           obligations with no encoding
+│   └── <module-name>/
+│       ├── operations/
+│       ├── entities/
+│       └── ...
+├── verify/                                  ◀── verification baselines
+│   └── LATEST.json                              drift report (committable)
+├── .cache/                                  ◀── gitignored
+│   ├── consolidator/                            spec consolidation cache
+│   │   ├── claims/<doc-hash>/<topic>.json
+│   │   └── manifest.json
+│   └── contracts/                               IL extraction cache
+│       ├── slices/<sliceId>.json
+│       └── manifest.json
+├── config.json                                  per-repo settings (committable)
+└── .lock                                        transient
 ```
 
-**Removed:** `truecourse verify` (we built it as a stepping stone; verification
-now runs only as a stage inside `analyze`).
+Global layout under `~/.truecourse/` is unchanged.
 
 ---
 
-## How `analyze` integrates contracts
+## CLI surface (locked)
 
 ```
-truecourse analyze
-  │
-  ├─ 1. extract step  (cached; runs only on spec content-hash change)
-  │     spec slices ─▶ Claude Code subprocess pool ─▶ fragments
-  │     fragments    ─▶ layered merge by rank      ─▶ .truecourse/contracts/*.tc
-  │
-  ├─ 2. verify step   (deterministic, fast)
-  │     .tc + code   ─▶ comparators                ─▶ ContractDrift[]
-  │     drifts       ─▶ adapter                    ─▶ Violation[]
-  │                                                   (category: 'contract-drift')
-  │
-  ├─ 3. rules step    (existing engine)            ─▶ Violation[]
-  │                                                   (category: 'rule')
-  │
-  └─ 4. write LATEST.json (single combined list)
-```
+truecourse spec scan                      # docs → claims → conflicts
+truecourse spec resolve                   # interactive resolve
+truecourse spec status
+truecourse spec apply                     # write .truecourse/spec/
+truecourse spec diff                      # docs vs canonical drift
 
-`--diff` works with no changes to the diff layer — it already operates on
-`Violation[]` from `LATEST.json`.
+truecourse contracts generate             # spec → IL
+truecourse contracts generate --diff
+truecourse contracts list
+truecourse contracts validate
+
+truecourse verify                         # IL + code → drift
+truecourse verify --diff
+truecourse verify --module <name>
+truecourse verify --json
+truecourse verify --publish-as-violations # opt-in fan-out to analyze
+
+truecourse analyze                        # rules engine — unchanged by this work
+truecourse analyze --diff
+```
 
 ---
 
-## Multi-spec layering (override semantics)
+## Phasing
 
-```yaml
-# .truecourse/specs.yaml
-specs:
-  - file: SPEC.md
-    rank: 0                # lowest — base spec
-  - file: docs/adr/*.md
-    rank: 1                # ADRs override base
-  - file: docs/rfc/2026-q1.md
-    rank: 2                # latest RFC wins over both
-```
+### Phase A — Verifier + IL extractor (DONE)
 
-**Rules:**
-1. Higher rank overrides lower for the same `(ArtifactKind, identity, obligationKey)`.
-2. Same-rank conflicts are surfaced as diagnostics — never silently picked.
-3. Every artifact carries a stack of `origin` lines (one per layered fragment),
-   so any field's winning source is traceable.
+| Sub-phase | Scope                                                                | Status |
+|-----------|----------------------------------------------------------------------|--------|
+| **A.1** | Parser, resolver, Operation slice (vertical end-to-end)                | DONE   |
+| **A.2** | Cross-cutting: ErrorEnvelope, Pagination, AuthRequirement              | DONE   |
+| **A.3** | Entity, StateMachine                                                   | DONE   |
+| **A.4** | AuthorizationRule, EffectGroup, Formula                                | DONE   |
+| **A.5** | IdempotencyContract                                                    | DONE   |
+| **A.6** | Violation schema unification (now becomes optional fan-out — see C.4) | DONE   |
+| **A.7** | ~~Wire verify into analyze, remove `verify` command~~ — **REVERSED** in C | DONE→reversed |
+| **A.8** | `truecourse contracts generate` (single-spec, slice cache, subprocess pool) | DONE   |
+| **A.9** | `truecourse contracts generate --diff`                                 | DONE   |
+| **A.10**| Bootstrap flow (auto-propose `specs.yaml` when missing)                | DONE   |
+| **A.11**| Multi-spec layering by rank; origin-trail stacking                     | DONE   |
+| **A.12**| Conflict surfacing (same-rank disagreements as diagnostics)            | DONE   |
+| **A.13**| `truecourse contracts list` / `validate` subcommands                   | DONE   |
+| **A.14**| Cross-file mount-graph resolver (Express sub-router stitching)         | DONE   |
+| **A.15**| Eval harness: EVAL_CODE override + per-slice error surfacing           | DONE   |
+
+### Phase B — Spec Consolidation engine (NEW)
+
+| Sub-phase | Scope                                                                  | Status |
+|-----------|------------------------------------------------------------------------|--------|
+| **B.1**  | `packages/spec-consolidator/` package skeleton + `Claim` schema (Zod)  | TODO   |
+| **B.2**  | Discovery — broaden doc detection (drop filename filter, classify all .md as candidates with `kind` + provenance) | TODO   |
+| **B.3**  | Block classifier — LLM tags doc sections with topic set (`auth`, `endpoints`, `data`, ...) | TODO   |
+| **B.4**  | Claim extractor — per-block LLM call producing structured `Claim[]` with status detection (Phase markers, Out of Scope, Deprecated, Future) | TODO   |
+| **B.5**  | Merger — group claims by `topic + subject`; detect identical / compatible / conflicting; produce `Conflict[]` for the conflict set | TODO   |
+| **B.6**  | Logical module detector — group claims by scope (path prefix, tag, theme) into `modules/<name>/` skeletons; emit `module.yaml` proposals | TODO   |
+| **B.7**  | Materializer — write `.truecourse/spec/modules/<name>/*.md` + `shared/*.md` + `overview.md` from resolved claims; honor `decisions.json` | TODO   |
+| **B.8**  | Version chain reconciliation — detect superseding doc pairs (filename suffix patterns, `Supersedes:` front-matter); surface as conflict with default winner | TODO   |
+| **B.9**  | Negative spec — emit `out-of-scope` lists per module from "Out of Scope" / "Excluded from V1" sections | TODO   |
+| **B.10** | Cache layer — `.truecourse/.cache/consolidator/`; per-(doc-hash, topic) caching | TODO   |
+| **B.11** | `truecourse spec scan` — full pipeline: discovery → claims → merge → conflicts | TODO   |
+| **B.12** | `truecourse spec resolve` — interactive CLI loop walking pending conflicts | TODO   |
+| **B.13** | `truecourse spec apply` — materialize canonical spec from current decisions | TODO   |
+| **B.14** | `truecourse spec status` / `spec diff` subcommands                     | TODO   |
+| **B.15** | Dashboard "Spec" tab — pending-conflict list, side-by-side resolver UI, WebSocket write-back to `decisions.json` | TODO   |
+| **B.16** | Validation gate — canonical spec must round-trip through Module 2's parser before being declared "applied" | TODO   |
+| **B.17** | Realistic fixture — multi-doc repo (PRDv1, PRDv2, ADRs, README, scattered notes) with planted conflicts; integration test asserts the engine surfaces all of them and produces a clean canonical spec after resolve | TODO   |
+
+### Phase C — Module separation (CLI/UI/storage)
+
+The original Phase 7 folded verification into `analyze`. Reversal:
+
+| Sub-phase | Scope                                                                  | Status |
+|-----------|------------------------------------------------------------------------|--------|
+| **C.1**  | Restore `truecourse verify` as a top-level command (NOT removed)        | TODO   |
+| **C.2**  | Module 2 reads `.truecourse/spec/` by default; `specs.yaml` falls back as escape hatch | TODO   |
+| **C.3**  | Module 3 writes `.truecourse/verify/LATEST.json` (own baseline) instead of feeding `analyze`'s `LATEST.json` | TODO   |
+| **C.4**  | Optional fan-out: `truecourse verify --publish-as-violations` adapts drifts into `analyze`'s `Violation[]` for users who want one combined view | TODO   |
+| **C.5**  | Dashboard "Contracts" tab — IL browser, spec-vs-IL diff, regenerate trigger | TODO   |
+| **C.6**  | Dashboard "Verification" tab — drift report, module-level grouping, --diff mode against committed `LATEST.json` | TODO   |
+| **C.7**  | Module-level matching: spec module `scope` → code-side detected module; emit `module.spec-without-impl` / `module.impl-without-spec` drifts | TODO   |
+| **C.8**  | Status-aware suppression: `planned` / `deferred` ops don't fire `implementation.missing` | TODO   |
+| **C.9**  | Negative-spec drift: `out-of-scope.implemented` when code ships something spec excluded | TODO   |
+| **C.10** | Auth comparator: honor `except` clause (current FP source on Compliance eval) | TODO   |
+| **C.11** | Auth-presence detector: walk mount graph upward to find ancestor middleware; recognize factory-call middleware (`buildAuthMiddleware()`, `auth(...)`, etc.) — closes 26 FPs on Compliance | TODO   |
 
 ---
 
-## Progressive parsing
-
-```
-Spec slicing (markdown headings, default H2):
-
-  SPEC.md
-  ├── # Operations
-  │   ├── ## POST /api/orders          ◀── slice 1
-  │   ├── ## GET /api/orders           ◀── slice 2
-  │   └── ## GET /api/orders/{id}      ◀── slice 3
-  ├── # Entities
-  │   └── ## Order                     ◀── slice 4
-  └── # Authentication                 ◀── slice 5
-
-Slice id = sha256(spec_path + heading_path + slice_text)
-```
-
-**Cache layout:**
-
-```
-.truecourse/spec-cache/                    (gitignored)
-├── slices/<SliceId>.json                  fragments per slice
-├── manifest.json                          (spec, heading) → SliceId
-└── merge.json                             last layered-merge result
-```
-
-**Invalidation** is content-addressed: same hash → cache hit; different hash
-→ one LLM call. Cost in steady state ≈ $0; cost on spec edit ≈ one call per
-edited slice.
-
----
-
-## LLM execution model
+## LLM execution model (shared across modules)
 
 **Provider:** Claude Code CLI subprocess. No API key juggling — uses the
 user's existing `claude` auth.
 
 **Concurrency:** capped by `TRUECOURSE_MAX_CONCURRENCY` (defaults to
-`min(os.cpus().length, 4)`). Slices are independent; we parallelize
-cache-misses up to the cap.
+`min(os.cpus().length, 4)`). Slices/sections are independent; runners
+parallelize cache-misses up to the cap.
 
 **Per-slice call:**
 
@@ -220,236 +542,41 @@ cache-misses up to the cap.
 spawn:  claude -p "<prompt>" --output-format json
         --append-system-prompt "<schema + few-shot>"
         --setting-sources project
+        (timeout: 240s)
 ```
 
-**Output (JSON, Zod-validated):**
-
-```ts
-{
-  fragments: [
-    {
-      kind: "Operation",
-      identity: "POST /api/orders",
-      tcSource: "operation POST \"/api/orders\" { … }",
-      origin: { source: "SPEC.md", section: "POST /api/orders", lines: [120, 135] },
-      obligationKeys: ["response.201", "response.201.headers.location", "response.400"]
-    },
-    {
-      kind: "UnenforceableObligation",
-      identity: "encryption.at-rest",
-      tcSource: "unenforceable-obligation encryption.at-rest { … }",
-      origin: { … },
-      reason: "no structural encoding for at-rest encryption"
-    }
-  ]
-}
-```
-
-`obligationKeys` matters — it's what the merger keys field-level layering on.
-
----
-
-## Validation gate (catch bad LLM output)
-
-Before writing anything to `.truecourse/contracts/`:
-
-1. **Parse** the merged `.tc` — must succeed.
-2. **Resolve** the corpus — every cross-reference must point to a known artifact.
-3. **Identity uniqueness** — no duplicates after merge.
-4. **Zod-validate** every fragment shape.
-
-If any check fails: don't write. Surface the offending slice + the LLM's raw
-output to the user. **Never let a bad LLM call corrupt the contract corpus.**
-
----
-
-## Bootstrap flow (first run, no `specs.yaml`)
-
-```
-$ truecourse contracts generate
-
-No .truecourse/specs.yaml found.
-Scanning the repo for candidate spec documents…
-
-Found:
-  README.md                  → likely "overview" (excluded)
-  SPEC.md                    → looks like a base spec
-  docs/adr/0001-…0007-*.md   → ADR sequence (date-ordered)
-  docs/rfc/2026-q1-orders.md → RFC superseding 2 ADRs
-  CHANGELOG.md               → release notes (excluded)
-
-Proposed specs.yaml:
-  - file: SPEC.md                     rank: 0
-  - file: docs/adr/*.md               rank: 1
-  - file: docs/rfc/2026-q1-orders.md  rank: 2
-
-Reasoning:
-  - SPEC.md establishes the base service contract.
-  - ADRs typically refine or amend the base spec; date-ordered.
-  - The RFC explicitly references ADR-0006 as superseded.
-
-Write this config? [Y/n/edit]
-```
-
-Under the hood: one Claude Code call. Walk repo → collect markdown
-candidates → send list + first ~200 lines of each → ask LLM to classify and
-propose ranks.
-
-No skill, no separate command — the flow is inline in `contracts generate`.
-
----
-
-## Phasing
-
-| Phase | Scope                                                                    | Status |
-|-------|--------------------------------------------------------------------------|--------|
-| **1** | Parser, resolver, Operation slice (vertical end-to-end)                  | DONE   |
-| **2** | Cross-cutting: ErrorEnvelope, Pagination, AuthRequirement                | DONE   |
-| **3** | Entity, StateMachine                                                     | DONE   |
-| **4** | AuthorizationRule, EffectGroup, Formula                                  | DONE   |
-| **5** | IdempotencyContract (lifter + presence detector + comparator)            | DONE   |
-| **6** | Violation schema: add `category`; map `ContractDrift → Violation`        | DONE   |
-| **7** | Wire verify into `analyze` pipeline; remove `truecourse verify` command  | DONE   |
-| **8** | `truecourse contracts generate` (single-spec, slice cache, Claude Code subprocess pool) | DONE |
-| **9** | `truecourse contracts generate --diff` (dry run vs on-disk `.tc`)        | DONE   |
-| **10**| Bootstrap flow (auto-propose `specs.yaml` when missing)                  | DONE   |
-| **11**| Multi-spec layering by rank; origin-trail stacking                       | DONE   |
-| **12**| Conflict surfacing (same-rank disagreements as diagnostics)              | DONE   |
-| **13**| `truecourse contracts list` / `validate` subcommands                     | DONE   |
-
----
-
-## Phase 6 — Violation schema unification
-
-**Goal:** drifts and rule violations share one type, one storage, one diff path.
-
-Changes:
-- `packages/shared/` — add `category: 'rule' | 'contract-drift'` to the
-  `Violation` schema. Optional `subcategory` (artifact kind) for filtering.
-- `packages/contract-verifier/` — keep `ContractDrift` as the internal
-  shape; add an adapter that maps it to `Violation`.
-- `LATEST.json` — no schema break: `Violation[]` is already the storage
-  shape; existing entries default to `category: 'rule'`.
-
-Acceptance: existing tests pass; new test confirms a `ContractDrift` round-trips
-through the adapter and matches the `Violation` Zod schema.
-
----
-
-## Phase 7 — Integrate verify into analyze; remove `verify` command
-
-**Goal:** `truecourse analyze` becomes the only verification entrypoint.
-
-Changes:
-- `packages/core/src/lib/pipeline.ts` (or equivalent) — add a verify stage
-  that runs `verify({ contractsDir, codeDir })`, maps drifts to violations,
-  and merges into the analyze output.
-- `tools/cli/src/index.ts` — remove the `verify` command registration and
-  its handler (`tools/cli/src/commands/verify.ts`).
-- Update tests / docs / fixture instructions referring to `truecourse verify`.
-
-Acceptance: `truecourse analyze` on the fixture produces the 18 contract
-drifts as violations alongside any rule violations; `truecourse analyze
---diff` shows them as new/resolved deltas.
-
----
-
-## Phase 8 — `contracts generate` (single-spec, no layering)
-
-**Goal:** SPEC.md → `.truecourse/contracts/*.tc` end-to-end.
-
-Modules:
-- `packages/contract-extractor/` (new package)
-  - `slicer.ts`         — markdown → slices with content hashes
-  - `cache.ts`           — read/write `.truecourse/spec-cache/slices/*`
-  - `claude-runner.ts`   — subprocess pool, concurrency cap
-  - `prompt.ts`          — system prompt + few-shot
-  - `merger.ts`          — fragments → grouped by `(kind, identity)`,
-                            no layering yet (single spec)
-  - `validator.ts`       — parse + resolve dry run; reject on failure
-  - `writer.ts`          — write `.tc` files with `origin` lines
-  - `index.ts`           — orchestrator
-- `tools/cli/src/commands/contracts.ts` — `generate` subcommand
-- `tools/cli/src/index.ts` — register `contracts` command group
-
-Acceptance: deleting the fixture's `.truecourse/contracts/` and running
-`truecourse contracts generate` reproduces the same `.tc` corpus that the
-verifier consumes. Subsequent runs hit cache (zero LLM calls).
-
----
-
-## Phase 9 — `contracts generate --diff`
-
-Dry run: re-slice, re-extract cache misses, merge, validate, **diff against
-on-disk `.tc`**, render the diff, **don't write**.
-
-Output mirrors a unified diff with artifact-level granularity:
-
-```
-M orders/operations/post-orders.tc   response.201 (was 200)
-+ orders/refund.tc                   new operation from rfc-q1.md
-- billing/invoice.tc                 spec removed in rfc-q2.md
-```
-
----
-
-## Phase 10 — Bootstrap flow
-
-Inline in `contracts generate`. Detects missing `specs.yaml`, walks repo,
-sends candidates to one Claude Code call, proposes config with per-entry
-reasoning, writes on approval. Falls back to a deterministic heuristic
-(`bootstrap.ts`) when `claude` is unavailable, the call fails, or the
-output fails Zod validation — so the flow always lands on a usable
-proposal.
-
----
-
-## Phase 11 — Multi-spec layering
-
-- `specs.yaml` rank-aware loader (glob expansion, explicit ordering).
-- Merger gains rank-based override per `(kind, identity, obligationKey)`.
-- `.tc` artifacts gain stacked `origin` lines (one per fragment that
-  contributed; winners marked).
-
----
-
-## Phase 12 — Conflict surfacing
-
-Same-rank fragments touching the same `obligationKey` with different content
-emit `SpecConflict` diagnostics in the verify output. They block writing
-unless the user resolves (edits a spec, bumps a rank, or marks one as
-authoritative in `specs.yaml`).
-
----
-
-## Phase 13 — `contracts list` / `validate`
-
-Convenience subcommands; no new mechanism, just expose existing capabilities
-to the CLI.
+**Output:** Zod-validated JSON. Anything that fails validation gets
+surfaced as a slice failure with the raw LLM text — never silently
+dropped, never partially written.
 
 ---
 
 ## Open questions (non-blocking)
 
-- **Spec file types** — markdown-only at first. Confluence / Google Docs via
-  fetch step is later.
-- **Slicing granularity** — H2 default; configurable per spec in
-  `specs.yaml` later.
-- **Origin stacking grammar** — current parser allows one `origin` line per
-  artifact; needs to allow multiple before Phase 11.
-- **What happens when a spec is removed?** Fragments invalidated, artifacts
-  may become orphaned → render as removals in the diff and require approval.
+- **Spec file types beyond markdown** — Confluence / Google Docs / Notion
+  exports via fetch step. Out of scope for B; revisit after the engine
+  proves out on markdown.
+- **Cross-repo specs** — a single product split across multiple repos.
+  Out of scope for v1.
+- **Spec source-of-truth in code** — TS interfaces / OpenAPI / GraphQL
+  schemas as alternative inputs. Read-only for v1; let docs remain
+  authoritative.
+- **Skill vs subcommand for human-driven spec authoring** — the
+  consolidator handles bulk import; users adding a new endpoint
+  one-at-a-time should use a Claude Code skill that helps maintain the
+  canonical format. Slot for it: post-B.15.
 
 ---
 
-## Triggers — when each step runs
+## Triggers — when each module runs
 
-| Event                | extract                | verify   | rules   |
-|----------------------|------------------------|----------|---------|
-| spec edited          | ✓ (cache miss on slice)| ✓        | —       |
-| code edited          | —                      | ✓        | ✓       |
-| `.tc` edited by hand | — (extract is skipped) | ✓        | —       |
+| Event                | spec consolidation | contracts gen | verify  | rules (analyze) |
+|----------------------|--------------------|---------------|---------|-----------------|
+| doc edited           | ✓ (cache miss)     | —             | —       | —               |
+| `decisions.json` edit| ✓ (apply step)     | ✓ (re-extract)| ✓       | —               |
+| `.truecourse/spec/` edit (manual) | —     | ✓             | ✓       | —               |
+| `.tc` edited by hand | —                  | —             | ✓       | —               |
+| code edited          | —                  | —             | ✓       | ✓               |
 
-The verifier is the cheap deterministic step — runs every analyze. The
-extractor is gated by spec content hash — runs only when a slice's text
-actually changed.
+Each module runs only when its inputs changed. Caches are
+content-addressed; nothing recomputes when nothing moved.
