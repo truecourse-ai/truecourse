@@ -20,6 +20,7 @@
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/shared": "workspace:^",
+    "@truecourse/spec-consolidator": "workspace:*",
     "commander": "^12.1.0",
     "js-yaml": "^4.1.0"
   },

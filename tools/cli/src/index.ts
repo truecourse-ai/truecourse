@@ -25,6 +25,13 @@ import {
   runContractsList,
   runContractsValidate,
 } from "./commands/contracts.js";
+import {
+  runSpecScan,
+  runSpecResolve,
+  runSpecApply,
+  runSpecStatus,
+  runSpecDiff,
+} from "./commands/spec.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -182,6 +189,47 @@ contractsCmd
   .description("Parse and resolve all .tc files, report any issues")
   .action(async () => {
     await runContractsValidate();
+  });
+
+// Spec consolidation — docs → claims → conflicts → canonical .truecourse/spec/.
+const specCmd = program
+  .command("spec")
+  .description("Consolidate scattered docs into a canonical spec");
+
+specCmd
+  .command("scan")
+  .description("Walk docs, extract claims, surface conflicts (no writes)")
+  .action(async () => {
+    await runSpecScan();
+  });
+
+specCmd
+  .command("resolve")
+  .description("Resolve open conflicts (interactive runs in the dashboard)")
+  .option("--all-defaults", "Accept the engine's pre-pick on every open conflict")
+  .action(async (options) => {
+    await runSpecResolve({ allDefaults: !!options.allDefaults });
+  });
+
+specCmd
+  .command("apply")
+  .description("Write .truecourse/spec/ from current decisions")
+  .action(async () => {
+    await runSpecApply();
+  });
+
+specCmd
+  .command("status")
+  .description("Summary of docs, claims, modules, and pending decisions")
+  .action(async () => {
+    await runSpecStatus();
+  });
+
+specCmd
+  .command("diff")
+  .description("Show what would change if you ran `spec apply` now")
+  .action(async () => {
+    await runSpecDiff();
   });
 
 // Rules management — reads/writes per-repo config.json directly. No server needed.
