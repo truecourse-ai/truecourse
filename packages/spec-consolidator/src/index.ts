@@ -40,3 +40,6 @@ export {
 
 export { discoverDocs, classifyDoc } from './discovery.js';
 export type { DocCandidate, DiscoveryOptions } from './discovery.js';
+
+export { sliceDoc } from './slicer.js';
+export type { Block } from './slicer.js';
