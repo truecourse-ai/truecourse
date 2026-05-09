@@ -31,7 +31,7 @@ import {
 import { detectModules, type DetectedModule } from './module-detector.js';
 import { extractClaims, type ExtractResult } from './extractor.js';
 import { materializeSpec, type MaterializeResult } from './materializer.js';
-import { mergeClaims, type MergeResult } from './merger.js';
+import { mergeClaims, type DecidedConflict, type MergeResult } from './merger.js';
 import { spawnRunner, type BlockRunner, type BlockRunResult } from './runner.js';
 import type { Block } from './slicer.js';
 import {
@@ -40,7 +40,15 @@ import {
   type RenderedSection,
   type SectionRunner,
 } from './section-runner.js';
-import { DecisionsFileSchema, type Claim, type DecisionsFile } from './types.js';
+import {
+  DecisionsFileSchema,
+  type Claim,
+  type Conflict,
+  type ConflictCandidate,
+  type DecisionsFile,
+} from './types.js';
+import { detectVersionChains, type VersionChain } from './version-chain.js';
+import { discoverDocs, type DocCandidate } from './discovery.js';
 
 export interface ConsolidateOptions {
   /**
@@ -90,7 +98,17 @@ export async function consolidate(
 ): Promise<ConsolidateResult> {
   const decisions = readDecisions(repoRoot);
 
-  // ---- Extract (cache-wrapped) ------------------------------------------
+  // ---- Discover (twice — once here for chain detection, once inside
+  //              extractClaims). Discovery is cheap and deterministic
+  //              so the duplication is negligible.
+  const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
+
+  // ---- Detect version chains (B.8) -------------------------------------
+  const chains = detectVersionChains(docs);
+  const chainConflicts = chains.map(synthesizeChainConflict);
+  const winnersByChain = resolveChainWinners(chainConflicts, decisions);
+
+  // ---- Extract (cache-wrapped) -----------------------------------------
   const blockRunner = wrapBlockRunner(repoRoot, opts.blockRunner ?? spawnRunner());
   const extract = await extractClaims(repoRoot, {
     runner: blockRunner,
@@ -100,15 +118,24 @@ export async function consolidate(
     onBlockFailure: opts.onBlockFailure,
   });
 
+  // ---- Apply chain decisions: drop claims from superseded docs ---------
+  const filteredClaims = filterByChainWinners(extract.claims, chains, winnersByChain);
+
   // ---- Merge -----------------------------------------------------------
-  const merge = mergeClaims(extract.claims, decisions);
+  const merge = mergeClaims(filteredClaims, decisions);
+
+  // ---- Stitch chain conflicts into the merge result --------------------
+  // Chains without a decision surface in openConflicts; chains with one
+  // surface in decidedConflicts. Either way the dashboard sees them
+  // through the same shape as content conflicts.
+  const stitchedMerge = stitchChainConflicts(merge, chainConflicts, decisions);
 
   if (!opts.materialize) {
-    return { extract, merge, decisions };
+    return { extract, merge: stitchedMerge, decisions };
   }
 
   // ---- Detect modules + materialize (cache-wrapped section runner) -----
-  const renderable = collectRenderableClaims(merge);
+  const renderable = collectRenderableClaims(stitchedMerge);
   const modules = detectModules(renderable).modules;
   const sectionRunner = wrapSectionRunner(
     repoRoot,
@@ -117,7 +144,7 @@ export async function consolidate(
   const specRoot = specRootPath(repoRoot);
   const materialize = await materializeSpec(
     specRoot,
-    merge,
+    stitchedMerge,
     modules,
     decisions,
     {
@@ -126,7 +153,147 @@ export async function consolidate(
     },
   );
 
-  return { extract, merge, modules, materialize, decisions };
+  return { extract, merge: stitchedMerge, modules, materialize, decisions };
+}
+
+// ---------------------------------------------------------------------------
+// Version chain → Conflict synthesis
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn a detected chain into a Conflict the dashboard can display
+ * with the same component as content conflicts. Each candidate is a
+ * synthetic Claim representing one doc in the chain — the LLM never
+ * sees these; they exist only at the merge layer for surfacing.
+ */
+function synthesizeChainConflict(chain: VersionChain): Conflict {
+  const candidates: ConflictCandidate[] = chain.docs.map((doc, index) => ({
+    index,
+    weight:
+      index === 0
+        ? 'oldest'
+        : index === chain.docs.length - 1
+          ? 'newest'
+          : index < chain.docs.length / 2
+            ? 'older'
+            : 'newer',
+    claim: docToSyntheticClaim(doc, chain),
+  }));
+  return {
+    id: chain.id,
+    topic: 'overview',
+    subject: `version chain: ${chain.docs.map((d) => path.basename(d.path)).join(' → ')}`,
+    candidates,
+    defaultPick: candidates.length - 1,
+  };
+}
+
+function docToSyntheticClaim(doc: DocCandidate, chain: VersionChain): Claim {
+  return {
+    id: `version-chain:${chain.id}:${doc.path}`,
+    topic: 'overview',
+    subject: `version chain: ${chain.docs.map((d) => path.basename(d.path)).join(' → ')}`,
+    content: {
+      file: doc.path,
+      detectedFrom: chain.detectedFrom,
+      preview: doc.preview.split('\n').slice(0, 5).join('\n'),
+    },
+    provenance: {
+      file: doc.path,
+      line: 1,
+      quote: doc.preview.split('\n').slice(0, 3).join('\n'),
+    },
+    metadata: {
+      docKind: doc.kind,
+      lastTouched: doc.lastTouched,
+    },
+  };
+}
+
+/**
+ * For each chain conflict, look up the user's decision (if any) and
+ * record which doc path "won". A `pick` resolution selects one doc
+ * exclusively; a `custom` resolution is interpreted as "merge both"
+ * — claims from every doc in the chain pass through unfiltered.
+ */
+function resolveChainWinners(
+  chainConflicts: Conflict[],
+  decisions: DecisionsFile,
+): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const conflict of chainConflicts) {
+    const decision = decisions.decisions.find((d) => d.conflictId === conflict.id);
+    if (!decision) {
+      out.set(conflict.id, null); // pending — surface as openConflict
+      continue;
+    }
+    if (decision.resolution.kind === 'pick') {
+      const idx = decision.resolution.candidateIndex;
+      const winnerClaim = conflict.candidates[idx]?.claim;
+      const winnerFile = (winnerClaim?.content as { file?: string } | undefined)?.file ?? null;
+      out.set(conflict.id, winnerFile);
+    } else {
+      // 'custom' — treat as "merge both": no filtering.
+      out.set(conflict.id, null);
+    }
+  }
+  return out;
+}
+
+/**
+ * Drop claims from docs that the user superseded. Claims from docs
+ * not in any chain (or in chains with no winner decided yet) pass
+ * through.
+ */
+function filterByChainWinners(
+  claims: Claim[],
+  chains: VersionChain[],
+  winnersByChain: Map<string, string | null>,
+): Claim[] {
+  const dropFiles = new Set<string>();
+  for (const chain of chains) {
+    const winner = winnersByChain.get(chain.id);
+    if (!winner) continue; // no decision yet OR custom (merge-both)
+    for (const doc of chain.docs) {
+      if (doc.path !== winner) dropFiles.add(doc.path);
+    }
+  }
+  if (dropFiles.size === 0) return claims;
+  return claims.filter((c) => !dropFiles.has(c.provenance.file));
+}
+
+/**
+ * Add chain conflicts to the merge result so the dashboard sees
+ * everything in one shape. Pending chains → openConflicts. Decided
+ * chains → decidedConflicts.
+ */
+function stitchChainConflicts(
+  merge: MergeResult,
+  chainConflicts: Conflict[],
+  decisions: DecisionsFile,
+): MergeResult {
+  const pending: Conflict[] = [];
+  const decided: DecidedConflict[] = [];
+  for (const conflict of chainConflicts) {
+    const decision = decisions.decisions.find((d) => d.conflictId === conflict.id);
+    if (!decision) {
+      pending.push(conflict);
+      continue;
+    }
+    decided.push({
+      conflict,
+      decision,
+      resolvedClaim:
+        decision.resolution.kind === 'pick'
+          ? conflict.candidates[decision.resolution.candidateIndex]?.claim
+          : undefined,
+    });
+  }
+  return {
+    resolvedClaims: merge.resolvedClaims,
+    decidedConflicts: [...decided, ...merge.decidedConflicts],
+    openConflicts: [...pending, ...merge.openConflicts],
+  };
 }
 
 // ---------------------------------------------------------------------------
