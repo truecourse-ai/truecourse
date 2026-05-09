@@ -374,6 +374,28 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/spec-consolidator:
+    dependencies:
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   tools/cli:
     dependencies:
       '@clack/prompts':
