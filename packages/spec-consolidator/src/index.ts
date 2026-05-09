@@ -37,3 +37,6 @@ export {
   ScopeSchema,
   ModuleManifestSchema,
 } from './types.js';
+
+export { discoverDocs, classifyDoc } from './discovery.js';
+export type { DocCandidate, DiscoveryOptions } from './discovery.js';
