@@ -63,3 +63,14 @@ export type { MergeResult, DecidedConflict } from './merger.js';
 
 export { detectModules, topicsInModule, SHARED_MODULE } from './module-detector.js';
 export type { DetectedModule, ModuleDetectionResult } from './module-detector.js';
+
+export { spawnSectionRunner } from './section-runner.js';
+export type {
+  SectionRunner,
+  PendingSection,
+  RenderedSection,
+  SpawnSectionRunnerOptions,
+} from './section-runner.js';
+
+export { materializeSpec } from './materializer.js';
+export type { MaterializeOptions, MaterializeResult } from './materializer.js';
