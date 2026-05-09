@@ -489,23 +489,27 @@ truecourse analyze --diff
 
 | Sub-phase | Scope                                                                  | Status |
 |-----------|------------------------------------------------------------------------|--------|
-| **B.1**  | `packages/spec-consolidator/` package skeleton + `Claim` schema (Zod)  | TODO   |
-| **B.2**  | Discovery — broaden doc detection (drop filename filter, classify all .md as candidates with `kind` + provenance) | TODO   |
-| **B.3**  | Block classifier — LLM tags doc sections with topic set (`auth`, `endpoints`, `data`, ...) | TODO   |
-| **B.4**  | Claim extractor — per-block LLM call producing structured `Claim[]` with status detection (Phase markers, Out of Scope, Deprecated, Future) | TODO   |
-| **B.5**  | Merger — group claims by `topic + subject`; detect identical / compatible / conflicting; produce `Conflict[]` for the conflict set | TODO   |
-| **B.6**  | Logical module detector — group claims by scope (path prefix, tag, theme) into `modules/<name>/` skeletons; emit `module.yaml` proposals | TODO   |
-| **B.7**  | Materializer — write `.truecourse/spec/modules/<name>/*.md` + `shared/*.md` + `overview.md` from resolved claims; honor `decisions.json` | TODO   |
-| **B.8**  | Version chain reconciliation — detect superseding doc pairs (filename suffix patterns, `Supersedes:` front-matter); surface as conflict with default winner | TODO   |
-| **B.9**  | Negative spec — emit `out-of-scope` lists per module from "Out of Scope" / "Excluded from V1" sections | TODO   |
-| **B.10** | Cache layer — `.truecourse/.cache/consolidator/`; per-(doc-hash, topic) caching | TODO   |
-| **B.11** | `truecourse spec scan` — full pipeline: discovery → claims → merge → conflicts | TODO   |
-| **B.12** | `truecourse spec resolve` — interactive CLI loop walking pending conflicts | TODO   |
-| **B.13** | `truecourse spec apply` — materialize canonical spec from current decisions | TODO   |
-| **B.14** | `truecourse spec status` / `spec diff` subcommands                     | TODO   |
-| **B.15** | Dashboard "Spec" tab — pending-conflict list, side-by-side resolver UI, WebSocket write-back to `decisions.json` | TODO   |
-| **B.16** | Validation gate — canonical spec must round-trip through Module 2's parser before being declared "applied" | TODO   |
-| **B.17** | Realistic fixture — multi-doc repo (PRDv1, PRDv2, ADRs, README, scattered notes) with planted conflicts; integration test asserts the engine surfaces all of them and produces a clean canonical spec after resolve | TODO   |
+| **B.1**  | `packages/spec-consolidator/` package skeleton + `Claim` schema (Zod)  | DONE   |
+| **B.2**  | Discovery — broaden doc detection (drop filename filter, classify all .md as candidates with `kind` + provenance) | DONE   |
+| **B.3**  | Block slicer + per-block LLM extractor (collapsed B.4 per Q4: one call does both classify + extract) | DONE   |
+| **B.4**  | (collapsed into B.3 per Q4 — single LLM call does classify + extract) | DONE   |
+| **B.5**  | Merger — group claims by `topic + subject`; auto-merge identical, emit Conflict on any difference (Q2); decisions persist (Q13) | DONE   |
+| **B.6**  | Module detector — derive module names from endpoint path prefixes; cross-cutting → `_shared`; manifests + scope selectors | DONE   |
+| **B.7**  | Materializer — write `.truecourse/spec/modules/<name>/*.md` + `shared/*.md` from resolved claims; LLM-rendered prose (Q5); batch apply (Q12) | DONE   |
+| **B.8**  | Version chain reconciliation — filename heuristic + `Supersedes:` header; surfaces as a single Conflict; resolution filters claims from non-winners before merge | DONE   |
+| **B.9**  | Negative spec — out-of-scope claims emit on `module.yaml.outOfScope[]` (structural), filtered out of section prose | DONE   |
+| **B.10** | Two-layer cache — `.truecourse/.cache/consolidator/{blocks,sections}/`, content-addressed | DONE   |
+| **B.11** | `truecourse spec scan`                                                 | DONE   |
+| **B.12** | `truecourse spec resolve` — `--all-defaults` batch path (interactive lives in the dashboard per Q8) | DONE   |
+| **B.13** | `truecourse spec apply`                                                | DONE   |
+| **B.14** | `truecourse spec status` / `spec diff` subcommands                     | DONE   |
+| **B.15** | Dashboard "Spec" tab — pending-conflict list, side-by-side resolver UI, WebSocket write-back to `decisions.json` | DEFERRED |
+| **B.16** | Validation gate — canonical spec must round-trip through Module 2's parser before being declared "applied" | DEFERRED |
+| **B.17** | Internal multi-doc fixture (`tests/fixtures/sample-multi-doc-spec/`) + end-to-end integration test with planted patterns | DONE   |
+
+**Deferred sub-phases:**
+- **B.15 (Dashboard "Spec" tab)** — substantial frontend work; defer to a dedicated UI session. The CLI surface (B.11–B.14) is enough to drive the engine end-to-end; the dashboard is a UX upgrade, not a correctness requirement.
+- **B.16 (Validation gate)** — depends on Module 2 (Contract Generation) being switched to read from `.truecourse/spec/` instead of `specs.yaml`. That's Phase C work (C.2). Defer until Module 2 is bridged.
 
 ### Phase C — Module separation (CLI/UI/storage)
 
