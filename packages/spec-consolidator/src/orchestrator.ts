@@ -411,7 +411,13 @@ function wrapSectionRunner(repoRoot: string, inner: SectionRunner): SectionRunne
 function collectRenderableClaims(merge: MergeResult): Claim[] {
   const out: Claim[] = [...merge.resolvedClaims];
   for (const decided of merge.decidedConflicts) {
-    if (decided.resolvedClaim) out.push(decided.resolvedClaim);
+    if (!decided.resolvedClaim) continue;
+    // Version-chain synthetic claims are metadata about the user's
+    // supersede decision — not real spec content. Filter them out so
+    // they don't end up rendered as a "version chain: …" overview
+    // file in the canonical.
+    if (decided.resolvedClaim.id.startsWith('version-chain:')) continue;
+    out.push(decided.resolvedClaim);
     // Custom-resolution claims are synthesized inside the
     // materializer itself (it has the resolution payload). Avoid
     // double-counting here.

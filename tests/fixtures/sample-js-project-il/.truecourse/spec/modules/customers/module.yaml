@@ -1,0 +1,8 @@
+name: customers
+status: shipped
+description: Customer create/list/fetch operations under /api/customers (admin-gated for create).
+sourceDocs:
+  - docs/PRDs/orders_PRDv2.md
+scope:
+  paths:
+    - /api/customers/**
