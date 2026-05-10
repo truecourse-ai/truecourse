@@ -150,12 +150,18 @@ importers:
 
   apps/dashboard/server:
     dependencies:
+      '@truecourse/contract-extractor':
+        specifier: workspace:*
+        version: link:../../../packages/contract-extractor
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
+      '@truecourse/spec-consolidator':
+        specifier: workspace:*
+        version: link:../../../packages/spec-consolidator
       chokidar:
         specifier: ^4.0.0
         version: 4.0.3

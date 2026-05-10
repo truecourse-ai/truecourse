@@ -13,6 +13,7 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
+import { SpecPanel } from '@/components/spec/SpecPanel';
 import { useGraph } from '@/hooks/useGraph';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
@@ -53,6 +54,7 @@ const VALID_LEFT_TABS = new Set<LeftTab>([
   'flows',
   'databases',
   'analyses',
+  'spec',
 ]);
 
 const MAIN_CONTENT_TABS = new Set<LeftTab>([
@@ -1155,6 +1157,8 @@ export default function RepoGraphPage() {
               violations={violations}
               isTab
             />
+          ) : leftTab === 'spec' ? (
+            <SpecPanel repoId={repoId} />
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}

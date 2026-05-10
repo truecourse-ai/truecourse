@@ -503,13 +503,9 @@ truecourse analyze --diff
 | **B.12** | `truecourse spec resolve` — `--all-defaults` batch path (interactive lives in the dashboard per Q8) | DONE   |
 | **B.13** | `truecourse spec apply`                                                | DONE   |
 | **B.14** | `truecourse spec status` / `spec diff` subcommands                     | DONE   |
-| **B.15** | Dashboard "Spec" tab — pending-conflict list, side-by-side resolver UI, WebSocket write-back to `decisions.json` | DEFERRED |
-| **B.16** | Validation gate — canonical spec must round-trip through Module 2's parser before being declared "applied" | DEFERRED |
+| **B.15** | Dashboard "Spec" tab — pending-conflict list, side-by-side resolver UI, REST endpoints for scan/decisions/apply | DONE   |
+| **B.16** | Validation gate — collapsed into `spec apply` chaining into Module 2; if IL extraction succeeds, the canonical is structurally valid. No separate gate to build. | DONE (collapsed) |
 | **B.17** | Internal multi-doc fixture (`tests/fixtures/sample-multi-doc-spec/`) + end-to-end integration test with planted patterns | DONE   |
-
-**Deferred sub-phases:**
-- **B.15 (Dashboard "Spec" tab)** — substantial frontend work; defer to a dedicated UI session. The CLI surface (B.11–B.14) is enough to drive the engine end-to-end; the dashboard is a UX upgrade, not a correctness requirement.
-- **B.16 (Validation gate)** — depends on Module 2 (Contract Generation) being switched to read from `.truecourse/spec/` instead of `specs.yaml`. That's Phase C work (C.2). Defer until Module 2 is bridged.
 
 ### Phase C — Module separation (CLI/UI/storage)
 
