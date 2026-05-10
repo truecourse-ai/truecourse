@@ -1,10 +1,9 @@
-# Order Management Service — Specification
+# Order Management Service — PRD v2
 
-A two-resource HTTP service (Orders + Customers) used as a fixture for the
-Intent IL verifier. The implementation under `code/` deliberately drifts
-from this spec in fourteen places, each marked with `// IL-DRIFT:`. The IL
-artifacts under `.truecourse/contracts/` encode the spec faithfully — they are what the
-verifier compares the code against.
+Supersedes: orders_PRDv1.md
+
+The current contract for the orders + customers service. Authoritative
+across the surface; older docs (v1, README) are kept for history.
 
 ---
 
@@ -27,7 +26,7 @@ Every 4xx and 5xx response — across the entire surface — uses one envelope:
   "error": {
     "code": "string",
     "message": "string",
-    "details": { ... }   // optional, shape depends on the code
+    "details": { ... }
   }
 }
 ```
@@ -221,3 +220,16 @@ Successful mutations emit the following events to the bus:
 Each payload carries the order's `id`, the new `status`, and the ISO
 timestamp of the transition. **No event is emitted on failed transitions
 or validation errors.**
+
+---
+
+## Out of Scope
+
+<!-- PLANTED NEGATIVE-SPEC: B.9 should extract these as outOfScope on
+     the orders module manifest, not as planned operations. -->
+
+The following endpoints are explicitly excluded from V2 and must not
+ship without a follow-up PRD:
+
+- `POST /api/orders/:id/replace` — replacement order flow
+- `POST /api/orders/:id/refund` — money-back flow

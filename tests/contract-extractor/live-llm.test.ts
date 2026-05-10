@@ -35,7 +35,9 @@ import { verify } from '../../packages/contract-verifier/src/verify.js';
  */
 
 const FIXTURE_ROOT = path.resolve(__dirname, '../fixtures/sample-js-project-il');
-const FIXTURE_SPEC = path.join(FIXTURE_ROOT, 'SPEC.md');
+// PRDv2 is the comprehensive current spec — same content the old
+// SPEC.md held, now living in the unified multi-doc fixture.
+const FIXTURE_SPEC = path.join(FIXTURE_ROOT, 'docs/PRDs/orders_PRDv2.md');
 const FIXTURE_CODE = path.join(FIXTURE_ROOT, 'code/src');
 /** The hand-written `.tc` corpus that ships with the fixture — the
  *  ground-truth contract set we compare LLM-generated output against. */
@@ -70,10 +72,9 @@ describe.skipIf(!SHOULD_RUN)('contract extractor — live Claude Code smoke', ()
       try {
         // Stage a canonical spec under tmp/.truecourse/spec/ — the
         // contract extractor reads only the canonical now. We treat
-        // the entire SPEC.md as one module's endpoints.md to keep the
-        // fixture-shaped behavior we want to verify (one slice per
-        // operation heading) while avoiding a second LLM-driven
-        // consolidation pass at test time.
+        // the entire orders_PRDv2.md as one module's endpoints.md to
+        // keep the test focused on extraction (one slice per operation
+        // heading) without a second LLM-driven consolidation pass.
         const moduleDir = path.join(tmp, '.truecourse', 'spec', 'modules', 'orders');
         fs.mkdirSync(moduleDir, { recursive: true });
         fs.copyFileSync(FIXTURE_SPEC, path.join(moduleDir, 'endpoints.md'));
@@ -83,7 +84,7 @@ describe.skipIf(!SHOULD_RUN)('contract extractor — live Claude Code smoke', ()
             'name: orders',
             'status: shipped',
             'sourceDocs:',
-            '  - SPEC.md',
+            '  - docs/PRDs/orders_PRDv2.md',
             'scope:',
             '  paths:',
             '    - /api/orders/**',
