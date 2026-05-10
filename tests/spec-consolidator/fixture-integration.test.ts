@@ -69,15 +69,22 @@ function pinMtime(rel: string, iso: string): void {
 }
 
 /**
- * Recursive directory copy. Skips `code/` because the consolidator
- * doesn't read it (only .md files), but we don't want the test
- * carrying around megabytes of the planted-bug tree just to test
- * the doc pipeline.
+ * Recursive directory copy. Skips `.truecourse/` (the hand-written
+ * canonical reference would otherwise be overwritten by the
+ * materializer when the test runs `apply`), `code/` (planted-bug
+ * tree, irrelevant to doc pipeline), and the usual build dirs.
  */
 function copyDir(src: string, dst: string): void {
   fs.mkdirSync(dst, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    if (entry.name === 'code' || entry.name === 'node_modules' || entry.name === 'dist') continue;
+    if (
+      entry.name === 'code' ||
+      entry.name === 'node_modules' ||
+      entry.name === 'dist' ||
+      entry.name === '.truecourse'
+    ) {
+      continue;
+    }
     const a = path.join(src, entry.name);
     const b = path.join(dst, entry.name);
     if (entry.isDirectory()) copyDir(a, b);
@@ -291,6 +298,22 @@ function fixtureRunner(): BlockRunner {
     }));
 }
 
+function listSubdirs(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
+}
+
+function listFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => e.name);
+}
+
 function fixtureSectionRunner(): SectionRunner {
   return async (sections) =>
     sections.map((s) => ({
@@ -461,6 +484,81 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       ),
     ) as Record<string, unknown>;
     expect(ordersManifest.sourceDocs).toEqual(['docs/PRDs/orders_PRDv2.md']);
+  });
+
+  it('produced canonical structurally matches the hand-written reference at .truecourse/spec/', async () => {
+    // Same pattern as the IL coverage check: we hand-write a canonical
+    // reference under FIXTURE_ROOT/.truecourse/spec/ describing what
+    // `spec apply` *should* produce on this fixture. The materializer's
+    // output is fuzzed by the LLM section runner (prose), but the
+    // structural pieces — module dirs, manifest shape, file presence
+    // — are deterministic. Compare those.
+    await resolveAllOpen();
+    await consolidate(workRoot, {
+      materialize: true,
+      blockRunner: fixtureRunner(),
+      sectionRunner: fixtureSectionRunner(),
+      skipGit: true,
+    });
+
+    const expectedRoot = path.join(FIXTURE_ROOT, '.truecourse/spec');
+    const actualRoot = path.join(workRoot, '.truecourse/spec');
+
+    // The hand-written canonical represents a fully-extracted ideal
+    // (every section the docs describe). The stub runner emits claims
+    // for a subset (orders only — not customers/entities/etc.) to
+    // keep tests fast. So we assert a SUBSET relationship: every
+    // module the consolidator produced must exist in the hand-written
+    // reference and match structurally.
+    const expectedModules = listSubdirs(path.join(expectedRoot, 'modules'));
+    const actualModules = listSubdirs(path.join(actualRoot, 'modules'));
+    for (const m of actualModules) {
+      expect(
+        expectedModules.includes(m),
+        `module "${m}" produced by consolidator is missing from hand-written reference`,
+      ).toBe(true);
+    }
+
+    // Each produced module's manifest matches the reference structurally
+    // — same name, status, scope.paths set, and outOfScope id set.
+    // sourceDocs is intentionally not compared because it depends on
+    // which decisions were resolved and the consolidator's mtime sort
+    // can produce a different (but equivalent) doc set than the
+    // hand-written intent.
+    for (const moduleName of actualModules) {
+      const expectedYaml = yaml.load(
+        fs.readFileSync(path.join(expectedRoot, 'modules', moduleName, 'module.yaml'), 'utf-8'),
+      ) as Record<string, unknown>;
+      const actualYaml = yaml.load(
+        fs.readFileSync(path.join(actualRoot, 'modules', moduleName, 'module.yaml'), 'utf-8'),
+      ) as Record<string, unknown>;
+      expect(actualYaml.name, `module ${moduleName} name`).toBe(expectedYaml.name);
+      expect(actualYaml.status, `module ${moduleName} status`).toBe(expectedYaml.status);
+      const expectedPaths = ((expectedYaml.scope as { paths?: string[] }).paths ?? []).sort();
+      const actualPaths = ((actualYaml.scope as { paths?: string[] }).paths ?? []).sort();
+      expect(actualPaths, `module ${moduleName} scope.paths`).toEqual(expectedPaths);
+      const expectedOos = ((expectedYaml.outOfScope as Array<{ id: string }> | undefined) ?? [])
+        .map((e) => e.id)
+        .sort();
+      const actualOos = ((actualYaml.outOfScope as Array<{ id: string }> | undefined) ?? [])
+        .map((e) => e.id)
+        .sort();
+      expect(actualOos, `module ${moduleName} outOfScope ids`).toEqual(expectedOos);
+    }
+
+    // shared/ files: the hand-written reference has more topic files
+    // (auth, errors, endpoints) than the stub runner produces, since
+    // our stub only emits auth + errors claims. Assert the materializer
+    // wrote at least the topics our stub produced — full LLM coverage
+    // is out of scope for the structural check.
+    const expectedSharedFiles = listFiles(path.join(expectedRoot, 'shared'));
+    const actualSharedFiles = listFiles(path.join(actualRoot, 'shared'));
+    for (const f of actualSharedFiles) {
+      expect(
+        expectedSharedFiles.includes(f),
+        `shared/${f} produced but not in hand-written reference`,
+      ).toBe(true);
+    }
   });
 
   it('caches stay warm: re-running the same step makes zero LLM calls', async () => {
