@@ -644,3 +644,106 @@ export function getAnalyticsResolution(
   return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
 }
 
+// ---------------------------------------------------------------------------
+// Spec Consolidation (Module 1)
+// ---------------------------------------------------------------------------
+
+export type SpecClaim = {
+  id: string;
+  topic: string;
+  subject: string;
+  content: unknown;
+  provenance: { file: string; line: number; quote: string };
+  metadata: { docKind: string; status?: string; lastTouched: string };
+};
+
+export type SpecConflictCandidate = {
+  index: number;
+  weight: 'newest' | 'newer' | 'older' | 'oldest';
+  claim: SpecClaim;
+};
+
+export type SpecConflict = {
+  id: string;
+  topic: string;
+  subject: string;
+  module?: string;
+  candidates: SpecConflictCandidate[];
+  defaultPick: number;
+  /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
+  candidateFingerprint: string;
+};
+
+export type SpecResolution =
+  | { kind: 'pick'; candidateIndex: number }
+  | { kind: 'custom'; content: string };
+
+export type SpecDecision = {
+  conflictId: string;
+  resolution: SpecResolution;
+  resolvedAt: string;
+  candidateFingerprint: string;
+  note?: string;
+};
+
+export type SpecDecisionsFile = {
+  version: 1;
+  decisions: SpecDecision[];
+};
+
+export type SpecScanResponse = {
+  docsScanned: number;
+  blocksAttempted: number;
+  claimsExtracted: number;
+  resolved: number;
+  decided: number;
+  openConflicts: SpecConflict[];
+  decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
+};
+
+export type SpecApplyResponse = {
+  merge: { resolved: number; decided: number; open: number };
+  materialize: {
+    written: number;
+    failures: Array<{ module: string; fileName: string; error: string }>;
+  } | null;
+  il:
+    | { written: number; validationIssues: unknown[]; mergeDiagnostics: unknown[] }
+    | { error: string }
+    | { skipped: string };
+};
+
+export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
+  return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
+}
+
+export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`);
+}
+
+export function postSpecDecision(
+  repoId: string,
+  payload: { conflictId: string; resolution: SpecResolution; candidateFingerprint: string; note?: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postSpecDecisionsBatch(
+  repoId: string,
+  mode: 'all-defaults',
+): Promise<{ added: number; decisions: SpecDecisionsFile }> {
+  return fetchApi(`/api/repos/${repoId}/spec/decisions/batch`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function postSpecApply(repoId: string): Promise<SpecApplyResponse> {
+  return fetchApi<SpecApplyResponse>(`/api/repos/${repoId}/spec/apply`, {
+    method: 'POST',
+  });
+}
+

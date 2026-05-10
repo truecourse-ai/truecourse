@@ -1,8 +1,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network } from 'lucide-react';
+import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network, BookOpen } from 'lucide-react';
 
-export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses';
+export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses' | 'spec';
 
 const TAB_LABELS: Record<LeftTab, string> = {
   home: 'Home',
@@ -11,9 +11,10 @@ const TAB_LABELS: Record<LeftTab, string> = {
   flows: 'Flows',
   databases: 'Databases',
   analyses: 'Analyses',
+  spec: 'Spec',
 };
 
-const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
+const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses', 'spec']);
 
 type LeftSidebarProps = {
   activeTab: LeftTab | null;
@@ -30,6 +31,7 @@ const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
   { id: 'flows', icon: Workflow, label: 'Flows' },
   { id: 'files', icon: FolderTree, label: 'Files' },
   { id: 'databases', icon: Database, label: 'Databases' },
+  { id: 'spec', icon: BookOpen, label: 'Spec' },
   { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
 ];
 
