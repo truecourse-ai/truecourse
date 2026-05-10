@@ -1,22 +1,12 @@
 import * as p from "@clack/prompts";
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
 import {
-  ConfigMissingError,
+  CanonicalSpecMissingError,
   defaultConcurrency,
-  gatherCandidates,
   generateContracts,
-  proposeWithHeuristic,
-  proposeWithLlm,
-  readSpecsConfig,
+  hasCanonicalSpec,
   spawnRunner,
-  writeSpecsConfig,
-  SPECS_CONFIG_FILE,
-} from "@truecourse/contract-extractor";
-import type {
-  BootstrapProposal,
-  SpecsConfig,
 } from "@truecourse/contract-extractor";
 
 export interface RunContractsGenerateOptions {
@@ -33,19 +23,18 @@ export async function runContractsGenerate(
 
   p.intro(options.diff ? "Contracts (dry run)" : "Contracts");
 
-  // 1. Bootstrap specs.yaml if missing.
-  let config = readSpecsConfig(repoRoot);
-  if (!config) {
-    config = await bootstrapSpecsConfig(repoRoot);
-    if (!config) {
-      p.outro("Aborted — no specs.yaml written.");
-      return;
-    }
+  // Module 2 reads the canonical spec produced by Module 1. If
+  // `.truecourse/spec/` doesn't exist, the user hasn't run the
+  // consolidator yet — tell them and bail.
+  if (!hasCanonicalSpec(repoRoot)) {
+    p.log.error(
+      "No .truecourse/spec/ found. Run `truecourse spec apply` first to produce the canonical spec.",
+    );
+    p.outro("Aborted.");
+    process.exit(1);
   }
 
-  p.log.step(`config  ${SPECS_CONFIG_FILE} (${config.specs.length} entries)`);
-
-  // 2. Run the extraction pipeline.
+  // Run the extraction pipeline against the canonical spec.
   const concurrency = defaultConcurrency();
   const runner = spawnRunner({
     concurrency,
@@ -59,14 +48,13 @@ export async function runContractsGenerate(
     result = await generateContracts({
       repoRoot,
       runner,
-      config,
       dryRun: !!options.diff,
       onSliceCacheHit: (s) => {
         p.log.message(`  cache hit  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
       },
     });
   } catch (e) {
-    if (e instanceof ConfigMissingError) {
+    if (e instanceof CanonicalSpecMissingError) {
       p.log.error(e.message);
       process.exit(1);
     }
@@ -75,7 +63,7 @@ export async function runContractsGenerate(
     process.exit(1);
   }
 
-  // 3. Surface per-slice run results (failures only — successes are quiet).
+  // Surface per-slice run results (failures only — successes are quiet).
   const failures = result.slices.filter(
     (o) => o.cache === "miss" && o.run && !o.run.result,
   );
@@ -87,7 +75,7 @@ export async function runContractsGenerate(
     }
   }
 
-  // 4. Surface validation issues — these block the write.
+  // Surface validation issues — these block the write.
   if (result.validationIssues.length > 0) {
     p.log.error(`Validation gate failed (${result.validationIssues.length} issue${result.validationIssues.length === 1 ? "" : "s"}):`);
     for (const issue of result.validationIssues) {
@@ -97,12 +85,12 @@ export async function runContractsGenerate(
     process.exit(1);
   }
 
-  // 5. Surface merge diagnostics (non-blocking).
+  // Surface merge diagnostics (non-blocking).
   for (const d of result.mergeDiagnostics) {
     p.log.warn(d.message);
   }
 
-  // 6. Final summary.
+  // Final summary.
   if (options.diff) {
     if (result.write.proposed.length === 0) {
       p.outro("No changes — every contract is already up to date.");
@@ -121,112 +109,6 @@ export async function runContractsGenerate(
   p.log.success(`Wrote ${result.write.written.length} contract file${result.write.written.length === 1 ? "" : "s"}.`);
   for (const f of result.write.written) console.log(`  • ${path.relative(repoRoot, f)}`);
   p.outro(`Run \`truecourse analyze\` to verify code against the new contracts.`);
-}
-
-// ---------------------------------------------------------------------------
-// Inline bootstrap — propose specs.yaml when missing.
-// ---------------------------------------------------------------------------
-
-async function bootstrapSpecsConfig(repoRoot: string): Promise<SpecsConfig | null> {
-  p.log.warn(`No ${SPECS_CONFIG_FILE} found.`);
-  p.log.step("Scanning the repo for candidate spec documents…");
-
-  const candidates = gatherCandidates(repoRoot);
-  if (candidates.length === 0) {
-    p.log.error("No markdown files that look like specs were found in this repo.");
-    p.log.message(
-      `Create a SPEC.md (or similar) describing your API contracts, then re-run \`truecourse contracts generate\`.`,
-    );
-    return null;
-  }
-
-  // Render the raw candidate list first so the user can see what we're
-  // about to ask the LLM about — gives context if Claude takes a moment.
-  console.log("");
-  console.log("Found:");
-  for (const c of candidates) {
-    console.log(`  ${c.file.padEnd(50)} → ${candidateKindLabel(c.kind)}`);
-  }
-  console.log("");
-
-  // Try the LLM-driven proposer first. The deterministic heuristic is the
-  // fallback when claude isn't available, the call fails, or its output
-  // doesn't match the schema.
-  let proposal: BootstrapProposal;
-  let reasons: Map<string, string> = new Map();
-  let summary: string | undefined;
-
-  const llmSpinner = p.spinner();
-  llmSpinner.start("Asking Claude Code to classify candidates…");
-  try {
-    const llm = await proposeWithLlm(candidates);
-    proposal = llm.proposal;
-    reasons = llm.reasons;
-    summary = llm.summary;
-    llmSpinner.stop("Claude Code proposal received.");
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    llmSpinner.stop("Claude Code unavailable — falling back to heuristic.");
-    p.log.warn(`LLM bootstrap failed: ${message}`);
-    proposal = proposeWithHeuristic(candidates);
-  }
-
-  if (proposal.config.specs.length === 0) {
-    p.log.error("Couldn't classify any candidates as specs.");
-    if (proposal.excluded.length > 0) {
-      p.log.message("Found these markdown files but didn't include them:");
-      for (const ex of proposal.excluded) {
-        console.log(`  ${ex.file}    (${ex.reason})`);
-      }
-    }
-    return null;
-  }
-
-  // Render proposal with reasoning lines (when the LLM provided them).
-  if (summary) {
-    console.log("Summary:");
-    console.log(`  ${summary}`);
-    console.log("");
-  }
-  console.log("Proposed specs.yaml:");
-  console.log(yaml.dump(proposal.config, { lineWidth: 100 }));
-  if (reasons.size > 0) {
-    console.log("Reasoning:");
-    for (const entry of proposal.config.specs) {
-      const reason = reasons.get(entry.file);
-      if (reason) console.log(`  - ${entry.file}: ${reason}`);
-    }
-    console.log("");
-  }
-  if (proposal.excluded.length > 0) {
-    console.log("Excluded:");
-    for (const ex of proposal.excluded) {
-      console.log(`  - ${ex.file}: ${ex.reason}`);
-    }
-    console.log("");
-  }
-
-  const answer = await p.confirm({ message: "Write this config?" });
-  if (p.isCancel(answer) || !answer) return null;
-
-  writeSpecsConfig(repoRoot, proposal.config);
-  p.log.success(`Wrote ${SPECS_CONFIG_FILE}.`);
-  return proposal.config;
-}
-
-function candidateKindLabel(kind: string): string {
-  switch (kind) {
-    case "base-spec":
-      return "base spec";
-    case "adr-series":
-      return "ADR";
-    case "rfc":
-      return "RFC";
-    case "overview":
-      return "overview (likely excluded)";
-    default:
-      return kind;
-  }
 }
 
 // ---------------------------------------------------------------------------

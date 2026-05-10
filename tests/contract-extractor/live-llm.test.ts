@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { generateContracts, spawnRunner } from '../../packages/contract-extractor/src/index.js';
-import { writeSpecsConfig } from '../../packages/contract-extractor/src/specs-config.js';
 import {
   diffContractDirs,
   formatCorpusDiff,
@@ -69,10 +68,27 @@ describe.skipIf(!SHOULD_RUN)('contract extractor — live Claude Code smoke', ()
     async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-live-'));
       try {
-        // Stage a clean repo: just SPEC.md + specs.yaml. Don't pull in
-        // the fixture's hand-written .tc (that's what we're regenerating).
-        fs.copyFileSync(FIXTURE_SPEC, path.join(tmp, 'SPEC.md'));
-        writeSpecsConfig(tmp, { specs: [{ file: 'SPEC.md', rank: 0 }] });
+        // Stage a canonical spec under tmp/.truecourse/spec/ — the
+        // contract extractor reads only the canonical now. We treat
+        // the entire SPEC.md as one module's endpoints.md to keep the
+        // fixture-shaped behavior we want to verify (one slice per
+        // operation heading) while avoiding a second LLM-driven
+        // consolidation pass at test time.
+        const moduleDir = path.join(tmp, '.truecourse', 'spec', 'modules', 'orders');
+        fs.mkdirSync(moduleDir, { recursive: true });
+        fs.copyFileSync(FIXTURE_SPEC, path.join(moduleDir, 'endpoints.md'));
+        fs.writeFileSync(
+          path.join(moduleDir, 'module.yaml'),
+          [
+            'name: orders',
+            'status: shipped',
+            'sourceDocs:',
+            '  - SPEC.md',
+            'scope:',
+            '  paths:',
+            '    - /api/orders/**',
+          ].join('\n') + '\n',
+        );
 
         const sliceFailures: string[] = [];
         const result = await generateContracts({

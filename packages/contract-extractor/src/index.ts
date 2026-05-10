@@ -1,22 +1,24 @@
 /**
  * Contract extractor — top-level orchestrator.
  *
- * `generateContracts({ repoRoot, runner })` walks the configured specs,
- * slices each into heading-keyed chunks, runs cache-miss slices through
- * the supplied runner (Claude Code subprocess by default), merges the
- * extracted fragments by `(kind, identity)`, validates the merged
- * corpus via the verifier's parser+resolver, and writes `.tc` files
- * into `.truecourse/contracts/`.
+ * `generateContracts({ repoRoot, runner })` walks the canonical
+ * spec under `.truecourse/spec/` (Module 1's output), slices each
+ * section file into heading-keyed chunks, runs cache-miss slices
+ * through the supplied runner (Claude Code subprocess by default),
+ * merges the extracted fragments by `(kind, identity)`, validates
+ * the merged corpus via the verifier's parser+resolver, and writes
+ * `.tc` files into `.truecourse/contracts/`.
+ *
+ * The legacy `specs.yaml` + raw-doc input path is gone: the
+ * consolidator (Module 1) produces a structured, user-confirmed
+ * canonical spec; Module 2 reads only that.
  *
  * The runner is injected so tests can drive the pipeline without
  * spawning real subprocesses.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { sliceMarkdown, fileHash } from './slicer.js';
+import { fileHash } from './slicer.js';
 import {
-  cachePaths,
   ensureCacheDirs,
   gcOrphanedSlices,
   readManifest,
@@ -24,20 +26,23 @@ import {
   writeManifest,
   writeSliceEntry,
 } from './cache.js';
+import {
+  hasCanonicalSpec,
+  readCanonicalSpec,
+  type CanonicalModuleInfo,
+} from './canonical-spec-reader.js';
 import { mergeRankedFragments, type MergeDiagnostic, type RankedFragment } from './merger.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
 import { writeContracts, type WriteResult } from './writer.js';
-import { resolveSpecEntry, readSpecsConfig } from './specs-config.js';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
-import type { Manifest, SpecSlice, SpecsConfig } from './types.js';
+import type { Manifest, SpecSlice } from './types.js';
+import fs from 'node:fs';
 
 export interface GenerateOptions {
-  /** Repo root — `.truecourse/specs.yaml` and `.truecourse/contracts/` live here. */
+  /** Repo root — `.truecourse/spec/` and `.truecourse/contracts/` live here. */
   repoRoot: string;
   /** Override the runner; defaults to `spawnRunner()`. Tests pass a stub. */
   runner?: SliceRunner;
-  /** Override the loaded config. When unset, reads `.truecourse/specs.yaml`. */
-  config?: SpecsConfig;
   /** When true, don't write `.tc` files — return what would change. */
   dryRun?: boolean;
   /** Hooks for the CLI to render progress. */
@@ -70,18 +75,16 @@ export interface GenerateResult {
 
 export async function generateContracts(opts: GenerateOptions): Promise<GenerateResult> {
   const { repoRoot, dryRun = false } = opts;
-  const config = opts.config ?? readSpecsConfig(repoRoot);
-  if (!config) {
-    throw new ConfigMissingError(
-      `No .truecourse/specs.yaml found in ${repoRoot}. Run \`truecourse contracts generate --bootstrap\` first.`,
+  if (!hasCanonicalSpec(repoRoot)) {
+    throw new CanonicalSpecMissingError(
+      `No .truecourse/spec/ found in ${repoRoot}. Run \`truecourse spec apply\` first.`,
     );
   }
 
   ensureCacheDirs(repoRoot);
   readManifest(repoRoot); // touch — kept for future incremental invalidation
-  const slicesWithRank = enumerateSlices(repoRoot, config);
-  const slices = slicesWithRank.map((sw) => sw.slice);
-  const sliceRankById = new Map(slicesWithRank.map((sw) => [sw.slice.id, sw.rank]));
+  const canonical = readCanonicalSpec(repoRoot);
+  const slices = canonical.slices;
   const runner = opts.runner ?? spawnRunner();
 
   // ---- Slice cache lookup --------------------------------------------------
@@ -115,7 +118,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
 
   // ---- Collect fragments + write manifest ---------------------------------
   const ranked: RankedFragment[] = [];
-  const manifest = buildManifest(repoRoot, config, slices);
+  const manifest = buildManifest(repoRoot, canonical.modules, slices);
   for (const outcome of outcomes) {
     let result;
     if (outcome.cache === 'hit') {
@@ -124,8 +127,9 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
       result = outcome.run?.result;
     }
     if (!result) continue;
-    const rank = sliceRankById.get(outcome.slice.id) ?? 0;
-    for (const fragment of result.fragments) ranked.push({ fragment, rank });
+    // No multi-spec layering anymore — canonical spec is the single
+    // source of truth, every fragment shares the same rank.
+    for (const fragment of result.fragments) ranked.push({ fragment, rank: 0 });
   }
 
   if (!dryRun) {
@@ -168,40 +172,31 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
 // Errors callers want to discriminate
 // ---------------------------------------------------------------------------
 
-export class ConfigMissingError extends Error {
-  readonly kind = 'config-missing';
+export class CanonicalSpecMissingError extends Error {
+  readonly kind = 'canonical-spec-missing';
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface SliceWithRank {
-  slice: SpecSlice;
-  rank: number;
-}
-
-function enumerateSlices(repoRoot: string, config: SpecsConfig): SliceWithRank[] {
-  const out: SliceWithRank[] = [];
-  for (const entry of config.specs) {
-    const files = resolveSpecEntry(repoRoot, entry);
-    for (const file of files) {
-      const rel = path.relative(repoRoot, file);
-      const source = fs.readFileSync(file, 'utf-8');
-      for (const slice of sliceMarkdown(rel, source)) {
-        out.push({ slice, rank: entry.rank });
-      }
-    }
-  }
-  return out;
-}
-
-function buildManifest(repoRoot: string, config: SpecsConfig, slices: SpecSlice[]): Manifest {
+function buildManifest(
+  repoRoot: string,
+  modules: CanonicalModuleInfo[],
+  slices: SpecSlice[],
+): Manifest {
   const specs: Manifest['specs'] = {};
-  for (const entry of config.specs) {
-    const files = resolveSpecEntry(repoRoot, entry);
-    for (const file of files) {
-      const rel = path.relative(repoRoot, file);
+  // Every section file from every module contributes one entry,
+  // keyed by its repo-relative path. Re-running over the same
+  // canonical spec produces an identical manifest.
+  const seenFiles = new Set<string>();
+  for (const m of modules) {
+    for (const file of m.sectionFiles) {
+      const rel = file.startsWith(repoRoot)
+        ? file.slice(repoRoot.length).replace(/^[/\\]+/, '').split(/[/\\]/).join('/')
+        : file;
+      if (seenFiles.has(rel)) continue;
+      seenFiles.add(rel);
       const fileHashStr = fileHash(fs.readFileSync(file, 'utf-8'));
       const sliceList = slices
         .filter((s) => s.specPath === rel)
@@ -218,10 +213,6 @@ function buildManifest(repoRoot: string, config: SpecsConfig, slices: SpecSlice[
 
 export { spawnRunner, defaultConcurrency } from './claude-runner.js';
 export type { SliceRunner, SliceRunResult } from './claude-runner.js';
-export { gatherCandidates, proposeWithHeuristic } from './bootstrap.js';
-export type { BootstrapCandidate, BootstrapProposal } from './bootstrap.js';
-export { proposeWithLlm } from './llm-bootstrap.js';
-export type { LlmBootstrapOptions, LlmBootstrapProposal } from './llm-bootstrap.js';
 export {
   diffContractDirs,
   diffCorpora,
@@ -234,18 +225,20 @@ export type {
   CorpusDiff,
 } from './corpus-diff.js';
 export {
-  readSpecsConfig,
-  writeSpecsConfig,
-  resolveSpecEntry,
-  specsConfigPath,
-  SPECS_CONFIG_FILE,
-} from './specs-config.js';
+  hasCanonicalSpec,
+  readCanonicalSpec,
+  canonicalSpecPath,
+} from './canonical-spec-reader.js';
+export type {
+  CanonicalReadResult,
+  CanonicalModuleInfo,
+  ManifestData,
+} from './canonical-spec-reader.js';
 export type {
   SpecSlice,
   Fragment,
   ExtractionResult,
   Manifest,
-  SpecsConfig,
 } from './types.js';
 export { sliceMarkdown, sliceHash, fileHash } from './slicer.js';
 export { mergeFragments, mergeRankedFragments } from './merger.js';
