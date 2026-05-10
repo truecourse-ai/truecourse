@@ -3,14 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  CanonicalSpecMissingError,
   generateContracts,
   type SliceRunner,
 } from '../../packages/contract-extractor/src/index.js';
 
 /**
- * The orchestrator end-to-end: spec on disk → slicer → cache → runner stub →
- * merger → validator → writer. The runner is stubbed so no Claude Code
- * subprocesses run during tests.
+ * The orchestrator end-to-end against the canonical spec at
+ * `.truecourse/spec/`: section files → slicer → cache → runner stub →
+ * merger → validator → writer. The runner is stubbed so no Claude
+ * Code subprocesses run during tests.
  */
 
 describe('contract extractor — orchestrator', () => {
@@ -23,24 +25,48 @@ describe('contract extractor — orchestrator', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  function writeSpec(contents: string): void {
-    fs.writeFileSync(path.join(tmpRoot, 'SPEC.md'), contents);
+  /**
+   * Write a minimal canonical spec — one module with one section
+   * file and a module.yaml. Mimics what the consolidator produces.
+   */
+  function writeCanonical(opts: {
+    moduleName?: string;
+    sectionName?: string;
+    body?: string;
+  } = {}): void {
+    const moduleName = opts.moduleName ?? 'orders';
+    const sectionName = opts.sectionName ?? 'endpoints.md';
+    const body =
+      opts.body ??
+      ['# Endpoints', '## Operations', '### Orders', 'Body.'].join('\n');
+    const moduleDir = path.join(tmpRoot, '.truecourse', 'spec', 'modules', moduleName);
+    fs.mkdirSync(moduleDir, { recursive: true });
+    fs.writeFileSync(path.join(moduleDir, sectionName), body);
+    fs.writeFileSync(
+      path.join(moduleDir, 'module.yaml'),
+      [
+        `name: ${moduleName}`,
+        `status: shipped`,
+        `sourceDocs:`,
+        `  - docs/source.md`,
+        `scope:`,
+        `  paths:`,
+        `    - /api/${moduleName}/**`,
+      ].join('\n') + '\n',
+    );
   }
 
-  function writeConfig(): void {
-    const yamlPath = path.join(tmpRoot, '.truecourse', 'specs.yaml');
-    fs.mkdirSync(path.dirname(yamlPath), { recursive: true });
-    fs.writeFileSync(yamlPath, 'specs:\n  - file: SPEC.md\n    rank: 0\n');
-  }
-
-  /** Stub runner: returns one Operation fragment per slice, plus origin lines. */
+  /** Stub runner: returns one Operation + one Entity fragment per slice. */
   function stubRunner(): SliceRunner {
     return async (slices) =>
       slices.map((slice) => {
         const opName = slice.headingPath.at(-1)!;
+        // Canonical-spec paths start with `.truecourse/...` so they
+        // need quoting in the origin grammar.
+        const originPath = `"${slice.specPath}"`;
         const tcSource = [
           `operation POST "/api/${opName.toLowerCase()}" {`,
-          `  origin ${slice.specPath} "${opName}" ${slice.lineRange[0]}..${slice.lineRange[1]}`,
+          `  origin ${originPath} "${opName}" ${slice.lineRange[0]}..${slice.lineRange[1]}`,
           `  response 201 on success {`,
           `    body Entity:Order`,
           `  }`,
@@ -61,7 +87,7 @@ describe('contract extractor — orchestrator', () => {
               {
                 kind: 'Entity',
                 identity: 'Order',
-                tcSource: 'entity Order {\n  origin SPEC.md "Order" 1..2\n  field id: string immutable\n}',
+                tcSource: `entity Order {\n  origin ${originPath} "Order" 1..2\n  field id: string immutable\n}`,
                 origin: { source: slice.specPath, section: opName, lines: slice.lineRange },
                 obligationKeys: [],
               },
@@ -72,9 +98,8 @@ describe('contract extractor — orchestrator', () => {
       });
   }
 
-  it('runs end-to-end and writes .tc files', async () => {
-    writeSpec(['# Spec', '## Operations', '### Orders', 'Body.'].join('\n'));
-    writeConfig();
+  it('runs end-to-end and writes .tc files from the canonical spec', async () => {
+    writeCanonical();
 
     const result = await generateContracts({ repoRoot: tmpRoot, runner: stubRunner() });
 
@@ -88,8 +113,7 @@ describe('contract extractor — orchestrator', () => {
   });
 
   it('hits the cache on the second run with no spec changes', async () => {
-    writeSpec(['# Spec', '## Operations', '### Orders', 'Body.'].join('\n'));
-    writeConfig();
+    writeCanonical();
 
     const runner = stubRunner();
     let calls = 0;
@@ -106,8 +130,7 @@ describe('contract extractor — orchestrator', () => {
   });
 
   it('honours --diff mode: no writes, returns proposed paths', async () => {
-    writeSpec(['# Spec', '## Operations', '### Orders', 'Body.'].join('\n'));
-    writeConfig();
+    writeCanonical();
 
     const result = await generateContracts({
       repoRoot: tmpRoot,
@@ -122,8 +145,7 @@ describe('contract extractor — orchestrator', () => {
   });
 
   it('blocks the write when validation fails', async () => {
-    writeSpec(['# Spec', '## Operations', '### Orders', 'Body.'].join('\n'));
-    writeConfig();
+    writeCanonical();
 
     const badRunner: SliceRunner = async (slices) =>
       slices.map((slice) => ({
@@ -147,53 +169,77 @@ describe('contract extractor — orchestrator', () => {
     expect(result.write.written).toEqual([]);
   });
 
-  it('throws ConfigMissingError when no specs.yaml exists', async () => {
-    writeSpec('# Spec\n');
+  it('throws CanonicalSpecMissingError when .truecourse/spec/ is absent', async () => {
     await expect(
       generateContracts({ repoRoot: tmpRoot, runner: stubRunner() }),
-    ).rejects.toThrow(/specs\.yaml/);
+    ).rejects.toThrow(CanonicalSpecMissingError);
   });
 
-  it('layers higher-rank specs over lower-rank ones', async () => {
-    fs.writeFileSync(path.join(tmpRoot, 'SPEC.md'), '# Spec\n## Auth\nBase auth.\n');
-    fs.writeFileSync(path.join(tmpRoot, 'OVERRIDE.md'), '# Spec\n## Auth\nOverridden auth.\n');
+  it('walks every module section file under .truecourse/spec/', async () => {
+    writeCanonical({ moduleName: 'orders' });
+    // Add a second module with a different section file.
+    fs.mkdirSync(
+      path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'auth'),
+      { recursive: true },
+    );
+    fs.writeFileSync(
+      path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'auth', 'auth.md'),
+      ['# Authentication', '## Bearer', 'Bearer JWT.'].join('\n'),
+    );
+    fs.writeFileSync(
+      path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'auth', 'module.yaml'),
+      `name: auth\nstatus: shipped\nsourceDocs: []\nscope:\n  paths:\n    - /api/auth/**\n`,
+    );
 
-    // Two specs, OVERRIDE.md at higher rank.
-    const config = {
-      specs: [
-        { file: 'SPEC.md', rank: 0 },
-        { file: 'OVERRIDE.md', rank: 2 },
-      ],
+    const seen: string[] = [];
+    const observingRunner: SliceRunner = async (slices) => {
+      for (const s of slices) seen.push(s.specPath);
+      return stubRunner()(slices);
     };
 
-    // Stub runner: each slice produces one Entity:Foo fragment whose
-    // tcSource includes the slice's source-spec filename so we can tell
-    // which one wins.
-    const runner = async (slices: any[]) =>
-      slices.map((slice) => ({
-        slice,
-        result: {
-          fragments: [
-            {
-              kind: 'Entity',
-              identity: 'Foo',
-              tcSource: `entity Foo {\n  origin ${slice.specPath} "Auth" 1..10\n  field src: string immutable\n}\n  // src=${slice.specPath}`,
-              origin: { source: slice.specPath, section: 'Auth', lines: slice.lineRange },
-              obligationKeys: [],
-            },
-          ],
-        },
-        durationMs: 1,
-      }));
+    await generateContracts({ repoRoot: tmpRoot, runner: observingRunner });
+    expect(seen.some((p) => p.startsWith('.truecourse/spec/modules/orders/'))).toBe(true);
+    expect(seen.some((p) => p.startsWith('.truecourse/spec/modules/auth/'))).toBe(true);
+  });
 
-    const result = await generateContracts({ repoRoot: tmpRoot, runner: runner as any, config });
-    expect(result.validationIssues).toEqual([]);
+  it('skips modules whose manifest declares status: out-of-scope', async () => {
+    writeCanonical({ moduleName: 'orders' });
+    // Add a module marked out-of-scope. Its sections must not produce slices.
+    const oosDir = path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'legacy');
+    fs.mkdirSync(oosDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(oosDir, 'endpoints.md'),
+      '# Legacy\n## OldOp\nbody\n',
+    );
+    fs.writeFileSync(
+      path.join(oosDir, 'module.yaml'),
+      `name: legacy\nstatus: out-of-scope\nsourceDocs: []\nscope:\n  paths:\n    - /legacy/**\n`,
+    );
 
-    // The higher-rank fragment's tcSource should be on disk.
-    const writtenFooFile = result.write.written.find((f) => /foo\.tc$/.test(f));
-    expect(writtenFooFile).toBeDefined();
-    const onDisk = fs.readFileSync(writtenFooFile!, 'utf-8');
-    expect(onDisk).toContain('// src=OVERRIDE.md');
-    expect(onDisk).toContain('overridden by rank 2');     // origin lineage stack
+    const seen: string[] = [];
+    const observingRunner: SliceRunner = async (slices) => {
+      for (const s of slices) seen.push(s.specPath);
+      return stubRunner()(slices);
+    };
+    await generateContracts({ repoRoot: tmpRoot, runner: observingRunner });
+    expect(seen.some((p) => p.includes('modules/legacy/'))).toBe(false);
+  });
+
+  it('also reads shared/ section files (cross-cutting)', async () => {
+    writeCanonical();
+    const sharedDir = path.join(tmpRoot, '.truecourse', 'spec', 'shared');
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sharedDir, 'auth.md'),
+      '# Auth\n## Scheme\nBearer JWT.\n',
+    );
+
+    const seen: string[] = [];
+    const observingRunner: SliceRunner = async (slices) => {
+      for (const s of slices) seen.push(s.specPath);
+      return stubRunner()(slices);
+    };
+    await generateContracts({ repoRoot: tmpRoot, runner: observingRunner });
+    expect(seen.some((p) => p.startsWith('.truecourse/spec/shared/'))).toBe(true);
   });
 });

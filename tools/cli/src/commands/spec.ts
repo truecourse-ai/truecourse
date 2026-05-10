@@ -22,6 +22,12 @@ import {
   type Decision,
   type DecisionsFile,
 } from "@truecourse/spec-consolidator";
+import {
+  CanonicalSpecMissingError,
+  defaultConcurrency as defaultExtractorConcurrency,
+  generateContracts,
+  spawnRunner as spawnExtractorRunner,
+} from "@truecourse/contract-extractor";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -167,7 +173,50 @@ export async function runSpecApply(opts: RunSpecOptions = {}): Promise<void> {
     }
   }
 
+  // Validation gate: chain into Module 2 (contract generation). If
+  // it succeeds, the canonical is structurally valid and IL is up to
+  // date. If it fails, the user sees the parse/validation errors and
+  // knows their canonical broke IL extraction.
+  if (result.merge.openConflicts.length === 0 && result.materialize?.failures.length === 0) {
+    await chainIntoContractsGenerate(root);
+  } else {
+    p.log.message("Skipping contract generation — resolve remaining conflicts first.");
+  }
+
   p.outro(result.merge.openConflicts.length === 0 ? "Canonical spec up to date." : "Partial — resolve remaining conflicts.");
+}
+
+async function chainIntoContractsGenerate(root: string): Promise<void> {
+  p.log.step("Generating IL contracts from the canonical spec…");
+  const concurrency = defaultExtractorConcurrency();
+  const runner = spawnExtractorRunner({ concurrency });
+  try {
+    const result = await generateContracts({ repoRoot: root, runner });
+    if (result.validationIssues.length > 0) {
+      p.log.error(
+        `Contract validation failed: ${result.validationIssues.length} issue${result.validationIssues.length === 1 ? "" : "s"}.`,
+      );
+      for (const issue of result.validationIssues.slice(0, 5)) {
+        p.log.message(`  • ${issue.artifactKey}: ${issue.message}`);
+      }
+      p.log.message("The canonical spec wrote successfully but IL extraction surfaced issues.");
+      return;
+    }
+    const wrote = result.write.written.length;
+    p.log.success(
+      wrote === 0
+        ? "IL contracts up to date — canonical valid."
+        : `Wrote ${wrote} IL file${wrote === 1 ? "" : "s"} under .truecourse/contracts/.`,
+    );
+  } catch (e) {
+    if (e instanceof CanonicalSpecMissingError) {
+      // Shouldn't reach here — we just wrote the canonical — but be
+      // explicit about the case.
+      p.log.error(e.message);
+      return;
+    }
+    p.log.error(`Contract generation failed: ${(e as Error).message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

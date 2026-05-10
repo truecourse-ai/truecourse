@@ -113,19 +113,3 @@ export const ManifestSchema = z.object({
 });
 export type Manifest = z.infer<typeof ManifestSchema>;
 
-// ---------------------------------------------------------------------------
-// Specs config (`.truecourse/specs.yaml`)
-// ---------------------------------------------------------------------------
-
-export const SpecsConfigEntrySchema = z.object({
-  /** Path or glob, relative to the repo root. */
-  file: z.string(),
-  /** Layering rank — higher rank overrides lower for the same artifact. */
-  rank: z.number().int().nonnegative().default(0),
-});
-export type SpecsConfigEntry = z.infer<typeof SpecsConfigEntrySchema>;
-
-export const SpecsConfigSchema = z.object({
-  specs: z.array(SpecsConfigEntrySchema).min(1),
-});
-export type SpecsConfig = z.infer<typeof SpecsConfigSchema>;
