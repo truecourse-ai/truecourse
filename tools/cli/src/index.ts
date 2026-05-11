@@ -27,6 +27,11 @@ import {
   runHooksStatus,
   runHooksRun,
 } from "./commands/hooks.js";
+import {
+  runAutoEnable,
+  runAutoDisable,
+  runAutoStatus,
+} from "./commands/auto.js";
 
 const program = new Command();
 
@@ -275,6 +280,40 @@ hooksCmd
   .description("Run pre-commit checks (called by the hook)")
   .action(async () => {
     await runHooksRun();
+  });
+
+// Auto mode — re-analyze in the background after merges/rebases land on main
+const autoCmd = program
+  .command("auto")
+  .description("Auto mode: re-run analyze on the main branch after merges");
+
+autoCmd
+  .command("enable")
+  .description("Install post-merge and post-rewrite hooks")
+  .option(
+    "--branch <name>",
+    "Branch the hook should fire on (auto-detects from origin/HEAD if omitted)",
+  )
+  .option(
+    "--commit",
+    "After analyze, also commit .truecourse/LATEST.json on the trigger branch (no push). Skips when HEAD has diverged from origin/<branch>",
+  )
+  .action(async (options: { branch?: string; commit?: boolean }) => {
+    await runAutoEnable({ branch: options.branch, commit: options.commit });
+  });
+
+autoCmd
+  .command("disable")
+  .description("Remove TrueCourse auto-mode hooks")
+  .action(() => {
+    runAutoDisable();
+  });
+
+autoCmd
+  .command("status")
+  .description("Show auto-mode hook status")
+  .action(() => {
+    runAutoStatus();
   });
 
 program.action(() => {
