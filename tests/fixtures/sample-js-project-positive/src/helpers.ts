@@ -2440,3 +2440,19 @@ export function getDefaultFieldMetaTMR(fieldType: FieldTypeTMRValue): FieldMetaT
       throw new Error(`Unsupported field type: ${String(fieldType)}`);
   }
 }
+
+
+// Mode shape-f6910cb6ab30 (corrected): two flat sibling writes to `state.phase`
+// at the same block level, with only `console`-style logging between them.
+// The intermediate statement does not mention `state`, so the visitor's
+// wasRead check stays false and element-overwrite fires on the second write.
+declare const bootstrapLogger: { info: (message: string) => void };
+const bootstrapState: { phase: string } = { phase: 'idle' };
+
+export function bootstrapAutosave(): void {
+  bootstrapState.phase = 'preparing';
+  bootstrapLogger.info('autosave bootstrap starting');
+  bootstrapLogger.info('autosave bootstrap configured');
+  bootstrapState.phase = 'ready';
+}
+

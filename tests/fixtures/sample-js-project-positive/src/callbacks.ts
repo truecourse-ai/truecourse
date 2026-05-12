@@ -670,3 +670,38 @@ export function setupPageObserverFpUfp(): (el: HTMLElement) => void {
   };
   return attachResizeObserverFpUfp;
 }
+
+
+// Mode: rxjs-pipe-combineLatest-nesting
+// Innermost arrow `(x) => x.id` sits four call_expression `arguments` ancestors deep
+// (map → of → combineLatest → switchMap), which the deep-callback-nesting rule
+// counts as depth >= 4. The body of each lambda is trivial — a single property
+// access or array transform — so this is the canonical RxJS pipeline FP.
+interface RxObservable<T> {
+  pipe<R>(op: RxOperator<T, R>): RxObservable<R>;
+}
+interface RxOperator<T, R> {
+  readonly __input: T;
+  readonly __output: R;
+}
+
+declare function of<T>(value: T): RxObservable<T>;
+declare function combineLatest<T>(sources: readonly RxObservable<T>[]): RxObservable<readonly T[]>;
+declare function switchMap<T, R>(project: (value: T) => RxObservable<R>): RxOperator<T, R>;
+declare function mapOp<T, R>(project: (value: T) => R): RxOperator<T, R>;
+
+interface RecipientRow { id: string; email: string; }
+declare const recipientStream: RxObservable<readonly RecipientRow[]>;
+
+export const recipientIds$ = recipientStream.pipe(
+  switchMap((values) =>
+    combineLatest(
+      values.map((value) =>
+        of(value).pipe(
+          mapOp((entry) => entry.id),
+        ),
+      ),
+    ),
+  ),
+);
+

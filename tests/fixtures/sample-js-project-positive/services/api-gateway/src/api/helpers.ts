@@ -69,3 +69,25 @@ void multiOriginCors;
 void applyPublicMetricsCors;
 void applyConfiguredCors;
 void setExpressCorsHeaders;
+
+
+// Mode shape-2830c2fce4f1 (corrected): metrics endpoint that intentionally
+// exposes Prometheus-style counters to any browser. The literal `'*'` is what
+// the permissive-cors rule pattern-matches, so all three call sites below fire.
+declare const metricsHeaders: { set: (name: string, value: string) => void };
+declare const corsMw: (options: { origin: string; credentials?: boolean }) => unknown;
+declare const metricsRes: { setHeader: (name: string, value: string) => void; header: (name: string, value: string) => void };
+
+export function applyMetricsCors(): void {
+  metricsHeaders.set('Access-Control-Allow-Origin', '*');
+}
+
+export const publicMetricsCors = corsMw({
+  origin: '*',
+  credentials: false,
+});
+
+export function setMetricsExpressCors(): void {
+  metricsRes.setHeader('Access-Control-Allow-Origin', '*');
+}
+

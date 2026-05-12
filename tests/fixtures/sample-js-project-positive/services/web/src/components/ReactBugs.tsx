@@ -280,3 +280,28 @@ export function ConditionalCleanupEffect(): JSX.Element {
 
   return <div id="document-flow-form-container">form</div>;
 }
+
+
+/**
+ * one-shot-beforeunload-listener:
+ *
+ * Registers a `beforeunload` handler that fires once when the user leaves the
+ * page. The listener tears itself down at unload time, so a cleanup function
+ * is technically unnecessary — but the missing-cleanup-useeffect rule still
+ * flags the effect because there is no `return` at the top of the callback
+ * body. This is the canonical FP shape for the rule.
+ */
+export function BeforeUnloadWarning(): JSX.Element {
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+  }, []);
+
+  return <div>Editing — leaving the page will prompt for confirmation.</div>;
+}
+

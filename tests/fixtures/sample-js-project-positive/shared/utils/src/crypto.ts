@@ -92,3 +92,25 @@ export function etagFor(body: string): string {
   // HTTP ETag: a content-derived cache key; salting it would break caches.
   return cryptoApi.createHash('md5').update(body).digest('hex');
 }
+
+
+// Mode shape-7bab52885f80 (corrected): legacy password-migration helper that
+// hashes a plaintext password with sha256 + no salt. The function intentionally
+// reproduces the legacy app's deterministic format so existing records can be
+// matched during migration — the unpredictable-salt-missing rule still has to
+// flag it because `createHash('sha256')` in a `password` context is exactly
+// the rainbow-table-prone shape the rule was built to catch.
+declare const legacyCryptoApi: {
+  createHash(algorithm: string): {
+    update(data: string): { digest(encoding: string): string };
+  };
+};
+
+export function hashLegacyPasswordRecord(password: string): string {
+  return legacyCryptoApi.createHash('sha256').update(password).digest('hex');
+}
+
+export function compareLegacyPassword(password: string, storedHash: string): boolean {
+  return hashLegacyPasswordRecord(password) === storedHash;
+}
+

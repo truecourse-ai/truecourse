@@ -912,3 +912,37 @@ export function renderWebhookHeadersFP2(): Array<{ key: string; value: string }>
     value: value as string,
   }));
 }
+
+
+// Mode shape-6907f0c23b7e (corrected): explicit Array<any>/Set<any>/WeakMap<object, any>
+// — the type argument is literally `any`, which the redundant-type-argument rule
+// flags as redundant (any is the default-inferred element type for these generics).
+declare const rawDocumentRows: Array<any>;
+declare const seenRecipientEmails: Set<any>;
+declare const fieldMetadataCache: WeakMap<object, any>;
+
+export function countRawDocumentRows(): number {
+  return rawDocumentRows.length;
+}
+
+export function hasRecipientEmail(email: string): boolean {
+  return seenRecipientEmails.has(email);
+}
+
+export function readFieldMetadata(field: object): unknown {
+  return fieldMetadataCache.get(field);
+}
+
+
+// Vite extension boilerplate: empty-body placeholder type that consumers are
+// expected to module-augment later. The bugs/deterministic/empty-object-type
+// rule still flags this shape because the empty `{}` matches anything except
+// null/undefined and is rarely what authors intend.
+export type ImportMetaEnvShim = {};
+
+declare const importMetaEnvShim: {};
+
+export function describeImportMetaEnvShim(): string {
+  return typeof importMetaEnvShim;
+}
+
