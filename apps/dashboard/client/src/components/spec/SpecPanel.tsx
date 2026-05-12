@@ -1,152 +1,104 @@
 /**
- * SpecPanel — the dashboard surface for Module 1 (Spec Consolidation).
+ * SpecPanel — the sidebar list of conflicts for the Spec tab. The
+ * conflict detail (candidates, pick/custom UI) lives in
+ * SpecConflictDetail, rendered in the main content slot by
+ * RepoGraphPage. State is shared via SpecProvider.
  *
  * Layout:
- *   Header      counts (docs, claims, resolved, decided, open) + Apply
- *   Toolbar     batch ops (Accept all defaults, Refresh)
- *   ConflictList  flat sortable list (Q9). Each row expands to show
- *                 candidates side-by-side with pick/custom buttons.
- *
- * Q-locks honored:
- *   Q7  engine pre-picks default; user reviews/overrides.
- *   Q8  this is the primary review surface (CLI is fast-path only).
- *   Q9  flat list, filterable.
- *   Q10 default-pick highlights the newest candidate.
- *   Q11 custom free-text answer per conflict.
- *   Q12 explicit Apply step writes the canonical and chains into IL.
+ *   Header      counts (docs, claims, resolved, open) + Apply
+ *   Toolbar     filter + accept-all-defaults + refresh + "Scanned ago"
+ *   List        flat selectable rows, grouped by topic; chain
+ *               conflicts pulled into a "Resolve first" section
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw, Wand2, Check, AlertCircle, FileText } from 'lucide-react';
+import { useEffect } from 'react';
+import { Loader2, AlertCircle, Play, GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import * as api from '@/lib/api';
-import type {
-  SpecConflict,
-  SpecResolution,
-  SpecScanResponse,
-  SpecApplyResponse,
-} from '@/lib/api';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useSpec } from './SpecContext';
+import { SpecCanonicalPanel } from './SpecCanonicalPanel';
+import type { CanonicalSpecTree, SpecConflict, SpecScanResponse } from '@/lib/api';
 
-interface SpecPanelProps {
-  repoId: string;
+/**
+ * View mode for the Spec tab — driven entirely by scan state. The
+ * sidebar shows the conflict list while there's anything open, and
+ * flips to the canonical browser once everything is resolved. No
+ * manual toggle: conflict resolution comes first, browsing later.
+ */
+export type SpecView = 'conflicts' | 'canonical';
+
+export function deriveSpecView(scan: SpecScanResponse | null): SpecView {
+  return scan && scan.openConflicts.length === 0 ? 'canonical' : 'conflicts';
 }
 
-export function SpecPanel({ repoId }: SpecPanelProps) {
-  const [scan, setScan] = useState<SpecScanResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [filterText, setFilterText] = useState('');
-  const [applying, setApplying] = useState(false);
-  const [applyResult, setApplyResult] = useState<SpecApplyResponse | null>(null);
-  const [busyConflictId, setBusyConflictId] = useState<string | null>(null);
+export interface SpecPanelProps {
+  /** Canonical tree owned by `useCanonicalSpecTree` at page level. */
+  canonicalTree: CanonicalSpecTree | null;
+  canonicalLoading: boolean;
+  canonicalError: string | null;
+  activeConflictId: string | null;
+  onSelectConflict: (id: string | null) => void;
+  activeCanonicalPath: string | null;
+  /** Single-click (transient) / double-click (pinned). Opens a tab. */
+  onOpenCanonicalFile: (filePath: string, pinned: boolean) => void;
+  /** Used to clear the canonical selection when the view flips. */
+  onSelectCanonicalFile: (filePath: string | null) => void;
+}
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const r = await api.getSpecScan(repoId);
-      setScan(r);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [repoId]);
+export function SpecPanel({
+  canonicalTree,
+  canonicalLoading,
+  canonicalError,
+  activeConflictId,
+  onSelectConflict,
+  activeCanonicalPath,
+  onOpenCanonicalFile,
+  onSelectCanonicalFile,
+}: SpecPanelProps) {
+  const { scan, hydrating, loading, error, refresh } = useSpec();
+  const view = deriveSpecView(scan);
 
+  // When the view flips (because a scan resolved or surfaced
+  // conflicts), drop the other view's selection so the right pane
+  // never tries to render something the sidebar is no longer showing.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const handleResolve = useCallback(
-    async (conflict: SpecConflict, resolution: SpecResolution) => {
-      setBusyConflictId(conflict.id);
-      try {
-        await api.postSpecDecision(repoId, {
-          conflictId: conflict.id,
-          resolution,
-          candidateFingerprint: conflict.candidateFingerprint,
-        });
-        await refresh();
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setBusyConflictId(null);
-      }
-    },
-    [repoId, refresh],
-  );
-
-  const handleAcceptAllDefaults = useCallback(async () => {
-    setLoading(true);
-    try {
-      await api.postSpecDecisionsBatch(repoId, 'all-defaults');
-      await refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
+    if (view === 'canonical') {
+      if (activeConflictId !== null) onSelectConflict(null);
+    } else {
+      if (activeCanonicalPath !== null) onSelectCanonicalFile(null);
     }
-  }, [repoId, refresh]);
-
-  const handleApply = useCallback(async () => {
-    setApplying(true);
-    setError(null);
-    try {
-      const r = await api.postSpecApply(repoId);
-      setApplyResult(r);
-      await refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setApplying(false);
-    }
-  }, [repoId, refresh]);
-
-  const filtered = scan
-    ? scan.openConflicts.filter((c) =>
-        filterText
-          ? `${c.topic} ${c.subject} ${c.module ?? ''}`
-              .toLowerCase()
-              .includes(filterText.toLowerCase())
-          : true,
-      )
-    : [];
+  }, [view, activeConflictId, activeCanonicalPath, onSelectConflict, onSelectCanonicalFile]);
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <Header
-        scan={scan}
-        loading={loading}
-        applying={applying}
-        onApply={handleApply}
-      />
-      <Toolbar
-        scan={scan}
-        filterText={filterText}
-        onFilterChange={setFilterText}
-        onAcceptAllDefaults={handleAcceptAllDefaults}
-        onRefresh={refresh}
-        loading={loading}
-      />
       {error && (
-        <div className="border-b border-border bg-red-500/10 px-4 py-2 text-sm text-red-300">
-          <AlertCircle className="mr-2 inline h-4 w-4" />
-          {error}
+        <div className="border-b border-border px-4 py-2">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         </div>
       )}
-      {applyResult && <ApplyResultBanner result={applyResult} />}
       <div className="flex-1 overflow-auto">
-        {loading && !scan ? (
-          <div className="flex h-full items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : scan && filtered.length === 0 ? (
-          <EmptyState scan={scan} filterActive={!!filterText} />
+        {hydrating ? (
+          <CenteredSpinner />
+        ) : !scan && !loading ? (
+          <NoScanYet onScan={refresh} />
+        ) : loading && !scan ? (
+          <ScanningPlaceholder />
+        ) : view === 'canonical' ? (
+          <SpecCanonicalPanel
+            tree={canonicalTree}
+            isLoading={canonicalLoading}
+            error={canonicalError}
+            activePath={activeCanonicalPath}
+            onOpen={onOpenCanonicalFile}
+          />
         ) : (
           <ConflictList
-            conflicts={filtered}
-            busyConflictId={busyConflictId}
-            onResolve={handleResolve}
+            scan={scan!}
+            activeConflictId={activeConflictId}
+            onSelect={onSelectConflict}
           />
         )}
       </div>
@@ -155,304 +107,217 @@ export function SpecPanel({ repoId }: SpecPanelProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Conflict list — grouped, selectable rows
 // ---------------------------------------------------------------------------
 
-function Header({
-  scan,
-  loading,
-  applying,
-  onApply,
-}: {
-  scan: SpecScanResponse | null;
-  loading: boolean;
-  applying: boolean;
-  onApply: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between border-b border-border bg-card px-4 py-3">
-      <div>
-        <h2 className="text-lg font-semibold">Spec</h2>
-        <p className="text-xs text-muted-foreground">
-          Consolidate scattered docs into a canonical, committable spec.
-        </p>
-      </div>
-      {scan && (
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <Stat label="Docs" value={scan.docsScanned} />
-          <Stat label="Claims" value={scan.claimsExtracted} />
-          <Stat label="Resolved" value={scan.resolved + scan.decided} />
-          <Stat label="Open" value={scan.openConflicts.length} highlight={scan.openConflicts.length > 0} />
-          <Button
-            onClick={onApply}
-            disabled={applying || loading || scan.openConflicts.length > 0}
-            size="sm"
-          >
-            {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
-            Apply
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
+/**
+ * Topic display order. Follows the natural reading flow for someone
+ * exploring a spec:
+ *   1. overview   — what is this?
+ *   2. auth       — how is access controlled?
+ *   3. endpoints  — the API surface
+ *   4. data       — what entities flow through?
+ *   5. effects    — what happens after a request?
+ *   6. errors     — what can go wrong?
+ * Unknown topics (shouldn't appear, but defensive) fall through to
+ * the end alphabetically.
+ */
+const TOPIC_ORDER: readonly string[] = [
+  'overview',
+  'auth',
+  'endpoints',
+  'data',
+  'effects',
+  'errors',
+];
 
-function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
-  return (
-    <div className="text-center">
-      <div className={`text-base font-semibold ${highlight ? 'text-amber-300' : 'text-foreground'}`}>
-        {value}
-      </div>
-      <div className="text-[10px] uppercase tracking-wider">{label}</div>
-    </div>
-  );
-}
-
-function Toolbar({
-  scan,
-  filterText,
-  onFilterChange,
-  onAcceptAllDefaults,
-  onRefresh,
-  loading,
-}: {
-  scan: SpecScanResponse | null;
-  filterText: string;
-  onFilterChange: (s: string) => void;
-  onAcceptAllDefaults: () => void;
-  onRefresh: () => void;
-  loading: boolean;
-}) {
-  const hasOpen = (scan?.openConflicts.length ?? 0) > 0;
-  return (
-    <div className="flex items-center gap-2 border-b border-border bg-card/50 px-4 py-2">
-      <input
-        value={filterText}
-        onChange={(e) => onFilterChange(e.target.value)}
-        placeholder="Filter conflicts…"
-        className="flex-1 rounded border border-border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-      />
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={onAcceptAllDefaults}
-        disabled={!hasOpen || loading}
-        title="Accept the engine's default pick on every open conflict"
-      >
-        <Wand2 className="mr-2 h-3.5 w-3.5" />
-        Accept all defaults
-      </Button>
-      <Button size="sm" variant="ghost" onClick={onRefresh} disabled={loading}>
-        <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-      </Button>
-    </div>
-  );
-}
-
-function EmptyState({
-  scan,
-  filterActive,
-}: {
-  scan: SpecScanResponse;
-  filterActive: boolean;
-}) {
-  if (scan.openConflicts.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Check className="h-6 w-6 text-emerald-400" />
-        <div>No open conflicts.</div>
-        <div className="text-xs">Click Apply to write the canonical spec and run IL extraction.</div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      {filterActive
-        ? 'No conflicts match the filter.'
-        : 'No conflicts to show.'}
-    </div>
-  );
+function compareTopics(a: string, b: string): number {
+  const ai = TOPIC_ORDER.indexOf(a);
+  const bi = TOPIC_ORDER.indexOf(b);
+  if (ai === -1 && bi === -1) return a.localeCompare(b);
+  if (ai === -1) return 1;
+  if (bi === -1) return -1;
+  return ai - bi;
 }
 
 function ConflictList({
-  conflicts,
-  busyConflictId,
-  onResolve,
+  scan,
+  activeConflictId,
+  onSelect,
 }: {
-  conflicts: SpecConflict[];
-  busyConflictId: string | null;
-  onResolve: (conflict: SpecConflict, resolution: SpecResolution) => void;
+  scan: SpecScanResponse;
+  activeConflictId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  // Separate chain conflicts from content conflicts so the user
+  // resolves the cascading ones first.
+  const chainConflicts: SpecConflict[] = [];
+  const byTopic = new Map<string, SpecConflict[]>();
+  for (const c of scan.openConflicts) {
+    const isChain = c.candidates[0]?.claim.id.startsWith('version-chain:');
+    if (isChain) {
+      chainConflicts.push(c);
+      continue;
+    }
+    const list = byTopic.get(c.topic) ?? [];
+    list.push(c);
+    byTopic.set(c.topic, list);
+  }
+  // Topic ordering: natural reading flow (TOPIC_ORDER); subjects
+  // within each topic alphabetically.
+  const topicOrder = [...byTopic.keys()].sort(compareTopics);
+  for (const t of topicOrder) {
+    byTopic.set(
+      t,
+      (byTopic.get(t) ?? []).sort((a, b) => a.subject.localeCompare(b.subject)),
+    );
+  }
+
+  return (
+    <div>
+      {chainConflicts.length > 0 && (
+        <Section title="Resolve first" count={chainConflicts.length} tone="amber">
+          {chainConflicts.map((c) => (
+            <ConflictRow
+              key={c.id}
+              conflict={c}
+              active={c.id === activeConflictId}
+              onSelect={() => onSelect(c.id)}
+              isVersionChain
+            />
+          ))}
+        </Section>
+      )}
+      {topicOrder.map((topic) => (
+        <Section
+          key={topic}
+          title={topic}
+          count={(byTopic.get(topic) ?? []).length}
+        >
+          {(byTopic.get(topic) ?? []).map((c) => (
+            <ConflictRow
+              key={c.id}
+              conflict={c}
+              active={c.id === activeConflictId}
+              onSelect={() => onSelect(c.id)}
+            />
+          ))}
+        </Section>
+      ))}
+    </div>
+  );
+}
+
+function Section({
+  title,
+  count,
+  tone,
+  dimmed,
+  children,
+}: {
+  title: string;
+  count: number;
+  tone?: 'amber';
+  dimmed?: boolean;
+  children: React.ReactNode;
 }) {
   return (
-    <div className="divide-y divide-border">
-      {conflicts.map((c) => (
-        <ConflictRow
-          key={c.id}
-          conflict={c}
-          busy={busyConflictId === c.id}
-          onResolve={(resolution) => onResolve(c, resolution)}
-        />
-      ))}
+    <div className={dimmed ? 'opacity-50' : undefined}>
+      <div
+        className={`sticky top-0 z-10 flex items-center justify-between border-b border-border px-4 py-1.5 text-[10px] uppercase tracking-wider ${
+          tone === 'amber' ? 'bg-amber-500/10 text-amber-300' : 'bg-card/80 text-muted-foreground'
+        }`}
+      >
+        <span>{title}</span>
+        <span>{count}</span>
+      </div>
+      {children}
     </div>
   );
 }
 
 function ConflictRow({
   conflict,
-  busy,
-  onResolve,
+  active,
+  onSelect,
+  isVersionChain,
+  disabled,
+  disabledReason,
 }: {
   conflict: SpecConflict;
-  busy: boolean;
-  onResolve: (resolution: SpecResolution) => void;
+  active: boolean;
+  onSelect: () => void;
+  isVersionChain?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [customMode, setCustomMode] = useState(false);
-  const [customText, setCustomText] = useState('');
-
+  const label = isVersionChain
+    ? conflict.subject.replace(/^version chain:\s*/, '')
+    : conflict.subject;
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-start gap-2">
-        <button
-          className="mt-0.5 text-muted-foreground hover:text-foreground"
-          onClick={() => setExpanded((v) => !v)}
-          aria-label={expanded ? 'Collapse' : 'Expand'}
-        >
-          <FileText className="h-4 w-4" />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-              {conflict.topic}
-            </span>
-            <span className="font-medium">{conflict.subject}</span>
-            <span className="text-xs text-muted-foreground">
-              {conflict.candidates.length} candidates
-            </span>
-          </div>
-          {expanded && (
-            <div className="mt-3 grid gap-2">
-              {conflict.candidates.map((cand) => (
-                <CandidateCard
-                  key={cand.index}
-                  candidate={cand}
-                  isDefault={cand.index === conflict.defaultPick}
-                  busy={busy}
-                  onPick={() => onResolve({ kind: 'pick', candidateIndex: cand.index })}
-                />
-              ))}
-              {customMode ? (
-                <div className="rounded border border-dashed border-border p-3">
-                  <textarea
-                    value={customText}
-                    onChange={(e) => setCustomText(e.target.value)}
-                    placeholder="Enter the authoritative answer in your own words…"
-                    className="w-full resize-none rounded border border-border bg-background p-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-                    rows={3}
-                  />
-                  <div className="mt-2 flex justify-end gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => { setCustomMode(false); setCustomText(''); }}>
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={busy || !customText.trim()}
-                      onClick={() => onResolve({ kind: 'custom', content: customText.trim() })}
-                    >
-                      Save custom
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  className="self-start rounded border border-dashed border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                  onClick={() => setCustomMode(true)}
-                  disabled={busy}
-                >
-                  Or write a custom answer…
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CandidateCard({
-  candidate,
-  isDefault,
-  busy,
-  onPick,
-}: {
-  candidate: SpecConflict['candidates'][number];
-  isDefault: boolean;
-  busy: boolean;
-  onPick: () => void;
-}) {
-  return (
-    <div
-      className={`rounded border p-3 transition-colors ${
-        isDefault ? 'border-primary/60 bg-primary/5' : 'border-border'
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
+      className={`flex w-full items-center gap-2 border-b border-border/60 px-4 py-2 text-left text-sm transition-colors ${
+        disabled
+          ? 'cursor-not-allowed text-muted-foreground'
+          : active
+            ? 'bg-primary/10 text-foreground'
+            : 'hover:bg-muted/40'
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-mono text-muted-foreground">
-            {candidate.claim.provenance.file}:{candidate.claim.provenance.line}
-          </span>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            {candidate.weight}
-          </span>
-          {isDefault && (
-            <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-primary">
-              default
-            </span>
-          )}
-        </div>
-        <Button size="sm" variant={isDefault ? 'default' : 'outline'} onClick={onPick} disabled={busy}>
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Pick'}
-        </Button>
-      </div>
-      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-2 text-xs text-muted-foreground">
-        {candidate.claim.provenance.quote}
-      </pre>
-      {candidate.claim.content !== undefined && (
-        <details className="mt-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer hover:text-foreground">Structured content</summary>
-          <pre className="mt-1 max-h-32 overflow-auto rounded bg-muted/30 p-2">
-            {JSON.stringify(candidate.claim.content, null, 2)}
-          </pre>
-        </details>
+      {isVersionChain ? (
+        <GitBranch className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+      ) : (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
       )}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="shrink-0 text-[10px] text-muted-foreground">
+        {conflict.candidates.length}
+      </span>
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Placeholders
+// ---------------------------------------------------------------------------
+
+function CenteredSpinner() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
     </div>
   );
 }
 
-function ApplyResultBanner({ result }: { result: SpecApplyResponse }) {
-  const ilStatus = (() => {
-    if ('error' in result.il) return { label: 'IL extraction failed', tone: 'red' as const, detail: result.il.error };
-    if ('skipped' in result.il) return { label: 'IL extraction skipped', tone: 'amber' as const, detail: result.il.skipped };
-    const hasIssues = (result.il.validationIssues?.length ?? 0) > 0;
-    return {
-      label: hasIssues ? 'IL extraction surfaced validation issues' : `IL extraction wrote ${result.il.written} files`,
-      tone: hasIssues ? ('amber' as const) : ('emerald' as const),
-      detail: undefined,
-    };
-  })();
-  const tone = {
-    red: 'bg-red-500/10 text-red-300',
-    amber: 'bg-amber-500/10 text-amber-300',
-    emerald: 'bg-emerald-500/10 text-emerald-300',
-  }[ilStatus.tone];
+function NoScanYet({ onScan }: { onScan: () => void }) {
   return (
-    <div className={`border-b border-border px-4 py-2 text-xs ${tone}`}>
-      <span className="font-semibold">Applied.</span> Materialized {result.materialize?.written ?? 0} canonical files.
-      {' · '}
-      <span>{ilStatus.label}</span>
-      {ilStatus.detail && <span className="ml-2 text-muted-foreground">({ilStatus.detail})</span>}
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <Play className="h-8 w-8 text-muted-foreground" />
+      <div>
+        <h3 className="text-sm font-semibold">No scan yet</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Run a scan to discover docs, extract claims, and surface conflicts.
+        </p>
+      </div>
+      <Button onClick={onScan} size="sm">
+        <Play className="mr-2 h-4 w-4" />
+        Run scan
+      </Button>
     </div>
   );
 }
+
+function ScanningPlaceholder() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin" />
+      <span>Scanning docs…</span>
+    </div>
+  );
+}
+
 

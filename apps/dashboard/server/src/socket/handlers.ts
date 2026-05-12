@@ -8,6 +8,8 @@ import {
 
 // Track in-progress analyses so we can inform clients that join mid-analysis
 const activeAnalyses = new Map<string, AnalysisProgressPayload>();
+// Same idea for BL Drift's Spec scan/apply.
+const activeSpec = new Map<string, AnalysisProgressPayload>();
 
 
 export function setupHandlers(io: SocketServer): void {
@@ -23,6 +25,10 @@ export function setupHandlers(io: SocketServer): void {
       const progress = activeAnalyses.get(repoId);
       if (progress) {
         socket.emit('analysis:progress', { repoId, ...progress });
+      }
+      const specProgress = activeSpec.get(repoId);
+      if (specProgress) {
+        socket.emit('spec:progress', { repoId, ...specProgress });
       }
 
 
@@ -192,4 +198,38 @@ export function createSocketStashConfirmHandler(repoId: string):
         socket.on('analysis:stash-confirm-response', onResponse);
       }
     });
+}
+
+// ---------------------------------------------------------------------------
+// BL Drift / Spec progress
+// ---------------------------------------------------------------------------
+
+/** Build a StepTracker that emits spec progress into the repo's room. */
+export function createSocketSpecTracker(
+  repoId: string,
+  stepDefs: { key: string; label: string }[],
+): StepTracker {
+  return new StepTracker((payload) => emitSpecProgress(repoId, payload), stepDefs);
+}
+
+export function emitSpecProgress(
+  repoId: string,
+  progress: AnalysisProgressPayload,
+): void {
+  if (progress.step === 'error') {
+    activeSpec.delete(repoId);
+  } else {
+    activeSpec.set(repoId, progress);
+  }
+  const io = getIO();
+  io.to(`repo:${repoId}`).emit('spec:progress', { repoId, ...progress });
+}
+
+export function emitSpecComplete(
+  repoId: string,
+  kind: 'scan' | 'apply',
+): void {
+  activeSpec.delete(repoId);
+  const io = getIO();
+  io.to(`repo:${repoId}`).emit('spec:complete', { repoId, kind });
 }

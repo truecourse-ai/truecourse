@@ -31,8 +31,8 @@ import { verify, type VerifyResult } from '../../packages/contract-verifier/src/
  *   tests/.eval-reports/<slug>.md  markdown report (gitignored)
  *
  * Cost: one `claude -p` subprocess per slice on the first run; subsequent
- * runs hit the spec-cache and cost ≈ $0. Use `EVAL_MAX_SLICES=5` when
- * scoping a new repo for the first time.
+ * runs hit the extractor cache and cost ≈ $0. Use `EVAL_MAX_SLICES=5`
+ * when scoping a new repo for the first time.
  *
  * Why a vitest test rather than a tsx script: vitest's resolver follows
  * workspace `src/*.ts` symlinks across packages, which tsx's doesn't.
@@ -191,9 +191,9 @@ function resolveTarget(target: string): Resolved {
   if (!fs.existsSync(abs)) throw new Error(`Path doesn't exist: ${abs}`);
 
   // Local target — copy into tests/.eval-repos/ so the harness never
-  // mutates the user's working tree (it writes specs.yaml, spec-cache,
-  // and contracts under <root>/.truecourse/). Skip node_modules / .git
-  // / dist to keep the copy fast and small.
+  // mutates the user's working tree (it writes the consolidator/
+  // extractor caches and contracts under <root>/.truecourse/). Skip
+  // node_modules / .git / dist to keep the copy fast and small.
   const slug = path.basename(abs).toLowerCase().replace(/[^a-z0-9-]+/g, '-') + '-local';
   const dest = path.join(REPOS_DIR, slug);
   if (!fs.existsSync(dest)) {

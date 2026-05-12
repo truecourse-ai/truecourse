@@ -44,8 +44,8 @@ const FIXTURE_CODE = path.join(FIXTURE_ROOT, 'code/src');
 const FIXTURE_CONTRACTS = path.join(FIXTURE_ROOT, '.truecourse/contracts');
 /** Where this test deposits its most-recent LLM output so a developer can
  *  inspect what Claude actually produced — `.tc` files, the populated
- *  spec-cache, and the corpus-diff against the hand-written ground truth.
- *  Gitignored; rewritten on every live run. */
+ *  extractor cache, and the corpus-diff against the hand-written ground
+ *  truth. Gitignored; rewritten on every live run. */
 const SAMPLE_OUTPUT_DIR = path.resolve(__dirname, '../.llm-sample');
 
 const SHOULD_RUN = process.env.LLM_TESTS === '1';
@@ -239,14 +239,14 @@ describe.skipIf(!SHOULD_RUN)('contract extractor — live Claude Code smoke', ()
         try {
           fs.rmSync(SAMPLE_OUTPUT_DIR, { recursive: true, force: true });
           fs.mkdirSync(SAMPLE_OUTPUT_DIR, { recursive: true });
-          // Copy the generated .tc corpus and the populated spec-cache.
+          // Copy the generated .tc corpus and the populated extractor cache.
           const tcDir = path.join(tmp, '.truecourse', 'contracts');
-          const cacheDir = path.join(tmp, '.truecourse', 'spec-cache');
+          const cacheDir = path.join(tmp, '.truecourse', '.cache', 'extractor');
           if (fs.existsSync(tcDir)) {
             copyDir(tcDir, path.join(SAMPLE_OUTPUT_DIR, 'contracts'));
           }
           if (fs.existsSync(cacheDir)) {
-            copyDir(cacheDir, path.join(SAMPLE_OUTPUT_DIR, 'spec-cache'));
+            copyDir(cacheDir, path.join(SAMPLE_OUTPUT_DIR, 'extractor-cache'));
           }
           // Drop a README so opening the dir is self-explanatory.
           fs.writeFileSync(
@@ -257,7 +257,7 @@ describe.skipIf(!SHOULD_RUN)('contract extractor — live Claude Code smoke', ()
               `Captured at: ${new Date().toISOString()}`,
               '',
               '- `contracts/` — the `.tc` files Claude produced for `tests/fixtures/sample-js-project-il/SPEC.md`',
-              '- `spec-cache/` — per-slice JSON cache (input/output for each Claude call)',
+              '- `extractor-cache/` — per-slice JSON cache (input/output for each Claude call)',
               '',
               'This directory is gitignored. It is rewritten every time you run',
               '`LLM_TESTS=1 pnpm vitest run tests/contract-extractor/live-llm.test.ts`.',

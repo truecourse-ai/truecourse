@@ -130,6 +130,7 @@ function assembleClaim(llm: LlmClaim, block: Block, doc: DocCandidate): Claim {
     topic: llm.topic,
     subject: llm.subject,
     content: llm.content,
+    kind: llm.kind,
     provenance,
     metadata,
   };

@@ -47,6 +47,7 @@ export type RepoResponse = {
   lastAnalyzed?: string;
   branches?: string[];
   defaultBranch?: string;
+  isGitRepo?: boolean;
   latestAnalysis?: {
     id: string;
     status: string;
@@ -692,6 +693,8 @@ export type SpecDecisionsFile = {
 };
 
 export type SpecScanResponse = {
+  /** Set on persisted state and on fresh scans. Absent on legacy responses. */
+  scannedAt?: string;
   docsScanned: number;
   blocksAttempted: number;
   claimsExtracted: number;
@@ -701,6 +704,13 @@ export type SpecScanResponse = {
   decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
 };
 
+export type IlValidationIssue = {
+  artifactKey: string;
+  message: string;
+  severity: 'hard' | 'soft';
+  tcSource?: string;
+};
+
 export type SpecApplyResponse = {
   merge: { resolved: number; decided: number; open: number };
   materialize: {
@@ -708,13 +718,83 @@ export type SpecApplyResponse = {
     failures: Array<{ module: string; fileName: string; error: string }>;
   } | null;
   il:
-    | { written: number; validationIssues: unknown[]; mergeDiagnostics: unknown[] }
+    | {
+        written: number;
+        validationIssues: IlValidationIssue[];
+        mergeDiagnostics: unknown[];
+      }
     | { error: string }
     | { skipped: string };
 };
 
 export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
   return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
+}
+
+export type CanonicalSpecTree = {
+  hasCanonical: boolean;
+  shared: Array<{ name: string; path: string }>;
+  modules: Array<{
+    name: string;
+    manifest: Record<string, unknown> | null;
+    files: Array<{ name: string; path: string }>;
+  }>;
+};
+
+export type CanonicalSpecFile = {
+  path: string;
+  content: string;
+};
+
+export function getSpecCanonicalTree(repoId: string): Promise<CanonicalSpecTree> {
+  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree`);
+}
+
+export function getSpecCanonicalFile(repoId: string, filePath: string): Promise<CanonicalSpecFile> {
+  return fetchApi<CanonicalSpecFile>(
+    `/api/repos/${repoId}/spec/canonical/file?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Contracts (Module 2)
+// ---------------------------------------------------------------------------
+
+export type ContractsTree = {
+  hasContracts: boolean;
+  modules: Array<{
+    name: string;
+    files: Array<{ name: string; path: string }>;
+  }>;
+};
+
+export type ContractsFile = {
+  path: string;
+  content: string;
+};
+
+export function getContractsTree(repoId: string): Promise<ContractsTree> {
+  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree`);
+}
+
+export function getContractsFile(repoId: string, filePath: string): Promise<ContractsFile> {
+  return fetchApi<ContractsFile>(
+    `/api/repos/${repoId}/contracts/file?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+/**
+ * Read the persisted scan-state. Returns null when the server
+ * responds 404 (no scan has been run yet) — any other error
+ * propagates so the caller can show it.
+ */
+export async function getSpecScanState(repoId: string): Promise<SpecScanResponse | null> {
+  try {
+    return await fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan-state`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {

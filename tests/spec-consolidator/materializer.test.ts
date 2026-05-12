@@ -194,8 +194,17 @@ describe('materializeSpec — decisions.json', () => {
 
 describe('materializeSpec — claim attribution via decisions', () => {
   function makePair() {
-    const a = endpoint('/api/v1/orders', { id: 'id-a', metadata: { docKind: 'prd', lastTouched: '2025-01-01T00:00:00Z' } });
-    const b = { ...endpoint('/api/v1/orders', { id: 'id-b', metadata: { docKind: 'prd', lastTouched: '2026-01-01T00:00:00Z' } }), content: { method: 'GET', path: '/api/v1/orders', responses: { '201': {} } } };
+    // Two claims with truly disjoint success codes — neither side's
+    // responses keys is a subset of the other's, so the merger leaves
+    // this as a real user-resolvable conflict.
+    const a = {
+      ...endpoint('/api/v1/orders', { id: 'id-a', metadata: { docKind: 'prd', lastTouched: '2025-01-01T00:00:00Z' } }),
+      content: { method: 'GET', path: '/api/v1/orders', responses: { '200': {} } },
+    };
+    const b = {
+      ...endpoint('/api/v1/orders', { id: 'id-b', metadata: { docKind: 'prd', lastTouched: '2026-01-01T00:00:00Z' } }),
+      content: { method: 'GET', path: '/api/v1/orders', responses: { '201': {} } },
+    };
     return [a, b];
   }
 

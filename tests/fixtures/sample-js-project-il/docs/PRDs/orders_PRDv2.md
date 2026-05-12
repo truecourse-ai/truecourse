@@ -1,7 +1,5 @@
 # Order Management Service — PRD v2
 
-Supersedes: orders_PRDv1.md
-
 The current contract for the orders + customers service. Authoritative
 across the surface; older docs (v1, README) are kept for history.
 

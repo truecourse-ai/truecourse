@@ -125,6 +125,7 @@ function makeRunner(): BlockRunner {
             topic: 'endpoints',
             subject: 'POST /api/v1/orders',
             content: { method: 'POST', path: '/api/v1/orders', responses: { [response]: {} } },
+            kind: 'definition',
           },
         ],
       };
@@ -137,6 +138,7 @@ function makeRunner(): BlockRunner {
             topic: 'endpoints',
             subject: 'GET /health',
             content: { method: 'GET', path: '/health' },
+            kind: 'definition',
           },
         ],
       };
@@ -156,7 +158,7 @@ describe('consolidate — scan mode', () => {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
 
     // Two conflicts now: the version chain (filename-detected
     // PRDv1 → PRDv2) and the orders content conflict (200 vs 201).
@@ -181,7 +183,7 @@ describe('consolidate — apply mode', () => {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     // Resolve every open conflict to its default pick. The chain
     // resolution (v2 supersedes v1) makes the content conflict
     // disappear because v1's claims are dropped before merging.
@@ -202,7 +204,7 @@ describe('consolidate — apply mode', () => {
       blockRunner: makeRunner(),
       sectionRunner: sectionRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
 
     expect(apply.merge.openConflicts).toEqual([]);
     expect(apply.materialize?.failures).toEqual([]);
@@ -253,7 +255,7 @@ describe('consolidate — caching', () => {
       materialize: false,
       blockRunner: countingRunner,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const firstRunCalls = calls;
     expect(firstRunCalls).toBeGreaterThan(0);
 
@@ -263,7 +265,7 @@ describe('consolidate — caching', () => {
       materialize: false,
       blockRunner: countingRunner,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     expect(calls).toBe(0);
   });
 
@@ -275,7 +277,7 @@ describe('consolidate — caching', () => {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const conflict = scan.merge.openConflicts[0];
     writeDecisions(repo, {
       version: 1,
@@ -298,7 +300,7 @@ describe('consolidate — caching', () => {
       blockRunner: makeRunner(),
       sectionRunner: countingSection,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const firstApplyCalls = sectionCalls;
     expect(firstApplyCalls).toBeGreaterThan(0);
 
@@ -309,7 +311,7 @@ describe('consolidate — caching', () => {
       blockRunner: makeRunner(),
       sectionRunner: countingSection,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     expect(sectionCalls).toBe(0);
   });
 

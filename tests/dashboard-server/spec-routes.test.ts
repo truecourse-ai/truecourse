@@ -13,7 +13,10 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
     emitViolationsReady: vi.fn(),
     emitFilesChanged: vi.fn(),
     emitAnalysisCanceled: vi.fn(),
+    emitSpecProgress: vi.fn(),
+    emitSpecComplete: vi.fn(),
     createSocketTracker: () => ({ start() {}, done() {}, error() {}, detail() {} }),
+    createSocketSpecTracker: () => ({ start() {}, done() {}, error() {}, detail() {} }),
     createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
     createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
   };

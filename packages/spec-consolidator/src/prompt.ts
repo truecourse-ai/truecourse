@@ -9,11 +9,15 @@
  */
 
 import { z } from 'zod';
-import { StatusSchema, TopicSchema } from './types.js';
+import { ClaimKindSchema, StatusSchema, TopicSchema } from './types.js';
 
 /**
  * One LLM-produced claim. The extractor wrapper canonicalizes this
  * into a full `Claim` by attaching id + provenance + metadata.
+ *
+ * `kind` is required (not optional) — adding this field invalidates
+ * any pre-existing block cache entries via Zod parse failure, which
+ * is the desired behaviour: prompt change → re-extraction.
  */
 export const LlmClaimSchema = z.object({
   topic: TopicSchema,
@@ -21,6 +25,11 @@ export const LlmClaimSchema = z.object({
   subject: z.string().min(1),
   /** Topic-specific structured content. Free-form JSON; downstream stages narrow. */
   content: z.unknown(),
+  /**
+   * Whether this section defines the subject or just narrows it.
+   * See ClaimKindSchema in types.ts for full semantics.
+   */
+  kind: ClaimKindSchema,
   /**
    * Status marker if the spec text indicates one (Phase markers,
    * "Out of Scope", "Deprecated", "Future"). Omitted when the spec
@@ -76,11 +85,56 @@ You are given ONE block of markdown from a documentation file (a PRD, ADR, RFC, 
                    "Order entity"               (a data type)
                    "memory.created event"       (an effect)
      - content:  topic-specific JSON. Use the field names below; include only fields the spec actually states.
+     - kind:     "definition" | "constraint" — see rule 4.
 
-3. Detect STATUS. If the surrounding text says the subject is "Phase 1", "V1 scope", "shipped", "current": status = "shipped". "Phase 2", "Future", "next": "planned". "Coming soon", "TODO", "Blocked": "deferred". "Deprecated", "Legacy", "Removed": "deprecated". "Out of Scope", "Excluded", "Won't ship": "out-of-scope".
+3. SUBJECT GRANULARITY. Most subjects are atomic — one section says everything the spec has to say about that subject ("POST /orders", "auth scheme", "global error envelope"). Use the plain subject string.
+
+   But some entities (typically in the \`data\` topic) are described across multiple sections, each covering a different FACET of the same thing — e.g., the entity's fields in one section, its state-transition rules in another, its computed/derived attributes in a third. When THIS section only specifies ONE FACET of such an entity, use a COMPOUND SUBJECT of the form "<Entity> / <facet>", where <facet> is a short noun (1-3 words, lowercase) describing what THIS section actually specifies. Derive the facet from the section's heading and content — do not invent generic placeholders.
+
+   Examples (the facet name follows the section's actual focus, so it varies per spec):
+     - "Order / fields"            (the section listing Order's columns/attributes)
+     - "Order / state machine"     (the section defining how Order moves between states)
+     - "Order / pricing rules"     (the section defining computed money attributes)
+     - "Customer / fields"
+     - "Booking / cancellation"    (the section specifying cancellation behavior)
+     - "Workspace / quotas"        (the section specifying limits)
+
+   When THIS section is the entity's full canonical definition — the place a reader would land for "what is X?" — use the plain subject ("Order entity"). Don't fragment a full definition.
+
+   Compound subjects apply mostly to the \`data\` topic. Endpoints, auth schemes, error envelopes, and individual effects almost always live in one focal section each — use plain subjects for those.
+
+4. Decide KIND for each claim. This tells the merger whether your claim is the primary spec for the subject or a narrowing rule that applies on top of it.
+
+   - kind = "definition" when the SECTION'S MAIN PURPOSE is to specify this subject.
+       Example: a "### POST /api/orders" section that lists request body, validation,
+                response codes — that's the definition of POST /api/orders.
+       Example: a "## Authentication" section that establishes the system-wide
+                auth scheme — that's the definition of "auth scheme".
+
+   - kind = "constraint" when the SECTION IS PRIMARILY ABOUT SOMETHING ELSE, and your
+                claim attaches an extra rule to a subject defined elsewhere.
+       Example: a "### Order ownership" section says ownership rules apply to
+                GET /api/orders/:id and POST /api/orders/:id/pay. The claims you
+                emit FOR EACH ENDPOINT here are constraints — they add an auth
+                requirement and a 403 response, but they are not the endpoint's
+                full definition.
+       Example: a "### Order lifecycle" section narrows the Order entity's
+                status field to a specific enum. The Order-entity claim from
+                this section is a constraint; the schema section defines the
+                full Order entity.
+
+   The rule of thumb: if a reader looking up "what is X?" would land on this
+   section as the primary answer, kind = definition. If the section assumes X
+   is defined elsewhere and just adds a rule to it, kind = constraint.
+
+   When in doubt, prefer "definition" — false positives there are recoverable
+   (the merger surfaces them as a conflict for the user); false negatives turn
+   real spec into silent narrowing.
+
+5. Detect STATUS. If the surrounding text says the subject is "Phase 1", "V1 scope", "shipped", "current": status = "shipped". "Phase 2", "Future", "next": "planned". "Coming soon", "TODO", "Blocked": "deferred". "Deprecated", "Legacy", "Removed": "deprecated". "Out of Scope", "Excluded", "Won't ship": "out-of-scope".
    Omit \`status\` when the spec is silent.
 
-4. The faithfulness rule. Encode ONLY what the spec STATES. Never guess. Never default to common patterns. If the spec doesn't say what status code is returned, don't assume 200. If the spec doesn't say auth is required, don't add an auth claim.
+6. The faithfulness rule. Encode ONLY what the spec STATES. Never guess. Never default to common patterns. If the spec doesn't say what status code is returned, don't assume 200. If the spec doesn't say auth is required, don't add an auth claim.
 
 # Content shapes per topic
 
@@ -149,10 +203,21 @@ Return ONLY a JSON object matching this exact shape — no prose, no code fences
         "request": { "walletAddress": "string", "signature": "string" },
         "responses": { "200": { "token": "string", "user": { "id": "string", "walletAddress": "string" } } }
       },
+      "kind": "definition",
       "status": "shipped",
       "line": 48
     }
   ]
+}
+
+A constraint example — the section is "### Resource ownership" but it adds a 403 to several endpoints. The claim about each affected endpoint is a constraint:
+
+{
+  "topic": "endpoints",
+  "subject": "GET /api/orders/:id",
+  "content": { "method": "GET", "path": "/api/orders/:id", "auth": "required", "responses": { "403": { "error": { "code": "forbidden" } } } },
+  "kind": "constraint",
+  "line": 182
 }
 
 If the block asserts nothing concrete about the system, return {"topics": [], "claims": []}.

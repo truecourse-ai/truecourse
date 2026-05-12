@@ -2,7 +2,6 @@
  * Version chain detection.
  *
  * When two docs in the same directory follow a v1/v2 naming pattern,
- * or one explicitly states `Supersedes: <other>` in its preamble,
  * they form a version chain. The consolidator surfaces the chain as
  * a single high-level decision ("v2 supersedes v1?") rather than
  * letting per-claim conflicts proliferate across the same content
@@ -12,17 +11,10 @@
  * register as multiple pairs and the user resolves each. Future work
  * can collapse them into one decision.
  *
- * Detection signals:
- *   - **Filename pattern** — two docs in the same directory whose
- *     names differ only in a `v1`/`v2`-style suffix.
- *   - **Supersedes header** — a doc's preview contains `Supersedes:
- *     <other-doc>` (case-insensitive). The other-doc reference is
- *     resolved against the asserting doc's directory; it has to
- *     exist in the candidate set to count.
- *
- * When both signals fire on the same pair, the chain is registered
- * once with `detectedFrom: 'supersedes-header'` (the explicit signal
- * outweighs the heuristic).
+ * Signals beyond filename versioning (e.g. content-based successor
+ * detection) come from the LLM-augmented detector in
+ * `version-chain-llm.ts`. This module stays narrow: filename pattern
+ * only, deterministic, zero LLM cost.
  */
 
 import { createHash } from 'node:crypto';
@@ -35,29 +27,13 @@ export interface VersionChain {
   /** Docs in oldest → newest order. */
   docs: DocCandidate[];
   /** Which signal surfaced this chain. */
-  detectedFrom: 'filename' | 'supersedes-header';
+  detectedFrom: 'filename' | 'llm';
 }
 
 export function detectVersionChains(docs: DocCandidate[]): VersionChain[] {
-  const byPath = new Map(docs.map((d) => [d.path, d]));
   const seen = new Set<string>();
   const out: VersionChain[] = [];
 
-  // Pass 1 — explicit Supersedes: headers
-  for (const doc of docs) {
-    const target = readSupersedesHeader(doc.preview);
-    if (!target) continue;
-    const resolved = resolveSupersedesTarget(doc.path, target, byPath);
-    if (!resolved) continue;
-    const older = byPath.get(resolved)!;
-    const chain = makeChain([older, doc], 'supersedes-header');
-    if (!seen.has(chain.id)) {
-      seen.add(chain.id);
-      out.push(chain);
-    }
-  }
-
-  // Pass 2 — filename heuristic, only for pairs not already seen
   for (let i = 0; i < docs.length; i++) {
     for (let j = i + 1; j < docs.length; j++) {
       const a = docs[i];
@@ -73,42 +49,6 @@ export function detectVersionChains(docs: DocCandidate[]): VersionChain[] {
   }
 
   return out;
-}
-
-// ---------------------------------------------------------------------------
-// Supersedes header
-// ---------------------------------------------------------------------------
-
-/**
- * Match a `Supersedes: <target>` line in the preview. Tolerates
- * leading whitespace, code-fences, and front-matter — looks for the
- * line anywhere in the preview window.
- */
-function readSupersedesHeader(preview: string): string | null {
-  const match = /^\s*supersedes:\s*([^\s]+)\s*$/im.exec(preview);
-  if (!match) return null;
-  return match[1].replace(/^["']|["']$/g, '').trim();
-}
-
-/**
- * Resolve a `Supersedes:` reference. The target is normally a
- * filename relative to the asserting doc's directory; we accept
- * absolute repo-relative paths too.
- */
-function resolveSupersedesTarget(
-  fromDocPath: string,
-  target: string,
-  byPath: Map<string, DocCandidate>,
-): string | null {
-  if (byPath.has(target)) return target;
-  const dir = path.dirname(fromDocPath);
-  const joined = path.posix.join(dir, target);
-  if (byPath.has(joined)) return joined;
-  // Last-ditch: any candidate whose basename matches.
-  for (const candidatePath of byPath.keys()) {
-    if (path.basename(candidatePath) === target) return candidatePath;
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
