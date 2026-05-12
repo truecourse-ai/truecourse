@@ -60,3 +60,35 @@ export function safeReturnRedirect(): void {
   const returnUrl = '/dashboard';
   responseObj.redirect(returnUrl);
 }
+
+
+
+// ---------------------------------------------------------------------------
+// Positive: clear-text-protocol — `http://` literal used purely as structural
+// glue for the URL parser to extract a hostname from a raw IP address. No
+// network communication occurs; the scheme is never used to dial out.
+// (shape 8a088fdefc6a — assert-webhook-url.ts toAddressUrl)
+// ---------------------------------------------------------------------------
+const toAddressUrlForHostExtraction = (address: string): string =>
+  address.includes(':') ? `http://[${address}]` : `http://${address}`;
+
+export function extractHostnameFromIp(rawIp: string): string {
+  const synthetic = toAddressUrlForHostExtraction(rawIp);
+  return new URL(synthetic).hostname;
+}
+
+// ---------------------------------------------------------------------------
+// Positive: clear-text-protocol — `http://` prefix used solely to construct a
+// parseable URL string for a recursive validation call (extracting an IPv4
+// from an IPv4-mapped IPv6 host like `::ffff:127.0.0.1`). No network use.
+// (shape 4222a22dfc36 — is-private-url.ts recursive call)
+// ---------------------------------------------------------------------------
+declare const isPrivateHostUrl: (input: string) => boolean;
+
+export function isPrivateMappedIpv4(hostname: string): boolean {
+  const v4Mapped = hostname.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u);
+  if (v4Mapped) {
+    return isPrivateHostUrl(`http://${v4Mapped[1]}`);
+  }
+  return false;
+}

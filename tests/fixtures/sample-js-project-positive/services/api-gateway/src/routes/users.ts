@@ -58,3 +58,91 @@ export async function findOrCreateByEmail(email: string): Promise<unknown> {
   if (!found) await drizzleDb.insert(users).values({ email });
   return found;
 }
+
+
+
+// Positive: values-not-convertible-to-number — Drizzle ORM sql<boolean> tagged template
+// literals where Date objects are interpolated as SQL parameters. Drizzle serializes
+// Date -> timestamp; the >= and <= operators are SQL date comparisons, not numeric coercion.
+declare const sql: <T = unknown>(strings: TemplateStringsArray, ...values: unknown[]) => { __sql: T };
+
+export function buildSigningVolumeDateCondition(
+  period: 'LAST_30_DAYS' | 'LAST_90_DAYS' | 'CUSTOM' | 'ALL',
+  startDate: Date,
+  endDate: Date,
+): { __sql: boolean } {
+  // shape-bfbf0288cd15: sql<boolean>`1=1` always-true predicate; <boolean> is a TS generic,
+  // not a numeric-to-boolean cast.
+  let dateCondition = sql<boolean>`1=1`;
+
+  if (period === 'CUSTOM') {
+    // shape-526bdbd04e78: Date range comparison; Drizzle parameterizes both Date values.
+    dateCondition = sql<boolean>`e."createdAt" >= ${startDate} AND e."createdAt" <= ${endDate}`;
+  } else if (period === 'LAST_30_DAYS') {
+    // shape-aa64abd321d2: single-sided Date >= comparison; idiomatic Drizzle ORM usage.
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    dateCondition = sql<boolean>`e."createdAt" >= ${thirtyDaysAgo}`;
+  } else if (period === 'LAST_90_DAYS') {
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    dateCondition = sql<boolean>`e."createdAt" >= ${ninetyDaysAgo}`;
+  } else {
+    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+    dateCondition = sql<boolean>`e."createdAt" >= ${oneYearAgo}`;
+  }
+
+  return dateCondition;
+}
+
+
+
+// Positive: void-return-value-used FP — Array.prototype.splice() returns the
+// array of removed elements (not void). Destructuring the first removed item
+// and reinserting it at the destination index is the canonical reorder pattern.
+export function reorderSigners<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  const [reorderedSigner] = items.splice(fromIndex, 1);
+  if (reorderedSigner !== undefined) {
+    items.splice(toIndex, 0, reorderedSigner);
+  }
+  return items;
+}
+
+// Positive: void-return-value-used FP — same shape used on a different array
+// (upload-page reorder). The destructured value is consumed on the next line.
+export function reorderUploadedItem<T>(items: T[], from: number, to: number): T[] {
+  const [reorderedItem] = items.splice(from, 1);
+  items.splice(to, 0, reorderedItem as T);
+  return items;
+}
+
+// Positive: void-return-value-used FP — Hono-style method chaining returns the
+// route builder, not void. The chained result is assigned and exported.
+declare const honoApp: {
+  get: (path: string, handler: (c: unknown) => unknown) => typeof honoApp;
+  delete: (path: string, handler: (c: unknown) => unknown) => typeof honoApp;
+  post: (path: string, handler: (c: unknown) => unknown) => typeof honoApp;
+};
+export const accountRoute = honoApp
+  .get('/account', (c) => c)
+  .delete('/account', (c) => c)
+  .post('/account/reset', (c) => c);
+
+
+
+// Positive: sync-require-in-handler — require() inside an Express-style (req, res) request handler.
+// Shape mirrors documenso seed FP (require() inside an async function body), but here the enclosing
+// function is a real HTTP request handler, satisfying the rule's 'handler' precondition.
+declare const require: (m: string) => any;
+declare const path: { join: (...parts: string[]) => string };
+declare const __dirname: string;
+type ExpressReq = { params: Record<string, string>; query: Record<string, string> };
+type ExpressRes = { json: (body: unknown) => void; status: (code: number) => ExpressRes };
+export async function handleSeedRouteRequest(req: ExpressReq, res: ExpressRes): Promise<void> {
+  const file = req.params.file;
+  for (const name of [file, 'default']) {
+    const mod = require(path.join(__dirname, './seed', name));
+    if (mod && typeof mod.seed === 'function') {
+      await mod.seed();
+    }
+  }
+  res.json({ ok: true });
+}
