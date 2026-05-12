@@ -7,33 +7,44 @@
  *   apply     write `.truecourse/spec/` from current decisions
  *   status    summary: docs walked, claims, modules, pending vs decided
  *   diff      docs vs current canonical — what would change on apply
+ *
+ * Every command delegates the heavy lifting to
+ * `@truecourse/core/commands/spec-in-process` so the CLI and the
+ * dashboard server execute the same code path. The only thing the
+ * CLI adds is a stdout step renderer; the dashboard server adds a
+ * socket emitter. Scan-state persistence, decision writes, and IL
+ * chaining live in core.
  */
 
 import * as p from "@clack/prompts";
 import path from "node:path";
 import {
-  candidateFingerprint,
-  consolidate,
-  readDecisions,
   specRootPath,
-  writeDecisions,
   type Conflict,
-  type ConsolidateResult,
-  type Decision,
-  type DecisionsFile,
 } from "@truecourse/spec-consolidator";
+import { StepTracker } from "@truecourse/core/progress";
 import {
-  CanonicalSpecMissingError,
-  defaultConcurrency as defaultExtractorConcurrency,
-  generateContracts,
-  spawnRunner as spawnExtractorRunner,
-} from "@truecourse/contract-extractor";
+  applyInProcess,
+  APPLY_STEPS,
+  RESOLVE_STEPS,
+  resolveAllDefaultsInProcess,
+  scanInProcess,
+  SCAN_STEPS,
+} from "@truecourse/core/commands/spec-in-process";
+import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
+import { syncShippedTcSyntax } from "./helpers.js";
 
 export interface RunSpecOptions {
   cwd?: string;
 }
 
 const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd();
+
+function withTracker(stepDefs: readonly { key: string; label: string }[]) {
+  const renderer = createStdoutStepRenderer();
+  const tracker = new StepTracker(renderer.onProgress, stepDefs.map((s) => ({ ...s })));
+  return { renderer, tracker };
+}
 
 // ---------------------------------------------------------------------------
 // scan
@@ -42,39 +53,35 @@ const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd(
 export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec scan");
-
-  let result: ConsolidateResult;
+  const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    result = await runWithSpinner("scanning docs and extracting claims", () =>
-      consolidate(root, { materialize: false }),
-    );
+    const { consolidate } = await scanInProcess(root, { tracker });
+    renderer.dispose();
+    const { extract, merge } = consolidate;
+    p.log.step(`docs        ${extract.docsScanned}`);
+    p.log.step(`blocks      ${extract.blocksAttempted}  (${extract.failures.length} failures)`);
+    p.log.step(`claims      ${extract.claims.length}`);
+    p.log.step(`resolved    ${merge.resolvedClaims.length}`);
+    p.log.step(`decided     ${merge.decidedConflicts.length}`);
+    p.log.step(`open        ${merge.openConflicts.length}`);
+
+    if (merge.openConflicts.length > 0) {
+      p.log.message("");
+      p.log.message("Open conflicts:");
+      for (const c of merge.openConflicts.slice(0, 10)) {
+        p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
+      }
+      if (merge.openConflicts.length > 10) {
+        p.log.message(`  … (+${merge.openConflicts.length - 10} more)`);
+      }
+      p.log.message("");
+      p.log.message("Resolve in the dashboard, or run `truecourse spec resolve --all-defaults`.");
+    }
+    p.outro(merge.openConflicts.length === 0 ? "No open conflicts." : `${merge.openConflicts.length} open.`);
   } catch (e) {
+    renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
-    return;
   }
-
-  const { extract, merge } = result;
-  p.log.step(`docs        ${extract.docsScanned}`);
-  p.log.step(`blocks      ${extract.blocksAttempted}  (${extract.failures.length} failures)`);
-  p.log.step(`claims      ${extract.claims.length}`);
-  p.log.step(`resolved    ${merge.resolvedClaims.length}`);
-  p.log.step(`decided     ${merge.decidedConflicts.length}`);
-  p.log.step(`open        ${merge.openConflicts.length}`);
-
-  if (merge.openConflicts.length > 0) {
-    p.log.message("");
-    p.log.message("Open conflicts:");
-    for (const c of merge.openConflicts.slice(0, 10)) {
-      p.log.message(`  • ${c.subject}  (${c.candidates.length} candidates, default: ${c.candidates[c.defaultPick].claim.provenance.file})`);
-    }
-    if (merge.openConflicts.length > 10) {
-      p.log.message(`  … (+${merge.openConflicts.length - 10} more)`);
-    }
-    p.log.message("");
-    p.log.message("Resolve in the dashboard, or run `truecourse spec resolve --all-defaults`.");
-  }
-
-  p.outro(merge.openConflicts.length === 0 ? "No open conflicts." : `${merge.openConflicts.length} open.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -97,45 +104,21 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
   }
 
   p.intro("Spec resolve — accepting all defaults");
-
-  let scan: ConsolidateResult;
+  const { renderer, tracker } = withTracker(RESOLVE_STEPS);
   try {
-    scan = await runWithSpinner("scanning", () =>
-      consolidate(root, { materialize: false }),
+    const { additions } = await resolveAllDefaultsInProcess(root, { tracker });
+    renderer.dispose();
+    p.log.step(`accepted    ${additions} default${additions === 1 ? "" : "s"}`);
+    p.log.step(`written     ${path.relative(root, decisionsRelPath(root))}`);
+    p.outro(
+      additions === 0
+        ? "Nothing to resolve."
+        : "Done. Run `truecourse spec apply` to write the canonical spec.",
     );
   } catch (e) {
+    renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
-    return;
   }
-
-  if (scan.merge.openConflicts.length === 0) {
-    p.outro("Nothing to resolve.");
-    return;
-  }
-
-  // Merge new decisions into any existing decisions.json so previous
-  // user picks survive (Q13 persistence).
-  const existing = readDecisions(root);
-  const seen = new Set(existing.decisions.map((d) => d.conflictId));
-  const additions: Decision[] = [];
-  for (const c of scan.merge.openConflicts) {
-    if (seen.has(c.id)) continue;
-    additions.push({
-      conflictId: c.id,
-      resolution: { kind: "pick", candidateIndex: c.defaultPick },
-      resolvedAt: new Date().toISOString(),
-      candidateFingerprint: candidateFingerprint(c),
-    });
-  }
-  const merged: DecisionsFile = {
-    version: 1,
-    decisions: [...existing.decisions, ...additions],
-  };
-  writeDecisions(root, merged);
-
-  p.log.step(`accepted    ${additions.length} defaults`);
-  p.log.step(`written     ${path.relative(root, decisionsRelPath(root))}`);
-  p.outro("Done. Run `truecourse spec apply` to write the canonical spec.");
 }
 
 // ---------------------------------------------------------------------------
@@ -145,77 +128,69 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
 export async function runSpecApply(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec apply");
-
-  let result: ConsolidateResult;
+  const { renderer, tracker } = withTracker(APPLY_STEPS);
   try {
-    result = await runWithSpinner("rendering canonical spec", () =>
-      consolidate(root, { materialize: true }),
-    );
-  } catch (e) {
-    p.cancel(`Failed: ${(e as Error).message}`);
-    return;
-  }
+    const { consolidate, il } = await applyInProcess(root, { tracker });
+    renderer.dispose();
 
-  if (result.merge.openConflicts.length > 0) {
-    p.log.warn(
-      `${result.merge.openConflicts.length} open conflicts remain — partial canonical written.`,
-    );
-    p.log.message("Resolve them in the dashboard or via `spec resolve --all-defaults`, then re-apply.");
-  }
-
-  if (result.materialize) {
-    p.log.step(`written     ${result.materialize.written.length} files under ${path.relative(root, specRootPath(root))}`);
-    if (result.materialize.failures.length > 0) {
-      p.log.warn(`failures    ${result.materialize.failures.length}`);
-      for (const f of result.materialize.failures.slice(0, 5)) {
-        p.log.message(`  • ${f.section.module}/${f.section.fileName}: ${f.error}`);
-      }
-    }
-  }
-
-  // Validation gate: chain into Module 2 (contract generation). If
-  // it succeeds, the canonical is structurally valid and IL is up to
-  // date. If it fails, the user sees the parse/validation errors and
-  // knows their canonical broke IL extraction.
-  if (result.merge.openConflicts.length === 0 && result.materialize?.failures.length === 0) {
-    await chainIntoContractsGenerate(root);
-  } else {
-    p.log.message("Skipping contract generation — resolve remaining conflicts first.");
-  }
-
-  p.outro(result.merge.openConflicts.length === 0 ? "Canonical spec up to date." : "Partial — resolve remaining conflicts.");
-}
-
-async function chainIntoContractsGenerate(root: string): Promise<void> {
-  p.log.step("Generating IL contracts from the canonical spec…");
-  const concurrency = defaultExtractorConcurrency();
-  const runner = spawnExtractorRunner({ concurrency });
-  try {
-    const result = await generateContracts({ repoRoot: root, runner });
-    if (result.validationIssues.length > 0) {
-      p.log.error(
-        `Contract validation failed: ${result.validationIssues.length} issue${result.validationIssues.length === 1 ? "" : "s"}.`,
+    if (consolidate.merge.openConflicts.length > 0) {
+      p.log.warn(
+        `${consolidate.merge.openConflicts.length} open conflicts remain — partial canonical written.`,
       );
-      for (const issue of result.validationIssues.slice(0, 5)) {
-        p.log.message(`  • ${issue.artifactKey}: ${issue.message}`);
-      }
-      p.log.message("The canonical spec wrote successfully but IL extraction surfaced issues.");
-      return;
+      p.log.message("Resolve them in the dashboard or via `spec resolve --all-defaults`, then re-apply.");
     }
-    const wrote = result.write.written.length;
-    p.log.success(
-      wrote === 0
-        ? "IL contracts up to date — canonical valid."
-        : `Wrote ${wrote} IL file${wrote === 1 ? "" : "s"} under .truecourse/contracts/.`,
+
+    if (consolidate.materialize) {
+      p.log.step(
+        `written     ${consolidate.materialize.written.length} files under ${path.relative(root, specRootPath(root))}`,
+      );
+      if (consolidate.materialize.failures.length > 0) {
+        p.log.warn(`failures    ${consolidate.materialize.failures.length}`);
+        for (const f of consolidate.materialize.failures.slice(0, 5)) {
+          p.log.message(`  • ${f.section.module}/${f.section.fileName}: ${f.error}`);
+        }
+      }
+    }
+
+    if (il.kind === 'extracted') {
+      const issueCount = il.result.validationIssues.length;
+      if (issueCount > 0) {
+        p.log.error(
+          `Contract validation surfaced ${issueCount} issue${issueCount === 1 ? "" : "s"}.`,
+        );
+        for (const issue of il.result.validationIssues.slice(0, 5)) {
+          p.log.message(`  • ${issue.artifactKey}: ${issue.message}`);
+        }
+      } else {
+        const wrote = il.result.write.written.length;
+        p.log.success(
+          wrote === 0
+            ? "IL contracts up to date — canonical valid."
+            : `Wrote ${wrote} IL file${wrote === 1 ? "" : "s"} under .truecourse/contracts/.`,
+        );
+      }
+    } else if (il.kind === 'failed') {
+      p.log.error(`IL extraction failed: ${il.error.message}`);
+    } else {
+      p.log.message(`IL extraction skipped — ${il.reason}.`);
+    }
+
+    // Install the bundled VS Code grammar for `.tc` files. We do this
+    // only on `spec apply` because that's the command that actually
+    // produces `.tc` files under `.truecourse/contracts/`. No prompt,
+    // no logs — purely additive editor sugar, idempotent across runs.
+    if (il.kind === 'extracted') {
+      syncShippedTcSyntax();
+    }
+
+    p.outro(
+      consolidate.merge.openConflicts.length === 0
+        ? "Canonical spec up to date."
+        : "Partial — resolve remaining conflicts.",
     );
   } catch (e) {
-    if (e instanceof CanonicalSpecMissingError) {
-      // Shouldn't reach here — we just wrote the canonical — but be
-      // explicit about the case.
-      p.log.error(e.message);
-      return;
-    }
-    p.log.error(`Contract generation failed: ${(e as Error).message}`);
+    renderer.dispose();
+    p.cancel(`Failed: ${(e as Error).message}`);
   }
 }
 
@@ -226,33 +201,29 @@ async function chainIntoContractsGenerate(root: string): Promise<void> {
 export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
   p.intro("Spec status");
-
-  let result: ConsolidateResult;
+  const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    result = await runWithSpinner("computing status", () =>
-      consolidate(root, { materialize: false }),
-    );
+    const { consolidate } = await scanInProcess(root, { tracker });
+    renderer.dispose();
+    const { extract, merge } = consolidate;
+    const rows: Array<[string, string]> = [
+      ["Docs scanned", String(extract.docsScanned)],
+      ["Claims extracted", String(extract.claims.length)],
+      ["Resolved (singletons + auto-merged)", String(merge.resolvedClaims.length)],
+      ["Decided (user-resolved)", String(merge.decidedConflicts.length)],
+      ["Open (pending decision)", String(merge.openConflicts.length)],
+    ];
+    for (const [k, v] of rows) p.log.step(`${k.padEnd(38)} ${v}`);
+
+    if (merge.openConflicts.length > 0) {
+      p.log.message("");
+      summarizeConflicts("Open", merge.openConflicts);
+    }
+    p.outro(merge.openConflicts.length === 0 ? "Up to date." : "Pending decisions.");
   } catch (e) {
+    renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
-    return;
   }
-
-  const { extract, merge } = result;
-  const rows: Array<[string, string]> = [
-    ["Docs scanned", String(extract.docsScanned)],
-    ["Claims extracted", String(extract.claims.length)],
-    ["Resolved (singletons + auto-merged)", String(merge.resolvedClaims.length)],
-    ["Decided (user-resolved)", String(merge.decidedConflicts.length)],
-    ["Open (pending decision)", String(merge.openConflicts.length)],
-  ];
-  for (const [k, v] of rows) p.log.step(`${k.padEnd(38)} ${v}`);
-
-  if (merge.openConflicts.length > 0) {
-    p.log.message("");
-    summarizeConflicts("Open", merge.openConflicts);
-  }
-
-  p.outro(merge.openConflicts.length === 0 ? "Up to date." : "Pending decisions.");
 }
 
 // ---------------------------------------------------------------------------
@@ -267,26 +238,23 @@ export async function runSpecDiff(opts: RunSpecOptions = {}): Promise<void> {
   // see what content would be written, then compare to the on-disk
   // canonical. Since the materializer overwrites, the cleanest dry
   // run is to scan + show the conflict delta vs decisions.json.
-  let result: ConsolidateResult;
+  const { renderer, tracker } = withTracker(SCAN_STEPS);
   try {
-    result = await runWithSpinner("computing diff", () =>
-      consolidate(root, { materialize: false }),
-    );
+    const { consolidate } = await scanInProcess(root, { tracker });
+    renderer.dispose();
+    const { merge } = consolidate;
+    if (merge.openConflicts.length === 0) {
+      p.log.success("No drift — every claim is decided or resolved.");
+      p.outro("Up to date.");
+      return;
+    }
+    p.log.warn(`${merge.openConflicts.length} open conflicts.`);
+    summarizeConflicts("Pending", merge.openConflicts);
+    p.outro("Resolve and re-apply to update the canonical spec.");
   } catch (e) {
+    renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
-    return;
   }
-
-  const { merge } = result;
-  if (merge.openConflicts.length === 0) {
-    p.log.success("No drift — every claim is decided or resolved.");
-    p.outro("Up to date.");
-    return;
-  }
-
-  p.log.warn(`${merge.openConflicts.length} open conflicts.`);
-  summarizeConflicts("Pending", merge.openConflicts);
-  p.outro("Resolve and re-apply to update the canonical spec.");
 }
 
 // ---------------------------------------------------------------------------
@@ -305,17 +273,4 @@ function summarizeConflicts(label: string, conflicts: Conflict[]): void {
 
 function decisionsRelPath(root: string): string {
   return path.join(root, ".truecourse", "spec", "decisions.json");
-}
-
-async function runWithSpinner<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  const s = p.spinner();
-  s.start(label);
-  try {
-    const out = await fn();
-    s.stop(label);
-    return out;
-  } catch (e) {
-    s.stop(`${label} (failed)`);
-    throw e;
-  }
 }

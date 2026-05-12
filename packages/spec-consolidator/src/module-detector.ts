@@ -56,12 +56,39 @@ export function detectModules(claims: Claim[]): ModuleDetectionResult {
   const byModule = new Map<string, Claim[]>();
   const unattributed: Claim[] = [];
 
+  // ---- Pass 1: attribute endpoints by their path. -------------------
+  // Endpoints carry the strongest signal (a real path) so they seed
+  // the module set first. Non-endpoint claims (data, effects, auth,
+  // errors, overview) get attributed in pass 2 by matching their
+  // subject against established modules — that way an "Order entity"
+  // data claim follows the module its endpoints already live in.
+  const deferred: Claim[] = [];
   for (const claim of claims) {
-    const moduleName = inferModuleFor(claim);
-    if (!moduleName) {
-      unattributed.push(claim);
-      continue;
+    if (claim.topic === 'endpoints') {
+      const moduleName = moduleFromEndpointClaim(claim);
+      if (!moduleName) {
+        unattributed.push(claim);
+        continue;
+      }
+      const list = byModule.get(moduleName) ?? [];
+      list.push(claim);
+      byModule.set(moduleName, list);
+    } else {
+      deferred.push(claim);
     }
+  }
+
+  // ---- Pass 2: attribute non-endpoint claims. -----------------------
+  // For each, try the original signals (subject is path-shaped, or
+  // overview-style slug) first, then attempt content-based attribution
+  // against existing modules. Falls back to _shared.
+  const existingModules = [...byModule.keys()].filter((n) => n !== SHARED_MODULE);
+  const moduleIndex = buildModuleIndex(byModule, existingModules);
+  for (const claim of deferred) {
+    const moduleName =
+      inferModuleForNonEndpoint(claim) ??
+      attributeByContentMatch(claim, existingModules, moduleIndex) ??
+      SHARED_MODULE;
     const list = byModule.get(moduleName) ?? [];
     list.push(claim);
     byModule.set(moduleName, list);
@@ -92,15 +119,15 @@ export function detectModules(claims: Claim[]): ModuleDetectionResult {
 // Per-claim attribution
 // ---------------------------------------------------------------------------
 
-function inferModuleFor(claim: Claim): string | null {
-  // Endpoints: the most reliable signal — derive from path.
-  if (claim.topic === 'endpoints') {
-    return moduleFromEndpointClaim(claim);
-  }
-
-  // Cross-cutting topics: try the same path-derivation in case the
-  // subject is path-shaped (e.g. "auth on /api/v1/admin/*"); else
-  // fall back to _shared.
+/**
+ * Try the structural signals on a non-endpoint claim's subject —
+ * path-shaped subjects (`"auth on /api/v1/admin/*"`) attribute
+ * directly; overview claims with single-token subjects treat the
+ * subject as the module name. Returns null when no strong signal
+ * is present; the caller then tries content-based matching against
+ * existing modules.
+ */
+function inferModuleForNonEndpoint(claim: Claim): string | null {
   const fromPath = extractPathFromSubject(claim.subject);
   if (fromPath) {
     const m = moduleFromPath(fromPath);
@@ -116,8 +143,119 @@ function inferModuleFor(claim: Claim): string | null {
     }
   }
 
-  // Default: cross-cutting goes to _shared.
-  return SHARED_MODULE;
+  return null;
+}
+
+/**
+ * Index every existing module's endpoint claims by the bare nouns
+ * mentioned in their path + content + subject. Used to attribute a
+ * data/effects claim to the module that's already talking about it.
+ *
+ * Returns a map: module name → set of lowercased tokens that appear
+ * in that module's claims. The matcher then scores each module by
+ * how many tokens overlap with the candidate claim's subject.
+ */
+function buildModuleIndex(
+  byModule: Map<string, Claim[]>,
+  moduleNames: string[],
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const name of moduleNames) {
+    const tokens = new Set<string>();
+    // The module name itself is always a high-signal token.
+    tokens.add(name);
+    // Singularize a trailing 's' (orders → order) so "Order entity"
+    // matches the orders module. Pure structural, no domain knowledge.
+    if (name.endsWith('s') && name.length > 1) {
+      tokens.add(name.slice(0, -1));
+    }
+    for (const claim of byModule.get(name) ?? []) {
+      // Path segments expose related nouns (e.g., /api/orders/:id/pay).
+      const path =
+        extractPath(claim.content) ?? extractPathFromSubject(claim.subject);
+      if (path) {
+        for (const seg of path.split('/')) {
+          const lower = seg.toLowerCase();
+          if (!lower || STRIPPED_PREFIX_SEGMENTS.has(lower)) continue;
+          if (VERSION_SEGMENT.test(lower)) continue;
+          if (lower.startsWith(':') || lower.startsWith('{')) continue;
+          tokens.add(lower);
+          if (lower.endsWith('s') && lower.length > 1) {
+            tokens.add(lower.slice(0, -1));
+          }
+        }
+      }
+    }
+    out.set(name, tokens);
+  }
+  return out;
+}
+
+/**
+ * Content-based attribution: score each existing module by how many
+ * of its indexed tokens appear in the claim's subject (lowercased,
+ * split on non-alphanumeric). Top-scoring module wins, ties break by
+ * module name. Returns null when no module overlaps at all.
+ *
+ * Examples (no domain knowledge baked in):
+ *   subject "Order entity"          → "order" matches orders module → "orders"
+ *   subject "Order / state machine" → "order" matches orders module → "orders"
+ *   subject "order.placed"          → "order" matches orders module → "orders"
+ *   subject "Customer entity"       → "customer" matches customers module → "customers"
+ *   subject "global error envelope" → no token overlap → null (→ _shared)
+ *   subject "auth scheme"           → no token overlap → null (→ _shared)
+ */
+function attributeByContentMatch(
+  claim: Claim,
+  moduleNames: string[],
+  index: Map<string, Set<string>>,
+): string | null {
+  if (moduleNames.length === 0) return null;
+  const subjectTokens = tokenize(claim.subject);
+  if (subjectTokens.size === 0) return null;
+  let best: { name: string; score: number } | null = null;
+  for (const name of moduleNames) {
+    const tokens = index.get(name);
+    if (!tokens) continue;
+    let score = 0;
+    for (const t of subjectTokens) {
+      if (tokens.has(t)) score++;
+    }
+    if (score === 0) continue;
+    if (!best || score > best.score || (score === best.score && name < best.name)) {
+      best = { name, score };
+    }
+  }
+  return best?.name ?? null;
+}
+
+/**
+ * Tokenize a subject string into normalized lowercase tokens for
+ * module-attribution matching. Splits on:
+ *   - non-alphanumeric characters (`Order entity` → `order`, `entity`)
+ *   - camelCase / PascalCase boundaries (`OrderStatus` → `order`,
+ *     `status`)
+ *   - letter↔digit boundaries (`v1Auth` → `v1`, `auth`)
+ *
+ * Also emits a singularized form for each plural-looking token
+ * (`orders` → also adds `order`) so subjects with the singular noun
+ * match a module named with the plural and vice versa.
+ */
+function tokenize(s: string): Set<string> {
+  const out = new Set<string>();
+  // Split on non-alphanumeric AND on camelCase/letter-digit boundaries.
+  const raw = s
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([a-zA-Z])/g, '$1 $2')
+    .toLowerCase();
+  for (const part of raw.split(/[^a-z0-9]+/)) {
+    if (!part || part.length < 2) continue;
+    out.add(part);
+    if (part.endsWith('s') && part.length > 2) out.add(part.slice(0, -1));
+  }
+  return out;
 }
 
 function moduleFromEndpointClaim(claim: Claim): string | null {
@@ -218,14 +356,67 @@ function buildManifest(name: string, claims: Claim[]): ModuleManifest {
 
   const status = inferModuleStatus(claims);
   const scope = inferScope(name, claims);
+  const description = inferDescription(name, claims);
   const manifest: ModuleManifest = {
     name,
     status,
     sourceDocs,
     scope,
   };
+  if (description) manifest.description = description;
   if (outOfScope.length > 0) manifest.outOfScope = outOfScope;
   return manifest;
+}
+
+/**
+ * Deterministic one-liner for the manifest's `description`. Lists
+ * the module's in-scope HTTP operations so a reader of `module.yaml`
+ * can see what it covers without opening the markdown. Returns undefined
+ * for `_shared` (no canonical surface to enumerate) and for modules
+ * with zero endpoint claims (the field is optional in the schema, so
+ * we just omit it).
+ */
+function inferDescription(name: string, claims: Claim[]): string | undefined {
+  if (name === SHARED_MODULE) return undefined;
+  const operations: string[] = [];
+  const seen = new Set<string>();
+  for (const c of claims) {
+    if (c.topic !== 'endpoints') continue;
+    if (c.metadata.status === 'out-of-scope') continue;
+    const path =
+      extractPath(c.content) ?? extractPathFromSubject(c.subject);
+    if (!path) continue;
+    const method = extractMethod(c) ?? '';
+    const op = method ? `${method} ${path}` : path;
+    if (seen.has(op)) continue;
+    seen.add(op);
+    operations.push(op);
+  }
+  if (operations.length === 0) return undefined;
+  const MAX_CHARS = 120;
+  const lead = `${name} module — `;
+  const joined = operations.join(', ');
+  if (lead.length + joined.length <= MAX_CHARS) return `${lead}${joined}.`;
+  // Truncate by op count instead of by character so the suffix lands
+  // cleanly between operations rather than mid-path.
+  for (let take = operations.length - 1; take >= 1; take--) {
+    const trimmed = operations.slice(0, take).join(', ');
+    const more = operations.length - take;
+    const suffix = `, and ${more} more.`;
+    if (lead.length + trimmed.length + suffix.length <= MAX_CHARS) {
+      return `${lead}${trimmed}${suffix}`;
+    }
+  }
+  return `${lead}${operations.length} operations.`;
+}
+
+function extractMethod(claim: Claim): string | null {
+  if (claim.content && typeof claim.content === 'object') {
+    const m = (claim.content as Record<string, unknown>).method;
+    if (typeof m === 'string') return m.toUpperCase();
+  }
+  const match = /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+/i.exec(claim.subject);
+  return match ? match[1].toUpperCase() : null;
 }
 
 /**
@@ -254,14 +445,17 @@ function extractOutOfScopeReason(claim: Claim): string | undefined {
 }
 
 /**
- * Module-level status (Q6): if every claim in the module shares a
- * single explicit status, lift it. Mixed or unset → 'shipped'
- * (the schema default).
+ * Module-level status (Q6): bubble a single status to the module
+ * only when EVERY claim agrees. Previously this lifted any singleton
+ * over the explicit-status subset, which marked the whole module
+ * out-of-scope when even ONE claim was explicitly OoS and the rest
+ * had no explicit status (treated implicitly as 'shipped'). Treating
+ * undefined as the schema default 'shipped' fixes that.
  */
 function inferModuleStatus(claims: Claim[]): ModuleManifest['status'] {
   const statuses = new Set<string>();
   for (const c of claims) {
-    if (c.metadata.status) statuses.add(c.metadata.status);
+    statuses.add(c.metadata.status ?? 'shipped');
   }
   if (statuses.size === 1) {
     return [...statuses][0] as ModuleManifest['status'];

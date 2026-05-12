@@ -8,6 +8,10 @@
  *   - 2+ claims with any difference           → emit as a `Conflict`
  *                                                 (Q2: any difference = user confirms).
  *
+ * Empty-content claims are dropped from a group when other claims in
+ * the same group carry actual data — they're typically the LLM
+ * finding a relevant section without extracting anything quotable.
+ *
  * Decisions (the user's previous resolutions) are honored:
  *
  *   - If a conflict's id matches a decision in `decisions.json`, it
@@ -30,6 +34,7 @@ import type {
   ConflictCandidate,
   Decision,
   DecisionsFile,
+  DocKind,
 } from './types.js';
 
 export interface MergeResult {
@@ -90,7 +95,7 @@ export function mergeClaims(
   // Sort group keys for deterministic output ordering.
   const sortedKeys = [...groups.keys()].sort();
   for (const key of sortedKeys) {
-    const list = sortClaims(groups.get(key)!);
+    const list = sortClaims(dropEmptyContentClaims(groups.get(key)!));
     if (list.length === 1) {
       resolvedClaims.push(list[0]);
       continue;
@@ -98,6 +103,50 @@ export function mergeClaims(
 
     if (allIdentical(list)) {
       resolvedClaims.push(mergeIdentical(list));
+      continue;
+    }
+
+    // Strict-subset merge across the group. If every pair's contents
+    // relate by a clean subset/superset structure with all overlapping
+    // leaves equal, fold them into a single richer claim. Catches the
+    // "B is a superset of A" pattern (e.g. an ADR's bare envelope vs a
+    // PRD's same envelope + extra optional fields + a codes catalog)
+    // without over-merging genuinely alternative claims (200 vs 201,
+    // where neither side's response-code keys are a subset of the
+    // other's).
+    const superset = tryFoldSupersets(list);
+    if (superset) {
+      resolvedClaims.push(superset);
+      continue;
+    }
+
+    // Fold constraints into definitions. A "constraint" claim is one
+    // whose source section primarily talks about something else and
+    // just narrows this subject (e.g., an "Order ownership" section
+    // adding 403 responses to four endpoints). The merger collapses
+    // it into the definition rather than surfacing it as a competing
+    // alternative.
+    const folded = foldConstraintsIntoDefinitions(list);
+    if (folded) {
+      // Replace the original list with the folded one. If the folded
+      // list is now a singleton or fully-identical group, we can
+      // resolve directly; otherwise the remaining definitions still
+      // disagree and need user input.
+      if (folded.length === 1) {
+        resolvedClaims.push(folded[0]);
+        continue;
+      }
+      if (allIdentical(folded)) {
+        resolvedClaims.push(mergeIdentical(folded));
+        continue;
+      }
+      const conflict = buildConflict(folded);
+      const decision = decisionsById.get(conflict.id);
+      if (decision) {
+        decidedConflicts.push(buildDecided(conflict, decision));
+      } else {
+        openConflicts.push(conflict);
+      }
       continue;
     }
 
@@ -111,6 +160,30 @@ export function mergeClaims(
   }
 
   return { resolvedClaims, decidedConflicts, openConflicts };
+}
+
+/**
+ * Drop claims with empty `{}` content when other claims in the same
+ * group carry actual structured data. An empty-content claim adds no
+ * information — it's typically the LLM finding a relevant section but
+ * failing to extract structured fields (e.g., an ADR's "## Decision"
+ * heading without quotable specifics). Surfacing it as a conflict
+ * candidate just adds noise.
+ *
+ * If every claim in the group is empty, we keep them all so the
+ * caller still gets a singleton or conflict to surface — better to
+ * see the issue than silently drop everything.
+ */
+function dropEmptyContentClaims(list: Claim[]): Claim[] {
+  const nonEmpty = list.filter((c) => !isEmptyContent(c.content));
+  return nonEmpty.length > 0 ? nonEmpty : list;
+}
+
+function isEmptyContent(content: unknown): boolean {
+  if (content === null || content === undefined) return true;
+  if (typeof content !== 'object') return false;
+  if (Array.isArray(content)) return content.length === 0;
+  return Object.keys(content as Record<string, unknown>).length === 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +264,206 @@ function mergeIdentical(list: Claim[]): Claim {
 }
 
 // ---------------------------------------------------------------------------
+// Constraint folding
+// ---------------------------------------------------------------------------
+
+/**
+ * Fold every `kind: "constraint"` claim into the matching `kind:
+ * "definition"` claim via deep-merge. Returns the new list (with
+ * constraints removed and definitions enriched), or `null` if any
+ * constraint can't fold cleanly into any definition — in which case
+ * we fall back to the original conflict-list behaviour.
+ *
+ *   - 0 definitions, only constraints → return null. The caller
+ *     surfaces the constraints as a conflict so the user picks one;
+ *     we won't silently merge two narrowing rules into something
+ *     neither doc asserts.
+ *   - 1+ definitions, 1+ constraints  → fold each constraint into
+ *     every definition that accepts it (deep-merge succeeds). If a
+ *     constraint can't fold into any definition, return null.
+ *   - 0 constraints                   → return null (nothing to do;
+ *     caller's existing path handles pure-definition conflicts).
+ */
+// ---------------------------------------------------------------------------
+// Strict-subset (superset) folding — for definition-vs-definition cases
+// where one claim's content shape is a clean subset of another's, with
+// all overlapping leaves equal.
+// ---------------------------------------------------------------------------
+
+/**
+ * Try to fold the entire group via strict subset/superset reduction.
+ * Returns a single merged Claim on success, or `null` if any pair
+ * fails (disjoint keys at some level, or leaf conflict).
+ *
+ * Stitched provenance retains every contributing doc so the user can
+ * still see which sources agreed on the merged shape.
+ *
+ * Only applies when every claim has the same `status` (otherwise the
+ * "same statement" assumption breaks).
+ */
+function tryFoldSupersets(list: Claim[]): Claim | null {
+  if (list.length === 0) return null;
+  const head = list[0];
+  const status = head.metadata.status ?? null;
+  let acc: unknown = head.content;
+  for (let i = 1; i < list.length; i++) {
+    const next = list[i];
+    if ((next.metadata.status ?? null) !== status) return null;
+    const result = trySubsetMerge(acc, next.content);
+    if (!result.ok) return null;
+    acc = result.value;
+  }
+  const additionalSources = list.slice(1).map((c) => ({
+    file: c.provenance.file,
+    line: c.provenance.line,
+    quote: c.provenance.quote,
+  }));
+  return {
+    ...head,
+    content: acc as Claim['content'],
+    provenance: {
+      file: head.provenance.file,
+      line: head.provenance.line,
+      quote: list
+        .map((c) => `[${c.provenance.file}:${c.provenance.line}] ${c.provenance.quote}`)
+        .join('\n---\n'),
+      additionalSources,
+    },
+  };
+}
+
+type SubsetMergeResult = { ok: true; value: unknown } | { ok: false };
+
+/**
+ * Subset-relation deep-merge. At every nesting level, one operand's
+ * keys must be a subset of (or equal to) the other operand's keys
+ * — true disjoint keys at any level mean the claims aren't in a
+ * superset relationship and we refuse to merge. Overlapping leaves
+ * must be deep-equal.
+ *
+ * This is strictly more conservative than `tryDeepMerge` (used for
+ * constraint folding). Constraint folding accepts disjoint keys as
+ * additive because the LLM signaled the claim is a narrowing rule;
+ * here we're working with two `definition` claims that could be
+ * competing alternatives, so we refuse the ambiguous case.
+ */
+function trySubsetMerge(a: unknown, b: unknown): SubsetMergeResult {
+  if (a === undefined) return { ok: true, value: b };
+  if (b === undefined) return { ok: true, value: a };
+
+  const aIsObj = isPlainObject(a);
+  const bIsObj = isPlainObject(b);
+  if (aIsObj && bIsObj) {
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+    const aSetB = aKeys.every((k) => k in bObj);
+    const bSetA = bKeys.every((k) => k in aObj);
+    if (!aSetB && !bSetA) {
+      // Neither side's keys is a subset of the other's. True disjoint
+      // keys at this level — ambiguous, refuse to fold.
+      return { ok: false };
+    }
+    const out: Record<string, unknown> = {};
+    const allKeys = new Set([...aKeys, ...bKeys]);
+    for (const k of allKeys) {
+      const sub = trySubsetMerge(aObj[k], bObj[k]);
+      if (!sub.ok) return { ok: false };
+      out[k] = sub.value;
+    }
+    return { ok: true, value: out };
+  }
+
+  // Leaves (primitives, arrays): must be deep-equal.
+  return stableStringify(a) === stableStringify(b)
+    ? { ok: true, value: a }
+    : { ok: false };
+}
+
+// ---------------------------------------------------------------------------
+// Constraint folding (definition + constraint(s))
+// ---------------------------------------------------------------------------
+
+function foldConstraintsIntoDefinitions(list: Claim[]): Claim[] | null {
+  // Treat missing kind as "definition" — the prompt explicitly tells
+  // the LLM to prefer "definition" when in doubt, and synthetic
+  // claims (version-chain candidates, custom resolutions) omit kind
+  // entirely.
+  const definitions = list.filter((c) => (c.kind ?? 'definition') === 'definition');
+  const constraints = list.filter((c) => c.kind === 'constraint');
+  if (constraints.length === 0) return null;
+  if (definitions.length === 0) return null;
+
+  const folded: Claim[] = [];
+  for (const def of definitions) {
+    let acc: unknown = def.content;
+    const stitchedSources = [
+      { file: def.provenance.file, line: def.provenance.line, quote: def.provenance.quote },
+    ];
+    for (const con of constraints) {
+      const result = tryDeepMerge(acc, con.content);
+      if (!result.ok) return null;
+      acc = result.value;
+      stitchedSources.push({
+        file: con.provenance.file,
+        line: con.provenance.line,
+        quote: con.provenance.quote,
+      });
+    }
+    folded.push({
+      ...def,
+      content: acc as Claim['content'],
+      provenance: {
+        ...def.provenance,
+        additionalSources: stitchedSources.slice(1),
+      },
+    });
+  }
+  return folded;
+}
+
+type DeepMergeResult = { ok: true; value: unknown } | { ok: false };
+
+/**
+ * Deep-merge two values. Plain objects union their keys; for shared
+ * keys we recurse. Arrays and primitives must be deep-equal.
+ *
+ * The merger only calls this for (definition, constraint) pairs — a
+ * constraint is supposed to be additive narrowing, so a clean fold
+ * means the constraint really is just adding new keys (or repeating
+ * the same values). Conflicting leaves mean the constraint actually
+ * disagrees with the definition, which we surface as a conflict.
+ */
+function tryDeepMerge(a: unknown, b: unknown): DeepMergeResult {
+  if (a === undefined) return { ok: true, value: b };
+  if (b === undefined) return { ok: true, value: a };
+
+  const aIsObj = isPlainObject(a);
+  const bIsObj = isPlainObject(b);
+  if (aIsObj && bIsObj) {
+    const out: Record<string, unknown> = {};
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const keys = new Set([...Object.keys(aObj), ...Object.keys(bObj)]);
+    for (const k of keys) {
+      const sub = tryDeepMerge(aObj[k], bObj[k]);
+      if (!sub.ok) return { ok: false };
+      out[k] = sub.value;
+    }
+    return { ok: true, value: out };
+  }
+
+  return stableStringify(a) === stableStringify(b)
+    ? { ok: true, value: a }
+    : { ok: false };
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+// ---------------------------------------------------------------------------
 // Conflict construction
 // ---------------------------------------------------------------------------
 
@@ -201,9 +474,45 @@ function buildConflict(list: Claim[]): Conflict {
     claim,
   }));
 
-  // Q10 default-pick rule: newest doc wins. Since `list` is sorted
-  // by lastTouched ASC, the last index is the newest.
-  const defaultPick = candidates.length - 1;
+  // Default-pick rule, in priority order:
+  //
+  //   1. docKindAuthority — ADRs outrank PRDs outrank READMEs.
+  //   2. lastTouched      — newer wins within the same kind.
+  //   3. contentRichness  — when both tie (e.g. multiple sections of
+  //                          the same doc describing different facets
+  //                          of one subject), prefer the structurally
+  //                          richest claim. This favors a full schema
+  //                          over a partial lifecycle blurb or a
+  //                          pricing-fields snippet, all of which can
+  //                          land under the same `(topic, subject)`
+  //                          group when the LLM picks the same subject
+  //                          string for different sections.
+  //
+  // README.md often has the latest mtime by accident (a doc-update
+  // commit) while being the *least* authoritative — that's why
+  // authority outranks mtime, not the other way around.
+  let defaultPick = 0;
+  let bestRank: [number, string, number] = [
+    docKindAuthority(list[0].metadata.docKind),
+    list[0].metadata.lastTouched,
+    contentRichness(list[0].content),
+  ];
+  for (let i = 1; i < list.length; i++) {
+    const rank: [number, string, number] = [
+      docKindAuthority(list[i].metadata.docKind),
+      list[i].metadata.lastTouched,
+      contentRichness(list[i].content),
+    ];
+    if (
+      rank[0] > bestRank[0] ||
+      (rank[0] === bestRank[0] &&
+        (rank[1] > bestRank[1] ||
+          (rank[1] === bestRank[1] && rank[2] > bestRank[2])))
+    ) {
+      defaultPick = i;
+      bestRank = rank;
+    }
+  }
 
   const id = conflictId(list);
 
@@ -214,6 +523,53 @@ function buildConflict(list: Claim[]): Conflict {
     candidates,
     defaultPick,
   };
+}
+
+/**
+ * "Richness" score for a claim's content. Higher = more structurally
+ * complete. We count recursive leaves (including array elements) —
+ * a claim with `fields: {id, status, customerId, totalCents, ...}` is
+ * richer than one with `fields: {status: "enum"}` even though both
+ * occupy the same `(topic, subject)` slot. Used as the third-level
+ * tiebreaker when authority and lastTouched both tie (typical for
+ * multi-facet entity descriptions from the same doc).
+ */
+function contentRichness(content: unknown): number {
+  if (content === null || content === undefined) return 0;
+  if (typeof content !== 'object') return 1;
+  if (Array.isArray(content)) {
+    return content.reduce<number>((acc, v) => acc + contentRichness(v), 0);
+  }
+  let total = 0;
+  for (const v of Object.values(content as Record<string, unknown>)) {
+    total += contentRichness(v);
+  }
+  return total;
+}
+
+/**
+ * Authority ranking for default-pick. Higher = more authoritative.
+ * ADRs and RFCs are formal decision records; PRDs and specs are
+ * primary requirements; runbooks and design notes describe how things
+ * work; READMEs are typically project-overview prose that goes stale.
+ */
+function docKindAuthority(kind: DocKind): number {
+  switch (kind) {
+    case 'adr':
+    case 'rfc':
+      return 4;
+    case 'prd':
+    case 'spec':
+      return 3;
+    case 'design-note':
+    case 'runbook':
+      return 2;
+    case 'readme':
+      return 1;
+    case 'unknown':
+    default:
+      return 0;
+  }
 }
 
 /**

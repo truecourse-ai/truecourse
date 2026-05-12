@@ -2,12 +2,101 @@ import { useEffect, useRef, useMemo, useState } from 'react';
 import { EditorView, lineNumbers, gutter, GutterMarker, Decoration, type DecorationSet, WidgetType } from '@codemirror/view';
 import { EditorState, StateField, RangeSet, Compartment } from '@codemirror/state';
 import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { css } from '@codemirror/lang-css';
+import { html } from '@codemirror/lang-html';
+import { json } from '@codemirror/lang-json';
+import { markdown } from '@codemirror/lang-markdown';
+import { rust } from '@codemirror/lang-rust';
+import { go } from '@codemirror/lang-go';
+import { java } from '@codemirror/lang-java';
+import { yaml } from '@codemirror/lang-yaml';
+import { sql } from '@codemirror/lang-sql';
+import { cpp } from '@codemirror/lang-cpp';
+import { php } from '@codemirror/lang-php';
+import { xml } from '@codemirror/lang-xml';
+import { tc } from '@/lib/codemirror-tc';
+import type { Extension } from '@codemirror/state';
 import { vscodeDark, vscodeLight } from '@uiw/codemirror-theme-vscode';
 import type { CodeViolationResponse } from '@/lib/api';
+
+/**
+ * Map a file path / language hint to a CodeMirror language extension.
+ * Returns `null` for unknown extensions so the editor falls back to
+ * plain text instead of silently mis-highlighting as JavaScript
+ * (the bug in the pre-fix code).
+ */
+function pickLanguageExtension(language: string, filePath?: string): Extension | null {
+  // Normalize: prefer the explicit `language` prop when given,
+  // otherwise derive from the file's extension.
+  const lower = language.toLowerCase();
+  const ext = filePath
+    ? filePath.toLowerCase().slice(filePath.lastIndexOf('.') + 1)
+    : '';
+  const key = lower === 'unknown' || lower === '' ? ext : lower;
+  switch (key) {
+    case 'ts':
+    case 'tsx':
+    case 'typescript':
+      return javascript({ typescript: true, jsx: true });
+    case 'js':
+    case 'jsx':
+    case 'mjs':
+    case 'cjs':
+    case 'javascript':
+      return javascript({ jsx: true });
+    case 'py':
+    case 'pyi':
+    case 'python':
+      return python();
+    case 'css':
+    case 'scss':
+      return css();
+    case 'html':
+    case 'htm':
+      return html();
+    case 'json':
+      return json();
+    case 'md':
+    case 'markdown':
+      return markdown();
+    case 'rs':
+    case 'rust':
+      return rust();
+    case 'go':
+      return go();
+    case 'java':
+      return java();
+    case 'yaml':
+    case 'yml':
+      return yaml();
+    case 'sql':
+      return sql();
+    case 'c':
+    case 'h':
+    case 'cpp':
+    case 'cc':
+    case 'cxx':
+    case 'hpp':
+      return cpp();
+    case 'php':
+      return php();
+    case 'xml':
+      return xml();
+    case 'tc':
+      return tc();
+    default:
+      // Plain text fallback — no highlighting, but at least the
+      // viewer won't pretend C# / Ruby / .toml files are JavaScript.
+      return null;
+  }
+}
 
 type CodeViewerProps = {
   content: string;
   language: string;
+  /** Used to detect language from extension when `language` is empty/unknown. */
+  filePath?: string;
   violations: CodeViolationResponse[];
   scrollToLine?: number;
 };
@@ -240,7 +329,7 @@ function getThemeExtension(dark: boolean) {
   return dark ? vscodeDark : vscodeLight;
 }
 
-export function CodeViewer({ content, language, violations, scrollToLine }: CodeViewerProps) {
+export function CodeViewer({ content, language, filePath, violations, scrollToLine }: CodeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const highlightCompartment = useRef(new Compartment());
@@ -373,16 +462,14 @@ export function CodeViewer({ content, language, violations, scrollToLine }: Code
       provide: (f) => EditorView.decorations.from(f),
     });
 
-    const langExtension = language === 'typescript' || language === 'javascript'
-      ? javascript({ typescript: language === 'typescript', jsx: true })
-      : javascript();
+    const langExtension = pickLanguageExtension(language, filePath);
 
     const initialDark = isDarkMode();
 
     const state = EditorState.create({
       doc: content,
       extensions: [
-        langExtension,
+        ...(langExtension ? [langExtension] : []),
         highlightCompartment.current.of(getThemeExtension(initialDark)),
         bgTheme,
         lineNumbers(),
@@ -419,7 +506,7 @@ export function CodeViewer({ content, language, violations, scrollToLine }: Code
       view.destroy();
       viewRef.current = null;
     };
-  }, [content, language, violationsByEndLine, violationLineSet, violations, scrollToLine]);
+  }, [content, language, filePath, violationsByEndLine, violationLineSet, violations, scrollToLine]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

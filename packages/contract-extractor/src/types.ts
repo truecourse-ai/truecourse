@@ -92,6 +92,12 @@ export const SliceCacheEntrySchema = z.object({
   result: ExtractionResultSchema,
   /** ISO-8601 timestamp the entry was written. */
   cachedAt: z.string(),
+  /**
+   * Fingerprint of the extraction system prompt when this entry was
+   * cached. Optional for backward compat: entries missing it are
+   * treated as stale and re-extracted under the current prompt.
+   */
+  promptFingerprint: z.string().optional(),
 });
 export type SliceCacheEntry = z.infer<typeof SliceCacheEntrySchema>;
 

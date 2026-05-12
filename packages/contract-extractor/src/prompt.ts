@@ -76,7 +76,12 @@ Return ONE JSON object matching this shape — no prose, no code fences:
 - ErrorEnvelope:        standard error response shape
 - PaginationContract:   how list endpoints paginate
 - IdempotencyContract:  routes that must read an idempotency key
-- EffectGroup / Effect: events that must (or must-not) fire on specific code paths
+- EffectGroup:          events that must (or must-not) fire on specific code paths.
+                        ALWAYS the top-level kind — even when the slice describes a
+                        single event. \`Effect\` is only a reference prefix (e.g.
+                        \`effect emits Effect:order.placed\`), never a top-level
+                        declaration. A slice with one event becomes a one-effect
+                        effect-group; never emit a bare \`Effect:name { ... }\` block.
 - Formula:              business-logic calculation
 - UnenforceableObligation: spec sentence with no structural encoding
 
@@ -231,6 +236,22 @@ effect-group order.lifecycle.events {
   }
   forbids {
     forbid emission when-response-status [4xx, 5xx]
+  }
+}
+
+// Single-event slice — when the spec section you're given only
+// describes ONE event, still wrap it in an effect-group. The group
+// name should be derived from the event itself (e.g.,
+// "order.placed.event" or just "order.placed"). Never emit
+// "Effect:name { ... }" at the top level.
+effect-group order.placed.event {
+  origin SPEC.md "order.placed" 160..170
+  channel event-bus
+  effect order.placed {
+    emit-when {
+      operation Operation:"POST /api/orders"
+      on-status 201
+    }
   }
 }
 

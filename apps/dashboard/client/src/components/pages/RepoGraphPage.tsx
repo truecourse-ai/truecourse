@@ -1,9 +1,21 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
-import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
+import {
+  LeftSidebar,
+  defaultTabForSection,
+  type DashboardSection,
+  type LeftTab,
+} from '@/components/layout/LeftSidebar';
+import { SpecToolbar } from '@/components/spec/SpecToolbar';
+import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
+import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
+import { ContractsPanel } from '@/components/drift/ContractsPanel';
+import { ContractsFile } from '@/components/drift/ContractsFile';
+import { VerifyPanel } from '@/components/drift/VerifyPanel';
+import { DecisionsPanel } from '@/components/drift/DecisionsPanel';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { HomePanel } from '@/components/pages/HomePanel';
 import { FileTree } from '@/components/files/FileTree';
@@ -14,7 +26,12 @@ import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
 import { SpecPanel } from '@/components/spec/SpecPanel';
+import { SpecProvider } from '@/components/spec/SpecContext';
+import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
+import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
 import { useGraph } from '@/hooks/useGraph';
+import { useContractsTree } from '@/hooks/useContractsTree';
+import { useCanonicalSpecTree } from '@/hooks/useCanonicalSpecTree';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
@@ -55,6 +72,9 @@ const VALID_LEFT_TABS = new Set<LeftTab>([
   'databases',
   'analyses',
   'spec',
+  'contracts',
+  'verify',
+  'decisions',
 ]);
 
 const MAIN_CONTENT_TABS = new Set<LeftTab>([
@@ -62,6 +82,8 @@ const MAIN_CONTENT_TABS = new Set<LeftTab>([
   'graphs',
   'analyses',
 ]);
+
+const DRIFT_TABS = new Set<LeftTab>(['spec', 'contracts', 'verify', 'decisions']);
 
 export default function RepoGraphPage() {
   const { repoId = '' } = useParams();
@@ -126,6 +148,14 @@ export default function RepoGraphPage() {
   }, [navigate, scopedServiceId, scopedModuleId]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Top-level dashboard section: 'analysis' (code architecture world)
+  // or 'drift' (spec/contracts/verify world). Persisted via
+  // `?section=drift`. Default 'analysis'.
+  const sectionFromUrl = searchParams?.get('section');
+  const [dashboardSection, setDashboardSectionState] = useState<DashboardSection>(
+    sectionFromUrl === 'drift' ? 'drift' : 'analysis',
+  );
+
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
     const tabParam = searchParams?.get('tab');
     // Legacy URL compat: ?tab=violations now maps to the Graphs tab.
@@ -137,8 +167,32 @@ export default function RepoGraphPage() {
     }
     if (searchParams?.get('flow')) return 'flows';
     if (searchParams?.get('file')) return 'files';
-    return 'home';
+    return defaultTabForSection(
+      searchParams?.get('section') === 'drift' ? 'drift' : 'analysis',
+    );
   });
+
+  const setDashboardSection = useCallback((next: DashboardSection) => {
+    setDashboardSectionState(next);
+    // Reset leftTab to the section's default tab. The URL captures
+    // both pieces, so reloads stay coherent.
+    const nextTab = defaultTabForSection(next);
+    setLeftTabState(nextTab);
+    const url = new URL(window.location.href);
+    if (next === 'drift') {
+      url.searchParams.set('section', 'drift');
+    } else {
+      url.searchParams.delete('section');
+    }
+    // Drop tab-scoped params that don't apply in the new section.
+    for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
+      url.searchParams.delete(key);
+    }
+    if (nextTab !== 'home') {
+      url.searchParams.set('tab', nextTab);
+    }
+    navigate(url.pathname + url.search);
+  }, [navigate]);
   const setLeftTab = useCallback((tab: LeftTab | null) => {
     setLeftTabState(tab);
     const url = new URL(window.location.href);
@@ -246,6 +300,81 @@ export default function RepoGraphPage() {
     setActiveDbIdState(id);
   }, []);
 
+  // Spec tab: which conflict is currently being reviewed in the
+  // main content slot. The list (sidebar) and the detail (main)
+  // share state via SpecProvider; this id just tracks which conflict
+  // the user picked.
+  const [activeSpecConflictId, setActiveSpecConflictId] = useState<string | null>(null);
+  // Spec tab — canonical file viewer selection. The sidebar view
+  // itself (conflicts vs canonical) is derived from scan state inside
+  // SpecPanel, not toggled by the user.
+  const [activeCanonicalPath, setActiveCanonicalPath] = useState<string | null>(null);
+  // Multi-tab canonical-spec viewer state — same pattern as
+  // openFiles/openFlows/openDatabases. Single-click in the tree
+  // replaces the transient tab; double-click pins it.
+  const [openCanonicalFiles, setOpenCanonicalFiles] = useState<
+    Array<{ path: string; pinned: boolean }>
+  >([]);
+  // Same multi-tab pattern for the BL-drift Contracts viewer.
+  const [activeContractsPath, setActiveContractsPath] = useState<string | null>(null);
+  const [openContractsFiles, setOpenContractsFiles] = useState<
+    Array<{ path: string; pinned: boolean }>
+  >([]);
+
+  const handleOpenContracts = useCallback((path: string, pinned: boolean) => {
+    setOpenContractsFiles((prev) => {
+      const existing = prev.find((f) => f.path === path);
+      if (existing) {
+        return prev.map((f) => (f.path === path ? { ...f, pinned: pinned || f.pinned } : f));
+      }
+      if (pinned) return [...prev, { path, pinned: true }];
+      const hasUnpinned = prev.find((f) => !f.pinned);
+      if (hasUnpinned) return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
+      return [...prev, { path, pinned: false }];
+    });
+    setActiveContractsPath(path);
+  }, []);
+
+  const handleCloseContracts = useCallback(
+    (path: string) => {
+      setOpenContractsFiles((prev) => prev.filter((f) => f.path !== path));
+      if (activeContractsPath === path) {
+        const remaining = openContractsFiles.filter((f) => f.path !== path);
+        setActiveContractsPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
+      }
+    },
+    [openContractsFiles, activeContractsPath],
+  );
+
+  const handleOpenCanonical = useCallback((path: string, pinned: boolean) => {
+    setOpenCanonicalFiles((prev) => {
+      const existing = prev.find((f) => f.path === path);
+      if (existing) {
+        return prev.map((f) =>
+          f.path === path ? { ...f, pinned: pinned || f.pinned } : f,
+        );
+      }
+      if (pinned) return [...prev, { path, pinned: true }];
+      const hasUnpinned = prev.find((f) => !f.pinned);
+      if (hasUnpinned) {
+        return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
+      }
+      return [...prev, { path, pinned: false }];
+    });
+    setActiveCanonicalPath(path);
+  }, []);
+
+  const handleCloseCanonical = useCallback(
+    (path: string) => {
+      setOpenCanonicalFiles((prev) => prev.filter((f) => f.path !== path));
+      if (activeCanonicalPath === path) {
+        const remaining = openCanonicalFiles.filter((f) => f.path !== path);
+        setActiveCanonicalPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
+      }
+    },
+    [openCanonicalFiles, activeCanonicalPath],
+  );
+
   // Sync React state from the URL on every location change. This covers
   // browser Back / Forward (and deep-linked reloads) — without it, the URL
   // changes but in-memory state stays frozen at whatever the user last set.
@@ -274,6 +403,18 @@ export default function RepoGraphPage() {
     setActiveFilePathState(searchParams?.get('file') ?? null);
     setActiveFlowIdState(searchParams?.get('flow') ?? null);
     setIsDiffModeState(searchParams?.get('view') === 'diff');
+
+    const sectionParam = searchParams?.get('section');
+    const resolvedSection: DashboardSection = sectionParam === 'drift' ? 'drift' : 'analysis';
+    setDashboardSectionState(resolvedSection);
+    // Guard: if the URL's tab doesn't belong to the URL's section, fall
+    // back to the section's default tab. Without this you can end up on
+    // ?section=drift&tab=home which would render nothing useful.
+    const tabBelongsToSection =
+      resolvedSection === 'drift' ? DRIFT_TABS.has(nextTab) : !DRIFT_TABS.has(nextTab);
+    if (!tabBelongsToSection) {
+      setLeftTabState(defaultTabForSection(resolvedSection));
+    }
   }, [searchParams]);
 
   const clearActiveDetailView = useCallback(() => {
@@ -378,7 +519,9 @@ export default function RepoGraphPage() {
   const {
     isConnected,
     analysisProgress,
+    specProgress,
     clearProgress,
+    clearSpecProgress,
     onEvent,
     llmEstimate,
     respondToLlmEstimate,
@@ -466,6 +609,23 @@ export default function RepoGraphPage() {
     useFlows(repoId, { enabled: leftTab === 'flows', analysisId: graphAnalysisId });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
+  // BL Drift trees — same pattern as useGraph/useFlows. Hoisted here
+  // so the data survives tab switches and so spec:complete socket
+  // events (fired after a successful Apply) can refetch both via the
+  // listeners below.
+  const {
+    tree: contractsTree,
+    isLoading: contractsLoading,
+    error: contractsError,
+    refetch: refetchContracts,
+  } = useContractsTree(repoId);
+  const {
+    tree: canonicalTree,
+    isLoading: canonicalLoading,
+    error: canonicalError,
+    refetch: refetchCanonical,
+  } = useCanonicalSpecTree(repoId);
+
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
 
@@ -521,6 +681,22 @@ export default function RepoGraphPage() {
     });
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
+
+  // Refresh BL Drift trees after a successful Apply. The server emits
+  // `spec:complete` with `kind: 'apply'` once the canonical spec +
+  // contracts have been written. Same idea as the analysis:complete
+  // listener above — hooks own the data, parent triggers refetch on
+  // the relevant socket event.
+  useEffect(() => {
+    const unsub = onEvent('spec:complete', (data) => {
+      const payload = data as { kind?: 'scan' | 'apply' } | undefined;
+      if (payload?.kind === 'apply') {
+        refetchCanonical();
+        refetchContracts();
+      }
+    });
+    return unsub;
+  }, [onEvent, refetchCanonical, refetchContracts]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -904,6 +1080,9 @@ export default function RepoGraphPage() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
+  const showingSpecConflict = activeSpecConflictId !== null && leftTab === 'spec';
+  const showingCanonicalFile = activeCanonicalPath !== null && leftTab === 'spec';
+  const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
 
   const hasAnalysis = repo?.lastAnalyzed != null;
 
@@ -919,11 +1098,12 @@ export default function RepoGraphPage() {
   }, [flowList]);
 
   return (
+    <SpecProvider repoId={repoId}>
     <div className="flex h-screen flex-col">
       <Header
         repoName={repo?.name}
         currentBranch={currentBranch}
-        onAnalyze={isViewingHistory || repoError ? undefined : handleAnalyze}
+        onAnalyze={isViewingHistory || repoError || repo?.isGitRepo === false ? undefined : handleAnalyze}
         isAnalyzing={isAnalyzing || isDiffChecking}
         showBack
         backHref="/"
@@ -934,6 +1114,8 @@ export default function RepoGraphPage() {
         selectedAnalysisId={selectedAnalysisId}
         onSelectAnalysis={setSelectedAnalysisId}
         currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
+        dashboardSection={dashboardSection}
+        onDashboardSectionChange={setDashboardSection}
       />
 
       {/* Page-level banners — span full width above both sidebar and main. */}
@@ -960,15 +1142,32 @@ export default function RepoGraphPage() {
           <span>Showing working tree state (uncommitted changes)</span>
         </div>
       )}
+      {repoError && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-destructive/10 border-b border-destructive/30 px-4 py-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{repoError}</span>
+        </div>
+      )}
+      {!repoError && repo?.isGitRepo === false && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>This directory is not a git repository — branch switching and history are unavailable.</span>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} badgeCounts={{
-          home: allViolations.length,
-          flows: flowList.length,
-          databases: nodes.filter((n) => n.type === 'database').length,
-          analyses: analyses.length,
-        }}>
+        <LeftSidebar
+          section={dashboardSection}
+          activeTab={leftTab}
+          onTabChange={handleLeftTabChange}
+          badgeCounts={{
+            home: allViolations.length,
+            flows: flowList.length,
+            databases: nodes.filter((n) => n.type === 'database').length,
+            analyses: analyses.length,
+          }}
+        >
           {leftTab === 'flows' && (
             <FlowList
               flows={flowList}
@@ -1030,13 +1229,38 @@ export default function RepoGraphPage() {
               }}
             />
           )}
+          {leftTab === 'spec' && (
+            <SpecPanel
+              canonicalTree={canonicalTree}
+              canonicalLoading={canonicalLoading}
+              canonicalError={canonicalError}
+              activeConflictId={activeSpecConflictId}
+              onSelectConflict={setActiveSpecConflictId}
+              activeCanonicalPath={activeCanonicalPath}
+              onOpenCanonicalFile={handleOpenCanonical}
+              onSelectCanonicalFile={setActiveCanonicalPath}
+            />
+          )}
+          {leftTab === 'contracts' && (
+            <ContractsPanel
+              tree={contractsTree}
+              isLoading={contractsLoading}
+              error={contractsError}
+              activePath={activeContractsPath}
+              onOpen={handleOpenContracts}
+            />
+          )}
+          {leftTab === 'verify' && <VerifyPanel />}
+          {leftTab === 'decisions' && <DecisionsPanel />}
         </LeftSidebar>
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases) */}
-          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
-            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec canonical) */}
+          {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
+            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
+          (leftTab === 'spec' && openCanonicalFiles.length > 0) ||
+          (leftTab === 'contracts' && openContractsFiles.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1128,8 +1352,70 @@ export default function RepoGraphPage() {
                   </div>
                 );
               })}
+              {/* Canonical spec tabs */}
+              {leftTab === 'spec' && openCanonicalFiles.map((f) => {
+                const fileName = f.path.split('/').pop() || f.path;
+                const isActive = activeCanonicalPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => setActiveCanonicalPath(f.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseCanonical(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Contracts tabs */}
+              {leftTab === 'contracts' && openContractsFiles.map((f) => {
+                const fileName = f.path.split('/').pop() || f.path;
+                const isActive = activeContractsPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => setActiveContractsPath(f.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseContracts(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-          )}
+          ) : null}
 
           <div className="relative flex-1 overflow-hidden">
           {/* Code viewer */}
@@ -1157,8 +1443,39 @@ export default function RepoGraphPage() {
               violations={violations}
               isTab
             />
+          ) : showingCanonicalFile && activeCanonicalPath ? (
+            <div className="flex h-full flex-col">
+              <SpecToolbar />
+              <div className="flex-1 overflow-hidden">
+                <SpecCanonicalFile repoId={repoId} filePath={activeCanonicalPath} />
+              </div>
+            </div>
+          ) : showingSpecConflict && activeSpecConflictId ? (
+            <div className="flex h-full flex-col">
+              <SpecToolbar />
+              <div className="flex-1 overflow-hidden">
+                <SpecConflictDetail
+                  conflictId={activeSpecConflictId}
+                  onClose={() => setActiveSpecConflictId(null)}
+                />
+              </div>
+            </div>
           ) : leftTab === 'spec' ? (
-            <SpecPanel repoId={repoId} />
+            <SpecPanePlaceholder />
+          ) : showingContractsFile && activeContractsPath ? (
+            <ContractsFile repoId={repoId} filePath={activeContractsPath} />
+          ) : leftTab === 'contracts' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <p>Select a contract file from the list to view it.</p>
+            </div>
+          ) : leftTab === 'verify' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <p>Verify detail view — coming soon.</p>
+            </div>
+          ) : leftTab === 'decisions' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <p>Decisions detail view — coming soon.</p>
+            </div>
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
@@ -1240,16 +1557,6 @@ export default function RepoGraphPage() {
                 </Button>
               </div>
             </div>
-          ) : repoError ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="flex flex-col items-center gap-3 text-center">
-                <AlertCircle className="h-10 w-10 text-amber-500" />
-                <Alert className="max-w-sm border-amber-500/30">
-                  <AlertTitle className="text-amber-500">Repository warning</AlertTitle>
-                  <AlertDescription className="text-amber-500/90">{repoError}</AlertDescription>
-                </Alert>
-              </div>
-            </div>
           ) : nodes.length === 0 && nodes.length === 0 &&
               !(depthLevel === 'modules' && !scopedServiceId) &&
               !(depthLevel === 'methods' && !scopedModuleId) ? (
@@ -1262,14 +1569,6 @@ export default function RepoGraphPage() {
                     Run an analysis to generate the architecture graph
                   </AlertDescription>
                 </Alert>
-                <Button
-                  onClick={() => handleAnalyze()}
-                  disabled={isAnalyzing}
-                  className="mt-2"
-                >
-                  {isAnalyzing && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isAnalyzing ? 'Analyzing...' : 'Analyze Repository'}
-                </Button>
                 {isDiffMode && diffError && (
                   <Alert className="mt-3 max-w-sm border-amber-500/30 text-amber-500">
                     <AlertCircle className="h-4 w-4" />
@@ -1538,6 +1837,10 @@ export default function RepoGraphPage() {
           )}
         </div>
       )}
+      {specProgress && (
+        <SpecProgressPopup progress={specProgress} onDismiss={clearSpecProgress} />
+      )}
     </div>
+    </SpecProvider>
   );
 }

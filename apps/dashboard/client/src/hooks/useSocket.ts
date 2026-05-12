@@ -39,6 +39,7 @@ type EventHandler = (data: unknown) => void;
 export function useSocket(repoId?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
+  const [specProgress, setSpecProgress] = useState<AnalysisProgress | null>(null);
   const [llmEstimate, setLlmEstimate] = useState<LlmEstimate | null>(null);
   const [stashConfirm, setStashConfirm] = useState<StashConfirmRequest | null>(null);
   const handlersRef = useRef<Map<string, EventHandler[]>>(new Map());
@@ -74,10 +75,29 @@ export function useSocket(repoId?: string) {
       handlersRef.current.get('analysis:complete')?.forEach((h) => h(data));
     }
 
+    function onSpecProgress(data: AnalysisProgress) {
+      if (data.step === 'error') {
+        setSpecProgress({ ...data, step: 'error' });
+        return;
+      }
+      if (data.percent >= 100) {
+        setSpecProgress(null);
+      } else {
+        setSpecProgress(data);
+      }
+    }
+
+    function onSpecComplete(data: unknown) {
+      setSpecProgress(null);
+      handlersRef.current.get('spec:complete')?.forEach((h) => h(data));
+    }
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('analysis:progress', onAnalysisProgress);
     socket.on('analysis:complete', onAnalysisComplete);
+    socket.on('spec:progress', onSpecProgress);
+    socket.on('spec:complete', onSpecComplete);
     socket.on('files:changed', (data: unknown) => {
       handlersRef.current.get('files:changed')?.forEach((h) => h(data));
     });
@@ -112,6 +132,8 @@ export function useSocket(repoId?: string) {
       socket.off('disconnect', onDisconnect);
       socket.off('analysis:progress', onAnalysisProgress);
       socket.off('analysis:complete', onAnalysisComplete);
+      socket.off('spec:progress', onSpecProgress);
+      socket.off('spec:complete', onSpecComplete);
       disconnectSocket();
     };
   }, [repoId]);
@@ -131,6 +153,7 @@ export function useSocket(repoId?: string) {
   }, []);
 
   const clearProgress = useCallback(() => setAnalysisProgress(null), []);
+  const clearSpecProgress = useCallback(() => setSpecProgress(null), []);
 
   const respondToLlmEstimate = useCallback((repoIdArg: string, proceed: boolean) => {
     const socket = connectSocket();
@@ -147,7 +170,9 @@ export function useSocket(repoId?: string) {
   return {
     isConnected,
     analysisProgress,
+    specProgress,
     clearProgress,
+    clearSpecProgress,
     onEvent,
     llmEstimate,
     respondToLlmEstimate,

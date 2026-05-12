@@ -117,12 +117,6 @@ export const ClaimMetadataSchema = z.object({
   version: z.string().optional(),
   /** ISO timestamp from `git log` for the source doc. */
   lastTouched: z.string(),
-  /**
-   * Set during merge: claim IDs this claim explicitly supersedes
-   * (e.g. an explicit `Supersedes:` front-matter, or a version-chain
-   * decision the user made).
-   */
-  supersedes: z.array(z.string()).optional(),
 });
 export type ClaimMetadata = z.infer<typeof ClaimMetadataSchema>;
 
@@ -135,6 +129,23 @@ export type ClaimMetadata = z.infer<typeof ClaimMetadataSchema>;
  * `content` is topic-specific. The classifier+extractor returns it as
  * loose JSON; downstream stages narrow it via Zod when reading.
  */
+/**
+ * Whether the source section primarily defines the subject (the
+ * authoritative spec for it) or just narrows/constrains a subject
+ * defined elsewhere.
+ *
+ *   - "definition": the section's job is to specify this subject.
+ *     Multiple definitions of the same subject that disagree are
+ *     real conflicts the user must resolve.
+ *   - "constraint": the section is primarily about a different
+ *     subject but adds rules to this one (e.g., an "Order ownership"
+ *     section that adds auth + 403 to several endpoints). A constraint
+ *     is additive — the merger folds it into the matching definition
+ *     rather than treating it as a competing alternative.
+ */
+export const ClaimKindSchema = z.enum(['definition', 'constraint']);
+export type ClaimKind = z.infer<typeof ClaimKindSchema>;
+
 export const ClaimSchema = z.object({
   /** Stable id — sha256(file + line + topic + subject). */
   id: z.string(),
@@ -149,6 +160,14 @@ export const ClaimSchema = z.object({
   subject: z.string(),
   /** Topic-specific structured content. */
   content: z.unknown(),
+  /**
+   * Whether this claim defines the subject or narrows it. Optional —
+   * synthetic claims (e.g. version chain candidates) and pre-`kind`
+   * test fixtures may omit it; the merger treats absence as
+   * "definition", matching the prompt's "when in doubt, prefer
+   * definition" rule.
+   */
+  kind: ClaimKindSchema.optional(),
   provenance: ProvenanceSchema,
   metadata: ClaimMetadataSchema,
 });

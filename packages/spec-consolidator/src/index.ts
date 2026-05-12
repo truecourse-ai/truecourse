@@ -83,12 +83,17 @@ export {
   sectionId,
   readSectionCache,
   writeSectionCache,
+  readScanState,
+  writeScanState,
+  clearScanState,
+  scanStatePath,
 } from './cache.js';
 export type {
   CachePaths,
   BlockCacheEntry,
   SectionCacheEntry,
   SectionCacheKey,
+  ScanState,
 } from './cache.js';
 
 export {
@@ -102,3 +107,16 @@ export type { ConsolidateOptions, ConsolidateResult } from './orchestrator.js';
 
 export { detectVersionChains } from './version-chain.js';
 export type { VersionChain } from './version-chain.js';
+
+export {
+  detectVersionChainsViaLlm,
+  CHAIN_DETECTION_SYSTEM_PROMPT,
+  buildChainDetectionUserPrompt,
+} from './version-chain-llm.js';
+export type {
+  ChainDetectionInput,
+  ChainRunner,
+  ChainRunnerOptions,
+  DetectChainsOptions,
+  DetectedChainOutput,
+} from './version-chain-llm.js';

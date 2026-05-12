@@ -123,6 +123,7 @@ function fixtureRunner(): BlockRunner {
             topic: 'auth',
             subject: 'auth scheme',
             content: { scheme: 'session-cookie', scope: '/api/**' },
+            kind: 'definition',
           },
         ],
       };
@@ -137,6 +138,7 @@ function fixtureRunner(): BlockRunner {
             topic: 'auth',
             subject: 'auth scheme',
             content: { scheme: 'bearer-jwt', scope: '/api/**' },
+            kind: 'definition',
           },
         ],
       };
@@ -151,6 +153,7 @@ function fixtureRunner(): BlockRunner {
             topic: 'errors',
             subject: 'global error envelope',
             content: { envelope: { error: { code: 'string', message: 'string' } } },
+            kind: 'definition',
           },
         ],
       };
@@ -171,6 +174,7 @@ function fixtureRunner(): BlockRunner {
                 request: { totalCents: 'integer', customerId: 'uuid' },
                 responses: { '200': { id: 'uuid', status: 'string' } },
               },
+              kind: 'definition',
               status: 'shipped',
             },
           ],
@@ -188,6 +192,7 @@ function fixtureRunner(): BlockRunner {
                 path: '/api/orders',
                 responses: { '200': { orders: 'Order[]' } },
               },
+              kind: 'definition',
               status: 'shipped',
             },
           ],
@@ -201,6 +206,7 @@ function fixtureRunner(): BlockRunner {
               topic: 'auth',
               subject: 'auth scheme',
               content: { scheme: 'session-cookie', scope: '/api/**' },
+              kind: 'definition',
             },
           ],
         };
@@ -229,6 +235,7 @@ function fixtureRunner(): BlockRunner {
                   },
                 },
               },
+              kind: 'definition',
               status: 'shipped',
             },
           ],
@@ -248,6 +255,7 @@ function fixtureRunner(): BlockRunner {
                   '200': { items: 'Order[]', nextCursor: 'string|null' },
                 },
               },
+              kind: 'definition',
               status: 'shipped',
             },
           ],
@@ -261,6 +269,7 @@ function fixtureRunner(): BlockRunner {
               topic: 'auth',
               subject: 'auth scheme',
               content: { scheme: 'bearer-jwt', scope: '/api/**' },
+              kind: 'definition',
             },
           ],
         };
@@ -273,12 +282,14 @@ function fixtureRunner(): BlockRunner {
               topic: 'endpoints',
               subject: 'POST /api/orders/:id/replace',
               content: { method: 'POST', path: '/api/orders/:id/replace' },
+              kind: 'definition',
               status: 'out-of-scope',
             },
             {
               topic: 'endpoints',
               subject: 'POST /api/orders/:id/refund',
               content: { method: 'POST', path: '/api/orders/:id/refund' },
+              kind: 'definition',
               status: 'out-of-scope',
             },
           ],
@@ -352,7 +363,7 @@ describe('fixture: sample-js-project-il — scan mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
 
     const subjects = result.merge.openConflicts.map((c) => c.subject).sort();
     // Expect: chain conflict (B.8) + 3 content conflicts.
@@ -367,7 +378,7 @@ describe('fixture: sample-js-project-il — scan mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const ordersConflict = result.merge.openConflicts.find(
       (c) => c.subject === 'POST /api/orders',
     )!;
@@ -382,7 +393,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const decisions: DecisionsFile = {
       version: 1,
       decisions: round1.merge.openConflicts.map((c) => ({
@@ -399,7 +410,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     if (round2.merge.openConflicts.length > 0) {
       writeDecisions(workRoot, {
         version: 1,
@@ -423,7 +434,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
 
     expect(apply.merge.openConflicts).toEqual([]);
     expect(apply.materialize?.failures).toEqual([]);
@@ -443,7 +454,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const ordersManifest = yaml.load(
       fs.readFileSync(
         path.join(workRoot, '.truecourse/spec/modules/orders/module.yaml'),
@@ -476,7 +487,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     const ordersManifest = yaml.load(
       fs.readFileSync(
         path.join(workRoot, '.truecourse/spec/modules/orders/module.yaml'),
@@ -499,7 +510,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
 
     const expectedRoot = path.join(FIXTURE_ROOT, '.truecourse/spec');
     const actualRoot = path.join(workRoot, '.truecourse/spec');
@@ -577,7 +588,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: countingBlock,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     expect(blockCalls).toBeGreaterThan(0);
 
     blockCalls = 0;
@@ -585,7 +596,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: countingBlock,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     expect(blockCalls).toBe(0);
 
     writeDecisions(workRoot, {
@@ -604,7 +615,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: countingBlock,
       sectionRunner: countingSection,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     expect(sectionCalls).toBeGreaterThan(0);
 
     sectionCalls = 0;
@@ -613,7 +624,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: countingBlock,
       sectionRunner: countingSection,
       skipGit: true,
-    });
+      disableLlmChainDetection: true,    });
     expect(sectionCalls).toBe(0);
   });
 });

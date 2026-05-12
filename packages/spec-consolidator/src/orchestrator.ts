@@ -48,6 +48,10 @@ import {
   type DecisionsFile,
 } from './types.js';
 import { detectVersionChains, type VersionChain } from './version-chain.js';
+import {
+  detectVersionChainsViaLlm,
+  type ChainRunner,
+} from './version-chain-llm.js';
 import { discoverDocs, type DocCandidate } from './discovery.js';
 
 export interface ConsolidateOptions {
@@ -60,6 +64,17 @@ export interface ConsolidateOptions {
   blockRunner?: BlockRunner;
   /** Override section-rendering runner. Tests pass a stub. */
   sectionRunner?: SectionRunner;
+  /**
+   * Override the LLM chain-detection runner. Tests pass a stub.
+   * When omitted, an LLM-backed runner is spawned automatically. Set
+   * `disableLlmChainDetection: true` to skip the LLM call entirely.
+   */
+  chainRunner?: ChainRunner;
+  /**
+   * When true, skip the LLM chain-detection step. The deterministic
+   * detector still runs. Useful for tests and offline runs.
+   */
+  disableLlmChainDetection?: boolean;
   /**
    * Skip the git-log mtime resolution. Useful for tests; the harness
    * also passes this when the working dir isn't a git repo.
@@ -103,8 +118,18 @@ export async function consolidate(
   //              so the duplication is negligible.
   const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
 
-  // ---- Detect version chains (B.8) -------------------------------------
-  const chains = detectVersionChains(docs);
+  // ---- Detect version chains (deterministic + LLM-augmented) ----------
+  // Deterministic detector catches filename versioning (v1/v2) — cheap,
+  // free, no model call. The LLM-based detector adds chains that don't
+  // follow the filename convention. Both run; results are merged with
+  // deterministic findings winning on overlap so the labels we attach
+  // later stay accurate.
+  const deterministicChains = detectVersionChains(docs);
+  const llmChains = await detectVersionChainsViaLlm(repoRoot, docs, {
+    runner: opts.chainRunner,
+    enabled: opts.disableLlmChainDetection !== true,
+  });
+  const chains = mergeChainResults(deterministicChains, llmChains);
   const chainConflicts = chains.map(synthesizeChainConflict);
   const winnersByChain = resolveChainWinners(chainConflicts, decisions);
 
@@ -121,6 +146,13 @@ export async function consolidate(
   // ---- Apply chain decisions: drop claims from superseded docs ---------
   const filteredClaims = filterByChainWinners(extract.claims, chains, winnersByChain);
 
+  // ---- Enrich chain conflicts with per-doc stats -----------------------
+  // The dashboard renders a more informative preview when each chain
+  // candidate carries claim counts + topic breakdown, so the user can
+  // see "v1 has 8 claims (auth, endpoints); v2 has 22 (auth,
+  // endpoints, data, effects)" instead of just a 5-line snippet.
+  const enrichedChainConflicts = enrichChainConflictsWithStats(chainConflicts, extract.claims);
+
   // ---- Merge -----------------------------------------------------------
   const merge = mergeClaims(filteredClaims, decisions);
 
@@ -128,7 +160,7 @@ export async function consolidate(
   // Chains without a decision surface in openConflicts; chains with one
   // surface in decidedConflicts. Either way the dashboard sees them
   // through the same shape as content conflicts.
-  const stitchedMerge = stitchChainConflicts(merge, chainConflicts, decisions);
+  const stitchedMerge = stitchChainConflicts(merge, enrichedChainConflicts, decisions);
 
   if (!opts.materialize) {
     return { extract, merge: stitchedMerge, decisions };
@@ -188,7 +220,12 @@ function synthesizeChainConflict(chain: VersionChain): Conflict {
   };
 }
 
+/** How many cleaned lines to surface in chain candidate previews. */
+const CHAIN_PREVIEW_LINES = 80;
+
 function docToSyntheticClaim(doc: DocCandidate, chain: VersionChain): Claim {
+  const cleaned = stripHtmlComments(doc.preview);
+  const preview = cleaned.split('\n').slice(0, CHAIN_PREVIEW_LINES).join('\n');
   return {
     id: `version-chain:${chain.id}:${doc.path}`,
     topic: 'overview',
@@ -196,18 +233,115 @@ function docToSyntheticClaim(doc: DocCandidate, chain: VersionChain): Claim {
     content: {
       file: doc.path,
       detectedFrom: chain.detectedFrom,
-      preview: doc.preview.split('\n').slice(0, 5).join('\n'),
+      preview,
     },
+    kind: 'definition',
     provenance: {
       file: doc.path,
       line: 1,
-      quote: doc.preview.split('\n').slice(0, 3).join('\n'),
+      // Same preview the UI renders — keep `quote` and `content.preview`
+      // in sync so the dashboard sees one source of truth.
+      quote: preview,
     },
     metadata: {
       docKind: doc.kind,
       lastTouched: doc.lastTouched,
     },
   };
+}
+
+/**
+ * Merge deterministic and LLM-detected chains. Deduplication is by
+ * chain id (which is sha256 of the sorted member paths), so any chain
+ * the LLM found that the deterministic detector also found gets
+ * dropped from the LLM list — the deterministic `filename` label is
+ * more informative than the generic `llm` tag, so we keep it.
+ */
+function mergeChainResults(
+  deterministic: VersionChain[],
+  llm: VersionChain[],
+): VersionChain[] {
+  const seen = new Set(deterministic.map((c) => c.id));
+  const out = [...deterministic];
+  for (const chain of llm) {
+    if (seen.has(chain.id)) continue;
+    seen.add(chain.id);
+    out.push(chain);
+  }
+  return out;
+}
+
+/**
+ * Attach per-doc claim stats to each chain candidate. The candidate's
+ * content gains:
+ *
+ *   - claimCount: how many claims this doc contributed
+ *   - topics:     count of claims grouped by topic
+ *   - subjects:   up to N (currently 8) representative subject strings
+ *
+ * These show up in the dashboard's version-chain UI as concrete
+ * impact info — much more useful for the "which doc is canonical?"
+ * decision than a 5-line text preview.
+ */
+function enrichChainConflictsWithStats(
+  chainConflicts: Conflict[],
+  allClaims: Claim[],
+): Conflict[] {
+  if (chainConflicts.length === 0) return chainConflicts;
+  // Index claims by source file once.
+  const claimsByFile = new Map<string, Claim[]>();
+  for (const c of allClaims) {
+    const list = claimsByFile.get(c.provenance.file) ?? [];
+    list.push(c);
+    claimsByFile.set(c.provenance.file, list);
+  }
+  return chainConflicts.map((conflict) => ({
+    ...conflict,
+    candidates: conflict.candidates.map((cand) => {
+      const file = (cand.claim.content as { file?: string } | undefined)?.file
+        ?? cand.claim.provenance.file;
+      const docClaims = claimsByFile.get(file) ?? [];
+      const topics: Record<string, number> = {};
+      for (const c of docClaims) topics[c.topic] = (topics[c.topic] ?? 0) + 1;
+      const subjects = docClaims
+        .map((c) => c.subject)
+        .filter((s, i, arr) => arr.indexOf(s) === i)
+        .slice(0, 8);
+      return {
+        ...cand,
+        claim: {
+          ...cand.claim,
+          content: {
+            ...(cand.claim.content as Record<string, unknown>),
+            claimCount: docClaims.length,
+            topics,
+            subjects,
+          },
+        },
+      };
+    }),
+  }));
+}
+
+/**
+ * Strip HTML comments before slicing a preview snippet. Without this,
+ * a comment that opens before our 3/5-line cutoff but closes after it
+ * leaks the open `<!--` into the rendered preview as raw text. Real
+ * docs commonly carry `<!-- TODO -->` markers, fixture annotations,
+ * and the like — none of which belong in a "what is this doc about"
+ * snippet.
+ */
+function stripHtmlComments(text: string): string {
+  // Drop fully-closed comments first (may span lines).
+  let out = text.replace(/<!--[\s\S]*?-->/g, '');
+  // Drop any trailing unclosed comment opener so a half-comment at
+  // the tail of the doc doesn't leak through.
+  const lastOpen = out.lastIndexOf('<!--');
+  if (lastOpen !== -1 && out.indexOf('-->', lastOpen) === -1) {
+    out = out.slice(0, lastOpen);
+  }
+  // Collapse any blank-line runs left behind by removed comments.
+  return out.replace(/\n{3,}/g, '\n\n').trimStart();
 }
 
 /**

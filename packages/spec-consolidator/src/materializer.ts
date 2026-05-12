@@ -192,6 +192,7 @@ function synthesizeCustomClaim(
     topic: conflict.topic,
     subject: conflict.subject,
     content: { _custom: content },
+    kind: 'definition',
     provenance: {
       file: '.truecourse/spec/decisions.json',
       line: 0,

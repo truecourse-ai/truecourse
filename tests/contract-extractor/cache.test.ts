@@ -86,8 +86,8 @@ describe('slice cache', () => {
 
   it('points at the expected on-disk locations', () => {
     const paths = cachePaths(tmpRoot);
-    expect(paths.cacheDir).toBe(path.join(tmpRoot, '.truecourse', 'spec-cache'));
-    expect(paths.slicesDir).toBe(path.join(tmpRoot, '.truecourse', 'spec-cache', 'slices'));
-    expect(paths.manifestPath).toBe(path.join(tmpRoot, '.truecourse', 'spec-cache', 'manifest.json'));
+    expect(paths.cacheDir).toBe(path.join(tmpRoot, '.truecourse', '.cache', 'extractor'));
+    expect(paths.slicesDir).toBe(path.join(tmpRoot, '.truecourse', '.cache', 'extractor', 'slices'));
+    expect(paths.manifestPath).toBe(path.join(tmpRoot, '.truecourse', '.cache', 'extractor', 'manifest.json'));
   });
 });

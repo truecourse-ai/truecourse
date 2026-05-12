@@ -51,7 +51,7 @@ describe('block cache', () => {
   it('round-trips an extraction', () => {
     writeBlockCache(repoRoot, 'block-1', {
       topics: ['endpoints'],
-      claims: [{ topic: 'endpoints', subject: 'POST /x', content: { method: 'POST' } }],
+      claims: [{ topic: 'endpoints', subject: 'POST /x', content: { method: 'POST' }, kind: 'definition' }],
     });
     const out = readBlockCache(repoRoot, 'block-1');
     expect(out).not.toBeNull();

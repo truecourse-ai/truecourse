@@ -1,8 +1,32 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network, BookOpen } from 'lucide-react';
+import {
+  Home,
+  AlertTriangle,
+  FolderTree,
+  Workflow,
+  Database,
+  ClipboardList,
+  Network,
+  BookOpen,
+  FileCode2,
+  ShieldCheck,
+  GitMerge,
+} from 'lucide-react';
 
-export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses' | 'spec';
+export type LeftTab =
+  | 'home'
+  | 'graphs'
+  | 'files'
+  | 'flows'
+  | 'databases'
+  | 'analyses'
+  | 'spec'
+  | 'contracts'
+  | 'verify'
+  | 'decisions';
+
+export type DashboardSection = 'analysis' | 'drift';
 
 const TAB_LABELS: Record<LeftTab, string> = {
   home: 'Home',
@@ -12,11 +36,43 @@ const TAB_LABELS: Record<LeftTab, string> = {
   databases: 'Databases',
   analyses: 'Analyses',
   spec: 'Spec',
+  contracts: 'Contracts',
+  verify: 'Verify',
+  decisions: 'Decisions',
 };
 
-const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses', 'spec']);
+/** Tabs that render no sidebar panel (the icon click is the entire UX). */
+const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
+
+type TabConfig = { id: LeftTab; icon: typeof AlertTriangle; label: string };
+
+const ANALYSIS_TABS: TabConfig[] = [
+  { id: 'home', icon: Home, label: 'Home' },
+  { id: 'graphs', icon: Network, label: 'Graphs' },
+  { id: 'flows', icon: Workflow, label: 'Flows' },
+  { id: 'files', icon: FolderTree, label: 'Files' },
+  { id: 'databases', icon: Database, label: 'Databases' },
+  { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
+];
+
+const DRIFT_TABS: TabConfig[] = [
+  { id: 'spec', icon: BookOpen, label: 'Spec' },
+  { id: 'contracts', icon: FileCode2, label: 'Contracts' },
+  { id: 'verify', icon: ShieldCheck, label: 'Verify' },
+  { id: 'decisions', icon: GitMerge, label: 'Decisions' },
+];
+
+export function tabsForSection(section: DashboardSection): TabConfig[] {
+  return section === 'drift' ? DRIFT_TABS : ANALYSIS_TABS;
+}
+
+/** Default left tab for a given section. */
+export function defaultTabForSection(section: DashboardSection): LeftTab {
+  return section === 'drift' ? 'spec' : 'home';
+}
 
 type LeftSidebarProps = {
+  section: DashboardSection;
   activeTab: LeftTab | null;
   onTabChange: (tab: LeftTab | null) => void;
   children: React.ReactNode;
@@ -25,17 +81,8 @@ type LeftSidebarProps = {
   badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
 };
 
-const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
-  { id: 'home', icon: Home, label: 'Home' },
-  { id: 'graphs', icon: Network, label: 'Graphs' },
-  { id: 'flows', icon: Workflow, label: 'Flows' },
-  { id: 'files', icon: FolderTree, label: 'Files' },
-  { id: 'databases', icon: Database, label: 'Databases' },
-  { id: 'spec', icon: BookOpen, label: 'Spec' },
-  { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
-];
-
 export function LeftSidebar({
+  section,
   activeTab,
   onTabChange,
   children,
@@ -46,6 +93,8 @@ export function LeftSidebar({
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
   const isDragging = useRef(false);
+
+  const tabs = tabsForSection(section);
 
   useEffect(() => {
     const calc = () => Math.floor(window.innerWidth * 0.8);

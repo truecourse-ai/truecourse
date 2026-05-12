@@ -4,7 +4,7 @@ import {
   resolveRepoDir,
 } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
-import { promptInstallSkills, syncShippedTcSyntax } from "./helpers.js";
+import { promptInstallSkills } from "./helpers.js";
 
 export interface AddOptions {
   /** Force-install or force-skip the Claude Code skills prompt. */
@@ -28,9 +28,6 @@ export async function runAdd(options: AddOptions = {}): Promise<void> {
   }
 
   await promptInstallSkills(repoPath, { install: options.installSkills });
-
-  // Silently install the bundled VS Code grammar for `.tc` files.
-  syncShippedTcSyntax();
 
   p.outro("Run `truecourse analyze` to generate analysis data.");
 }

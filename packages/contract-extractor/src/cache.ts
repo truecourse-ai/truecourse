@@ -1,22 +1,40 @@
 /**
  * Slice cache. Persists per-slice extraction results under
- * `.truecourse/spec-cache/`. Read on every `truecourse contracts generate`
- * run so unchanged slices avoid LLM calls; written when a slice's
- * content hash isn't already on disk.
+ * `.truecourse/.cache/extractor/`. Read on every `truecourse contracts
+ * generate` run so unchanged slices avoid LLM calls; written when a
+ * slice's content hash isn't already on disk.
  *
  * The cache is content-addressed via slice id (see `slicer.sliceHash`),
  * so cache hits tolerate spec moves and repo renames as long as the
  * heading path + text are unchanged.
+ *
+ * The cache lives under the shared `.truecourse/.cache/` umbrella
+ * alongside the consolidator's cache. Pre-rename layouts used
+ * `.truecourse/spec-cache/` — that path is no longer read, and any
+ * stragglers can be deleted; the cache rebuilds on next run.
  */
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExtractionResult, Manifest, SliceCacheEntry, SpecSlice } from './types.js';
 import { ManifestSchema, SliceCacheEntrySchema } from './types.js';
+import { SYSTEM_PROMPT } from './prompt.js';
 
-const CACHE_DIR = path.join('.truecourse', 'spec-cache');
+const CACHE_DIR = path.join('.truecourse', '.cache', 'extractor');
 const SLICES_SUBDIR = 'slices';
 const MANIFEST_FILE = 'manifest.json';
+
+/**
+ * Fingerprint of the extraction prompt. Cached slice entries record
+ * the fingerprint they were extracted under; on read we treat a
+ * mismatch as a miss. Prompt edits then self-invalidate the cache
+ * — no manual cache bust required.
+ */
+const EXTRACTION_PROMPT_FINGERPRINT = createHash('sha256')
+  .update(SYSTEM_PROMPT)
+  .digest('hex')
+  .slice(0, 16);
 
 export interface CachePaths {
   cacheDir: string;
@@ -48,7 +66,9 @@ export function readSliceEntry(repoRoot: string, sliceId: string): SliceCacheEnt
   if (!fs.existsSync(file)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-    return SliceCacheEntrySchema.parse(raw);
+    const entry = SliceCacheEntrySchema.parse(raw);
+    if (entry.promptFingerprint !== EXTRACTION_PROMPT_FINGERPRINT) return null;
+    return entry;
   } catch {
     // Malformed cache entry — treat as a miss so the next run rewrites it.
     return null;
@@ -68,6 +88,7 @@ export function writeSliceEntry(
     lineRange: slice.lineRange,
     result,
     cachedAt: new Date().toISOString(),
+    promptFingerprint: EXTRACTION_PROMPT_FINGERPRINT,
   };
   const file = path.join(cachePaths(repoRoot).slicesDir, `${slice.id}.json`);
   fs.writeFileSync(file, JSON.stringify(entry, null, 2));

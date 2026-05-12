@@ -1,10 +1,10 @@
 # Order Management Service — PRD v1
 
 <!-- PLANTED VERSION CHAIN: superseded by orders_PRDv2.md.
-     The consolidator should detect the chain via filename pattern
-     AND the explicit Supersedes: header in v2. Resolving the chain
-     (v2 wins) drops v1's claims before merge — collapsing the
-     201/200 + cookie/JWT per-claim conflicts since v1 is filtered. -->
+     The consolidator should detect the chain via the v1/v2 filename
+     pattern. Resolving the chain (v2 wins) drops v1's claims before
+     merge — collapsing the 201/200 + cookie/JWT per-claim conflicts
+     since v1 is filtered. -->
 
 ## Overview
 
