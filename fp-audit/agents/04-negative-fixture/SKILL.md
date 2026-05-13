@@ -10,6 +10,7 @@ Never ask the user questions. Never pause for confirmation. If a step fails or a
 # Inputs
 
 - `fp-audit/state/fp.jsonl` — global ledger (TP rows are the source of truth)
+- `fp-audit/state/excluded-rules.json` — **optional**. JSON array of rule keys to skip entirely. Same file stage 3 uses.
 - Each target's clone path from `state.json` (e.g., `/tmp/audit-targets/documenso/`) — sub-agents read real TP source for AST reference
 
 # Outputs
@@ -36,6 +37,8 @@ Stage 4 previously dispatched per rule (1 marker per rule = 176 markers). The ne
 # Steps
 
 1. **Read fp.jsonl.** Build dispatch list — one entry per distinct `(rule, shape_sig)` where `class === "TP"`. Each entry carries the representative `(file, line)` TP row and all member `fp_id`s.
+
+   **Apply excluded-rules filter.** If `fp-audit/state/excluded-rules.json` exists, drop every entry whose `rule` is in the set. Log: `excluded N rules / M groups skipped`. These rules' FP rows won't get `negative_fixture_path` set; stage 5 will skip them.
 
 2. **Find existing markers**. For each `(rule, shape_sig)` group, check if a `// VIOLATION: <rule>` marker already exists in the negative fixture. If yes → reuse (no sub-agent needed for that group).
 

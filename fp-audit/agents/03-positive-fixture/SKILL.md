@@ -11,6 +11,7 @@ Never ask the user questions. Never pause for confirmation. If a step fails or a
 
 - `fp-audit/state/fp.jsonl` — global FP ledger (the authoritative source — shapes, files, lines, rules)
 - `fp-audit/state/rule-briefs.json` — **optional, hint only**. The `suggested_predicate` per mode helps sub-agents understand the FP's "why" but is not required.
+- `fp-audit/state/excluded-rules.json` — **optional**. JSON array of rule keys to skip entirely (their FP rows stay at `status: "unconfirmed"`). Used to defer expensive or unfixable rules to a later run. If missing or empty, no exclusions.
 - Each target's clone path from `state.json` (e.g., `/tmp/audit-targets/documenso/`) — the sub-agent reads the real FP source here for reference.
 
 # Outputs
@@ -54,9 +55,11 @@ Multiple snippets for different shapes of the same rule typically land in the sa
    - Representative `(file, line, why, mode)` (pick the row with the smallest `(file, line)` for determinism)
    - All `fp_id`s in the group (for later stamping)
 
-2. **Filter out already-done groups** — if every row in a group already has `positive_fixture_path` set, skip. (Makes the SKILL resumable.)
+2. **Apply excluded-rules filter.** If `fp-audit/state/excluded-rules.json` exists, load it as a `Set<string>` and drop every dispatch entry whose `rule` is in the set. Log a summary line: `excluded N rules / M groups skipped (per excluded-rules.json)`.
 
-3. **Pre-dispatch plan:**
+3. **Filter out already-done groups** — if every row in a group already has `positive_fixture_path` set, skip. (Makes the SKILL resumable.)
+
+4. **Pre-dispatch plan:**
    ```
    ── stage 3 dispatch plan ────────────────────────────────
    distinct (rule, shape_sig) groups: <N>
@@ -65,21 +68,21 @@ Multiple snippets for different shapes of the same rule typically land in the sa
    estimated waves:                   <ceil(N / 50)>
    ```
 
-4. **Wave-based dispatch loop.** 50 sub-agents per wave (Sonnet is fast and cheap enough to scale). Same retry pattern as earlier stages (MAX_WAVE_RETRIES = 2). Each sub-agent writes to `fp-audit/state/positive-scratch/<rule_safe>__<shape_sig>.json`.
+5. **Wave-based dispatch loop.** 50 sub-agents per wave (Sonnet is fast and cheap enough to scale). Same retry pattern as earlier stages (MAX_WAVE_RETRIES = 2). Each sub-agent writes to `fp-audit/state/positive-scratch/<rule_safe>__<shape_sig>.json`.
 
    Validate scratch: file exists, parses as JSON, has `rule`, `shape_sig`, `target_file`, `code_to_append`, `member_fp_ids`.
 
-5. **Apply scratches serially.** For each valid scratch:
+6. **Apply scratches serially.** For each valid scratch:
    - Append `code_to_append` to `tests/fixtures/sample-js-project-positive/<target_file>`. Separate from existing content with a blank line. Atomic-write.
    - Idempotency: if the first ~60 chars of `code_to_append` already appear in the file, skip (re-run safe).
 
-6. **Verify each appended snippet fires the rule** by running the analyzer programmatically against the fixture project and checking violations for `rule` at the snippet's location. (Use a small helper script — `pnpm vitest run tests/analyzer/js-positive.test.ts` is fine but slow; a direct programmatic check per snippet is faster.)
+7. **Verify each appended snippet fires the rule** by running the analyzer programmatically against the fixture project and checking violations for `rule` at the snippet's location. (Use a small helper script — `pnpm vitest run tests/analyzer/js-positive.test.ts` is fine but slow; a direct programmatic check per snippet is faster.)
    - If the rule fires → record `positive_fixture_path` on every fp_id in `member_fp_ids` and advance status to `"positive-fixture-ready"`.
    - If it does NOT fire → mark all member fp_ids `status: "fixed-by-prior-work"` and stamp `positive_fixture_path` anyway (for traceability).
 
-7. **Incremental fp.jsonl writes.** Atomic-write fp.jsonl after EACH scratch is applied + verified. Do NOT batch end-of-wave. Crash-resilient.
+8. **Incremental fp.jsonl writes.** Atomic-write fp.jsonl after EACH scratch is applied + verified. Do NOT batch end-of-wave. Crash-resilient.
 
-8. **Print summary:**
+9. **Print summary:**
    ```
    ═══ stage 3 complete ═════════════════════════════════
    shape groups processed:     <N>
