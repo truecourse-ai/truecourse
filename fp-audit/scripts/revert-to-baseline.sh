@@ -26,9 +26,18 @@ rm -f fp-audit/scripts/stage5-mark-status.mjs
 rm -f tests/analyzer/locate-uc.test.ts
 
 echo "==> 3. Restore positive fixture project to main baseline"
+# Step A: restore content of files that exist on main
 git checkout main -- tests/fixtures/sample-js-project-positive/
-# Also clean any untracked new files in the positive fixture that weren't on main
+# Step B: remove untracked files added on the branch
 git clean -fd tests/fixtures/sample-js-project-positive/
+# Step C: remove TRACKED files added on the branch (not on main).
+# `git checkout main -- <path>` only restores files in main — it leaves
+# branch-added files alone. Identify and git-rm them.
+extras=$(git diff --name-only main -- tests/fixtures/sample-js-project-positive/ || true)
+if [ -n "$extras" ]; then
+  echo "$extras" | xargs git rm -q
+  echo "    removed $(echo "$extras" | wc -l | tr -d ' ') branch-added tracked files"
+fi
 
 echo "==> 4. Reset fp.jsonl positive- AND negative-fixture fields (keep classification)"
 node -e "
