@@ -128,7 +128,7 @@ Locate the visitor for `{{rule}}`:
 
 # Iteration loop
 
-Up to 5 iterations. On each iteration:
+Up to 10 iterations (raised from 5 because the per-shape fixture contract now contains many distinct AST shapes per rule — a single guard rarely passes on the first attempt). On each iteration:
 
   1. Edit the visitor to add a guard that suppresses the FP shape captured by
      the positive fixture project, while preserving the TP shape captured by
@@ -154,7 +154,7 @@ Up to 5 iterations. On each iteration:
 
 # Failure exit
 
-If after 5 iterations both contracts still aren't satisfied:
+If after 10 iterations both contracts still aren't satisfied:
   - revert your edits: `git checkout -- packages/analyzer/src/rules/<changed paths>`
   - append: {"rule": "{{rule}}", "outcome": "failed", "edited_files": [...], "iterations": 5, "final_failures": [...]}
   - exit
@@ -170,7 +170,11 @@ Do NOT leave a half-broken visitor.
   necessary; if you do, list the file in `edited_files`.
 - Do NOT read fp-audit/state/fp.jsonl. You don't need it.
 - Output ONLY the JSON line in {{report_path}}. No other stdout.
-- NEVER ask the user a question. If stuck after 5 iterations, revert and report failed.
+- NEVER ask the user a question. If stuck after 10 iterations, revert and report failed.
+- The positive fixture now contains MANY shape snippets per rule (stage 3 wrote one
+  per (rule, shape_sig) group). Your guard must handle ALL of them — not just the
+  first one you fix. Run `js-positive.test.ts` and grep for `{{rule}}` to count
+  remaining firings; iterate until that count is zero.
 ````
 
 # Failure modes

@@ -93,38 +93,3 @@ export function createWebsiteBucket(scope: unknown): Bucket {
     removalPolicy: RemovalPolicy.RETAIN,
   });
 }
-
-
-
-// ---------------------------------------------------------------------------
-// CloudFront signed-URL distribution config -- env() returns string | undefined,
-// so wrapping each lookup in a template literal coerces a potential undefined
-// into the literal string 'undefined' before it reaches the SDK. That coercion
-// is intentional defensive typing (the SDK requires `string`, not `string|undefined`),
-// so the template expressions here are NOT redundant.
-// ---------------------------------------------------------------------------
-
-declare const env: (name: string) => string | undefined;
-declare const getSignedUrl: (params: {
-  url: string;
-  keyPairId: string;
-  privateKey: string;
-  dateLessThan: string;
-}) => string;
-
-export function buildDistributionAssetUrl(key: string): string {
-  // Coerces undefined -> 'undefined' so the URL constructor still gets a string.
-  const distributionUrl = new URL(key, `${env('NEXT_PRIVATE_UPLOAD_DISTRIBUTION_DOMAIN')}`);
-  return distributionUrl.toString();
-}
-
-export function signDistributionUrl(key: string, expiresAt: Date): string {
-  const distributionUrl = new URL(key, `${env('NEXT_PRIVATE_UPLOAD_DISTRIBUTION_DOMAIN')}`);
-
-  return getSignedUrl({
-    url: distributionUrl.toString(),
-    keyPairId: `${env('NEXT_PRIVATE_UPLOAD_DISTRIBUTION_KEY_ID')}`,
-    privateKey: `${env('NEXT_PRIVATE_UPLOAD_DISTRIBUTION_KEY_CONTENTS')}`,
-    dateLessThan: expiresAt.toISOString(),
-  });
-}
