@@ -20,6 +20,12 @@ export {
   parseSpecContent,
   parseTextSpec,
 } from './spec-discovery.js'
+export {
+  SPEC_CODE_FACT_EXTRACTORS,
+  extractCodeFacts,
+  type CodeFactExtractionError,
+  type CodeFactExtractionResult,
+} from './spec-code-facts.js'
 export { performSplitAnalysis, type SplitAnalysisResult } from './split-analyzer.js'
 
 // Parser utilities
