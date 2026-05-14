@@ -1,0 +1,21 @@
+
+// FP shape: return object with ternary in one property value (object literal)
+const columnWidth = 19.125;
+const fullColumnWidth = 57.375;
+const rowHeight = 6.7;
+
+const computeGridCell = (
+  row: number,
+  column: number,
+  width: 'full' | 'column' = 'column',
+) => {
+  const gridStartX = 31;
+  const gridStartY = 19;
+
+  return {
+    height: rowHeight,
+    width: width === 'full' ? fullColumnWidth : columnWidth,
+    positionX: gridStartX + column * columnWidth,
+    positionY: gridStartY + row * rowHeight,
+  };
+};

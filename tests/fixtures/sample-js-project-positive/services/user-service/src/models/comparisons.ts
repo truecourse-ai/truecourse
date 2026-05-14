@@ -37,3 +37,15 @@ export function stringEquality(a: string, b: string): boolean {
 export function numericLiteralArithmetic(items: readonly string[]): number[] {
   return items.map((_, i) => i * 2);
 }
+
+
+
+// Array.find with id equality -- roleId is string | null | undefined
+// (resolved from upstream conditional logic); no actual argument-type mismatch.
+declare const availableRoles: Array<{ id: string; name: string; level: number }>;
+
+function resolveRoleById(
+  roleId: string | null | undefined,
+): { id: string; name: string; level: number } | undefined {
+  return availableRoles.find((role) => role.id === roleId);
+}

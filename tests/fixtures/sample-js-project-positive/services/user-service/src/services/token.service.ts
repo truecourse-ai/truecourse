@@ -7,3 +7,13 @@ export class TokenService {
     return payload.startsWith('{') && payload.includes('userId');
   }
 }
+
+
+
+declare function nanoid(size: number): string;
+
+export function generateSessionToken(): { rawToken: string; sessionId: string } {
+  const rawToken = nanoid(16);
+  const [sessionId] = rawToken.split('|');
+  return { rawToken, sessionId: sessionId ?? rawToken };
+}

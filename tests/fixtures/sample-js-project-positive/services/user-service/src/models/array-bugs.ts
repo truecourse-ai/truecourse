@@ -73,3 +73,47 @@ export function accessWithBoundsGuard(delays: readonly number[], count: number):
   return delays[count];
 }
 
+
+
+
+// Extracting IDs from nested collections
+declare const workspace: {
+  readonly projects: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  readonly ownerId: string;
+};
+
+export function extractProjectIds(): string[] {
+  const projectIds = workspace.projects.map((project) => project.id);
+  return projectIds;
+}
+
+export function extractMemberIds(team: { readonly members: ReadonlyArray<{ readonly userId: string }> }): string[] {
+  const memberIds = team.members.map((member) => member.userId);
+  return memberIds;
+}
+
+export function extractGroupNames(department: { readonly groups: ReadonlyArray<{ readonly name: string }> }): string[] {
+  const groupNames = department.groups.map((group) => group.name);
+  return groupNames;
+}
+
+
+
+declare const workspaces: Array<{
+  id: string;
+  name: string;
+  slug: string;
+  members: Array<{ id: string; role: string; userId: string }>;
+}>;
+
+export function flattenWorkspaceMembers() {
+  return workspaces.flatMap((workspace) =>
+    workspace.members.map((member) => ({
+      ...member,
+      workspace: {
+        ...workspace,
+        members: undefined,
+      },
+    })),
+  );
+}

@@ -1,0 +1,14 @@
+
+// shape: async function delegates to another async handler returning a Promise; async for handler signature conformance
+declare function handlePendingFileRequest(opts: { version: string; fileId: string }): Promise<Response>;
+declare function handleStaticFileRequest(opts: { version: string; fileId: string }): Promise<Response>;
+
+type FileRequestOptions = { version: 'signed' | 'original' | 'pending'; fileId: string };
+
+const handleFileRequest = async (options: FileRequestOptions): Promise<Response> => {
+  if (options.version === 'pending') {
+    return handlePendingFileRequest(options);
+  }
+
+  return handleStaticFileRequest(options);
+};
