@@ -6,6 +6,7 @@ export const SPEC_COMPLIANCE_CODE_FACT_SCHEMA_VERSION = 'spec-code-fact.v1'
 export const SPEC_COMPLIANCE_RESULT_SCHEMA_VERSION = 'spec-compliance-result.v1'
 export const SPEC_COMPLIANCE_MATCHER_VERSION = 'spec-compliance-matcher.v1'
 export const SPEC_COMPLIANCE_PROMPT_VERSION = 'spec-compliance-prompt.v1'
+export const SPEC_COMPLIANCE_SPEC_MANIFEST_VERSION = 'spec-manifest.v1'
 
 export const SpecComplianceFindingCategory = 'spec-compliance' as const
 
@@ -138,6 +139,42 @@ export const ComplianceFindingMetadataSchema = z.object({
 
 export type ComplianceFindingMetadata = z.infer<typeof ComplianceFindingMetadataSchema>
 
+export const SpecSourceKindSchema = z.enum(['markdown', 'mdx', 'text', 'json', 'yaml', 'unsupported'])
+export type SpecSourceKind = z.infer<typeof SpecSourceKindSchema>
+
+export const SpecChunkSchema = z.object({
+  id: z.string().min(1),
+  sourceFile: z.string().min(1),
+  sourceRange: SourceRangeSchema,
+  headingPath: z.array(z.string().min(1)),
+  text: z.string().min(1),
+  hash: z.string().min(1),
+  extractor: ExtractorMetadataSchema,
+})
+
+export type SpecChunk = z.infer<typeof SpecChunkSchema>
+
+export const SpecFileManifestSchema = z.object({
+  path: z.string().min(1),
+  kind: SpecSourceKindSchema,
+  hash: z.string().min(1),
+  chunks: z.array(SpecChunkSchema),
+  requirements: z.array(RequirementSchema).default([]),
+  status: z.enum(['parsed', 'unsupported', 'malformed']),
+  error: z.string().min(1).optional(),
+  extractor: ExtractorMetadataSchema,
+})
+
+export type SpecFileManifest = z.infer<typeof SpecFileManifestSchema>
+
+export const SpecExtractionManifestSchema = z.object({
+  schemaVersion: z.literal(SPEC_COMPLIANCE_SPEC_MANIFEST_VERSION),
+  extractor: ExtractorMetadataSchema,
+  files: z.array(SpecFileManifestSchema),
+})
+
+export type SpecExtractionManifest = z.infer<typeof SpecExtractionManifestSchema>
+
 export const SpecComplianceConfigSchema = z.object({
   enabled: z.boolean().default(false),
   specGlobs: z.array(z.string().min(1)).default([
@@ -245,6 +282,22 @@ export function createCodeFactId(input: CodeFactIdInput): string {
     kind: input.kind,
     predicate: input.predicate,
     value: input.value,
+    extractorVersion: input.extractorVersion,
+  })
+}
+
+export interface SpecChunkIdInput {
+  sourceFile: string
+  sourceRange: SourceRange
+  text: string
+  extractorVersion: string
+}
+
+export function createSpecChunkId(input: SpecChunkIdInput): string {
+  return stableHash('chunk', {
+    sourceFile: normalizePath(input.sourceFile),
+    sourceRange: input.sourceRange,
+    text: normalizeText(input.text),
     extractorVersion: input.extractorVersion,
   })
 }

@@ -3193,7 +3193,7 @@ Task breakdowns live in `docs/prds/spec-compliance-analyzer/tasks/`.
 Current task status:
 
 - Phase 1 core data model: `STATUS: DONE`
-- Phase 2 spec discovery and parsing: `STATUS: TODO`
+- Phase 2 spec discovery and parsing: `STATUS: DONE`
 - Phase 3 LLM requirement extraction: `STATUS: TODO`
 - Phase 4 code fact extraction: `STATUS: TODO`
 - Phase 5 compliance matchers: `STATUS: TODO`

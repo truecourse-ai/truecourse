@@ -134,7 +134,11 @@ In the dashboard you can also toggle rules from the Rules panel
 any violation card via the **⋮** menu → **Disable rule for this repo**.
 
 `config.json` also reserves a `specCompliance` section for the in-progress
-spec compliance analyzer. It is disabled by default and does not affect
+spec compliance analyzer. The analyzer package can now deterministically
+discover configured Markdown, MDX, text, JSON, and YAML spec files. Prose specs
+are split into stable source-ranged chunks, and structured OpenAPI or known
+`requirements` JSON/YAML specs can produce deterministic requirements without
+LLM calls. Spec compliance is still disabled by default and does not affect
 analysis unless explicitly enabled in a future integration.
 
 ### Git Hooks

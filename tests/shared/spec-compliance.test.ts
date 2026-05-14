@@ -7,6 +7,7 @@ import {
   canonicalJson,
   createCodeFactId,
   createRequirementId,
+  createSpecChunkId,
 } from '../../packages/shared/src/types/spec-compliance'
 
 const requirement = {
@@ -173,5 +174,23 @@ describe('stable spec compliance IDs', () => {
 
     expect(first).toBe(second)
     expect(first).toMatch(/^fact_[a-f0-9]{12}$/)
+  })
+
+  it('creates stable chunk IDs from normalized source text', () => {
+    const first = createSpecChunkId({
+      sourceFile: './docs/billing.md',
+      sourceRange: { startLine: 4, endLine: 8 },
+      text: 'The service must expose the checkout route.',
+      extractorVersion: '1.0.0',
+    })
+    const second = createSpecChunkId({
+      sourceFile: 'docs/billing.md',
+      sourceRange: { startLine: 4, endLine: 8 },
+      text: '  The service must expose   the checkout route. ',
+      extractorVersion: '1.0.0',
+    })
+
+    expect(first).toBe(second)
+    expect(first).toMatch(/^chunk_[a-f0-9]{12}$/)
   })
 })
