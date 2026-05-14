@@ -5,6 +5,12 @@ import ignore from 'ignore'
 import { normalizePath, repoRelativePath } from './utils.js'
 
 const CODE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'])
+const EXTRA_FACT_FILE_NAMES = new Set(['docker-compose.yml', 'docker-compose.yaml', 'schema.prisma'])
+const EXTRA_FACT_PATH_PATTERNS = [
+  /^\.github\/workflows\/[^/]+\.(ya?ml)$/i,
+  /(^|\/)drizzle\/.*\.(ts|js|mts|mjs|cts|cjs)$/i,
+  /(^|\/)(models?|schema|db)\/.*\.py$/i,
+]
 export const JSX_EXTENSIONS = new Set(['.tsx', '.jsx'])
 
 const GENERATED_DIRS = new Set([
@@ -42,6 +48,8 @@ function shouldIncludeCodeFactInput(relPath: string): boolean {
   const normalized = normalizePath(relPath)
   if (normalized.split('/').some((part) => GENERATED_DIRS.has(part))) return false
   if (basename(normalized) === 'package.json') return true
+  if (EXTRA_FACT_FILE_NAMES.has(basename(normalized))) return true
+  if (EXTRA_FACT_PATH_PATTERNS.some((pattern) => pattern.test(normalized))) return true
   return CODE_EXTENSIONS.has(extname(normalized).toLowerCase())
 }
 

@@ -234,9 +234,11 @@ describe('createSpecExtractionManifest', () => {
     expect(requirement?.object).toBe('POST /api/billing/checkout')
     expect(requirement?.sourceRange).toEqual({ startLine: 9, endLine: 9 })
     expect(requirement?.constraints.map((constraint) => constraint.type)).toEqual([
+      'statusCode',
       'requestSchema',
       'responseSchema',
       'auth',
+      'securityScheme',
     ])
     expect(requirement?.id).toMatch(/^req_[a-f0-9]{12}$/)
   })

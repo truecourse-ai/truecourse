@@ -55,6 +55,54 @@ function routeHandlerName(args: ts.NodeArray<ts.Expression>): string | undefined
   return undefined
 }
 
+function collectStatusCodes(node: ts.Node): number[] {
+  const codes = new Set<number>()
+  const visit = (child: ts.Node): void => {
+    if (ts.isCallExpression(child) && ts.isPropertyAccessExpression(child.expression)) {
+      const method = child.expression.name.text
+      const firstArg = child.arguments[0]
+      if ((method === 'status' || method === 'sendStatus') && firstArg && ts.isNumericLiteral(firstArg)) {
+        const code = Number(firstArg.text)
+        if (Number.isInteger(code) && code >= 100 && code <= 599) codes.add(code)
+      }
+    }
+    ts.forEachChild(child, visit)
+  }
+  visit(node)
+  return [...codes].sort((a, b) => a - b)
+}
+
+function collectRequestFields(node: ts.Node): string[] {
+  const fields = new Set<string>()
+  const visit = (child: ts.Node): void => {
+    if (
+      ts.isPropertyAccessExpression(child)
+      && ts.isPropertyAccessExpression(child.expression)
+      && ts.isIdentifier(child.expression.expression)
+      && /^(req|request)$/i.test(child.expression.expression.text)
+      && child.expression.name.text === 'body'
+    ) {
+      fields.add(child.name.text)
+    }
+
+    if (
+      ts.isElementAccessExpression(child)
+      && ts.isPropertyAccessExpression(child.expression)
+      && ts.isIdentifier(child.expression.expression)
+      && /^(req|request)$/i.test(child.expression.expression.text)
+      && child.expression.name.text === 'body'
+      && child.argumentExpression
+      && ts.isStringLiteralLike(child.argumentExpression)
+    ) {
+      fields.add(child.argumentExpression.text)
+    }
+
+    ts.forEachChild(child, visit)
+  }
+  visit(node)
+  return [...fields].sort()
+}
+
 function resolveImportPath(fromFile: string, specifier: string, knownFiles: Set<string>): string | undefined {
   if (!specifier.startsWith('.')) return undefined
   const base = resolve(dirname(fromFile), specifier)
@@ -122,6 +170,8 @@ function collectExpressModel(unit: SourceUnit, knownFiles: Set<string>): FileRou
               path,
               ...(handlerName ? { handlerName } : {}),
               middlewares,
+              statusCodes: collectStatusCodes(node),
+              requestFields: collectRequestFields(node),
             })
           }
         }
@@ -222,6 +272,30 @@ export function emitExpressFacts(units: SourceUnit[], knownFiles: Set<string>): 
           },
           EXTRACTORS.express,
         )
+
+        for (const statusCode of route.statusCodes) {
+          pushFact(
+            unit.facts,
+            sourceFile,
+            route.sourceRange,
+            'api.response.status',
+            'status.returned',
+            { method: route.method, path, statusCode },
+            EXTRACTORS.express,
+          )
+        }
+
+        for (const field of route.requestFields) {
+          pushFact(
+            unit.facts,
+            sourceFile,
+            route.sourceRange,
+            'api.request.field',
+            'field.used',
+            { method: route.method, path, name: field },
+            EXTRACTORS.express,
+          )
+        }
 
         for (const middleware of route.middlewares.filter(isAuthName)) {
           pushFact(

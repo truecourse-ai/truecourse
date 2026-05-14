@@ -78,6 +78,30 @@ describe('extractCodeFacts', () => {
       { name: 'API_SECRET', access: 'bracket' },
     ]))
     expect(envReads).not.toContainEqual({ name: 'name', access: 'bracket' })
+
+  })
+
+  it('extracts statically visible Express request body fields and response statuses', async () => {
+    const root = tempProject()
+    writeFixture(root, 'src/api.ts', [
+      'const app = express()',
+      'app.post("/users", (req, res) => {',
+      '  if (!req.body.email) return res.status(400).json({ error: "email" })',
+      '  return res.status(201).json({ id: "u1", email: req.body["email"] })',
+      '})',
+      'app.delete("/users/:id", (_req, res) => res.sendStatus(204))',
+    ].join('\n'))
+
+    const result = await extractCodeFacts(root)
+    expect(result.errors).toEqual([])
+    expect(values<{ method: string; path: string; name: string }>(result.facts, 'api.request.field')).toEqual(expect.arrayContaining([
+      { method: 'POST', path: '/users', name: 'email' },
+    ]))
+    expect(values<{ method: string; path: string; statusCode: number }>(result.facts, 'api.response.status')).toEqual(expect.arrayContaining([
+      { method: 'POST', path: '/users', statusCode: 201 },
+      { method: 'POST', path: '/users', statusCode: 400 },
+      { method: 'DELETE', path: '/users/:id', statusCode: 204 },
+    ]))
   })
 
   it('extracts React Router JSX routes, object routes, JSX text, fields, labels, buttons, and validation text', async () => {
@@ -162,6 +186,66 @@ describe('extractCodeFacts', () => {
       expect.objectContaining({ name: 'root-package', dependencies: ['express'], devDependencies: ['typescript'] }),
       expect.objectContaining({ name: '@scope/app', dependencies: ['react'], devDependencies: [] }),
     ]))
+  })
+
+  it('extracts Prisma, Drizzle, SQLAlchemy, Docker Compose, and GitHub Actions facts', async () => {
+    const root = tempProject()
+    writeFixture(root, 'services/user/prisma/schema.prisma', [
+      'model User {',
+      '  id String @id',
+      '  email String @unique',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'services/notify/src/db/schema.ts', [
+      'import { pgTable, uuid, text } from "drizzle-orm/pg-core"',
+      'export const messages = pgTable("messages", {',
+      '  id: uuid("id").primaryKey(),',
+      '  subject: text("subject").notNull(),',
+      '})',
+    ].join('\n'))
+    writeFixture(root, 'services/billing/models/invoice.py', [
+      'from sqlalchemy import Column, Integer, String',
+      'class Invoice(Base):',
+      '    __tablename__ = "invoices"',
+      '    id = Column(Integer, primary_key=True)',
+      '    number = Column(String, nullable=False)',
+    ].join('\n'))
+    writeFixture(root, 'docker-compose.yml', [
+      'services:',
+      '  api:',
+      '    build: .',
+      '    ports: ["3000:3000"]',
+      '  redis:',
+      '    image: redis:7',
+    ].join('\n'))
+    writeFixture(root, '.github/workflows/ci.yml', [
+      'jobs:',
+      '  test:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - uses: actions/checkout@v4',
+      '      - run: pnpm test',
+    ].join('\n'))
+
+    const result = await extractCodeFacts(root)
+    expect(result.errors).toEqual([])
+    expect(values<{ name: string }>(result.facts, 'data.table')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'User' }),
+      expect.objectContaining({ name: 'messages' }),
+      expect.objectContaining({ name: 'invoices' }),
+    ]))
+    expect(values<{ table: string; name: string }>(result.facts, 'data.field')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ table: 'User', name: 'email' }),
+      expect.objectContaining({ table: 'messages', name: 'subject' }),
+      expect.objectContaining({ table: 'invoices', name: 'number' }),
+    ]))
+    expect(values<{ name: string }>(result.facts, 'infra.compose.service')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'api' }),
+      expect.objectContaining({ name: 'redis' }),
+    ]))
+    expect(values<{ name: string; runsOn: string }>(result.facts, 'infra.ci.job')).toEqual([
+      expect.objectContaining({ name: 'test', runsOn: 'ubuntu-latest' }),
+    ])
   })
 
   it('extracts test hints including nested suites, .skip/.only names, and static string references', async () => {

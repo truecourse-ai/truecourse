@@ -3183,7 +3183,7 @@ Token-based comparison algorithm to detect copy-pasted code blocks across the co
 
 ---
 
-## Phase 37: Spec Compliance Analyzer `STATUS: IN_PROGRESS`
+## Phase 37: Spec Compliance Analyzer `STATUS: DONE`
 
 Validate whether repo implementation matches repo specs by extracting atomic requirements from spec documents, extracting deterministic code facts from source/config/test files, and comparing both sides with idempotent matchers.
 
@@ -3198,7 +3198,7 @@ Current task status:
 - Phase 4 code fact extraction: `STATUS: DONE`
 - Phase 5 compliance matchers: `STATUS: DONE`
 - Phase 6 CLI and dashboard integration: `STATUS: DONE`
-- Phase 7 hardening and expansion: `STATUS: TODO`
+- Phase 7 hardening and expansion: `STATUS: DONE`
 
 Initial scope:
 
@@ -3208,3 +3208,15 @@ Initial scope:
 - Compare requirements to facts using deterministic matchers
 - Report missing, conflicting, partial, ambiguous, unverifiable, and unspecified implementation findings
 - Prove repeated runs over identical inputs produce identical output
+
+Phase 7 hardening status:
+
+- OpenAPI operation requirements now include operation IDs, status codes, request/response schema hints, required request fields, response field hints, auth, and security scheme metadata. `STATUS: DONE`
+- Express facts now include statically visible response status codes and request body field usage. `STATUS: DONE`
+- Schema/data facts now emit `data.table`, `data.field`, `data.index`, and `data.relation` from Prisma, Drizzle, and SQLAlchemy schema parser output. `STATUS: DONE`
+- Auth facts now normalize role, permission, admin-only, public-route, and ownership-style signals when statically visible. `STATUS: DONE`
+- Test coverage hints now compare requirement IDs, subject/object text, evidence text, acceptance criteria, test names, and static string references. `STATUS: DONE`
+- Infra/config facts now cover Docker Compose services, GitHub Actions jobs, and package scripts. `STATUS: DONE`
+- Spec-compliance artifacts now expose phase timing metadata and cache/LLM counters. `STATUS: DONE`
+- Remaining expansion: larger mixed-domain snapshot. `STATUS: DONE`
+- Requested Phase 7 test/build sweep (`pnpm test -- tests/analyzer tests/core tests/cli tests/dashboard-server`, `pnpm build`). `STATUS: DONE`

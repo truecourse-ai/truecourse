@@ -1,4 +1,5 @@
 import { createSpecExtractionManifest, extractCodeFacts } from '@truecourse/analyzer';
+import { performance } from 'node:perf_hooks';
 import {
   SpecComplianceConfigSchema,
   canonicalJson,
@@ -36,6 +37,24 @@ export interface SpecComplianceArtifact {
     findings: number;
     byStatus: Record<SpecComplianceFindingStatus, number>;
     bySeverity: Record<ComplianceSeverity, number>;
+  };
+  metrics: {
+    timingsMs: {
+      specDiscovery: number;
+      requirementExtraction: number;
+      factExtraction: number;
+      matching: number;
+      findingConversion: number;
+      total: number;
+    };
+    cache: {
+      requirementCacheHits: number;
+      requirementCacheMisses: number;
+      skippedProseChunks: number;
+      llmCallCount: number;
+      unchangedSpecHashCount: number;
+      unchangedCodeFactHashCount: number;
+    };
   };
 }
 
@@ -118,8 +137,11 @@ export async function runSpecComplianceAnalysis(
   repoPath: string,
   options: RunSpecComplianceOptions = {},
 ): Promise<SpecComplianceArtifact> {
+  const totalStart = performance.now();
   const config = resolveConfig(repoPath, options);
+  const specStart = performance.now();
   const manifest = createSpecExtractionManifest(repoPath, config);
+  const specDiscovery = performance.now() - specStart;
   const provider = options.provider ?? {
     model: 'no-llm',
     extractProseRequirements: async () => {
@@ -127,16 +149,31 @@ export async function runSpecComplianceAnalysis(
     },
   };
 
+  const requirementStart = performance.now();
   const requirementResult = await extractRequirementsFromManifest(repoPath, manifest, provider, {
     useLlm: config.useLlm,
   });
+  const requirementExtraction = performance.now() - requirementStart;
+  const factStart = performance.now();
   const factResult = await extractCodeFacts(repoPath);
+  const factExtraction = performance.now() - factStart;
+  const matchingStart = performance.now();
   const evaluation = evaluateSpecCompliance({
     requirements: requirementResult.requirements,
     facts: factResult.facts,
     includeSatisfiedResults: config.includeSatisfiedResults,
     includeUnspecifiedFindings: true,
   });
+  const matching = performance.now() - matchingStart;
+  const findingStart = performance.now();
+  const summary = artifactSummary({
+    requirements: requirementResult.requirements,
+    facts: factResult.facts,
+    results: evaluation.results,
+    visibleResults: evaluation.visibleResults,
+    findings: evaluation.findings,
+  });
+  const findingConversion = performance.now() - findingStart;
 
   const artifact: SpecComplianceArtifact = {
     enabled: config.enabled,
@@ -148,16 +185,38 @@ export async function runSpecComplianceAnalysis(
     visibleResults: evaluation.visibleResults,
     findings: evaluation.findings,
     errors: [...requirementResult.errors, ...factResult.errors],
-    summary: artifactSummary({
-      requirements: requirementResult.requirements,
-      facts: factResult.facts,
-      results: evaluation.results,
-      visibleResults: evaluation.visibleResults,
-      findings: evaluation.findings,
-    }),
+    summary,
+    metrics: {
+      timingsMs: {
+        specDiscovery: Math.round(specDiscovery * 1000) / 1000,
+        requirementExtraction: Math.round(requirementExtraction * 1000) / 1000,
+        factExtraction: Math.round(factExtraction * 1000) / 1000,
+        matching: Math.round(matching * 1000) / 1000,
+        findingConversion: Math.round(findingConversion * 1000) / 1000,
+        total: Math.round((performance.now() - totalStart) * 1000) / 1000,
+      },
+      cache: {
+        requirementCacheHits: requirementResult.cacheHits,
+        requirementCacheMisses: requirementResult.cacheMisses,
+        skippedProseChunks: requirementResult.skippedChunks,
+        llmCallCount: requirementResult.llmCallCount,
+        unchangedSpecHashCount: repeatedCount(manifest.files.map((file) => file.hash)),
+        unchangedCodeFactHashCount: repeatedCount(factResult.facts.map((fact) => fact.id)),
+      },
+    },
   };
 
   return sortArtifact(artifact);
+}
+
+function repeatedCount(values: string[]): number {
+  const seen = new Set<string>();
+  let repeated = 0;
+  for (const value of values) {
+    if (seen.has(value)) repeated++;
+    else seen.add(value);
+  }
+  return repeated;
 }
 
 function sortArtifact(artifact: SpecComplianceArtifact): SpecComplianceArtifact {

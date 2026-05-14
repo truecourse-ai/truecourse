@@ -9,6 +9,8 @@ export const EXTRACTORS = {
   env: { name: 'env-var-extractor', version: '1.0.0' },
   packageManifest: { name: 'package-manifest-extractor', version: '1.0.0' },
   testHint: { name: 'test-hint-extractor', version: '1.0.0' },
+  schema: { name: 'schema-fact-extractor', version: '1.0.0' },
+  infraConfig: { name: 'infra-config-extractor', version: '1.0.0' },
 } satisfies Record<string, ExtractorMetadata>
 
 export const SPEC_CODE_FACT_EXTRACTORS = [
@@ -20,4 +22,6 @@ export const SPEC_CODE_FACT_EXTRACTORS = [
   EXTRACTORS.env,
   EXTRACTORS.packageManifest,
   EXTRACTORS.testHint,
+  EXTRACTORS.schema,
+  EXTRACTORS.infraConfig,
 ]

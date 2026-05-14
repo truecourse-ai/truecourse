@@ -100,6 +100,8 @@ describe('LLM requirement extraction', () => {
 
     expect(firstProvider.calls).toHaveLength(1);
     expect(secondProvider.calls).toHaveLength(0);
+    expect(first.llmCallCount).toBe(1);
+    expect(second.llmCallCount).toBe(0);
     expect(second.cacheHits).toBe(1);
     expect(second.cacheMisses).toBe(0);
     expect(second.requirements).toEqual(first.requirements);

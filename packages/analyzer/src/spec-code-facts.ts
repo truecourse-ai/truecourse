@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { basename, extname, resolve } from 'node:path'
 import ts from 'typescript'
 import {
   SPEC_COMPLIANCE_CODE_FACT_SCHEMA_VERSION,
@@ -12,8 +12,10 @@ import { extractEnvFacts } from './spec-code-facts/env.js'
 import { emitExpressFacts } from './spec-code-facts/express.js'
 import { extractJsxFacts } from './spec-code-facts/jsx.js'
 import { SPEC_CODE_FACT_EXTRACTORS } from './spec-code-facts/metadata.js'
+import { extractInfraConfigFacts } from './spec-code-facts/infra-config.js'
 import { extractPackageFacts } from './spec-code-facts/package-manifest.js'
 import { extractReactRouteFacts } from './spec-code-facts/react-router.js'
+import { extractSchemaFacts } from './spec-code-facts/schema.js'
 import { extractTestFacts } from './spec-code-facts/test-hints.js'
 import type {
   CodeFactExtractionError,
@@ -36,7 +38,7 @@ export async function extractCodeFacts(rootDir: string): Promise<CodeFactExtract
   const errors: CodeFactExtractionError[] = []
   const files = discoverCodeFactInputs(resolvedRoot)
   const knownFiles = new Set(files.map((file) => normalizePath(resolve(file))))
-  const sourceUnits: SourceUnit[] = []
+const sourceUnits: SourceUnit[] = []
 
   for (const absPath of files) {
     const sourceFile = repoRelativePath(resolvedRoot, absPath)
@@ -53,6 +55,17 @@ export async function extractCodeFacts(rootDir: string): Promise<CodeFactExtract
       content = readFileSync(absPath, 'utf8')
     } catch (error) {
       errors.push({ sourceFile, message: error instanceof Error ? error.message : String(error) })
+      continue
+    }
+
+    try {
+      extractSchemaFacts(sourceFile, content, facts)
+      extractInfraConfigFacts(sourceFile, content, facts)
+    } catch (error) {
+      errors.push({ sourceFile, message: error instanceof Error ? error.message : String(error) })
+    }
+
+    if (!['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'].includes(extname(absPath).toLowerCase())) {
       continue
     }
 

@@ -29,6 +29,8 @@ export interface RouteRegistration {
   path: string
   handlerName?: string
   middlewares: string[]
+  statusCodes: number[]
+  requestFields: string[]
 }
 
 export interface RouterMount {

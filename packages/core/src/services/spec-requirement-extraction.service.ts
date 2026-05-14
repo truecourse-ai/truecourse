@@ -63,6 +63,7 @@ export interface RequirementExtractionResult {
   cacheHits: number;
   cacheMisses: number;
   skippedChunks: number;
+  llmCallCount: number;
 }
 
 interface RequirementCacheEntry {
@@ -198,6 +199,7 @@ export async function extractRequirementsFromManifest(
     cacheHits: 0,
     cacheMisses: 0,
     skippedChunks: 0,
+    llmCallCount: 0,
   };
 
   for (const file of manifest.files) {
@@ -229,6 +231,7 @@ export async function extractRequirementsFromManifest(
       }
 
       result.cacheMisses++;
+      result.llmCallCount++;
       try {
         const redactedText = redactSpecText(chunk.text);
         const output = await provider.extractProseRequirements({

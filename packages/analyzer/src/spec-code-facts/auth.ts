@@ -12,13 +12,28 @@ export function extractAuthFacts(unit: SourceUnit): void {
     if (ts.isCallExpression(node)) {
       const name = expressionName(node.expression)
       if (name && /^(requireAuth|requireRole|authorize|ensureAuth|requirePermission|canAccess)$/i.test(name)) {
+        const args = node.arguments.map((arg) => arg.getText(unit.ast))
+        const signal = node.getText(unit.ast)
         pushFact(
           unit.facts,
           unit.sourceFile,
           rangeOf(unit.ast, node),
           'auth.signal',
           'auth.detected',
-          { signal: node.getText(unit.ast), source: name.toLowerCase().includes('role') ? 'role-check' : 'guard-call' },
+          {
+            signal,
+            source: name.toLowerCase().includes('role')
+              ? 'role-check'
+              : name.toLowerCase().includes('permission')
+                ? 'permission-check'
+                : name.toLowerCase().includes('access')
+                  ? 'ownership-check'
+                  : 'guard-call',
+            roles: args.filter((arg) => /admin|owner|user|member|manager|editor|viewer/i.test(arg)).map((arg) => arg.replace(/^['"]|['"]$/g, '')),
+            permissions: args.filter((arg) => /[.:_-]/.test(arg)).map((arg) => arg.replace(/^['"]|['"]$/g, '')),
+            adminOnly: /admin/i.test(signal),
+            ownershipCheck: /owner|userId|canAccess|belongsTo|self/i.test(signal),
+          },
           EXTRACTORS.auth,
         )
       }
@@ -33,7 +48,13 @@ export function extractAuthFacts(unit: SourceUnit): void {
           rangeOf(unit.ast, node),
           'auth.signal',
           'auth.detected',
-          { signal: text, source: 'role-check' },
+          {
+            signal: text,
+            source: /\bpermissions?\b/i.test(text) ? 'permission-check' : 'role-check',
+            adminOnly: /\badmin\b/i.test(text),
+            ownershipCheck: /\b(owner|userId|createdBy|accountId)\b/i.test(text),
+            publicRoute: /\b(public|anonymous|unauthenticated)\b/i.test(text),
+          },
           EXTRACTORS.auth,
         )
       }

@@ -155,6 +155,29 @@ secrets before LLM calls, validates outputs into the shared requirement schema,
 and caches results under
 `<repo>/.truecourse/spec-compliance/llm-requirements/`.
 
+Spec compliance uses deterministic evidence where possible. OpenAPI specs
+produce API route requirements with operation IDs, status codes, request and
+response schema hints, required request fields, and auth/security metadata.
+Implementation facts include Express routes, visible request body field usage,
+returned status codes, auth checks, React/UI facts, package scripts, Docker
+Compose services, GitHub Actions jobs, and schema facts from Prisma, Drizzle,
+and SQLAlchemy models.
+
+Result statuses:
+
+- `missing`: required behavior has no matching implementation evidence.
+- `partial`: some related evidence exists, but a required detail is absent or
+  not fully comparable.
+- `conflicting`: implementation evidence violates a `must_not` requirement.
+- `ambiguous`: the requirement is too unclear for deterministic matching.
+- `unverifiable`: no supported fact taxonomy is available for the requirement.
+- `unspecified`: implementation evidence exists without a matching requirement.
+
+The persisted artifact also includes `metrics.timingsMs` for spec discovery,
+requirement extraction, fact extraction, matching, and finding conversion, plus
+cache counters for requirement cache hits/misses, skipped prose chunks, LLM call
+count, and unchanged hash counts.
+
 Example `.truecourse/config.json`:
 
 ```json

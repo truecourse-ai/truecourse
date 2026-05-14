@@ -366,6 +366,24 @@ function schemaNameFromRef(ref: string): string {
   return parts[parts.length - 1] || ref
 }
 
+function refPath(ref: string): string[] {
+  if (!ref.startsWith('#/')) return []
+  return ref.slice(2).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'))
+}
+
+function resolveRef(root: Record<string, unknown>, ref: string): unknown {
+  return refPath(ref).reduce<unknown>((current, segment) => isRecord(current) ? current[segment] : undefined, root)
+}
+
+function resolveSchema(root: Record<string, unknown>, schema: unknown): Record<string, unknown> | null {
+  if (!isRecord(schema)) return null
+  if (typeof schema.$ref === 'string') {
+    const resolved = resolveRef(root, schema.$ref)
+    return isRecord(resolved) ? resolved : schema
+  }
+  return schema
+}
+
 function schemaHint(schema: unknown): unknown {
   if (!isRecord(schema)) return schema
   const ref = schema.$ref
@@ -389,6 +407,28 @@ function requestSchemaHints(operation: Record<string, unknown>): unknown[] {
     })
 }
 
+function schemaFieldHints(root: Record<string, unknown>, schema: unknown): Array<{ name: string; required: boolean; schema?: unknown }> {
+  const resolved = resolveSchema(root, schema)
+  if (!resolved) return []
+  const required = new Set(Array.isArray(resolved.required) ? resolved.required.filter((item): item is string => typeof item === 'string') : [])
+  const properties = isRecord(resolved.properties) ? resolved.properties : {}
+  return Object.entries(properties)
+    .filter(([name]) => name.trim().length > 0)
+    .map(([name, property]) => ({ name, required: required.has(name), schema: schemaHint(property) }))
+}
+
+function requestFieldHints(root: Record<string, unknown>, operation: Record<string, unknown>): unknown[] {
+  const requestBody = operation.requestBody
+  if (!isRecord(requestBody)) return []
+  const content = requestBody.content
+  if (!isRecord(content)) return []
+
+  return Object.entries(content).flatMap(([mediaType, media]) => {
+    if (!isRecord(media)) return []
+    return schemaFieldHints(root, media.schema).map((field) => ({ mediaType, ...field }))
+  })
+}
+
 function responseSchemaHints(operation: Record<string, unknown>): unknown[] {
   const responses = operation.responses
   if (!isRecord(responses)) return []
@@ -404,6 +444,33 @@ function responseSchemaHints(operation: Record<string, unknown>): unknown[] {
         return schema === undefined ? [] : [{ status, mediaType, schema: schemaHint(schema) }]
       })
     })
+}
+
+function responseFieldHints(root: Record<string, unknown>, operation: Record<string, unknown>): unknown[] {
+  const responses = operation.responses
+  if (!isRecord(responses)) return []
+
+  return Object.entries(responses).flatMap(([status, response]) => {
+    if (!isRecord(response) || !isRecord(response.content)) return []
+    return Object.entries(response.content).flatMap(([mediaType, media]) => {
+      if (!isRecord(media)) return []
+      return schemaFieldHints(root, media.schema).map((field) => ({ status, mediaType, ...field }))
+    })
+  })
+}
+
+function statusCodeHints(operation: Record<string, unknown>): string[] {
+  return isRecord(operation.responses) ? Object.keys(operation.responses).sort() : []
+}
+
+function securitySchemeHints(root: Record<string, unknown>, security: unknown[]): unknown[] {
+  const schemes = isRecord(root.components) && isRecord(root.components.securitySchemes)
+    ? root.components.securitySchemes
+    : {}
+  return security.flatMap((entry) => {
+    if (!isRecord(entry)) return []
+    return Object.keys(entry).sort().map((name) => ({ name, scheme: schemes[name] ?? null }))
+  })
 }
 
 function securityHints(root: Record<string, unknown>, operation: Record<string, unknown>): unknown[] {
@@ -463,16 +530,24 @@ function extractOpenApiRequirements(sourceFile: string, content: string, root: R
       const upperMethod = method.toUpperCase()
       const route = `${upperMethod} ${path}`
       const constraints: Array<{ type: string; value: unknown }> = []
-      const requests = requestSchemaHints(operation)
-      const responses = responseSchemaHints(operation)
-      const security = securityHints(root, operation)
-
-      if (requests.length > 0) constraints.push({ type: 'requestSchema', value: requests })
-      if (responses.length > 0) constraints.push({ type: 'responseSchema', value: responses })
-      if (security.length > 0) constraints.push({ type: 'auth', value: security })
-
       const summary = typeof operation.summary === 'string' ? operation.summary : undefined
       const operationId = typeof operation.operationId === 'string' ? operation.operationId : undefined
+      const requests = requestSchemaHints(operation)
+      const responses = responseSchemaHints(operation)
+      const requestFields = requestFieldHints(root, operation)
+      const responseFields = responseFieldHints(root, operation)
+      const statusCodes = statusCodeHints(operation)
+      const security = securityHints(root, operation)
+
+      if (operationId) constraints.push({ type: 'operationId', value: operationId })
+      if (statusCodes.length > 0) constraints.push({ type: 'statusCode', value: statusCodes })
+      if (requests.length > 0) constraints.push({ type: 'requestSchema', value: requests })
+      if (requestFields.length > 0) constraints.push({ type: 'requestField', value: requestFields })
+      if (responses.length > 0) constraints.push({ type: 'responseSchema', value: responses })
+      if (responseFields.length > 0) constraints.push({ type: 'responseField', value: responseFields })
+      if (security.length > 0) constraints.push({ type: 'auth', value: security })
+      if (security.length > 0) constraints.push({ type: 'securityScheme', value: securitySchemeHints(root, security) })
+
       const subject = summary ?? operationId ?? 'OpenAPI operation'
       const evidenceText = `${sourceFile} requires ${route}${summary ? ` (${summary})` : ''}.`
 

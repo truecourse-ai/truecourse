@@ -25,6 +25,58 @@ import { hasAuthRequirement, hasRequestFieldRequirement, hasValidationMessageReq
 
 const AUTH_PATTERN = /(auth|authenticated|requireauth|ensur(e|ed)auth|guard|jwt|session|permission|role|admin|authorize)/i;
 
+function hasConstraint(requirement: { constraints: Array<{ type: string; value?: unknown }> }, pattern: RegExp): boolean {
+  return requirement.constraints.some((constraint) => pattern.test(constraint.type));
+}
+
+function constraintValuesByType(requirement: { constraints: Array<{ type: string; value?: unknown }> }, pattern: RegExp): unknown[] {
+  return requirement.constraints.filter((constraint) => pattern.test(constraint.type)).map((constraint) => constraint.value);
+}
+
+function openApiFieldNames(requirement: { constraints: Array<{ type: string; value?: unknown }> }, type: RegExp, requiredOnly = false): string[] {
+  return constraintValuesByType(requirement, type).flatMap((value) => {
+    const entries = Array.isArray(value) ? value : [value];
+    return entries.flatMap((entry) => {
+      const item = record(entry);
+      if (typeof item.name !== 'string') return [];
+      if (requiredOnly && item.required !== true) return [];
+      return [item.name];
+    });
+  });
+}
+
+function openApiStatusCodes(requirement: { constraints: Array<{ type: string; value?: unknown }> }): number[] {
+  return constraintValuesByType(requirement, /^statusCode$/i).flatMap((value) => {
+    const entries = Array.isArray(value) ? value : [value];
+    return entries.flatMap((entry) => {
+      const numeric = Number(entry);
+      return Number.isInteger(numeric) ? [numeric] : [];
+    });
+  });
+}
+
+function statusFacts(facts: CodeFact[]): CodeFact[] {
+  return facts.filter((fact) => fact.kind === 'api.response.status' && fact.predicate === 'status.returned');
+}
+
+function requestFieldFacts(facts: CodeFact[]): CodeFact[] {
+  return facts.filter((fact) => ['api.request.field', 'api.request_field'].includes(fact.kind));
+}
+
+function factRouteMatchesRoute(fact: CodeFact, route: { method?: string; path?: string }): boolean {
+  const value = record(fact.value);
+  const factPath = typeof value.path === 'string' || typeof value.route === 'string' ? normalizePath(String(value.path ?? value.route)) : undefined;
+  const factMethod = typeof value.method === 'string' ? value.method.toUpperCase() : undefined;
+  return (!route.path || !factPath || normalizePath(route.path) === factPath)
+    && (!route.method || !factMethod || route.method === factMethod);
+}
+
+function fieldFactMatches(fact: CodeFact, field: string, route: { method?: string; path?: string }): boolean {
+  const value = record(fact.value);
+  const factField = String(value.name ?? value.field ?? '');
+  return normalizeText(factField) === normalizeText(field) && factRouteMatchesRoute(fact, route);
+}
+
 function routeHasAuth(route: CodeFact, facts: CodeFact[]): CodeFact[] {
   const value = record(route.value);
   const routePath = typeof value.path === 'string' ? normalizePath(value.path) : undefined;
@@ -38,6 +90,79 @@ function routeHasAuth(route: CodeFact, facts: CodeFact[]): CodeFact[] {
 }
 
 export const complianceMatchers = [
+  makeMatcher(
+    'api.openapi_operation',
+    (requirement) => requirement.kind === 'api'
+      && Boolean(extractRoute(requirement).path)
+      && hasConstraint(requirement, /^(operationId|statusCode|requestField|responseField|securityScheme|requestSchema|responseSchema)$/i),
+    ({ requirement, facts }, metadata) => {
+      const route = extractRoute(requirement);
+      const routes = routeFacts(facts).filter((fact) => routeMatches(requirement, fact));
+      const matches: CodeFact[] = [...routes];
+      const missing: string[] = [];
+      const unverifiable: string[] = [];
+
+      if (routes.length === 0) {
+        missing.push('route');
+      }
+
+      if (hasAuthRequirement(requirement)) {
+        const authMatches = routes.flatMap((routeFact) => routeHasAuth(routeFact, facts));
+        if (routes.length > 0 && authMatches.length === 0) missing.push('auth');
+        matches.push(...authMatches);
+      }
+
+      const requiredFields = openApiFieldNames(requirement, /^requestField$/i, true);
+      if (requiredFields.length > 0) {
+        const fieldFacts = requestFieldFacts(facts);
+        if (fieldFacts.length === 0) unverifiable.push('request fields');
+        for (const field of requiredFields) {
+          const fieldMatches = fieldFacts.filter((fact) => fieldFactMatches(fact, field, route));
+          if (fieldFacts.length > 0 && fieldMatches.length === 0) missing.push(`request field ${field}`);
+          matches.push(...fieldMatches);
+        }
+      }
+
+      const expectedStatusCodes = openApiStatusCodes(requirement);
+      if (expectedStatusCodes.length > 0) {
+        const allStatusFacts = statusFacts(facts);
+        if (allStatusFacts.length === 0) unverifiable.push('response status codes');
+        for (const statusCode of expectedStatusCodes) {
+          const codeMatches = allStatusFacts.filter((fact) => Number(record(fact.value).statusCode) === statusCode && factRouteMatchesRoute(fact, route));
+          if (allStatusFacts.length > 0 && codeMatches.length === 0) missing.push(`status ${statusCode}`);
+          matches.push(...codeMatches);
+        }
+      }
+
+      const responseFields = openApiFieldNames(requirement, /^responseField$/i, false);
+      if (responseFields.length > 0 && !facts.some((fact) => fact.kind === 'api.response.field')) {
+        unverifiable.push('response fields');
+      }
+
+      const uniqueMatches = [...new Map(matches.map((fact) => [fact.id, fact])).values()];
+      let status: 'satisfied' | 'partial' | 'missing' | 'unverifiable' = 'satisfied';
+      if (routes.length === 0) status = 'missing';
+      else if (missing.length > 0) status = 'partial';
+      else if (unverifiable.length > 0) status = uniqueMatches.length > 0 ? 'partial' : 'unverifiable';
+
+      if (requirement.modality === 'must_not') {
+        const inverted = uniqueMatches.length > 0 ? 'conflicting' : 'satisfied';
+        return complianceResult(requirement, metadata, inverted, {
+          matchingFacts: inverted === 'satisfied' ? [] : [],
+          conflictingFacts: inverted === 'conflicting' ? uniqueMatches : [],
+          message: inverted === 'conflicting' ? `Prohibited OpenAPI operation evidence exists for "${requirement.subject}".` : `Prohibited OpenAPI operation is absent for "${requirement.subject}".`,
+        });
+      }
+
+      const details = [...missing, ...unverifiable.map((item) => `${item} unverifiable`)];
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: uniqueMatches,
+        message: status === 'satisfied'
+          ? `OpenAPI operation is satisfied for "${requirement.subject}".`
+          : `OpenAPI operation is ${status} for "${requirement.subject}"${details.length ? `: ${details.join(', ')}.` : '.'}`,
+      });
+    },
+  ),
   makeMatcher(
     'api.route.exists',
     (requirement) => requirement.kind === 'api' && Boolean(extractRoute(requirement).path) && !hasAuthRequirement(requirement) && !hasRequestFieldRequirement(requirement),
@@ -210,11 +335,36 @@ export const complianceMatchers = [
     },
   ),
   makeMatcher(
+    'infra.config_fact_exists',
+    (requirement) => requirement.kind === 'infra' || (requirement.kind === 'config' && !extractEnvVar(requirement)),
+    ({ requirement, facts }, metadata) => {
+      const target = requirement.object ?? requirement.subject;
+      const candidates = facts.filter((fact) => fact.kind.startsWith('infra.') || fact.kind === 'package.script');
+      if (candidates.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `Infra/config facts are unavailable for "${requirement.subject}".` });
+      }
+      const matches = candidates.filter((fact) => hasSubstantialOverlap(factValueText(fact), target) || hasSubstantialOverlap(factValueText(fact), requirement.evidenceText));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Infra/config requirement "${target}" has matching evidence.` : `Infra/config requirement "${target}" has no matching evidence.`,
+      });
+    },
+  ),
+  makeMatcher(
     'test.coverage_hint_exists',
     (requirement) => requirement.kind === 'test',
     ({ requirement, facts }, metadata) => {
+      const targets = [
+        requirement.id,
+        requirement.subject,
+        requirement.object,
+        requirement.evidenceText,
+        ...(requirement.acceptanceCriteria ?? []),
+      ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      const matches = facts.filter((fact) => fact.kind === 'test.case' && fact.predicate === 'test.named' && targets.some((target) => hasSubstantialOverlap(factValueText(fact), target)));
       const target = requirement.object ?? requirement.subject;
-      const matches = facts.filter((fact) => fact.kind === 'test.case' && fact.predicate === 'test.named' && hasSubstantialOverlap(factValueText(fact), target));
       const status = invertStatus(requirement, matches.length > 0);
       return complianceResult(requirement, metadata, status, {
         matchingFacts: requirement.modality === 'must_not' ? [] : matches,
@@ -229,4 +379,3 @@ export const complianceMatchers = [
     ({ requirement }, metadata) => complianceResult(requirement, metadata, 'unverifiable', { message: `No deterministic matcher can evaluate "${requirement.subject}".` }),
   ),
 ];
-

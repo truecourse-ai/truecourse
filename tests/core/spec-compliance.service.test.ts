@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../packages/shared/src/types/spec-compliance';
 import {
+  type RunSpecComplianceOptions,
   runSpecComplianceAnalysis,
 } from '../../packages/core/src/services/spec-compliance.service';
 import { computeSpecComplianceViolationLifecycle } from '../../packages/core/src/services/spec-compliance-lifecycle.service';
@@ -27,7 +28,7 @@ function writeProject(root: string): void {
   writeFixture(root, 'src/server.ts', [
     "import express from 'express'",
     'const app = express()',
-    "app.get('/health', (_req, res) => res.json({ ok: true }))",
+    "app.get('/health', (_req, res) => res.status(200).json({ ok: true }))",
   ].join('\n'));
   writeFixture(root, 'docs/openapi.yaml', [
     'openapi: 3.0.0',
@@ -39,6 +40,38 @@ function writeProject(root: string): void {
     '        "200":',
     '          description: OK',
   ].join('\n'));
+}
+
+function mockProvider(): Required<RunSpecComplianceOptions>['provider'] & { calls: unknown[] } {
+  const calls: unknown[] = [];
+  return {
+    model: 'spec-compliance-service-cache-test',
+    calls,
+    async extractProseRequirements(input: unknown) {
+      calls.push(input);
+      return {
+        requirements: [
+          {
+            kind: 'api',
+            modality: 'must',
+            subject: 'health route',
+            action: 'expose',
+            object: 'GET /health',
+            constraints: [],
+            evidenceText: 'The health route must expose GET /health.',
+            confidence: 0.95,
+          },
+        ],
+      };
+    },
+  };
+}
+
+function withoutTimings<T extends { metrics?: { timingsMs?: unknown } }>(artifact: T): T {
+  return {
+    ...artifact,
+    metrics: artifact.metrics ? { ...artifact.metrics, timingsMs: {} } : artifact.metrics,
+  };
 }
 
 afterEach(() => {
@@ -69,7 +102,21 @@ describe('runSpecComplianceAnalysis', () => {
     expect(first.requirements).toHaveLength(1);
     expect(first.facts.some((fact) => fact.kind === 'api.route')).toBe(true);
     expect(first.results.map((result) => result.status)).toEqual(['satisfied']);
-    expect(canonicalJson(second)).toBe(canonicalJson(first));
+    expect(first.metrics.cache).toMatchObject({
+      requirementCacheHits: 0,
+      requirementCacheMisses: 0,
+      skippedProseChunks: 0,
+      llmCallCount: 0,
+    });
+    expect(Object.keys(first.metrics.timingsMs)).toEqual([
+      'specDiscovery',
+      'requirementExtraction',
+      'factExtraction',
+      'matching',
+      'findingConversion',
+      'total',
+    ]);
+    expect(canonicalJson(withoutTimings(second))).toBe(canonicalJson(withoutTimings(first)));
   });
 
   it('no-LLM mode skips prose extraction but keeps structured requirements, facts, and matchers', async () => {
@@ -87,6 +134,47 @@ describe('runSpecComplianceAnalysis', () => {
     expect(artifact.errors.some((error) => error.message.includes('LLM extraction is disabled'))).toBe(true);
     expect(artifact.facts.length).toBeGreaterThan(0);
     expect(artifact.results).toHaveLength(1);
+  });
+
+  it('reports prose requirement cache hits and stable results across identical service runs', async () => {
+    const root = tempProject();
+    writeFixture(root, 'package.json', JSON.stringify({ dependencies: { express: '^4.18.0' } }, null, 2));
+    writeFixture(root, 'src/server.ts', [
+      "import express from 'express'",
+      'const app = express()',
+      "app.get('/health', (_req, res) => res.status(200).json({ ok: true }))",
+    ].join('\n'));
+    writeFixture(root, 'docs/product.md', '# Product\n\nThe health route must expose GET /health.\n');
+
+    const firstProvider = mockProvider();
+    const first = await runSpecComplianceAnalysis(root, {
+      enabled: true,
+      specs: ['docs/product.md'],
+      provider: firstProvider,
+      showSatisfied: true,
+    });
+    const secondProvider = mockProvider();
+    const second = await runSpecComplianceAnalysis(root, {
+      enabled: true,
+      specs: ['docs/product.md'],
+      provider: secondProvider,
+      showSatisfied: true,
+    });
+
+    expect(firstProvider.calls).toHaveLength(1);
+    expect(secondProvider.calls).toHaveLength(0);
+    expect(first.metrics.cache).toMatchObject({
+      requirementCacheHits: 0,
+      requirementCacheMisses: 1,
+      llmCallCount: 1,
+    });
+    expect(second.metrics.cache).toMatchObject({
+      requirementCacheHits: 1,
+      requirementCacheMisses: 0,
+      llmCallCount: 0,
+    });
+    expect(second.requirements).toEqual(first.requirements);
+    expect(second.results).toEqual(first.results);
   });
 });
 

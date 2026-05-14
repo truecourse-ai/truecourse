@@ -136,6 +136,44 @@ describe('evaluateSpecCompliance', () => {
     expect(evaluateSpecCompliance({ requirements, facts, includeSatisfiedResults: true }).results.map((item) => item.status)).toEqual(['satisfied', 'satisfied'])
   })
 
+  it('matches OpenAPI operation status codes, required request fields, and auth partially', () => {
+    const requirements = [
+      req('req_openapi_satisfied', {
+        kind: 'api',
+        subject: 'create user',
+        object: 'POST /users',
+        constraints: [
+          { type: 'statusCode', value: ['201'] },
+          { type: 'requestField', value: [{ name: 'email', required: true }] },
+          { type: 'auth', value: [{ bearerAuth: [] }] },
+        ],
+      }),
+      req('req_openapi_partial', {
+        kind: 'api',
+        subject: 'create account',
+        object: 'POST /accounts',
+        constraints: [
+          { type: 'statusCode', value: ['201'] },
+          { type: 'requestField', value: [{ name: 'email', required: true }] },
+        ],
+      }),
+    ]
+    const facts = [
+      fact('fact_users', { kind: 'api.route', predicate: 'route.exists', value: { method: 'POST', path: '/users', middlewares: ['requireAuth'] } }),
+      fact('fact_users_auth', { kind: 'auth.signal', predicate: 'auth.detected', value: { signal: 'requireAuth', source: 'middleware', route: '/users' } }),
+      fact('fact_users_status', { kind: 'api.response.status', predicate: 'status.returned', value: { method: 'POST', path: '/users', statusCode: 201 } }),
+      fact('fact_users_field', { kind: 'api.request.field', predicate: 'field.used', value: { method: 'POST', path: '/users', name: 'email' } }),
+      fact('fact_accounts', { kind: 'api.route', predicate: 'route.exists', value: { method: 'POST', path: '/accounts', middlewares: [] } }),
+      fact('fact_accounts_status', { kind: 'api.response.status', predicate: 'status.returned', value: { method: 'POST', path: '/accounts', statusCode: 200 } }),
+      fact('fact_accounts_field', { kind: 'api.request.field', predicate: 'field.used', value: { method: 'POST', path: '/accounts', name: 'name' } }),
+    ]
+
+    expect(Object.fromEntries(evaluateSpecCompliance({ requirements, facts, includeSatisfiedResults: true }).results.map((item) => [item.requirementId, item.status]))).toEqual({
+      req_openapi_partial: 'partial',
+      req_openapi_satisfied: 'satisfied',
+    })
+  })
+
   it('matches UI routes, text, form fields, and validation messages', () => {
     const requirements = [
       req('req_field', { kind: 'ui', subject: 'email field', object: 'email', evidenceText: 'The form must include an email field.' }),
