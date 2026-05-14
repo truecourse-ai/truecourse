@@ -25,9 +25,11 @@
  *           Convenience: accept the engine's pre-pick on every
  *           currently-open conflict in one shot.
  *
- *   POST  /api/repos/:id/spec/apply
- *           Run consolidate({ materialize: true }). Returns the
- *           result + IL extraction summary chained from Module 2.
+*   POST  /api/repos/:id/spec/apply
+ *           Run consolidate({ materialize: true }) and persist the
+ *           scan-state. Materialize-only — IL extraction is exposed
+ *           as a separate `POST /api/repos/:id/contracts/generate`
+ *           so the dashboard can drive the two phases independently.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -47,9 +49,12 @@ import { resolveProjectForRequest } from '@truecourse/core/config/current-projec
 import {
   APPLY_STEPS,
   applyInProcess,
+  appliedMarkerPath,
+  generatedMarkerPath,
   resolveAllDefaultsInProcess,
   SCAN_STEPS,
   scanInProcess,
+  verifyStatePath,
 } from '@truecourse/core/commands/spec-in-process';
 import {
   createSocketSpecTracker,
@@ -165,6 +170,34 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// DELETE /api/repos/:id/spec/decisions/:conflictId — revoke one decision
+// ---------------------------------------------------------------------------
+
+router.delete(
+  '/:id/spec/decisions/:conflictId',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const conflictId = req.params.conflictId as string;
+      const existing = readDecisions(repo.path);
+      const filtered = existing.decisions.filter(
+        (d) => d.conflictId !== conflictId,
+      );
+      if (filtered.length === existing.decisions.length) {
+        // Idempotent: no-op when the decision is already absent.
+        res.json(existing);
+        return;
+      }
+      const nextFile: DecisionsFile = { version: 1, decisions: filtered };
+      writeDecisions(repo.path, nextFile);
+      res.json(nextFile);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // POST /api/repos/:id/spec/decisions/batch — accept all defaults
 // ---------------------------------------------------------------------------
 
@@ -190,7 +223,7 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// POST /api/repos/:id/spec/apply — materialize + chain into IL extraction
+// POST /api/repos/:id/spec/apply — materialize the canonical spec
 // ---------------------------------------------------------------------------
 
 router.post(
@@ -203,7 +236,7 @@ router.post(
       const tracker = createSocketSpecTracker(repoIdForCleanup, APPLY_STEPS.map((s) => ({ ...s })));
       const outcome = await applyInProcess(repo.path, { tracker });
 
-      const response: Record<string, unknown> = {
+      const response = {
         merge: {
           resolved: outcome.consolidate.merge.resolvedClaims.length,
           decided: outcome.consolidate.merge.decidedConflicts.length,
@@ -219,19 +252,12 @@ router.post(
               })),
             }
           : null,
+        // Apply already produced a fresh scan-state; ship it back so
+        // the client can update its view without a follow-up
+        // `GET /spec/scan` (which would re-emit progress events and
+        // surface a second popup right after the toast).
+        scanState: outcome.scanState,
       };
-
-      if (outcome.il.kind === 'extracted') {
-        response.il = {
-          written: outcome.il.result.write.written.length,
-          validationIssues: outcome.il.result.validationIssues,
-          mergeDiagnostics: outcome.il.result.mergeDiagnostics,
-        };
-      } else if (outcome.il.kind === 'failed') {
-        response.il = { error: outcome.il.error.message };
-      } else {
-        response.il = { skipped: outcome.il.reason };
-      }
 
       emitSpecComplete(repoIdForCleanup, 'apply');
       res.json(response);
@@ -247,6 +273,72 @@ router.post(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// GET /api/repos/:id/spec/staleness
+// ---------------------------------------------------------------------------
+
+/**
+ * Cheap mtime probe that drives the "unapplied / ungenerated /
+ * unverified changes" dots on the Apply, Generate, and Verify buttons.
+ *
+ *   specStale       decisions.json is newer than the last Apply marker
+ *                   (or the marker is missing → never applied)
+ *   contractsStale  last Apply marker is newer than the last Generate
+ *                   marker (or the Generate marker is missing → never
+ *                   generated against the current canonical)
+ *   verifyStale     last Generate marker is newer than verify-state.json
+ *                   (or verify-state.json is missing → never verified
+ *                   against current contracts). We use verify-state.json
+ *                   itself as the marker; `verifyInProcess` rewrites it
+ *                   on every successful run.
+ *
+ * Markers are stamped by `applyInProcess` / `generateContractsInProcess`
+ * / `verifyInProcess` so CLI and dashboard both feed the same signal.
+ */
+router.get(
+  '/:id/spec/staleness',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const decisionsFile = path.join(repo.path, '.truecourse', 'spec', 'decisions.json');
+      const decisionsMtime = mtimeIfExists(decisionsFile);
+      const appliedMtime = mtimeIfExists(appliedMarkerPath(repo.path));
+      const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
+      const verifiedMtime = mtimeIfExists(verifyStatePath(repo.path));
+
+      const specStale =
+        decisionsMtime !== null &&
+        (appliedMtime === null || decisionsMtime > appliedMtime);
+      const contractsStale =
+        appliedMtime !== null &&
+        (generatedMtime === null || appliedMtime > generatedMtime);
+      const verifyStale =
+        generatedMtime !== null &&
+        (verifiedMtime === null || generatedMtime > verifiedMtime);
+
+      res.json({
+        specStale,
+        contractsStale,
+        verifyStale,
+        hasDecisions: decisionsMtime !== null,
+        hasApplied: appliedMtime !== null,
+        hasGenerated: generatedMtime !== null,
+        hasVerified: verifiedMtime !== null,
+      });
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+function mtimeIfExists(file: string): number | null {
+  try {
+    return fs.statSync(file).mtimeMs;
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/canonical/tree

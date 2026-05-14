@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import { Loader2, AlertCircle, Folder, FileCode2, ChevronRight, ChevronDown } from 'lucide-react';
+import { EmptyState } from '@/components/ui/empty-state';
 import type { ContractsTree } from '@/lib/api';
 
 interface ContractsPanelProps {
@@ -36,22 +37,22 @@ export function ContractsPanel({ tree, isLoading, error, activePath, onOpen }: C
   }
   if (!tree || !tree.hasContracts) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-sm text-muted-foreground">
-        <FileCode2 className="h-6 w-6" />
-        <div>
-          <div className="font-semibold">No contracts yet</div>
-          <div className="mt-1 text-xs">
-            Resolve all open conflicts in <strong>Spec</strong> and click{' '}
-            <strong>Apply</strong> — contracts are generated from the canonical
-            spec.
-          </div>
-        </div>
-      </div>
+      <EmptyState
+        icon={FileCode2}
+        title="No contracts yet"
+        body={
+          <>
+            Resolve all open conflicts in <strong>Spec</strong>, click{' '}
+            <strong>Apply</strong>, then click <strong>Generate</strong> here to
+            extract IL contracts.
+          </>
+        }
+      />
     );
   }
 
   return (
-    <div className="flex flex-col gap-1 overflow-auto py-1">
+    <div className="h-full overflow-auto">
       {tree.modules.map((m) => (
         <ModuleGroup
           key={m.name}
@@ -83,17 +84,21 @@ function ModuleGroup({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+        className={`sticky top-0 z-10 flex w-full items-center justify-between gap-2 border-b border-border bg-card/80 px-4 py-1.5 text-left text-[10px] uppercase tracking-wider hover:text-foreground ${
+          childActive ? 'text-foreground' : 'text-muted-foreground'
+        }`}
         aria-expanded={open}
       >
-        {open ? (
-          <ChevronDown className="h-3 w-3 shrink-0" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0" />
-        )}
-        <Folder className="h-3.5 w-3.5 shrink-0" />
-        <span className={`flex-1 truncate ${childActive ? 'text-foreground' : ''}`}>{label}</span>
-        <span className="ml-auto text-[10px] text-muted-foreground/60">{files.length}</span>
+        <div className="flex min-w-0 items-center gap-1.5">
+          {open ? (
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0" />
+          )}
+          <Folder className="h-3 w-3 shrink-0" />
+          <span className="truncate">{label}</span>
+        </div>
+        <span>{files.length}</span>
       </button>
       {open &&
         files.map((f) => {
@@ -108,8 +113,10 @@ function ModuleGroup({
               type="button"
               onClick={() => onOpen(f.path, false)}
               onDoubleClick={() => onOpen(f.path, true)}
-              className={`flex w-full items-center gap-1.5 px-3 py-1.5 pl-9 text-left text-xs transition-colors ${
-                isActive ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+              className={`flex w-full items-center gap-2 border-b border-border/60 px-4 py-2 pl-9 text-left text-xs transition-colors ${
+                isActive
+                  ? 'bg-primary/10 text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
               }`}
               title={`${f.path} — click to preview, double-click to pin`}
             >

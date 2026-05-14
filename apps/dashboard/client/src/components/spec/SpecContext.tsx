@@ -18,6 +18,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { toast } from 'sonner';
 import * as api from '@/lib/api';
 import type {
   SpecApplyResponse,
@@ -49,6 +50,9 @@ export interface SpecContextValue {
   ) => Promise<void>;
   /** Accept the engine's default pick on every open conflict. */
   acceptAllDefaults: () => Promise<void>;
+  /** Revoke a previously saved decision and re-scan so the conflict
+   *  re-opens with its candidates intact. */
+  revokeDecision: (conflictId: string) => Promise<void>;
   /** Write the canonical spec + run IL extraction. */
   apply: () => Promise<void>;
 }
@@ -95,7 +99,7 @@ export function SpecProvider({
       const r = await api.getSpecScan(repoId);
       setScan(r);
     } catch (e) {
-      setError((e as Error).message);
+      reportError('Spec scan failed', e, setError);
     } finally {
       setLoading(false);
     }
@@ -112,7 +116,7 @@ export function SpecProvider({
         });
         await refresh();
       } catch (e) {
-        setError((e as Error).message);
+        reportError('Saving decision failed', e, setError);
       } finally {
         setBusyConflictId(null);
       }
@@ -126,11 +130,26 @@ export function SpecProvider({
       await api.postSpecDecisionsBatch(repoId, 'all-defaults');
       await refresh();
     } catch (e) {
-      setError((e as Error).message);
+      reportError('Accept all defaults failed', e, setError);
     } finally {
       setLoading(false);
     }
   }, [repoId, refresh]);
+
+  const revokeDecision = useCallback(
+    async (conflictId: string) => {
+      setBusyConflictId(conflictId);
+      try {
+        await api.deleteSpecDecision(repoId, conflictId);
+        await refresh();
+      } catch (e) {
+        reportError('Revoking decision failed', e, setError);
+      } finally {
+        setBusyConflictId(null);
+      }
+    },
+    [repoId, refresh],
+  );
 
   const apply = useCallback(async () => {
     setApplying(true);
@@ -138,17 +157,21 @@ export function SpecProvider({
     try {
       const r = await api.postSpecApply(repoId);
       setApplyResult(r);
+      // The apply route returns a fresh scan-state — adopt it
+      // directly instead of calling `refresh()`, which would fire a
+      // second `GET /spec/scan` and surface a second progress popup
+      // right after the result toast.
+      setScan(r.scanState);
       // Canonical files were just rewritten — bump the version so
       // SpecCanonicalPanel re-fetches the tree on its next mount /
       // effect run.
       setCanonicalVersion((v) => v + 1);
-      await refresh();
     } catch (e) {
-      setError((e as Error).message);
+      reportError('Apply failed', e, setError);
     } finally {
       setApplying(false);
     }
-  }, [repoId, refresh]);
+  }, [repoId]);
 
   const value = useMemo<SpecContextValue>(
     () => ({
@@ -163,6 +186,7 @@ export function SpecProvider({
       refresh,
       resolveConflict,
       acceptAllDefaults,
+      revokeDecision,
       apply,
     }),
     [
@@ -177,6 +201,7 @@ export function SpecProvider({
       refresh,
       resolveConflict,
       acceptAllDefaults,
+      revokeDecision,
       apply,
     ],
   );
@@ -190,4 +215,19 @@ export function useSpec(): SpecContextValue {
     throw new Error('useSpec must be used inside <SpecProvider>');
   }
   return ctx;
+}
+
+/**
+ * Surface a Spec-pipeline error to the user. Both fire a toast (so the
+ * user sees it from any tab) and write to `error` state (so SpecPanel's
+ * inline alert still works when the user is on the Spec tab).
+ */
+function reportError(
+  title: string,
+  err: unknown,
+  setError: (msg: string | null) => void,
+): void {
+  const message = err instanceof Error ? err.message : String(err);
+  setError(message);
+  toast.error(title, { description: message });
 }

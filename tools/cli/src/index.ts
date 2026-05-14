@@ -31,6 +31,7 @@ import {
   runSpecApply,
   runSpecStatus,
   runSpecDiff,
+  runVerify,
 } from "./commands/spec.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
@@ -230,6 +231,15 @@ specCmd
   .description("Show what would change if you ran `spec apply` now")
   .action(async () => {
     await runSpecDiff();
+  });
+
+// Verify — compares generated IL contracts against the code.
+program
+  .command("verify")
+  .description("Compare code against the canonical IL contracts")
+  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
+  .action(async (options) => {
+    await runVerify({ codeDir: options.codeDir });
   });
 
 // Rules management — reads/writes per-repo config.json directly. No server needed.

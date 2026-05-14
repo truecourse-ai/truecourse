@@ -26,7 +26,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { SpecConflict, SpecResolution } from '@/lib/api';
+import type { SpecConflict, SpecDecision, SpecResolution } from '@/lib/api';
 import { useSpec } from './SpecContext';
 
 interface SpecConflictDetailProps {
@@ -35,21 +35,35 @@ interface SpecConflictDetailProps {
 }
 
 export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailProps) {
-  const { scan, busyConflictId, resolveConflict } = useSpec();
-  const conflict = scan?.openConflicts.find((c) => c.id === conflictId);
+  const { scan, busyConflictId, resolveConflict, revokeDecision } = useSpec();
+  // Look in both lists — the detail view is rendered from the Spec tab
+  // (where conflicts come from `openConflicts`) and from the Decisions
+  // tab (where they come from `decidedConflicts`).
+  const openMatch = scan?.openConflicts.find((c) => c.id === conflictId);
+  const decidedMatch = scan?.decidedConflicts.find(
+    (d) => d.conflict.id === conflictId,
+  );
+  const conflict = openMatch ?? decidedMatch?.conflict;
+  const decision: SpecDecision | undefined = decidedMatch?.decision;
+  const isDecided = !!decision;
   const isVersionChain = !!conflict?.candidates[0]?.claim.id.startsWith('version-chain:');
 
-  // Selected candidate within this conflict. Default = recommended.
-  const [selectedIndex, setSelectedIndex] = useState<number>(
-    conflict?.defaultPick ?? 0,
-  );
-  // Reset selection whenever the user navigates to a different conflict.
+  // Selected candidate within this conflict. For decided conflicts,
+  // open on the candidate the user picked (if any) so they can see
+  // exactly what's currently committed. Otherwise, open on the
+  // engine's recommended pick.
+  const initialIndex =
+    decision?.resolution.kind === 'pick'
+      ? decision.resolution.candidateIndex
+      : (conflict?.defaultPick ?? 0);
+  const [selectedIndex, setSelectedIndex] = useState<number>(initialIndex);
   useEffect(() => {
-    setSelectedIndex(conflict?.defaultPick ?? 0);
-  }, [conflict?.id, conflict?.defaultPick]);
+    setSelectedIndex(initialIndex);
+    // Intentional: only reset when navigating to a different conflict.
+  }, [conflict?.id]);
 
-  // Auto-clear if this conflict disappears from the open list (user
-  // resolved it).
+  // Auto-clear if the conflict disappears from both lists (e.g. the
+  // doc was removed and a rescan dropped it entirely).
   useEffect(() => {
     if (scan && !conflict && onClose) onClose();
   }, [scan, conflict, onClose]);
@@ -82,9 +96,16 @@ export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailPr
   const onSaveCustom = () =>
     resolveConflict(conflict, { kind: 'custom', content: customText.trim() });
 
+  const onRevoke = () => revokeDecision(conflict.id);
+
   return (
     <div className="flex h-full flex-col bg-background">
-      <DetailHeader conflict={conflict} isVersionChain={isVersionChain} onClose={onClose} />
+      <DetailHeader
+        conflict={conflict}
+        isVersionChain={isVersionChain}
+        decision={decision}
+        onClose={onClose}
+      />
       <div className="flex flex-1 min-h-0">
         <CandidateSidebar
           conflict={conflict}
@@ -133,11 +154,13 @@ export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailPr
         conflict={conflict}
         isVersionChain={isVersionChain}
         isDefault={isDefault}
+        isDecided={isDecided}
         busy={busy}
         customMode={customMode}
         onPick={onPick}
         onKeepAll={onKeepAll}
         onOpenCustom={() => setCustomMode(true)}
+        onRevoke={onRevoke}
       />
     </div>
   );
@@ -150,10 +173,12 @@ export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailPr
 function DetailHeader({
   conflict,
   isVersionChain,
+  decision,
   onClose,
 }: {
   conflict: SpecConflict;
   isVersionChain: boolean;
+  decision?: SpecDecision;
   onClose?: () => void;
 }) {
   const label = isVersionChain
@@ -181,6 +206,14 @@ function DetailHeader({
         <span className="ml-2 shrink-0 text-xs text-muted-foreground">
           {conflict.candidates.length} candidates
         </span>
+        {decision && (
+          <span
+            className="ml-2 shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300"
+            title={`Decided ${new Date(decision.resolvedAt).toLocaleString()}`}
+          >
+            decided
+          </span>
+        )}
       </div>
       {onClose && (
         <Button size="sm" variant="ghost" onClick={onClose} title="Close detail view">
@@ -513,49 +546,75 @@ function ActionFooter({
   conflict,
   isVersionChain,
   isDefault,
+  isDecided,
   busy,
   customMode,
   onPick,
   onKeepAll,
   onOpenCustom,
+  onRevoke,
 }: {
   conflict: SpecConflict;
   isVersionChain: boolean;
   isDefault: boolean;
+  isDecided: boolean;
   busy: boolean;
   customMode: boolean;
   onPick: () => void;
   onKeepAll: () => void;
   onOpenCustom: () => void;
+  onRevoke: () => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border bg-card px-6 py-3">
-      {isVersionChain ? (
+    <div className="flex shrink-0 items-center gap-2 border-t border-border bg-card px-6 py-3">
+      {isDecided && (
         <Button
           size="sm"
-          variant="outline"
-          onClick={onKeepAll}
+          variant="ghost"
+          onClick={onRevoke}
           disabled={busy}
-          title="Keep all docs — claims from every version flow through unfiltered"
+          className="text-destructive hover:text-destructive"
+          title="Revoke this decision — the conflict will re-open"
         >
-          Keep all docs
+          Revoke decision
         </Button>
-      ) : (
-        !customMode && (
-          <Button size="sm" variant="outline" onClick={onOpenCustom} disabled={busy}>
-            Write custom answer
-          </Button>
-        )
       )}
-      <Button size="sm" onClick={onPick} disabled={busy}>
-        {busy ? (
-          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+      <div className="ml-auto flex items-center gap-2">
+        {isVersionChain ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onKeepAll}
+            disabled={busy}
+            title="Keep all docs — claims from every version flow through unfiltered"
+          >
+            Keep all docs
+          </Button>
         ) : (
-          <Check className="mr-2 h-3.5 w-3.5" />
+          !customMode && (
+            <Button size="sm" variant="outline" onClick={onOpenCustom} disabled={busy}>
+              Write custom answer
+            </Button>
+          )
         )}
-        {isVersionChain ? 'Use this version' : 'Pick this candidate'}
-        {isDefault && <span className="ml-1.5 text-[10px] opacity-70">(recommended)</span>}
-      </Button>
+        <Button size="sm" onClick={onPick} disabled={busy}>
+          {busy ? (
+            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="mr-2 h-3.5 w-3.5" />
+          )}
+          {isDecided
+            ? isVersionChain
+              ? 'Use this version instead'
+              : 'Change to this candidate'
+            : isVersionChain
+              ? 'Use this version'
+              : 'Pick this candidate'}
+          {!isDecided && isDefault && (
+            <span className="ml-1.5 text-[10px] opacity-70">(recommended)</span>
+          )}
+        </Button>
+      </div>
       <span className="sr-only">
         {conflict.candidates.length} candidates total
       </span>

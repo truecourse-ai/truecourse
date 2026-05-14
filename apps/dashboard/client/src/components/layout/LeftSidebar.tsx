@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Home,
   AlertTriangle,
+  AlertCircle,
   FolderTree,
   Workflow,
   Database,
@@ -13,6 +14,7 @@ import {
   ShieldCheck,
   GitMerge,
 } from 'lucide-react';
+import { HoverPopover } from '@/components/ui/hover-popover';
 
 export type LeftTab =
   | 'home'
@@ -79,6 +81,12 @@ type LeftSidebarProps = {
   defaultWidth?: number;
   minWidth?: number;
   badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
+  /**
+   * Per-tab advisory: when set, an amber warning icon is rendered on the
+   * rail button and (for the active tab) inside the panel header. The
+   * value is the tooltip text shown on hover.
+   */
+  tabWarnings?: Partial<Record<LeftTab, string | null>>;
 };
 
 export function LeftSidebar({
@@ -89,6 +97,7 @@ export function LeftSidebar({
   defaultWidth = 350,
   minWidth = 260,
   badgeCounts,
+  tabWarnings,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
@@ -194,6 +203,17 @@ export function LeftSidebar({
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTab ? TAB_LABELS[activeTab] : ''}
             </span>
+            {(() => {
+              const warning = activeTab ? tabWarnings?.[activeTab] : undefined;
+              if (!warning) return null;
+              return (
+                <HoverPopover align="start" width="wide" content={warning}>
+                  <span className="flex items-center text-amber-400">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                  </span>
+                </HoverPopover>
+              );
+            })()}
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
               if (badge == null) return null;

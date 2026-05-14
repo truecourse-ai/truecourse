@@ -12,11 +12,12 @@
  */
 
 import { useEffect } from 'react';
-import { Loader2, AlertCircle, Play, GitBranch } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Loader2, AlertCircle, GitBranch, Play } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useSpec } from './SpecContext';
 import { SpecCanonicalPanel } from './SpecCanonicalPanel';
+import { SpecStats } from './SpecStats';
 import type { CanonicalSpecTree, SpecConflict, SpecScanResponse } from '@/lib/api';
 
 /**
@@ -55,7 +56,7 @@ export function SpecPanel({
   onOpenCanonicalFile,
   onSelectCanonicalFile,
 }: SpecPanelProps) {
-  const { scan, hydrating, loading, error, refresh } = useSpec();
+  const { scan, hydrating, loading, error } = useSpec();
   const view = deriveSpecView(scan);
 
   // When the view flips (because a scan resolved or surfaced
@@ -70,7 +71,8 @@ export function SpecPanel({
   }, [view, activeConflictId, activeCanonicalPath, onSelectConflict, onSelectCanonicalFile]);
 
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
+    <div className="flex h-full flex-col">
+      <SpecStats />
       {error && (
         <div className="border-b border-border px-4 py-2">
           <Alert variant="destructive">
@@ -82,10 +84,8 @@ export function SpecPanel({
       <div className="flex-1 overflow-auto">
         {hydrating ? (
           <CenteredSpinner />
-        ) : !scan && !loading ? (
-          <NoScanYet onScan={refresh} />
-        ) : loading && !scan ? (
-          <ScanningPlaceholder />
+        ) : !scan ? (
+          <NoScanYet />
         ) : view === 'canonical' ? (
           <SpecCanonicalPanel
             tree={canonicalTree}
@@ -293,31 +293,18 @@ function CenteredSpinner() {
   );
 }
 
-function NoScanYet({ onScan }: { onScan: () => void }) {
+function NoScanYet() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-      <Play className="h-8 w-8 text-muted-foreground" />
-      <div>
-        <h3 className="text-sm font-semibold">No scan yet</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Run a scan to discover docs, extract claims, and surface conflicts.
-        </p>
-      </div>
-      <Button onClick={onScan} size="sm">
-        <Play className="mr-2 h-4 w-4" />
-        Run scan
-      </Button>
-    </div>
+    <EmptyState
+      icon={Play}
+      title="No scan yet"
+      body={
+        <>
+          Click <strong>Scan</strong> in the header to discover docs, extract
+          claims, and surface conflicts.
+        </>
+      }
+    />
   );
 }
-
-function ScanningPlaceholder() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-      <Loader2 className="h-6 w-6 animate-spin" />
-      <span>Scanning docs…</span>
-    </div>
-  );
-}
-
 
