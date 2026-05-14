@@ -30,13 +30,19 @@ import {
   type ScanState,
 } from '@truecourse/spec-consolidator';
 import {
-  CanonicalSpecMissingError,
   defaultConcurrency as defaultExtractorConcurrency,
   generateContracts,
   hasCanonicalSpec,
   spawnRunner as spawnExtractorRunner,
   type GenerateResult,
 } from '@truecourse/contract-extractor';
+import {
+  verify,
+  type ContractDrift,
+  type VerifyResult,
+} from '@truecourse/contract-verifier';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { StepTracker } from '../progress.js';
 
 // ---------------------------------------------------------------------------
@@ -61,7 +67,16 @@ export const APPLY_STEPS = [
   { key: 'extract', label: 'Extracting claims' },
   { key: 'merge', label: 'Merging + detecting conflicts' },
   { key: 'materialize', label: 'Rendering canonical spec' },
+] as const;
+
+export const GENERATE_STEPS = [
   { key: 'il', label: 'Extracting IL contracts' },
+] as const;
+
+export const VERIFY_STEPS = [
+  { key: 'load', label: 'Loading contracts' },
+  { key: 'extract-code', label: 'Scanning code for operations' },
+  { key: 'compare', label: 'Comparing code against contracts' },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -77,11 +92,39 @@ export interface SpecScanInProcessResult {
 export interface SpecApplyInProcessResult {
   consolidate: ConsolidateResult;
   scanState: ScanState;
-  /** IL extraction outcome — present only when the canonical landed cleanly. */
+}
+
+export interface GenerateContractsInProcessResult {
+  /** IL extraction outcome. `skipped` is set when the canonical spec
+   *  is missing or the call was made with no work to do. */
   il:
     | { kind: 'extracted'; result: GenerateResult }
     | { kind: 'skipped'; reason: string }
     | { kind: 'failed'; error: Error };
+}
+
+export interface VerifyInProcessResult {
+  /** Verifier output — full drift list + counts. */
+  verify: VerifyResult;
+  /** State persisted to disk for the dashboard to consume on next mount. */
+  state: VerifyState;
+}
+
+/**
+ * What we persist to
+ * `.truecourse/.cache/verifier/verify-state.json`. The dashboard
+ * Verify tab reads this on mount; the CLI's `truecourse verify`
+ * writes it on every run. One shape, two surfaces.
+ */
+export interface VerifyState {
+  verifiedAt: string;
+  contractsDir: string;
+  codeDir: string;
+  artifactCount: number;
+  extractedOperationCount: number;
+  drifts: ContractDrift[];
+  resolverErrors: string[];
+  unresolvedRefs: string[];
 }
 
 export interface SpecResolveAllDefaultsResult {
@@ -118,6 +161,53 @@ export interface SpecInProcessOptions {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Marker files stamped after a successful Apply / Generate run. The
+ * dashboard's `/spec/staleness` endpoint reads their mtimes (against
+ * `decisions.json` and the canonical spec) to tell the user whether
+ * Apply or Generate has unfinished work. Both CLI and dashboard run
+ * through the in-process functions below, so a CLI run keeps the
+ * dashboard's staleness indicators honest.
+ */
+const APPLIED_MARKER_REL = path.join('.truecourse', '.cache', '.last-applied.json');
+const GENERATED_MARKER_REL = path.join('.truecourse', '.cache', '.last-generated.json');
+
+export function appliedMarkerPath(repoRoot: string): string {
+  return path.join(repoRoot, APPLIED_MARKER_REL);
+}
+
+export function generatedMarkerPath(repoRoot: string): string {
+  return path.join(repoRoot, GENERATED_MARKER_REL);
+}
+
+function writeStampMarker(file: string, payload: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
+}
+
+/**
+ * Stamp the apply marker. Exposed for callers that run their own
+ * apply path (e.g. the CLI's `truecourse spec apply` does today, but
+ * external integrations may bypass `applyInProcess` in the future).
+ */
+export function stampAppliedMarker(repoRoot: string): void {
+  writeStampMarker(appliedMarkerPath(repoRoot), {
+    appliedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Stamp the generate marker. Exposed so `truecourse contracts generate`
+ * — which drives the extractor directly rather than via
+ * `generateContractsInProcess` — can keep the dashboard's
+ * `contractsStale` signal honest.
+ */
+export function stampGeneratedMarker(repoRoot: string): void {
+  writeStampMarker(generatedMarkerPath(repoRoot), {
+    generatedAt: new Date().toISOString(),
+  });
+}
+
 function buildScanState(result: ConsolidateResult): ScanState {
   const openWithFp = result.merge.openConflicts.map((c) => ({
     ...c,
@@ -132,7 +222,11 @@ function buildScanState(result: ConsolidateResult): ScanState {
     decided: result.merge.decidedConflicts.length,
     openConflicts: openWithFp,
     decidedConflicts: result.merge.decidedConflicts.map((d) => ({
-      conflict: d.conflict,
+      // Stamp the same fingerprint we surface on open conflicts so the
+      // Decisions tab can POST a change-of-mind via the existing
+      // upsert endpoint (the server validates that the field is
+      // present, and uses it as the candidate-set identity).
+      conflict: { ...d.conflict, candidateFingerprint: candidateFingerprint(d.conflict) },
       decision: d.decision,
     })),
   };
@@ -352,13 +446,11 @@ function isChainConflict(c: ConsolidateResult['merge']['openConflicts'][number])
 // ---------------------------------------------------------------------------
 
 /**
- * Run the full Apply pipeline: `consolidate({ materialize: true })`,
- * persist scan-state, then (when the canonical landed cleanly) chain
- * into Module 2's `generateContracts()` to extract IL.
- *
- * Step transitions in order: discover → extract → merge → materialize → il.
- * The IL step is set to `done` with a `skipped` detail when there are
- * open conflicts or materialize failures.
+ * Materialize the canonical spec: `consolidate({ materialize: true })`,
+ * then persist scan-state. Step transitions: discover → extract →
+ * merge → materialize. IL extraction (Module 2) is now a separate
+ * `generateContractsInProcess` call so the two phases can be driven
+ * independently from CLI + dashboard.
  */
 export async function applyInProcess(
   repoRoot: string,
@@ -447,26 +539,43 @@ export async function applyInProcess(
   const scanState = buildScanState(result);
   writeScanState(repoRoot, scanState);
 
-  // Chain into Module 2 (IL extraction) when the canonical is clean.
-  const canChainIntoIl =
+  // Stamp the apply marker so the dashboard's staleness endpoint can
+  // tell when decisions.json drifts past the last materialize. Only
+  // stamp on a clean run (no open conflicts and no materialize
+  // failures) — a partial Apply shouldn't claim "fresh."
+  const clean =
     result.merge.openConflicts.length === 0 &&
-    (result.materialize?.failures.length ?? 0) === 0 &&
-    hasCanonicalSpec(repoRoot);
+    (result.materialize?.failures.length ?? 0) === 0;
+  if (clean) {
+    stampAppliedMarker(repoRoot);
+  }
 
-  if (!canChainIntoIl) {
-    const reason =
-      result.merge.openConflicts.length > 0
-        ? 'open conflicts'
-        : (result.materialize?.failures.length ?? 0) > 0
-          ? 'materialize failures'
-          : 'no canonical spec';
+  return { consolidate: result, scanState };
+}
+
+// ---------------------------------------------------------------------------
+// generateContractsInProcess — Module 2 IL extraction, decoupled from
+// the spec-apply pipeline. Same in-process pattern (shared between CLI
+// and dashboard, driven by a tracker).
+// ---------------------------------------------------------------------------
+
+/**
+ * Run Module 2's `generateContracts()` against the canonical spec on
+ * disk. Returns a `kind: 'skipped'` result when the canonical isn't
+ * there yet (caller should run `applyInProcess` first), `'extracted'`
+ * on success (even when validation surfaced issues), and `'failed'`
+ * when extraction threw.
+ */
+export async function generateContractsInProcess(
+  repoRoot: string,
+  options: SpecInProcessOptions = {},
+): Promise<GenerateContractsInProcessResult> {
+  const { tracker } = options;
+
+  if (!hasCanonicalSpec(repoRoot)) {
     tracker?.start('il');
-    tracker?.done('il', `skipped — ${reason}`);
-    return {
-      consolidate: result,
-      scanState,
-      il: { kind: 'skipped', reason },
-    };
+    tracker?.done('il', 'skipped — no canonical spec');
+    return { il: { kind: 'skipped', reason: 'no canonical spec' } };
   }
 
   tracker?.start('il');
@@ -485,13 +594,143 @@ export async function applyInProcess(
           : `${wrote} files`
         : `${wrote} files · ${issueCount} issue${issueCount === 1 ? '' : 's'}`,
     );
-    return { consolidate: result, scanState, il: { kind: 'extracted', result: il } };
+    // Stamp the generate marker only when validation passed — issues
+    // mean the .tc corpus didn't fully land, so "fresh" would lie.
+    if (issueCount === 0) {
+      stampGeneratedMarker(repoRoot);
+    }
+    return { il: { kind: 'extracted', result: il } };
   } catch (e) {
     tracker?.error('il', (e as Error).message);
     const err = e instanceof Error ? e : new Error(String(e));
-    if (e instanceof CanonicalSpecMissingError) {
-      return { consolidate: result, scanState, il: { kind: 'failed', error: err } };
-    }
-    return { consolidate: result, scanState, il: { kind: 'failed', error: err } };
+    return { il: { kind: 'failed', error: err } };
   }
+}
+
+// ---------------------------------------------------------------------------
+// verify — compare code against generated IL contracts
+// ---------------------------------------------------------------------------
+
+const VERIFY_STATE_REL = path.join('.truecourse', '.cache', 'verifier', 'verify-state.json');
+
+export function verifyStatePath(repoRoot: string): string {
+  return path.join(repoRoot, VERIFY_STATE_REL);
+}
+
+export function readVerifyState(repoRoot: string): VerifyState | null {
+  const file = verifyStatePath(repoRoot);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as VerifyState;
+    if (typeof raw.verifiedAt !== 'string') return null;
+    if (!Array.isArray(raw.drifts)) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+export function writeVerifyState(repoRoot: string, state: VerifyState): void {
+  const file = verifyStatePath(repoRoot);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(state, null, 2) + '\n');
+}
+
+export interface VerifyInProcessOptions {
+  tracker?: StepTracker;
+  /**
+   * Where to find the IL contracts. Defaults to
+   * `<repoRoot>/.truecourse/contracts`.
+   */
+  contractsDir?: string;
+  /**
+   * Where the implementation code lives. Defaults to the repo root
+   * itself. For our fixture layout (`<repoRoot>/code/`), pass that
+   * explicitly.
+   */
+  codeDir?: string;
+}
+
+/**
+ * Compare the canonical IL contracts against the code in `codeDir`
+ * and persist the result to `.truecourse/.cache/verifier/`. Same
+ * pattern as scanInProcess/applyInProcess: shared between CLI and
+ * dashboard, drives a tracker through three phases (load contracts,
+ * extract code-side operations, compare).
+ */
+export async function verifyInProcess(
+  repoRoot: string,
+  options: VerifyInProcessOptions = {},
+): Promise<VerifyInProcessResult> {
+  const { tracker } = options;
+  const contractsDir =
+    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
+  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
+
+  if (!fs.existsSync(contractsDir)) {
+    const err = new Error(
+      `Contracts directory not found at ${contractsDir}. Run \`truecourse spec apply\` first.`,
+    );
+    tracker?.error('load', err.message);
+    throw err;
+  }
+
+  // The verifier doesn't expose per-phase hooks today, so we mark
+  // each step done as soon as `verify()` returns. The work is
+  // synchronous-feeling from the caller's POV (~hundreds of ms on
+  // the fixture), so a single progress emit per phase is fine.
+  tracker?.start('load');
+  let result: VerifyResult;
+  try {
+    // `verify()` internally: load .tc files → resolve → extract
+    // code-side operations → compare. We collapse those phases into
+    // one tracker call because the engine doesn't surface them yet.
+    result = await verify({ contractsDir, codeDir });
+  } catch (e) {
+    tracker?.error('load', (e as Error).message);
+    throw e;
+  }
+  tracker?.done(
+    'load',
+    `${result.artifactCount} artifact${result.artifactCount === 1 ? '' : 's'}`,
+  );
+
+  tracker?.start('extract-code');
+  tracker?.done(
+    'extract-code',
+    `${result.extractedOperationCount} operation${result.extractedOperationCount === 1 ? '' : 's'}`,
+  );
+
+  tracker?.start('compare');
+  tracker?.done(
+    'compare',
+    `${result.drifts.length} drift${result.drifts.length === 1 ? '' : 's'}`,
+  );
+
+  const state: VerifyState = {
+    verifiedAt: new Date().toISOString(),
+    contractsDir,
+    codeDir,
+    artifactCount: result.artifactCount,
+    extractedOperationCount: result.extractedOperationCount,
+    drifts: result.drifts,
+    resolverErrors: result.resolverErrors,
+    unresolvedRefs: result.unresolvedRefs,
+  };
+  writeVerifyState(repoRoot, state);
+
+  return { verify: result, state };
+}
+
+/**
+ * Try to find the project's code root. Most real projects keep code
+ * at the repo root; the fixture nests it under `code/`. We prefer
+ * the explicit subdir when present; otherwise fall back to repoRoot.
+ */
+function autodetectCodeDir(repoRoot: string): string {
+  const codeSubdir = path.join(repoRoot, 'code');
+  if (fs.existsSync(codeSubdir) && fs.statSync(codeSubdir).isDirectory()) {
+    return codeSubdir;
+  }
+  return repoRoot;
 }

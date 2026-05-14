@@ -9,12 +9,20 @@ import {
   type DashboardSection,
   type LeftTab,
 } from '@/components/layout/LeftSidebar';
-import { SpecToolbar } from '@/components/spec/SpecToolbar';
+import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
+import { SpecApplyResultToaster } from '@/components/spec/SpecApplyResultToaster';
 import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
 import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
 import { ContractsPanel } from '@/components/drift/ContractsPanel';
 import { ContractsFile } from '@/components/drift/ContractsFile';
 import { VerifyPanel } from '@/components/drift/VerifyPanel';
+import { VerifyHeaderActions } from '@/components/drift/VerifyHeaderActions';
+import { VerifyDriftDetail, VerifyEmptyState } from '@/components/drift/VerifyDriftDetail';
+import { useVerifyState } from '@/hooks/useVerifyState';
+import { useContractsGenerate } from '@/hooks/useContractsGenerate';
+import { useSpecStaleness } from '@/hooks/useSpecStaleness';
+import { ContractsHeaderActions } from '@/components/drift/ContractsHeaderActions';
+import { ContractsGenerateResultToaster } from '@/components/drift/ContractsGenerateResultToaster';
 import { DecisionsPanel } from '@/components/drift/DecisionsPanel';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { HomePanel } from '@/components/pages/HomePanel';
@@ -381,7 +389,7 @@ export default function RepoGraphPage() {
   // Setters are idempotent, so running this on our own navigations is a no-op.
   useEffect(() => {
     const tabParam = searchParams?.get('tab') ?? null;
-    const nextTab: LeftTab =
+    const derivedTab: LeftTab =
       tabParam === 'violations'
         ? 'graphs'
         : tabParam === 'analytics'
@@ -393,7 +401,22 @@ export default function RepoGraphPage() {
               : searchParams?.get('file')
                 ? 'files'
                 : 'home';
-    setLeftTabState(nextTab);
+
+    const sectionParam = searchParams?.get('section');
+    const resolvedSection: DashboardSection = sectionParam === 'drift' ? 'drift' : 'analysis';
+
+    // Resolve the final tab in one pass before setting state, so the
+    // header's section-actions slot never momentarily renders the wrong
+    // buttons (e.g. spec actions for one frame when entering ?section=drift
+    // without a ?tab=).
+    const tabBelongsToSection =
+      resolvedSection === 'drift' ? DRIFT_TABS.has(derivedTab) : !DRIFT_TABS.has(derivedTab);
+    const finalTab: LeftTab = tabBelongsToSection
+      ? derivedTab
+      : defaultTabForSection(resolvedSection);
+
+    setLeftTabState(finalTab);
+    setDashboardSectionState(resolvedSection);
 
     const modeParam = searchParams?.get('mode') ?? '';
     setDepthLevelState(urlToDepth[modeParam] ?? 'services');
@@ -403,18 +426,6 @@ export default function RepoGraphPage() {
     setActiveFilePathState(searchParams?.get('file') ?? null);
     setActiveFlowIdState(searchParams?.get('flow') ?? null);
     setIsDiffModeState(searchParams?.get('view') === 'diff');
-
-    const sectionParam = searchParams?.get('section');
-    const resolvedSection: DashboardSection = sectionParam === 'drift' ? 'drift' : 'analysis';
-    setDashboardSectionState(resolvedSection);
-    // Guard: if the URL's tab doesn't belong to the URL's section, fall
-    // back to the section's default tab. Without this you can end up on
-    // ?section=drift&tab=home which would render nothing useful.
-    const tabBelongsToSection =
-      resolvedSection === 'drift' ? DRIFT_TABS.has(nextTab) : !DRIFT_TABS.has(nextTab);
-    if (!tabBelongsToSection) {
-      setLeftTabState(defaultTabForSection(resolvedSection));
-    }
   }, [searchParams]);
 
   const clearActiveDetailView = useCallback(() => {
@@ -625,6 +636,74 @@ export default function RepoGraphPage() {
     error: canonicalError,
     refetch: refetchCanonical,
   } = useCanonicalSpecTree(repoId);
+  const {
+    state: verifyState,
+    isLoading: verifyLoading,
+    isRunning: verifyRunning,
+    error: verifyError,
+    refetch: refetchVerify,
+    run: runVerify,
+  } = useVerifyState(repoId);
+  const {
+    generating: contractsGenerating,
+    result: contractsGenerateResult,
+    run: runContractsGenerate,
+  } = useContractsGenerate(repoId);
+  const {
+    specStale,
+    contractsStale,
+    verifyStale,
+    refetch: refetchStaleness,
+  } = useSpecStaleness(repoId);
+  const [activeDriftId, setActiveDriftId] = useState<string | null>(null);
+  // Multi-tab drift viewer state — same preview/pin pattern as
+  // openFiles / openCanonicalFiles / openContractsFiles.
+  const [openDriftTabs, setOpenDriftTabs] = useState<
+    Array<{ id: string; pinned: boolean }>
+  >([]);
+
+  const handleOpenDrift = useCallback((id: string, pinned: boolean) => {
+    setOpenDriftTabs((prev) => {
+      const existing = prev.find((d) => d.id === id);
+      if (existing) {
+        return prev.map((d) =>
+          d.id === id ? { ...d, pinned: pinned || d.pinned } : d,
+        );
+      }
+      if (pinned) return [...prev, { id, pinned: true }];
+      const hasUnpinned = prev.find((d) => !d.pinned);
+      if (hasUnpinned) {
+        return prev.map((d) => (!d.pinned ? { id, pinned: false } : d));
+      }
+      return [...prev, { id, pinned: false }];
+    });
+    setActiveDriftId(id);
+  }, []);
+
+  const handleCloseDrift = useCallback(
+    (id: string) => {
+      setOpenDriftTabs((prev) => prev.filter((d) => d.id !== id));
+      if (activeDriftId === id) {
+        const remaining = openDriftTabs.filter((d) => d.id !== id);
+        setActiveDriftId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+      }
+    },
+    [openDriftTabs, activeDriftId],
+  );
+
+  // When the underlying verify run changes (re-run / fresh load), drop
+  // any open drift tabs whose ids no longer exist so we never show a
+  // stale tab pointing at nothing.
+  useEffect(() => {
+    if (!verifyState) {
+      setOpenDriftTabs([]);
+      setActiveDriftId(null);
+      return;
+    }
+    const validIds = new Set(verifyState.drifts.map((d) => d.id));
+    setOpenDriftTabs((prev) => prev.filter((d) => validIds.has(d.id)));
+    setActiveDriftId((prev) => (prev && validIds.has(prev) ? prev : null));
+  }, [verifyState]);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -682,21 +761,38 @@ export default function RepoGraphPage() {
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
 
-  // Refresh BL Drift trees after a successful Apply. The server emits
-  // `spec:complete` with `kind: 'apply'` once the canonical spec +
-  // contracts have been written. Same idea as the analysis:complete
-  // listener above — hooks own the data, parent triggers refetch on
-  // the relevant socket event.
+  // Refresh BL Drift trees after a successful Apply / Generate /
+  // Verify. The server emits `spec:complete` with one of four kinds —
+  // we fan out to the relevant hook's refetch so each tree stays in
+  // sync without polling. Apply writes the canonical (refetchCanonical),
+  // Generate writes contracts (refetchContracts), Verify writes the
+  // drift state (refetchVerify).
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
-      const payload = data as { kind?: 'scan' | 'apply' } | undefined;
+      const payload = data as
+        | { kind?: 'scan' | 'apply' | 'generate' | 'verify' }
+        | undefined;
       if (payload?.kind === 'apply') {
         refetchCanonical();
+      } else if (payload?.kind === 'generate') {
         refetchContracts();
+      } else if (payload?.kind === 'verify') {
+        refetchVerify();
+      }
+      // Any spec lifecycle event can shift staleness — a scan refresh
+      // surfaces decision changes, an apply clears specStale, a
+      // generate clears contractsStale, a verify clears verifyStale.
+      if (
+        payload?.kind === 'scan' ||
+        payload?.kind === 'apply' ||
+        payload?.kind === 'generate' ||
+        payload?.kind === 'verify'
+      ) {
+        refetchStaleness();
       }
     });
     return unsub;
-  }, [onEvent, refetchCanonical, refetchContracts]);
+  }, [onEvent, refetchCanonical, refetchContracts, refetchVerify, refetchStaleness]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -1080,7 +1176,9 @@ export default function RepoGraphPage() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
-  const showingSpecConflict = activeSpecConflictId !== null && leftTab === 'spec';
+  const showingSpecConflict =
+    activeSpecConflictId !== null &&
+    (leftTab === 'spec' || leftTab === 'decisions');
   const showingCanonicalFile = activeCanonicalPath !== null && leftTab === 'spec';
   const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
 
@@ -1103,19 +1201,44 @@ export default function RepoGraphPage() {
       <Header
         repoName={repo?.name}
         currentBranch={currentBranch}
-        onAnalyze={isViewingHistory || repoError || repo?.isGitRepo === false ? undefined : handleAnalyze}
+        onAnalyze={
+          dashboardSection !== 'analysis' || isViewingHistory || repoError || repo?.isGitRepo === false
+            ? undefined
+            : handleAnalyze
+        }
         isAnalyzing={isAnalyzing || isDiffChecking}
         showBack
         backHref="/"
         isDiffMode={isDiffMode}
-        onEnterDiffMode={isViewingHistory ? undefined : handleEnterDiffMode}
-        onExitDiffMode={isViewingHistory ? undefined : handleExitDiffMode}
+        onEnterDiffMode={
+          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleEnterDiffMode
+        }
+        onExitDiffMode={
+          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleExitDiffMode
+        }
         analyses={analyses}
         selectedAnalysisId={selectedAnalysisId}
         onSelectAnalysis={setSelectedAnalysisId}
         currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
         dashboardSection={dashboardSection}
         onDashboardSectionChange={setDashboardSection}
+        sectionActions={
+          leftTab === 'spec' ? (
+            <SpecHeaderActions stale={specStale} />
+          ) : leftTab === 'contracts' ? (
+            <ContractsHeaderActions
+              isGenerating={contractsGenerating}
+              onGenerate={runContractsGenerate}
+              stale={contractsStale}
+            />
+          ) : leftTab === 'verify' ? (
+            <VerifyHeaderActions
+              isRunning={verifyRunning}
+              onRun={runVerify}
+              stale={verifyStale}
+            />
+          ) : null
+        }
       />
 
       {/* Page-level banners — span full width above both sidebar and main. */}
@@ -1155,6 +1278,13 @@ export default function RepoGraphPage() {
         </div>
       )}
 
+      {/* Apply / Generate results surface as toasts (sonner's
+          <Toaster /> lives at the app root). These components are
+          render-less side effects — they listen for new results and
+          emit toasts, no layout impact. */}
+      <SpecApplyResultToaster />
+      <ContractsGenerateResultToaster result={contractsGenerateResult} />
+
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
         <LeftSidebar
@@ -1166,6 +1296,13 @@ export default function RepoGraphPage() {
             flows: flowList.length,
             databases: nodes.filter((n) => n.type === 'database').length,
             analyses: analyses.length,
+          }}
+          tabWarnings={{
+            verify: verifyState && verifyState.unresolvedRefs.length > 0
+              ? `${verifyState.unresolvedRefs.length} unresolved reference${
+                  verifyState.unresolvedRefs.length === 1 ? '' : 's'
+                } — some artifacts the spec mentions weren't extracted into contracts. Drifts against them won't be detected.`
+              : null,
           }}
         >
           {leftTab === 'flows' && (
@@ -1250,17 +1387,31 @@ export default function RepoGraphPage() {
               onOpen={handleOpenContracts}
             />
           )}
-          {leftTab === 'verify' && <VerifyPanel />}
-          {leftTab === 'decisions' && <DecisionsPanel />}
+          {leftTab === 'verify' && (
+            <VerifyPanel
+              state={verifyState}
+              isLoading={verifyLoading}
+              error={verifyError}
+              activeDriftId={activeDriftId}
+              onOpenDrift={handleOpenDrift}
+            />
+          )}
+          {leftTab === 'decisions' && (
+            <DecisionsPanel
+              activeConflictId={activeSpecConflictId}
+              onSelectConflict={setActiveSpecConflictId}
+            />
+          )}
         </LeftSidebar>
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec canonical) */}
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec canonical/Contracts/Verify) */}
           {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
             (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
           (leftTab === 'spec' && openCanonicalFiles.length > 0) ||
-          (leftTab === 'contracts' && openContractsFiles.length > 0) ? (
+          (leftTab === 'contracts' && openContractsFiles.length > 0) ||
+          (leftTab === 'verify' && openDriftTabs.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1414,6 +1565,41 @@ export default function RepoGraphPage() {
                   </div>
                 );
               })}
+              {/* Drift tabs */}
+              {leftTab === 'verify' && openDriftTabs.map((t) => {
+                const drift = verifyState?.drifts.find((d) => d.id === t.id);
+                if (!drift) return null;
+                const label = drift.obligationKey || drift.id;
+                const isActive = activeDriftId === t.id;
+                const tooltip = drift.artifactRef
+                  ? `${drift.artifactRef.kind}:${drift.artifactRef.identity} — ${drift.obligationKey}`
+                  : drift.obligationKey;
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => setActiveDriftId(t.id)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={tooltip}
+                  >
+                    <span className={`min-w-0 truncate max-w-[16rem] pr-0.5 ${t.pinned ? 'font-medium' : 'italic'}`}>{label}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseDrift(t.id);
+                      }}
+                      className={`shrink-0 rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
 
@@ -1444,22 +1630,12 @@ export default function RepoGraphPage() {
               isTab
             />
           ) : showingCanonicalFile && activeCanonicalPath ? (
-            <div className="flex h-full flex-col">
-              <SpecToolbar />
-              <div className="flex-1 overflow-hidden">
-                <SpecCanonicalFile repoId={repoId} filePath={activeCanonicalPath} />
-              </div>
-            </div>
+            <SpecCanonicalFile repoId={repoId} filePath={activeCanonicalPath} />
           ) : showingSpecConflict && activeSpecConflictId ? (
-            <div className="flex h-full flex-col">
-              <SpecToolbar />
-              <div className="flex-1 overflow-hidden">
-                <SpecConflictDetail
-                  conflictId={activeSpecConflictId}
-                  onClose={() => setActiveSpecConflictId(null)}
-                />
-              </div>
-            </div>
+            <SpecConflictDetail
+              conflictId={activeSpecConflictId}
+              onClose={() => setActiveSpecConflictId(null)}
+            />
           ) : leftTab === 'spec' ? (
             <SpecPanePlaceholder />
           ) : showingContractsFile && activeContractsPath ? (
@@ -1469,12 +1645,34 @@ export default function RepoGraphPage() {
               <p>Select a contract file from the list to view it.</p>
             </div>
           ) : leftTab === 'verify' ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-              <p>Verify detail view — coming soon.</p>
-            </div>
+            (() => {
+              const activeDrift = activeDriftId
+                ? verifyState?.drifts.find((d) => d.id === activeDriftId)
+                : null;
+              if (activeDrift) {
+                return (
+                  <VerifyDriftDetail
+                    drift={activeDrift}
+                    onClose={() => handleCloseDrift(activeDrift.id)}
+                    onOpenFile={(filePath, line) => {
+                      // Cross-section navigation: drift refers to a
+                      // file → switch to Code Analysis and open the
+                      // file viewer at the right line.
+                      setDashboardSection('analysis');
+                      handleOpenFile(filePath, true, line);
+                    }}
+                  />
+                );
+              }
+              return <VerifyEmptyState />;
+            })()
           ) : leftTab === 'decisions' ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-              <p>Decisions detail view — coming soon.</p>
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+              <p className="max-w-md">
+                Every conflict you've resolved in the Spec tab lives in the
+                ledger on the left. Revoke a decision to re-open its
+                conflict — your other candidates are preserved.
+              </p>
             </div>
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel

@@ -15,35 +15,12 @@ import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import * as api from '@/lib/api';
 import { CodeViewer } from '@/components/code/CodeViewer';
+import { FileBreadcrumb } from '@/components/code/FileBreadcrumb';
 import { useSpec } from '@/components/spec/SpecContext';
 
 interface ContractsFileProps {
   repoId: string;
   filePath: string;
-}
-
-function FileBreadcrumb({ filePath }: { filePath: string }) {
-  const parts = filePath.split('/');
-  return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
-      <div className="flex flex-1 items-center gap-1 overflow-hidden text-sm">
-        {parts.map((part, i) => (
-          <span key={i} className="flex items-center gap-1">
-            {i > 0 && <span className="text-muted-foreground">/</span>}
-            <span
-              className={
-                i === parts.length - 1
-                  ? 'font-medium text-foreground'
-                  : 'text-muted-foreground'
-              }
-            >
-              {part}
-            </span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function ContractsFile({ repoId, filePath }: ContractsFileProps) {

@@ -717,6 +717,13 @@ export type SpecApplyResponse = {
     written: number;
     failures: Array<{ module: string; fileName: string; error: string }>;
   } | null;
+  /** Fresh scan-state produced by the apply pipeline. Clients should
+   *  setScan() from this instead of issuing a follow-up GET /spec/scan,
+   *  which would re-run a full scan and emit a second progress popup. */
+  scanState: SpecScanResponse;
+};
+
+export type ContractsGenerateResponse = {
   il:
     | {
         written: number;
@@ -783,6 +790,55 @@ export function getContractsFile(repoId: string, filePath: string): Promise<Cont
   );
 }
 
+// ---------------------------------------------------------------------------
+// Verify (Module 3 — code vs contracts drift detection)
+// ---------------------------------------------------------------------------
+
+export type DriftSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
+
+export type ContractDrift = {
+  id: string;
+  artifactRef?: { kind: string; identity: string } | null;
+  obligationKey: string;
+  severity: DriftSeverity;
+  message: string;
+  filePath?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+  specSide?: unknown;
+  codeSide?: unknown;
+};
+
+export type VerifyState = {
+  verifiedAt: string;
+  contractsDir: string;
+  codeDir: string;
+  artifactCount: number;
+  extractedOperationCount: number;
+  drifts: ContractDrift[];
+  resolverErrors: string[];
+  unresolvedRefs: string[];
+};
+
+/**
+ * Persisted verify state. Returns null on 404 (no run yet); other
+ * errors propagate.
+ */
+export async function getVerifyState(repoId: string): Promise<VerifyState | null> {
+  try {
+    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export function postVerifyRun(repoId: string): Promise<VerifyState> {
+  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/run`, {
+    method: 'POST',
+  });
+}
+
 /**
  * Read the persisted scan-state. Returns null when the server
  * responds 404 (no scan has been run yet) — any other error
@@ -799,6 +855,16 @@ export async function getSpecScanState(repoId: string): Promise<SpecScanResponse
 
 export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {
   return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`);
+}
+
+export function deleteSpecDecision(
+  repoId: string,
+  conflictId: string,
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(
+    `/api/repos/${repoId}/spec/decisions/${encodeURIComponent(conflictId)}`,
+    { method: 'DELETE' },
+  );
 }
 
 export function postSpecDecision(
@@ -825,5 +891,28 @@ export function postSpecApply(repoId: string): Promise<SpecApplyResponse> {
   return fetchApi<SpecApplyResponse>(`/api/repos/${repoId}/spec/apply`, {
     method: 'POST',
   });
+}
+
+export function postContractsGenerate(
+  repoId: string,
+): Promise<ContractsGenerateResponse> {
+  return fetchApi<ContractsGenerateResponse>(
+    `/api/repos/${repoId}/contracts/generate`,
+    { method: 'POST' },
+  );
+}
+
+export type SpecStalenessResponse = {
+  specStale: boolean;
+  contractsStale: boolean;
+  verifyStale: boolean;
+  hasDecisions: boolean;
+  hasApplied: boolean;
+  hasGenerated: boolean;
+  hasVerified: boolean;
+};
+
+export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse> {
+  return fetchApi<SpecStalenessResponse>(`/api/repos/${repoId}/spec/staleness`);
 }
 

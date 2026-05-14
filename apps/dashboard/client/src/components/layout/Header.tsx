@@ -37,6 +37,12 @@ type HeaderProps = {
   /** When provided, render the section switcher next to the logo. */
   dashboardSection?: DashboardSection;
   onDashboardSectionChange?: (next: DashboardSection) => void;
+  /** Section-specific action buttons (e.g. Apply for Spec, Run for
+   * Verify). Rendered just before the Analyze button so global actions
+   * for the current section sit alongside Analyze instead of in a
+   * separate row that disappears when switching tabs (which caused the
+   * left sidebar to visibly shift). */
+  sectionActions?: React.ReactNode;
 };
 
 export function Header({
@@ -55,6 +61,7 @@ export function Header({
   currentAnalysisId,
   dashboardSection,
   onDashboardSectionChange,
+  sectionActions,
 }: HeaderProps) {
   const [isDark, setIsDark] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -189,6 +196,9 @@ export function Header({
               </div>
             </div>
           </div>
+        )}
+        {sectionActions && (
+          <div className="flex items-center gap-2">{sectionActions}</div>
         )}
         {onAnalyze && (
           <div className="relative flex items-center">

@@ -227,7 +227,7 @@ export function emitSpecProgress(
 
 export function emitSpecComplete(
   repoId: string,
-  kind: 'scan' | 'apply',
+  kind: 'scan' | 'apply' | 'verify' | 'generate',
 ): void {
   activeSpec.delete(repoId);
   const io = getIO();

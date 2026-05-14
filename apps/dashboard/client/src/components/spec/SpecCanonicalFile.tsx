@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import * as api from '@/lib/api';
+import { FileBreadcrumb } from '@/components/code/FileBreadcrumb';
 import { useSpec } from './SpecContext';
 
 interface SpecCanonicalFileProps {
@@ -46,6 +47,7 @@ export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) 
 
   return (
     <div className="flex h-full flex-col bg-background">
+      <FileBreadcrumb filePath={filePath} />
       <div className="flex-1 overflow-auto px-6 py-4">
         {loading ? (
           <div className="flex h-full items-center justify-center">

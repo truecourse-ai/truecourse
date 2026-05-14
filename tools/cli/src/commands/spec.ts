@@ -30,9 +30,10 @@ import {
   resolveAllDefaultsInProcess,
   scanInProcess,
   SCAN_STEPS,
+  verifyInProcess,
+  VERIFY_STEPS,
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
-import { syncShippedTcSyntax } from "./helpers.js";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -130,7 +131,7 @@ export async function runSpecApply(opts: RunSpecOptions = {}): Promise<void> {
   p.intro("Spec apply");
   const { renderer, tracker } = withTracker(APPLY_STEPS);
   try {
-    const { consolidate, il } = await applyInProcess(root, { tracker });
+    const { consolidate } = await applyInProcess(root, { tracker });
     renderer.dispose();
 
     if (consolidate.merge.openConflicts.length > 0) {
@@ -152,42 +153,14 @@ export async function runSpecApply(opts: RunSpecOptions = {}): Promise<void> {
       }
     }
 
-    if (il.kind === 'extracted') {
-      const issueCount = il.result.validationIssues.length;
-      if (issueCount > 0) {
-        p.log.error(
-          `Contract validation surfaced ${issueCount} issue${issueCount === 1 ? "" : "s"}.`,
-        );
-        for (const issue of il.result.validationIssues.slice(0, 5)) {
-          p.log.message(`  • ${issue.artifactKey}: ${issue.message}`);
-        }
-      } else {
-        const wrote = il.result.write.written.length;
-        p.log.success(
-          wrote === 0
-            ? "IL contracts up to date — canonical valid."
-            : `Wrote ${wrote} IL file${wrote === 1 ? "" : "s"} under .truecourse/contracts/.`,
-        );
-      }
-    } else if (il.kind === 'failed') {
-      p.log.error(`IL extraction failed: ${il.error.message}`);
+    if (
+      consolidate.merge.openConflicts.length === 0 &&
+      (consolidate.materialize?.failures.length ?? 0) === 0
+    ) {
+      p.outro("Canonical spec up to date. Run `truecourse contracts generate` to extract IL contracts.");
     } else {
-      p.log.message(`IL extraction skipped — ${il.reason}.`);
+      p.outro("Partial — resolve remaining conflicts.");
     }
-
-    // Install the bundled VS Code grammar for `.tc` files. We do this
-    // only on `spec apply` because that's the command that actually
-    // produces `.tc` files under `.truecourse/contracts/`. No prompt,
-    // no logs — purely additive editor sugar, idempotent across runs.
-    if (il.kind === 'extracted') {
-      syncShippedTcSyntax();
-    }
-
-    p.outro(
-      consolidate.merge.openConflicts.length === 0
-        ? "Canonical spec up to date."
-        : "Partial — resolve remaining conflicts.",
-    );
   } catch (e) {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
@@ -251,6 +224,60 @@ export async function runSpecDiff(opts: RunSpecOptions = {}): Promise<void> {
     p.log.warn(`${merge.openConflicts.length} open conflicts.`);
     summarizeConflicts("Pending", merge.openConflicts);
     p.outro("Resolve and re-apply to update the canonical spec.");
+  } catch (e) {
+    renderer.dispose();
+    p.cancel(`Failed: ${(e as Error).message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// verify
+// ---------------------------------------------------------------------------
+
+export interface RunVerifyOptions extends RunSpecOptions {
+  /** Override the code dir (default: auto-detect repo/code or repoRoot). */
+  codeDir?: string;
+}
+
+export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
+  const root = repoRoot(opts);
+  p.intro("Verify");
+  const { renderer, tracker } = withTracker(VERIFY_STEPS);
+  try {
+    const { verify } = await verifyInProcess(root, { tracker, codeDir: opts.codeDir });
+    renderer.dispose();
+
+    p.log.step(`artifacts   ${verify.artifactCount}`);
+    p.log.step(`operations  ${verify.extractedOperationCount}  (extracted from code)`);
+    p.log.step(`drifts      ${verify.drifts.length}`);
+
+    if (verify.unresolvedRefs.length > 0) {
+      p.log.warn(`unresolved  ${verify.unresolvedRefs.length} reference${verify.unresolvedRefs.length === 1 ? "" : "s"}`);
+      for (const ref of verify.unresolvedRefs.slice(0, 5)) {
+        p.log.message(`  • ${ref}`);
+      }
+    }
+
+    if (verify.drifts.length > 0) {
+      p.log.message("");
+      p.log.message("Drifts:");
+      for (const d of verify.drifts.slice(0, 20)) {
+        const loc = d.filePath
+          ? ` ${path.relative(root, d.filePath)}:${d.lineStart ?? "?"}`
+          : "";
+        p.log.message(`  [${d.severity}] ${d.obligationKey}${loc}`);
+        p.log.message(`    → ${d.message}`);
+      }
+      if (verify.drifts.length > 20) {
+        p.log.message(`  … (+${verify.drifts.length - 20} more)`);
+      }
+    }
+
+    p.outro(
+      verify.drifts.length === 0
+        ? "No drift detected."
+        : `${verify.drifts.length} drift item${verify.drifts.length === 1 ? "" : "s"} — review the list above.`,
+    );
   } catch (e) {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);

@@ -8,6 +8,8 @@ import {
   hasCanonicalSpec,
   spawnRunner,
 } from "@truecourse/contract-extractor";
+import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
+import { syncShippedTcSyntax } from "./helpers.js";
 
 export interface RunContractsGenerateOptions {
   /** When true, perform a dry run — write nothing, show what would change. */
@@ -102,13 +104,25 @@ export async function runContractsGenerate(
     return;
   }
 
+  // Stamp the generate marker on every successful run (including the
+  // "nothing to write" case — we still confirmed contracts match the
+  // canonical). Keeps the dashboard's `contractsStale` signal honest
+  // when generation is driven from the terminal.
+  stampGeneratedMarker(repoRoot);
+
   if (result.write.written.length === 0) {
     p.outro("Up to date — no contract files needed updating.");
     return;
   }
   p.log.success(`Wrote ${result.write.written.length} contract file${result.write.written.length === 1 ? "" : "s"}.`);
   for (const f of result.write.written) console.log(`  • ${path.relative(repoRoot, f)}`);
-  p.outro(`Run \`truecourse analyze\` to verify code against the new contracts.`);
+
+  // Install the bundled VS Code grammar for `.tc` files. We do this on
+  // `contracts generate` because that's the command that actually
+  // writes `.tc` artifacts. No prompt, idempotent across runs.
+  syncShippedTcSyntax();
+
+  p.outro(`Run \`truecourse verify\` to check code against the new contracts.`);
 }
 
 // ---------------------------------------------------------------------------

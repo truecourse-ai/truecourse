@@ -1,19 +1,34 @@
 /**
- * Contracts routes — the dashboard surface for browsing IL contracts
- * produced by `truecourse spec apply` (Module 2).
+ * Contracts routes — the dashboard surface for browsing + producing IL
+ * contracts (Module 2).
  *
- *   GET  /api/repos/:id/contracts/tree
- *          Walk `.truecourse/contracts/` and return the file tree
- *          grouped by module. Pure read, no LLM.
+ *   GET   /api/repos/:id/contracts/tree
+ *           Walk `.truecourse/contracts/` and return the file tree
+ *           grouped by module. Pure read, no LLM.
  *
- *   GET  /api/repos/:id/contracts/file?path=...
- *          Return one .tc file's content. Refuses path traversal.
+ *   GET   /api/repos/:id/contracts/file?path=...
+ *           Return one .tc file's content. Refuses path traversal.
+ *
+ *   POST  /api/repos/:id/contracts/generate
+ *           Run `generateContractsInProcess` against the canonical spec
+ *           on disk. Returns the IL extraction outcome (extracted /
+ *           failed / skipped). Drives `spec:progress` / `spec:complete`
+ *           socket events with `kind: 'generate'`.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import {
+  GENERATE_STEPS,
+  generateContractsInProcess,
+} from '@truecourse/core/commands/spec-in-process';
+import {
+  createSocketSpecTracker,
+  emitSpecComplete,
+  emitSpecProgress,
+} from '../socket/handlers.js';
 
 const router: Router = Router();
 
@@ -127,6 +142,51 @@ router.get(
       }
       res.json({ path: requested, content: fs.readFileSync(resolved, 'utf-8') });
     } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/repos/:id/contracts/generate — run IL extraction
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/:id/contracts/generate',
+  async (req: Request, res: Response, next: NextFunction) => {
+    let repoIdForCleanup: string | null = null;
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      repoIdForCleanup = req.params.id as string;
+      const tracker = createSocketSpecTracker(
+        repoIdForCleanup,
+        GENERATE_STEPS.map((s) => ({ ...s })),
+      );
+      const outcome = await generateContractsInProcess(repo.path, { tracker });
+
+      const response: Record<string, unknown> = {};
+      if (outcome.il.kind === 'extracted') {
+        response.il = {
+          written: outcome.il.result.write.written.length,
+          validationIssues: outcome.il.result.validationIssues,
+          mergeDiagnostics: outcome.il.result.mergeDiagnostics,
+        };
+      } else if (outcome.il.kind === 'failed') {
+        response.il = { error: outcome.il.error.message };
+      } else {
+        response.il = { skipped: outcome.il.reason };
+      }
+
+      emitSpecComplete(repoIdForCleanup, 'generate');
+      res.json(response);
+    } catch (e) {
+      if (repoIdForCleanup) {
+        emitSpecProgress(repoIdForCleanup, {
+          step: 'error',
+          percent: 100,
+          detail: (e as Error).message,
+        });
+      }
       next(e);
     }
   },
