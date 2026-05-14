@@ -44,7 +44,7 @@ export function ContractsPanel({ tree, isLoading, error, activePath, onOpen }: C
           <>
             Resolve all open conflicts in <strong>Spec</strong>, click{' '}
             <strong>Apply</strong>, then click <strong>Generate</strong> here to
-            extract IL contracts.
+            extract TC contracts.
           </>
         }
       />

@@ -63,7 +63,7 @@ export function VerifyPanel({
         body={
           <>
             Click <strong>Verify</strong> in the header to compare your code
-            against the generated IL contracts.
+            against the generated TC contracts.
           </>
         }
       />

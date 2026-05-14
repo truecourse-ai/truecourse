@@ -68,16 +68,16 @@ function walkContracts(rootPath: string): ContractModule[] {
     files.sort((a, b) => a.path.localeCompare(b.path));
     modules.push({ name: moduleName, files });
   }
-  modules.sort((a, b) => sortModule(a.name).localeCompare(sortModule(b.name)));
+  modules.sort((a, b) => {
+    // Underscore-prefixed directories (`_shared`, `_unenforceable`)
+    // sort first — they're cross-cutting reference material the user
+    // is more likely to want at the top of the sidebar.
+    const aLeading = a.name.startsWith('_') ? 0 : 1;
+    const bLeading = b.name.startsWith('_') ? 0 : 1;
+    if (aLeading !== bLeading) return aLeading - bLeading;
+    return a.name.localeCompare(b.name);
+  });
   return modules;
-}
-
-/**
- * Sort key for modules. `_shared` and `_unenforceable` (leading
- * underscore) get pushed to the end so user modules sort first.
- */
-function sortModule(name: string): string {
-  return name.startsWith('_') ? `￿${name}` : name;
 }
 
 function collectTcFiles(dir: string, contractsRoot: string, out: ContractFile[]): void {
