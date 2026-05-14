@@ -2,7 +2,7 @@
 
 ## Status
 
-`STATUS: TODO`
+`STATUS: DONE`
 
 ## Goal
 
@@ -16,36 +16,36 @@ Compare structured requirements to deterministic code facts and produce stable c
 
 ## Tasks
 
-- [ ] Add a `ComplianceMatcher` interface with stable matcher name/version metadata.
-- [ ] Add a matcher registry and deterministic matcher selection order.
-- [ ] Ensure every requirement receives exactly one compliance result.
-- [ ] Add status mapping for `satisfied`, `missing`, `conflicting`, `partial`, `unverifiable`, and `ambiguous`.
-- [ ] Add severity mapping based on requirement modality and result status.
-- [ ] Implement `api.route.exists`.
-- [ ] Implement `api.route.auth_required`.
-- [ ] Implement `api.request.field_required` where request schema facts exist.
-- [ ] Implement `ui.route.exists`.
-- [ ] Implement `ui.text.exists`.
-- [ ] Implement `ui.form.field_exists`.
-- [ ] Implement `ui.form.validation_message_exists`.
-- [ ] Implement `auth.role_required`.
-- [ ] Implement `config.env_var_required`.
-- [ ] Implement `data.field_exists` where data facts exist.
-- [ ] Implement `test.coverage_hint_exists`.
-- [ ] Add fallback handling for unsupported requirement kinds as `unverifiable`.
-- [ ] Add ambiguous requirement handling when extraction confidence or fields are insufficient.
-- [ ] Add optional unspecified implementation detection for code facts that appear related to spec scope but have no matching requirement.
-- [ ] Sort compliance results and findings deterministically.
+- [x] Add a `ComplianceMatcher` interface with stable matcher name/version metadata.
+- [x] Add a matcher registry and deterministic matcher selection order.
+- [x] Ensure every requirement receives exactly one compliance result.
+- [x] Add status mapping for `satisfied`, `missing`, `conflicting`, `partial`, `unverifiable`, and `ambiguous`.
+- [x] Add severity mapping based on requirement modality and result status.
+- [x] Implement `api.route.exists`.
+- [x] Implement `api.route.auth_required`.
+- [x] Implement `api.request.field_required` where request schema facts exist.
+- [x] Implement `ui.route.exists`.
+- [x] Implement `ui.text.exists`.
+- [x] Implement `ui.form.field_exists`.
+- [x] Implement `ui.form.validation_message_exists`.
+- [x] Implement `auth.role_required`.
+- [x] Implement `config.env_var_required`.
+- [x] Implement `data.field_exists` where data facts exist.
+- [x] Implement `test.coverage_hint_exists`.
+- [x] Add fallback handling for unsupported requirement kinds as `unverifiable`.
+- [x] Add ambiguous requirement handling when extraction confidence or fields are insufficient.
+- [x] Add optional unspecified implementation detection for code facts that appear related to spec scope but have no matching requirement.
+- [x] Sort compliance results and findings deterministically.
 
 ## Test Tasks
 
-- [ ] Add unit tests for each matcher.
-- [ ] Add tests for modality-to-severity behavior.
-- [ ] Add tests proving each requirement gets exactly one result.
-- [ ] Add tests for missing, partial, conflicting, ambiguous, and unverifiable outcomes.
-- [ ] Add unspecified implementation tests.
-- [ ] Add snapshot tests for canonical compliance output.
-- [ ] Add repeated-run idempotency tests.
+- [x] Add unit tests for each matcher.
+- [x] Add tests for modality-to-severity behavior.
+- [x] Add tests proving each requirement gets exactly one result.
+- [x] Add tests for missing, partial, conflicting, ambiguous, and unverifiable outcomes.
+- [x] Add unspecified implementation tests.
+- [x] Add snapshot tests for canonical compliance output.
+- [x] Add repeated-run idempotency tests.
 
 ## Acceptance Criteria
 
@@ -60,4 +60,3 @@ Compare structured requirements to deterministic code facts and produce stable c
 - Keep matching conservative. Prefer `unverifiable` over an unjustified `satisfied`.
 - Matcher versions should change when behavior changes.
 - Store enough evidence for users to understand why a mismatch was reported.
-

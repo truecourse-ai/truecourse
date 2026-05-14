@@ -1,0 +1,232 @@
+import type { CodeFact } from '@truecourse/shared';
+import { makeMatcher } from './matcher-factory.js';
+import { complianceResult, invertStatus } from './result.js';
+import {
+  authFacts,
+  containsAny,
+  extractEnvVar,
+  extractField,
+  extractRole,
+  extractRoute,
+  extractTextRequirement,
+  extractUiPath,
+  factValueText,
+  hasSubstantialOverlap,
+  normalizePath,
+  normalizeText,
+  record,
+  requirementText,
+  routeFacts,
+  routeMatches,
+  uiPathMatches,
+  uiRouteFacts,
+} from './utils.js';
+import { hasAuthRequirement, hasRequestFieldRequirement, hasValidationMessageRequirement } from './signals.js';
+
+const AUTH_PATTERN = /(auth|authenticated|requireauth|ensur(e|ed)auth|guard|jwt|session|permission|role|admin|authorize)/i;
+
+function routeHasAuth(route: CodeFact, facts: CodeFact[]): CodeFact[] {
+  const value = record(route.value);
+  const routePath = typeof value.path === 'string' ? normalizePath(value.path) : undefined;
+  const middlewareNames = Array.isArray(value.middlewares) ? value.middlewares.map(String) : [];
+  const routeAuthFacts = authFacts(facts).filter((fact) => {
+    const authValue = record(fact.value);
+    return typeof authValue.route !== 'string' || !routePath || normalizePath(authValue.route) === routePath;
+  });
+  const authMiddlewareFacts = AUTH_PATTERN.test(middlewareNames.join(' ')) ? [route] : [];
+  return [...authMiddlewareFacts, ...routeAuthFacts];
+}
+
+export const complianceMatchers = [
+  makeMatcher(
+    'api.route.exists',
+    (requirement) => requirement.kind === 'api' && Boolean(extractRoute(requirement).path) && !hasAuthRequirement(requirement) && !hasRequestFieldRequirement(requirement),
+    ({ requirement, facts }, metadata) => {
+      const matches = routeFacts(facts).filter((fact) => routeMatches(requirement, fact));
+      const status = invertStatus(requirement, matches.length > 0);
+      const evidence = requirement.modality === 'must_not' && matches.length > 0
+        ? { conflictingFacts: matches, message: `Prohibited API route exists for "${requirement.subject}".` }
+        : { matchingFacts: matches, message: matches.length > 0 ? `API route exists for "${requirement.subject}".` : `API route is missing for "${requirement.subject}".` };
+      return complianceResult(requirement, metadata, status, evidence);
+    },
+  ),
+  makeMatcher(
+    'api.route.auth_required',
+    (requirement) => requirement.kind === 'api' && Boolean(extractRoute(requirement).path) && hasAuthRequirement(requirement) && !hasRequestFieldRequirement(requirement),
+    ({ requirement, facts }, metadata) => {
+      const routes = routeFacts(facts).filter((fact) => routeMatches(requirement, fact));
+      const authMatches = routes.flatMap((route) => routeHasAuth(route, facts));
+      if (requirement.modality === 'must_not') {
+        const status = authMatches.length > 0 ? 'conflicting' : 'satisfied';
+        return complianceResult(requirement, metadata, status, {
+          matchingFacts: status === 'satisfied' ? routes : [],
+          conflictingFacts: status === 'conflicting' ? authMatches : [],
+          message: status === 'conflicting' ? `Prohibited auth constraint is present for "${requirement.subject}".` : `Prohibited auth constraint is absent for "${requirement.subject}".`,
+        });
+      }
+      if (routes.length === 0) {
+        return complianceResult(requirement, metadata, 'missing', { message: `API route is missing for auth requirement "${requirement.subject}".` });
+      }
+      if (authMatches.length === 0) {
+        return complianceResult(requirement, metadata, 'partial', { matchingFacts: routes, message: `API route exists but required auth is missing for "${requirement.subject}".` });
+      }
+      return complianceResult(requirement, metadata, 'satisfied', { matchingFacts: [...routes, ...authMatches], message: `API route auth is satisfied for "${requirement.subject}".` });
+    },
+  ),
+  makeMatcher(
+    'api.request.field_required',
+    (requirement) => requirement.kind === 'api' && hasRequestFieldRequirement(requirement),
+    ({ requirement, facts }, metadata) => {
+      const taxonomy = facts.filter((fact) => ['api.request.field', 'api.request_field'].includes(fact.kind));
+      if (taxonomy.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `Request field facts are unavailable for "${requirement.subject}".` });
+      }
+      const field = extractField(requirement)!;
+      const route = extractRoute(requirement);
+      const matches = taxonomy.filter((fact) => {
+        const value = record(fact.value);
+        const factField = String(value.name ?? value.field ?? '');
+        const factPath = typeof value.route === 'string' || typeof value.path === 'string' ? normalizePath(String(value.route ?? value.path)) : undefined;
+        const factMethod = typeof value.method === 'string' ? value.method.toUpperCase() : undefined;
+        return normalizeText(factField) === normalizeText(field)
+          && (!route.path || !factPath || normalizePath(route.path) === factPath)
+          && (!route.method || !factMethod || route.method === factMethod);
+      });
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Request field "${field}" is represented in code facts.` : `Request field "${field}" is missing from code facts.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'ui.route.exists',
+    (requirement) => requirement.kind === 'ui' && Boolean(extractUiPath(requirement)) && containsAny(requirementText(requirement), ['route', 'page', 'screen', 'path']),
+    ({ requirement, facts }, metadata) => {
+      const path = extractUiPath(requirement)!;
+      const matches = uiRouteFacts(facts).filter((fact) => uiPathMatches(path, fact));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `UI route "${path}" exists.` : `UI route "${path}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'ui.text.exists',
+    (requirement) => requirement.kind === 'ui' && Boolean(extractTextRequirement(requirement)) && containsAny(requirementText(requirement), ['text', 'copy', 'label', 'message']) && !hasValidationMessageRequirement(requirement),
+    ({ requirement, facts }, metadata) => {
+      const text = extractTextRequirement(requirement)!;
+      const matches = facts.filter((fact) => fact.kind === 'ui.text' && fact.predicate === 'text.visible' && hasSubstantialOverlap(factValueText(fact), text));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `UI text matching "${text}" exists.` : `UI text matching "${text}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'ui.form.field_exists',
+    (requirement) => requirement.kind === 'ui' && Boolean(extractField(requirement)) && containsAny(requirementText(requirement), ['field', 'input', 'form']) && !hasValidationMessageRequirement(requirement),
+    ({ requirement, facts }, metadata) => {
+      const field = extractField(requirement)!;
+      const matches = facts.filter((fact) => {
+        if (fact.kind !== 'ui.form_field' || fact.predicate !== 'field.exists') return false;
+        const value = record(fact.value);
+        return [value.name, value.id, value.label].some((candidate) => typeof candidate === 'string' && normalizeText(candidate) === normalizeText(field));
+      });
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `UI form field "${field}" exists.` : `UI form field "${field}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'ui.form.validation_message_exists',
+    (requirement) => requirement.kind === 'ui' && hasValidationMessageRequirement(requirement),
+    ({ requirement, facts }, metadata) => {
+      const message = extractTextRequirement(requirement)!;
+      const matches = facts.filter((fact) => fact.kind === 'ui.text' && fact.predicate === 'text.visible' && hasSubstantialOverlap(factValueText(fact), message));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Validation message matching "${message}" exists.` : `Validation message matching "${message}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'auth.role_required',
+    (requirement) => requirement.kind === 'auth' && Boolean(extractRole(requirement)),
+    ({ requirement, facts }, metadata) => {
+      const role = extractRole(requirement)!;
+      const matches = authFacts(facts).filter((fact) => hasSubstantialOverlap(factValueText(fact), role));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Role requirement "${role}" has matching auth evidence.` : `Role requirement "${role}" has no matching auth evidence.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'config.env_var_required',
+    (requirement) => requirement.kind === 'config' && Boolean(extractEnvVar(requirement)),
+    ({ requirement, facts }, metadata) => {
+      const envVar = extractEnvVar(requirement)!;
+      const matches = facts.filter((fact) => fact.kind === 'config.env' && fact.predicate === 'env.read' && normalizeText(record(fact.value).name) === normalizeText(envVar));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Environment variable "${envVar}" is read.` : `Environment variable "${envVar}" is not read.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'data.field_exists',
+    (requirement) => requirement.kind === 'data' && Boolean(extractField(requirement)),
+    ({ requirement, facts }, metadata) => {
+      const taxonomy = facts.filter((fact) => ['data.field', 'data.schema_field'].includes(fact.kind));
+      if (taxonomy.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `Data field facts are unavailable for "${requirement.subject}".` });
+      }
+      const field = extractField(requirement)!;
+      const matches = taxonomy.filter((fact) => {
+        const value = record(fact.value);
+        return [value.name, value.field, value.column].some((candidate) => typeof candidate === 'string' && normalizeText(candidate) === normalizeText(field));
+      });
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Data field "${field}" exists.` : `Data field "${field}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'test.coverage_hint_exists',
+    (requirement) => requirement.kind === 'test',
+    ({ requirement, facts }, metadata) => {
+      const target = requirement.object ?? requirement.subject;
+      const matches = facts.filter((fact) => fact.kind === 'test.case' && fact.predicate === 'test.named' && hasSubstantialOverlap(factValueText(fact), target));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `Test coverage hint exists for "${target}".` : `Test coverage hint is missing for "${target}".`,
+      });
+    },
+  ),
+  makeMatcher(
+    'fallback',
+    () => true,
+    ({ requirement }, metadata) => complianceResult(requirement, metadata, 'unverifiable', { message: `No deterministic matcher can evaluate "${requirement.subject}".` }),
+  ),
+];
+

@@ -3196,7 +3196,7 @@ Current task status:
 - Phase 2 spec discovery and parsing: `STATUS: DONE`
 - Phase 3 LLM requirement extraction: `STATUS: DONE`
 - Phase 4 code fact extraction: `STATUS: DONE`
-- Phase 5 compliance matchers: `STATUS: TODO`
+- Phase 5 compliance matchers: `STATUS: DONE`
 - Phase 6 CLI and dashboard integration: `STATUS: TODO`
 - Phase 7 hardening and expansion: `STATUS: TODO`
 
