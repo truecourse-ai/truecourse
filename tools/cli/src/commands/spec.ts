@@ -157,7 +157,7 @@ export async function runSpecApply(opts: RunSpecOptions = {}): Promise<void> {
       consolidate.merge.openConflicts.length === 0 &&
       (consolidate.materialize?.failures.length ?? 0) === 0
     ) {
-      p.outro("Canonical spec up to date. Run `truecourse contracts generate` to extract IL contracts.");
+      p.outro("Canonical spec up to date. Run `truecourse contracts generate` to extract TC contracts.");
     } else {
       p.outro("Partial — resolve remaining conflicts.");
     }

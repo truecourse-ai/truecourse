@@ -70,7 +70,7 @@ export const APPLY_STEPS = [
 ] as const;
 
 export const GENERATE_STEPS = [
-  { key: 'il', label: 'Extracting IL contracts' },
+  { key: 'il', label: 'Extracting TC contracts' },
 ] as const;
 
 export const VERIFY_STEPS = [

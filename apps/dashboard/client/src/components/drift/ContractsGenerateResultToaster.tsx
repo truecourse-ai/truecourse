@@ -44,7 +44,7 @@ export function ContractsGenerateResultToaster({
 
     if (issues.length === 0) {
       toast.success('Generated', {
-        description: `Wrote ${written} IL file${written === 1 ? '' : 's'}.`,
+        description: `Wrote ${written} TC contract${written === 1 ? '' : 's'}.`,
       });
       return;
     }
@@ -81,7 +81,7 @@ function ValidationIssuesDetail({
   return (
     <div>
       <div>
-        Wrote {written} files · {issues.length} validation issue
+        Wrote {written} TC contracts · {issues.length} validation issue
         {issues.length === 1 ? '' : 's'}
         {hardCount > 0 && softCount > 0 && (
           <>

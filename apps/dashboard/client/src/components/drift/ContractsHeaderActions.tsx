@@ -29,7 +29,7 @@ export function ContractsHeaderActions({
       width="narrow"
       content={
         stale
-          ? 'Canonical spec has changed since the last Generate. Click to re-extract IL contracts.'
+          ? 'Canonical spec has changed since the last Generate. Click to re-extract TC contracts.'
           : null
       }
     >

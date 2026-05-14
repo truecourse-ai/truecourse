@@ -31,7 +31,7 @@ export function SpecApplyResultToaster() {
           <>
             Materialized {written} canonical files. Run{' '}
             <span className="font-mono">Generate</span> on the Contracts tab
-            to extract IL.
+            to extract TC contracts.
           </>
         ),
       });

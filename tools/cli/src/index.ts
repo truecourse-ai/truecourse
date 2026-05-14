@@ -233,10 +233,10 @@ specCmd
     await runSpecDiff();
   });
 
-// Verify — compares generated IL contracts against the code.
+// Verify — compares generated TC contracts against the code.
 program
   .command("verify")
-  .description("Compare code against the canonical IL contracts")
+  .description("Compare code against the canonical TC contracts")
   .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
   .action(async (options) => {
     await runVerify({ codeDir: options.codeDir });
