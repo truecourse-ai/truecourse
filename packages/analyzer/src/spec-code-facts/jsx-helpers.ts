@@ -1,12 +1,17 @@
 import ts from 'typescript'
 import { stringLiteralValue } from './utils.js'
 
-export function jsxAttributeValue(attr: ts.JsxAttribute | undefined): string | boolean | undefined {
+export function jsxAttributeValue(
+  attr: ts.JsxAttribute | undefined,
+  resolveExpression?: (node: ts.Node) => string | undefined,
+): string | boolean | undefined {
   if (!attr) return undefined
   if (!attr.initializer) return true
   if (ts.isStringLiteral(attr.initializer)) return attr.initializer.text
   if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
     if (attr.initializer.expression.kind === ts.SyntaxKind.TrueKeyword) return true
+    const resolved = resolveExpression?.(attr.initializer.expression)
+    if (resolved !== undefined) return resolved
     return stringLiteralValue(attr.initializer.expression)
   }
   return undefined
@@ -24,7 +29,7 @@ export function jsxTagName(node: ts.JsxOpeningLikeElement): string {
   return node.tagName.getText()
 }
 
-export function staticJsxText(node: ts.Node): string {
+export function staticJsxText(node: ts.Node, resolveExpression?: (node: ts.Node) => string | undefined): string {
   const parts: string[] = []
   const visit = (child: ts.Node): void => {
     if (ts.isJsxText(child)) {
@@ -33,7 +38,7 @@ export function staticJsxText(node: ts.Node): string {
       return
     }
     if (ts.isJsxExpression(child) && child.expression) {
-      const text = stringLiteralValue(child.expression)
+      const text = resolveExpression?.(child.expression) ?? stringLiteralValue(child.expression)
       if (text) parts.push(text.trim())
       return
     }
@@ -43,14 +48,17 @@ export function staticJsxText(node: ts.Node): string {
   return parts.join(' ').replace(/\s+/g, ' ').trim()
 }
 
-export function directJsxTextChildren(node: ts.JsxElement): Array<{ text: string; node: ts.Node }> {
+export function directJsxTextChildren(
+  node: ts.JsxElement,
+  resolveExpression?: (node: ts.Node) => string | undefined,
+): Array<{ text: string; node: ts.Node }> {
   const texts: Array<{ text: string; node: ts.Node }> = []
   for (const child of node.children) {
     if (ts.isJsxText(child)) {
       const text = child.getText().replace(/\s+/g, ' ').trim()
       if (text) texts.push({ text, node: child })
     } else if (ts.isJsxExpression(child) && child.expression) {
-      const text = stringLiteralValue(child.expression)?.trim()
+      const text = (resolveExpression?.(child.expression) ?? stringLiteralValue(child.expression))?.trim()
       if (text) texts.push({ text, node: child })
     }
   }

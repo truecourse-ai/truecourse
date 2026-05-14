@@ -159,9 +159,10 @@ Spec compliance uses deterministic evidence where possible. OpenAPI specs
 produce API route requirements with operation IDs, status codes, request and
 response schema hints, required request fields, and auth/security metadata.
 Implementation facts include Express routes, visible request body field usage,
-returned status codes, auth checks, React/UI facts, package scripts, Docker
-Compose services, GitHub Actions jobs, and schema facts from Prisma, Drizzle,
-and SQLAlchemy models.
+returned status codes, auth checks, React/UI facts, statically resolvable
+composed React labels and route constants, package scripts, Docker Compose
+services, GitHub Actions jobs, and schema facts from Prisma, Drizzle, and
+SQLAlchemy models.
 
 Result statuses:
 

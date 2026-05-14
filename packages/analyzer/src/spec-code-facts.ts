@@ -16,6 +16,7 @@ import { extractInfraConfigFacts } from './spec-code-facts/infra-config.js'
 import { extractPackageFacts } from './spec-code-facts/package-manifest.js'
 import { extractReactRouteFacts } from './spec-code-facts/react-router.js'
 import { extractSchemaFacts } from './spec-code-facts/schema.js'
+import { createStaticValueResolver } from './spec-code-facts/static-values.js'
 import { extractTestFacts } from './spec-code-facts/test-hints.js'
 import type {
   CodeFactExtractionError,
@@ -24,11 +25,11 @@ import type {
 } from './spec-code-facts/types.js'
 import { normalizePath, repoRelativePath, scriptKindFor } from './spec-code-facts/utils.js'
 
-function extractFromSourceUnit(unit: SourceUnit): void {
+function extractFromSourceUnit(unit: SourceUnit, resolver: ReturnType<typeof createStaticValueResolver>): void {
   extractEnvFacts(unit)
   extractAuthFacts(unit)
-  extractReactRouteFacts(unit)
-  extractJsxFacts(unit)
+  extractReactRouteFacts(unit, resolver)
+  extractJsxFacts(unit, resolver)
   extractTestFacts(unit)
 }
 
@@ -38,7 +39,7 @@ export async function extractCodeFacts(rootDir: string): Promise<CodeFactExtract
   const errors: CodeFactExtractionError[] = []
   const files = discoverCodeFactInputs(resolvedRoot)
   const knownFiles = new Set(files.map((file) => normalizePath(resolve(file))))
-const sourceUnits: SourceUnit[] = []
+  const sourceUnits: SourceUnit[] = []
 
   for (const absPath of files) {
     const sourceFile = repoRelativePath(resolvedRoot, absPath)
@@ -80,9 +81,10 @@ const sourceUnits: SourceUnit[] = []
   }
 
   emitExpressFacts(sourceUnits, knownFiles)
+  const staticValueResolver = createStaticValueResolver(sourceUnits)
   for (const unit of sourceUnits) {
     try {
-      extractFromSourceUnit(unit)
+      extractFromSourceUnit(unit, staticValueResolver)
     } catch (error) {
       unit.errors.push({ sourceFile: unit.sourceFile, message: error instanceof Error ? error.message : String(error) })
     }

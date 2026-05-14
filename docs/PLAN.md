@@ -3218,5 +3218,6 @@ Phase 7 hardening status:
 - Test coverage hints now compare requirement IDs, subject/object text, evidence text, acceptance criteria, test names, and static string references. `STATUS: DONE`
 - Infra/config facts now cover Docker Compose services, GitHub Actions jobs, and package scripts. `STATUS: DONE`
 - Spec-compliance artifacts now expose phase timing metadata and cache/LLM counters. `STATUS: DONE`
+- React/UI extraction now resolves same-file and relative imported static string constants, object property reads, route constants, composed field labels, and composed display text props without executing code. `STATUS: DONE`
 - Remaining expansion: larger mixed-domain snapshot. `STATUS: DONE`
 - Requested Phase 7 test/build sweep (`pnpm test -- tests/analyzer tests/core tests/cli tests/dashboard-server`, `pnpm build`). `STATUS: DONE`

@@ -1,12 +1,18 @@
 import ts from 'typescript'
 import { jsxAttributeValue, jsxAttrs, jsxTagName } from './jsx-helpers.js'
 import { EXTRACTORS } from './metadata.js'
+import type { StaticValueResolver } from './static-values.js'
 import type { SourceUnit } from './types.js'
 import { expressionName, joinRoutePath, pushFact, rangeOf, stringLiteralValue, textOfName } from './utils.js'
 
-function routePathFromJsxAttr(attrs: Map<string, ts.JsxAttribute>): { path?: string; index?: boolean } {
-  const path = jsxAttributeValue(attrs.get('path'))
-  const index = jsxAttributeValue(attrs.get('index'))
+function routePathFromJsxAttr(
+  unit: SourceUnit,
+  attrs: Map<string, ts.JsxAttribute>,
+  resolver?: StaticValueResolver,
+): { path?: string; index?: boolean } {
+  const resolve = (node: ts.Node) => resolver?.resolveString(unit, node)
+  const path = jsxAttributeValue(attrs.get('path'), resolve)
+  const index = jsxAttributeValue(attrs.get('index'), resolve)
   return {
     ...(typeof path === 'string' ? { path } : {}),
     ...(index === true || index === 'true' ? { index: true } : {}),
@@ -22,7 +28,7 @@ function componentNameFromElementAttr(attr: ts.JsxAttribute | undefined): string
   return undefined
 }
 
-export function extractReactRouteFacts(unit: SourceUnit): void {
+export function extractReactRouteFacts(unit: SourceUnit, resolver?: StaticValueResolver): void {
   const emit = (node: ts.Node, value: Record<string, unknown>): void => {
     pushFact(unit.facts, unit.sourceFile, rangeOf(unit.ast, node), 'ui.route', 'route.exists', value, EXTRACTORS.react)
   }
@@ -30,7 +36,8 @@ export function extractReactRouteFacts(unit: SourceUnit): void {
   const visitJsxRoutes = (node: ts.Node, parentPath = ''): void => {
     if (ts.isJsxElement(node) && jsxTagName(node.openingElement) === 'Route') {
       const attrs = jsxAttrs(node.openingElement)
-      const route = routePathFromJsxAttr(attrs)
+      const route = routePathFromJsxAttr(unit, attrs, resolver)
+      if (!route.index && attrs.has('path') && route.path === undefined) return
       const path = route.index ? parentPath || '/' : joinRoutePath(parentPath, route.path ?? '')
       const componentName = componentNameFromElementAttr(attrs.get('element'))
       emit(node, {
@@ -44,7 +51,8 @@ export function extractReactRouteFacts(unit: SourceUnit): void {
 
     if (ts.isJsxSelfClosingElement(node) && jsxTagName(node) === 'Route') {
       const attrs = jsxAttrs(node)
-      const route = routePathFromJsxAttr(attrs)
+      const route = routePathFromJsxAttr(unit, attrs, resolver)
+      if (!route.index && attrs.has('path') && route.path === undefined) return
       const path = route.index ? parentPath || '/' : joinRoutePath(parentPath, route.path ?? '')
       const componentName = componentNameFromElementAttr(attrs.get('element'))
       emit(node, {
@@ -60,6 +68,7 @@ export function extractReactRouteFacts(unit: SourceUnit): void {
 
   const readObjectRoute = (node: ts.ObjectLiteralExpression, parentPath: string): void => {
     let path: string | undefined
+    let hasPath = false
     let index = false
     let componentName: string | undefined
     let children: ts.ArrayLiteralExpression | undefined
@@ -67,7 +76,10 @@ export function extractReactRouteFacts(unit: SourceUnit): void {
     for (const prop of node.properties) {
       if (!ts.isPropertyAssignment(prop)) continue
       const name = textOfName(prop.name)
-      if (name === 'path') path = stringLiteralValue(prop.initializer)
+      if (name === 'path') {
+        hasPath = true
+        path = resolver?.resolveString(unit, prop.initializer) ?? stringLiteralValue(prop.initializer)
+      }
       if (name === 'index' && prop.initializer.kind === ts.SyntaxKind.TrueKeyword) index = true
       if (name === 'element') {
         const init = prop.initializer
@@ -77,6 +89,8 @@ export function extractReactRouteFacts(unit: SourceUnit): void {
       }
       if (name === 'children' && ts.isArrayLiteralExpression(prop.initializer)) children = prop.initializer
     }
+
+    if (hasPath && path === undefined && !index) return
 
     if (path !== undefined || index) {
       const fullPath = index ? parentPath || '/' : joinRoutePath(parentPath, path ?? '')

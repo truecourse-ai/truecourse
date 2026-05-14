@@ -3,9 +3,9 @@ import type { ExtractorMetadata } from '@truecourse/shared'
 export const EXTRACTORS = {
   express: { name: 'express-route-extractor', version: '1.0.0' },
   auth: { name: 'auth-signal-extractor', version: '1.0.0' },
-  react: { name: 'react-route-extractor', version: '1.0.0' },
-  jsxText: { name: 'jsx-visible-text-extractor', version: '1.0.0' },
-  jsxForm: { name: 'jsx-form-extractor', version: '1.0.0' },
+  react: { name: 'react-route-extractor', version: '1.1.0' },
+  jsxText: { name: 'jsx-visible-text-extractor', version: '1.1.0' },
+  jsxForm: { name: 'jsx-form-extractor', version: '1.1.0' },
   env: { name: 'env-var-extractor', version: '1.0.0' },
   packageManifest: { name: 'package-manifest-extractor', version: '1.0.0' },
   testHint: { name: 'test-hint-extractor', version: '1.0.0' },

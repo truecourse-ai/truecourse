@@ -28,7 +28,7 @@ Improve coverage, performance, framework support, and reporting after the MVP lo
 
 ## Deferred outside Phase 37.7
 
-- [ ] Improve React extraction for composed components and imported labels where statically resolvable.
+- [x] Improve React extraction for composed components and imported labels where statically resolvable.
 - [ ] Add support for additional backend routing frameworks once core Express support is stable.
 - [ ] Add deployment manifest and feature-flag extractors beyond the current Docker Compose, GitHub Actions, package script, and env-read coverage.
 - [ ] Add real incremental analysis using spec chunk hashes and code file hashes. Current Phase 37.7 cache coverage is requirement extraction cache metrics and deterministic repeated-run output.
@@ -51,6 +51,7 @@ Improve coverage, performance, framework support, and reporting after the MVP lo
 - Performance metadata makes slow phases visible.
 - Expanded extractors remain deterministic.
 - Documentation explains known limitations and result categories.
+- React UI facts include statically resolvable route paths, composed field labels, and display text props, while dynamic values are skipped instead of guessed.
 
 ## Notes
 

@@ -158,6 +158,71 @@ describe('extractCodeFacts', () => {
     expect(values<{ label: string; type?: string }>(result.facts, 'ui.button')).toContainEqual({ label: 'Save profile', type: 'submit' })
   })
 
+  it('extracts statically resolvable composed React routes, labels, fields, and text', async () => {
+    const root = tempProject()
+    writeFixture(root, 'src/ui-copy.ts', [
+      'export const LABELS = {',
+      '  email: "Email address",',
+      '  search: "Search users",',
+      '  empty: "No users found",',
+      '} as const',
+      'export const TITLES = { profile: "Profile overview" } as const',
+    ].join('\n'))
+    writeFixture(root, 'src/routes.ts', [
+      'export const ROUTES = {',
+      '  profile: "/profile",',
+      '  settings: "/settings",',
+      '} as const',
+    ].join('\n'))
+    writeFixture(root, 'src/App.tsx', [
+      'import { Route, createBrowserRouter } from "react-router-dom"',
+      'import { LABELS, TITLES } from "./ui-copy"',
+      'import { ROUTES } from "./routes"',
+      'const EMAIL_ID = "email" as const',
+      'const FIELD_NAMES = { email: "email", search: "query" } as const',
+      'const LOCAL_COPY = { cta: "Continue" } as const',
+      'const router = createBrowserRouter([',
+      '  { path: ROUTES.settings, element: <Settings /> },',
+      '])',
+      'export function App() {',
+      '  return <main>',
+      '    <Route path={ROUTES.profile} element={<Profile />} />',
+      '    <TextField id={EMAIL_ID} name={FIELD_NAMES.email} label={LABELS.email} required />',
+      '    <SearchBox name={FIELD_NAMES.search} placeholder={LABELS.search} />',
+      '    <EmptyState title={TITLES.profile} message={LABELS.empty} />',
+      '    <Banner text={LOCAL_COPY.cta} />',
+      '    <TextField name="dynamic" label={t("email")} />',
+      '    <Route path={routeFor("billing")} element={<Billing />} />',
+      '  </main>',
+      '}',
+    ].join('\n'))
+
+    const result = await extractCodeFacts(root)
+    expect(result.errors).toEqual([])
+
+    expect(values<{ path: string; componentName?: string }>(result.facts, 'ui.route')).toEqual(expect.arrayContaining([
+      { path: '/profile', componentName: 'Profile' },
+      { path: '/settings', componentName: 'Settings' },
+    ]))
+    expect(values<{ path: string }>(result.facts, 'ui.route')).not.toContainEqual(expect.objectContaining({ path: '/billing' }))
+
+    expect(values<{ tag: string; name?: string; id?: string; label?: string; required: boolean }>(result.facts, 'ui.form_field')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tag: 'TextField', id: 'email', name: 'email', label: 'Email address', required: true }),
+      expect.objectContaining({ tag: 'SearchBox', name: 'query', label: 'Search users', required: false }),
+    ]))
+    expect(values<{ tag: string; name?: string; label?: string }>(result.facts, 'ui.form_field')).not.toContainEqual(expect.objectContaining({
+      tag: 'TextField',
+      name: 'dynamic',
+    }))
+
+    expect(values<{ text: string }>(result.facts, 'ui.text')).toEqual(expect.arrayContaining([
+      { text: 'Profile overview' },
+      { text: 'No users found' },
+      { text: 'Continue' },
+    ]))
+    expect(values<{ text: string }>(result.facts, 'ui.text')).not.toContainEqual({ text: 'email' })
+  })
+
   it('extracts package manifest facts from root and nested package.json files', async () => {
     const root = tempProject()
     writeFixture(root, 'package.json', JSON.stringify({
