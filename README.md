@@ -138,8 +138,13 @@ spec compliance analyzer. The analyzer package can now deterministically
 discover configured Markdown, MDX, text, JSON, and YAML spec files. Prose specs
 are split into stable source-ranged chunks, and structured OpenAPI or known
 `requirements` JSON/YAML specs can produce deterministic requirements without
-LLM calls. Spec compliance is still disabled by default and does not affect
-analysis unless explicitly enabled in a future integration.
+LLM calls. The core package also has the Phase 3 prose requirement extraction
+service: it redacts secrets before LLM calls, validates outputs into the shared
+requirement schema, and caches results under
+`<repo>/.truecourse/spec-compliance/llm-requirements/` using the spec hash,
+chunk hash, schema version, prompt version, and model. Spec compliance is still
+disabled by default and does not affect analysis unless explicitly enabled in a
+future integration.
 
 ### Git Hooks
 

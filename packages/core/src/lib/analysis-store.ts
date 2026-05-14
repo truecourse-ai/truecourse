@@ -27,6 +27,8 @@ const ANALYSES_DIR = 'analyses';
 const LATEST_FILE = 'LATEST.json';
 const HISTORY_FILE = 'history.json';
 const DIFF_FILE = 'diff.json';
+const SPEC_COMPLIANCE_DIR = 'spec-compliance';
+const REQUIREMENT_CACHE_DIR = 'llm-requirements';
 
 function storeDir(repoPath: string): string {
   return path.join(repoPath, TRUECOURSE_DIR);
@@ -34,6 +36,10 @@ function storeDir(repoPath: string): string {
 
 function analysesDir(repoPath: string): string {
   return path.join(storeDir(repoPath), ANALYSES_DIR);
+}
+
+function requirementCacheDir(repoPath: string): string {
+  return path.join(storeDir(repoPath), SPEC_COMPLIANCE_DIR, REQUIREMENT_CACHE_DIR);
 }
 
 export function analysisFilePath(repoPath: string, filename: string): string {
@@ -50,6 +56,10 @@ export function historyPath(repoPath: string): string {
 
 export function diffPath(repoPath: string): string {
   return path.join(storeDir(repoPath), DIFF_FILE);
+}
+
+export function requirementExtractionCachePath(repoPath: string, cacheKey: string): string {
+  return path.join(requirementCacheDir(repoPath), `${cacheKey}.json`);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +218,20 @@ export function deleteDiff(repoPath: string): void {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Spec-compliance LLM requirement extraction cache
+// ---------------------------------------------------------------------------
+
+export function readRequirementExtractionCache<T>(repoPath: string, cacheKey: string): T | null {
+  const file = requirementExtractionCachePath(repoPath, cacheKey);
+  if (!fs.existsSync(file)) return null;
+  return JSON.parse(fs.readFileSync(file, 'utf-8')) as T;
+}
+
+export function writeRequirementExtractionCache(repoPath: string, cacheKey: string, entry: unknown): void {
+  atomicWriteJson(requirementExtractionCachePath(repoPath, cacheKey), entry);
 }
 
 // ---------------------------------------------------------------------------

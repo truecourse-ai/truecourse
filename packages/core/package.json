@@ -92,6 +92,10 @@
       "types": "./dist/services/rules.service.d.ts",
       "import": "./dist/services/rules.service.js"
     },
+    "./services/spec-requirement-extraction": {
+      "types": "./dist/services/spec-requirement-extraction.service.d.ts",
+      "import": "./dist/services/spec-requirement-extraction.service.js"
+    },
     "./services/stable-keys": {
       "types": "./dist/services/stable-keys.d.ts",
       "import": "./dist/services/stable-keys.js"
