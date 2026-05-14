@@ -11,6 +11,9 @@ export const AdminUserDetails = ({ userId, name }: AdminUserDetailsProps) => {
   return null;
 };
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // FP shape: stats is an explicitly typed Record initialised with all ReadStatus enum keys;

@@ -27,3 +27,7 @@ function calculateTextLayout({ text, fontSize, fontFamily, baseWidth, baseHeight
 
   return { exceedsWidth, exceedsHeight, hasMultiLineRoom: baseHeight >= lineH * 2 };
 }
+
+const _s1 = 'duplicate-value-key';
+const _s2 = 'duplicate-value-key';
+const _s3 = 'duplicate-value-key';

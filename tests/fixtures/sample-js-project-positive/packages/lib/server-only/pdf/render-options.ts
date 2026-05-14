@@ -13,3 +13,6 @@ const calculateRenderLayout = (field: { id: string; type: string }, options: Ren
   const contentHeight = fieldHeight - padding * 2;
   return { contentWidth, contentHeight, showLabel };
 };
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;

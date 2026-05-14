@@ -12,6 +12,9 @@ async function renderCertificateBranding() {
   return brandingGroup.toObject();
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // shape: .then() callback is async to obtain arrayBuffer from a Promise-returning method; async is redundant but intentional — res.arrayBuffer() already returns a Promise

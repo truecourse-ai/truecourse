@@ -10,3 +10,7 @@ function setCorsHeaders(origin: string | undefined, allowedOrigins: string[]) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
+
+const _dupStr_2830c2fc_a = 'config-endpoint-2830c2fc';
+const _dupStr_2830c2fc_b = 'config-endpoint-2830c2fc';
+const _dupStr_2830c2fc_c = 'config-endpoint-2830c2fc';

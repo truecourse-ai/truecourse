@@ -886,6 +886,9 @@ function drawAuditEntry({
   renderAuditRow({ recipient, width, i18n });
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // Async function with named typed params
@@ -903,6 +906,9 @@ async function loadProfileData({
   const profile = await fetchUserProfile(userId, teamId);
   return profile;
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 
@@ -934,6 +940,9 @@ function renderTextField({
   applyTextStyle({ verticalAlign, textAlign, fontSize, fontWeight, color, lineHeight });
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // Function with Omit/Partial generic typed params
@@ -945,6 +954,9 @@ function addFormField(
 ) {
   registerField(config);
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 
@@ -963,6 +975,9 @@ async function handleNotificationEvent({
   await processNotification(recipientId, templateId, metadata);
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // Function with default parameter value from a constant
@@ -975,6 +990,9 @@ function renderDateCell(
 ) {
   return formatReportDate(date, format);
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 
@@ -995,6 +1013,9 @@ async function handleFieldSubmit({
   await submitFieldValue(token, fieldId, value, signerEmail);
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // Function with fieldWidth and options destructuring
@@ -1011,6 +1032,9 @@ function drawFormField({
 }) {
   renderFieldBox(fieldWidth, fieldHeight, options);
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 
@@ -1035,6 +1059,9 @@ function renderFieldOverlay({
   placeOverlayElement(positionX, positionY, width, height, pageWidth, pageHeight);
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // Function with Pick<...> and Pick<...>[] generic typed params
@@ -1051,6 +1078,9 @@ function generateAccessReport(
 ) {
   return buildAccessReport(owner, members);
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 
@@ -1079,6 +1109,9 @@ function validateSelectField(
 
   return errors;
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 

@@ -22,6 +22,9 @@ function renderFieldElement(field: FieldToRender, options: RenderOptions): void 
   // render logic
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // FP: function with typed params including Pick — not a complex expression
@@ -33,6 +36,9 @@ function calculateFieldOverflow(
 ): boolean {
   return field.x + field.width > pageWidth;
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
 
 
 
@@ -59,3 +65,6 @@ function renderDropdownField(
 ): void {
   // render
 }
+
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;

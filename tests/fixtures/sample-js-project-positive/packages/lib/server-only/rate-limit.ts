@@ -18,6 +18,9 @@ async function checkEmailDeliveryRateLimit({
   return { allowed: true };
 }
 
+declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
+const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
 
 
 // --- unknown-catch-variable shape: catch(error) logger.error spread; fail-open return without property access ---
