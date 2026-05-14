@@ -111,3 +111,47 @@ export function DataTable() {
     </table>
   );
 }
+
+// --- duplicate-import TP shape: three separate react imports (default type + named type + named value) ---
+
+import type React from 'react';
+// VIOLATION: bugs/deterministic/duplicate-import
+import type { HTMLAttributes } from 'react';
+import { useCallback } from 'react';
+
+declare function resolveShareUrl(id: string): string;
+declare function copyToClipboard(text: string): Promise<void>;
+
+export type ShareButtonProps = HTMLAttributes<HTMLButtonElement> & {
+  resourceId: string;
+  onCopied?: () => void;
+};
+
+export function ShareButton({ resourceId, onCopied, className, ...rest }: ShareButtonProps) {
+  const handleClick = useCallback(async () => {
+    const url = resolveShareUrl(resourceId);
+    await copyToClipboard(url);
+    onCopied?.();
+  }, [resourceId, onCopied]);
+
+  return (
+    <button type="button" className={className} onClick={handleClick} {...rest}>
+      Copy link
+    </button>
+  ) as React.ReactElement;
+}
+
+// duplicate-import TP shape: namespace import + named import from same module
+import * as ReactDOM from 'react-dom';
+// VIOLATION: bugs/deterministic/duplicate-import
+import { createPortal } from 'react-dom';
+
+declare const modalRoot: HTMLElement;
+
+export function ModalPortal({ children }: { children: any }) {
+  const version = ReactDOM.version;
+  return createPortal(
+    <div data-react-version={version}>{children}</div>,
+    modalRoot,
+  );
+}
