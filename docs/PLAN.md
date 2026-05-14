@@ -3220,4 +3220,5 @@ Phase 7 hardening status:
 - Spec-compliance artifacts now expose phase timing metadata and cache/LLM counters. `STATUS: DONE`
 - React/UI extraction now resolves same-file and relative imported static string constants, object property reads, route constants, composed field labels, and composed display text props without executing code. `STATUS: DONE`
 - Remaining expansion: larger mixed-domain snapshot. `STATUS: DONE`
+- Minimal React todo fixture with structured product requirements for manual and regression spec-compliance runs. `STATUS: DONE`
 - Requested Phase 7 test/build sweep (`pnpm test -- tests/analyzer tests/core tests/cli tests/dashboard-server`, `pnpm build`). `STATUS: DONE`

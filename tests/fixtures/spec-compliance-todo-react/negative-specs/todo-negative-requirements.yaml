@@ -1,0 +1,6 @@
+requirements:
+  - kind: ui
+    subject: Archive route
+    action: render
+    object: /archive
+    evidenceText: The archive route /archive must exist.

@@ -148,6 +148,13 @@ truecourse analyze --spec-compliance --show-satisfied
 truecourse analyze --spec-compliance --output json
 ```
 
+For a tiny deterministic sample, run the React todo fixture:
+
+```bash
+cd tests/fixtures/spec-compliance-todo-react
+pnpm tsx ../../../tools/cli/src/index.ts analyze --no-llm --no-stash --no-skills --spec-compliance --specs docs/** --show-satisfied --output json
+```
+
 `--no-llm` disables both normal LLM rules and prose requirement extraction.
 `--output json` prints a stable JSON summary containing the normal analysis
 summary plus `specCompliance` when enabled. Prose requirement extraction redacts
