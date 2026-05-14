@@ -15,6 +15,7 @@ export const ViolationTypeSchema = z.enum([
   'module',
   'service',
   'function',
+  'spec-compliance',
 ])
 export type ViolationType = z.infer<typeof ViolationTypeSchema>
 

@@ -133,6 +133,10 @@ In the dashboard you can also toggle rules from the Rules panel
 (Shield icon in the top-right) or silence a noisy rule directly from
 any violation card via the **⋮** menu → **Disable rule for this repo**.
 
+`config.json` also reserves a `specCompliance` section for the in-progress
+spec compliance analyzer. It is disabled by default and does not affect
+analysis unless explicitly enabled in a future integration.
+
 ### Git Hooks
 
 TrueCourse can install a pre-commit hook that blocks commits introducing new violations at or above a configured severity:

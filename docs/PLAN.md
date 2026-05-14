@@ -3180,3 +3180,31 @@ Token-based comparison algorithm to detect copy-pasted code blocks across the co
 3. Hash each window, compare across files
 4. Merge overlapping matches into contiguous duplicate blocks
 5. Report duplicate blocks with file locations and percentage
+
+---
+
+## Phase 37: Spec Compliance Analyzer `STATUS: IN_PROGRESS`
+
+Validate whether repo implementation matches repo specs by extracting atomic requirements from spec documents, extracting deterministic code facts from source/config/test files, and comparing both sides with idempotent matchers.
+
+Product requirements live in `docs/prds/spec-compliance-analyzer/PRD.md`.
+Task breakdowns live in `docs/prds/spec-compliance-analyzer/tasks/`.
+
+Current task status:
+
+- Phase 1 core data model: `STATUS: DONE`
+- Phase 2 spec discovery and parsing: `STATUS: TODO`
+- Phase 3 LLM requirement extraction: `STATUS: TODO`
+- Phase 4 code fact extraction: `STATUS: TODO`
+- Phase 5 compliance matchers: `STATUS: TODO`
+- Phase 6 CLI and dashboard integration: `STATUS: TODO`
+- Phase 7 hardening and expansion: `STATUS: TODO`
+
+Initial scope:
+
+- Discover Markdown and structured spec files
+- Extract requirement graphs with stable IDs and cached LLM support for prose specs
+- Extract deterministic code fact graphs for APIs, UI, config, auth, data, and tests
+- Compare requirements to facts using deterministic matchers
+- Report missing, conflicting, partial, ambiguous, unverifiable, and unspecified implementation findings
+- Prove repeated runs over identical inputs produce identical output
