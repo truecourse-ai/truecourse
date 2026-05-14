@@ -74,3 +74,63 @@ function getEntitlements(productClaimId: string): PlanEntitlement | null {
   }
   return SUBSCRIPTION_ENTITLEMENTS[productClaimId as SubscriptionPlanId];
 }
+
+
+// FP 417d07d5db1b: mode = 'edit' as default parameter for RenderMode discriminant
+// 'edit' / 'preview' / 'readonly' are discriminant literals defined by the type — not magic strings.
+type RenderMode_417d = 'preview' | 'edit' | 'readonly';
+export function renderFieldValue_417d(
+  value: string,
+  fieldType: string,
+  mode: RenderMode_417d = 'edit',
+): string {
+  if (mode === 'readonly') return value;
+  if (mode === 'preview') return value.length > 0 ? value : `[${fieldType}]`;
+  return value;
+}
+
+
+
+// FP a65cc23423fa: 'Retry-After' appears in rate-limit header code
+// 'Retry-After' is an RFC 6585 standard HTTP header name — a protocol constant, not a magic string.
+// The rule fired because the literal appears multiple times, but it's an industry-standard name.
+export function buildRateLimitHeaders_a65cc(
+  resetAt: Date,
+): Record<string, string> {
+  const retryAfterSecs = Math.max(1, Math.ceil((resetAt.getTime() - Date.now()) / 1000));
+  return {
+    'Retry-After': String(retryAfterSecs),
+    'X-RateLimit-Remaining': '0',
+    'X-RateLimit-Reset': resetAt.toISOString(),
+  };
+}
+
+
+
+// Suspense used for lazy code-splitting, not async data — no wrapper needed
+declare function useQuery<T>(opts: { queryKey: unknown[] }): { data: T | undefined };
+
+export function LazyBillingInfo({ orgId }: { orgId: string }) {
+  const { data } = useQuery<{ plan: string }>({ queryKey: ['billing', orgId] });
+  return <div>{data?.plan ?? 'loading'}</div>;
+}
+
+
+
+// FP 98bd37827550: 'signer@documenso.com' / 'SIGNING_TOKEN' in webhook sample data generator
+// These are demo/placeholder strings in a test-data factory — not magic strings needing constants.
+export function generateWebhookSamplePayload_98bd() {
+  return {
+    event: 'envelope.completed',
+    recipients: [
+      {
+        id: 52,
+        email: 'signer@documenso.com',
+        name: 'John Doe',
+        token: 'SIGNING_TOKEN',
+        role: 'SIGNER',
+      },
+    ],
+  };
+}
+

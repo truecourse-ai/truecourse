@@ -80,3 +80,19 @@ export const lookupCredentialBySecret = async ({ secret }: { secret: string }) =
     member,
   };
 };
+
+
+// path.join(process.cwd(), CONSTANT_STRING) — standard path construction, no type mismatch
+declare const path: { join: (...parts: string[]) => string };
+
+const LICENSE_FILE_NAME = 'truecourse.lic';
+const SIGNING_KEY_FILE = 'signing.key.pem';
+
+export function getLicenseFilePath(): string {
+  return path.join(process.cwd(), LICENSE_FILE_NAME);
+}
+
+export function getSigningKeyPath(): string {
+  return path.join(process.cwd(), 'keys', SIGNING_KEY_FILE);
+}
+

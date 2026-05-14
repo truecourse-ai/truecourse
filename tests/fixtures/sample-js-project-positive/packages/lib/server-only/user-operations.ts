@@ -28,3 +28,14 @@ export async function disableUserAndReassignDocs(
     });
   });
 }
+
+
+// setTemplateRecipients({userId: apiToken.userId, teamId: apiToken.teamId ?? undefined}) FP — setTemplateRecipients undefined → TS2304 → rule fires
+export async function syncContactAssignment_57c52a18(): Promise<void> {
+  await setTemplateRecipients({
+    userId: apiCredential.userId,
+    teamId: apiCredential.teamId ?? undefined,
+    contacts: contactList,
+  });
+}
+

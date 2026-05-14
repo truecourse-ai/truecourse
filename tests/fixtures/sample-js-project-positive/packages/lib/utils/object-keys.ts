@@ -43,3 +43,42 @@ function groupRecipientsByRole(recipients: Recipient[]): Record<RecipientRole, R
     ),
   ) as Record<RecipientRole, Recipient[]>;
 }
+
+
+// ENVELOPE_VISIBILITY_MAP is a Record keyed by TeamMemberRole enum;
+// currentRole is typed TeamMemberRole (defaulted to MEMBER if null). Enum-exhaustive Record lookup.
+enum TeamMemberRole { ADMIN = 'ADMIN', MANAGER = 'MANAGER', MEMBER = 'MEMBER' }
+enum EnvelopeVisibility { PUBLIC = 'PUBLIC', TEAM = 'TEAM', PRIVATE = 'PRIVATE' }
+
+const ENVELOPE_VISIBILITY_MAP = {
+  [TeamMemberRole.ADMIN]: [EnvelopeVisibility.PUBLIC, EnvelopeVisibility.TEAM, EnvelopeVisibility.PRIVATE],
+  [TeamMemberRole.MANAGER]: [EnvelopeVisibility.PUBLIC, EnvelopeVisibility.TEAM],
+  [TeamMemberRole.MEMBER]: [EnvelopeVisibility.PUBLIC],
+} satisfies Record<TeamMemberRole, EnvelopeVisibility[]>;
+
+export function countVisibleEnvelopes(
+  currentRole: TeamMemberRole | null,
+  visibilityCounts: Partial<Record<EnvelopeVisibility, number>>,
+): number {
+  const role = currentRole ?? TeamMemberRole.MEMBER;
+  const allowedVisibilities = ENVELOPE_VISIBILITY_MAP[role];
+  return allowedVisibilities.reduce((sum, v) => sum + (visibilityCounts[v] ?? 0), 0);
+}
+
+
+
+// Record keyed by union type — lookup is exhaustive by construction, TypeScript enforces key membership at compile time
+type RecipientRoleLabel = 'Needs to sign' | 'Needs to approve' | 'Receives copy' | 'Needs to view';
+type RecipientRoleValue = 'SIGNER' | 'APPROVER' | 'CC' | 'VIEWER';
+
+const RECIPIENT_ROLE_BY_LABEL: Record<RecipientRoleLabel, RecipientRoleValue> = {
+  'Needs to sign': 'SIGNER',
+  'Needs to approve': 'APPROVER',
+  'Receives copy': 'CC',
+  'Needs to view': 'VIEWER',
+};
+
+export function resolveRecipientRole(roleLabel: RecipientRoleLabel): RecipientRoleValue {
+  return RECIPIENT_ROLE_BY_LABEL[roleLabel];
+}
+

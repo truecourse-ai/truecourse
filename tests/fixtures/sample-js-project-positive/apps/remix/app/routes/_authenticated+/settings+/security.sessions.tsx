@@ -198,3 +198,28 @@ export default function ActiveSessionsPage() {
     </div>
   );
 }
+
+
+// argument-type-mismatch FP: DateTime.fromJSDate accepts Date; row.original.updatedAt is Date — no mismatch
+declare const DateTime_bd: { fromJSDate(date: Date): { toRelative(): string | null } };
+declare const useLingui_bd: () => { t: (strings: TemplateStringsArray, ...vals: unknown[]) => string };
+declare const useMemo_bd: <T>(fn: () => T, deps: unknown[]) => T;
+
+export function useSessionTableColumns_bd() {
+  const { t } = useLingui_bd();
+  return useMemo_bd(() => [
+    {
+      header: t`Last Active`,
+      accessorKey: 'updatedAt',
+      cell: ({ row }: { row: { original: { updatedAt: Date } } }) =>
+        DateTime_bd.fromJSDate(row.original.updatedAt).toRelative(),
+    },
+    {
+      header: t`Created`,
+      accessorKey: 'createdAt',
+      cell: ({ row }: { row: { original: { createdAt: Date } } }) =>
+        DateTime_bd.fromJSDate(row.original.createdAt).toRelative(),
+    },
+  ], [t]);
+}
+

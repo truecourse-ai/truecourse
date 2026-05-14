@@ -150,3 +150,18 @@ export async function getOrCreateCachedSigner() {
   }
   return _cachedSigner;
 }
+
+
+// Buffer.toString('base64') — 'base64' is a standard Node.js Buffer encoding literal, not a magic string
+declare const fs: { readFileSync: (p: string) => Buffer };
+declare const path: { join: (...parts: string[]) => string };
+
+export function readCertificateAsBase64(certRelativePath: string): string {
+  return fs.readFileSync(path.join(process.cwd(), certRelativePath)).toString('base64');
+}
+
+export function encodeImageAsDataUrl(imagePath: string, mimeType: string): string {
+  const base64 = fs.readFileSync(imagePath).toString('base64');
+  return `data:${mimeType};base64,${base64}`;
+}
+

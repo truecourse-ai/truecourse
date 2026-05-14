@@ -94,3 +94,54 @@ export function renderLayoutToCanvas(options: any): ImageData {
 
   return result;
 }
+
+
+// FP: pdfDoc.reload() is a PDF document method call, not a database operation.
+declare const PDFLib: { load(data: Uint8Array): Promise<{ reload(data: Uint8Array): Promise<void>; getForm(): { flatten(): void }; save(): Promise<Uint8Array> }> };
+declare function flattenAnnotations(doc: { getForm(): { flatten(): void } }, fields: Array<{ name: string; value: string }>): void;
+declare function serializePdf(doc: { save(): Promise<Uint8Array> }): Promise<Uint8Array>;
+
+export async function applyFlattenedAnnotations(
+  pdfBytes: Uint8Array,
+  annotations: Array<{ name: string; value: string }>,
+): Promise<Uint8Array> {
+  const pdfDoc = await PDFLib.load(pdfBytes);
+  const annotationDoc = await PDFLib.load(await serializePdf(pdfDoc));
+
+  flattenAnnotations(annotationDoc, annotations);
+  annotationDoc.getForm().flatten();
+
+  // Reload the main doc with the flattened annotation layer baked in.
+  await pdfDoc.reload(await serializePdf(annotationDoc));
+
+  return serializePdf(pdfDoc);
+}
+
+
+
+// FP: pdfDoc.save()/legacyPdfLibDoc.save() are PDF library calls, not ORM writes.
+// The rule fires on save() as if it were a database operation — it is not.
+declare const PDF2: {
+  load(data: Uint8Array): Promise<{
+    reload(data: Uint8Array): Promise<void>;
+    getForm(): { flatten(): void };
+    save(opts?: unknown): Promise<Uint8Array>;
+    getPage(n: number): { width: number; height: number };
+  }>;
+};
+
+export async function applyLegacyAndV2Fields(
+  pdfBytes: Uint8Array,
+): Promise<Uint8Array> {
+  const pdfDoc = await PDF2.load(pdfBytes);
+
+  // V1 path: create a separate PDFDocument for legacy field insertion
+  const legacyPdfLibDoc = await PDF2.load(await pdfDoc.save({ useXRefStream: true }));
+  legacyPdfLibDoc.getForm().flatten();
+
+  // Reload the main doc with the flattened legacy layer baked in
+  await pdfDoc.reload(await legacyPdfLibDoc.save());
+
+  return pdfDoc.save({ useXRefStream: true });
+}
+

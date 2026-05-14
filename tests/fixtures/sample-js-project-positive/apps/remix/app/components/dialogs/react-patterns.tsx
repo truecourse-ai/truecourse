@@ -169,3 +169,23 @@ const SubscriptionPlanPicker = ({
     </div>
   );
 };
+
+
+// Exported component prop-type alias over a library type — decouples consumers from the primitive, standard React practice
+declare namespace SelectPrimitive {
+  interface SelectProps {
+    value?: string;
+    onValueChange?: (v: string) => void;
+    disabled?: boolean;
+    children?: React.ReactNode;
+  }
+}
+
+export type EnvelopeStatusSelectProps = SelectPrimitive.SelectProps;
+
+declare function forwardRef<T, P>(fn: (props: P, ref: React.Ref<T>) => React.ReactElement | null): React.ForwardRefExoticComponent<P & React.RefAttributes<T>>;
+
+export const EnvelopeStatusSelect = forwardRef<HTMLButtonElement, EnvelopeStatusSelectProps>(({ ...props }, _ref) => {
+  return <div role="combobox" aria-expanded="false" />;
+});
+

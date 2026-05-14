@@ -22,3 +22,10 @@ export async function updateEnvelopeSettings(
     });
   });
 }
+
+
+// envelope.envelopeItems.map((item) => item.title) FP — envelopeRecord undefined → TS2304 → rule fires
+export function getEnvelopeItemTitles_7f70a12f(): string[] {
+  return envelopeRecord.envelopeItems.map((item: { title: string }) => item.title);
+}
+

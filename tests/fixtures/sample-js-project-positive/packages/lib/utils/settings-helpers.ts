@@ -23,3 +23,9 @@ function mergeTeamSettings(orgSettings: OrgSettings, teamSettings: TeamSettings)
 
   return derived;
 }
+
+
+// FP: alias inside declare global { namespace PrismaJson } is required by prisma-json-types-generator
+type ReportColumnConfigBase_8a63d8 = { key: string; label?: string; width?: number };
+type ReportColumnConfig_8a63d8 = ReportColumnConfigBase_8a63d8;
+

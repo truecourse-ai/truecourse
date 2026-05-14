@@ -348,3 +348,99 @@ function _longFn_abf76b11(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// --- missing-return-type FP: private async loader helper with complex inferred return type ---
+// The return type is correctly inferred from the framework utility; explicit annotation is
+// idiomatic-optional for private route loaders, not a quality gap.
+declare function getWorkspaceByToken(opts: { token: string }): Promise<{
+  id: string;
+  teamId: string;
+  directLink: { id: string } | null;
+  participants: Array<{ id: string }>;
+  fields: Array<{ id: string; participantId: string }>;
+} | null>;
+declare function getWorkspaceFeatureFlags(opts: { teamId: string }): Promise<{ flags: { embedViewing: boolean } }>;
+declare function loaderJson<T>(data: T): T;
+
+interface RouteLoaderArgs { params: { token: string }; request: Request }
+
+async function workspaceEmbedLoader({ params }: RouteLoaderArgs) {
+  if (!params.token) {
+    throw new Response('Not found', { status: 404 });
+  }
+
+  const token = params.token;
+  const workspace = await getWorkspaceByToken({ token }).catch(() => null);
+
+  if (!workspace || !workspace.directLink) {
+    throw new Response('Not found', { status: 404 });
+  }
+
+  const { flags } = await getWorkspaceFeatureFlags({ teamId: workspace.teamId });
+
+  return loaderJson({
+    token,
+    workspace,
+    allowEmbed: flags.embedViewing,
+  });
+}
+
+
+
+// --- missing-return-type FP: private async loader helper; return type inferred from framework utility ---
+// Not a public API — the inferred return type from loaderJson2 is correct and explicit annotation
+// would add verbosity without safety benefit.
+declare function getSigningSessionByToken(opts: { token: string; userId?: string }): Promise<{
+  sessionId: string;
+  participants: Array<{ id: string }>;
+} | null>;
+declare function resolveOptionalAuth(request: Request): Promise<{ user: { id: string } | null }>;
+declare function loaderJson2<T>(data: T): T;
+
+interface SigningLoaderArgs { params: { token: string }; request: Request }
+
+async function signingSessionLoader({ params, request }: SigningLoaderArgs) {
+  if (!params.token) {
+    throw new Response('Not found', { status: 404 });
+  }
+
+  const token = params.token;
+  const { user } = await resolveOptionalAuth(request);
+
+  const session = await getSigningSessionByToken({
+    token,
+    userId: user?.id,
+  }).catch(() => null);
+
+  if (!session) {
+    throw new Response('Not found', { status: 404 });
+  }
+
+  return loaderJson2({
+    token,
+    sessionId: session.sessionId,
+    participants: session.participants,
+  });
+}
+
+
+
+// FP: framework async loader export — return type is inferred by the framework convention.
+declare function getOptionalSession(request: Request): Promise<{ isAuthenticated: boolean; user: { id: string } | null }>;
+declare function findPortalBySlug(where: object): Promise<{ name: string; enabled: boolean } | null>;
+declare function redirect(url: string): never;
+declare namespace Route { interface LoaderArgs { request: Request; params: { slug: string } } }
+
+export async function loader({ request, params }: Route.LoaderArgs) {
+  const { isAuthenticated, user } = await getOptionalSession(request);
+
+  const portal = await findPortalBySlug({ where: { slug: params.slug } });
+
+  if (!portal || !portal.enabled) {
+    throw redirect('/');
+  }
+
+  return { isAuthenticated, user, portal };
+}
+

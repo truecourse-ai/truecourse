@@ -1,26 +1,26 @@
-// import signingCelebration from '@documenso/assets/images/signing-celebration.png';
-// import { getOptionalSession } from '@documenso/auth/server/lib/utils/get-session';
-// import { EnvelopeRenderProvider } from '@documenso/lib/client-only/providers/envelope-render-provider';
-// import { useOptionalSession } from '@documenso/lib/client-only/providers/session';
-// import { AppError, AppErrorCode } from '@documenso/lib/errors/app-error';
-// import { getDocumentAndSenderByToken } from '@documenso/lib/server-only/document/get-document-by-token';
-// import { viewedDocument } from '@documenso/lib/server-only/document/viewed-document';
-// import { getEnvelopeForRecipientSigning } from '@documenso/lib/server-only/envelope/get-envelope-for-recipient-signing';
-// import { getEnvelopeRequiredAccessData } from '@documenso/lib/server-only/envelope/get-envelope-required-access-data';
-// import { getCompletedFieldsForToken } from '@documenso/lib/server-only/field/get-completed-fields-for-token';
-// import { getFieldsForToken } from '@documenso/lib/server-only/field/get-fields-for-token';
-// import { getIsRecipientsTurnToSign } from '@documenso/lib/server-only/recipient/get-is-recipient-turn';
-// import { getNextPendingRecipient } from '@documenso/lib/server-only/recipient/get-next-pending-recipient';
-// import { getRecipientByToken } from '@documenso/lib/server-only/recipient/get-recipient-by-token';
-// import { getRecipientSignatures } from '@documenso/lib/server-only/recipient/get-recipient-signatures';
-// import { getRecipientsForAssistant } from '@documenso/lib/server-only/recipient/get-recipients-for-assistant';
-// import { getTeamSettings } from '@documenso/lib/server-only/team/get-team-settings';
-// import { getUserByEmail } from '@documenso/lib/server-only/user/get-user-by-email';
-// import { DocumentAccessAuth } from '@documenso/lib/types/document-auth';
-// import { extractDocumentAuthMethods } from '@documenso/lib/utils/document-auth';
-// import { isRecipientExpired } from '@documenso/lib/utils/recipients';
-// import { prisma } from '@documenso/prisma';
-// import { SigningCard3D } from '@documenso/ui/components/signing-card';
+// import signingCelebration from '@app/assets/images/signing-celebration.png';
+// import { getOptionalSession } from '@app/auth/server/lib/utils/get-session';
+// import { EnvelopeRenderProvider } from '@app/lib/client-only/providers/envelope-render-provider';
+// import { useOptionalSession } from '@app/lib/client-only/providers/session';
+// import { AppError, AppErrorCode } from '@app/lib/errors/app-error';
+// import { getDocumentAndSenderByToken } from '@app/lib/server-only/document/get-document-by-token';
+// import { viewedDocument } from '@app/lib/server-only/document/viewed-document';
+// import { getEnvelopeForRecipientSigning } from '@app/lib/server-only/envelope/get-envelope-for-recipient-signing';
+// import { getEnvelopeRequiredAccessData } from '@app/lib/server-only/envelope/get-envelope-required-access-data';
+// import { getCompletedFieldsForToken } from '@app/lib/server-only/field/get-completed-fields-for-token';
+// import { getFieldsForToken } from '@app/lib/server-only/field/get-fields-for-token';
+// import { getIsRecipientsTurnToSign } from '@app/lib/server-only/recipient/get-is-recipient-turn';
+// import { getNextPendingRecipient } from '@app/lib/server-only/recipient/get-next-pending-recipient';
+// import { getRecipientByToken } from '@app/lib/server-only/recipient/get-recipient-by-token';
+// import { getRecipientSignatures } from '@app/lib/server-only/recipient/get-recipient-signatures';
+// import { getRecipientsForAssistant } from '@app/lib/server-only/recipient/get-recipients-for-assistant';
+// import { getTeamSettings } from '@app/lib/server-only/team/get-team-settings';
+// import { getUserByEmail } from '@app/lib/server-only/user/get-user-by-email';
+// import { DocumentAccessAuth } from '@app/lib/types/document-auth';
+// import { extractDocumentAuthMethods } from '@app/lib/utils/document-auth';
+// import { isRecipientExpired } from '@app/lib/utils/recipients';
+// import { prisma } from '@app/prisma';
+// import { SigningCard3D } from '@app/ui/components/signing-card';
 // import { Trans } from '@lingui/react/macro';
 // import { DocumentSigningOrder, DocumentStatus, RecipientRole, SigningStatus } from '@prisma/client';
 // import { Clock8 } from 'lucide-react';
@@ -358,15 +358,15 @@ const SigningPageV1 = ({ data }: { data: Awaited<ReturnType<typeof handleV1Loade
           </p>
 
           {user ? (
-            <Link to="/" className="mt-36 text-documenso-700 hover:text-documenso-600">
+            <Link to="/" className="mt-36 text-app-700 hover:text-app-600">
               <Trans>Go Back Home</Trans>
             </Link>
           ) : (
             <p className="mt-36 text-muted-foreground/60 text-sm">
               <Trans>
                 Want to send slick signing links like this one?{' '}
-                <Link to="https://documenso.com" className="text-documenso-700 hover:text-documenso-600">
-                  Check out Documenso
+                <Link to="https://app.example.com" className="text-app-700 hover:text-app-600">
+                  Check out App
                 </Link>
                 .
               </Trans>
@@ -444,15 +444,15 @@ const SigningPageV2 = ({ data }: { data: Awaited<ReturnType<typeof handleV2Loade
           </p>
 
           {user ? (
-            <Link to="/" className="mt-36 text-documenso-700 hover:text-documenso-600">
+            <Link to="/" className="mt-36 text-app-700 hover:text-app-600">
               <Trans>Go Back Home</Trans>
             </Link>
           ) : (
             <p className="mt-36 text-muted-foreground/60 text-sm">
               <Trans>
                 Want to send slick signing links like this one?{' '}
-                <Link to="https://documenso.com" className="text-documenso-700 hover:text-documenso-600">
-                  Check out Documenso
+                <Link to="https://app.example.com" className="text-app-700 hover:text-app-600">
+                  Check out App
                 </Link>
                 .
               </Trans>

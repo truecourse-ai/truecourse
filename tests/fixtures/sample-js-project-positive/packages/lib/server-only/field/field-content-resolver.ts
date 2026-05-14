@@ -260,3 +260,23 @@ function _longFn_69103fa5(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// Shape: flatMap with find to validate each field against a related list — no type mismatch
+declare const formFields: Array<{ id: string; recipientId: string; pageIndex?: number }>;
+declare const recipients: Array<{ id: string; name: string; email: string }>;
+declare const pageItems: Array<{ id: string }>;
+
+export function validateFieldRecipients() {
+  return formFields.flatMap((field) => {
+    const recipient = recipients.find((r) => r.id === field.recipientId);
+    if (!recipient) {
+      return [];
+    }
+    if (field.pageIndex !== undefined && !pageItems.find((p) => p.id === field.id)) {
+      return [];
+    }
+    return [{ ...field, recipient }];
+  });
+}
+

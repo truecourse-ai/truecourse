@@ -1,12 +1,12 @@
-// import { DocumentSignatureType } from '@documenso/lib/constants/document';
+// import { DocumentSignatureType } from '@app/lib/constants/document';
 import {
   type TBaseEmbedAuthoringSchema,
   ZBaseEmbedAuthoringSchema,
-} from '@documenso/lib/types/embed-authoring-base-schema';
-// import { putPdfFile } from '@documenso/lib/universal/upload/put-file';
-// import { trpc } from '@documenso/trpc/react';
-// import { Stepper } from '@documenso/ui/primitives/stepper';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/lib/types/embed-authoring-base-schema';
+// import { putPdfFile } from '@app/lib/universal/upload/put-file';
+// import { trpc } from '@app/trpc/react';
+// import { Stepper } from '@app/ui/primitives/stepper';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { useLingui } from '@lingui/react';
 // import { useLayoutEffect, useState } from 'react';
 // import { useNavigate } from 'react-router';

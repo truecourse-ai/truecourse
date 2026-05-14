@@ -16,3 +16,10 @@ export async function deactivateUser(userId: number): Promise<void> {
     await tx.verificationToken.updateMany({ where: { userId }, data: { expires: new Date() } });
   });
 }
+
+
+// .map((team) => team.id) FP — workspace undefined → TS2304 in range → rule fires
+export function extractProjectIds_a09ce881(): string[] {
+  return workspace.projects.map((project: { id: string }) => project.id);
+}
+

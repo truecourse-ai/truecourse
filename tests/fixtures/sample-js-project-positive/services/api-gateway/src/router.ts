@@ -152,3 +152,54 @@ await setDocumentRecipients({
   })),
   requestMetadata,
 });
+
+
+
+// Positive: argument-type-mismatch — generic class instantiation new Router<EnvType>().
+// new HttpRouter<AppEnv>() is a typed generic instantiation; no argument type mismatch.
+declare class HttpRouter<TEnv> {
+  get(path: string, handler: (ctx: { env: TEnv; params: Record<string, string> }) => Response): this;
+  post(path: string, handler: (ctx: { env: TEnv; params: Record<string, string> }) => Response | Promise<Response>): this;
+}
+
+interface ReportsEnv {
+  DATABASE_URL: string;
+  STORAGE_BUCKET: string;
+}
+
+const reportsRouter = new HttpRouter<ReportsEnv>();
+
+reportsRouter
+  .get('/reports/:id', (ctx) => {
+    return Response.json({ id: ctx.params.id });
+  })
+  .post('/reports', (_ctx) => {
+    return Response.json({ created: true }, { status: 201 });
+  });
+
+export { reportsRouter };
+
+
+
+// 'embed' is a typed discriminant for the render mode — logic branches on this union value
+type RenderMode = 'embed' | 'iframe' | 'full-page';
+
+export function buildResponseSecurityHeaders(mode: RenderMode, nonce: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-XSS-Protection': '0',
+  };
+
+  if (mode === 'embed') {
+    headers['Content-Security-Policy'] = `script-src 'nonce-${nonce}'; frame-ancestors *`;
+  } else if (mode === 'iframe') {
+    headers['Content-Security-Policy'] = `script-src 'nonce-${nonce}'; frame-ancestors 'self'`;
+    headers['X-Frame-Options'] = 'SAMEORIGIN';
+  } else {
+    headers['Content-Security-Policy'] = `script-src 'self' 'nonce-${nonce}'`;
+    headers['X-Frame-Options'] = 'DENY';
+  }
+
+  return headers;
+}
+

@@ -72,3 +72,29 @@ export async function getOrganisationSummary(
 
 declare const _p: boolean, _q: boolean, _r: boolean, _s: boolean, _t: boolean, _u: boolean;
 const _complexCheck = _p && _q && _r || _s && _t || _u && _p && _q;
+
+
+// FP shape: Kysely table alias reference string in a typed query builder — not a magic string
+declare const kyselyDb: {
+  $kysely: {
+    selectFrom: (table: string) => {
+      select: (cols: string[]) => {
+        leftJoin: (table: string, lhsCol: string, rhsCol: string) => {
+          where: (col: string, op: string, val: unknown) => {
+            execute: () => Promise<unknown[]>;
+          };
+        };
+      };
+    };
+  };
+};
+
+export async function getWorkspaceTeamStats(workspaceId: string) {
+  return kyselyDb.$kysely
+    .selectFrom('Team as t')
+    .select(['t.id', 't.name', 't.createdAt', 't.memberCount'])
+    .leftJoin('Workspace as w', 'w.id', 't.workspaceId')
+    .where('t.workspaceId', '=', workspaceId)
+    .execute();
+}
+

@@ -126,3 +126,27 @@ export async function getUserEngagementMetrics() {
 
   return await result.execute();
 }
+
+
+// --- argument-type-mismatch FP: fn.count<number>('id') in Kysely query builder ---
+// fn.count<number>('id').as('total') is a valid Kysely generic count call; no type mismatch.
+declare const kyselyReports: {
+  $kysely: {
+    selectFrom(source: unknown): {
+      select(cb: (helpers: { fn: { count<T>(col: string): { as(alias: string): unknown } } }) => unknown): {
+        executeTakeFirstOrThrow(): Promise<{ total: number | bigint | null }>;
+      };
+    };
+  };
+};
+declare const filteredReportQuery: { as(alias: string): unknown };
+
+export async function countFilteredReports(): Promise<number> {
+  const countQuery = kyselyReports.$kysely
+    .selectFrom(filteredReportQuery.as('filtered'))
+    .select(({ fn }) => fn.count<number>('id').as('total'));
+
+  const result = await countQuery.executeTakeFirstOrThrow();
+  return Number(result.total ?? 0);
+}
+

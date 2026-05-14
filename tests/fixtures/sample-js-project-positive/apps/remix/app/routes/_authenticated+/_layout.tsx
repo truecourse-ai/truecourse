@@ -306,3 +306,68 @@ function _longFn_21d25221(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// Idiomatic Remix/Web-API HTTP error throwing — 'Not Found' is the HTTP reason phrase, not a domain magic string.
+declare function getSigningTokenRecord(token: string): Promise<{ id: number; recipientId: number } | null>;
+
+export async function signTokenLoader({ params }: { params: { token?: string } }) {
+  const { token } = params;
+
+  if (!token) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  const record = await getSigningTokenRecord(token);
+
+  if (!record) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  return { record };
+}
+
+
+
+declare const WORKSPACE_ANNOUNCEMENT_ID: string;
+declare function fetchWorkspaceConfig(): Promise<Array<{ id: string; value: string }>>;
+
+async function loadAnnouncementConfig() {
+  const announcement = await fetchWorkspaceConfig().then((configs) =>
+    configs.find((config) => config.id === WORKSPACE_ANNOUNCEMENT_ID),
+  );
+  return announcement;
+}
+
+
+
+// Shape: getSiteSettings().then(settings => settings.find(...)) — Promise chain with Array.find; no type mismatch
+declare function fetchWorkspaceSettings(): Promise<Array<{ id: string; value: string }>>;
+declare const WORKSPACE_BANNER_ID: string;
+
+async function loadBannerFromSettings(): Promise<{ id: string; value: string } | undefined> {
+  return fetchWorkspaceSettings().then((settings) =>
+    settings.find((s) => s.id === WORKSPACE_BANNER_ID),
+  );
+}
+
+
+
+declare function getViewTokenRecord(token: string): Promise<{ id: number } | null>;
+
+export async function viewTokenLoader({ params }: { params: { token?: string } }) {
+  const { token } = params;
+
+  if (!token) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  const record = await getViewTokenRecord(token);
+
+  if (!record) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  return { record };
+}
+

@@ -12,3 +12,27 @@ export async function exchangeApiToken(apiToken: string): Promise<string> {
 
   return presignToken;
 }
+
+
+// FP shape: JSON.stringify used to display raw webhook event data in a debug playground —
+// standard built-in serialisation, not a restricted API in any meaningful context.
+declare const webhookEventLog: Array<{ type: string; payload: unknown; receivedAt: number }>;
+
+export function renderWebhookEventDebugPanel(eventIndex: number): string {
+  const event = webhookEventLog[eventIndex];
+
+  if (!event) {
+    return 'No event at index ' + eventIndex;
+  }
+
+  const formatted = JSON.stringify(event.payload, null, 2);
+  return `[${event.type}] @ ${new Date(event.receivedAt).toISOString()}\n${formatted}`;
+}
+
+
+
+// FP shape: location.href used directly for navigation in playground redirect — direct location mutation
+export function redirectPlayground(path: string): void {
+  location.href = path;
+}
+

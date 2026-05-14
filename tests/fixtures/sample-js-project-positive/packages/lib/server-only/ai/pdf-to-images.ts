@@ -256,3 +256,39 @@ function _longFn_2fb49b03(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// fetchAssetServerSide({type, data}) — type and data fields match DocumentData structure, no type mismatch
+declare function fetchAssetServerSide(opts: { type: string; data: string }): Promise<Buffer>;
+declare const reportRecord: { reportData: { type: string; snapshotData: string; liveData: string } };
+declare const renderVersion: 'current' | 'snapshot';
+
+async function getReportFileForVersion() {
+  const dataToUse = renderVersion === 'current'
+    ? reportRecord.reportData.liveData
+    : reportRecord.reportData.snapshotData;
+  return fetchAssetServerSide({
+    type: reportRecord.reportData.type,
+    data: dataToUse,
+  });
+}
+
+
+
+// Array.from({length: doc.numPages}) creating sparse array for pMap — valid Array.from usage, no type mismatch
+declare function pMap19<T, R>(items: T[], mapper: (item: T, index: number) => Promise<R>, opts?: { concurrency?: number }): Promise<R[]>;
+declare const reportPdf19: { numPages: number; getPage: (n: number) => Promise<{ getViewport: (opts: { scale: number }) => { width: number; height: number }; render: (ctx: unknown) => { promise: Promise<void> }; }> };
+
+async function renderReportPages(): Promise<{ pageNumber: number; width: number; height: number }[]> {
+  return pMap19(
+    Array.from({ length: reportPdf19.numPages }),
+    async (_, index) => {
+      const pageNumber = index + 1;
+      const page = await reportPdf19.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.5 });
+      return { pageNumber, width: viewport.width, height: viewport.height };
+    },
+    { concurrency: 3 },
+  );
+}
+

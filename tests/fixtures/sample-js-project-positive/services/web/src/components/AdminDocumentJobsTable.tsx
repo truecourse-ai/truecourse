@@ -107,3 +107,26 @@ export function AdminDocumentJobsTable() {
     />
   );
 }
+
+
+// --- argument-type-mismatch FP: i18n.date() called with Date argument or 'N/A' fallback ---
+// Ternary passes Date to i18n.date() only when non-null; the 'N/A' fallback is the else branch.
+declare const i18nFormatter: { date: (d: Date) => string };
+
+type JobRunRow = { startedAt: Date | null; finishedAt: Date | null };
+
+export function formatJobRunDates(row: JobRunRow): { startedAt: string; finishedAt: string } {
+  return {
+    startedAt: row.startedAt ? i18nFormatter.date(row.startedAt) : 'N/A',
+    finishedAt: row.finishedAt ? i18nFormatter.date(row.finishedAt) : 'N/A',
+  };
+}
+
+
+
+// FP: i18n.date() called with Date | null — ternary guards, but TS sees overall call as mismatched
+function formatJobDate(i18n: { date: (d: Date) => string }, dateVal: Date | null): string {
+  const formatted: string = i18n.date(dateVal);
+  return formatted;
+}
+

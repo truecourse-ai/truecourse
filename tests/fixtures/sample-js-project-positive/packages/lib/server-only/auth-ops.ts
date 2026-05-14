@@ -18,3 +18,13 @@ export async function registerPasskey(
     });
   });
 }
+
+
+// procedure.input(ZSchema).output(ZSchema).mutation(...) FP — authenticatedProcedure undefined → TS2304 → rule fires
+export const createEnvelopeShareRoute_fd15f021 = authenticatedProcedure
+  .input(ZShareDocumentRequestSchema)
+  .output(ZShareDocumentResponseSchema)
+  .mutation(async ({ input, ctx }: { input: { envelopeId: number }; ctx: { user: { id: number } } }) => {
+    return { shareUrl: `/share/envelope/${input.envelopeId}` };
+  });
+

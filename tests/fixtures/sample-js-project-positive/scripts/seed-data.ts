@@ -492,3 +492,61 @@ interface SeedFormField { type: string; customText?: string; fieldMeta?: { readO
 export function seedInsertedFlag(field: SeedFormField, insertFields: boolean): boolean {
   return insertFields && ((!field.fieldMeta?.readOnly && Boolean(field.customText)) || field.type === 'SIGNATURE');
 }
+
+
+// Entity type prefix string passed to prefixedId helper in seed data — single-use type identifier
+declare function prefixedId(entityType: string): string;
+declare const seedDb: {
+  report: {
+    create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+  };
+};
+
+export async function seedReportRecord(workspaceId: number, ownerId: number) {
+  return seedDb.report.create({
+    data: {
+      id: prefixedId('report'),
+      type: 'TEMPLATE',
+      workspaceId,
+      ownerId,
+      title: '[SEED] Sample Report Template',
+    },
+  });
+}
+
+
+
+// Standard promise .catch() error handler on a CLI entry-point — no type mismatch
+async function runSeedMigration(): Promise<void> {
+  console.log('Starting seed migration...');
+  console.log('Seed migration complete.');
+}
+
+runSeedMigration().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+
+
+
+// process.exit(1) — process.exit accepts a number exit code; 1 is valid. Standard Node.js script error exit.
+declare const process28: { exit: (code: number) => never; env: Record<string, string | undefined>; argv: string[] };
+
+function requireEnvVarForScript(name: string): string {
+  const value = process28.env[name];
+  if (!value) {
+    console.error(`Missing required environment variable: ${name}`);
+    process28.exit(1);
+  }
+  return value;
+}
+
+function validateScriptArgs(minArgs: number): string[] {
+  const args = process28.argv.slice(2);
+  if (args.length < minArgs) {
+    console.error(`Usage: npx tsx scripts/seed-data.ts <arg1> [arg2...]`);
+    process28.exit(1);
+  }
+  return args;
+}
+

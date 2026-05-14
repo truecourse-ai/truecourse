@@ -8565,3 +8565,205 @@ function removeSelectedOptions(
 
   return cloneOption;
 }
+
+
+// --- magic-string FP: prefixedId('report') — entity-type prefix passed to ID helper, not a repeated constant ---
+// The string literal is the entity type identifier for a prefixed-ID generation helper;
+// used once at a single call site, not scattered across business logic.
+declare function prefixedId(entityType: string): string;
+declare const db: {
+  report: {
+    create: (args: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+  };
+};
+
+export async function seedReport(userId: number, workspaceId: number, key: string) {
+  return db.report.create({
+    data: {
+      id: prefixedId('report'),
+      type: 'ANALYSIS',
+      title: `[TEST] Report ${key}`,
+      userId,
+      workspaceId,
+    },
+  });
+}
+
+
+
+// --- magic-string FP: 'ownerIds' is a URL search param name at a single read site ---
+// searchParams?.get('ownerIds') — the string is the query-param key, not a scattered business constant.
+declare const filterSearchParams: URLSearchParams | null;
+
+export function parseOwnerIdsFromUrl(): string[] {
+  return (filterSearchParams?.get('ownerIds') ?? '').split(',').filter((value) => value !== '');
+}
+
+
+
+// --- magic-string FP: 'InvalidToken' as const in a discriminated return — typed literal, not a magic string ---
+// `as const` promotes the string to a compile-time literal type; the discriminant is
+// consumed by a union type check, not scattered as repeated raw strings.
+export async function declineWorkspaceInviteLoader(params: { token?: string }) {
+  const { token } = params;
+
+  if (!token) {
+    return {
+      state: 'InvalidToken',
+    } as const;
+  }
+
+  return { state: 'valid', token } as const;
+}
+
+
+
+// FP: process.exit(1) passes a number to exit() which expects a number — no type mismatch
+declare const process: { exit: (code: number) => never; env: Record<string, string | undefined> };
+declare function runAnalysisPipeline(): Promise<void>;
+declare function connectToWorkspace(url: string): Promise<void>;
+
+async function main(): Promise<void> {
+  const workspaceUrl = process.env.WORKSPACE_URL ?? '';
+  await connectToWorkspace(workspaceUrl);
+  await runAnalysisPipeline();
+}
+
+main().catch((err: unknown) => {
+  console.error('Fatal error in analysis pipeline:', err);
+  process.exit(1);
+});
+
+
+
+// Object.entries with union type — typeof guard handles boolean/non-boolean branches correctly, no mismatch
+export function normalizeFormValues(
+  formValues: Record<string, string | boolean | number>,
+): Array<[string, string | boolean]> {
+  return Object.entries(formValues).map(([key, value]) => [
+    key,
+    typeof value === 'boolean' ? value : value.toString(),
+  ]);
+}
+
+
+
+// FP 232096dc285e: TEAM_DOCUMENT_VISIBILITY_MAP[teamRole] in find-templates
+// Same pattern: teamRole typed TeamMemberRole, map covers all values.
+type TeamMemberRole_232096 = 'OWNER' | 'ADMIN' | 'MEMBER';
+type DocVisibility_232096 = 'EVERYONE' | 'TEAM_AND_ADMINS' | 'ADMINS_ONLY';
+declare const VISIBILITY_MAP_232096: Record<TeamMemberRole_232096, DocVisibility_232096[]>;
+export function getDocumentVisibilities_232096(teamRole: TeamMemberRole_232096): DocVisibility_232096[] {
+  return VISIBILITY_MAP_232096[teamRole];
+}
+
+
+
+// Shape: early `return {}` is a structurally valid empty GroupedOption — TypeScript unifies all branches
+type RecipientOption_f463 = { value: string; label: string; [key: string]: unknown };
+type GroupedRecipientOption_f463 = { [key: string]: RecipientOption_f463[] };
+
+export function groupRecipientOptions_f463(
+  options: RecipientOption_f463[],
+  groupBy?: string,
+): GroupedRecipientOption_f463 {
+  if (options.length === 0) {
+    return {};
+  }
+
+  if (!groupBy) {
+    return { '': options };
+  }
+
+  const grouped: GroupedRecipientOption_f463 = {};
+
+  for (const option of options) {
+    const key = (option[groupBy] as string) ?? '';
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(option);
+  }
+
+  return grouped;
+}
+
+
+
+// FP 421ca61b9103: licenseFlags[flag.key as keyof TLicenseClaim]
+// flag.key is typed as keyof TLicenseClaim — an enum-exhaustive Record key.
+// The receiver is Partial<TLicenseClaim> so the lookup can return undefined,
+// but this is an object property lookup, NOT array indexing — FP.
+type TLicenseClaim_421ca = {
+  billing: boolean;
+  teamCount: number | null;
+  enterpriseFeatures: boolean;
+};
+declare const licenseFlags_421ca: Partial<TLicenseClaim_421ca>;
+declare const featureFlags_421ca: Array<{ key: keyof TLicenseClaim_421ca; isEnterprise: boolean }>;
+export function getDisallowedFlags_421ca() {
+  return featureFlags_421ca.filter(
+    (flag) => flag.isEnterprise && !licenseFlags_421ca[flag.key as keyof TLicenseClaim_421ca],
+  );
+}
+
+
+
+// FP ce69fa82ca23: timeConstantsRecords[expiresIn] where expiresIn: ExpiryPreset
+// expiresIn is typed as a string-union ExpiryPreset;
+// timeConstantsRecords is Record<ExpiryPreset, Duration> — exhaustive by construction.
+type ExpiryPreset_ce69 = '7d' | '30d' | '90d' | '365d';
+type Duration_ce69 = { days?: number; weeks?: number };
+declare const timeConstantsRecords_ce69: Record<ExpiryPreset_ce69, Duration_ce69>;
+declare function addDuration_ce69(base: Date, d: Duration_ce69): Date;
+export function resolveExpiry_ce69(expiresIn: ExpiryPreset_ce69 | null): Date | null {
+  return expiresIn ? addDuration_ce69(new Date(), timeConstantsRecords_ce69[expiresIn]) : null;
+}
+
+
+
+// FP: Radix UI namespace member re-export aliases — intentional module re-aliasing pattern.
+// The rule must not fire on const X = Namespace.X; re-export patterns.
+declare const CollapsiblePrimitive_50a8: {
+  Root: unknown;
+  Trigger: unknown;
+  Content: unknown;
+};
+
+const Collapsible_50a8 = CollapsiblePrimitive_50a8.Root;
+const CollapsibleTrigger_50a8 = CollapsiblePrimitive_50a8.Trigger;
+const CollapsibleContent_50a8 = CollapsiblePrimitive_50a8.Content;
+
+export { Collapsible_50a8, CollapsibleTrigger_50a8, CollapsibleContent_50a8 };
+
+
+
+// FP ed62797afd6c: multipliers[unit] where unit is cast from string to WindowUnit
+// unit = window.slice(-1) as WindowUnit; multipliers covers all WindowUnit values.
+// Enum-exhaustive Record lookup — not array indexing, no bound risk.
+type WindowUnit_ed62 = 's' | 'm' | 'h' | 'd';
+export function parseRateLimitWindow_ed62(window_ed62: string): number {
+  const value_ed62 = parseInt(window_ed62.slice(0, -1), 10);
+  const unit_ed62 = window_ed62.slice(-1) as WindowUnit_ed62;
+  const multipliers_ed62: Record<WindowUnit_ed62, number> = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+  };
+  return value_ed62 * multipliers_ed62[unit_ed62];
+}
+
+
+
+// FP b3e23e516a19: TEAM_DOCUMENT_VISIBILITY_MAP[teamRole] where teamRole: TeamMemberRole
+// TEAM_DOCUMENT_VISIBILITY_MAP is Record<TeamMemberRole, Visibility[]>.
+// teamRole is typed TeamMemberRole — exhaustive enum key, no missing entry possible.
+type TeamMemberRole_b3e2 = 'ADMIN' | 'MANAGER' | 'MEMBER';
+type TemplateVisibility_b3e2 = 'EVERYONE' | 'TEAM_AND_ADMINS' | 'ADMINS_ONLY';
+declare const TEAM_DOCUMENT_VISIBILITY_MAP_b3e2: Record<TeamMemberRole_b3e2, TemplateVisibility_b3e2[]>;
+declare const teamRole_b3e2: TeamMemberRole_b3e2;
+export function getVisibleTemplates_b3e2(): TemplateVisibility_b3e2[] {
+  return TEAM_DOCUMENT_VISIBILITY_MAP_b3e2[teamRole_b3e2];
+}
+

@@ -400,3 +400,129 @@ function buildRoleOptions() {
     ...GROUP_MEMBER_ROLE_LABELS[role],
   }));
 }
+
+
+// argument-type-mismatch FP: Array.find() comparing timezone string to Intl.DateTimeFormat result — string equality
+declare const TIMEZONE_OPTIONS: { label: string; value: string }[];
+
+function detectBrowserTimezoneOption() {
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const matched = TIMEZONE_OPTIONS.find((opt) => opt.value === browserTimezone);
+  return matched ?? TIMEZONE_OPTIONS[0];
+}
+
+function InviteMemberTimezoneSelector({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const defaultOption = detectBrowserTimezoneOption();
+  return null;
+}
+
+
+
+// FP: REPORT_ACCESS_LEVEL_CONFIG is a Record keyed by ReportAccessLevel enum;
+// accessLevel comes from Object.values(ReportAccessLevel) iteration — enum-exhaustive Record lookup.
+declare const enum ReportAccessLevel { PUBLIC = 'PUBLIC', SIGNED_IN = 'SIGNED_IN', INVITED_ONLY = 'INVITED_ONLY' }
+
+interface AccessLevelConfig { label: string; description: string; requiresInviteList: boolean }
+
+const REPORT_ACCESS_LEVEL_CONFIG = {
+  [ReportAccessLevel.PUBLIC]: { label: 'Public', description: 'Anyone with the link can view', requiresInviteList: false },
+  [ReportAccessLevel.SIGNED_IN]: { label: 'Signed-in users', description: 'Must have an account to view', requiresInviteList: false },
+  [ReportAccessLevel.INVITED_ONLY]: { label: 'Invited only', description: 'Only explicitly invited contacts', requiresInviteList: true },
+} satisfies Record<ReportAccessLevel, AccessLevelConfig>;
+
+function buildAccessLevelOptions(): Array<{ value: ReportAccessLevel; label: string; requiresInviteList: boolean }> {
+  return (Object.values(ReportAccessLevel) as ReportAccessLevel[]).map((accessLevel) => ({
+    value: accessLevel,
+    label: REPORT_ACCESS_LEVEL_CONFIG[accessLevel].label,
+    requiresInviteList: REPORT_ACCESS_LEVEL_CONFIG[accessLevel].requiresInviteList,
+  }));
+}
+
+
+
+// FP: WORKSPACE_MEMBER_ROLE_CONFIG is a Record keyed by WorkspaceMemberRole enum;
+// role comes from iterating WORKSPACE_ROLE_HIERARCHY which yields only valid role values.
+// Enum-exhaustive Record lookup.
+declare const enum WorkspaceMemberRole { OWNER = 'OWNER', ADMIN = 'ADMIN', MEMBER = 'MEMBER', VIEWER = 'VIEWER' }
+
+const WORKSPACE_MEMBER_ROLE_CONFIG = {
+  [WorkspaceMemberRole.OWNER]: { label: 'Owner', sortOrder: 1, canInvite: true },
+  [WorkspaceMemberRole.ADMIN]: { label: 'Admin', sortOrder: 2, canInvite: true },
+  [WorkspaceMemberRole.MEMBER]: { label: 'Member', sortOrder: 3, canInvite: false },
+  [WorkspaceMemberRole.VIEWER]: { label: 'Viewer', sortOrder: 4, canInvite: false },
+} satisfies Record<WorkspaceMemberRole, { label: string; sortOrder: number; canInvite: boolean }>;
+
+const WORKSPACE_ROLE_HIERARCHY: WorkspaceMemberRole[] = [
+  WorkspaceMemberRole.OWNER,
+  WorkspaceMemberRole.ADMIN,
+  WorkspaceMemberRole.MEMBER,
+  WorkspaceMemberRole.VIEWER,
+];
+
+function buildWorkspaceRoleOptions() {
+  return WORKSPACE_ROLE_HIERARCHY.map((role) => ({
+    value: role,
+    ...WORKSPACE_MEMBER_ROLE_CONFIG[role],
+  }));
+}
+
+
+
+// FP: mixed import where the value side (CsvLib) is legitimately used at runtime;
+// the inline `type CsvParseResult` specifier is correct. Rule incorrectly flags
+// a mixed import where only the named type has the `type` modifier.
+//
+// Simulates: import CsvLib, { type CsvParseResult } from 'some-csv-lib';
+declare const CsvLib: {
+  parse: <T>(input: string | File, options?: unknown) => void;
+  unparse: (data: unknown[], options?: unknown) => string;
+};
+declare type CsvParseResult = {
+  data: Array<Record<string, string>>;
+  errors: Array<{ message: string }>;
+};
+
+type InviteImportRow = { email: string; role: string };
+
+function parseInviteCsv(
+  file: File,
+  onComplete: (rows: InviteImportRow[]) => void,
+  onError: (message: string) => void,
+): void {
+  CsvLib.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: (results: CsvParseResult) => {
+      if (results.errors.length > 0) {
+        onError(results.errors.map((e) => e.message).join('; '));
+        return;
+      }
+      const rows = results.data
+        .map((row) => ({
+          email: (row['email'] ?? '').trim().toLowerCase(),
+          role: (row['role'] ?? 'MEMBER').trim().toUpperCase(),
+        }))
+        .filter((row) => row.email.length > 0);
+      onComplete(rows);
+    },
+    error: (error: Error) => onError(error.message),
+  });
+}
+
+function downloadInviteCsvTemplate(): void {
+  const csv = CsvLib.unparse([{ email: 'user@example.com', role: 'MEMBER' }], { header: true });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'invite-template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+

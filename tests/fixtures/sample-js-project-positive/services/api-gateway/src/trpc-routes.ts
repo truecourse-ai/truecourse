@@ -395,3 +395,31 @@ export const updateGroupRoute = authenticatedProcedure
       }
     });
   });
+
+
+
+// Positive: argument-type-mismatch — createTRPCClient<AppRouter>({ links: [splitLink({...})] }) is
+// standard tRPC client creation with a typed generic router; no argument type mismatch.
+declare function createTypedTRPCClient<TRouter>(opts: {
+  links: Array<unknown>;
+}): { query: (path: string, input: unknown) => Promise<unknown> };
+declare function buildSplitLink(opts: {
+  condition: (op: { type: string }) => boolean;
+  true: unknown;
+  false: unknown;
+}): unknown;
+declare function buildHttpBatchLink(opts: { url: string }): unknown;
+declare function buildWsLink(opts: { client: unknown }): unknown;
+declare function buildWSClient(opts: { url: string }): unknown;
+interface AnalyticsAppRouter {}
+
+export const analyticsClient = createTypedTRPCClient<AnalyticsAppRouter>({
+  links: [
+    buildSplitLink({
+      condition: (op) => op.type === 'subscription',
+      true: buildWsLink({ client: buildWSClient({ url: 'ws://localhost:4001' }) }),
+      false: buildHttpBatchLink({ url: '/api/analytics/trpc' }),
+    }),
+  ],
+});
+

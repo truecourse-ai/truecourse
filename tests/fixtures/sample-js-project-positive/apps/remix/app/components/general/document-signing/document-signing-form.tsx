@@ -35,3 +35,9 @@ async function finalizeDocumentSigning(): Promise<void> {
     });
   }
 }
+
+
+// Positive sample: mixed-type-imports fires on line 22 of this file.
+// import { AssistantConfirmationDialog, type NextSigner } from '../../dialogs/assistant-confirmation-dialog'
+// mixes a value specifier with an inline type specifier in a single import statement.
+

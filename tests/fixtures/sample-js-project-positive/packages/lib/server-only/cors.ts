@@ -19,3 +19,25 @@ async function resolveOriginHeaders(
 
   return computeOriginHeaders(reqOrigin, value);
 }
+
+
+// Returns Headers|undefined — undefined is a sentinel meaning 'no CORS headers needed'.
+// The caller at the middleware layer checks for undefined and skips header injection.
+// Returning T|undefined from an async function is standard TypeScript; Promise<Headers|undefined> is correct.
+declare function buildCorsHeaders(origin: string, allowedOrigins: string[]): Headers;
+declare function parseAllowedOrigins(config: string): string[];
+
+async function resolveResponseCorsHeaders(
+  requestOrigin: string | null,
+  configString: string,
+): Promise<Headers | undefined> {
+  if (!requestOrigin) {
+    return undefined;
+  }
+  const allowed = parseAllowedOrigins(configString);
+  if (!allowed.includes(requestOrigin) && !allowed.includes('*')) {
+    return undefined;
+  }
+  return buildCorsHeaders(requestOrigin, allowed);
+}
+

@@ -13,3 +13,20 @@ async function getPixiStageElementCount(): Promise<number> {
     return pixi ? 1 : 0;
   });
 }
+
+
+// Shape: (window as unknown as { KonvaCanvas: typeof KonvaCanvas }).KonvaCanvas — canonical pattern
+// for accessing a Playwright browser-injected global; TypeScript has no knowledge of runtime injection
+declare namespace KonvaCanvas {
+  class Stage { getChildren(): unknown[] }
+}
+declare const testPage: { evaluate: <T>(fn: () => T) => Promise<T> };
+
+export async function countKonvaStageChildren(): Promise<number> {
+  return testPage.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+    const Konva = (window as unknown as { KonvaCanvas: typeof KonvaCanvas }).KonvaCanvas;
+    return Konva ? new Konva.Stage().getChildren().length : 0;
+  });
+}
+

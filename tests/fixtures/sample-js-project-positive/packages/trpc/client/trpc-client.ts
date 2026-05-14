@@ -32,3 +32,17 @@ tRPC.create({
     };
   },
 });
+
+
+// typeof opts.op.context.teamId === 'string' — standard JavaScript typeof type guard, not a magic string
+function buildTrpcLinkHeaders(opts: { op: { context: { teamId?: unknown; orgId?: unknown } } }) {
+  const headers: Record<string, string> = {};
+  if (typeof opts.op.context.teamId === 'string') {
+    headers['x-team-id'] = opts.op.context.teamId;
+  }
+  if (typeof opts.op.context.orgId === 'string') {
+    headers['x-org-id'] = opts.op.context.orgId;
+  }
+  return headers;
+}
+

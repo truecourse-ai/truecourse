@@ -68,3 +68,23 @@ async function bulkDeleteItems(itemIds: string[]): Promise<{ success: boolean; i
     }),
   );
 }
+
+
+// Promise.all with async map over recipients — valid async map, no type mismatch
+declare function sendCancellationEmail(args: { recipientId: number; recipientEmail: string; documentTitle: string }): Promise<void>;
+
+async function notifyRecipientsOfCancellation(
+  recipients: Array<{ id: number; email: string }>,
+  documentTitle: string,
+): Promise<void> {
+  await Promise.all(
+    recipients.map(async (recipient) =>
+      sendCancellationEmail({
+        recipientId: recipient.id,
+        recipientEmail: recipient.email,
+        documentTitle,
+      }),
+    ),
+  );
+}
+

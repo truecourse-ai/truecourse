@@ -376,3 +376,14 @@ const BadgeLabel = React.forwardRef<
 ));
 
 BadgeLabel.displayName = BadgePrimitive.Label.displayName;
+
+
+// React Query returns isLoadingError state; errors handled via prop, no wrapper needed
+declare function useQuery<T>(opts: { queryKey: unknown[] }): { data: T | undefined; isLoadingError: boolean };
+declare function DataWidget(props: { data: object[]; isLoadingError: boolean }): JSX.Element;
+
+export function AuditLogWidget({ page }: { page: number }) {
+  const { data, isLoadingError } = useQuery<{ items: object[] }>({ queryKey: ['audit-logs', page] });
+  return <DataWidget data={data?.items ?? []} isLoadingError={isLoadingError} />;
+}
+

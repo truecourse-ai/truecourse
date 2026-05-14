@@ -191,3 +191,42 @@ export const EnvelopeEditorRecipientForm = ({
     </Form>
   );
 };
+
+
+// fields.map(field => ({nativeId: field.id, formId: `${field.id}-...`, ...})) — typed object map, no type mismatch
+interface SignatureField {
+  id: number;
+  recipientItemId: string;
+  page: number;
+  type: string;
+  positionX: number;
+  positionY: number;
+  width: number;
+  height: number;
+  recipientId: number;
+  fieldConfig?: unknown;
+}
+
+interface EnvelopeRecipient { id: number; email: string; }
+
+declare function parseFieldConfig(config: unknown): unknown;
+
+export function buildFieldFormDefaults(
+  fields: SignatureField[],
+  recipients: EnvelopeRecipient[],
+) {
+  return fields.map((field) => ({
+    nativeId: field.id,
+    formId: `${field.id}-${field.recipientItemId}`,
+    pageNumber: field.page,
+    type: field.type,
+    pageX: Number(field.positionX),
+    pageY: Number(field.positionY),
+    pageWidth: Number(field.width),
+    pageHeight: Number(field.height),
+    signerEmail: recipients.find((r) => r.id === field.recipientId)?.email ?? '',
+    recipientId: field.recipientId,
+    fieldConfig: field.fieldConfig ? parseFieldConfig(field.fieldConfig) : undefined,
+  }));
+}
+

@@ -13,3 +13,11 @@ export async function removeStaleFields(fieldIds: number[], envelopeId: number):
     });
   });
 }
+
+
+// fs.readFileSync(...).toString('base64') FP — fs/path undefined → TS2304 in range → rule fires
+export const loadFieldTemplateAsBase64_ef3d7ddf = (templateName: string): string => {
+  const templatePath = path.join(process.cwd(), 'field-templates', templateName);
+  return fs.readFileSync(templatePath).toString('base64');
+};
+

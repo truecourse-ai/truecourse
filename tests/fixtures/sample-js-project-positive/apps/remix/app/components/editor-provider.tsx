@@ -12,3 +12,18 @@ interface EditorProviderProps {
 function EditorProvider({ children, config }: EditorProviderProps) {
   return <div data-config={JSON.stringify(config)}>{children}</div>;
 }
+
+
+// Hook accepting a typed async callback — useEnvelopeAutosave(async (fields: TLocalField[]) => {...}) is valid, no type mismatch
+type TEnvelopeField = { id: string; type: string; value: string; required: boolean };
+declare function useEnvelopeAutosave(callback: (fields: TEnvelopeField[]) => Promise<void>): void;
+declare function persistEnvelopeFields(fields: TEnvelopeField[]): Promise<void>;
+
+function EnvelopeEditorProvider({ children }: { children: unknown }) {
+  useEnvelopeAutosave(async (localFields: TEnvelopeField[]) => {
+    await persistEnvelopeFields(localFields);
+  });
+
+  return <div>{children}</div>;
+}
+

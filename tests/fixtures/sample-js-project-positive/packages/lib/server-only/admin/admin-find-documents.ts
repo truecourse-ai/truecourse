@@ -328,3 +328,227 @@ function _longFn_19932f3a(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// argument-type-mismatch FP: new Map(ids.map((id, index) => [id, index])) preserves requested ordering — no type mismatch
+export function sortByRequestedOrder(
+  records: Array<{ id: number; title: string; createdAt: Date }>,
+  ids: number[],
+) {
+  const idOrder = new Map(ids.map((id, index) => [id, index]));
+  return records.slice().sort((a, b) => (idOrder.get(a.id) ?? 0) - (idOrder.get(b.id) ?? 0));
+}
+
+
+
+// argument-type-mismatch FP: uploadFile called with object containing template literal name — standard function call
+declare function uploadFileToStorage(
+  file: { name: string; contentType: string; data: () => Promise<Uint8Array> },
+  options: { prefix: string },
+): Promise<{ fileId: string; downloadUrl: string }>;
+declare const baseReportName: string;
+declare const isArchived: boolean;
+declare const reportBytes: Uint8Array;
+
+async function persistProcessedReport() {
+  const suffix = isArchived ? '_archived.pdf' : '_final.pdf';
+
+  const { fileId, downloadUrl } = await uploadFileToStorage(
+    {
+      name: `${baseReportName}${suffix}`,
+      contentType: 'application/pdf',
+      data: async () => Promise.resolve(reportBytes),
+    },
+    { prefix: 'reports' },
+  );
+
+  return { fileId, downloadUrl };
+}
+
+
+
+// argument-type-mismatch FP: createRequire(import.meta.url) — types match Node.js createRequire signature
+import { createRequire } from 'module';
+import path from 'path';
+
+class JobQueueDashboardServer {
+  private resolveUiPackagePath() {
+    const _require = createRequire(import.meta.url);
+    const uiPkgPath = path.dirname(_require.resolve('bull-board/package.json'));
+    return uiPkgPath;
+  }
+}
+
+
+
+// Shape: async arrow returning Promise.resolve(buffer) as arrayBuffer field — valid typed call
+declare function storeEnvelopeFile(
+  opts: { name: string; type: string; arrayBuffer: () => Promise<Uint8Array> },
+  originalDataId?: string,
+): Promise<{ documentData: { id: string } }>;
+
+export async function uploadSealedEnvelope(
+  envelopeTitle: string,
+  sealedBytes: Uint8Array,
+  originalDataId: string,
+): Promise<string> {
+  const { documentData } = await storeEnvelopeFile(
+    {
+      name: `${envelopeTitle}_sealed.pdf`,
+      type: 'application/pdf',
+      arrayBuffer: async () => Promise.resolve(sealedBytes),
+    },
+    originalDataId,
+  );
+  return documentData.id;
+}
+
+
+
+// argument-type-mismatch FP: Array.find with id equality — senderId may be string | null | undefined; no type mismatch
+declare const authorizedSenders2: Array<{ id: string; email: string; displayName: string }>;
+
+export function resolveSenderById2(
+  senderId: string | null | undefined,
+): { id: string; email: string; displayName: string } | undefined {
+  return authorizedSenders2.find((sender) => sender.id === senderId);
+}
+
+
+
+// Shape: Object.entries destructuring in for...of — correctly typed [string, T][] entries
+type SignaturesByPage = Record<string, Array<{ id: string; type: string; pageX: number; pageY: number }>>;
+
+export async function applySignaturesToPages(
+  signaturesByPage: SignaturesByPage,
+  applyFn: (pageNumber: string, sig: { id: string; type: string; pageX: number; pageY: number }) => Promise<void>,
+): Promise<void> {
+  for (const [pageNumber, signatures] of Object.entries(signaturesByPage)) {
+    for (const signature of signatures) {
+      await applyFn(pageNumber, signature);
+    }
+  }
+}
+
+
+
+// --- argument-type-mismatch FP: $transaction() with for...of loop inside async callback ---
+// prisma.$transaction(async (tx) => { for (const item of items) { await tx.X.update(...) } }) — standard Prisma pattern.
+declare const prisma3: {
+  $transaction<T>(fn: (tx: {
+    attachment: {
+      update(args: { where: { reportId: string; dataId: string }; data: { dataId: string } }): Promise<void>;
+    };
+  }) => Promise<T>): Promise<T>;
+};
+
+interface AttachmentMigration { reportId: string; oldDataId: string; newDataId: string }
+
+export async function migrateAttachmentData(migrations: AttachmentMigration[]): Promise<void> {
+  await prisma3.$transaction(async (tx) => {
+    for (const { reportId, oldDataId, newDataId } of migrations) {
+      await tx.attachment.update({
+        where: { reportId, dataId: oldDataId },
+        data: { dataId: newDataId },
+      });
+    }
+  });
+}
+
+
+
+// Promise.allSettled with async map — valid async map of job triggers, no type mismatch
+interface ExpiredAccessToken { id: string; recipientId: string; }
+declare const jobDispatcher: { triggerJob: (opts: { name: string; payload: object }) => Promise<void> };
+
+async function sweepExpiredAccessTokens(tokens: ExpiredAccessToken[]): Promise<void> {
+  await Promise.allSettled(
+    tokens.map(async (token) => {
+      await jobDispatcher.triggerJob({
+        name: 'internal.revoke-expired-token',
+        payload: { tokenId: token.id, recipientId: token.recipientId },
+      });
+    }),
+  );
+}
+
+
+
+// Promise.all with two overloaded render calls in parallel — valid, no type mismatch
+declare function renderNotificationEmail(
+  template: { subject: string; bodyHtml: string },
+  opts: { locale: string; plainText?: boolean },
+): Promise<string>;
+
+declare const tokenExpiredTemplate: { subject: string; bodyHtml: string };
+declare const renderOpts: { locale: string };
+
+async function renderTokenExpiredEmailVariants() {
+  const [htmlBody, plainBody] = await Promise.all([
+    renderNotificationEmail(tokenExpiredTemplate, renderOpts),
+    renderNotificationEmail(tokenExpiredTemplate, { ...renderOpts, plainText: true }),
+  ]);
+
+  return { html: htmlBody, plain: plainBody };
+}
+
+
+
+// Promise.all(externalSavers.map(async (save) => save())) — array of async save callbacks, no type mismatch
+declare const externalSavers: Array<() => Promise<void>>;
+
+async function runAllExternalSavers() {
+  await Promise.all(externalSavers.map(async (save) => save()));
+}
+
+
+
+// $transaction with async update callback — standard Prisma usage; no type mismatch.
+declare const db26: {
+  $transaction<T>(fn: (tx: {
+    token: { update(args: { where: { id: string }; data: unknown }): Promise<{ id: string }> };
+    auditLog: { create(args: { data: unknown }): Promise<void> };
+  }) => Promise<T>): Promise<T>;
+};
+declare const userId26: string;
+
+export async function enableFeatureForUser26(featureId: string): Promise<{ id: string }> {
+  return db26.$transaction(async (tx) => {
+    const token = await tx.token.update({
+      where: { id: featureId },
+      data: { enabledAt: new Date(), enabledByUserId: userId26 },
+    });
+    await tx.auditLog.create({
+      data: { action: 'FEATURE_ENABLED', userId: userId26, featureId },
+    });
+    return token;
+  });
+}
+
+
+
+// argument-type-mismatch FP: Promise.all with async map dispatching completion notifications — no type mismatch
+declare function sendCompletionNotification2(opts: {
+  recipientEmail: string;
+  recipientName: string;
+  reportTitle: string;
+  downloadUrl: string;
+}): Promise<void>;
+
+declare const completedRecipients2: Array<{ email: string; name: string }>;
+declare const reportTitle2: string;
+declare const downloadUrl2: string;
+
+export async function notifyReportCompletion2(): Promise<void> {
+  await Promise.all(
+    completedRecipients2.map(async (recipient) =>
+      sendCompletionNotification2({
+        recipientEmail: recipient.email,
+        recipientName: recipient.name,
+        reportTitle: reportTitle2,
+        downloadUrl: downloadUrl2,
+      })
+    )
+  );
+}
+

@@ -192,3 +192,100 @@ export const EnvelopeEditorUploadPage = ({
     </div>
   );
 };
+
+
+
+// Positive: argument-type-mismatch — array.map() with conditional spread immutable update.
+// Items with matching id get a title/data update via spread; others pass through unchanged. No type mismatch.
+declare function useState<T>(init: T): [T, (v: T) => void];
+type AttachmentItem = { id: string; label: string; payload: Uint8Array };
+
+function useAttachmentUpdater(items: AttachmentItem[]) {
+  const [store, setStore] = useState<AttachmentItem[]>(items);
+
+  async function replaceAttachment(targetId: string, file: File, newLabel: string) {
+    const buf = await file.arrayBuffer();
+    const payload = new Uint8Array(buf.slice(0));
+    setStore(
+      store.map((item) =>
+        item.id === targetId ? { ...item, label: newLabel, payload } : item,
+      ),
+    );
+  }
+
+  return { store, replaceAttachment };
+}
+
+
+
+
+// Positive: argument-type-mismatch — Array.concat with mapped objects.
+// existingAttachments.concat(data.map((item) => ({...}))) uses concat with a mapped object array; no type mismatch.
+type AttachmentEntry = { id: string; filename: string; sizeBytes: number };
+
+declare function useState<T>(init: T): [T, (v: T) => void];
+
+function useAttachmentList(initial: AttachmentEntry[]) {
+  const [attachments, setAttachments] = useState<AttachmentEntry[]>(initial);
+
+  function appendUploads(uploads: Array<{ id: string; filename: string; sizeBytes: number }>) {
+    setAttachments(
+      attachments.concat(
+        uploads.map((item) => ({
+          id: item.id,
+          filename: item.filename,
+          sizeBytes: item.sizeBytes,
+        })),
+      ),
+    );
+  }
+
+  return { attachments, appendUploads };
+}
+
+
+
+
+// Positive: argument-type-mismatch — form.setValue with nested key path ('meta.emailSettings').
+// The value type flows from the DocumentEmailCheckboxes onChange prop, which matches the form field type.
+declare function useFormContext_fb4768<T>(): {
+  setValue: (key: string, value: unknown) => void;
+  control: object;
+};
+declare function FormField_fb4768(props: {
+  control: object;
+  name: string;
+  render: (p: { field: object }) => JSX.Element;
+}): JSX.Element;
+declare function Textarea_fb4768(props: { className?: string; [key: string]: unknown }): JSX.Element;
+declare function FormControl_fb4768(props: { children: JSX.Element }): JSX.Element;
+declare function FormMessage_fb4768(): JSX.Element;
+declare function DocumentEmailSettings_fb4768(props: {
+  value: object;
+  onChange: (v: object) => void;
+}): JSX.Element;
+
+type EnvelopeMetaForm = { meta: { emailSettings: object; messageBody?: string } };
+
+function EnvelopeEmailSettingsSection() {
+  const form = useFormContext_fb4768<EnvelopeMetaForm>();
+
+  return (
+    <>
+      <FormField_fb4768
+        control={form.control}
+        name="meta.messageBody"
+        render={({ field }) => (
+          <FormControl_fb4768>
+            <Textarea_fb4768 className="h-16 resize-none bg-background" {...field} />
+          </FormControl_fb4768>
+        )}
+      />
+      <DocumentEmailSettings_fb4768
+        value={{}}
+        onChange={(value) => form.setValue('meta.emailSettings', value)}
+      />
+    </>
+  );
+}
+

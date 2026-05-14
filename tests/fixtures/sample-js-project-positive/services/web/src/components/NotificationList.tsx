@@ -185,3 +185,34 @@ export const NotificationCenterProvider = ({
 };
 
 NotificationCenterProvider.displayName = 'NotificationCenterProvider';
+
+
+// --- missing-error-boundary FP: Remix route module with useQuery; covered by root.tsx ---
+// Root ErrorBoundary handles all cascade errors; no local boundary needed in this route.
+declare const trpcApiToken: {
+  apiToken: { getMany: { useQuery(input: { workspaceId: string }): { data: Array<{ id: string; label: string; createdAt: string }> | undefined; isLoading: boolean } } };
+};
+declare function useCurrentWorkspaceContext(): { id: string; slug: string };
+declare function DateTime_fromISO(s: string): { toRelative(): string | null };
+
+export function WorkspaceApiTokensPage(): JSX.Element | null {
+  const { id: workspaceId } = useCurrentWorkspaceContext();
+
+  const { data: tokens, isLoading } = trpcApiToken.apiToken.getMany.useQuery({ workspaceId });
+
+  if (isLoading) return null;
+
+  return (
+    <ul className="space-y-2">
+      {(tokens ?? []).map((token) => (
+        <li key={token.id} className="flex items-center justify-between rounded border p-3">
+          <span className="font-mono text-sm">{token.label}</span>
+          <span className="text-xs text-muted-foreground">
+            {DateTime_fromISO(token.createdAt).toRelative()}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+

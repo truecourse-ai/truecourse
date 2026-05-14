@@ -250,3 +250,141 @@ export const TemplateSelfCompleted44 = ({ documentName, assetBaseUrl }: Template
     </>
   );
 };
+
+
+// Default parameter values for email template preview — real URLs injected by caller
+declare const TemplateFooter50: React.ComponentType<{ isDocument: boolean }>;
+
+type EnvelopeInviteTemplateProps = {
+  senderName?: string;
+  envelopeTitle?: string;
+  signEnvelopeUrl?: string;
+  reviewEnvelopeUrl?: string;
+  assetBaseUrl?: string;
+};
+
+export const EnvelopeInviteEmailTemplate = ({
+  senderName = 'Your sender',
+  envelopeTitle = 'Untitled envelope',
+  signEnvelopeUrl = 'https://app.example.com/sign/preview',
+  reviewEnvelopeUrl = 'https://app.example.com/review/preview',
+  assetBaseUrl = 'http://localhost:3002',
+}: EnvelopeInviteTemplateProps) => {
+  return (
+    <html>
+      <head />
+      <body className="mx-auto my-auto bg-white font-sans">
+        <section>
+          <container className="mx-auto mt-8 mb-2 max-w-xl rounded-lg border border-slate-200 p-4">
+            <p className="font-medium">{senderName} invited you to sign:</p>
+            <p className="text-slate-600">{envelopeTitle}</p>
+            <a href={signEnvelopeUrl} className="rounded bg-blue-600 px-4 py-2 text-white">Sign Now</a>
+            <a href={reviewEnvelopeUrl} className="ml-4 text-slate-500">Review First</a>
+          </container>
+          <container className="mx-auto max-w-xl">
+            <TemplateFooter50 isDocument={true} />
+          </container>
+        </section>
+      </body>
+    </html>
+  );
+};
+
+
+
+// Shape: _(msg`text`) lingui translation with template literal — types correct, no mismatch
+declare const useLingui52: () => { _: (msg: unknown) => string };
+declare const msg52: (strings: TemplateStringsArray, ...values: unknown[]) => unknown;
+
+export function useEnvelopeStatusLabels() {
+  const { _ } = useLingui52();
+  return {
+    sent: _(msg52`Sent`),
+    opened: _(msg52`Opened`),
+    signed: _(msg52`Signed`),
+    rejected: _(msg52`Rejected`),
+    voided: _(msg52`Voided`),
+  };
+}
+
+
+
+// documentLink default param — preview-only fallback, real URL always passed by caller
+declare const TemplateFooter53: React.ComponentType<{ isDocument: boolean }>;
+
+type EnvelopeAccessExpiredEmailProps = {
+  recipientName?: string;
+  envelopeTitle?: string;
+  envelopeLink?: string;
+};
+
+export const EnvelopeAccessExpiredEmailTemplate = ({
+  recipientName = 'Recipient',
+  envelopeTitle = 'Untitled',
+  envelopeLink = 'https://app.example.com/envelopes/preview',
+}: EnvelopeAccessExpiredEmailProps) => {
+  return (
+    <html>
+      <head />
+      <body className="mx-auto my-auto bg-white font-sans">
+        <section>
+          <container className="mx-auto mt-8 mb-2 max-w-xl rounded-lg border border-slate-200 p-4">
+            <p>Hi <strong>{recipientName}</strong>, your access to "{envelopeTitle}" has expired.</p>
+            <a href={envelopeLink} className="rounded bg-blue-600 px-4 py-2 text-white">Request New Access</a>
+          </container>
+          <container className="mx-auto max-w-xl">
+            <TemplateFooter53 isDocument={true} />
+          </container>
+        </section>
+      </body>
+    </html>
+  );
+};
+
+
+
+// baseUrl default param is a preview-only fallback — real URL always injected by caller
+declare const TemplateFooter55: React.ComponentType<{ isDocument: boolean }>;
+
+type WorkspaceDeletedEmailProps = {
+  workspaceName?: string;
+  baseUrl?: string;
+};
+
+export const WorkspaceDeletedEmailTemplate = ({
+  workspaceName = 'Your Workspace',
+  baseUrl = 'https://app.example.com',
+}: WorkspaceDeletedEmailProps) => {
+  return (
+    <html>
+      <head />
+      <body className="mx-auto my-auto bg-white font-sans">
+        <section>
+          <container className="mx-auto mt-8 mb-2 max-w-xl rounded-lg border border-slate-200 p-4">
+            <p>Your workspace <strong>{workspaceName}</strong> has been permanently deleted.</p>
+            <a href={`${baseUrl}/dashboard`} className="rounded bg-blue-600 px-4 py-2 text-white">
+              Go to Dashboard
+            </a>
+          </container>
+          <container className="mx-auto max-w-xl">
+            <TemplateFooter55 isDocument={false} />
+          </container>
+        </section>
+      </body>
+    </html>
+  );
+};
+
+
+
+
+// FP 52f14b2767ee: skia-backend.ts exports Konva (third-party lib name)
+// The file patches Konva internals for the server-side skia-canvas backend
+// and re-exports the configured library under its own canonical name.
+// The export name is the third-party class, not a class defined in this file.
+declare const Konva_52f14: { prototype: { renderPage: (n: number) => void }; new (): unknown };
+Konva_52f14.prototype.renderPage = function (_pageNumber: number): void {
+  /* server-side skia-canvas backend no-op */
+};
+export { Konva_52f14 as Konva };
+

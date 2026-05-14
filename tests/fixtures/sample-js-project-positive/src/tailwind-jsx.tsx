@@ -1297,3 +1297,39 @@ export function buildOrgItemClassName({ orgId, currentOrgId, hoveredOrgId }: Org
     orgId === hoveredOrgId && 'bg-accent',
   );
 }
+
+
+// --- argument-type-mismatch FP: canvas measureText('m'.repeat(N)) — valid string arg, no type mismatch ---
+declare const signaturePadCtx: CanvasRenderingContext2D;
+
+export function measureAverageGlyphWidth(): number {
+  const metrics = signaturePadCtx.measureText('m'.repeat(10));
+  return metrics.width / 10;
+}
+
+
+
+// FP: email template with preview-only default URL parameter.
+// The hardcoded URL is a Storybook/email-preview fallback;
+// the real link is always supplied by the caller in production.
+function PasswordResetEmail({
+  recipientName,
+  resetLink = 'https://app.example.com/auth/reset?token=preview-token',
+}: {
+  recipientName: string;
+  resetLink?: string;
+}): JSX.Element {
+  return (
+    <div className="mx-auto max-w-lg px-4 py-8">
+      <p className="text-base text-gray-700">Hi {recipientName},</p>
+      <a
+        href={resetLink}
+        className="mt-4 inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white"
+      >
+        Reset Password
+      </a>
+    </div>
+  );
+}
+export { PasswordResetEmail };
+

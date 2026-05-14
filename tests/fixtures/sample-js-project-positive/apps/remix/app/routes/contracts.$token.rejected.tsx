@@ -181,3 +181,93 @@ function renderField(field: ContractFormField): JSX.Element {
     .with({ type: 'checkbox' }, () => <input key={field.id} type="checkbox" />)
     .exhaustive() as JSX.Element;
 }
+
+
+// fields.find() with FieldType enum comparison and optional chaining — valid find, no type mismatch
+enum FieldType { NAME = 'NAME', EMAIL = 'EMAIL', DATE = 'DATE', SIGNATURE = 'SIGNATURE' }
+
+interface EnvelopeField { id: number; type: FieldType; customText?: string; required: boolean }
+
+export function getContactReference(
+  recipient: { name?: string | null; email: string },
+  fields: EnvelopeField[],
+): string {
+  return (
+    recipient.name ||
+    fields.find((f) => f.type === FieldType.NAME)?.customText ||
+    recipient.email
+  );
+}
+
+
+
+// Shape: .find() with fallback object via || — valid find pattern, no type mismatch
+interface EnvelopeSigner { id: number; name: string; avatarColor: string; }
+interface EnvelopeField { id: number; signerId: number; fieldType: string; }
+
+const PLACEHOLDER_SIGNER: EnvelopeSigner = { id: 0, name: 'Unknown', avatarColor: '#e5e7eb' };
+
+export function resolveFieldSigner(
+  signers: EnvelopeSigner[],
+  field: EnvelopeField,
+): EnvelopeSigner {
+  return signers.find((s) => s.id === field.signerId) || PLACEHOLDER_SIGNER;
+}
+
+
+
+// Comparing match?.id against route name strings to determine the active layout — React Router route
+// ID string comparison for navigation logic, not secret comparison; timing attack does not apply.
+declare const useMatches19: () => Array<{ id: string; pathname: string }> | undefined;
+
+const SIGNING_LAYOUT_ROUTE19 = '_recipient._layout';
+const SIGNING_ACTIVE_ROUTE19 = '_recipient._layout.sign.$token._index';
+
+export function getSigningRouteState19() {
+  const matches = useMatches19();
+  const activeMatch = matches?.find(
+    (m) => m.id === SIGNING_LAYOUT_ROUTE19 || m.id === SIGNING_ACTIVE_ROUTE19,
+  );
+  return activeMatch?.id === SIGNING_ACTIVE_ROUTE19 ? 'active' : 'layout';
+}
+
+
+
+// FP shape: localFields.map() with ts-pattern match on field.type in JSX —
+// valid pattern matching in a React render; no type mismatch.
+declare const matchField: <T>(value: T) => {
+  with: <R>(pattern: unknown, fn: (v: T) => R) => {
+    with: <R2>(pattern2: unknown, fn2: (v: T) => R2) => {
+      with: <R3>(pattern3: unknown, fn3: (v: T) => R3) => {
+        otherwise: (fn4: (v: T) => null) => R | R2 | R3 | null;
+      };
+    };
+  };
+};
+
+type SigningFieldType = 'SIGNATURE' | 'CHECKBOX' | 'DATE' | 'TEXT';
+interface SigningFormField { id: string; type: SigningFieldType; label: string; required: boolean; }
+
+declare const localSigningFields: SigningFormField[];
+
+const renderedSigningFields = localSigningFields.map((field) =>
+  matchField(field)
+    .with({ type: 'SIGNATURE' }, (f) => <canvas key={f.id} data-field-id={f.id} />)
+    .with({ type: 'CHECKBOX' }, (f) => <input key={f.id} type="checkbox" aria-label={f.label} />)
+    .with({ type: 'DATE' }, (f) => <input key={f.id} type="date" aria-label={f.label} />)
+    .otherwise(() => null)
+);
+
+
+
+// Comparing contract token status against route ID strings — route navigation logic, not secret comparison
+declare const useMatches: () => Array<{ id: string; pathname: string }> | undefined;
+
+const CONTRACT_TOKEN_ROUTE = '_recipient._layout.contracts.$token.rejected';
+
+export function getContractTokenRouteState() {
+  const matches = useMatches();
+  const activeMatch = matches?.find((m) => m.id === CONTRACT_TOKEN_ROUTE);
+  return activeMatch?.id === CONTRACT_TOKEN_ROUTE ? 'rejected' : 'other';
+}
+

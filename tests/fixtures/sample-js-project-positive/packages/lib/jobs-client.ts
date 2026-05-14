@@ -57,3 +57,17 @@ if (!global.__jobQueueClient) {
 export function getJobQueueClient(): unknown {
   return global.__jobQueueClient;
 }
+
+
+// argument-type-mismatch FP: createRequire(import.meta.url) — types match Node.js createRequire signature
+import { createRequire } from 'module';
+import path from 'path';
+
+class JobQueueDashboardServer {
+  private resolveUiPackagePath() {
+    const _require = createRequire(import.meta.url);
+    const uiPkgPath = path.dirname(_require.resolve('bull-board/package.json'));
+    return uiPkgPath;
+  }
+}
+

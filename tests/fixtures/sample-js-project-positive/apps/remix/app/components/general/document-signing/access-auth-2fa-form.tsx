@@ -38,3 +38,21 @@ async function handleBackupCodeVerification(backupCode: string): Promise<boolean
     return false;
   }
 }
+
+
+// catch(error) shows generic toast; error value is never dereferenced — no property access on untyped error.
+declare function submitAccessCode(code: string): Promise<void>;
+declare function showAccessDeniedToast(opts: { title: string; description: string; variant: string }): void;
+
+async function handleAccessCodeSubmit(code: string): Promise<void> {
+  try {
+    await submitAccessCode(code);
+  } catch (error) {
+    showAccessDeniedToast({
+      title: 'Access denied',
+      description: 'The code you entered is incorrect. Please try again.',
+      variant: 'destructive',
+    });
+  }
+}
+

@@ -156,3 +156,25 @@ function CheckboxOptionList({ initialValues }: { initialValues: Array<{ label: s
 
   return values.map((item, index) => ({ item, onToggle: () => handleToggle(index) }));
 }
+
+
+// Destructuring value from SignaturePad onChange event object — correctly typed prop, no argument type mismatch
+declare function useState<T>(init: T): [T, (v: T) => void];
+declare function SignaturePadWidget(props: {
+  onChange: (event: { value: string; isEmpty: boolean }) => void;
+  placeholder?: string;
+  className?: string;
+}): JSX.Element;
+
+function InitialsCapturePad() {
+  const [capturedInitials, setCapturedInitials] = useState<string>('');
+
+  return (
+    <SignaturePadWidget
+      onChange={({ value }) => setCapturedInitials(value)}
+      placeholder="Draw your initials"
+      className="w-full h-32 rounded-md border"
+    />
+  );
+}
+

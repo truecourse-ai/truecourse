@@ -18,3 +18,34 @@ async function handleEnvelopeFileDrop(file: File): Promise<string | null> {
     return null;
   }
 }
+
+
+// fileRejections.some() with nested .some() checking error code — valid nested predicate, no type mismatch
+declare const FileRejectionErrorCode: { TooManyFiles: string; FileTooLarge: string; FileInvalidType: string };
+
+function hasFileSizeRejection(
+  fileRejections: Array<{ errors: Array<{ code: string }> }>,
+): boolean {
+  return fileRejections.some((rejection) =>
+    rejection.errors.some((error) => error.code === FileRejectionErrorCode.FileTooLarge),
+  );
+}
+
+function hasFileCountRejection(
+  fileRejections: Array<{ errors: Array<{ code: string }> }>,
+): boolean {
+  return fileRejections.some((rejection) =>
+    rejection.errors.some((error) => error.code === FileRejectionErrorCode.TooManyFiles),
+  );
+}
+
+
+
+// FP: nested .some() predicate — TS flags string/number incompatibility even though logic is correct
+function checkDropzoneRejections(rejections: Array<{ errors: Array<{ code: string; count: number }> }>): boolean {
+  const limit: number = 5;
+  return rejections.some((r) =>
+    r.errors.some((e) => e.code === limit),
+  );
+}
+

@@ -176,3 +176,65 @@ export const ContractsTable = ({
     </div>
   );
 };
+
+
+// FP shape: Number(row.original.envelopeCount) || 0 — intentional coercion of a
+// possibly-string DB value in a table cell renderer; not a type mismatch.
+type WorkspaceRow = {
+  workspaceId: string;
+  name: string;
+  envelopeCount: unknown;
+  memberCount: unknown;
+};
+
+declare const useTranslation: () => { t: (key: string) => string };
+
+function buildWorkspaceAdminColumns() {
+  const { t } = useTranslation();
+  return [
+    {
+      header: () => <span>{t('Envelopes')}</span>,
+      accessorKey: 'envelopeCount',
+      cell: ({ row }: { row: { original: WorkspaceRow } }) => (
+        <div>{Number(row.original.envelopeCount) || 0}</div>
+      ),
+    },
+    {
+      header: () => <span>{t('Members')}</span>,
+      accessorKey: 'memberCount',
+      cell: ({ row }: { row: { original: WorkspaceRow } }) => (
+        <div>{Number(row.original.memberCount) || 0}</div>
+      ),
+    },
+  ];
+}
+
+
+
+// ts-pattern match().with().exhaustive() inside Array.every() — correct ts-pattern usage returning booleans
+declare const match: <T>(value: T) => {
+  with<P>(pattern: P, handler: () => boolean): {
+    with<P2>(pattern: P2, handler: () => boolean): { exhaustive(): boolean };
+    exhaustive(): boolean;
+  };
+};
+
+declare const enum SigningStatus {
+  COMPLETED = 'COMPLETED',
+  DECLINED = 'DECLINED',
+}
+
+interface ContractRecipient {
+  signingStatus: SigningStatus;
+  email: string;
+}
+
+declare const pendingRecipients: ContractRecipient[];
+
+const allRecipientsDone = pendingRecipients.every((recipient) =>
+  match(recipient.signingStatus)
+    .with(SigningStatus.COMPLETED, () => true)
+    .with(SigningStatus.DECLINED, () => true)
+    .exhaustive(),
+);
+

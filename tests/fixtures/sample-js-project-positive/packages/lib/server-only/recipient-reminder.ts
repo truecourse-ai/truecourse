@@ -273,3 +273,78 @@ function _longFn_6f6bb5a8(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// Only one prisma write in this function (recipient.updateMany); subsequent operations are reads only.
+// No transaction is needed for a single atomic write.
+declare const prismaClient: {
+  recipient: {
+    updateMany(args: { where: unknown; data: unknown }): Promise<{ count: number }>;
+    findFirst(args: { where: unknown; select: unknown }): Promise<{ id: number; envelopeId: string } | null>;
+  };
+  envelope: { findFirst(args: { where: unknown }): Promise<{ id: string; subject: string } | null> };
+};
+
+export async function claimReminderSlot(recipientId: number): Promise<void> {
+  const now = new Date();
+
+  const claimed = await prismaClient.recipient.updateMany({
+    where: { id: recipientId, signingState: 'UNSIGNED', nextReminderAt: { lte: now } },
+    data: { lastReminderSentAt: now, nextReminderAt: null },
+  });
+
+  if (claimed.count === 0) return;
+
+  const recipient = await prismaClient.recipient.findFirst({
+    where: { id: recipientId },
+    select: { id: true, envelopeId: true },
+  });
+
+  if (!recipient) return;
+
+  const envelope = await prismaClient.envelope.findFirst({
+    where: { id: recipient.envelopeId },
+  });
+
+  if (!envelope) return;
+  // dispatch reminder notification...
+}
+
+
+
+// FP: prisma.recipient.updateMany followed by prisma.documentAuditLog.create — rule flags the first
+// write as needing a transaction, but the audit log write is a fire-and-forget side-effect that
+// does not need atomicity with the recipient update.
+declare const prismaClient: {
+  recipient: {
+    updateMany(args: { where: unknown; data: unknown }): Promise<{ count: number }>;
+    findFirst(args: { where: unknown; select: unknown }): Promise<{ id: number; envelopeId: string } | null>;
+  };
+  documentAuditLog: {
+    create(args: { data: unknown }): Promise<void>;
+  };
+  envelope: { findFirst(args: { where: unknown }): Promise<{ id: string; subject: string } | null> };
+};
+
+export async function claimReminderSlotAndAudit(recipientId: number): Promise<void> {
+  const now = new Date();
+
+  const claimed = await prismaClient.recipient.updateMany({
+    where: { id: recipientId, signingState: 'UNSIGNED', nextReminderAt: { lte: now } },
+    data: { lastReminderSentAt: now, nextReminderAt: null },
+  });
+
+  if (claimed.count === 0) return;
+
+  const recipient = await prismaClient.recipient.findFirst({
+    where: { id: recipientId },
+    select: { id: true, envelopeId: true },
+  });
+
+  if (!recipient) return;
+
+  await prismaClient.documentAuditLog.create({
+    data: { type: 'SIGNING_REMINDER_SENT', recipientId, envelopeId: recipient.envelopeId, createdAt: now },
+  });
+}
+

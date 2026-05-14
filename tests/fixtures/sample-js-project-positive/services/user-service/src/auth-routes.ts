@@ -39,3 +39,17 @@ export const authRoutes = router
 
     return c.text('OK', 200);
   });
+
+
+// String split/filter to extract bearer token — split returns string[], filter by length returns string[]
+declare function getRequestHeader(name: string): string | null;
+
+function extractBearerToken(authHeader: string | null): string | undefined {
+  const [token] = (authHeader || '').split('Bearer ').filter((s) => s.length > 0);
+  return token;
+}
+
+export function resolveEmbedToken(authorizationHeader: string | null): string | undefined {
+  return extractBearerToken(authorizationHeader);
+}
+

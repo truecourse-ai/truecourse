@@ -61,3 +61,45 @@ const RoleSelector = ({ availableRoles, selectedRoles, onSelectionChange }: Role
     </div>
   );
 };
+
+
+// FP shape: CONTACT_ROLE_LABELS is a Record keyed by ContactRole enum;
+// role comes from Object.values(ContactRole) iteration, so key is always present.
+enum ContactRole {
+  OWNER = 'OWNER',
+  SIGNER = 'SIGNER',
+  APPROVER = 'APPROVER',
+  CC = 'CC',
+}
+
+const CONTACT_ROLE_LABELS = {
+  [ContactRole.OWNER]: 'Owner',
+  [ContactRole.SIGNER]: 'Signer',
+  [ContactRole.APPROVER]: 'Approver',
+  [ContactRole.CC]: 'CC Recipient',
+} satisfies Record<ContactRole, string>;
+
+function buildContactRoleOptions(): Array<{ value: ContactRole; label: string }> {
+  return (Object.values(ContactRole) as ContactRole[]).map((role) => ({
+    value: role,
+    label: CONTACT_ROLE_LABELS[role],
+  }));
+}
+
+
+
+// FP: RECIPIENT_ROLE_LABELS keyed by RecipientRole; role from Object.values iteration — always present
+type RecipientRoleKey = 'SIGNER' | 'APPROVER' | 'CC' | 'VIEWER';
+
+const RECIPIENT_ROLE_LABELS: Record<RecipientRoleKey, string> = {
+  SIGNER: 'Signer',
+  APPROVER: 'Approver',
+  CC: 'CC Recipient',
+  VIEWER: 'Viewer',
+};
+
+function getRoleLabel(role: RecipientRoleKey): string {
+  const label = RECIPIENT_ROLE_LABELS[role];
+  return label;
+}
+

@@ -157,3 +157,14 @@ function renderPlanCards(plans: InternalPlans) {
     ...plans[planId],
   }));
 }
+
+
+// Positive sample: missing-error-boundary fires on this file.
+// The file uses trpc .useQuery() but has no ErrorBoundary.
+
+
+
+// Positive sample: unchecked-array-access fires on the existing internalClaimsDescription[planId] at line 282.
+// Both plans[planId] and internalClaimsDescription[planId] use a variable index on a Record
+// without a key-existence check — the rule fires on the subscript_expression.
+

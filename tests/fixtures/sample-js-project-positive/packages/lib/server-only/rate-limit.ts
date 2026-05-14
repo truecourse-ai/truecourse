@@ -63,3 +63,22 @@ async function checkRateLimit(
     };
   }
 }
+
+
+// 'Retry-After' is a standard HTTP response header name (RFC 6585) — a protocol constant, not a magic string.
+declare const honoCtx: {
+  header: (name: string, value: string) => void;
+  json: (body: unknown, status: number) => Response;
+};
+declare const rateLimitCheck: { isLimited: boolean; reset: Date; remaining: number };
+
+export function applyRateLimitHeaders(): Response | null {
+  if (rateLimitCheck.isLimited) {
+    const retryAfterSecs = Math.max(1, Math.ceil((rateLimitCheck.reset.getTime() - Date.now()) / 1000));
+    honoCtx.header('Retry-After', String(retryAfterSecs));
+    honoCtx.header('X-RateLimit-Remaining', '0');
+    return honoCtx.json({ error: 'Rate limit exceeded. Please try again later.' }, 429);
+  }
+  return null;
+}
+

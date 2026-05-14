@@ -119,3 +119,95 @@ export function InvoiceErrorBoundary({ error, params }: InvoiceErrorBoundaryProp
     />
   );
 }
+
+
+// FP shape: throw new Response('Not found', { status: 404 }) — standard web platform
+// error response used in a Remix loader when a resource does not exist.
+declare function getContractByToken(token: string): Promise<{ id: string; status: string } | null>;
+
+export async function contractSignLoader({ params }: { params: { token?: string } }) {
+  if (!params.token) {
+    throw new Response('Not found', { status: 404 });
+  }
+
+  const contract = await getContractByToken(params.token);
+
+  if (!contract) {
+    throw new Response('Not found', { status: 404 });
+  }
+
+  return { contract };
+}
+
+
+
+// FP shape: throw new Response('Not Found', { status: 404 }) — standard web platform
+// error response used in a Remix loader when a route param is missing or invalid.
+declare function getEnvelopeById(args: { id: string; workspaceId: string }): Promise<{ id: string; status: string } | null>;
+
+export async function envelopeEditorLoader({
+  params,
+  workspaceId,
+}: {
+  params: { envelopeId?: string };
+  workspaceId: string;
+}) {
+  const { envelopeId } = params;
+
+  if (!envelopeId) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  const envelope = await getEnvelopeById({ id: envelopeId, workspaceId });
+
+  if (!envelope) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  return { envelope };
+}
+
+
+
+// Framework-conventional async loader export — return type inferred by framework
+declare function getSessionOrNull(req: unknown): Promise<{ isAuthenticated: boolean; userId?: string }>;
+declare function redirect(url: string): never;
+declare function getCookieValue(name: string, headers: unknown): string | null;
+declare function json(payload: unknown): unknown;
+
+export async function loader({ request }: { request: { headers: unknown } }) {
+  const session = await getSessionOrNull(request);
+
+  if (!session.isAuthenticated) {
+    throw redirect('/sign-in');
+  }
+
+  const preferredWorkspace = getCookieValue('workspace', request.headers);
+  if (preferredWorkspace) {
+    throw redirect(`/w/${preferredWorkspace}`);
+  }
+
+  return json({ userId: session.userId ?? null });
+}
+
+
+
+// Standard HTTP reason phrase in a framework Response throw — not a domain magic string
+declare function getInvoiceByToken(token: string): Promise<{ id: number; amount: number } | null>;
+
+export async function invoiceLoader({ params }: { params: { token?: string } }) {
+  const token = params.token;
+
+  if (!token) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  const invoice = await getInvoiceByToken(token);
+
+  if (!invoice) {
+    throw new Response('Not Found', { status: 404 });
+  }
+
+  return { invoice };
+}
+

@@ -256,3 +256,10 @@ export async function removeStaleFieldBeforeSigning(
     });
   });
 }
+
+
+// results.filter((r) => !r.success).map((r) => r.envelopeId) FP — dispatchResults undefined → TS2304 → rule fires
+export function collectFailedEnvelopeIds_40838eca(): string[] {
+  return dispatchResults.filter((r: { success: boolean; envelopeId: string }) => !r.success).map((r: { success: boolean; envelopeId: string }) => r.envelopeId);
+}
+

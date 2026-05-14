@@ -18,3 +18,16 @@ export async function createRecipientWithFields(
     });
   });
 }
+
+
+// createEnvelope({userId: user.id, teamId, ...}) FP — createEnvelope undefined → TS2304 → rule fires
+export async function createUserEnvelope_5e8dc309(title: string, type: string): Promise<{ id: string }> {
+  return createEnvelope({
+    userId: currentUser.id,
+    teamId: currentTeamId,
+    title,
+    type,
+    visibility: EnvelopeVisibility.TEAM,
+  });
+}
+

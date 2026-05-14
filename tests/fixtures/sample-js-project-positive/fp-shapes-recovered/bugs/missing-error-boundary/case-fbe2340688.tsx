@@ -1,16 +1,16 @@
-// import { APP_DOCUMENT_UPLOAD_SIZE_LIMIT } from '@documenso/lib/constants/app';
+// import { APP_DOCUMENT_UPLOAD_SIZE_LIMIT } from '@app/lib/constants/app';
 import {
   TEMPLATE_RECIPIENT_EMAIL_PLACEHOLDER_REGEX,
   TEMPLATE_RECIPIENT_NAME_PLACEHOLDER_REGEX,
-} from '@documenso/lib/constants/template';
-// import { DO_NOT_INVALIDATE_QUERY_ON_MUTATION, SKIP_QUERY_BATCH_META } from '@documenso/lib/constants/trpc';
-// import { AppError, AppErrorCode } from '@documenso/lib/errors/app-error';
-// import { type TRecipientLite, ZRecipientEmailSchema } from '@documenso/lib/types/recipient';
-// import { putPdfFile } from '@documenso/lib/universal/upload/put-file';
-// import { trpc } from '@documenso/trpc/react';
-// import { cn } from '@documenso/ui/lib/utils';
-// import { Button } from '@documenso/ui/primitives/button';
-// import { Checkbox } from '@documenso/ui/primitives/checkbox';
+} from '@app/lib/constants/template';
+// import { DO_NOT_INVALIDATE_QUERY_ON_MUTATION, SKIP_QUERY_BATCH_META } from '@app/lib/constants/trpc';
+// import { AppError, AppErrorCode } from '@app/lib/errors/app-error';
+// import { type TRecipientLite, ZRecipientEmailSchema } from '@app/lib/types/recipient';
+// import { putPdfFile } from '@app/lib/universal/upload/put-file';
+// import { trpc } from '@app/trpc/react';
+// import { cn } from '@app/ui/lib/utils';
+// import { Button } from '@app/ui/primitives/button';
+// import { Checkbox } from '@app/ui/primitives/checkbox';
 import {
   Dialog,
   DialogClose,
@@ -20,12 +20,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@documenso/ui/primitives/dialog';
-// import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@documenso/ui/primitives/form/form';
-// import { Input } from '@documenso/ui/primitives/input';
-// import { SpinnerBox } from '@documenso/ui/primitives/spinner';
-// import { Tooltip, TooltipContent, TooltipTrigger } from '@documenso/ui/primitives/tooltip';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/ui/primitives/dialog';
+// import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@app/ui/primitives/form/form';
+// import { Input } from '@app/ui/primitives/input';
+// import { SpinnerBox } from '@app/ui/primitives/spinner';
+// import { Tooltip, TooltipContent, TooltipTrigger } from '@app/ui/primitives/tooltip';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { zodResolver } from '@hookform/resolvers/zod';
 // import { msg } from '@lingui/core/macro';
 // import { useLingui } from '@lingui/react';

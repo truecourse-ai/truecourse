@@ -171,3 +171,53 @@ export function ChoiceDialog({ handler, options }: ChoiceDialogProps): JSX.Eleme
     </Dialog>
   );
 }
+
+
+// FP: route module that uses useQuery but has no local ErrorBoundary.
+// Errors bubble up the route hierarchy to the root layout ErrorBoundary;
+// route-specific boundaries are only needed for fine-grained recovery UX.
+declare function useQuery<T>(opts: object): { data: T | undefined; isLoading: boolean };
+interface DomainRecord { id: string; name: string; verified: boolean }
+
+export function AdminDomainDetailPage({ domainId }: { domainId: string }): JSX.Element {
+  const { data: domain } = useQuery<DomainRecord>({ queryKey: ['domain', domainId] });
+  return <div>{domain?.name ?? 'Loading...'}</div>;
+}
+
+
+
+// FP: React context provider (not a route) that uses useQuery for session data.
+// Context providers are consumed within routes; boundary responsibility belongs
+// to the enclosing route or root layout, not the provider itself.
+declare function createContext<T>(defaultValue: T): React.Context<T>;
+declare function useQuery<T>(opts: object): { data: T | undefined; isLoading: boolean };
+interface AuthSession { userId: string; role: string; expiresAt: number }
+
+const AuthSessionContext = createContext<{ session: AuthSession | undefined }>({ session: undefined });
+
+export function AuthSessionProvider({ children }: { children: React.ReactNode }): JSX.Element {
+  const { data: session } = useQuery<AuthSession>({ queryKey: ['auth-session'] });
+  return <AuthSessionContext.Provider value={{ session }}>{children}</AuthSessionContext.Provider>;
+}
+
+
+
+// FP: ts-pattern match().with() for role-based JSX rendering — exhaustive(), correct usage
+declare function match<T>(val: T): {
+  with<R>(pattern: T, handler: () => R): {
+    with<R2>(pattern: T, handler: () => R2): { exhaustive: () => R | R2 };
+    exhaustive: () => R;
+  };
+};
+
+type ParticipantRole = 'SIGNER' | 'VIEWER' | 'APPROVER' | 'CC';
+declare const participantRole: ParticipantRole;
+
+function ParticipantActionBadge(): JSX.Element {
+  const actionLabel = match(participantRole)
+    .with('SIGNER', () => 'Sign Report')
+    .with('VIEWER', () => 'View Report')
+    .exhaustive();
+  return <span className="rounded px-2 py-0.5 text-xs font-medium">{actionLabel}</span>;
+}
+

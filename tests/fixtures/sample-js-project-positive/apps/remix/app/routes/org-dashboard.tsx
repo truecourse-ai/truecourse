@@ -224,3 +224,29 @@ function _longFn_90121056(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// organisations.flatMap((org) => org.teams.map((team) => ({...team, ...}))) — standard flatMap+map transform, no type mismatch
+declare const organisations: Array<{
+  id: string;
+  name: string;
+  slug: string;
+  teams: Array<{ id: string; name: string; url: string; currentTeamRole: string | null }>;
+}>;
+
+export function useFlattenedTeams() {
+  return React.useMemo(
+    () =>
+      organisations.flatMap((org) =>
+        org.teams.map((team) => ({
+          ...team,
+          organisation: {
+            ...org,
+            teams: undefined,
+          },
+        })),
+      ),
+    [organisations],
+  );
+}
+

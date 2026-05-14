@@ -128,3 +128,42 @@ export const handleAttachmentPdfRequest = async ({
 
   return ctx.body(file);
 };
+
+
+// --- argument-type-mismatch FP: Hono route.get with multiple sValidator middleware handlers ---
+// route.get(path, sValidator(...), sValidator(...), async handler) — standard Hono pattern; no type mismatch.
+declare const zRoute: { object: (shape: Record<string, any>) => any; string: () => { optional(): any } };
+declare function sValidator2(target: string, schema: any): (c: any, next: () => Promise<void>) => Promise<void>;
+declare const reportRoute: { get: (path: string, ...handlers: any[]) => any };
+
+const ZReportParamsSchema = zRoute.object({
+  reportId: zRoute.string(),
+  tokenId: zRoute.string(),
+  dataId: zRoute.string(),
+  version: zRoute.string(),
+});
+
+const ZReportQuerySchema = zRoute.object({
+  accessToken: zRoute.string().optional(),
+});
+
+reportRoute.get(
+  '/report/:reportId/token/:tokenId/data/:dataId/:version/report.pdf',
+  sValidator2('param', ZReportParamsSchema),
+  sValidator2('query', ZReportQuerySchema),
+  async (c: any) => {
+    const { reportId, tokenId, dataId, version } = c.req.valid('param');
+    const { accessToken } = c.req.valid('query');
+    return c.json({ reportId, tokenId, dataId, version, accessToken });
+  },
+);
+
+
+
+// argument-type-mismatch: typed route handler with argument type error at call site
+function parseAttachmentVersion(version: 'current' | 'initial', strict: boolean): string {
+  return strict ? version.toUpperCase() : version;
+}
+// TS2345: Argument of type 'number' is not assignable to parameter of type 'boolean'
+const _ver = parseAttachmentVersion('current', 1);
+

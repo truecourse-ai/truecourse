@@ -109,3 +109,28 @@ async function purgeExpiredRateLimits(cutoffDate: Date): Promise<void> {
     deleted = result.count;
   } while (deleted > 0);
 }
+
+
+// Shape: createRecord({userId, workspaceId, ...}) object argument — no type mismatch
+declare function createEnvelopeDraft(opts: {
+  userId: string;
+  workspaceId: string;
+  normalizePdf: boolean;
+  title: string;
+  externalRef: string | null;
+}): Promise<{ id: string }>;
+declare const currentUserId: string;
+declare const currentWorkspaceId: string;
+declare const envelopeTitle: string;
+
+export async function initEnvelopeDraft() {
+  const envelope = await createEnvelopeDraft({
+    userId: currentUserId,
+    workspaceId: currentWorkspaceId,
+    normalizePdf: false,
+    title: envelopeTitle,
+    externalRef: null,
+  });
+  return envelope;
+}
+

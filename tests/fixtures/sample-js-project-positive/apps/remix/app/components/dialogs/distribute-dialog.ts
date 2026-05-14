@@ -64,3 +64,37 @@ async function handleResendDocument(documentId: string, recipientId: string): Pr
     showToast('Failed to resend document. Please try again.', 'error');
   }
 }
+
+
+// missing-error-boundary FP: Remix leaf dialog component — root.tsx exports a global ErrorBoundary;
+// leaf components use try/catch+toast for errors, which is the correct Remix convention
+declare function useQuery(opts: object): { data: unknown; isLoading: boolean };
+declare function useMutation(opts: object): { mutateAsync: (data: object) => Promise<void> };
+declare function useToast(): { toast: (opts: object) => void };
+
+export function ReportShareDialog({
+  reportId,
+  open,
+  onOpenChange,
+}: {
+  reportId: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const { data: contacts } = useQuery({ queryKey: ['contacts', reportId] });
+  const shareMutation = useMutation({ mutationFn: async (d: object) => d });
+
+  const handleShare = async (email: string) => {
+    try {
+      await shareMutation.mutateAsync({ reportId, email });
+      toast({ title: 'Report shared successfully' });
+      onOpenChange(false);
+    } catch {
+      toast({ title: 'Failed to share report', variant: 'destructive' });
+    }
+  };
+
+  return null;
+}
+

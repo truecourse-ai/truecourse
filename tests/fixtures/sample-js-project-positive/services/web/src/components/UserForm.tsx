@@ -455,3 +455,15 @@ export const ChangeEmailForm = ({ className, confirmationToken }: ChangeEmailFor
     </form>
   );
 };
+
+
+// FP: type aliases inside declare global { namespace PrismaJson } required by prisma-json-types-generator
+type ReportAuthOptionsBase_17ce0e = { globalAccessAuth: string | null; globalActionAuth: string | null };
+type ReportAuthOptions_17ce0e = ReportAuthOptionsBase_17ce0e;
+
+
+
+// FP: type alias inside declare global namespace required by prisma-json-types-generator
+type DefaultSignerConfigBase_2c2871 = { name: string; email: string; role: string; accessCode?: string };
+type DefaultSignerConfig_2c2871 = DefaultSignerConfigBase_2c2871;
+

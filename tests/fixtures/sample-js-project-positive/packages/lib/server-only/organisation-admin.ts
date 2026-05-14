@@ -14,3 +14,20 @@ export async function applySubscriptionClaim(organisationId: number, claimId: nu
     });
   });
 }
+
+
+// setFieldsForTemplate({userId: ctx.user.id, teamId, id: {...}, fields: [...]}) FP — setFieldsForTemplate undefined → TS2304 → rule fires
+export async function applyFieldConfig_44d04f5f(): Promise<void> {
+  await setFieldsForTemplate({
+    userId: requestCtx.user.id,
+    teamId: requestCtx.teamId,
+    id: { type: 'envelopeId', id: currentEnvelopeId },
+    fields: rawFields.map((f: { fieldType: string; page: number; x: number; y: number }) => ({
+      type: f.fieldType,
+      pageNumber: f.page,
+      pageX: f.x,
+      pageY: f.y,
+    })),
+  });
+}
+

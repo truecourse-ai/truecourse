@@ -1,10 +1,10 @@
-// import { useCurrentOrganisation } from '@documenso/lib/client-only/providers/organisation';
-// import { ORGANISATION_MEMBER_ROLE_HIERARCHY } from '@documenso/lib/constants/organisations';
-// import { EXTENDED_ORGANISATION_MEMBER_ROLE_MAP } from '@documenso/lib/constants/organisations-translations';
-// import { AppError } from '@documenso/lib/errors/app-error';
-// import { trpc } from '@documenso/trpc/react';
-// import { ZCreateOrganisationGroupRequestSchema } from '@documenso/trpc/server/organisation-router/create-organisation-group.types';
-// import { Button } from '@documenso/ui/primitives/button';
+// import { useCurrentOrganisation } from '@app/lib/client-only/providers/organisation';
+// import { ORGANISATION_MEMBER_ROLE_HIERARCHY } from '@app/lib/constants/organisations';
+// import { EXTENDED_ORGANISATION_MEMBER_ROLE_MAP } from '@app/lib/constants/organisations-translations';
+// import { AppError } from '@app/lib/errors/app-error';
+// import { trpc } from '@app/trpc/react';
+// import { ZCreateOrganisationGroupRequestSchema } from '@app/trpc/server/organisation-router/create-organisation-group.types';
+// import { Button } from '@app/ui/primitives/button';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@documenso/ui/primitives/dialog';
+} from '@app/ui/primitives/dialog';
 import {
   Form,
   FormControl,
@@ -22,10 +22,10 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from '@documenso/ui/primitives/form/form';
-// import { Input } from '@documenso/ui/primitives/input';
-// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@documenso/ui/primitives/select';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/ui/primitives/form/form';
+// import { Input } from '@app/ui/primitives/input';
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@app/ui/primitives/select';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { zodResolver } from '@hookform/resolvers/zod';
 // import { Trans, useLingui } from '@lingui/react/macro';
 // import { OrganisationMemberRole } from '@prisma/client';

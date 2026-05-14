@@ -17,3 +17,22 @@ const template = await getItemById({
   userId,
   teamId,
 });
+
+
+// missing-return-type FP: Remix loader export; return type inferred from data() call — framework-conventional export
+declare function getSessionForRequest(req: unknown): Promise<{ isAuthenticated: boolean; userId?: string }>;
+declare function getWorkspaceSettings(): Promise<Array<{ id: string; value: unknown }>>;
+declare const ANNOUNCEMENT_BANNER_ID: string;
+declare function data(payload: unknown): unknown;
+
+export async function layoutLoader({ request }: { request: unknown }) {
+  const [session, announcementBanner] = await Promise.all([
+    getSessionForRequest(request),
+    getWorkspaceSettings().then((settings) =>
+      settings.find((s) => s.id === ANNOUNCEMENT_BANNER_ID),
+    ),
+  ]);
+
+  return data({ session, announcementBanner });
+}
+

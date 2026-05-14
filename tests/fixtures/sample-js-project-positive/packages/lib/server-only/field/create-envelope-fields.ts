@@ -1,12 +1,12 @@
-// import { DOCUMENT_AUDIT_LOG_TYPE } from '@documenso/lib/types/document-audit-logs';
-// import type { TFieldAndMeta } from '@documenso/lib/types/field-meta';
-// import type { ApiRequestMetadata } from '@documenso/lib/universal/extract-request-metadata';
-// import { getFileServerSide } from '@documenso/lib/universal/upload/get-file.server';
-// import { putPdfFileServerSide } from '@documenso/lib/universal/upload/put-file.server';
-// import { createDocumentAuditLogData } from '@documenso/lib/utils/document-audit-logs';
-// import { prisma } from '@documenso/prisma';
-// import { PDF } from '@libpdf/core';
-// import { EnvelopeType } from '@prisma/client';
+import { DOCUMENT_AUDIT_LOG_TYPE } from '@app/lib/types/document-audit-logs';
+import type { TFieldAndMeta } from '@app/lib/types/field-meta';
+import type { ApiRequestMetadata } from '@app/lib/universal/extract-request-metadata';
+import { getFileServerSide } from '@app/lib/universal/upload/get-file.server';
+import { putPdfFileServerSide } from '@app/lib/universal/upload/put-file.server';
+import { createDocumentAuditLogData } from '@app/lib/utils/document-audit-logs';
+import { prisma } from '@app/prisma';
+import { PDF } from '@libpdf/core';
+import { EnvelopeType } from '@prisma/client';
 
 import { AppError, AppErrorCode } from '../../errors/app-error';
 import type { EnvelopeIdOptions } from '../../utils/envelope';

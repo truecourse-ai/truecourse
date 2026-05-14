@@ -176,3 +176,35 @@ function _longFn_0b268de7(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// Structured arg matching discriminated union parameter — no type mismatch
+declare function fetchEnvelopeById(
+  opts: { id: { type: string; id: string }; type: string; includeFields?: boolean },
+): Promise<unknown>;
+declare const params: { documentId?: string };
+declare const EnvelopeType: { DOCUMENT: string };
+
+async function loadDocumentEnvelope() {
+  const documentId = params.documentId;
+  if (!documentId) return null;
+
+  return await fetchEnvelopeById({
+    id: { type: 'documentId', id: documentId },
+    type: EnvelopeType.DOCUMENT,
+    includeFields: true,
+  });
+}
+
+
+
+// FP: getEnvelopeById id field typed as number but passed string | undefined (documentId from params)
+declare function getEnvelopeByDocId(opts: { id: { type: 'documentId'; id: number }; teamId: number }): Promise<{ id: number; title: string } | null>;
+declare const routeParams: { documentId?: string };
+
+async function loadTeamDocumentEnvelope(teamId: number) {
+  const documentId = routeParams.documentId;
+  if (!documentId) return null;
+  return getEnvelopeByDocId({ id: { type: 'documentId', id: documentId }, teamId });
+}
+

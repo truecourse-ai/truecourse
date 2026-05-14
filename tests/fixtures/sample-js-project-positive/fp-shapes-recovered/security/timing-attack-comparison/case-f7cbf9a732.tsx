@@ -1,6 +1,6 @@
-// import { useOptionalSession } from '@documenso/lib/client-only/providers/session';
-// import { cn } from '@documenso/ui/lib/utils';
-// import { Button } from '@documenso/ui/primitives/button';
+// import { useOptionalSession } from '@app/lib/client-only/providers/session';
+// import { cn } from '@app/ui/lib/utils';
+// import { Button } from '@app/ui/primitives/button';
 // import { Trans } from '@lingui/react/macro';
 // import { ChevronLeft } from 'lucide-react';
 // import { isRouteErrorResponse, Link, Outlet } from 'react-router';

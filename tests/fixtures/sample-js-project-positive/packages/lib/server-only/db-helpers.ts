@@ -508,3 +508,24 @@ seedWorkspaceData()
     console.error(error);
     process.exit(1);
   });
+
+
+// FP shape: unwrappedNode.destroy() is a Yoga/layout DOM lifecycle call, not a
+// database write — rule fires because destroy() is in ORM_WRITE_METHODS but it's not a DB op.
+declare const yogaDocument: { create: (opts: Record<string, unknown>) => { calculateLayout: () => void; destroy: () => void } };
+declare const yogaNode: { destroy: () => void };
+
+export function renderDocumentLayout_7cad66be(opts: Record<string, unknown>): void {
+  yogaDocument.create(opts).calculateLayout();
+  // DOM lifecycle: destroy() releases native Yoga memory, not a DB operation
+  yogaNode.destroy();
+}
+
+
+
+// magic-string FP: 'base64' and 'utf-8' are standard Node.js Buffer encoding constants
+const _certEncoding1_8ac59a47 = 'base64';
+const _certEncoding2_8ac59a47 = 'base64';
+const _certEncoding3_8ac59a47 = 'base64';
+export const _certEncodings_8ac59a47 = [_certEncoding1_8ac59a47, _certEncoding2_8ac59a47, _certEncoding3_8ac59a47];
+

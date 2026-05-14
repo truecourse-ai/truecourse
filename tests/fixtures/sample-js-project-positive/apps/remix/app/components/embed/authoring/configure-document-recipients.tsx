@@ -94,3 +94,31 @@ export function ConfigureDocumentRecipients({
     </div>
   );
 }
+
+
+// splice + map to reorder recipients with signingOrder — valid array transform, no type mismatch
+declare function canModifyRecipient(id: string): boolean;
+
+type RecipientRow = { id: string; signingOrder: number; name: string; email: string; role: string };
+
+export function reorderRecipients(
+  recipients: RecipientRow[],
+  sourceIndex: number,
+  destinationIndex: number,
+): RecipientRow[] {
+  const items = [...recipients];
+  const [moved] = items.splice(sourceIndex, 1);
+
+  let insertAt = destinationIndex;
+  while (insertAt < items.length && !canModifyRecipient(items[insertAt].id)) {
+    insertAt++;
+  }
+
+  items.splice(insertAt, 0, moved);
+
+  return items.map((recipient, index) => ({
+    ...recipient,
+    signingOrder: canModifyRecipient(recipient.id) ? index + 1 : recipient.signingOrder,
+  }));
+}
+

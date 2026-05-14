@@ -194,3 +194,99 @@ export const FieldItemAdvancedSettings = ({
     </Form>
   );
 };
+
+
+// --- argument-type-mismatch FP: field.value.find() with optional chaining and fallback ---
+// selectedGroups.find((v) => v.groupId === groupId)?.role — type-safe optional chain, no type mismatch.
+declare const groupRoleField: { value: Array<{ groupId: string; role: string }> };
+type GroupRole = 'ADMIN' | 'MEMBER' | 'VIEWER';
+
+export function getSelectedGroupRole(groupId: string): GroupRole {
+  return (groupRoleField.value.find((v) => v.groupId === groupId)?.role as GroupRole) || 'MEMBER';
+}
+
+
+
+// --- argument-type-mismatch FP: Array.includes() checking config key string against literal array ---
+// ['characterLimit', 'minLength'].includes(key) — valid includes() call with a string literal, no type mismatch.
+type FieldSettingKey = 'characterLimit' | 'minLength' | 'pattern' | 'placeholder' | 'defaultValue';
+
+export function extractNumericSetting(
+  key: FieldSettingKey,
+  value: string | number | boolean,
+): number | undefined {
+  if (['characterLimit', 'minLength'].includes(key)) {
+    const parsed = Number(value);
+    return isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
+
+
+// --- argument-type-mismatch FP: string[].filter((msg) => msg.includes('character limit')) ---
+// validationErrors is string[]; .filter(msg => msg.includes(...)) is correct string array usage.
+declare function validateSignatureField(
+  text: string,
+  rules: { minLength?: number; maxLength?: number },
+  strict: boolean
+): string[];
+declare const signatureText: string;
+declare const signatureRules: { minLength?: number; maxLength?: number };
+
+export function categorizeSignatureErrors(): { required: string[]; tooLong: string[] } {
+  const errors = validateSignatureField(signatureText, signatureRules, true);
+  return {
+    required: errors.filter((msg) => msg.includes('required')),
+    tooLong: errors.filter((msg) => msg.includes('character limit')),
+  };
+}
+
+
+
+// --- unchecked-array-access FP: enum-exhaustive Record lookup via Object.values() iteration ---
+// FIELD_AUTH_TYPES is a Record keyed by FieldAccessAuth enum; authType comes from
+// Object.values(FieldAccessAuth) — enum-exhaustive, so [authType] is always valid.
+enum FieldAccessAuth { NONE = 'NONE', REQUIRE_ACCOUNT = 'REQUIRE_ACCOUNT', REQUIRE_2FA = 'REQUIRE_2FA', PASSKEY = 'PASSKEY' }
+
+interface FieldAuthConfig { label: string; description: string; requiresSetup: boolean }
+
+const FIELD_AUTH_TYPES = {
+  [FieldAccessAuth.NONE]: { label: 'No authentication', description: 'Anyone can sign', requiresSetup: false },
+  [FieldAccessAuth.REQUIRE_ACCOUNT]: { label: 'Require account', description: 'Must be signed in', requiresSetup: false },
+  [FieldAccessAuth.REQUIRE_2FA]: { label: 'Two-factor auth', description: 'Must verify via 2FA', requiresSetup: true },
+  [FieldAccessAuth.PASSKEY]: { label: 'Passkey', description: 'Must use a passkey', requiresSetup: true },
+} satisfies Record<FieldAccessAuth, FieldAuthConfig>;
+
+export function getFieldAuthOptions(excludeSetupRequired: boolean): Array<{ value: FieldAccessAuth; label: string }> {
+  return (Object.values(FieldAccessAuth) as FieldAccessAuth[])
+    .filter((authType) => !excludeSetupRequired || !FIELD_AUTH_TYPES[authType].requiresSetup)
+    .map((authType) => ({ value: authType, label: FIELD_AUTH_TYPES[authType].label }));
+}
+
+
+
+// --- magic-string FP: textAlign: 'left' in CSS default state object ---
+// textAlign: 'left' is a CSS text-alignment value in a typed default state — not a magic string.
+type TextAlignValue = 'left' | 'center' | 'right';
+type AnnotationType = 'text' | 'initials' | 'name' | 'email' | 'date';
+
+interface AnnotationMeta {
+  type: AnnotationType;
+  fontSize: number;
+  textAlign: TextAlignValue;
+}
+
+function getAnnotationDefaultState(annotationType: AnnotationType): AnnotationMeta {
+  switch (annotationType) {
+    case 'initials':
+      return { type: 'initials', fontSize: 14, textAlign: 'left' };
+    case 'name':
+      return { type: 'name', fontSize: 14, textAlign: 'left' };
+    case 'email':
+      return { type: 'email', fontSize: 12, textAlign: 'left' };
+    default:
+      return { type: 'text', fontSize: 14, textAlign: 'left' };
+  }
+}
+

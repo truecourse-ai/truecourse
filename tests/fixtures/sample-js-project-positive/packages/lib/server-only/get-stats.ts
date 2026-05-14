@@ -126,3 +126,23 @@ function _syntheticLongFunction() {
   const _step53 = 53 + 1; // processing step 53
   const _step54 = 54 + 1; // processing step 54
 }
+
+
+// Promise.all([cappedCount(query), ...]) passes typed query builders to cappedCount — types match the function signature.
+type EnvelopeQueryBuilder = { where: Record<string, unknown>; take: number };
+declare function cappedEnvelopeCount(query: EnvelopeQueryBuilder): Promise<number>;
+declare const draftEnvelopeQuery: EnvelopeQueryBuilder;
+declare const pendingEnvelopeQuery: EnvelopeQueryBuilder;
+declare const completedEnvelopeQuery: EnvelopeQueryBuilder;
+declare const archivedEnvelopeQuery: EnvelopeQueryBuilder;
+
+export async function getEnvelopeStatusCounts() {
+  const [draftCount, pendingCount, completedCount, archivedCount] = await Promise.all([
+    cappedEnvelopeCount(draftEnvelopeQuery),
+    cappedEnvelopeCount(pendingEnvelopeQuery),
+    cappedEnvelopeCount(completedEnvelopeQuery),
+    cappedEnvelopeCount(archivedEnvelopeQuery),
+  ]);
+  return { draftCount, pendingCount, completedCount, archivedCount };
+}
+

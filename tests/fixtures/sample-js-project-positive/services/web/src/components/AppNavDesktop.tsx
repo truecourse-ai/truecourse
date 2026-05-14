@@ -99,3 +99,18 @@ export function AppNavDesktop() {
     </nav>
   );
 }
+
+
+// Shared navigation component rendered across authenticated layouts — errors bubble to root ErrorBoundary
+declare function useQuery(opts: object): { data: { count: number } | undefined; isLoading: boolean };
+
+export function AppNavUnreadBadge() {
+  // Non-route shared component — inherits error boundary from parent layout route
+  const { data: inboxData } = useQuery({ queryKey: ['inbox', 'unread-count'] });
+  const unreadCount = inboxData?.count ?? 0;
+
+  if (unreadCount === 0) return null;
+
+  return <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">{unreadCount}</span>;
+}
+

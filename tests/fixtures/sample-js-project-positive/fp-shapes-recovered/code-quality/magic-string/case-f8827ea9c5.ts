@@ -1,4 +1,4 @@
-// import { prisma } from '@documenso/prisma';
+// import { prisma } from '@app/prisma';
 // import { sha256 } from '@noble/hashes/sha2';
 // import { BackgroundJobStatus, Prisma } from '@prisma/client';
 // import { CronExpressionParser } from 'cron-parser';

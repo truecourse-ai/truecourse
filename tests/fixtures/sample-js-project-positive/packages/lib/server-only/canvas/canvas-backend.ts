@@ -30,3 +30,15 @@ import type { Canvas } from 'canvas';
 declare const canvasLib: Canvas;
 canvasLib.prototype.toBuffer;
 export { canvasLib as Canvas };
+
+
+
+// Positive: filename-class-mismatch — this file patches the PDF rendering library for the
+// server-side (Node canvas) backend and re-exports the configured instance under the library's own
+// name. The export name is the third-party library being re-exported, not a class defined here.
+declare const PdfRenderer: { prototype: { renderPage: (n: number) => void }; new (): unknown };
+PdfRenderer.prototype.renderPage = function (pageNumber: number): void {
+  void pageNumber; // no-op in server backend
+};
+export { PdfRenderer };
+

@@ -15,3 +15,16 @@ export async function replaceGroupMemberWithTeam(
     return tx.team.create({ data: teamData });
   });
 }
+
+
+// (authorizationHeader||'').split('Bearer ').filter(s => s.length > 0) FP — getRequestHeader undefined → TS2304 → rule fires
+export function resolveEmbedToken_e157c2e1(authorizationHeader: string | null): string | undefined {
+  const [token] = (authorizationHeader || '').split('Bearer ').filter((s) => s.length > 0);
+  return token;
+}
+
+export function extractApiKey_e157c2e1(authorizationHeader: string | null): string | undefined {
+  const header = getRequestHeader('x-api-key');
+  return (header || '').split(' ').filter((s) => s.length > 0)[0];
+}
+

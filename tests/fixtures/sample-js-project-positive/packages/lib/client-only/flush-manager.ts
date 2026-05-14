@@ -39,3 +39,12 @@ async function scheduleFlush(): Promise<void> {
     isFlushingRef.current = false;
   }
 }
+
+
+// Promise.all(externalSavers.map(async (save) => save())) — array of async save callbacks, no type mismatch
+declare const externalSavers: Array<() => Promise<void>>;
+
+async function runAllExternalSavers() {
+  await Promise.all(externalSavers.map(async (save) => save()));
+}
+

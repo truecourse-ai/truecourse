@@ -49,3 +49,24 @@ async function handleFileUpload(fileBuffer: Buffer, mimeType: string): Promise<{
     throw new AppError('UPLOAD_FAILED', 'Failed to store the uploaded file');
   }
 }
+
+
+// Hono route builder .post() with sValidator('json', schema) middleware — standard Hono pattern; no type mismatch.
+declare const ZCreateReportSchema: unknown;
+declare function sValidator30(target: string, schema: unknown): unknown;
+
+import { Hono as Hono30 } from 'hono';
+
+type ApiEnv30 = { Variables: { userId: string } };
+
+const reportRoute30 = new Hono30<ApiEnv30>()
+  .post('/reports', sValidator30('json', ZCreateReportSchema), async (c: {
+    req: { valid(t: string): { title: string; type: string } };
+    get(k: string): string;
+    json(data: unknown): unknown;
+  }) => {
+    const body = c.req.valid('json');
+    const userId = c.get('userId');
+    return c.json({ reportId: `rep_${userId}_${body.title}`, type: body.type });
+  });
+

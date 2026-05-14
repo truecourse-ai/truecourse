@@ -1,5 +1,5 @@
-// import { prisma } from '@documenso/prisma';
-// import { DateTime } from 'luxon';
+import { prisma } from '@app/prisma';
+import { DateTime } from 'luxon';
 
 import { EMAIL_VERIFICATION_STATE, USER_SIGNUP_VERIFICATION_TOKEN_IDENTIFIER } from '../../constants/email';
 import { jobsClient } from '../../jobs/client';
@@ -105,3 +105,26 @@ export const verifyEmail = async ({ token }: VerifyEmailProps) => {
     userId: updatedUser.id,
   };
 };
+
+
+// FP 3a8e99ea31bf: verificationToken.findFirst in verify-email.ts
+// findFirst with orderBy: { createdAt: desc } selects the most recent from a multi-row set.
+// This is a "find most recent" pattern — NOT a uniqueness check before insert.
+// The missing-unique-constraint rule should not fire on orderBy findFirst lookups.
+declare const prismaVerify_3a8e: {
+  verificationToken: {
+    findFirst: (args: {
+      where: { userId: string };
+      orderBy: { createdAt: string };
+    }) => Promise<{ id: string; token: string; createdAt: Date } | null>;
+  };
+};
+export async function findMostRecentVerificationToken_3a8e(
+  userId: string
+): Promise<{ id: string; token: string } | null> {
+  return prismaVerify_3a8e.verificationToken.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+

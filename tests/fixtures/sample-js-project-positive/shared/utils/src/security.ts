@@ -60,3 +60,38 @@ export function safeReturnRedirect(): void {
   const returnUrl = '/dashboard';
   responseObj.redirect(returnUrl);
 }
+
+
+
+// Positive: timing-attack-comparison — array length check to derive config flag, not a secret comparison.
+// signatureTypes.length === 0 derives a boolean config; no secret value is involved.
+export const enum SignatureMode { DRAWN = 'DRAWN', TYPED = 'TYPED', UPLOADED = 'UPLOADED' }
+
+export function deriveSignatureConfig(enabledModes: SignatureMode[]): {
+  drawnSignatureEnabled: boolean;
+  typedSignatureEnabled: boolean;
+  uploadedSignatureEnabled: boolean;
+} {
+  return {
+    drawnSignatureEnabled: enabledModes.length === 0 || enabledModes.includes(SignatureMode.DRAWN),
+    typedSignatureEnabled: enabledModes.length === 0 || enabledModes.includes(SignatureMode.TYPED),
+    uploadedSignatureEnabled: enabledModes.length === 0 || enabledModes.includes(SignatureMode.UPLOADED),
+  };
+}
+
+
+
+// Positive: comparing signatureTypes array length === 0 to derive a config flag, not a secret
+export const enum SignatureType { DRAWN = 'DRAWN', TYPED = 'TYPED', UPLOADED = 'UPLOADED' }
+
+export function resolveSignatureConfig(signatureTypes: SignatureType[]): {
+  drawnEnabled: boolean;
+  typedEnabled: boolean;
+} {
+  const noSignatureTypes = signatureTypes.length === 0;
+  return {
+    drawnEnabled: noSignatureTypes || signatureTypes.includes(SignatureType.DRAWN),
+    typedEnabled: noSignatureTypes || signatureTypes.includes(SignatureType.TYPED),
+  };
+}
+

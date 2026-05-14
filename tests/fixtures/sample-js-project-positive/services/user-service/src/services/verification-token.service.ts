@@ -65,3 +65,16 @@ export const sendVerificationToken = async ({ email, force = false }: SendVerifi
     throw new Error('Failed to dispatch the verification email');
   }
 };
+
+
+// FP shape: catch(err) passes err directly to console.error — no untyped property access
+declare function dispatchPasswordResetEmail(opts: { userId: string; token: string }): Promise<void>;
+
+export async function sendPasswordResetNotification(userId: string, token: string): Promise<void> {
+  try {
+    await dispatchPasswordResetEmail({ userId, token });
+  } catch (err) {
+    console.error(err);
+  }
+}
+

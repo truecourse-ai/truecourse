@@ -1,6 +1,6 @@
-// import { mailer } from '@documenso/email/mailer';
-// import DocumentCancelTemplate from '@documenso/email/templates/document-cancel';
-// import { prisma } from '@documenso/prisma';
+// import { mailer } from '@app/email/mailer';
+// import DocumentCancelTemplate from '@app/email/templates/document-cancel';
+// import { prisma } from '@app/prisma';
 // import { msg } from '@lingui/core/macro';
 // import type { DocumentMeta, Envelope, Recipient, User } from '@prisma/client';
 // import { DocumentStatus, EnvelopeType, SendStatus, WebhookTriggerEvents } from '@prisma/client';

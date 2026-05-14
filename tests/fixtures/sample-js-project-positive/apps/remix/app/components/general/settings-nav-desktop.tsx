@@ -110,3 +110,28 @@ export const SettingsDesktopNav2 = ({ className }: { className?: string }) => {
     </div>
   );
 };
+
+
+// pathname?.startsWith('/settings/notifications') — URL path prefix used in conditional active-link styling.
+// Route path strings in navigation components are effectively typed constants tied to the router.
+declare const useLocation9: () => { pathname: string | undefined };
+declare const cn9: (...args: unknown[]) => string;
+declare const Button9: React.FC<{ variant?: string; className?: string; children?: React.ReactNode }>;
+declare const Link9: React.FC<{ to: string; children?: React.ReactNode }>;
+declare const BellIcon9: React.FC<{ className?: string }>;
+
+export const NotificationsNavLink9 = () => {
+  const { pathname } = useLocation9();
+  return (
+    <Link9 to="/settings/notifications">
+      <Button9
+        variant="ghost"
+        className={cn9('w-full justify-start', pathname?.startsWith('/settings/notifications') && 'bg-secondary')}
+      >
+        <BellIcon9 className="mr-2 h-5 w-5" />
+        Notifications
+      </Button9>
+    </Link9>
+  );
+};
+

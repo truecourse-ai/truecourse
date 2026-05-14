@@ -1,13 +1,13 @@
-// import { getPdfPagesCount } from '@documenso/lib/constants/pdf-viewer';
-// import type { TEditorEnvelope } from '@documenso/lib/types/envelope-editor';
-// import { ZFieldMetaSchema } from '@documenso/lib/types/field-meta';
-// import { nanoid } from '@documenso/lib/universal/id';
-// import { zodResolver } from '@hookform/resolvers/zod';
-// import type { Field } from '@prisma/client';
-// import { FieldType } from '@prisma/client';
-// import { useCallback, useEffect, useMemo, useState } from 'react';
-// import { useFieldArray, useForm } from 'react-hook-form';
-// import { z } from 'zod';
+import { getPdfPagesCount } from '@app/lib/constants/pdf-viewer';
+import type { TEditorEnvelope } from '@app/lib/types/envelope-editor';
+import { ZFieldMetaSchema } from '@app/lib/types/field-meta';
+import { nanoid } from '@app/lib/universal/id';
+import { zodResolver } from '@hookform/resolvers/zod';
+import type { Field } from '@prisma/client';
+import { FieldType } from '@prisma/client';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFieldArray, useForm } from 'react-hook-form';
+import { z } from 'zod';
 
 export const ZLocalFieldSchema = z.object({
   // This is the actual ID of the field if created.

@@ -1,5 +1,5 @@
-// import { NEXT_PUBLIC_WEBAPP_URL } from '@documenso/lib/constants/app';
-// import { AppError } from '@documenso/lib/errors/app-error';
+// import { NEXT_PUBLIC_WEBAPP_URL } from '@app/lib/constants/app';
+// import { AppError } from '@app/lib/errors/app-error';
 // import type { ClientResponse, InferRequestType } from 'hono/client';
 // import { hc } from 'hono/client';
 // import superjson from 'superjson';

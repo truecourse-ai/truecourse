@@ -1,16 +1,16 @@
-// import { DO_NOT_INVALIDATE_QUERY_ON_MUTATION } from '@documenso/lib/constants/trpc';
+// import { DO_NOT_INVALIDATE_QUERY_ON_MUTATION } from '@app/lib/constants/trpc';
 import {
   DEFAULT_EDITOR_CONFIG,
   type EnvelopeEditorConfig,
   type TEditorEnvelope,
-} from '@documenso/lib/types/envelope-editor';
-// import { trpc } from '@documenso/trpc/react';
-// import type { TSetEnvelopeFieldsResponse } from '@documenso/trpc/server/envelope-router/set-envelope-fields.types';
-// import type { TSetEnvelopeRecipientsRequest } from '@documenso/trpc/server/envelope-router/set-envelope-recipients.types';
-// import type { TUpdateEnvelopeRequest } from '@documenso/trpc/server/envelope-router/update-envelope.types';
-// import type { TRecipientColor } from '@documenso/ui/lib/recipient-colors';
-// import { getRecipientColor } from '@documenso/ui/lib/recipient-colors';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/lib/types/envelope-editor';
+// import { trpc } from '@app/trpc/react';
+// import type { TSetEnvelopeFieldsResponse } from '@app/trpc/server/envelope-router/set-envelope-fields.types';
+// import type { TSetEnvelopeRecipientsRequest } from '@app/trpc/server/envelope-router/set-envelope-recipients.types';
+// import type { TUpdateEnvelopeRequest } from '@app/trpc/server/envelope-router/update-envelope.types';
+// import type { TRecipientColor } from '@app/ui/lib/recipient-colors';
+// import { getRecipientColor } from '@app/ui/lib/recipient-colors';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { useLingui } from '@lingui/react/macro';
 // import { EnvelopeType, Prisma, ReadStatus, SendStatus, SigningStatus } from '@prisma/client';
 // import type React from 'react';

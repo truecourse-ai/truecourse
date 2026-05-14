@@ -43,3 +43,20 @@ export default function DocumentPreview(props: DocumentPreviewProps): JSX.Elemen
     </Suspense>
   ) as unknown as JSX.Element;
 }
+
+
+// --- missing-error-boundary FP: non-route UI component using useQuery ---
+// Non-route component rendered inside authenticated routes whose root ErrorBoundary covers all errors.
+// No local ErrorBoundary is required at this leaf component level.
+declare const trpcReport: {
+  report: { get: { useQuery(input: { reportId: string }, opts?: object): { data: unknown; isLoading: boolean } } };
+};
+
+export function ReportCertificateQrView({ reportId }: { reportId: string }): JSX.Element | null {
+  const { data: report, isLoading } = trpcReport.report.get.useQuery({ reportId });
+
+  if (isLoading || !report) return null;
+
+  return <div className="text-sm font-mono">{reportId}</div>;
+}
+

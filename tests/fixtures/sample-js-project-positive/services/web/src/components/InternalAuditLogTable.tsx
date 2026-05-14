@@ -141,3 +141,15 @@ export function InternalAuditLogTable() {
     </div>
   );
 }
+
+
+// --- argument-type-mismatch FP: translate wrapper receiving string result of a formatter ---
+// _(formatDeviceInfo(entry.userAgent, deviceInfo)) — string → translate; types match correctly.
+declare function translateMsg<T>(msg: T): T;
+declare function formatDeviceInfo(userAgent: string | null, deviceMeta: Record<string, string>): string;
+declare const deviceMeta: Record<string, string>;
+
+function renderAuditEntryDevice(entry: AuditLogEntry): string {
+  return translateMsg(formatDeviceInfo(entry.metadata['userAgent'] as string | null, deviceMeta));
+}
+

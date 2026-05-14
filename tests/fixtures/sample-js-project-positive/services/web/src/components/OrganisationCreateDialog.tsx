@@ -145,3 +145,87 @@ export const OrganisationCreateDialog = ({
     </Dialog>
   );
 };
+
+
+// --- argument-type-mismatch FP: useMutation onSuccess async callback that navigates ---
+// onSuccess: async () => { await navigate('/dashboard'); } — standard tRPC/tanstack callback, no type mismatch.
+declare function useNavigate2(): (path: string) => Promise<void>;
+declare function verifyOrgToken(input: { token: string }): Promise<void>;
+
+function useOrgInviteConfirmation() {
+  const navigate = useNavigate2();
+  const { mutate: confirmInvite, isPending } = useMutation<void, { token: string }>({
+    mutationFn: verifyOrgToken,
+    onSuccess: async () => {
+      await navigate('/dashboard');
+    },
+    onError: (err: unknown) => {
+      console.error(err);
+    },
+  });
+  return { confirmInvite, isPending };
+}
+
+
+
+// --- missing-error-boundary FP: leaf dialog component using useQuery ---
+// This is a leaf dialog component — route-level error boundaries in the layout routes
+// cover it. A file-level heuristic that ignores ancestor boundaries fires incorrectly here.
+declare function useWorkspacePlans(): { data: Array<{ id: string; name: string }> | undefined; isLoading: boolean };
+
+export function WorkspaceUpgradeDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { toast } = useToast();
+  const { data: plans, isLoading } = useWorkspacePlans();
+
+  const upgradeMutation = useMutation({
+    mutationFn: async (planId: string) => {
+      await new Promise((r) => setTimeout(r, 100));
+    },
+  });
+
+  const handleUpgrade = async (planId: string) => {
+    try {
+      await upgradeMutation.mutateAsync(planId);
+      toast({ title: 'Workspace upgraded' });
+      onOpenChange(false);
+    } catch {
+      toast({ title: 'Upgrade failed', variant: 'destructive' });
+    }
+  };
+
+  return null;
+}
+
+
+
+// --- unchecked-array-access FP: Record keyed by hardcoded enum; access is always safe ---
+// tierDescriptions is a Record<TierId, ...>; tierId comes from the same hardcoded enum values.
+const enum TierId { STARTER = 'STARTER', PRO = 'PRO', ENTERPRISE = 'ENTERPRISE' }
+
+interface TierDescriptor { label: string; monthlyPrice: number; features: string[] }
+
+const TIER_DESCRIPTIONS: Record<TierId, TierDescriptor> = {
+  [TierId.STARTER]: { label: 'Starter', monthlyPrice: 0, features: ['5 reports/mo'] },
+  [TierId.PRO]: { label: 'Pro', monthlyPrice: 29, features: ['100 reports/mo', 'API access'] },
+  [TierId.ENTERPRISE]: { label: 'Enterprise', monthlyPrice: 99, features: ['Unlimited', 'SSO', 'SLA'] },
+};
+
+const SELECTABLE_TIER_IDS = [TierId.STARTER, TierId.PRO, TierId.ENTERPRISE] as const;
+
+function buildTierOptions(billingPeriod: 'monthly' | 'yearly') {
+  return SELECTABLE_TIER_IDS.map((tierId) => ({
+    id: tierId,
+    label: TIER_DESCRIPTIONS[tierId].label,
+    price: billingPeriod === 'monthly'
+      ? TIER_DESCRIPTIONS[tierId].monthlyPrice
+      : TIER_DESCRIPTIONS[tierId].monthlyPrice * 10,
+    features: TIER_DESCRIPTIONS[tierId].features,
+  }));
+}
+

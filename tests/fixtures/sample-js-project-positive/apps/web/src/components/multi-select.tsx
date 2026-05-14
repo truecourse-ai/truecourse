@@ -21,3 +21,41 @@ function filterSelectedOptions(groupedOptions: GroupedOptions, selected: SelectO
 }
 
 export { isOptionsPresent, filterSelectedOptions };
+
+
+// defaultValue?.map(...).filter(Boolean) with 'as Option[]' cast — intentional narrowing after filter, no type mismatch
+type AuthOption = { value: string; label: string };
+
+declare const authOptions: AuthOption[];
+declare const currentValue: string[] | undefined;
+declare const defaultValue: string[] | undefined;
+
+const selectedOptions: AuthOption[] =
+  (currentValue?.map((val) => authOptions.find((opt) => opt.value === val)).filter(Boolean) as AuthOption[]) || [];
+
+const defaultOptions: AuthOption[] =
+  (defaultValue?.map((val) => authOptions.find((opt) => opt.value === val)).filter(Boolean) as AuthOption[]) || [];
+
+
+
+// .find used as truthy predicate inside .some — nested membership check, no type mismatch
+interface TagOption { value: string; label: string; color?: string; }
+type GroupedTagOptions = Record<string, TagOption[]>;
+
+function hasMatchingTag(groupedTags: GroupedTagOptions, selectedTags: TagOption[]): boolean {
+  for (const [, tags] of Object.entries(groupedTags)) {
+    if (tags.some((tag) => selectedTags.find((s) => s.value === tag.value))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function removeSelectedTags(groupedTags: GroupedTagOptions, toRemove: TagOption[]): GroupedTagOptions {
+  const result: GroupedTagOptions = {};
+  for (const [group, tags] of Object.entries(groupedTags)) {
+    result[group] = tags.filter((tag) => !toRemove.find((r) => r.value === tag.value));
+  }
+  return result;
+}
+

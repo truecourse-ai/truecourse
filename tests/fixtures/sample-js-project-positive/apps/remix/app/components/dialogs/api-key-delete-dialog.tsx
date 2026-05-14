@@ -133,3 +133,21 @@ function _longFn_f681d87a(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// tRPC maybeAuthenticated procedure chain: .input().output().mutation() — standard definition, no type mismatch
+declare const maybeAuthProcedure: {
+  input<S>(schema: S): {
+    output<O>(schema: O): {
+      mutation<R>(handler: (opts: { input: unknown; ctx: unknown }) => Promise<R>): unknown;
+    };
+  };
+};
+
+const createApiKeyProcedure = maybeAuthProcedure
+  .input({ name: String, expiresAt: Date })
+  .output({ token: String, id: String, createdAt: String })
+  .mutation(async ({ input }) => {
+    return { token: 'tk_live_generated', id: 'key-001', createdAt: new Date().toISOString() };
+  });
+

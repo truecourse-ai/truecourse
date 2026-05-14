@@ -19,3 +19,23 @@ export async function replaceGroupMembers(
     });
   });
 }
+
+
+// result.fields.map() spreading field and adding formId FP — setEnvelopeFields undefined → TS2304 → rule fires
+export async function updateFieldPositions_ad6faee8(envelopeId: string): Promise<{ data: unknown[] }> {
+  const result = await setEnvelopeFields({
+    envelopeId,
+    fields: rawEnvelopeFields.map((field: { id: string; page: number; positionX: number }) => ({
+      ...field,
+      pageNumber: field.page,
+      pageX: field.positionX,
+    })),
+  });
+  return {
+    data: result.fields.map((field: { id: string; formId?: string }) => ({
+      ...field,
+      formId: field.formId,
+    })),
+  };
+}
+

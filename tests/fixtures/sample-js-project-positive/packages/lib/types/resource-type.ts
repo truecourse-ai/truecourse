@@ -17,3 +17,15 @@ const TEMPLATE_KIND_ICONS: Record<TemplateKindTypes, TemplateKindIcon> = {
   PUBLIC: { label: 'Public', color: 'text-green-600', iconName: 'globe' },
   TEAM: { label: 'Team', color: 'text-purple-600', iconName: 'building' },
 };
+
+
+// FP: type alias inside declare global { namespace PrismaJson } required by prisma-json-types-generator
+type ClaimFlagsBase_16033a103934 = { tier: string; expiresAt: string | null };
+type ClaimFlags_16033a103934 = ClaimFlagsBase_16033a103934;
+
+
+
+// FP: alias inside declare global { namespace PrismaJson } — required by prisma-json-types-generator
+type ContactAuthOptionsBase_963b1f3b = { accessLevel: string | null; actionPermissions: string | null };
+type ContactAuthOptions_963b1f3b = ContactAuthOptionsBase_963b1f3b;
+

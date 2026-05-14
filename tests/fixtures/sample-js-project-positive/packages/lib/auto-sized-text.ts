@@ -29,3 +29,25 @@ function pxToRem(px: number): number {
 function remToPx(rem: number): number {
   return rem * getBaseFontSizePx();
 }
+
+
+// argument-type-mismatch FP: Number.isFinite(parsed) where parsed is number from parseFloat — valid static method call
+function getCanvasScaleFactor(): number {
+  try {
+    const scaleAttr = document.documentElement.getAttribute('data-canvas-scale');
+    const parsed = parseFloat(scaleAttr ?? '');
+
+    if (!Number.isFinite(parsed)) {
+      return 1.0;
+    }
+
+    return parsed;
+  } catch {
+    return 1.0;
+  }
+}
+
+function scaleCanvasPx(px: number): number {
+  return px * getCanvasScaleFactor();
+}
+

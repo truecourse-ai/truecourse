@@ -134,3 +134,40 @@ function _longFn_02ef5aa5(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// unchecked-array-access FP: enum-exhaustive Record<EditTemplateStep, StepConfig> lookup;
+// step is typed EditTemplateStep so all keys are guaranteed present
+const enum EditTemplateStep { DETAILS = 'DETAILS', RECIPIENTS = 'RECIPIENTS', FIELDS = 'FIELDS', REVIEW = 'REVIEW' }
+
+interface TemplateStepConfig { label: string; description: string; isOptional: boolean }
+
+const templateEditFlow: Record<EditTemplateStep, TemplateStepConfig> = {
+  [EditTemplateStep.DETAILS]: { label: 'Template Details', description: 'Name and type', isOptional: false },
+  [EditTemplateStep.RECIPIENTS]: { label: 'Recipients', description: 'Who signs', isOptional: false },
+  [EditTemplateStep.FIELDS]: { label: 'Signature Fields', description: 'Place fields', isOptional: false },
+  [EditTemplateStep.REVIEW]: { label: 'Review', description: 'Preview template', isOptional: true },
+};
+
+function getTemplateStepConfig(step: EditTemplateStep): TemplateStepConfig {
+  return templateEditFlow[step];
+}
+
+
+
+// FP: enum-exhaustive Record<Step, Config> lookup; step is typed so key always present
+type WizardStep = 'details' | 'recipients' | 'fields' | 'review';
+interface StepMeta { title: string; index: number }
+
+const WIZARD_STEPS: Record<WizardStep, StepMeta> = {
+  details: { title: 'Details', index: 0 },
+  recipients: { title: 'Recipients', index: 1 },
+  fields: { title: 'Fields', index: 2 },
+  review: { title: 'Review', index: 3 },
+};
+
+function getWizardStepTitle(step: WizardStep): string {
+  const meta = WIZARD_STEPS[step];
+  return meta.title;
+}
+

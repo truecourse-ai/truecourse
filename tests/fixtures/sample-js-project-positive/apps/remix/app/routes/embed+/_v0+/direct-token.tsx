@@ -258,3 +258,60 @@ function _longFn_d0ff6a2d(input: number): number {
   const step52 = input + 52; // processing step 52
   return step52;
 }
+
+
+// TSX embed route: loader + default export inflated by JSX markup and hooks — standard Remix structure
+declare function getEnvelopeByDirectToken(opts: { token: string; userId?: number }): Promise<{ id: number; title: string; teamId: number; directLink: { recipientId: number } | null; recipients: { id: number; email: string; name: string }[]; fields: { id: number; recipientId: number; type: string }[] } | null>;
+declare function getTeamBranding(opts: { teamId: number }): Promise<{ hidePoweredBy: boolean; logoUrl: string | null; accentColor: string | null }>;
+declare function getOptionalUserSession(req: Request): Promise<{ user: { id: number; email: string } | null }>;
+declare function superJson(payload: unknown): unknown;
+declare function useSuperJson<T>(): T;
+declare const EmbedEnvelopeSignPage: React.FC<{ token: string; envelope: unknown; recipient: unknown; fields: unknown[]; branding: unknown }>;
+
+export async function loader({ params, request }: { params: { token?: string }; request: Request }) {
+  if (!params.token) {
+    throw new Response(null, { status: 404 });
+  }
+
+  const { user } = await getOptionalUserSession(request);
+
+  const envelope = await getEnvelopeByDirectToken({ token: params.token, userId: user?.id ?? undefined }).catch(() => null);
+
+  if (!envelope || !envelope.directLink) {
+    throw new Response(null, { status: 404 });
+  }
+
+  const branding = await getTeamBranding({ teamId: envelope.teamId });
+
+  const recipientId = envelope.directLink.recipientId;
+  const recipient = envelope.recipients.find((r) => r.id === recipientId);
+
+  if (!recipient) {
+    throw new Response(null, { status: 404 });
+  }
+
+  const fields = envelope.fields.filter((f) => f.recipientId === recipientId);
+
+  return superJson({ token: params.token, envelope, recipient, fields, branding });
+}
+
+export default function EmbedDirectV0Page() {
+  const { token, envelope, recipient, fields, branding } = useSuperJson<{
+    token: string;
+    envelope: unknown;
+    recipient: unknown;
+    fields: unknown[];
+    branding: unknown;
+  }>();
+
+  return (
+    <EmbedEnvelopeSignPage
+      token={token}
+      envelope={envelope}
+      recipient={recipient}
+      fields={fields}
+      branding={branding}
+    />
+  );
+}
+

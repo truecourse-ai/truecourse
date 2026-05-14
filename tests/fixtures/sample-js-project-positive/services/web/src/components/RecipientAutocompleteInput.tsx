@@ -121,3 +121,27 @@ export const RecipientAutocompleteInput = ({
     </Popover>
   );
 };
+
+
+// option[groupBy] is a property access on a typed object using a generic key — not an array index
+type RecipientOption = { value: string; label: string; role?: string; teamId?: number };
+
+function groupRecipientOptions<K extends keyof RecipientOption>(
+  options: RecipientOption[],
+  groupBy: K,
+): Map<RecipientOption[K], RecipientOption[]> {
+  const grouped = new Map<RecipientOption[K], RecipientOption[]>();
+
+  options.forEach((option) => {
+    const groupValue = option[groupBy];
+    const existing = grouped.get(groupValue);
+    if (existing) {
+      existing.push(option);
+    } else {
+      grouped.set(groupValue, [option]);
+    }
+  });
+
+  return grouped;
+}
+

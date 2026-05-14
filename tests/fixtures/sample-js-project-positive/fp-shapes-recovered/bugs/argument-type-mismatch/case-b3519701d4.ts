@@ -1,9 +1,9 @@
-// import { AppError, AppErrorCode } from '@documenso/lib/errors/app-error';
-// import { generatePartialSignedPdf } from '@documenso/lib/server-only/pdf/generate-partial-signed-pdf';
-// import { getTeamById } from '@documenso/lib/server-only/team/get-team';
-// import { sha256 } from '@documenso/lib/universal/crypto';
-// import { getFileServerSide } from '@documenso/lib/universal/upload/get-file.server';
-// import { prisma } from '@documenso/prisma';
+// import { AppError, AppErrorCode } from '@app/lib/errors/app-error';
+// import { generatePartialSignedPdf } from '@app/lib/server-only/pdf/generate-partial-signed-pdf';
+// import { getTeamById } from '@app/lib/server-only/team/get-team';
+// import { sha256 } from '@app/lib/universal/crypto';
+// import { getFileServerSide } from '@app/lib/universal/upload/get-file.server';
+// import { prisma } from '@app/prisma';
 import {
   type DocumentDataType,
   DocumentStatus,

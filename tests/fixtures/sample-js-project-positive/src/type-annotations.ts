@@ -1669,3 +1669,57 @@ export const FIELD_DEFAULT_GENERIC_FONT_SIZE = '14px';
 export const FIELD_DEFAULT_GENERIC_COLOR = '#000000';
 export const FIELD_DEFAULT_DATE_FORMAT = 'MM/DD/YYYY';
 
+
+
+// --- use-before-define FP: typeof used in a type alias at module top, referencing a const declared later ---
+// TypeScript evaluates `typeof` in type positions using the full file scope;
+// declaration order does not matter for type-only uses. No runtime reference.
+declare function once<T>(fn: () => T): () => T;
+
+const AVAILABLE_RECIPIENT_COLORS = ['#4A90E2', '#7ED321', '#D0021B', '#F5A623', '#9B59B6'] as const;
+type RecipientColor = typeof AVAILABLE_RECIPIENT_COLORS[number];
+
+type RecipientColorStyles = {
+  base: string;
+  text: string;
+  ring: string;
+};
+
+const RECIPIENT_COLOR_MAP: Record<RecipientColor, () => RecipientColorStyles> = {
+  '#4A90E2': once((): RecipientColorStyles => ({ base: 'bg-blue-100', text: 'text-blue-700', ring: 'ring-blue-400' })),
+  '#7ED321': once((): RecipientColorStyles => ({ base: 'bg-green-100', text: 'text-green-700', ring: 'ring-green-400' })),
+  '#D0021B': once((): RecipientColorStyles => ({ base: 'bg-red-100', text: 'text-red-700', ring: 'ring-red-400' })),
+  '#F5A623': once((): RecipientColorStyles => ({ base: 'bg-orange-100', text: 'text-orange-700', ring: 'ring-orange-400' })),
+  '#9B59B6': once((): RecipientColorStyles => ({ base: 'bg-purple-100', text: 'text-purple-700', ring: 'ring-purple-400' })),
+};
+
+
+
+// FP: i18n translation function called with MessageDescriptor — types match.
+type MessageDescriptor = { id: string; defaultMessage?: string; comment?: string };
+declare function t(descriptor: MessageDescriptor): string;
+
+const fieldValidationMessages = {
+  required: { id: 'field.required', defaultMessage: 'This field is required' },
+  tooShort: { id: 'field.too_short', defaultMessage: 'Value is too short' },
+  invalidEmail: { id: 'field.invalid_email', defaultMessage: 'Enter a valid email address' },
+} satisfies Record<string, MessageDescriptor>;
+
+export function getFieldValidationLabel(key: keyof typeof fieldValidationMessages): string {
+  return t(fieldValidationMessages[key]);
+}
+
+
+
+// FP: type aliases inside declare global { namespace PrismaJson } are required
+// by prisma-json-types-generator to map JSON fields to typed definitions.
+// These are not redundant — they form the augmentation contract.
+declare global {
+  namespace PrismaJson {
+    type ReportAuthOptions = { globalAccessAuth: string | null; globalActionAuth: string | null };
+    type ReportEmailSettings = { reportCompleted: boolean; participantNotified: boolean };
+    type ReportEmailSettingsNullable = ReportEmailSettings | null;
+    type WorkspaceMetadata = { plan: string; trialEndsAt: string | null };
+  }
+}
+

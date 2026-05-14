@@ -127,3 +127,77 @@ function getEmailStatusMessage(state: TeamEmailState): string {
     .with({ teamEmail: P.string }, () => 'Email set but not verified')
     .otherwise(() => 'No team email configured');
 }
+
+
+// Function call with discriminated union id param {type, id} — correct argument types
+declare function createEnvelopeFields(options: {
+  userId: number;
+  teamId: number | null;
+  id: { type: string; id: number };
+  fields: Array<{ name: string; value: string; position: number }>;
+  requestMetadata: Record<string, unknown>;
+}): Promise<{ fields: Array<{ id: number }> }>;
+
+export async function addFieldsToEnvelope(
+  currentUserId: number,
+  currentTeamId: number | null,
+  envelopeId: number,
+  rawFields: Array<{ label: string; content: string; pageNumber: number }>,
+  requestMeta: Record<string, unknown>,
+) {
+  return createEnvelopeFields({
+    userId: currentUserId,
+    teamId: currentTeamId,
+    id: {
+      type: 'envelopeId',
+      id: envelopeId,
+    },
+    fields: rawFields.map((field) => ({
+      name: field.label,
+      value: field.content,
+      position: field.pageNumber,
+    })),
+    requestMetadata: requestMeta,
+  });
+}
+
+
+
+// Function call passing discriminated union id {type, id} — correct arg types, no mismatch
+declare function getOrganisationTemplateById(options: {
+  id: { type: string; id: number };
+  userId: number;
+  teamId: number | null;
+}): Promise<{ id: number; title: string; fields: unknown[] } | null>;
+
+export async function loadOrganisationTemplate(
+  templateId: number,
+  userId: number,
+  teamId: number | null,
+) {
+  const template = await getOrganisationTemplateById({
+    id: { type: 'templateId', id: templateId },
+    userId,
+    teamId,
+  });
+
+  if (!template) {
+    throw new Error('Template not found');
+  }
+
+  return template;
+}
+
+
+
+// FP: getOrgTemplateById requires teamId: number but receives number | null from session
+declare function getOrgTemplateById(options: {
+  id: { type: 'templateId'; id: number };
+  userId: number;
+  teamId: number;
+}): Promise<{ id: number; title: string } | null>;
+
+export async function loadOrgTemplate(templateId: number, userId: number, teamId: number | null) {
+  return getOrgTemplateById({ id: { type: 'templateId', id: templateId }, userId, teamId });
+}
+

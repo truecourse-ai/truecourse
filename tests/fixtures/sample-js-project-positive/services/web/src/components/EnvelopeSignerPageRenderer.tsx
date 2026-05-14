@@ -133,3 +133,90 @@ export const EnvelopeSignerPageRenderer = ({
     </div>
   );
 };
+
+
+// --- argument-type-mismatch FP: render() called with JSX element tree wrapping a provider ---
+// EmailRenderer.render(<I18nProvider i18n={i18n}>...) — renders React element tree, no type mismatch.
+declare namespace ReactEmail {
+  function render(element: JSX.Element, opts?: { pretty?: boolean }): Promise<string>;
+}
+
+type I18nConfig2 = { locale: string; messages: Record<string, string> };
+type NotificationEmailProps = { subject: string; recipientName: string; tokenExpiry: string };
+
+declare const I18nProvider2: (props: { i18n: I18nConfig2; children: JSX.Element }) => JSX.Element;
+declare const SigningReminderEmail: (props: NotificationEmailProps) => JSX.Element;
+
+export async function renderSigningReminderEmail(
+  i18n: I18nConfig2,
+  props: NotificationEmailProps,
+): Promise<string> {
+  return ReactEmail.render(
+    <I18nProvider2 i18n={i18n}>
+      <SigningReminderEmail {...props} />
+    </I18nProvider2>,
+    { pretty: false },
+  );
+}
+
+
+
+// --- argument-type-mismatch FP: .filter() comparing status field to enum value ---
+// recipients.filter((r) => r.signingStatus === SigningStatus.SIGNED) — valid enum comparison, no type mismatch.
+enum SigningStatus2 { PENDING = 'PENDING', SIGNED = 'SIGNED', REJECTED = 'REJECTED' }
+
+interface EnvelopeRecipient { id: string; email: string; signingStatus: SigningStatus2; role: string; }
+
+export function getCompletedSigners(recipients: EnvelopeRecipient[]): EnvelopeRecipient[] {
+  return recipients.filter(
+    (r) => r.signingStatus === SigningStatus2.SIGNED,
+  );
+}
+
+
+
+// FP shape: recipients.map() with prefill transform on nested fields — standard
+// nested map operation; no type mismatch.
+declare const envelopeSigningData: {
+  recipients: Array<{
+    id: number;
+    name: string;
+    email: string;
+    fields: Array<{ id: string; type: string; value: string | null }>;
+  }>;
+};
+declare const prefillFieldValues: Record<string, string>;
+
+export function applyPrefillToEnvelopeRecipients() {
+  return {
+    ...envelopeSigningData,
+    recipients: envelopeSigningData.recipients.map((recipient) => ({
+      ...recipient,
+      fields: recipient.fields.map((field) => ({
+        ...field,
+        value: prefillFieldValues[field.id] ?? field.value,
+      })),
+    })),
+  };
+}
+
+
+
+// group.name() === 'field-group' && !activeFields.some() — Konva-style name check returns boolean, no type mismatch
+declare const stage: { findOne: (selector: string) => { find: (sel: string) => Array<{ name: () => string; id: () => string; destroy: () => void }> } | null };
+declare const activeFieldIds: Array<{ id: number }>;
+
+export function cleanupStaleFieldGroups(): void {
+  const layer = stage.findOne('Layer');
+  if (!layer) return;
+
+  layer.find('Group').forEach((group) => {
+    if (
+      group.name() === 'field-group' &&
+      !activeFieldIds.some((field) => field.id.toString() === group.id())
+    ) {
+      group.destroy();
+    }
+  });
+}
+

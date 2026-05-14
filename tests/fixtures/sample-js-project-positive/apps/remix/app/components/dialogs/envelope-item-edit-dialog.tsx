@@ -90,3 +90,75 @@ function useFieldUpdater(
 
   return { moveField, resizeField };
 }
+
+
+// nested filter+find — pendingFields filtered by absence in existing envelope items, no type mismatch
+interface EnvelopeFieldItem {
+  id: string;
+  label: string;
+  pageNumber: number;
+}
+
+interface EnvelopeSection {
+  sectionId: string;
+  fields: EnvelopeFieldItem[];
+}
+
+declare const pendingFieldUploads: EnvelopeFieldItem[];
+declare const existingSections: EnvelopeSection[];
+
+function getUnplacedFields(): EnvelopeFieldItem[] {
+  return pendingFieldUploads.filter(
+    (field) =>
+      !existingSections.find(
+        (section) => section.fields.find((existing) => existing.id === field.id),
+      ),
+  );
+}
+
+
+
+// catch(err) passes err directly to console.error — no untyped property access on err.
+declare function updateEnvelopeItemDetails(itemId: string, data: Record<string, unknown>): Promise<void>;
+
+async function handleEnvelopeItemUpdate(itemId: string, data: Record<string, unknown>): Promise<void> {
+  try {
+    await updateEnvelopeItemDetails(itemId, data);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+
+
+// tRPC useMutation onSuccess callback destructuring data — standard tRPC pattern, no argument type mismatch
+declare function useTrpcMutation<T>(opts: { onSuccess: (result: T) => void; onError: () => void }): { mutateAsync: (input: unknown) => Promise<T> };
+declare function useEnvelopeStore(): { updateEnvelopeItems: (items: unknown[]) => void };
+
+type EnvelopeEditResult = { data: { id: string; title: string }; meta: { updatedAt: Date } | null };
+
+function useEnvelopeItemEditMutation() {
+  const { updateEnvelopeItems } = useEnvelopeStore();
+
+  const { mutateAsync: editEnvelopeItem } = useTrpcMutation<EnvelopeEditResult>({
+    onSuccess: ({ data, meta }) => {
+      updateEnvelopeItems([{ id: data.id, title: data.title, updatedAt: meta?.updatedAt }]);
+    },
+    onError: () => {
+      console.error('Envelope item edit failed');
+    },
+  });
+
+  return { editEnvelopeItem };
+}
+
+
+
+// Positive sample: catch-without-error-type fires on the existing catch block at line 120.
+// That catch block has 2+ statements (console.error + toast) with no instanceof/typeof check.
+
+
+
+// Positive sample: argument-type-mismatch fires on the existing tRPC useMutation
+// onSuccess destructuring pattern in this file — the TS compiler reports the mismatch.
+

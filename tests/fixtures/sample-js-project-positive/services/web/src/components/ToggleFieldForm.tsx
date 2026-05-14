@@ -25,7 +25,7 @@ declare const SelectValue: (props?: { placeholder?: string }) => JSX.Element;
 declare const Separator: (props?: Record<string, unknown>) => JSX.Element;
 
 // The following named imports from @sample/ui/primitives/form mirror the
-// @documenso/ui/primitives/form pattern — shared UI library subpath
+// @app/ui/primitives/form pattern — shared UI library subpath
 const { Form: FormComponent, FormControl: FC, FormField: FF, FormItem: FI, FormLabel: FL, FormMessage: FM } = {
   Form,
   FormControl,

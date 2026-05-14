@@ -1,18 +1,18 @@
-// import { DEFAULT_DOCUMENT_DATE_FORMAT, isValidDateFormat } from '@documenso/lib/constants/date-formats';
-// import { DocumentSignatureType } from '@documenso/lib/constants/document';
-// import { isValidLanguageCode } from '@documenso/lib/constants/i18n';
-// import { DEFAULT_DOCUMENT_TIME_ZONE } from '@documenso/lib/constants/time-zones';
-// import { getDocumentWithDetailsById } from '@documenso/lib/server-only/document/get-document-with-details-by-id';
-// import { verifyEmbeddingPresignToken } from '@documenso/lib/server-only/embedding-presign/verify-embedding-presign-token';
-// import { ZDocumentEmailSettingsSchema } from '@documenso/lib/types/document-email';
+// import { DEFAULT_DOCUMENT_DATE_FORMAT, isValidDateFormat } from '@app/lib/constants/date-formats';
+// import { DocumentSignatureType } from '@app/lib/constants/document';
+// import { isValidLanguageCode } from '@app/lib/constants/i18n';
+// import { DEFAULT_DOCUMENT_TIME_ZONE } from '@app/lib/constants/time-zones';
+// import { getDocumentWithDetailsById } from '@app/lib/server-only/document/get-document-with-details-by-id';
+// import { verifyEmbeddingPresignToken } from '@app/lib/server-only/embedding-presign/verify-embedding-presign-token';
+// import { ZDocumentEmailSettingsSchema } from '@app/lib/types/document-email';
 import {
   type TBaseEmbedAuthoringSchema,
   ZBaseEmbedAuthoringEditSchema,
-} from '@documenso/lib/types/embed-authoring-base-schema';
-// import { nanoid } from '@documenso/lib/universal/id';
-// import { trpc } from '@documenso/trpc/react';
-// import { Stepper } from '@documenso/ui/primitives/stepper';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/lib/types/embed-authoring-base-schema';
+// import { nanoid } from '@app/lib/universal/id';
+// import { trpc } from '@app/trpc/react';
+// import { Stepper } from '@app/ui/primitives/stepper';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { msg } from '@lingui/core/macro';
 // import { useLingui } from '@lingui/react';
 // import { DocumentDistributionMethod, DocumentSigningOrder, SigningStatus } from '@prisma/client';

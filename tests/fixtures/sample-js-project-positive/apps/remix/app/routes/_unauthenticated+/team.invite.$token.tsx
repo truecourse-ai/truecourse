@@ -102,3 +102,78 @@ export default function TeamInvitePage({ loaderData }: Route['ComponentProps']) 
     </div>
   );
 }
+
+
+// TSX invite route: loader + default export with JSX branches — standard Remix unauthenticated route structure
+declare function resolveOrgInviteToken(opts: { token: string }): Promise<{ id: number; email: string; orgId: number; org: { name: string; logoUrl: string | null } } | null>;
+declare function acceptOrgInvite(opts: { token: string; userId: number }): Promise<void>;
+declare function getSessionUser(request: Request): Promise<{ id: number; email: string } | null>;
+declare const OrgBadge: React.FC<{ name: string; logoUrl: string | null }>;
+declare const ActionButton: React.FC<{ to: string; variant?: string; children: React.ReactNode }>;
+
+export async function orgInviteLoader({ params, request }: { params: { token?: string }; request: Request }) {
+  if (!params.token) {
+    return { state: 'InvalidLink' as const };
+  }
+
+  const invite = await resolveOrgInviteToken({ token: params.token });
+
+  if (!invite) {
+    return { state: 'InvalidLink' as const };
+  }
+
+  const user = await getSessionUser(request);
+
+  if (user) {
+    try {
+      await acceptOrgInvite({ token: params.token, userId: user.id });
+      return { state: 'Accepted' as const, orgName: invite.org.name, logoUrl: invite.org.logoUrl };
+    } catch {
+      return { state: 'Error' as const, orgName: invite.org.name };
+    }
+  }
+
+  return {
+    state: 'PendingLogin' as const,
+    orgName: invite.org.name,
+    logoUrl: invite.org.logoUrl,
+    inviteEmail: invite.email,
+    token: params.token,
+  };
+}
+
+export function OrgInvitePage({ loaderData }: { loaderData: Awaited<ReturnType<typeof orgInviteLoader>> }) {
+  if (loaderData.state === 'InvalidLink') {
+    return (
+      <div className="mx-auto max-w-md py-16 text-center">
+        <h1 className="mb-2 text-2xl font-bold">Invalid Invitation</h1>
+        <p className="text-muted-foreground mb-6">This invitation link is invalid or has expired.</p>
+        <ActionButton to="/">Go Home</ActionButton>
+      </div>
+    );
+  }
+
+  if (loaderData.state === 'Accepted') {
+    return (
+      <div className="mx-auto max-w-md py-16 text-center">
+        <OrgBadge name={loaderData.orgName} logoUrl={loaderData.logoUrl} />
+        <h1 className="mb-2 text-2xl font-bold">Welcome to {loaderData.orgName}</h1>
+        <p className="text-muted-foreground mb-6">You have successfully joined the organisation.</p>
+        <ActionButton to="/dashboard">Go to Dashboard</ActionButton>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-md py-16 text-center">
+      <h1 className="mb-2 text-2xl font-bold">Organisation Invitation</h1>
+      <p className="text-muted-foreground mb-6">
+        You have been invited to join <span className="font-semibold">{(loaderData as { orgName: string }).orgName}</span>. Sign in to accept.
+      </p>
+      <ActionButton to={`/sign-in?next=/org/invite/${(loaderData as { token?: string }).token ?? ''}`}>
+        Sign In to Accept
+      </ActionButton>
+    </div>
+  );
+}
+

@@ -40,3 +40,33 @@ async function submitSignedDocument(): Promise<void> {
     });
   }
 }
+
+
+// catch(err) with String(err) coercion for postMessage — no untyped property access on err
+declare function submitEnvelopeForSigning(opts: { token: string; recipientEmail: string }): Promise<{ envelopeId: string }>;
+declare const embedOrigin: string;
+
+export async function handleEmbedTemplateComplete(token: string, recipientEmail: string): Promise<void> {
+  try {
+    const result = await submitEnvelopeForSigning({ token, recipientEmail });
+    if (window.parent) {
+      window.parent.postMessage(
+        { action: 'signing-complete', data: { envelopeId: result.envelopeId } },
+        embedOrigin,
+      );
+    }
+  } catch (err) {
+    if (window.parent) {
+      window.parent.postMessage(
+        { action: 'signing-error', data: String(err) },
+        embedOrigin,
+      );
+    }
+  }
+}
+
+
+
+// Positive sample: argument-type-mismatch fires on the existing createDocumentFromDirectTemplate
+// call at line 223 — the TS compiler reports a type error at that call site.
+

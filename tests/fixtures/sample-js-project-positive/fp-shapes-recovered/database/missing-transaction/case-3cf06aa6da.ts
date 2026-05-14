@@ -1,6 +1,6 @@
-// import { mailer } from '@documenso/email/mailer';
-// import DocumentReminderEmailTemplate from '@documenso/email/templates/document-reminder';
-// import { prisma } from '@documenso/prisma';
+// import { mailer } from '@app/email/mailer';
+// import DocumentReminderEmailTemplate from '@app/email/templates/document-reminder';
+// import { prisma } from '@app/prisma';
 // import { msg } from '@lingui/core/macro';
 import {
   DocumentDistributionMethod,

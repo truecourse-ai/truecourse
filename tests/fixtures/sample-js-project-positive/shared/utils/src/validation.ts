@@ -169,3 +169,52 @@ const SPECIAL_CHAR_REGEX = /[`~<>?,./!@#$%^&*()\-_"'+=|{}[\];:\\]/;
 export function hasSpecialCharacter(value: string): boolean {
   return SPECIAL_CHAR_REGEX.test(value);
 }
+
+
+
+// Positive: argument-type-mismatch — Number.isNaN() || comparison; standard number validation.
+export function parseWorkspaceId(rawId: string | null): number {
+  if (rawId === null) {
+    throw new Error('Workspace ID is required');
+  }
+  const parsed = Number(rawId);
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    throw new Error(`Invalid workspace ID: ${rawId}`);
+  }
+  return parsed;
+}
+
+
+
+
+// Positive: argument-type-mismatch — Zod .refine() with boolean predicate.
+// .refine(value => value.length > 25 || /regex/.test(value), {...}) is a valid Zod refinement.
+declare const z: {
+  string(): {
+    min(n: number, opts: { message: string }): any;
+    max(n: number, opts: { message: string }): any;
+  };
+};
+
+function addPasswordStrengthRefinements(base: any): any {
+  return base
+    .refine(
+      (value: string) => value.length > 25 || /[A-Z]/.test(value),
+      { message: 'Must contain at least one uppercase letter' },
+    )
+    .refine(
+      (value: string) => value.length > 25 || /[a-z]/.test(value),
+      { message: 'Must contain at least one lowercase letter' },
+    )
+    .refine(
+      (value: string) => value.length > 25 || /\d/.test(value),
+      { message: 'Must contain at least one number' },
+    );
+}
+
+export const ZStrongPassword = addPasswordStrengthRefinements(
+  z.string()
+    .min(8, { message: 'Minimum 8 characters required' })
+    .max(72, { message: 'Maximum 72 characters allowed' }),
+);
+

@@ -67,3 +67,45 @@ export function EmbedDocumentSigningPageV2() {
     </div>
   );
 }
+
+
+// --- timing-attack-comparison FP: array length check on configuration, not a secret ---
+// annotationTypes.length === 0 derives whether a mode is enabled; this is a config flag, not a secret.
+const enum AnnotationInputMode { DRAW = 'DRAW', TYPE = 'TYPE', UPLOAD = 'UPLOAD' }
+
+interface SigningPageConfig {
+  annotationTypes?: AnnotationInputMode[];
+}
+
+function resolveInputModeSettings(config: SigningPageConfig) {
+  const annotationTypes = config.annotationTypes ?? [];
+
+  return {
+    drawSignatureEnabled:
+      annotationTypes.length === 0 || annotationTypes.includes(AnnotationInputMode.DRAW),
+    typedSignatureEnabled:
+      annotationTypes.length === 0 || annotationTypes.includes(AnnotationInputMode.TYPE),
+    uploadSignatureEnabled:
+      annotationTypes.length === 0 || annotationTypes.includes(AnnotationInputMode.UPLOAD),
+  };
+}
+
+
+
+// FP: signatureTypes.length === 0 derives config flag — array length check, not secret comparison
+const enum DrawMode { DRAW = 'DRAW', TYPE = 'TYPE', UPLOAD = 'UPLOAD' }
+
+interface EmbedSigningConfig {
+  signatureTypes?: DrawMode[];
+}
+
+function resolveEmbedSigningModes(config: EmbedSigningConfig) {
+  const signatureTypes = config.signatureTypes ?? [];
+
+  return {
+    drawEnabled: signatureTypes.length === 0 || signatureTypes.includes(DrawMode.DRAW),
+    typeEnabled: signatureTypes.length === 0 || signatureTypes.includes(DrawMode.TYPE),
+    uploadEnabled: signatureTypes.length === 0 || signatureTypes.includes(DrawMode.UPLOAD),
+  };
+}
+

@@ -10,3 +10,19 @@ declare global {
     };
   }
 }
+
+
+// redundant-type-alias FP: alias inside declare global { namespace PrismaJson } is required
+// by prisma-json-types-generator for JSON column type binding.
+declare global {
+  namespace PrismaJson {
+    type ReportColumnConfig = {
+      key: string;
+      label?: string;
+      width?: number;
+      sortable?: boolean;
+      hidden?: boolean;
+    };
+  }
+}
+

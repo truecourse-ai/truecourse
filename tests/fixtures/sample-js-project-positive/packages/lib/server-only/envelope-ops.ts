@@ -20,3 +20,16 @@ export async function createEnvelopeWithRecipients(
     });
   });
 }
+
+
+// createTRPCClient<AppRouter>({ links: [splitLink({...})] }) FP — createTRPCClient undefined → TS2304 → rule fires
+export const analyticsClient_bfc35c6f = createTRPCClient({
+  links: [
+    splitLink({
+      condition: (op: { type: string }) => op.type === 'subscription',
+      true: wsLink({ client: createWSClient({ url: 'ws://localhost:4001' }) }),
+      false: httpBatchLink({ url: '/api/analytics/trpc' }),
+    }),
+  ],
+});
+

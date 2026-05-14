@@ -59,3 +59,10 @@ async function detectRecipientsChunked(): Promise<Array<{ email: string; role: s
   }
   return allRecipients;
 }
+
+
+// sharp(Buffer.from(svg)) FP — sharp undefined → TS2304 in range → rule fires
+export const svgToPng_809f8660 = async (svg: string) => {
+  return await sharp(Buffer.from(svg)).toFormat('png').toBuffer();
+};
+

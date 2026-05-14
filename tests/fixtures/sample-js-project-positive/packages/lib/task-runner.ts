@@ -196,3 +196,13 @@ class JobQueueClient {
     };
   }
 }
+
+
+// argument-type-mismatch FP: void promise.finally(tick) — correct callback usage, no type mismatch
+declare function processPendingReports(): Promise<void>;
+declare function rescheduleReportProcessing(): void;
+
+function runReportProcessingCycle() {
+  void processPendingReports().finally(rescheduleReportProcessing);
+}
+

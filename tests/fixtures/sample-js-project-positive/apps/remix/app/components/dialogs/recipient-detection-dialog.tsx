@@ -41,3 +41,14 @@ const ROLE_VALUE_BY_LABEL: Record<RoleLabel, RoleValue> = {
 function resolveRoleFromLabel(roleLabel: RoleLabel): RoleValue {
   return ROLE_VALUE_BY_LABEL[roleLabel];
 }
+
+
+// Lingui translation call with string argument — _(ROLE_DESCRIPTIONS[role].roleName) is valid, no type mismatch
+declare function translateMsg<T>(msg: T): T;
+declare const RECIPIENT_ROLE_DESCRIPTIONS: Record<string, { roleName: string; description: string }>;
+declare const detectedRecipient: { role: string; email: string };
+
+function formatDetectedRecipientLabel(recipient: { role: string }): string {
+  return translateMsg(RECIPIENT_ROLE_DESCRIPTIONS[recipient.role].roleName);
+}
+

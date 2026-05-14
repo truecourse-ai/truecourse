@@ -107,3 +107,34 @@ export const SignFieldCheckboxDialog = ({
     </Dialog>
   );
 };
+
+
+// --- argument-type-mismatch FP: .map((item, index) => ...) with index as key ---
+// checkboxLengthOptions.map((item, index) => <SelectItem key={index} ...>) — valid map; no type mismatch.
+declare const checkboxLengthOptions: number[];
+declare const Select: any;
+declare const SelectContent: any;
+declare const SelectItem: any;
+declare const SelectTrigger: any;
+declare const SelectValue: any;
+declare const FormControl: any;
+
+function CheckboxLengthSelector(): JSX.Element {
+  return (
+    <Select>
+      <FormControl>
+        <SelectTrigger className="mt-5 w-full bg-background">
+          <SelectValue placeholder="Pick a number" />
+        </SelectTrigger>
+      </FormControl>
+      <SelectContent position="popper">
+        {checkboxLengthOptions.map((item, index) => (
+          <SelectItem key={index} value={String(item)}>
+            {item}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+

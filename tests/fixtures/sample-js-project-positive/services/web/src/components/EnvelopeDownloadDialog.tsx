@@ -143,3 +143,25 @@ export const EnvelopeDownloadDialog = ({
     </Dialog>
   );
 };
+
+
+// Popover UI component (non-route) using tRPC useQuery — error boundary coverage comes from parent layout route
+declare function useQuery(opts: object): { data: { attachments: Array<{ id: string; name: string }> } | undefined; isLoading: boolean };
+
+export function AttachmentsPreviewPanel({ envelopeId }: { envelopeId: string }) {
+  // Non-route component — no per-component ErrorBoundary needed;
+  // errors propagate to the parent route's ErrorBoundary.
+  const { data, isLoading } = useQuery({ queryKey: ['envelope', envelopeId, 'attachments'] });
+  const attachments = data?.attachments ?? [];
+
+  if (isLoading) return <span className="text-sm text-muted-foreground">Loading...</span>;
+
+  return (
+    <ul className="space-y-1">
+      {attachments.map((a) => (
+        <li key={a.id} className="text-sm">{a.name}</li>
+      ))}
+    </ul>
+  );
+}
+

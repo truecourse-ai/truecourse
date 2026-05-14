@@ -24,3 +24,20 @@ export async function transferSubscription(
     await tx.subscription.update({ where: { id: subscriptionId }, data: { organisationId: targetOrgId } });
   });
 }
+
+
+// await createEnvelope({ internalVersion: 1, data: {...} }) FP — createEnvelope undefined → TS2304 → rule fires
+export async function submitEnvelopeCreation_e35953d7(
+  title: string,
+  recipientEmail: string,
+): Promise<{ id: string; status: string }> {
+  return await createEnvelope({
+    internalVersion: 1,
+    data: {
+      type: EnvelopeType.STANDARD,
+      title,
+      recipients: [{ email: recipientEmail, name: '', role: 'SIGNER' }],
+    },
+  });
+}
+

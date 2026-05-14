@@ -172,3 +172,32 @@ export const ConfigureDocumentView = ({
     </Form>
   );
 };
+
+
+// --- argument-type-mismatch FP: tRPC useMutation with onSuccess callback ---
+// trpc.report.update.useMutation({ onSuccess }) — standard tRPC React pattern; no type mismatch.
+declare const trpcUtils: { report: { get: { setData(key: object, updater: (old: any) => any): void } } };
+declare const trpc2: {
+  report: {
+    update: {
+      useMutation(opts: {
+        onSuccess(newData: { id: string; title: string; status: string }): void;
+      }): { mutateAsync(input: { id: string; title: string }): Promise<{ id: string; title: string; status: string }> };
+    };
+  };
+};
+declare const initialReport: { id: string; title: string; status: string };
+
+function useReportEditor() {
+  const { mutateAsync: updateReport } = trpc2.report.update.useMutation({
+    onSuccess(newData) {
+      trpcUtils.report.get.setData(
+        { reportId: initialReport.id },
+        (oldData: any) => ({ ...(oldData || initialReport), ...newData }),
+      );
+    },
+  });
+
+  return { updateReport };
+}
+

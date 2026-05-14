@@ -1,7 +1,7 @@
-// import type { ImageLoadingState, PageRenderData } from '@documenso/lib/client-only/providers/envelope-render-provider';
-// import { PDF_VIEWER_PAGE_CLASSNAME } from '@documenso/lib/constants/pdf-viewer';
-// import { cn } from '@documenso/ui/lib/utils';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+// import type { ImageLoadingState, PageRenderData } from '@app/lib/client-only/providers/envelope-render-provider';
+// import { PDF_VIEWER_PAGE_CLASSNAME } from '@app/lib/constants/pdf-viewer';
+// import { cn } from '@app/ui/lib/utils';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { Trans, useLingui } from '@lingui/react/macro';
 // import pMap from 'p-map';
 // import * as pdfjsLib from 'pdfjs-dist';

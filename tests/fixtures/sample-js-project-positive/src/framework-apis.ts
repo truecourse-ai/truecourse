@@ -4770,3 +4770,34 @@ export function updatePostsCache(authorId: number, newPosts: Post[]): void {
     (oldData) => newPosts
   );
 }
+
+
+// FP: MAP[key] where key is keyof typeof MAP and MAP uses satisfies Record<K, V[]>
+// TypeScript guarantees exhaustive coverage but the rule still flags as unchecked-array-access
+type WorkspaceRole_ec0dbe1b = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+
+const WORKSPACE_ROLE_PERMISSIONS_MAP_ec0dbe1b = {
+  OWNER: ['invite', 'remove', 'billing', 'settings', 'delete'] as string[],
+  ADMIN: ['invite', 'remove', 'settings'] as string[],
+  MEMBER: ['invite'] as string[],
+  VIEWER: [] as string[],
+} satisfies Record<WorkspaceRole_ec0dbe1b, string[]>;
+
+const WORKSPACE_ROLE_LABEL_MAP_ec0dbe1b = {
+  OWNER: 'Owner',
+  ADMIN: 'Administrator',
+  MEMBER: 'Member',
+  VIEWER: 'Viewer',
+} satisfies Record<WorkspaceRole_ec0dbe1b, string>;
+
+export function getWorkspaceRoleLabel_ec0dbe1b(role: keyof typeof WORKSPACE_ROLE_LABEL_MAP_ec0dbe1b): string {
+  return WORKSPACE_ROLE_LABEL_MAP_ec0dbe1b[role];
+}
+
+export function workspaceRoleHasPermission_ec0dbe1b(
+  role: keyof typeof WORKSPACE_ROLE_PERMISSIONS_MAP_ec0dbe1b,
+  permission: string,
+): boolean {
+  return WORKSPACE_ROLE_PERMISSIONS_MAP_ec0dbe1b[role].includes(permission);
+}
+

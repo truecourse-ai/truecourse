@@ -86,3 +86,50 @@ declare const c: { status: (code: number) => Response };
 export function handleCachedResponse(): Response {
   return c.status(304);
 }
+
+
+// FP shape: typed discriminant-union literals for a multi-service health check
+// 'ok', 'warning', 'error' are typed status codes, not arbitrary magic strings.
+type HealthStatus = 'ok' | 'warning' | 'error';
+
+declare function pingDatabase(): Promise<void>;
+declare function pingCache(): Promise<void>;
+declare function pingQueue(): Promise<void>;
+
+export async function multiServiceHealthLoader() {
+  const services: Record<string, { status: HealthStatus; latencyMs?: number }> = {
+    database: { status: 'ok' },
+    cache: { status: 'ok' },
+    queue: { status: 'ok' },
+  };
+
+  let overall: HealthStatus = 'ok';
+
+  const start = Date.now();
+  try {
+    await pingDatabase();
+    services.database = { status: 'ok', latencyMs: Date.now() - start };
+  } catch {
+    services.database = { status: 'error' };
+    overall = 'error';
+  }
+
+  try {
+    await pingCache();
+    services.cache = { status: 'ok' };
+  } catch {
+    services.cache = { status: 'warning' };
+    if (overall === 'ok') overall = 'warning';
+  }
+
+  try {
+    await pingQueue();
+    services.queue = { status: 'ok' };
+  } catch {
+    services.queue = { status: 'warning' };
+    if (overall === 'ok') overall = 'warning';
+  }
+
+  return { status: overall, services };
+}
+

@@ -17,3 +17,25 @@ export const normalizeRawField = (raw: RawDetectedField): NormalizedField => {
     confidence: raw.score,
   };
 };
+
+
+// contact.fields.map((field) => ({...})) building ORM create data — field properties correctly mapped
+declare const sourceContact: {
+  fields: Array<{ type: string; page: number; positionX: number; positionY: number; width: number; height: number; defaultValue: string }>;
+};
+declare const newReportId: string;
+declare const fieldTypeIdMap: Record<string, string>;
+
+const fieldsCreateData = sourceContact.fields.map((field) => ({
+  reportId: newReportId,
+  fieldTypeId: fieldTypeIdMap[field.type] ?? '',
+  type: field.type,
+  page: field.page,
+  positionX: field.positionX,
+  positionY: field.positionY,
+  width: field.width,
+  height: field.height,
+  defaultValue: '',
+  inserted: false,
+}));
+

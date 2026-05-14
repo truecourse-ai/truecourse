@@ -19,3 +19,18 @@ const ZCreateResourceRequestSchema = z.object({
     .transform((val) => (Array.isArray(val) ? val : [val])),
   isPublic: z.boolean().optional().default(false),
 });
+
+
+// hardcoded-url FP: URL inside OpenAPI spec description string — documentation text embedded in spec, not a runtime endpoint
+const openApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'TrueCourse Public API',
+    version: '1.0.0',
+    description:
+      'Full REST API reference for TrueCourse. Interactive playground: https://api.truecourse.io/docs.',
+  },
+  servers: [{ url: '/api/v1' }],
+  paths: {} as Record<string, unknown>,
+};
+

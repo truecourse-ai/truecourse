@@ -1,4 +1,4 @@
-// import { AppDebugger } from '@documenso/lib/utils/debugger';
+// import { AppDebugger } from '@app/lib/utils/debugger';
 // import type { Context, Next } from 'hono';
 // import { setCookie } from 'hono/cookie';
 

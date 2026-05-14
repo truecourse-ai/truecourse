@@ -38,3 +38,23 @@ async function enrichFolders(
     }),
   );
 }
+
+
+// --- argument-type-mismatch FP: arrayBuffer async function returning Promise.resolve(Uint8Array) ---
+// arrayBuffer: async () => Promise.resolve(processedPdf) — returns Promise<Uint8Array>, matches signature.
+declare const processedAttachment: Uint8Array;
+declare function storeAttachmentServerSide(opts: {
+  name: string;
+  type: string;
+  arrayBuffer: () => Promise<Uint8Array>;
+}): Promise<{ attachmentData: { id: string } }>;
+
+export async function uploadProcessedAttachment(filename: string): Promise<string> {
+  const { attachmentData } = await storeAttachmentServerSide({
+    name: filename,
+    type: 'application/pdf',
+    arrayBuffer: async () => Promise.resolve(processedAttachment),
+  });
+  return attachmentData.id;
+}
+

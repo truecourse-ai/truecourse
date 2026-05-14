@@ -102,3 +102,16 @@ async function processBatchesWithRateLimit(): Promise<void> {
     await new Promise<void>((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS));
   }
 }
+
+
+// results.filter(r => !r.success).map(r => r.jobId) — chained filter/map on typed array; no type mismatch.
+declare const dispatchResults: Array<{ success: boolean; jobId: string; error?: string }>;
+
+export function collectFailedJobIds(): string[] {
+  return dispatchResults.filter((r) => !r.success).map((r) => r.jobId);
+}
+
+export function collectSuccessfulJobIds(): string[] {
+  return dispatchResults.filter((r) => r.success).map((r) => r.jobId);
+}
+

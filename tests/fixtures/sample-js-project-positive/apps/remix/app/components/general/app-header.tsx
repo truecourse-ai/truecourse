@@ -163,3 +163,60 @@ export const DashboardHeader28 = ({ className, ...props }: DashboardHeaderProps2
     </header>
   );
 };
+
+
+// Shape: ternary selecting one of two nav switcher components based on a boolean — valid JSX conditional
+declare const isPersonalWorkspace: boolean;
+declare const PersonalWorkspaceSwitcher: React.ComponentType;
+declare const TeamWorkspaceSwitcher: React.ComponentType;
+
+export function AppHeaderNavSwitcher() {
+  return (
+    <div className="flex items-center gap-2">
+      {isPersonalWorkspace ? <PersonalWorkspaceSwitcher /> : <TeamWorkspaceSwitcher />}
+    </div>
+  );
+}
+
+
+
+// Shape: array.find() with nested property equality predicate — valid find callback
+declare const currentAccountId: string;
+
+export function findCurrentAccountMembership(
+  group: { groupMembers: Array<{ account: { id: string }; role: string }> },
+): { account: { id: string }; role: string } | undefined {
+  return group.groupMembers.find((gm) => gm.account.id === currentAccountId);
+}
+
+
+
+// scrollY > 5 is a minimal scroll-threshold for border visibility; near-zero, intent is obvious.
+declare const cn38: (...classes: (string | boolean | undefined)[]) => string;
+declare const useState38: <T>(init: T) => [T, (v: T) => void];
+declare const useEffect38: (fn: () => void | (() => void), deps: unknown[]) => void;
+
+export function WorkspaceHeader38({ className }: { className?: string }) {
+  const [scrollY38, setScrollY38] = useState38(0);
+
+  useEffect38(() => {
+    const onScroll = () => setScrollY38(window.scrollY);
+    window.addEventListener('scroll', onScroll);
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  return (
+    <header
+      className={cn38(
+        'sticky top-0 z-50 flex h-14 w-full items-center border-b border-b-transparent bg-background/95 backdrop-blur transition-colors',
+        scrollY38 > 5 && 'border-b-border shadow-sm',
+        className,
+      )}
+    >
+      <div className="mx-auto flex w-full max-w-screen-xl items-center justify-between px-6">
+        <span className="text-sm font-semibold">Workspace</span>
+      </div>
+    </header>
+  );
+}
+

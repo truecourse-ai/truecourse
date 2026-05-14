@@ -1,16 +1,16 @@
-// import type { InternalClaimPlans } from '@documenso/ee/server-only/stripe/get-internal-claim-plans';
-// import { useUpdateSearchParams } from '@documenso/lib/client-only/hooks/use-update-search-params';
-// import { useSession } from '@documenso/lib/client-only/providers/session';
-// import { IS_BILLING_ENABLED } from '@documenso/lib/constants/app';
-// import { AppError } from '@documenso/lib/errors/app-error';
-// import { INTERNAL_CLAIM_ID } from '@documenso/lib/types/subscription';
-// import { parseMessageDescriptorMacro } from '@documenso/lib/utils/i18n';
-// import { isPersonalLayout } from '@documenso/lib/utils/organisations';
-// import { trpc } from '@documenso/trpc/react';
-// import { ZCreateOrganisationRequestSchema } from '@documenso/trpc/server/organisation-router/create-organisation.types';
-// import { cn } from '@documenso/ui/lib/utils';
-// import { Badge } from '@documenso/ui/primitives/badge';
-// import { Button } from '@documenso/ui/primitives/button';
+// import type { InternalClaimPlans } from '@app/ee/server-only/stripe/get-internal-claim-plans';
+// import { useUpdateSearchParams } from '@app/lib/client-only/hooks/use-update-search-params';
+// import { useSession } from '@app/lib/client-only/providers/session';
+// import { IS_BILLING_ENABLED } from '@app/lib/constants/app';
+// import { AppError } from '@app/lib/errors/app-error';
+// import { INTERNAL_CLAIM_ID } from '@app/lib/types/subscription';
+// import { parseMessageDescriptorMacro } from '@app/lib/utils/i18n';
+// import { isPersonalLayout } from '@app/lib/utils/organisations';
+// import { trpc } from '@app/trpc/react';
+// import { ZCreateOrganisationRequestSchema } from '@app/trpc/server/organisation-router/create-organisation.types';
+// import { cn } from '@app/ui/lib/utils';
+// import { Badge } from '@app/ui/primitives/badge';
+// import { Button } from '@app/ui/primitives/button';
 import {
   Dialog,
   DialogContent,
@@ -19,12 +19,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@documenso/ui/primitives/dialog';
-// import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@documenso/ui/primitives/form/form';
-// import { Input } from '@documenso/ui/primitives/input';
-// import { SpinnerBox } from '@documenso/ui/primitives/spinner';
-// import { Tabs, TabsList, TabsTrigger } from '@documenso/ui/primitives/tabs';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/ui/primitives/dialog';
+// import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@app/ui/primitives/form/form';
+// import { Input } from '@app/ui/primitives/input';
+// import { SpinnerBox } from '@app/ui/primitives/spinner';
+// import { Tabs, TabsList, TabsTrigger } from '@app/ui/primitives/tabs';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { zodResolver } from '@hookform/resolvers/zod';
 // import type { MessageDescriptor } from '@lingui/core';
 // import { msg } from '@lingui/core/macro';
@@ -398,7 +398,7 @@ const BillingPlanForm = ({ value, onChange, plans, canCreateFreeOrganisation }: 
 
       <div className="mt-6 text-center">
         <Link
-          to="https://documenso.com/pricing"
+          to="https://app.example.com/pricing"
           className="flex items-center justify-center gap-1 text-primary text-sm hover:text-primary/80 hover:underline"
           target="_blank"
         >

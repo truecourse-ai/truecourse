@@ -20,3 +20,24 @@ function DocumentSignedEmailTemplate({
     </div>
   );
 }
+
+
+
+// Positive: filename-class-mismatch — document-signed.tsx exports DocumentSignedEmail (drops the
+// 'Template' suffix vs function name DocumentSignedEmailTemplate). Minor suffix variation in email
+// template naming is an intentional convention: the named function retains 'Template' for internal
+// disambiguation while the exported name is the external-facing email class name.
+export function DocumentSignedEmail({
+  documentName,
+  signerName,
+}: {
+  documentName: string;
+  signerName: string;
+}) {
+  return (
+    <div>
+      <p>{signerName} has signed the document: {documentName}</p>
+    </div>
+  );
+}
+

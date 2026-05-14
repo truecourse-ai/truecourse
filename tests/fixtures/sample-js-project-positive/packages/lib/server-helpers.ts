@@ -208,3 +208,67 @@ function hashDocumentFingerprint(content: string): string {
   // deterministic hash for content addressing; salt would break lookup
   return sha256Hex(content);
 }
+
+
+// argument-type-mismatch FP: uploadFile called with object containing template literal name — standard function call
+declare function uploadFileToStorage(
+  file: { name: string; contentType: string; data: () => Promise<Uint8Array> },
+  options: { prefix: string },
+): Promise<{ fileId: string; downloadUrl: string }>;
+declare const baseReportName: string;
+declare const isArchived: boolean;
+declare const reportBytes: Uint8Array;
+
+async function persistProcessedReport() {
+  const suffix = isArchived ? '_archived.pdf' : '_final.pdf';
+
+  const { fileId, downloadUrl } = await uploadFileToStorage(
+    {
+      name: `${baseReportName}${suffix}`,
+      contentType: 'application/pdf',
+      data: async () => Promise.resolve(reportBytes),
+    },
+    { prefix: 'reports' },
+  );
+
+  return { fileId, downloadUrl };
+}
+
+
+
+// magic-string FP: role: 'user' / role: 'system' are LLM protocol-defined constants, not magic strings
+type LLMMessageRole = 'user' | 'assistant' | 'system';
+type LLMMessage = { role: LLMMessageRole; content: string };
+
+declare function callLanguageModel(messages: LLMMessage[]): Promise<string>;
+
+async function detectReportFieldsFromText(reportText: string, systemPrompt: string): Promise<string> {
+  const messages: LLMMessage[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: reportText },
+  ];
+  return callLanguageModel(messages);
+}
+
+
+
+// magic-string FP(retry): role: 'user' repeated 3× in LLM message arrays — standard protocol values,
+// not magic strings. 'user' / 'assistant' / 'system' are defined by the OpenAI Chat API spec.
+type LLMMessage2 = { role: string; content: string };
+declare function callLanguageModel2(messages: LLMMessage2[]): Promise<string>;
+
+async function detectFieldsFromPage(pageText: string, systemPrompt: string): Promise<string> {
+  return callLanguageModel2([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: pageText },
+  ]);
+}
+
+async function detectFieldsWithContext(text: string, context: string, systemPrompt: string): Promise<string> {
+  return callLanguageModel2([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: context },
+    { role: 'user', content: text },
+  ]);
+}
+

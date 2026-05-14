@@ -190,3 +190,27 @@ async function notifyRemovedMembers() {
     }),
   );
 }
+
+
+// FP shape: single DB write (organisation.update) followed by external billing API call — no transaction needed
+interface OrgRepo { organisation: { update(args: object): Promise<{ id: number; memberCount: number }> } }
+declare const orgRepo: OrgRepo;
+declare const billingClient: { subscriptions: { update(id: string, data: object): Promise<void> } };
+
+export async function removeOrgMemberAndSyncBilling(
+  organisationId: string,
+  memberId: number,
+  billingSubscriptionId: string,
+): Promise<void> {
+  // Single DB write: decrement the org member count
+  await orgRepo.organisation.update({
+    where: { id: organisationId },
+    data: { memberCount: { decrement: 1 } },
+  });
+
+  // External billing API call — not a DB operation, no transaction required
+  await billingClient.subscriptions.update(billingSubscriptionId, {
+    metadata: { removedMemberId: String(memberId) },
+  });
+}
+

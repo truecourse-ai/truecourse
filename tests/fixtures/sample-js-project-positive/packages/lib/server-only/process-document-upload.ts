@@ -24,3 +24,17 @@ async function processDocumentUpload(input: UploadInput) {
 
   return { fileId, title: payload.title };
 }
+
+
+// Object.values(meta).length > 0 — Object.values returns any[]; length is number; comparison with 0 is valid
+declare function updateEnvelopeMeta(opts: { envelopeId: number; meta: Record<string, unknown> }): Promise<void>;
+
+export async function distributeEnvelope(
+  envelopeId: number,
+  meta: Record<string, unknown> = {},
+): Promise<void> {
+  if (Object.values(meta).length > 0) {
+    await updateEnvelopeMeta({ envelopeId, meta });
+  }
+}
+

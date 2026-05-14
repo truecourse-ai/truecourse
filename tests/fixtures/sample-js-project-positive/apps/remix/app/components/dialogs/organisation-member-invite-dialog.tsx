@@ -1,16 +1,458 @@
+import { downloadFile } from '@app/lib/client-only/download-file';
+import { useCurrentOrganisation } from '@app/lib/client-only/providers/organisation';
+import { IS_BILLING_ENABLED, SUPPORT_EMAIL } from '@app/lib/constants/app';
+import { ORGANISATION_MEMBER_ROLE_HIERARCHY } from '@app/lib/constants/organisations';
+import { ORGANISATION_MEMBER_ROLE_MAP } from '@app/lib/constants/organisations-translations';
+import { INTERNAL_CLAIM_ID } from '@app/lib/types/subscription';
+import { zEmail } from '@app/lib/utils/zod';
+import { trpc } from '@app/trpc/react';
+import { ZCreateOrganisationMemberInvitesRequestSchema } from '@app/trpc/server/organisation-router/create-organisation-member-invites.types';
+import { cn } from '@app/ui/lib/utils';
+import { Alert, AlertDescription } from '@app/ui/primitives/alert';
+import { Button } from '@app/ui/primitives/button';
+import { Card, CardContent } from '@app/ui/primitives/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@app/ui/primitives/dialog';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@app/ui/primitives/form/form';
+import { Input } from '@app/ui/primitives/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@app/ui/primitives/select';
+import { SpinnerBox } from '@app/ui/primitives/spinner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@app/ui/primitives/tabs';
+import { useToast } from '@app/ui/primitives/use-toast';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { msg } from '@lingui/core/macro';
+import { useLingui } from '@lingui/react';
+import { Trans } from '@lingui/react/macro';
+import { OrganisationMemberRole } from '@prisma/client';
+import type * as DialogPrimitive from '@radix-ui/react-dialog';
+import { Download, Mail, MailIcon, PlusCircle, Trash, Upload, UsersIcon } from 'lucide-react';
+import Papa, { type ParseResult } from 'papaparse';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFieldArray, useForm } from 'react-hook-form';
+import { z } from 'zod';
 
-// [unknown-catch-variable] catch(err) — console.error(err) safe pass + fixed toast message
-declare function inviteTeamMember(opts: { email: string; role: string; teamId: string }): Promise<void>;
-declare const teamId: string;
-declare const inviteNotify: (opts: { title: string; description: string; variant?: string }) => void;
+export type OrganisationMemberInviteDialogProps = {
+  trigger?: React.ReactNode;
+} & Omit<DialogPrimitive.DialogProps, 'children'>;
 
-async function handleMemberInvite(email: string, role: string): Promise<void> {
+const ZInviteOrganisationMembersFormSchema = z
+  .object({
+    invitations: ZCreateOrganisationMemberInvitesRequestSchema.shape.invitations,
+  })
+  // Display exactly which rows are duplicates.
+  .superRefine((items, ctx) => {
+    const uniqueEmails = new Map<string, number>();
+
+    for (const [index, invitation] of items.invitations.entries()) {
+      const email = invitation.email.toLowerCase();
+
+      const firstFoundIndex = uniqueEmails.get(email);
+
+      if (firstFoundIndex === undefined) {
+        uniqueEmails.set(email, index);
+        continue;
+      }
+
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Emails must be unique',
+        path: ['invitations', index, 'email'],
+      });
+
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Emails must be unique',
+        path: ['invitations', firstFoundIndex, 'email'],
+      });
+    }
+  });
+
+type TInviteOrganisationMembersFormSchema = z.infer<typeof ZInviteOrganisationMembersFormSchema>;
+
+type TabTypes = 'INDIVIDUAL' | 'BULK';
+
+const ZImportOrganisationMemberSchema = z.array(
+  z.object({
+    email: zEmail(),
+    organisationRole: z.nativeEnum(OrganisationMemberRole),
+  }),
+);
+
+export const OrganisationMemberInviteDialog = ({ trigger, ...props }: OrganisationMemberInviteDialogProps) => {
+  const [open, setOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [invitationType, setInvitationType] = useState<TabTypes>('INDIVIDUAL');
+
+  const { _ } = useLingui();
+  const { toast } = useToast();
+
+  const organisation = useCurrentOrganisation();
+
+  const form = useForm<TInviteOrganisationMembersFormSchema>({
+    resolver: zodResolver(ZInviteOrganisationMembersFormSchema),
+    defaultValues: {
+      invitations: [
+        {
+          email: '',
+          organisationRole: OrganisationMemberRole.MEMBER,
+        },
+      ],
+    },
+  });
+
+  const {
+    append: appendOrganisationMemberInvite,
+    fields: organisationMemberInvites,
+    remove: removeOrganisationMemberInvite,
+  } = useFieldArray({
+    control: form.control,
+    name: 'invitations',
+  });
+
+  const { mutateAsync: createOrganisationMemberInvites } = trpc.organisation.member.invite.createMany.useMutation();
+
+  const { data: fullOrganisation } = trpc.organisation.get.useQuery({
+    organisationReference: organisation.id,
+  });
+
+  const onAddOrganisationMemberInvite = () => {
+    appendOrganisationMemberInvite({
+      email: '',
+      organisationRole: OrganisationMemberRole.MEMBER,
+    });
+  };
+
+  const onFormSubmit = async ({ invitations }: TInviteOrganisationMembersFormSchema) => {
+    try {
+      await createOrganisationMemberInvites({
+        organisationId: organisation.id,
+        invitations,
+      });
+
+      toast({
+        title: _(msg`Success`),
+        description: _(msg`Organisation invitations have been sent.`),
+        duration: 5000,
+      });
+
+      setOpen(false);
+    } catch {
+      toast({
+        title: _(msg`An unknown error occurred`),
+        description: _(
+          msg`We encountered an unknown error while attempting to invite organisation members. Please try again later.`,
+        ),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const dialogState = useMemo(() => {
+    if (!fullOrganisation) {
+      return 'loading';
+    }
+
+    if (!IS_BILLING_ENABLED()) {
+      return 'form';
+    }
+
+    if (fullOrganisation.organisationClaim.memberCount === 0) {
+      return 'form';
+    }
+
+    if (fullOrganisation.members.length < fullOrganisation.organisationClaim.memberCount) {
+      return 'form';
+    }
+
+    // This is probably going to screw us over in the future.
+    if (fullOrganisation.organisationClaim.originalSubscriptionClaimId !== INTERNAL_CLAIM_ID.TEAM) {
+      return 'alert';
+    }
+
+    return 'form';
+  }, [fullOrganisation]);
+
+  useEffect(() => {
+    if (!open) {
+      form.reset();
+      setInvitationType('INDIVIDUAL');
+    }
+  }, [open, form]);
+
+  const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length) {
+      return;
+    }
+
+    const csvFile = e.target.files[0];
+
+    Papa.parse(csvFile, {
+      skipEmptyLines: true,
+      comments: 'Work email,Job title',
+      complete: (results: ParseResult<string[]>) => {
+        const members = results.data.map((row) => {
+          const [email, role] = row;
+
+          return {
+            email: email.trim(),
+            organisationRole: role.trim().toUpperCase(),
+          };
+        });
+
+        // Remove the first row if it contains the headers.
+        if (members.length > 1 && members[0].organisationRole.toUpperCase() === 'ROLE') {
+          members.shift();
+        }
+
+        try {
+          const importedInvitations = ZImportOrganisationMemberSchema.parse(members);
+
+          form.setValue('invitations', importedInvitations);
+          form.clearErrors('invitations');
+
+          setInvitationType('INDIVIDUAL');
+        } catch (err) {
+          console.error(err);
+
+          toast({
+            title: _(msg`Something went wrong`),
+            description: _(msg`Please check the CSV file and make sure it is according to our format`),
+            variant: 'destructive',
+          });
+        }
+      },
+    });
+  };
+
+  const downloadTemplate = () => {
+    const data = [
+      { email: 'admin@app.example.com', role: 'Admin' },
+      { email: 'manager@app.example.com', role: 'Manager' },
+      { email: 'member@app.example.com', role: 'Member' },
+    ];
+
+    const csvContent = 'Email address,Role\n' + data.map((row) => `${row.email},${row.role}`).join('\n');
+
+    const blob = new Blob([csvContent], {
+      type: 'text/csv',
+    });
+
+    downloadFile({
+      filename: 'app-organisation-member-invites-template.csv',
+      data: blob,
+    });
+  };
+
+  return (
+    <Dialog {...props} open={open} onOpenChange={(value) => !form.formState.isSubmitting && setOpen(value)}>
+      <DialogTrigger onClick={(e) => e.stopPropagation()} asChild>
+        {trigger ?? (
+          <Button variant="secondary">
+            <Trans>Invite member</Trans>
+          </Button>
+        )}
+      </DialogTrigger>
+
+      <DialogContent position="center">
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>Invite organisation members</Trans>
+          </DialogTitle>
+
+          <DialogDescription className="mt-4">
+            <Trans>An email containing an invitation will be sent to each member.</Trans>
+          </DialogDescription>
+        </DialogHeader>
+
+        {dialogState === 'loading' && <SpinnerBox className="py-32" />}
+
+        {dialogState === 'alert' && (
+          <>
+            <Alert className="flex flex-col justify-between p-6 sm:flex-row sm:items-center" variant="neutral">
+              <AlertDescription>
+                <Trans>
+                  Your plan does not support inviting members. Please upgrade or your plan or contact sales at{' '}
+                  <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> if you would like to discuss your options.
+                </Trans>
+              </AlertDescription>
+            </Alert>
+
+            <DialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+                <Trans>Cancel</Trans>
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+
+        {dialogState === 'form' && (
+          <Tabs
+            defaultValue="INDIVIDUAL"
+            value={invitationType}
+            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+            onValueChange={(value) => setInvitationType(value as TabTypes)}
+          >
+            <TabsList className="w-full">
+              <TabsTrigger value="INDIVIDUAL" className="w-full hover:text-foreground">
+                <MailIcon size={20} className="mr-2" />
+                <Trans>Invite Members</Trans>
+              </TabsTrigger>
+
+              <TabsTrigger value="BULK" className="w-full hover:text-foreground">
+                <UsersIcon size={20} className="mr-2" /> <Trans>Bulk Import</Trans>
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="INDIVIDUAL">
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onFormSubmit)}>
+                  <fieldset className="flex h-full flex-col space-y-4" disabled={form.formState.isSubmitting}>
+                    <div className="custom-scrollbar -m-1 max-h-[60vh] space-y-4 overflow-y-auto p-1">
+                      {organisationMemberInvites.map((organisationMemberInvite, index) => (
+                        <div className="flex w-full flex-row space-x-4" key={organisationMemberInvite.id}>
+                          <FormField
+                            control={form.control}
+                            name={`invitations.${index}.email`}
+                            render={({ field }) => (
+                              <FormItem className="w-full">
+                                {index === 0 && (
+                                  <FormLabel required>
+                                    <Trans>Email address</Trans>
+                                  </FormLabel>
+                                )}
+                                <FormControl>
+                                  <Input className="bg-background" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name={`invitations.${index}.organisationRole`}
+                            render={({ field }) => (
+                              <FormItem className="w-full">
+                                {index === 0 && (
+                                  <FormLabel required>
+                                    <Trans>Organisation Role</Trans>
+                                  </FormLabel>
+                                )}
+                                <FormControl>
+                                  <Select {...field} onValueChange={field.onChange}>
+                                    <SelectTrigger className="max-w-[200px] text-muted-foreground">
+                                      <SelectValue />
+                                    </SelectTrigger>
+
+                                    <SelectContent position="popper">
+                                      {ORGANISATION_MEMBER_ROLE_HIERARCHY[organisation.currentOrganisationRole].map(
+                                        (role) => (
+                                          <SelectItem key={role} value={role}>
+                                            {_(ORGANISATION_MEMBER_ROLE_MAP[role]) ?? role}
+                                          </SelectItem>
+                                        ),
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <button
+                            type="button"
+                            className={cn(
+                              'justify-left inline-flex h-10 w-10 items-center text-slate-500 hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50',
+                              index === 0 ? 'mt-8' : 'mt-0',
+                            )}
+                            disabled={organisationMemberInvites.length === 1}
+                            onClick={() => removeOrganisationMemberInvite(index)}
+                          >
+                            <Trash className="h-5 w-5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="w-fit"
+                      onClick={() => onAddOrganisationMemberInvite()}
+                    >
+                      <PlusCircle className="mr-2 h-4 w-4" />
+                      <Trans>Add more</Trans>
+                    </Button>
+
+                    <DialogFooter>
+                      <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+                        <Trans>Cancel</Trans>
+                      </Button>
+
+                      <Button type="submit" loading={form.formState.isSubmitting}>
+                        {!form.formState.isSubmitting && <Mail className="mr-2 h-4 w-4" />}
+                        <Trans>Invite</Trans>
+                      </Button>
+                    </DialogFooter>
+                  </fieldset>
+                </form>
+              </Form>
+            </TabsContent>
+
+            <TabsContent value="BULK">
+              <div className="mt-4 space-y-4">
+                <Card gradient className="h-32">
+                  <CardContent
+                    className="flex h-full cursor-pointer flex-col items-center justify-center rounded-lg p-0 text-muted-foreground/80 transition-colors hover:text-muted-foreground/90"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="h-5 w-5" />
+
+                    <p className="mt-1 text-sm">
+                      <Trans>Click here to upload</Trans>
+                    </p>
+
+                    <input onChange={onFileInputChange} type="file" ref={fileInputRef} accept=".csv" hidden />
+                  </CardContent>
+                </Card>
+
+                <DialogFooter>
+                  <Button type="button" variant="secondary" onClick={downloadTemplate}>
+                    <Download className="mr-2 h-4 w-4" />
+                    <Trans>Template</Trans>
+                  </Button>
+                </DialogFooter>
+              </div>
+            </TabsContent>
+          </Tabs>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+
+// [unknown-catch-variable] catch(err) — console.error(err) safe pass-through + fixed toast message
+declare function sendMemberInvitation(opts: { email: string; role: string; workspaceId: string }): Promise<void>;
+declare const currentWorkspaceId: string;
+declare const workspaceToast: (opts: { title: string; description: string; variant?: string }) => void;
+
+async function handleWorkspaceInvite(email: string, role: string): Promise<void> {
   try {
-    await inviteTeamMember({ email, role, teamId });
-    inviteNotify({ title: 'Invitation sent', description: `${email} has been invited to the team.` });
+    await sendMemberInvitation({ email, role, workspaceId: currentWorkspaceId });
+    workspaceToast({ title: 'Invitation sent', description: `${email} has been invited to the workspace.` });
   } catch (err) {
     console.error(err);
-    inviteNotify({
+    workspaceToast({
       title: 'Invitation failed',
       description: 'We could not send the invitation. Please try again.',
       variant: 'destructive',
@@ -20,25 +462,8 @@ async function handleMemberInvite(email: string, role: string): Promise<void> {
 
 
 
-// FP shape: option is an element from options.forEach; groupKey is a key name on Option type.
-// option[groupKey] is a property access on a typed object, not an array index. No out-of-bounds risk.
-declare type TSelectOption = { value: string; label: string; category?: string; disabled?: boolean };
+// Positive sample: type-import-side-effects fires on line 36.
+// import Papa, { type ParseResult } from 'papaparse' — Papa is a default value import
+// but the rule only inspects named import_specifier nodes, so hasValueImport stays false
+// while hasInlineType is true — triggering the rule incorrectly.
 
-function groupSelectOptions<K extends keyof TSelectOption>(
-  options: TSelectOption[],
-  groupBy: K,
-): Map<TSelectOption[K], TSelectOption[]> {
-  const grouped = new Map<TSelectOption[K], TSelectOption[]>();
-
-  options.forEach((option) => {
-    const groupValue = option[groupBy];
-    const existing = grouped.get(groupValue);
-    if (existing) {
-      existing.push(option);
-    } else {
-      grouped.set(groupValue, [option]);
-    }
-  });
-
-  return grouped;
-}

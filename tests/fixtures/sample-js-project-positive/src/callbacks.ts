@@ -9774,3 +9774,448 @@ function useParticipantOrdering() {
 
   return { handleOrderChange };
 }
+
+
+// --- catch-without-error-type FP: catch(err) where err is never accessed ---
+// The fallback value is computed independently of the caught exception;
+// err is unused — the rule should not flag a catch block that intentionally discards the error.
+interface RenderState { ctx: unknown; width: number; height: number; }
+declare function applyFont(state: RenderState, font: string, size: number): void;
+
+export function resolveRenderFont(state: RenderState, fontName: string): string {
+  let resolvedFont = '12pt Helvetica';
+  try {
+    applyFont(state, fontName, 12);
+    resolvedFont = `12pt ${fontName}`;
+  } catch (err) {
+    // Font unavailable — build fallback descriptor without inspecting the error.
+    resolvedFont = '/Helv 12 Tf 0 g';
+  }
+  return resolvedFont;
+}
+
+
+
+// FP: canvas Group.find(selector) returns a Node array, never undefined.
+// Konva's selector API is not Array.prototype.find(); no null check is meaningful.
+interface CanvasGroup {
+  find(selector: string): CanvasNode[];
+  add(...nodes: CanvasNode[]): void;
+}
+interface CanvasNode {
+  x(val?: number): number;
+  y(val?: number): number;
+  width(val?: number): number;
+  destroy(): void;
+}
+
+declare const signatureFieldGroup: CanvasGroup;
+
+function repositionSignatureLines(): void {
+  const lines = signatureFieldGroup.find('.signature-line');
+  lines.forEach((line, idx) => {
+    line.y(idx * 32);
+    line.x(0);
+  });
+}
+
+
+
+// FP: Array.findIndex() with equality check on a field — standard lookup, no type mismatch
+interface ReportField {
+  id: string;
+  formId: string;
+  label: string;
+  pageIndex: number;
+  positionY: number;
+}
+
+declare const activeReportFields: ReportField[];
+declare function applyFieldUpdate(field: ReportField): void;
+
+export function reorderReportFields(draggedFormId: string, targetFormId: string): void {
+  const draggedIndex = activeReportFields.findIndex((f) => f.formId === draggedFormId);
+  const targetIndex = activeReportFields.findIndex((f) => f.formId === targetFormId);
+
+  if (draggedIndex === -1 || targetIndex === -1) return;
+
+  const reordered = [...activeReportFields];
+  const [moved] = reordered.splice(draggedIndex, 1);
+  reordered.splice(targetIndex, 0, moved);
+
+  reordered.forEach((field, idx) => applyFieldUpdate({ ...field, positionY: idx * 48 }));
+}
+
+
+
+// defaultValue?.map(...).filter(Boolean) with 'as Option[]' cast — intentional narrowing after filter, no type mismatch
+type AuthOption_ad32 = { value: string; label: string };
+
+declare const authOptions_ad32: AuthOption_ad32[];
+declare const currentValue_ad32: string[] | undefined;
+declare const defaultValue_ad32: string[] | undefined;
+
+const selectedOptions_ad32: AuthOption_ad32[] =
+  (currentValue_ad32?.map((val) => authOptions_ad32.find((opt) => opt.value === val)).filter(Boolean) as AuthOption_ad32[]) || [];
+
+const defaultOptions_ad32: AuthOption_ad32[] =
+  (defaultValue_ad32?.map((val) => authOptions_ad32.find((opt) => opt.value === val)).filter(Boolean) as AuthOption_ad32[]) || [];
+
+
+
+// .filter((item) => !data.envelopeItems.some((i) => i.id === item.id)) — Array.filter predicate using Array.some, not a type mismatch
+type WebhookDelivery_add2 = { id: string; webhookId: string; statusCode: number; createdAt: Date };
+
+export function filterNewDeliveries_add2(
+  incoming: WebhookDelivery_add2[],
+  existing: WebhookDelivery_add2[],
+): WebhookDelivery_add2[] {
+  return incoming.filter(
+    (item) => !existing.some((e) => e.id === item.id),
+  );
+}
+
+export function filterRemovedDeliveries_add2(
+  incoming: WebhookDelivery_add2[],
+  existing: WebhookDelivery_add2[],
+): WebhookDelivery_add2[] {
+  return existing.filter(
+    (item) => !incoming.some((e) => e.id === item.id),
+  );
+}
+
+
+
+// magic-string FP: 'UNAUTHORIZED' is a TRPCError framework-defined typed error code, not a magic string
+type TRPCErrorCode_816e = 'UNAUTHORIZED' | 'FORBIDDEN' | 'NOT_FOUND' | 'BAD_REQUEST' | 'INTERNAL_SERVER_ERROR';
+declare class TRPCError_816e extends Error { constructor(opts: { code: TRPCErrorCode_816e; message?: string }); }
+
+function requireAuthToken_816e(token: string | undefined): asserts token is string {
+  if (!token) {
+    throw new TRPCError_816e({ code: 'UNAUTHORIZED', message: 'A valid auth token is required' });
+  }
+}
+
+
+
+// argument-type-mismatch FP: Number.isFinite(parsed) where parsed is number from parseFloat — valid static method call
+function getCanvasScaleFactor_b0b9(): number {
+  try {
+    const scaleAttr = document.documentElement.getAttribute('data-canvas-scale');
+    const parsed = parseFloat(scaleAttr ?? '');
+
+    if (!Number.isFinite(parsed)) {
+      return 1.0;
+    }
+
+    return parsed;
+  } catch {
+    return 1.0;
+  }
+}
+
+function scaleCanvasPx_b0b9(px: number): number {
+  return px * getCanvasScaleFactor_b0b9();
+}
+
+
+
+// --- argument-type-mismatch FP: Array.includes() checking config key string against literal array ---
+// ['characterLimit', 'minLength'].includes(key) — valid includes() call with a string literal, no type mismatch.
+type FieldSettingKey_7c67 = 'characterLimit' | 'minLength' | 'pattern' | 'placeholder' | 'defaultValue';
+
+export function extractNumericSetting_7c67(
+  key: FieldSettingKey_7c67,
+  value: string | number | boolean,
+): number | undefined {
+  if (['characterLimit', 'minLength'].includes(key)) {
+    const parsed = Number(value);
+    return isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
+
+
+// --- unchecked-array-access FP: enum-exhaustive Record lookup via Object.values() iteration ---
+// FIELD_AUTH_TYPES is a Record keyed by FieldAccessAuth enum; authType comes from
+// Object.values(FieldAccessAuth) — enum-exhaustive, so [authType] is always valid.
+enum FieldAccessAuth_a4f2 { NONE = 'NONE', REQUIRE_ACCOUNT = 'REQUIRE_ACCOUNT', REQUIRE_2FA = 'REQUIRE_2FA', PASSKEY = 'PASSKEY' }
+
+interface FieldAuthConfig_a4f2 { label: string; description: string; requiresSetup: boolean }
+
+const FIELD_AUTH_TYPES_a4f2 = {
+  [FieldAccessAuth_a4f2.NONE]: { label: 'No authentication', description: 'Anyone can sign', requiresSetup: false },
+  [FieldAccessAuth_a4f2.REQUIRE_ACCOUNT]: { label: 'Require account', description: 'Must be signed in', requiresSetup: false },
+  [FieldAccessAuth_a4f2.REQUIRE_2FA]: { label: 'Two-factor auth', description: 'Must verify via 2FA', requiresSetup: true },
+  [FieldAccessAuth_a4f2.PASSKEY]: { label: 'Passkey', description: 'Must use a passkey', requiresSetup: true },
+} satisfies Record<FieldAccessAuth_a4f2, FieldAuthConfig_a4f2>;
+
+export function getFieldAuthOptions_a4f2(excludeSetupRequired: boolean): Array<{ value: FieldAccessAuth_a4f2; label: string }> {
+  return (Object.values(FieldAccessAuth_a4f2) as FieldAccessAuth_a4f2[])
+    .filter((authType) => !excludeSetupRequired || !FIELD_AUTH_TYPES_a4f2[authType].requiresSetup)
+    .map((authType) => ({ value: authType, label: FIELD_AUTH_TYPES_a4f2[authType].label }));
+}
+
+
+
+// Shape: String.prototype.includes() with a string constant — no argument type mismatch
+const CONTENT_TYPE_MULTIPART_FORM_fb5a = 'multipart/form-data';
+
+export function isMultipartRequest_fb5a(contentType: string): boolean {
+  return contentType.includes(CONTENT_TYPE_MULTIPART_FORM_fb5a);
+}
+
+
+
+// Shape: Promise.all with async map — standard parallel upload pattern, no type mismatch
+declare function storeEnvelopeAttachment_51f2(
+  attachment: { name: string; size: number; mimeType: string },
+): Promise<{ storageId: string; publicUrl: string }>;
+
+export async function uploadEnvelopeAttachments_51f2(
+  attachments: Array<{ name: string; size: number; mimeType: string }>,
+): Promise<Array<{ name: string; storageId: string; url: string }>> {
+  return Promise.all(
+    attachments.map(async (attachment) => {
+      const { storageId, publicUrl } = await storeEnvelopeAttachment_51f2(attachment);
+      return {
+        name: attachment.name,
+        storageId,
+        url: publicUrl,
+      };
+    }),
+  );
+}
+
+
+
+// --- argument-type-mismatch FP: Zod schema composition with .array().min().refine() ---
+// z.array(z.object({...})).min(1).refine(...) is standard Zod builder chain; no type mismatch.
+declare const ContactRole_fda3: { OWNER: string; EDITOR: string; VIEWER: string };
+declare function zEmail_fda3(): any;
+declare const z_fda3: {
+  object(shape: Record<string, any>): any;
+  string(): { describe(s: string): any };
+  array(schema: any): { min(n: number): { refine(fn: (val: any) => boolean, opts: { message: string }): any } };
+  nativeEnum(e: object): any;
+};
+
+export const ZAddContactsRequestSchema_fda3 = z_fda3.object({
+  workspaceId: z_fda3.string().describe('The workspace to add the contacts to'),
+  contacts: z_fda3
+    .array(
+      z_fda3.object({
+        email: zEmail_fda3().trim().toLowerCase(),
+        role: z_fda3.nativeEnum(ContactRole_fda3),
+      }),
+    )
+    .min(1)
+    .refine(
+      (contacts: Array<{ email?: string }>) => {
+        const emails = contacts
+          .filter((c) => c.email !== undefined)
+          .map((c) => c.email);
+        return new Set(emails).size === emails.length;
+      },
+      { message: 'Contact emails must be unique' },
+    ),
+});
+
+
+
+// .find used as truthy predicate inside .some — nested membership check, no type mismatch
+interface TagOption_ffc8 { value: string; label: string; color?: string; }
+type GroupedTagOptions_ffc8 = Record<string, TagOption_ffc8[]>;
+
+function hasMatchingTag_ffc8(groupedTags: GroupedTagOptions_ffc8, selectedTags: TagOption_ffc8[]): boolean {
+  for (const [, tags] of Object.entries(groupedTags)) {
+    if (tags.some((tag) => selectedTags.find((s) => s.value === tag.value))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function removeSelectedTags_ffc8(groupedTags: GroupedTagOptions_ffc8, toRemove: TagOption_ffc8[]): GroupedTagOptions_ffc8 {
+  const result: GroupedTagOptions_ffc8 = {};
+  for (const [group, tags] of Object.entries(groupedTags)) {
+    result[group] = tags.filter((tag) => !toRemove.find((r) => r.value === tag.value));
+  }
+  return result;
+}
+
+
+
+// FP: REPORT_ACCESS_LEVEL_CONFIG is a Record keyed by ReportAccessLevel enum;
+// accessLevel comes from Object.values(ReportAccessLevel) iteration — enum-exhaustive Record lookup.
+declare const enum ReportAccessLevel_ac69 { PUBLIC = 'PUBLIC', SIGNED_IN = 'SIGNED_IN', INVITED_ONLY = 'INVITED_ONLY' }
+
+interface AccessLevelConfig_ac69 { label: string; description: string; requiresInviteList: boolean }
+
+const REPORT_ACCESS_LEVEL_CONFIG_ac69 = {
+  [ReportAccessLevel_ac69.PUBLIC]: { label: 'Public', description: 'Anyone with the link can view', requiresInviteList: false },
+  [ReportAccessLevel_ac69.SIGNED_IN]: { label: 'Signed-in users', description: 'Must have an account to view', requiresInviteList: false },
+  [ReportAccessLevel_ac69.INVITED_ONLY]: { label: 'Invited only', description: 'Only explicitly invited contacts', requiresInviteList: true },
+} satisfies Record<ReportAccessLevel_ac69, AccessLevelConfig_ac69>;
+
+function buildAccessLevelOptions_ac69(): Array<{ value: ReportAccessLevel_ac69; label: string; requiresInviteList: boolean }> {
+  return (Object.values(ReportAccessLevel_ac69) as ReportAccessLevel_ac69[]).map((accessLevel) => ({
+    value: accessLevel,
+    label: REPORT_ACCESS_LEVEL_CONFIG_ac69[accessLevel].label,
+    requiresInviteList: REPORT_ACCESS_LEVEL_CONFIG_ac69[accessLevel].requiresInviteList,
+  }));
+}
+
+
+
+// FP: data[normalizedKey] accessed inside else-if Array.isArray(data[normalizedKey]) branch —
+// guaranteed to be an array at that point. .push() is safe.
+function collectMultiValueHeaders_ad2d(
+  headers: Headers,
+): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {};
+
+  headers.forEach((value, rawKey) => {
+    const normalizedKey = rawKey.toLowerCase();
+    if (!(normalizedKey in result)) {
+      result[normalizedKey] = value;
+    } else if (Array.isArray(result[normalizedKey])) {
+      (result[normalizedKey] as string[]).push(value);
+    } else {
+      result[normalizedKey] = [result[normalizedKey] as string, value];
+    }
+  });
+
+  return result;
+}
+
+
+
+// Positive: argument-type-mismatch — Object.values() assigned to a typed property.
+// Object.values(PRIORITY_VARIANT) returns string[] which matches the variants array type.
+const PRIORITY_VARIANT_545a = {
+  low: 'priority-low',
+  medium: 'priority-medium',
+  high: 'priority-high',
+  critical: 'priority-critical',
+} as const;
+
+const STATUS_VARIANT_545a = {
+  draft: 'status-draft',
+  active: 'status-active',
+  archived: 'status-archived',
+} as const;
+
+export const FIELD_STYLE_CONFIG_545a = {
+  priorityPattern: /^priority-(low|medium|high|critical)$/u,
+  statusPattern: /^status-(draft|active|archived)$/u,
+  priorityVariants: Object.values(PRIORITY_VARIANT_545a),
+  statusVariants: Object.values(STATUS_VARIANT_545a),
+};
+
+
+
+// FP shape: group.teamMemberships.map() extracting nested member properties —
+// standard transform of a joined query result; no type mismatch.
+declare const fetchedGroups_a365: Array<{
+  groupId: string;
+  name: string;
+  teamMemberships: Array<{
+    id: string;
+    role: string;
+    member: {
+      id: string;
+      name: string;
+      email: string;
+      avatarUrl: string | null;
+    };
+  }>;
+}>;
+
+export const normalisedGroups_a365 = fetchedGroups_a365.map((group) => ({
+  ...group,
+  members: group.teamMemberships.map(({ member, role }) => ({
+    id: member.id,
+    memberId: member.id,
+    name: member.name || '',
+    email: member.email,
+    avatarUrl: member.avatarUrl,
+    role,
+  })),
+}));
+
+
+
+// OpenAPI documentation tag string in procedure metadata — spec-level identifiers, not magic strings
+declare const authenticatedProcedure_1fd4: {
+  meta(m: object): {
+    input<S>(s: S): { query<R>(fn: (opts: { input: unknown }) => Promise<R>): unknown };
+  };
+};
+
+export const listFoldersProcedure_1fd4 = authenticatedProcedure_1fd4
+  .meta({
+    openapi: {
+      method: 'GET',
+      path: '/folders',
+      summary: 'List folders for the current workspace',
+      tags: ['Folder'],
+    },
+  })
+  .input({ parentId: String })
+  .query(async ({ input }) => {
+    return { items: [] as Array<{ id: string; name: string; parentId: string | null }> };
+  });
+
+
+
+// onValueChange receives string, handleInput accepts string — JSX callback forwarding, no argument type mismatch
+// Pattern: <Select onValueChange={(value) => handleInput('textAlign', value)}>
+declare function buildSelectProps_ba30(options: {
+  value?: string;
+  onValueChange?: (value: string) => void;
+}): Record<string, unknown>;
+declare function updateFieldMetaSetting_ba30(key: string, value: string): void;
+
+export function getTextAlignSelectProps_ba30(currentAlign?: string): Record<string, unknown> {
+  return buildSelectProps_ba30({
+    value: currentAlign,
+    onValueChange: (value) => updateFieldMetaSetting_ba30('textAlign', value),
+  });
+}
+
+
+
+// Function call with discriminated union id param {type, id} — correct argument types, no mismatch
+declare function createEnvelopeFields_a22d(options: {
+  userId: number;
+  teamId: number | null;
+  id: { type: string; id: number };
+  fields: Array<{ name: string; value: string; position: number }>;
+  requestMetadata: Record<string, unknown>;
+}): Promise<{ fields: Array<{ id: number }> }>;
+
+export async function addFieldsToEnvelope_a22d(
+  currentUserId: number,
+  currentTeamId: number | null,
+  envelopeId: number,
+  rawFields: Array<{ label: string; content: string; pageNumber: number }>,
+  requestMeta: Record<string, unknown>,
+) {
+  return createEnvelopeFields_a22d({
+    userId: currentUserId,
+    teamId: currentTeamId,
+    id: {
+      type: 'envelopeId',
+      id: envelopeId,
+    },
+    fields: rawFields.map((field) => ({
+      name: field.label,
+      value: field.content,
+      position: field.pageNumber,
+    })),
+    requestMetadata: requestMeta,
+  });
+}
+

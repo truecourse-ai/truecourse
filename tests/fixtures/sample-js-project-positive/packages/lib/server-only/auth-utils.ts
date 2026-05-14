@@ -26,3 +26,25 @@ declare function decodeJwtToken(token: string): Promise<{ userId: string }>;
 class AuthError extends Error {
   constructor(public code: string, msg: string) { super(msg); this.name = "AuthError"; }
 }
+
+
+// Buffer.from(string, encoding) — id is string, encoding is string literal; standard Node.js Buffer API usage.
+declare const tokenRecord: { rawId: string; credentialType: string };
+
+function decodeRawTokenId(): Buffer {
+  return Buffer.from(tokenRecord.rawId, 'base64url');
+}
+
+function encodeRawTokenId(rawBytes: Buffer): string {
+  return rawBytes.toString('base64url');
+}
+
+
+
+// argument-type-mismatch: passes string where Buffer expected — genuine TS2345
+function encodeTokenToBase64url(rawBuffer: Buffer): string {
+  return rawBuffer.toString('base64url');
+}
+// TS2345: Argument of type 'string' is not assignable to parameter of type 'Buffer'
+const _encoded = encodeTokenToBase64url('raw-credential-id');
+

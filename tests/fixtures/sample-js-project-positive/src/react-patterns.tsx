@@ -24747,3 +24747,62 @@ function ApiKeyHighlight({
 
   return <div className="mt-4 rounded bg-muted p-3">{newlyCreatedKey.name} was just created.</div>;
 }
+
+
+// FP: tRPC onSuccess async navigate callback — standard mutation pattern, no type mismatch
+declare function usePortalMutation<TInput>(opts: {
+  mutationFn: (data: TInput) => Promise<void>;
+  onSuccess?: () => Promise<void> | void;
+}): { mutate: (data: TInput) => void };
+declare function useNavigate(): (path: string) => Promise<void>;
+declare function buildPortalPath(slug: string): string;
+
+function PortalJoinConfirmForm({ slug, inviteToken }: { slug: string; inviteToken: string }) {
+  const navigate = useNavigate();
+  const { mutate: acceptInvite } = usePortalMutation({
+    mutationFn: async (data: { token: string }) => submitPortalInvite(data),
+    onSuccess: async () => {
+      await navigate(buildPortalPath(slug));
+    },
+  });
+  return <button onClick={() => acceptInvite({ token: inviteToken })}>Join Portal</button>;
+}
+
+declare function submitPortalInvite(data: { token: string }): Promise<void>;
+
+
+
+// FP: Radix UI namespace member re-export aliases — intentional module re-aliasing pattern.
+// The rule must not fire on const X = Namespace.X; re-export patterns.
+declare const CollapsiblePrimitive: {
+  Root: unknown;
+  Trigger: unknown;
+  Content: unknown;
+};
+
+const Collapsible = CollapsiblePrimitive.Root;
+const CollapsibleTrigger = CollapsiblePrimitive.Trigger;
+const CollapsibleContent = CollapsiblePrimitive.Content;
+
+export { Collapsible, CollapsibleTrigger, CollapsibleContent };
+
+
+
+// Exported component prop-type alias over a library type — decouples consumers from the primitive, standard React practice
+declare namespace SelectPrimitive_8973 {
+  interface SelectProps {
+    value?: string;
+    onValueChange?: (v: string) => void;
+    disabled?: boolean;
+    children?: React.ReactNode;
+  }
+}
+
+export type EnvelopeStatusSelectProps_8973 = SelectPrimitive_8973.SelectProps;
+
+declare function forwardRef_8973<T, P>(fn: (props: P, ref: React.Ref<T>) => React.ReactElement | null): React.ForwardRefExoticComponent<P & React.RefAttributes<T>>;
+
+export const EnvelopeStatusSelect_8973 = forwardRef_8973<HTMLButtonElement, EnvelopeStatusSelectProps_8973>(({ ...props }, _ref) => {
+  return <div role="combobox" aria-expanded="false" />;
+});
+

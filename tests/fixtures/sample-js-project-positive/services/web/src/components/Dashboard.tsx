@@ -720,3 +720,106 @@ export const MediaDropZone = ({ children, variant, className }: MediaDropZonePro
     </div>
   );
 };
+
+declare const useSession: () => { user: { id: string; name: string }; organisations: Array<{ id: string; url: string; name: string; teams: Array<{ id: string; url: string; name: string }> }> };
+declare const useParams: () => Record<string, string | undefined>;
+declare const Outlet: () => JSX.Element;
+declare const AppSidebar: (props: { currentOrg: { id: string; url: string; name: string } | null; teams: Array<{ id: string; url: string; name: string }> }) => JSX.Element;
+declare const SiteBanner: (props: { content: string }) => JSX.Element;
+declare const redirect: (url: string) => never;
+declare const getOptionalSession: (req: Request) => Promise<{ isAuthenticated: boolean }>;
+declare const getSiteSettings: () => Promise<Array<{ id: string; value: string }>>;
+declare const SITE_SETTINGS_BANNER_ID: string;
+
+export const shouldRevalidate = () => false;
+
+export async function authenticatedLayoutLoader({ request }: { request: Request }) {
+  const [session, allSettings] = await Promise.all([
+    getOptionalSession(request),
+    getSiteSettings(),
+  ]);
+
+  if (!session.isAuthenticated) {
+    throw redirect('/signin');
+  }
+
+  const banner = allSettings.find((s) => s.id === SITE_SETTINGS_BANNER_ID);
+
+  return { banner };
+}
+
+export default function AuthenticatedLayout({
+  loaderData,
+  params,
+}: {
+  loaderData: { banner?: { value: string } };
+  params: Record<string, string | undefined>;
+}) {
+  const { banner } = loaderData;
+  const { user, organisations } = useSession();
+
+  const teamUrl = params.teamUrl;
+  const orgUrl = params.orgUrl;
+
+  const teams = organisations.flatMap((org) => org.teams);
+
+  const extractCurrentOrg = () => {
+    if (orgUrl) return organisations.find((org) => org.url === orgUrl) ?? null;
+    if (teamUrl) return organisations.find((org) => org.teams.some((t) => t.url === teamUrl)) ?? null;
+    return null;
+  };
+
+  const currentOrg = extractCurrentOrg();
+
+  return (
+    <div className="flex min-h-screen flex-row">
+      <AppSidebar currentOrg={currentOrg} teams={teams} />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {banner && <SiteBanner content={banner.value} />}
+        <main className="flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+
+
+// --- missing-return-type FP: route default-export React component returning JSX ---
+// TS infers JSX.Element return type; explicit annotation is idiomatic-optional for components.
+declare function useLingui(): { t: (s: string) => string };
+declare function useCurrentSession(): { user: { id: string; name: string }; workspaces: Array<{ id: string; name: string }> };
+
+export default function WorkspaceDashboardPage() {
+  const { t } = useLingui();
+  const { user, workspaces } = useCurrentSession();
+
+  return (
+    <div className="flex flex-col gap-4 p-6">
+      <h1 className="text-2xl font-semibold">{t('My Workspaces')}</h1>
+      <p className="text-sm text-muted-foreground">{user.name}</p>
+      <ul className="space-y-2">
+        {workspaces.map((ws) => (
+          <li key={ws.id} className="rounded-lg border p-3">
+            {ws.name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+
+
+// --- argument-type-mismatch FP: Number(payload[0].value).toLocaleString — type coercion chain ---
+// Number(payload[0].value) converts recharts ValueType to number; .toLocaleString('en-US') formats it.
+declare type ValueType = string | number | Array<string | number>;
+declare type NameType = string | number;
+declare type TooltipPayload = Array<{ name: NameType; value: ValueType }>;
+
+function formatActivityCount(payload: TooltipPayload): string {
+  if (!payload || payload.length === 0) return '0';
+  return Number(payload[0].value).toLocaleString('en-US');
+}
+

@@ -18,3 +18,17 @@ export async function addRecipientsInTransaction(envelopeId: string, emails: str
     });
   });
 }
+
+
+// generateAuditLogPdf({envelope, recipients: envelope.recipients, ...}) FP — generateAuditLogPdf undefined → TS2304 → rule fires
+export async function exportAuditLogPdf_06d170cd(locale: string): Promise<Buffer> {
+  return generateAuditLogPdf({
+    envelope: currentEnvelope,
+    recipients: currentEnvelope.recipients,
+    fields: currentEnvelope.fields,
+    locale,
+    pageWidth: PDF_DIMENSIONS.width,
+    pageHeight: PDF_DIMENSIONS.height,
+  });
+}
+

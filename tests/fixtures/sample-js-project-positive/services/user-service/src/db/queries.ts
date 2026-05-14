@@ -145,3 +145,89 @@ const envelopeSchema = z.object({
   message: z.string().max(255).optional(),
   signerName: z.string().min(1).max(255).optional(),
 });
+
+
+// --- void-return-value FP: Array.pop() returns the removed element, not void ---
+// entries.pop() returns the next cursor item (LogRecord | undefined), used for nextCursor.
+type AuditLogPage<T> = { data: T[]; count: number; currentPage: number; perPage: number; totalPages: number; nextCursor?: string };
+
+type LogRecord = { id: string; action: string; actorEmail: string; createdAt: Date };
+
+declare const dbClient: {
+  auditLog: {
+    findMany(q: object): Promise<LogRecord[]>;
+    count(q: object): Promise<number>;
+  };
+};
+
+export async function paginateAuditLogs(
+  contactId: string,
+  page: number,
+  perPage: number,
+): Promise<AuditLogPage<LogRecord>> {
+  const whereClause = { contactId };
+
+  const [entries, count] = await Promise.all([
+    dbClient.auditLog.findMany({
+      where: whereClause,
+      skip: Math.max(page - 1, 0) * perPage,
+      take: perPage + 1,
+    }),
+    dbClient.auditLog.count({ where: whereClause }),
+  ]);
+
+  let nextCursor: string | undefined;
+
+  if (entries.length > perPage) {
+    const nextItem = entries.pop();
+    nextCursor = nextItem!.id;
+  }
+
+  return {
+    data: entries,
+    count,
+    currentPage: Math.max(page, 1),
+    perPage,
+    totalPages: Math.ceil(count / perPage),
+    nextCursor,
+  };
+}
+
+
+
+// FP: loadedPdf.destroy() is a PDF document lifecycle call, not a database write.
+// The rule must not fire on canvas/PDF library teardown calls.
+declare const pdfjsLib: { getDocument(config: { data: ArrayBuffer }): { promise: Promise<PdfDoc> } };
+interface PdfDoc {
+  numPages: number;
+  destroy(): Promise<void>;
+  getPage(n: number): Promise<{ render(ctx: unknown): { promise: Promise<void> } }>;
+}
+
+export async function renderPdfPreview(
+  pdfData: ArrayBuffer,
+  onReady: (doc: PdfDoc) => void,
+): Promise<void> {
+  let cancelled = false;
+
+  const loadedPdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+
+  if (cancelled) {
+    await loadedPdf.destroy();
+    return;
+  }
+
+  onReady(loadedPdf);
+}
+
+
+
+// FP: two ORM writes to different tables in same function without transaction
+declare const userRepo: { create(data: { email: string; name: string }): Promise<{ id: number }> };
+declare const profileRepo: { create(data: { userId: number; bio: string }): Promise<void> };
+
+export async function createUserWithProfile(email: string, name: string, bio: string): Promise<void> {
+  const user = await userRepo.create({ email, name });
+  await profileRepo.create({ userId: user.id, bio });
+}
+

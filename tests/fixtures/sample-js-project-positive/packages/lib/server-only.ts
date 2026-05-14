@@ -890,3 +890,63 @@ if (!global.__globalCacheStore) {
 }
 
 export const globalCache = global.__globalCacheStore;
+
+
+// FP: $transaction() with Promise.all(map) — standard async transaction, no type mismatch
+interface TxClient {
+  contact: {
+    update: (args: { where: { id: string }; data: { updatedAt: Date } }) => Promise<{ id: string }>;
+  };
+}
+
+declare const prisma19: {
+  $transaction<T>(fn: (tx: TxClient) => Promise<T>): Promise<T>;
+};
+declare const contactsToStamp: Array<{ id: string; email: string }>;
+
+async function stampContactsUpdatedAt() {
+  return await prisma19.$transaction(async (tx) => {
+    return await Promise.all(
+      contactsToStamp.map(async (contact) =>
+        tx.contact.update({
+          where: { id: contact.id },
+          data: { updatedAt: new Date() },
+        }),
+      ),
+    );
+  });
+}
+
+
+
+
+// FP b04ab87bf919: TelemetryClient.heartbeatInterval written in start(), read in stop()
+// The read occurs via instance-qualified access: `if (instance.heartbeatInterval)`
+// inside the static stop() method — the rule missed the instance.field read pattern.
+export class TelemetryClient_b04ab {
+  private static instance_b04ab: TelemetryClient_b04ab | null = null;
+
+  private heartbeatInterval_b04ab: ReturnType<typeof setInterval> | null = null;
+
+  private constructor() {}
+
+  public static async start_b04ab(): Promise<void> {
+    if (TelemetryClient_b04ab.instance_b04ab) return;
+    const inst = new TelemetryClient_b04ab();
+    TelemetryClient_b04ab.instance_b04ab = inst;
+    inst.heartbeatInterval_b04ab = setInterval(() => inst.sendHeartbeat_b04ab(), 60_000);
+  }
+
+  public static stop_b04ab(): void {
+    const instance = TelemetryClient_b04ab.instance_b04ab;
+    if (!instance) return;
+    if (instance.heartbeatInterval_b04ab) {
+      clearInterval(instance.heartbeatInterval_b04ab);
+      instance.heartbeatInterval_b04ab = null;
+    }
+    TelemetryClient_b04ab.instance_b04ab = null;
+  }
+
+  private sendHeartbeat_b04ab(): void { /* no-op */ }
+}
+

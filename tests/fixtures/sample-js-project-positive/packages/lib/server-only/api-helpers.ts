@@ -50,3 +50,40 @@ function handleRouterError(
     errorLogger.error('Router error encountered');
   }
 }
+
+
+// mode = 'edit' is a typed parameter default for a rendering mode discriminant — not a magic string
+type RenderMode = 'preview' | 'edit' | 'readonly';
+
+function renderFieldValue(
+  value: string,
+  fieldType: string,
+  mode: RenderMode = 'edit',
+): string {
+  if (mode === 'readonly') {
+    return value;
+  }
+  if (mode === 'preview') {
+    return value.length > 0 ? value : `[${fieldType}]`;
+  }
+  return value;
+}
+
+
+
+declare const DRAFT_FIELD_PREFIX: string;
+declare const pendingFields: Array<{ id: string; label: string; replaceIndex?: number }>;
+declare const fieldsToCreate: unknown[];
+declare const fieldsToUpdate: unknown[];
+
+function classifyPendingFields() {
+  pendingFields.forEach((field) => {
+    const isDraft = field.id.startsWith(DRAFT_FIELD_PREFIX);
+    if (!isDraft) {
+      fieldsToUpdate.push(field);
+    } else {
+      fieldsToCreate.push(field);
+    }
+  });
+}
+

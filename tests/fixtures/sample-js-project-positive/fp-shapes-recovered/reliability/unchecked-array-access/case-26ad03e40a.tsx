@@ -1,4 +1,4 @@
-// import { RECIPIENT_ROLES_DESCRIPTION } from '@documenso/lib/constants/recipient-roles';
+// import { RECIPIENT_ROLES_DESCRIPTION } from '@app/lib/constants/recipient-roles';
 // import { msg } from '@lingui/core/macro';
 // import { useLingui } from '@lingui/react';
 // import { Trans } from '@lingui/react/macro';
@@ -47,7 +47,7 @@ export const DocumentCreatedFromDirectTemplateEmailTemplate = ({
               {branding.brandingEnabled && branding.brandingLogo ? (
                 <Img src={branding.brandingLogo} alt="Branding Logo" className="mb-4 h-6" />
               ) : (
-                <Img src={getAssetUrl('/static/logo.png')} alt="Documenso Logo" className="mb-4 h-6" />
+                <Img src={getAssetUrl('/static/logo.png')} alt="App Logo" className="mb-4 h-6" />
               )}
 
               <TemplateDocumentImage className="mt-6" assetBaseUrl={assetBaseUrl} />
@@ -65,7 +65,7 @@ export const DocumentCreatedFromDirectTemplateEmailTemplate = ({
 
                 <Section className="my-6 text-center">
                   <Button
-                    className="inline-flex items-center justify-center rounded-lg bg-documenso-500 px-6 py-3 text-center font-medium text-black text-sm no-underline"
+                    className="inline-flex items-center justify-center rounded-lg bg-app-500 px-6 py-3 text-center font-medium text-black text-sm no-underline"
                     href={documentLink}
                   >
                     <Trans>View document</Trans>

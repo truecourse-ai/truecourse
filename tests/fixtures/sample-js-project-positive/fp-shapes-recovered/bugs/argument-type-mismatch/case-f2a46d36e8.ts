@@ -1,4 +1,4 @@
-// import { kyselyPrisma, sql } from '@documenso/prisma';
+// import { kyselyPrisma, sql } from '@app/prisma';
 // import { DateTime } from 'luxon';
 
 // import { addZeroMonth } from '../add-zero-month';

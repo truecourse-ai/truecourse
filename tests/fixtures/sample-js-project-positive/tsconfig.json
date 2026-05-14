@@ -9,7 +9,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "paths": {
-      "@sample/shared-utils": ["./shared/utils/src/index.ts"]
+      "@sample/shared-utils": ["./shared/utils/src/index.ts"],
+      "@app/*": ["./packages/*/src/*", "./packages/*/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"]

@@ -197,3 +197,34 @@ function buildAccessAuthOptions(): Array<{ value: DocumentAccessAuth; label: str
     description: DOCUMENT_ACCESS_AUTH_TYPES[authType].description,
   }));
 }
+
+
+// Dialog with try/catch + toast for async mutation errors — Error Boundaries guard render-time throws, not async handlers
+declare function useDocumentMutation(opts: object): { mutateAsync: (data: { documentId: string; folderId: string | null }) => Promise<void> };
+declare function useNotificationToast(): { notify: (opts: { title: string; description?: string; variant?: string }) => void };
+declare class DocumentAppError { static parseError(err: unknown): { code: string } }
+
+interface DocumentMoveProps {
+  documentId: string;
+  targetFolderId: string | null;
+  onSuccess?: () => void;
+}
+
+export function useDocumentFolderMove({ documentId, targetFolderId, onSuccess }: DocumentMoveProps) {
+  const { notify } = useNotificationToast();
+  const mutation = useDocumentMutation({});
+
+  const handleMove = async () => {
+    try {
+      await mutation.mutateAsync({ documentId, folderId: targetFolderId });
+      notify({ title: 'Document moved', variant: 'default' });
+      onSuccess?.();
+    } catch (err) {
+      const error = DocumentAppError.parseError(err);
+      notify({ title: 'Failed to move document', description: error.code, variant: 'destructive' });
+    }
+  };
+
+  return { handleMove };
+}
+

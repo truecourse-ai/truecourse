@@ -15,3 +15,21 @@ declare global {
     type ClaimFlags = StorageMetadata.ClaimFlags;
   }
 }
+
+
+// type alias inside declare global { namespace PrismaJson } required by prisma-json-types-generator
+declare namespace SubscriptionMeta {
+  interface PlanFlags {
+    tier: string;
+    expiresAt: string | null;
+    addOns: string[];
+  }
+  type BillingFlags = PlanFlags;
+}
+
+declare global {
+  namespace PrismaJson {
+    type BillingFlags = SubscriptionMeta.BillingFlags;
+  }
+}
+

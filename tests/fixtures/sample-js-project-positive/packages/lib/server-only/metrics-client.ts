@@ -28,3 +28,37 @@ export class MetricsClient {
     // flush metrics
   }
 }
+
+
+
+// Positive: unread-private-attribute — heartbeatInterval is written in start() and read in stop().
+// The read occurs through instance-qualified access: `if (instance.heartbeatInterval)` before clearInterval.
+export class TelemetryClient {
+  private static instance: TelemetryClient | null = null;
+
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+  private constructor() {}
+
+  public static async start(): Promise<void> {
+    if (TelemetryClient.instance) return;
+    const inst = new TelemetryClient();
+    TelemetryClient.instance = inst;
+    inst.heartbeatInterval = setInterval(() => inst.sendHeartbeat(), 60_000);
+  }
+
+  public static stop(): void {
+    const instance = TelemetryClient.instance;
+    if (!instance) return;
+    if (instance.heartbeatInterval) {
+      clearInterval(instance.heartbeatInterval);
+      instance.heartbeatInterval = null;
+    }
+    TelemetryClient.instance = null;
+  }
+
+  private sendHeartbeat(): void {
+    // send heartbeat to telemetry endpoint
+  }
+}
+

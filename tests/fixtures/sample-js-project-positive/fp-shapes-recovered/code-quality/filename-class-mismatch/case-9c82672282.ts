@@ -1,21 +1,21 @@
-// import { tsRestHonoApp } from '@documenso/api/hono';
-// import { auth } from '@documenso/auth/server';
-// import { jobsClient } from '@documenso/lib/jobs/client';
-// import { LicenseClient } from '@documenso/lib/server-only/license/license-client';
-// import { createRateLimitMiddleware } from '@documenso/lib/server-only/rate-limit/rate-limit-middleware';
+// import { tsRestHonoApp } from '@app/api/hono';
+// import { auth } from '@app/auth/server';
+// import { jobsClient } from '@app/lib/jobs/client';
+// import { LicenseClient } from '@app/lib/server-only/license/license-client';
+// import { createRateLimitMiddleware } from '@app/lib/server-only/rate-limit/rate-limit-middleware';
 import {
   aiRateLimit,
   apiTrpcRateLimit,
   apiV1RateLimit,
   apiV2RateLimit,
   fileUploadRateLimit,
-} from '@documenso/lib/server-only/rate-limit/rate-limits';
-// import { TelemetryClient } from '@documenso/lib/server-only/telemetry/telemetry-client';
-// import { migrateDeletedAccountServiceAccount } from '@documenso/lib/server-only/user/service-accounts/deleted-account';
-// import { migrateLegacyServiceAccount } from '@documenso/lib/server-only/user/service-accounts/legacy-service-account';
-// import { env } from '@documenso/lib/utils/env';
-// import { logger } from '@documenso/lib/utils/logger';
-// import { openApiDocument } from '@documenso/trpc/server/open-api';
+} from '@app/lib/server-only/rate-limit/rate-limits';
+// import { TelemetryClient } from '@app/lib/server-only/telemetry/telemetry-client';
+// import { migrateDeletedAccountServiceAccount } from '@app/lib/server-only/user/service-accounts/deleted-account';
+// import { migrateLegacyServiceAccount } from '@app/lib/server-only/user/service-accounts/legacy-service-account';
+// import { env } from '@app/lib/utils/env';
+// import { logger } from '@app/lib/utils/logger';
+// import { openApiDocument } from '@app/trpc/server/open-api';
 // import { Hono } from 'hono';
 // import { contextStorage } from 'hono/context-storage';
 // import { cors } from 'hono/cors';

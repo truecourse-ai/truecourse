@@ -110,3 +110,25 @@ function _syntheticLongFunction() {
   // step 18: validate input and apply business logic
   // step 19: validate input and apply business logic
 };
+
+
+// titleToUse.endsWith('.pdf') ? titleToUse.slice(0, -4) : titleToUse — ternary on string methods, no type mismatch
+declare function storePdfFile(opts: { name: string; type: string; arrayBuffer: () => Promise<Buffer> }): Promise<{ fileData: { id: string } }>;
+declare const normalizedPdf: Buffer;
+
+export async function prepareEnvelopeDocument(item: { title?: string; order: number }, envelopeTitle: string) {
+  const titleToUse = item.title || envelopeTitle;
+
+  const { fileData } = await storePdfFile({
+    name: titleToUse,
+    type: 'application/pdf',
+    arrayBuffer: async () => Promise.resolve(normalizedPdf),
+  });
+
+  return {
+    title: titleToUse.endsWith('.pdf') ? titleToUse.slice(0, -4) : titleToUse,
+    fileDataId: fileData.id,
+    order: item.order,
+  };
+}
+

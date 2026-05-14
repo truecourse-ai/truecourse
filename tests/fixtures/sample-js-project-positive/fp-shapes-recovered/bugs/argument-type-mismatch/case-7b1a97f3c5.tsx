@@ -1,9 +1,9 @@
-// import { RECIPIENT_ROLES_DESCRIPTION } from '@documenso/lib/constants/recipient-roles';
-// import type { TDetectedRecipientSchema } from '@documenso/lib/server-only/ai/envelope/detect-recipients/schema';
-// import { Alert, AlertDescription } from '@documenso/ui/primitives/alert';
-// import { AvatarWithText } from '@documenso/ui/primitives/avatar';
-// import { Button } from '@documenso/ui/primitives/button';
-// import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@documenso/ui/primitives/dialog';
+// import { RECIPIENT_ROLES_DESCRIPTION } from '@app/lib/constants/recipient-roles';
+// import type { TDetectedRecipientSchema } from '@app/lib/server-only/ai/envelope/detect-recipients/schema';
+// import { Alert, AlertDescription } from '@app/ui/primitives/alert';
+// import { AvatarWithText } from '@app/ui/primitives/avatar';
+// import { Button } from '@app/ui/primitives/button';
+// import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@app/ui/primitives/dialog';
 // import { msg } from '@lingui/core/macro';
 // import { useLingui } from '@lingui/react';
 // import { Plural, Trans } from '@lingui/react/macro';

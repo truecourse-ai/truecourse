@@ -1,4 +1,4 @@
-// import { prisma } from '@documenso/prisma';
+// import { prisma } from '@app/prisma';
 // import { createCanvas, loadImage } from '@napi-rs/canvas';
 // import { DocumentStatus, type Field, RecipientRole } from '@prisma/client';
 // import { generateObject } from 'ai';

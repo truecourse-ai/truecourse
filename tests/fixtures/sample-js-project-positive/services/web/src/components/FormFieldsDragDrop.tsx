@@ -166,3 +166,99 @@ export const FormFieldsDragDrop = ({
     </div>
   );
 };
+
+
+// --- timing-attack-comparison FP: array length === 0 and .includes() for UI config flags ---
+// annotationModes.length === 0 checks whether the config allows all modes; no secret involved.
+const enum AnnotationMode { DRAW = 'DRAW', TYPE = 'TYPE', STAMP = 'STAMP' }
+
+interface FieldEditorConfig {
+  annotationModes?: AnnotationMode[];
+  externalId?: string;
+  isReadOnly?: boolean;
+}
+
+function deriveAnnotationSettings(config: FieldEditorConfig) {
+  const modes = config.annotationModes ?? [];
+
+  return {
+    drawEnabled: modes.length === 0 || modes.includes(AnnotationMode.DRAW),
+    typedEnabled: modes.length === 0 || modes.includes(AnnotationMode.TYPE),
+    stampEnabled: modes.length === 0 || modes.includes(AnnotationMode.STAMP),
+  };
+}
+
+
+
+// --- magic-number FP: nanoid(12) — well-known ID-length convention parameter ---
+// nanoid(12) generates a 12-character form field ID; the length is a standard convention, not a magic number.
+declare function nanoid2(size: number): string;
+declare const activeFieldType: string;
+declare const dropPageNumber: number;
+declare const dropPageX: number;
+declare const dropPageY: number;
+declare const dropFieldWidth: number;
+declare const dropFieldHeight: number;
+declare const activeContactId: number;
+declare const activeContactEmail: string;
+declare function appendField(field: Record<string, unknown>): void;
+
+function placeFieldOnPage(): void {
+  const field = {
+    formId: nanoid2(12),
+    type: activeFieldType,
+    pageNumber: dropPageNumber,
+    pageX: dropPageX,
+    pageY: dropPageY,
+    pageWidth: dropFieldWidth,
+    pageHeight: dropFieldHeight,
+    recipientId: activeContactId,
+    recipientEmail: activeContactEmail,
+    fieldMeta: undefined,
+  };
+
+  appendField(field);
+}
+
+
+
+// --- magic-number FP: nanoid(12) in field paste handler — well-known ID length convention ---
+// nanoid(12) on paste generates a 12-char form field ID; same convention as field placement.
+declare function nanoid3(size: number): string;
+declare function appendPasted(field: Record<string, unknown>): void;
+declare const clipboardField: Record<string, unknown> | null;
+declare const activeRecipient: { email?: string; id?: number } | null;
+
+function pasteFieldFromClipboard(): void {
+  if (clipboardField) {
+    const copiedField = { ...clipboardField };
+    appendPasted({
+      ...copiedField,
+      nativeId: undefined,
+      formId: nanoid3(12),
+      recipientEmail: activeRecipient?.email ?? copiedField['recipientEmail'],
+      recipientId: activeRecipient?.id ?? copiedField['recipientId'],
+    });
+  }
+}
+
+
+
+// timing-attack-comparison FP: signatureTypes.length === 0 checks whether all signature modes allowed
+// signatureTypes is a UI config array — not a secret/token; timing-safe comparison not needed.
+interface SignatureConfig {
+  signatureTypes?: string[];
+  drawEnabled?: boolean;
+  typeEnabled?: boolean;
+}
+
+function resolveSignatureOptions(config: SignatureConfig) {
+  const signatureTypes = config.signatureTypes ?? [];
+
+  return {
+    drawAllowed: signatureTypes.length === 0 || signatureTypes.includes('DRAW'),
+    typeAllowed: signatureTypes.length === 0 || signatureTypes.includes('TYPE'),
+    uploadAllowed: signatureTypes.length === 0 || signatureTypes.includes('UPLOAD'),
+  };
+}
+

@@ -275,3 +275,12 @@ async function seedTestEnvelopes() {
 }
 
 void seedTestEnvelopes();
+
+
+// magic-string FP: prefixedId('envelope') entity-type prefix string appears 3+ times in seed data
+declare function prefixedId_b003(prefix: string): string;
+const _seedEnvelopeId1 = prefixedId_b003('envelope');
+const _seedEnvelopeId2 = prefixedId_b003('envelope');
+const _seedEnvelopeId3 = prefixedId_b003('envelope');
+export const _seedEnvelopeIds_b003 = [_seedEnvelopeId1, _seedEnvelopeId2, _seedEnvelopeId3];
+

@@ -1,6 +1,6 @@
-// import { kyselyPrisma, prisma, sql } from '@documenso/prisma';
-// import type { DB } from '@documenso/prisma/generated/types';
-// import { ExtendedDocumentStatus } from '@documenso/prisma/types/extended-document-status';
+// import { kyselyPrisma, prisma, sql } from '@app/prisma';
+// import type { DB } from '@app/prisma/generated/types';
+// import { ExtendedDocumentStatus } from '@app/prisma/types/extended-document-status';
 // import type { DocumentSource, Envelope, Team, TeamEmail } from '@prisma/client';
 import {
   DocumentStatus,

@@ -42,3 +42,16 @@ export const collectPublicEnv = (): Record<string, string | undefined> =>
   );
 
 export {};
+
+
+// FP: alias inside declare global { namespace PrismaJson } — required by prisma-json-types-generator
+// to bind JSON column types. Not a stylistic alias.
+declare global {
+  namespace PrismaJson {
+    type ContactAuthOptions = {
+      accessLevel: string | null;
+      actionPermissions: string | null;
+    };
+  }
+}
+

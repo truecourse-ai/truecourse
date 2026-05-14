@@ -15,3 +15,20 @@ async function processEnvelopeSweep() {
   });
   return envelopes;
 }
+
+
+// Promise.allSettled with async map — valid async map of job triggers, no type mismatch
+interface ExpiredAccessToken { id: string; recipientId: string; }
+declare const jobDispatcher: { triggerJob: (opts: { name: string; payload: object }) => Promise<void> };
+
+async function sweepExpiredAccessTokens(tokens: ExpiredAccessToken[]): Promise<void> {
+  await Promise.allSettled(
+    tokens.map(async (token) => {
+      await jobDispatcher.triggerJob({
+        name: 'internal.revoke-expired-token',
+        payload: { tokenId: token.id, recipientId: token.recipientId },
+      });
+    }),
+  );
+}
+

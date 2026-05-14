@@ -114,3 +114,64 @@ export function MultiSelect({
     </Popover>
   );
 }
+
+
+// Shape: enum-exhaustive Record lookup — RecipientRole is an enum; ROLE_LABEL_MAP covers all variants
+const enum RecipientRole { SIGNER = 'SIGNER', APPROVER = 'APPROVER', VIEWER = 'VIEWER' }
+
+const ROLE_LABEL_MAP = {
+  [RecipientRole.SIGNER]: { label: 'Signer', color: 'blue' },
+  [RecipientRole.APPROVER]: { label: 'Approver', color: 'yellow' },
+  [RecipientRole.VIEWER]: { label: 'Viewer', color: 'gray' },
+} satisfies Record<RecipientRole, { label: string; color: string }>;
+
+export function getRecipientRoleLabel(role: RecipientRole): { label: string; color: string } {
+  return ROLE_LABEL_MAP[role];
+}
+
+
+
+// Shape: early `return {}` is a structurally valid empty GroupedOption — TypeScript unifies all branches
+type RecipientOption = { value: string; label: string; [key: string]: unknown };
+type GroupedRecipientOption = { [key: string]: RecipientOption[] };
+
+export function groupRecipientOptions(
+  options: RecipientOption[],
+  groupBy?: string,
+): GroupedRecipientOption {
+  if (options.length === 0) {
+    return {};
+  }
+
+  if (!groupBy) {
+    return { '': options };
+  }
+
+  const grouped: GroupedRecipientOption = {};
+
+  for (const option of options) {
+    const key = (option[groupBy] as string) ?? '';
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(option);
+  }
+
+  return grouped;
+}
+
+
+
+// Shape: rowSelection is Record<string,boolean>; Object.keys only yields keys that exist in the object,
+// so rowSelection[id] for every id is a guaranteed defined boolean — no out-of-bounds risk
+export function getSelectedEnvelopeIds(rowSelection: Record<string, boolean>): string[] {
+  return Object.keys(rowSelection).filter((id) => rowSelection[id]);
+}
+
+export function computeSelectedSignerIds(
+  rowSelection: Record<string, boolean>,
+  allSignerIds: string[],
+): string[] {
+  return allSignerIds.filter((id) => rowSelection[id] === true);
+}
+

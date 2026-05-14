@@ -45,3 +45,30 @@ function buildClaimsColumns(): ColumnDef[] {
     },
   ];
 }
+
+
+// i18n.date() receiving a Date value — types match, no argument-type-mismatch
+declare const i18n: { date: (value: Date, opts?: Intl.DateTimeFormatOptions) => string };
+
+interface ClaimRow {
+  original: { createdAt: Date; planId: string; teamName: string };
+}
+
+const subscriptionClaimsColumns = [
+  {
+    id: 'createdAt',
+    header: 'Created At',
+    cell: ({ row }: { row: ClaimRow }) => i18n.date(row.original.createdAt),
+  },
+  {
+    id: 'planId',
+    header: 'Plan',
+    cell: ({ row }: { row: ClaimRow }) => row.original.planId,
+  },
+  {
+    id: 'teamName',
+    header: 'Team',
+    cell: ({ row }: { row: ClaimRow }) => row.original.teamName,
+  },
+];
+

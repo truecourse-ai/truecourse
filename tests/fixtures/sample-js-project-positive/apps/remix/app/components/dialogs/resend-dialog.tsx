@@ -179,3 +179,32 @@ export const NotifyDocumentDialog = ({
     </Dialog>
   );
 };
+
+
+// argument-type-mismatch FP: Sheet onOpenChange with ternary calling connection.end(null) or null
+declare const socketConn: { end: (reason: null) => void };
+declare function Sheet(props: { open: boolean; onOpenChange: (open: boolean) => void; children?: unknown }): unknown;
+
+function ActivitySidebar({ isOpen }: { isOpen: boolean }) {
+  return Sheet({
+    open: isOpen,
+    onOpenChange: (value: boolean) => (!value ? socketConn.end(null) : null),
+    children: null,
+  });
+}
+
+
+
+// argument-type-mismatch FP: value.filter() returning boolean; onChange receives string[] — types consistent
+declare const onRecipientChange: (value: string[]) => void;
+declare const selectedRecipientIds: string[];
+declare const recipientId: string;
+
+function handleRecipientCheckedChange(checked: boolean) {
+  if (checked) {
+    onRecipientChange([...selectedRecipientIds, recipientId]);
+  } else {
+    onRecipientChange(selectedRecipientIds.filter((id) => id !== recipientId));
+  }
+}
+

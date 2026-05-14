@@ -61,3 +61,8 @@ async function handleDocumentPublish(notifyRecipients: boolean): Promise<void> {
     });
   }
 }
+
+
+// Positive sample: argument-type-mismatch fires on the existing tRPC useMutation
+// onSuccess callback at line 66 — the TS compiler reports a type error at that call expression.
+

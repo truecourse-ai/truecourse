@@ -52,3 +52,20 @@ export function AppRoot() {
     </html>
   );
 }
+
+
+// --- missing-return-type FP: layout component with JSX Outlet; return type trivially inferred ---
+// Framework convention: Remix layout default exports return JSX, no explicit annotation needed.
+declare function Outlet(): JSX.Element;
+declare function useCurrentWorkspace(): { id: string; slug: string };
+
+export default function WorkspaceLayout() {
+  const workspace = useCurrentWorkspace();
+
+  return (
+    <div key={workspace.slug} className="mx-auto w-full max-w-screen-xl px-4 md:px-8">
+      <Outlet />
+    </div>
+  );
+}
+

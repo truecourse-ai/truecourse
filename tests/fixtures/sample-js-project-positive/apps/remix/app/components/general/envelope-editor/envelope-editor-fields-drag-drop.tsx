@@ -1,17 +1,17 @@
-// import { getBoundingClientRect } from '@documenso/lib/client-only/get-bounding-client-rect';
-// import { useDocumentElement } from '@documenso/lib/client-only/hooks/use-document-element';
-// import { useCurrentEnvelopeEditor } from '@documenso/lib/client-only/providers/envelope-editor-provider';
-// import { PDF_VIEWER_PAGE_SELECTOR } from '@documenso/lib/constants/pdf-viewer';
-// import { FIELD_META_DEFAULT_VALUES } from '@documenso/lib/types/field-meta';
-// import { nanoid } from '@documenso/lib/universal/id';
-// import { canRecipientFieldsBeModified } from '@documenso/lib/utils/recipients';
-// import { SignatureIcon } from '@documenso/ui/icons/signature';
-// import { getRecipientColorStyles } from '@documenso/ui/lib/recipient-colors';
-// import { cn } from '@documenso/ui/lib/utils';
-// import { FRIENDLY_FIELD_TYPE } from '@documenso/ui/primitives/document-flow/types';
-// import { msg } from '@lingui/core/macro';
-// import { useLingui } from '@lingui/react/macro';
-// import { FieldType } from '@prisma/client';
+import { getBoundingClientRect } from '@app/lib/client-only/get-bounding-client-rect';
+import { useDocumentElement } from '@app/lib/client-only/hooks/use-document-element';
+import { useCurrentEnvelopeEditor } from '@app/lib/client-only/providers/envelope-editor-provider';
+import { PDF_VIEWER_PAGE_SELECTOR } from '@app/lib/constants/pdf-viewer';
+import { FIELD_META_DEFAULT_VALUES } from '@app/lib/types/field-meta';
+import { nanoid } from '@app/lib/universal/id';
+import { canRecipientFieldsBeModified } from '@app/lib/utils/recipients';
+import { SignatureIcon } from '@app/ui/icons/signature';
+import { getRecipientColorStyles } from '@app/ui/lib/recipient-colors';
+import { cn } from '@app/ui/lib/utils';
+import { FRIENDLY_FIELD_TYPE } from '@app/ui/primitives/document-flow/types';
+import { msg } from '@lingui/core/macro';
+import { useLingui } from '@lingui/react/macro';
+import { FieldType } from '@prisma/client';
 import {
   CalendarIcon,
   CheckSquareIcon,
@@ -23,7 +23,7 @@ import {
   TextIcon,
   UserIcon,
 } from 'lucide-react';
-// import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const MIN_HEIGHT_PX = 12;
 const MIN_WIDTH_PX = 36;

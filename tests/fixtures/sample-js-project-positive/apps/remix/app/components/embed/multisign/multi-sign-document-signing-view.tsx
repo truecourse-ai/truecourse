@@ -104,3 +104,32 @@ export function MultiSignDocumentSigningView({
     </div>
   );
 }
+
+
+// Non-route view component rendered inside a layout route that exports an ErrorBoundary.
+// Error boundary coverage comes from the parent layout — this component need not repeat one.
+declare function useContractSigningData(opts: { sessionId: string }): { contract: { id: string; title: string } | null; isLoading: boolean };
+
+export function ContractSigningProgressView({ sessionId }: { sessionId: string }) {
+  const { contract, isLoading } = useContractSigningData({ sessionId });
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center py-12">Loading&hellip;</div>;
+  }
+
+  if (!contract) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold">{contract.title}</h2>
+    </div>
+  );
+}
+
+
+
+// Positive sample: missing-error-boundary fires on this file.
+// The file uses trpc .useQuery() but has no ErrorBoundary.
+

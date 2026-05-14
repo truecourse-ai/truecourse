@@ -43,3 +43,20 @@ declare const crypto: { randomBytes(size: number): Buffer };
 function generateAccountLinkToken(): string {
   return crypto.randomBytes(20).toString('hex');
 }
+
+
+// magic-string FP: 'base64' and 'utf-8' are Node.js Buffer encoding constants, not magic strings
+declare function getEnvCertContents(): string | undefined;
+
+function decodeCertificateContents(encodedContents: string): string {
+  return Buffer.from(encodedContents, 'base64').toString('utf-8');
+}
+
+export function loadCertificatePemFromEnv(): string | null {
+  const encodedContents = getEnvCertContents();
+  if (!encodedContents) {
+    return null;
+  }
+  return decodeCertificateContents(encodedContents);
+}
+

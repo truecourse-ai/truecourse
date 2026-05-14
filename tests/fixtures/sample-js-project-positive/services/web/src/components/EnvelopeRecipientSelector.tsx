@@ -147,3 +147,23 @@ export const EnvelopeRecipientSelector = ({
     </div>
   );
 };
+
+
+
+// Positive: mixed-type-imports — inline `type` modifier (TS 4.5+) mixes value and type specifiers
+// in a single import statement. This is valid, idiomatic TypeScript with verbatimModuleSyntax.
+declare function createMultiSelect<T>(options: T[]): { value: T | null; select: (v: T) => void };
+declare function formatRecipientLabel(r: { email: string; displayName: string }): string;
+
+// import { createMultiSelect, type RecipientOption } from '@app/ui/primitives/multi-select';
+// The inline type modifier is the recommended pattern — mixing value and inline-type in one statement.
+type RecipientOption = { id: string; email: string; displayName: string };
+
+export function buildRecipientSelector(recipients: RecipientOption[]) {
+  const select = createMultiSelect(recipients);
+  return {
+    ...select,
+    label: select.value ? formatRecipientLabel(select.value) : '',
+  };
+}
+

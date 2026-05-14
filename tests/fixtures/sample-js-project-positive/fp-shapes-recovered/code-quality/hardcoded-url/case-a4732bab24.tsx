@@ -1,25 +1,25 @@
-// import { useCurrentOrganisation } from '@documenso/lib/client-only/providers/organisation';
-// import { ORGANISATION_MEMBER_ROLE_HIERARCHY } from '@documenso/lib/constants/organisations';
-// import { ORGANISATION_MEMBER_ROLE_MAP } from '@documenso/lib/constants/organisations-translations';
+// import { useCurrentOrganisation } from '@app/lib/client-only/providers/organisation';
+// import { ORGANISATION_MEMBER_ROLE_HIERARCHY } from '@app/lib/constants/organisations';
+// import { ORGANISATION_MEMBER_ROLE_MAP } from '@app/lib/constants/organisations-translations';
 import {
   formatOrganisationCallbackUrl,
   formatOrganisationLoginUrl,
-} from '@documenso/lib/utils/organisation-authentication-portal';
-// import { trpc } from '@documenso/trpc/react';
-// import { domainRegex } from '@documenso/trpc/server/enterprise-router/create-organisation-email-domain.types';
-// import type { TGetOrganisationAuthenticationPortalResponse } from '@documenso/trpc/server/enterprise-router/get-organisation-authentication-portal.types';
-// import { ZUpdateOrganisationAuthenticationPortalRequestSchema } from '@documenso/trpc/server/enterprise-router/update-organisation-authentication-portal.types';
-// import { CopyTextButton } from '@documenso/ui/components/common/copy-text-button';
-// import { Alert, AlertDescription } from '@documenso/ui/primitives/alert';
-// import { Button } from '@documenso/ui/primitives/button';
-// import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@documenso/ui/primitives/form/form';
-// import { Input } from '@documenso/ui/primitives/input';
-// import { Label } from '@documenso/ui/primitives/label';
-// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@documenso/ui/primitives/select';
-// import { SpinnerBox } from '@documenso/ui/primitives/spinner';
-// import { Switch } from '@documenso/ui/primitives/switch';
-// import { Textarea } from '@documenso/ui/primitives/textarea';
-// import { useToast } from '@documenso/ui/primitives/use-toast';
+} from '@app/lib/utils/organisation-authentication-portal';
+// import { trpc } from '@app/trpc/react';
+// import { domainRegex } from '@app/trpc/server/enterprise-router/create-organisation-email-domain.types';
+// import type { TGetOrganisationAuthenticationPortalResponse } from '@app/trpc/server/enterprise-router/get-organisation-authentication-portal.types';
+// import { ZUpdateOrganisationAuthenticationPortalRequestSchema } from '@app/trpc/server/enterprise-router/update-organisation-authentication-portal.types';
+// import { CopyTextButton } from '@app/ui/components/common/copy-text-button';
+// import { Alert, AlertDescription } from '@app/ui/primitives/alert';
+// import { Button } from '@app/ui/primitives/button';
+// import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@app/ui/primitives/form/form';
+// import { Input } from '@app/ui/primitives/input';
+// import { Label } from '@app/ui/primitives/label';
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@app/ui/primitives/select';
+// import { SpinnerBox } from '@app/ui/primitives/spinner';
+// import { Switch } from '@app/ui/primitives/switch';
+// import { Textarea } from '@app/ui/primitives/textarea';
+// import { useToast } from '@app/ui/primitives/use-toast';
 // import { zodResolver } from '@hookform/resolvers/zod';
 // import { msg } from '@lingui/core/macro';
 // import { Trans, useLingui } from '@lingui/react/macro';

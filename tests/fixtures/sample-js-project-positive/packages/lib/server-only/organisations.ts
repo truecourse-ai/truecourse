@@ -100,3 +100,33 @@ async function createOrganisationGroup(opts: { orgId: string; name: string; orgR
     return group;
   });
 }
+
+
+// enum-exhaustive-record-lookup: MAP[key] where key is typed keyof typeof MAP, MAP uses satisfies
+type WorkspaceRole = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+
+const WORKSPACE_ROLE_PERMISSIONS_MAP = {
+  OWNER: ['invite', 'remove', 'billing', 'settings', 'delete'] as string[],
+  ADMIN: ['invite', 'remove', 'settings'] as string[],
+  MEMBER: ['invite'] as string[],
+  VIEWER: [] as string[],
+} satisfies Record<WorkspaceRole, string[]>;
+
+const WORKSPACE_ROLE_LABEL_MAP = {
+  OWNER: 'Owner',
+  ADMIN: 'Administrator',
+  MEMBER: 'Member',
+  VIEWER: 'Viewer',
+} satisfies Record<WorkspaceRole, string>;
+
+export function getWorkspaceRoleLabel(role: keyof typeof WORKSPACE_ROLE_LABEL_MAP): string {
+  return WORKSPACE_ROLE_LABEL_MAP[role];
+}
+
+export function workspaceRoleHasPermission(
+  role: keyof typeof WORKSPACE_ROLE_PERMISSIONS_MAP,
+  permission: string,
+): boolean {
+  return WORKSPACE_ROLE_PERMISSIONS_MAP[role].includes(permission);
+}
+

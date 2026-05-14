@@ -2,7 +2,7 @@
 
 // import { source } from '@/lib/source';
 
-const BASE_URL = 'https://docs.documenso.com';
+const BASE_URL = 'https://docs.app.example.com';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [

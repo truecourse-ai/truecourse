@@ -1,12 +1,12 @@
 import {
   EnvelopeRenderProvider,
   useCurrentEnvelopeRender,
-} from '@documenso/lib/client-only/providers/envelope-render-provider';
-// import { PDF_VIEWER_ERROR_MESSAGES } from '@documenso/lib/constants/pdf-viewer-i18n';
-// import { getDocumentDataUrlForPdfViewer } from '@documenso/lib/utils/envelope-download';
-// import { formatDocumentsPath } from '@documenso/lib/utils/teams';
-// import { trpc } from '@documenso/trpc/react';
-// import { Button } from '@documenso/ui/primitives/button';
+} from '@app/lib/client-only/providers/envelope-render-provider';
+// import { PDF_VIEWER_ERROR_MESSAGES } from '@app/lib/constants/pdf-viewer-i18n';
+// import { getDocumentDataUrlForPdfViewer } from '@app/lib/utils/envelope-download';
+// import { formatDocumentsPath } from '@app/lib/utils/teams';
+// import { trpc } from '@app/trpc/react';
+// import { Button } from '@app/ui/primitives/button';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@documenso/ui/primitives/dialog';
+} from '@app/ui/primitives/dialog';
 // import { Trans } from '@lingui/react/macro';
 // import { type DocumentData, DocumentStatus, type EnvelopeItem, EnvelopeType } from '@prisma/client';
 // import { DownloadIcon } from 'lucide-react';
@@ -76,7 +76,7 @@ export const DocumentCertificateQRView = ({
 
               <DialogDescription>
                 <Trans>
-                  This document is available in your Documenso account. You can view more details, recipients, and audit
+                  This document is available in your App account. You can view more details, recipients, and audit
                   logs there.
                 </Trans>
               </DialogDescription>

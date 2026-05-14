@@ -31,3 +31,23 @@ const validateTwoFactorToken = async ({
 
   return false;
 };
+
+
+// Promise.all with two overloaded render calls in parallel — valid, no type mismatch
+declare function renderNotificationEmail(
+  template: { subject: string; bodyHtml: string },
+  opts: { locale: string; plainText?: boolean },
+): Promise<string>;
+
+declare const tokenExpiredTemplate: { subject: string; bodyHtml: string };
+declare const renderOpts: { locale: string };
+
+async function renderTokenExpiredEmailVariants() {
+  const [htmlBody, plainBody] = await Promise.all([
+    renderNotificationEmail(tokenExpiredTemplate, renderOpts),
+    renderNotificationEmail(tokenExpiredTemplate, { ...renderOpts, plainText: true }),
+  ]);
+
+  return { html: htmlBody, plain: plainBody };
+}
+

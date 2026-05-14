@@ -48,3 +48,38 @@ function AnalyticsInit() {
 
   return null;
 }
+
+
+// argument-type-mismatch FP: hydrateRoot(document, <JSX>) — document is valid container, JSX element is valid React node
+declare function hydrateRoot(container: Document | Element, ui: unknown): { unmount: () => void };
+declare const StrictModeApp: unknown;
+
+hydrateRoot(document, StrictModeApp);
+
+
+
+// argument-type-mismatch FP: startTransition(() => { hydrateRoot(...) }) — startTransition takes void callback
+declare function startTransition(callback: () => void): void;
+declare function hydrateRootClient(container: Element, ui: unknown): void;
+declare const rootContainer: Element;
+declare const appComponent: unknown;
+
+startTransition(() => {
+  hydrateRootClient(rootContainer, appComponent);
+});
+
+
+
+// FP: initRemixClient expects mountNode: Element but document (Document) is passed
+declare function initRemixClient(mountNode: Element, config: { ssr: boolean }): void;
+
+initRemixClient(document, { ssr: true });
+
+
+
+// FP: hydrateRemixApp expects rootId: number but receives string from env variable
+declare function hydrateRemixApp(rootId: number, opts: { strict: boolean }): void;
+declare const ROOT_ELEMENT_ID: string;
+
+hydrateRemixApp(ROOT_ELEMENT_ID, { strict: true });
+

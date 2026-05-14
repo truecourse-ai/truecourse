@@ -17,3 +17,22 @@ async function applyFormValuesToDocument(
     arrayBuffer: async () => Promise.resolve(prefilled),
   });
 }
+
+
+// argument-type-mismatch FP: array.find() with optional chaining to extract a property — valid, no type mismatch
+type UploadedFile = { name: string; documentDataId: string };
+type FileMapping = { identifier: string | number | undefined };
+
+export function resolveDocumentDataId(
+  uploadedFiles: UploadedFile[],
+  mapping: FileMapping,
+): string | undefined {
+  if (typeof mapping.identifier === 'string') {
+    return uploadedFiles.find((file) => file.name === mapping.identifier)?.documentDataId;
+  }
+  if (typeof mapping.identifier === 'number') {
+    return uploadedFiles.at(mapping.identifier)?.documentDataId;
+  }
+  return uploadedFiles.at(0)?.documentDataId;
+}
+

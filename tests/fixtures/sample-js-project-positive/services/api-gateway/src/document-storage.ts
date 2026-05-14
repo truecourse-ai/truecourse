@@ -14,3 +14,22 @@ async function storeDocumentPdf(name: string, pdfBytes: Uint8Array): Promise<str
   });
   return result.url;
 }
+
+
+// Function call with object arg containing name, type, and arrayBuffer — correct property types
+declare function putFileToStorage(opts: {
+  name: string;
+  type: string;
+  arrayBuffer: () => Promise<ArrayBuffer>;
+}): Promise<{ fileId: string; url: string }>;
+
+declare const uploadedFile: { name: string; arrayBuffer: () => Promise<ArrayBuffer> };
+
+export async function storeUploadedPdf(): Promise<{ fileId: string; url: string }> {
+  return putFileToStorage({
+    name: uploadedFile.name,
+    type: 'application/pdf',
+    arrayBuffer: async () => uploadedFile.arrayBuffer(),
+  });
+}
+

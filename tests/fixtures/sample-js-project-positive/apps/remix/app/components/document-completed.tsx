@@ -74,3 +74,17 @@ export function ResourceListSnippet() {
     </div>
   );
 }
+
+
+// Non-route component using useQuery — root boundary covers all cascade errors
+declare function useQuery<T>(opts: { queryKey: unknown[]; enabled?: boolean }): { data: T | undefined; isLoading: boolean };
+
+type InvoiceRow = { id: string; amount: number; status: string; date: string };
+
+export function OrgInvoicesPanel({ orgId }: { orgId: string }) {
+  const { data, isLoading } = useQuery<{ items: InvoiceRow[] }>({ queryKey: ['invoices', orgId], enabled: Boolean(orgId) });
+  const items = data?.items ?? [];
+  if (isLoading) return null;
+  return <ul>{items.map((inv) => <li key={inv.id}>{inv.date} — {inv.amount}</li>)}</ul>;
+}
+

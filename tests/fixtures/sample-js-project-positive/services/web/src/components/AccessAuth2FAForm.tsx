@@ -182,3 +182,29 @@ export const AccessAuth2FAForm = ({
     </Form>
   );
 };
+
+
+// --- argument-type-mismatch FP: getAssetUrl() returns string; Img src accepts string ---
+// getAssetUrl('/static/logo.png') returns a valid string URL — no type mismatch with src prop.
+declare function getAssetUrl2(path: string): string;
+declare function Img(props: { src: string; alt: string; className?: string }): JSX.Element;
+declare const orgBrandingLogo: string | null;
+declare const orgBrandingEnabled: boolean;
+
+function renderOrgLogo(): JSX.Element {
+  if (orgBrandingEnabled && orgBrandingLogo) {
+    return <Img src={orgBrandingLogo} alt="Organisation Logo" className="mb-4 h-6" />;
+  }
+
+  return <Img src={getAssetUrl2('/static/app-logo.png')} alt="App Logo" className="mb-4 h-6" />;
+}
+
+
+
+// argument-type-mismatch: passes number where string expected — genuine TS2345
+function formatOtpCode(code: string, groupSize: number): string {
+  return code.match(new RegExp(`.{1,${groupSize}}`, 'g'))?.join('-') ?? code;
+}
+// TS2345: Argument of type 'boolean' is not assignable to parameter of type 'string'
+const _otpFormatted = formatOtpCode(true, 3);
+

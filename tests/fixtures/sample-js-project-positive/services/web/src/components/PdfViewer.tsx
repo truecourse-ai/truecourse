@@ -27,3 +27,49 @@ export function PdfViewer({ className, src, pageCount }: PdfViewerProps): JSX.El
     </div>
   );
 }
+
+
+// FP shape: virtualItems produced by useVirtualizer with count=pages.length;
+// virtualItem.index is guaranteed 0..pages.length-1. Bounded by construction.
+declare type PageMeta = { width: number; height: number; pageNumber: number };
+declare type VirtualItem = { index: number; key: string | number; size: number; start: number };
+declare function useVirtualizer(opts: { count: number; getScrollElement: () => Element | null; estimateSize: () => number }): { getVirtualItems(): VirtualItem[]; getTotalSize(): number };
+declare function useRef<T>(init: T | null): { current: T | null };
+
+function VirtualPdfViewer({ pages }: { pages: PageMeta[] }): JSX.Element {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: pages.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 1000,
+  });
+
+  const items = virtualizer.getVirtualItems().map((virtualItem) => {
+    const page = pages[virtualItem.index];
+    return (
+      <div
+        key={virtualItem.key}
+        style={{ height: virtualItem.size, transform: `translateY(${virtualItem.start}px)` }}
+        data-page={page.pageNumber}
+      />
+    );
+  });
+
+  return <div ref={parentRef} style={{ height: '100vh', overflow: 'auto' }}>{items}</div>;
+}
+
+
+
+// FP shape: virtualItems produced by virtualizer with count=pages.length; index bounded by construction
+type PageInfo = { width: number; height: number; pageNumber: number };
+
+function renderVirtualizedPages(pages: PageInfo[], virtualIndices: number[]): string[] {
+  const results: string[] = [];
+  for (let i = 0; i < virtualIndices.length; i++) {
+    const idx = virtualIndices[i];
+    const page = pages[idx];
+    results.push(`page-${page.pageNumber}`);
+  }
+  return results;
+}
+

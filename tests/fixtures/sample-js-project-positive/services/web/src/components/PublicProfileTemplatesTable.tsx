@@ -87,3 +87,26 @@ export function PublicProfileTemplatesTable({ profileSlug }: PublicProfileTempla
     />
   );
 }
+
+
+// templates.map() rendering TableRow components — standard JSX list rendering, no type mismatch
+interface PublicTemplate {
+  id: string;
+  title: string;
+  description: string;
+  slug: string;
+}
+
+declare const publicTemplates: PublicTemplate[];
+declare function TableRow(props: { key: string; children?: unknown }): JSX.Element;
+declare function TableCell(props: { className?: string; children?: unknown }): JSX.Element;
+
+function renderTemplateRows() {
+  return publicTemplates.map((template) => (
+    <TableRow key={template.id}>
+      <TableCell className="font-medium">{template.title}</TableCell>
+      <TableCell className="text-muted-foreground">{template.description}</TableCell>
+    </TableRow>
+  ));
+}
+

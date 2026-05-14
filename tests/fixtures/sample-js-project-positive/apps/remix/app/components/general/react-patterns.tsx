@@ -274,3 +274,15 @@ const DeclineInviteButton = ({ token }: { token: string }) => {
     </ActionButton>
   );
 };
+
+
+// React Query useQuery does NOT throw during render by default — it returns isLoadingError state.
+// Error is handled via isLoadingError prop on the table; no ErrorBoundary is needed here.
+declare function useQuery5(opts: object): { data: { items: object[]; totalCount: number } | undefined; isLoadingError: boolean };
+declare function DataTable5(props: { data: object[]; isLoadingError: boolean }): JSX.Element;
+
+export function AuditLogTable({ page }: { page: number }) {
+  const { data, isLoadingError } = useQuery5({ queryKey: ['audit-logs', page] });
+  return <DataTable5 data={data?.items ?? []} isLoadingError={isLoadingError} />;
+}
+

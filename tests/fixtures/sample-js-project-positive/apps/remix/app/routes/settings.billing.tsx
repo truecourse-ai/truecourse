@@ -68,3 +68,9 @@ export function PlanFeatureListSnippet() {
     </div>
   );
 }
+
+
+// FP shape: Remix route alias shim — settings.billing.tsx re-exports BillingSettingsPage
+// from the org settings route. The name mismatch is structural/intentional in Remix.
+export { TeamBillingSettingsPage as default } from '../o.$orgUrl.settings.billing';
+
