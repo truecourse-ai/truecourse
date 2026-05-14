@@ -138,6 +138,45 @@ describe('CLI analyze pipeline (e2e)', () => {
     const fresh = getProjectBySlug(project.slug);
     expect(fresh?.lastAnalyzed).toBeTruthy();
   }, 120_000);
+
+  it('threads spec compliance options through analyze and returns stable JSON-compatible data', async () => {
+    fs.mkdirSync(path.join(workDir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(workDir, 'docs', 'openapi.yaml'), [
+      'openapi: 3.0.0',
+      'paths:',
+      '  /definitely-missing:',
+      '    get:',
+      '      summary: Missing route',
+      '      responses:',
+      '        "200":',
+      '          description: OK',
+    ].join('\n'));
+
+    const result = await analyzeInProcess(project, {
+      enableLlmRulesOverride: false,
+      skipStash: true,
+      specCompliance: true,
+      specs: ['docs/openapi.yaml'],
+      showSatisfied: true,
+      noLlm: true,
+    });
+
+    expect(result.specCompliance).toMatchObject({
+      enabled: true,
+      summary: {
+        requirements: 1,
+        results: 1,
+        byStatus: expect.objectContaining({ missing: 1 }),
+      },
+    });
+    expect(JSON.parse(JSON.stringify({
+      serviceCount: result.serviceCount,
+      fileCount: result.fileCount,
+      architecture: result.architecture,
+      violationsSummary: result.violationsSummary,
+      specCompliance: result.specCompliance,
+    }))).toBeTruthy();
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------

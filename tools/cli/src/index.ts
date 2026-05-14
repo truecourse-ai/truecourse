@@ -107,16 +107,31 @@ program
   .option("--no-llm", "Skip LLM-powered rules for this run")
   .option("--stash", "Pre-approve stashing pending changes before analysis")
   .option("--no-stash", "Analyze the working tree as-is without stashing")
+  .option("--spec-compliance", "Run spec compliance checks")
+  .option("--specs <globs>", "Comma-separated spec include globs")
+  .option("--show-satisfied", "Include satisfied spec compliance results")
+  .option("--output <format>", "Output format: text or json", "text")
   .option("--install-skills", "Install Claude Code skills without prompting")
   .option("--no-skills", "Skip the Claude Code skills prompt")
   .action(async (options) => {
     const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
     const stash: boolean | undefined = typeof options.stash === "boolean" ? options.stash : undefined;
     const installSkills = resolveInstallSkills(options);
+    const specs = typeof options.specs === "string"
+      ? options.specs.split(",").map((s: string) => s.trim()).filter(Boolean)
+      : undefined;
     if (options.diff) {
       await runAnalyzeDiff({ llm, stash, installSkills });
     } else {
-      await runAnalyze({ llm, stash, installSkills });
+      await runAnalyze({
+        llm,
+        stash,
+        installSkills,
+        specCompliance: options.specCompliance,
+        specs,
+        showSatisfied: options.showSatisfied,
+        output: options.output === "json" ? "json" : "text",
+      });
     }
   });
 

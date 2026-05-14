@@ -138,6 +138,10 @@ export interface AnalyzeOptions {
   stash?: boolean;
   /** Force-install / force-skip the Claude Code skills first-run prompt. */
   installSkills?: boolean;
+  specCompliance?: boolean;
+  specs?: string[];
+  showSatisfied?: boolean;
+  output?: "text" | "json";
 }
 
 /** Resolve the per-run `enableLlmRules` decision from flag + config + TTY state. */
@@ -225,17 +229,20 @@ export async function resolveStashDecision(
 }
 
 export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
-  p.intro("Analyzing repository");
+  const jsonOutput = options.output === "json";
+  if (!jsonOutput) p.intro("Analyzing repository");
   ensureClaudeCli();
-  showFirstRunNotice();
+  if (!jsonOutput) showFirstRunNotice();
 
   const project = resolveOrInitProject();
-  p.log.step(`Repository: ${project.name}`);
+  if (!jsonOutput) p.log.step(`Repository: ${project.name}`);
 
   // First-time setup convenience: offer to install Claude Code skills if
   // they haven't been installed for this repo yet. `--install-skills` /
   // `--no-skills` bypasses the prompt; non-interactive runs skip silently.
-  await promptInstallSkills(project.path, { install: options.installSkills });
+  if (!jsonOutput) {
+    await promptInstallSkills(project.path, { install: options.installSkills });
+  }
 
   // All internal pipeline logs (`[Pipeline]`, `[LLM]`, `[CLI]`, `[Analyzer]`,
   // `[Flows]`, `[Violations]`) go to this repo's analyze.log. The terminal
@@ -266,7 +273,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
 
   const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
   const tracker = new StepTracker((payload) => {
-    if (payload.steps) renderSteps(payload.steps);
+    if (!jsonOutput && payload.steps) renderSteps(payload.steps);
   }, stepDefs);
 
   const abortController = new AbortController();
@@ -292,6 +299,10 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
       skipStash: stashDecision.skipStash,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
+      specCompliance: options.specCompliance,
+      specs: options.specs,
+      showSatisfied: options.showSatisfied,
+      noLlm: !enableLlmRules,
       source: "cli",
       onLlmEstimate: async (estimate) => {
         stopSpinner();
@@ -306,16 +317,30 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     });
 
     stopSpinner();
+    if (jsonOutput) {
+      process.stdout.write(`${JSON.stringify({
+        serviceCount: result.serviceCount,
+        fileCount: result.fileCount,
+        architecture: result.architecture,
+        violationsSummary: result.violationsSummary,
+        ...(result.specCompliance ? { specCompliance: result.specCompliance } : {}),
+      }, null, 2)}\n`);
+      return;
+    }
     p.log.success("Analysis complete");
     renderViolationsSummary([], result.violationsSummary);
     p.outro("Analysis complete — view results with: truecourse dashboard");
   } catch (err) {
     stopSpinner();
     if (err instanceof DOMException && err.name === "AbortError") {
-      p.outro("Analysis cancelled");
+      if (!jsonOutput) p.outro("Analysis cancelled");
       process.exit(130);
     }
-    p.log.error(err instanceof Error ? err.message : String(err));
+    if (jsonOutput) {
+      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    } else {
+      p.log.error(err instanceof Error ? err.message : String(err));
+    }
     process.exit(1);
   } finally {
     process.removeListener("SIGINT", onSigint);

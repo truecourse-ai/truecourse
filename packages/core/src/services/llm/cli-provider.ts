@@ -33,6 +33,10 @@ import {
   CodeViolationLifecycleOutputSchema,
   FlowEnrichmentOutputSchema,
 } from './schemas.js';
+import {
+  ProseRequirementExtractionOutputSchema,
+  type ProseRequirementExtractionInput,
+} from '../spec-requirement-extraction.service.js';
 import type { UsageData } from '../usage.service.js';
 import type {
   LLMProvider,
@@ -81,6 +85,10 @@ export abstract class BaseCLIProvider implements LLMProvider {
   abstract get binaryName(): string;
   abstract get baseArgs(): string[];
   abstract get modelFlag(): string[];
+
+  get model(): string {
+    return config.claudeCodeModel || 'default';
+  }
 
   private maxRetries = config.claudeCodeMaxRetries ?? 2;
   private limit: LimitFunction = pLimit(config.claudeCodeMaxConcurrency);
@@ -802,6 +810,20 @@ export abstract class BaseCLIProvider implements LLMProvider {
       resolvedViolationIds: allResolved.length > 0 ? allResolved : undefined,
       unchangedViolationIds: allUnchanged.length > 0 ? allUnchanged : undefined,
     };
+  }
+
+  async extractProseRequirements(input: ProseRequirementExtractionInput): Promise<unknown> {
+    log.info(`[CLI] Spec requirement extraction call starting for ${input.sourceFile}:${input.sourceRange.startLine}-${input.sourceRange.endLine}...`);
+    const t0 = Date.now();
+    const { data: object, usage: cliUsage } = await this.spawnAndParse(input.prompt, ProseRequirementExtractionOutputSchema, {
+      extraArgs: ['--tools', ''],
+      label: 'spec-requirements',
+      timeoutMs: 180_000,
+    });
+    const dur = Date.now() - t0;
+    this.collectUsage('spec-requirements', cliUsage, dur);
+    log.info(`[CLI] Spec requirement extraction done in ${dur}ms`);
+    return object;
   }
 
   async enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult> {

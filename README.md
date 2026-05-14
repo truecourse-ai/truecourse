@@ -133,18 +133,40 @@ In the dashboard you can also toggle rules from the Rules panel
 (Shield icon in the top-right) or silence a noisy rule directly from
 any violation card via the **⋮** menu → **Disable rule for this repo**.
 
-`config.json` also reserves a `specCompliance` section for the in-progress
-spec compliance analyzer. The analyzer package can now deterministically
-discover configured Markdown, MDX, text, JSON, and YAML spec files. Prose specs
-are split into stable source-ranged chunks, and structured OpenAPI or known
-`requirements` JSON/YAML specs can produce deterministic requirements without
-LLM calls. The core package also has the Phase 3 prose requirement extraction
-service: it redacts secrets before LLM calls, validates outputs into the shared
-requirement schema, and caches results under
-`<repo>/.truecourse/spec-compliance/llm-requirements/` using the spec hash,
-chunk hash, schema version, prompt version, and model. Spec compliance is still
-disabled by default and does not affect analysis unless explicitly enabled in a
-future integration.
+`config.json` also supports an opt-in `specCompliance` section. When enabled,
+analysis discovers configured Markdown, MDX, text, JSON, and YAML specs,
+extracts structured and prose requirements, extracts deterministic code facts,
+evaluates compliance, persists the full artifact at
+`metadata.specCompliance`, and surfaces non-satisfied findings as
+`spec-compliance` violations in the dashboard.
+
+```bash
+truecourse analyze --spec-compliance
+truecourse analyze --spec-compliance --specs "docs/**/*.md,specs/**/*.yaml"
+truecourse analyze --spec-compliance --no-llm
+truecourse analyze --spec-compliance --show-satisfied
+truecourse analyze --spec-compliance --output json
+```
+
+`--no-llm` disables both normal LLM rules and prose requirement extraction.
+`--output json` prints a stable JSON summary containing the normal analysis
+summary plus `specCompliance` when enabled. Prose requirement extraction redacts
+secrets before LLM calls, validates outputs into the shared requirement schema,
+and caches results under
+`<repo>/.truecourse/spec-compliance/llm-requirements/`.
+
+Example `.truecourse/config.json`:
+
+```json
+{
+  "specCompliance": {
+    "enabled": true,
+    "specGlobs": ["docs/**/*.md", "specs/**/*.yaml"],
+    "useLlm": true,
+    "includeSatisfiedResults": false
+  }
+}
+```
 
 ### Git Hooks
 

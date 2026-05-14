@@ -86,7 +86,7 @@ const RequirementCandidateSchema = RequirementSchema
   })
   .strict();
 
-const RequirementOutputSchema = z.union([
+export const ProseRequirementExtractionOutputSchema = z.union([
   z.object({ requirements: z.array(RequirementCandidateSchema) }).strict(),
   z.array(RequirementCandidateSchema),
 ]);
@@ -143,7 +143,7 @@ export function redactSpecText(text: string): string {
 }
 
 function normalizeProviderOutput(output: unknown): z.infer<typeof RequirementCandidateSchema>[] {
-  const parsed = RequirementOutputSchema.parse(output);
+  const parsed = ProseRequirementExtractionOutputSchema.parse(output);
   return Array.isArray(parsed) ? parsed : parsed.requirements;
 }
 

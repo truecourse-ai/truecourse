@@ -36,6 +36,10 @@ export interface AnalyzeInProcessOptions {
   skipStash?: boolean;
   enabledCategoriesOverride?: string[];
   enableLlmRulesOverride?: boolean;
+  specCompliance?: boolean;
+  specs?: string[];
+  showSatisfied?: boolean;
+  noLlm?: boolean;
   tracker?: StepTracker;
   onProgress?: (progress: { detail?: string }) => void;
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;

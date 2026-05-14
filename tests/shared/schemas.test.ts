@@ -77,6 +77,18 @@ describe('AnalyzeRepoSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts spec compliance analysis options', () => {
+    const result = AnalyzeRepoSchema.safeParse({
+      mode: 'full',
+      specCompliance: true,
+      specs: ['docs/**/*.md', 'specs/**/*.yaml'],
+      showSatisfied: true,
+      noLlm: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.specs).toEqual(['docs/**/*.md', 'specs/**/*.yaml']);
+  });
+
   it('rejects {} (mode is required)', () => {
     const result = AnalyzeRepoSchema.safeParse({});
     expect(result.success).toBe(false);

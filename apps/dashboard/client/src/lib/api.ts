@@ -164,11 +164,18 @@ export function deleteRepo(id: string): Promise<void> {
 
 export function analyzeRepo(
   id: string,
-  options?: { skipGit?: boolean },
+  options?: { skipGit?: boolean; specCompliance?: boolean; specs?: string[]; showSatisfied?: boolean; noLlm?: boolean },
 ): Promise<{ message: string; repoId: string; mode: 'full' }> {
   return fetchApi(`/api/repos/${id}/analyses`, {
     method: 'POST',
-    body: JSON.stringify({ mode: 'full', ...(options?.skipGit != null ? { skipGit: options.skipGit } : {}) }),
+    body: JSON.stringify({
+      mode: 'full',
+      ...(options?.skipGit != null ? { skipGit: options.skipGit } : {}),
+      ...(options?.specCompliance != null ? { specCompliance: options.specCompliance } : {}),
+      ...(options?.specs ? { specs: options.specs } : {}),
+      ...(options?.showSatisfied != null ? { showSatisfied: options.showSatisfied } : {}),
+      ...(options?.noLlm != null ? { noLlm: options.noLlm } : {}),
+    }),
   });
 }
 
@@ -298,6 +305,38 @@ export function getViolations(repoId: string, analysisId?: string): Promise<Viol
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<ViolationResponse[]>(`/api/repos/${repoId}/violations${qs ? `?${qs}` : ''}`);
+}
+
+export type SpecComplianceArtifact = {
+  enabled: boolean;
+  config: Record<string, unknown>;
+  manifest: unknown;
+  requirements: unknown[];
+  facts: unknown[];
+  results: Array<{ status: string; severity: string; [key: string]: unknown }>;
+  visibleResults: Array<{ status: string; severity: string; [key: string]: unknown }>;
+  findings: unknown[];
+  errors: unknown[];
+  summary: {
+    requirements: number;
+    facts: number;
+    results: number;
+    visibleResults: number;
+    findings: number;
+    byStatus: Record<string, number>;
+    bySeverity: Record<string, number>;
+  };
+};
+
+export function getSpecCompliance(
+  repoId: string,
+  options?: { analysisId?: string; showSatisfied?: boolean },
+): Promise<SpecComplianceArtifact | null> {
+  const params = new URLSearchParams();
+  if (options?.analysisId) params.set('analysisId', options.analysisId);
+  if (options?.showSatisfied) params.set('showSatisfied', 'true');
+  const qs = params.toString();
+  return fetchApi<SpecComplianceArtifact | null>(`/api/repos/${repoId}/spec-compliance${qs ? `?${qs}` : ''}`);
 }
 
 // Databases
@@ -643,4 +682,3 @@ export function getAnalyticsResolution(
   const qs = params.toString();
   return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
 }
-
