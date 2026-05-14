@@ -1,0 +1,2 @@
+export const SERVER_HOST_48631517 = "192.168.1.42";
+export const BACKUP_HOST_48631517 = "10.0.0.91";
