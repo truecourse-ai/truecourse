@@ -26,6 +26,15 @@ export interface ExtractOptions extends DiscoveryOptions {
   onDocStart?: (doc: DocCandidate) => void;
   onDocDone?: (doc: DocCandidate, blockCount: number, claimCount: number) => void;
   onBlockFailure?: (block: Block, error: string) => void;
+  /**
+   * Fired once, after slicing, with the total number of blocks the
+   * runner will process. Pairs with `onBlockDone` so progress UIs can
+   * show "N / total blocks" updating in real time during the long LLM
+   * extraction phase. (`onDocStart`/`onDocDone` only fire on slice
+   * start / final assembly — both are instantaneous, so they can't
+   * drive a live progress display.)
+   */
+  onBlocksReady?: (total: number) => void;
 }
 
 export interface ExtractResult {
@@ -67,8 +76,11 @@ export async function extractClaims(
   }
 
   if (allBlocks.length === 0) {
+    opts.onBlocksReady?.(0);
     return { claims: [], failures: [], blocksAttempted: 0, docsScanned: docs.length };
   }
+
+  opts.onBlocksReady?.(allBlocks.length);
 
   const runner = opts.runner ?? spawnRunner();
   const results: BlockRunResult[] = await runner(allBlocks);

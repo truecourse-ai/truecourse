@@ -30,7 +30,6 @@ import {
   runSpecResolve,
   runSpecApply,
   runSpecStatus,
-  runSpecDiff,
   runVerify,
 } from "./commands/spec.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -224,13 +223,6 @@ specCmd
   .description("Summary of docs, claims, modules, and pending decisions")
   .action(async () => {
     await runSpecStatus();
-  });
-
-specCmd
-  .command("diff")
-  .description("Show what would change if you ran `spec apply` now")
-  .action(async () => {
-    await runSpecDiff();
   });
 
 // Verify — compares generated TC contracts against the code.

@@ -7,8 +7,7 @@
  * Out of scope for now: drift decisions (mute/snooze on Verify drifts).
  */
 
-import { GitMerge, Loader2, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { GitMerge, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useSpec } from '@/components/spec/SpecContext';
 import type { SpecConflict, SpecDecision } from '@/lib/api';
@@ -39,7 +38,7 @@ interface DecisionsPanelProps {
 }
 
 export function DecisionsPanel({ activeConflictId, onSelectConflict }: DecisionsPanelProps) {
-  const { scan, hydrating, busyConflictId, revokeDecision } = useSpec();
+  const { scan, hydrating } = useSpec();
 
   if (hydrating) {
     return (
@@ -111,9 +110,7 @@ export function DecisionsPanel({ activeConflictId, onSelectConflict }: Decisions
                 key={entry.decision.conflictId}
                 entry={entry}
                 active={entry.decision.conflictId === activeConflictId}
-                busy={busyConflictId === entry.decision.conflictId}
                 onSelect={() => onSelectConflict(entry.decision.conflictId)}
-                onRevoke={() => revokeDecision(entry.decision.conflictId)}
               />
             ))}
           </Section>
@@ -129,9 +126,7 @@ export function DecisionsPanel({ activeConflictId, onSelectConflict }: Decisions
                 key={entry.decision.conflictId}
                 entry={entry}
                 active={entry.decision.conflictId === activeConflictId}
-                busy={busyConflictId === entry.decision.conflictId}
                 onSelect={() => onSelectConflict(entry.decision.conflictId)}
-                onRevoke={() => revokeDecision(entry.decision.conflictId)}
               />
             ))}
           </Section>
@@ -164,15 +159,11 @@ function Section({
 function DecisionRow({
   entry,
   active,
-  busy,
   onSelect,
-  onRevoke,
 }: {
   entry: DecidedEntry;
   active: boolean;
-  busy: boolean;
   onSelect: () => void;
-  onRevoke: () => void;
 }) {
   const { conflict, decision } = entry;
   const answer = answerSummary(entry);
@@ -212,23 +203,6 @@ function DecisionRow({
           {formatRelativeTime(decision.resolvedAt)}
         </div>
       </div>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="shrink-0"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRevoke();
-        }}
-        disabled={busy}
-        title="Revoke this decision — the conflict will re-open in the Spec tab"
-      >
-        {busy ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Trash2 className="h-3.5 w-3.5" />
-        )}
-      </Button>
     </div>
   );
 }
