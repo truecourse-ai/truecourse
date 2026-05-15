@@ -7,12 +7,13 @@ import { JS_LANGUAGES } from './_helpers.js'
 // These are shared across all requests in server contexts
 
 function isModuleLevel(node: SyntaxNode): boolean {
-  // parent should be program or export_statement
+  // Only flag EXPORTED mutable declarations. Module-private mutable state used
+  // through a controlled accessor (singleton pattern, store + dispatch) is
+  // common and intentional — the danger of shared state arises when external
+  // code can mutate it directly.
   const parent = node.parent
   if (!parent) return false
-  if (parent.type === 'program') return true
-  if (parent.type === 'export_statement' && parent.parent?.type === 'program') return true
-  return false
+  return parent.type === 'export_statement' && parent.parent?.type === 'program'
 }
 
 function isMutableInit(node: SyntaxNode): boolean {
