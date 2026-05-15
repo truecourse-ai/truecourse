@@ -1,194 +1,314 @@
 ---
 name: fp-audit-05-fix-visitors
-description: For each rule with positive+negative fixtures wired up, dispatch a sub-agent that edits the visitor in packages/analyzer/src/rules/ until every positive fixture passes AND every negative fixture still fires. Sub-agent reads ONLY fixtures and visitor source — no fp.jsonl. After visitor changes, orchestrator rebuilds the CLI, re-analyzes affected targets, and updates fp.jsonl status (and stage-6 audit verifies disappearances).
+description: For each rule with positive+negative fixtures wired up, dispatch ONE sub-agent at a time that edits the rule's visitor until every positive fixture passes AND every negative fixture still fires. Orchestrator commits per rule, so progress is durable across interruptions, resets, or crashes. No parallel waves, no shared-tree contamination.
 ---
 
 # Autonomous mode
 
-Never ask the user questions. Never pause for confirmation. If a step fails or an input is ambiguous, follow the decision policy in `fp-audit/agents/00-fix/SKILL.md` (log to `fp-audit/state/decisions.jsonl`, continue per the table). Forbidden phrasings: "Should I proceed?", "Please clarify", any phrasing that waits for the user. The only allowed abort condition in this stage is `pnpm build:dist` failing — everything else logs and continues.
+Never ask the user questions. Never pause for confirmation. If a step fails or an input is ambiguous, follow the decision policy in `fp-audit/agents/00-fix/SKILL.md` (log to `fp-audit/state/decisions.jsonl`, continue per the table). Forbidden: "Should I proceed?", "Please clarify".
+
+# Design principles
+
+These principles are load-bearing — earlier designs violated them and lost ~half the work after 14 hours:
+
+1. **Successful edits are persisted via git commit, not left in the working tree.** The working tree is never authoritative state.
+2. **One rule at a time, sequential dispatch.** No parallel sub-agents in a shared working tree. Parallelism trades reliability for marginal throughput at this stage.
+3. **Sub-agent never runs git commands.** Only the orchestrator commits, reverts, or stashes. Sub-agents only edit files.
+4. **Patch capture is a safety net, not the primary mechanism.** Each successful sub-agent's diff is also captured to `fp-audit/state/patches/<rule>.patch` (gitignored). If the orchestrator crashes between sub-agent return and commit, the patch survives.
+5. **Resumability is via fp.jsonl status + git log.** Re-running the SKILL skips rules already at `status: "fixed"` or `"surviving"`, and rules whose commit message matches `^stage5: fix <rule>$`.
 
 # Inputs
 
-- `fp-audit/state/fp.jsonl` — global FP ledger (read by orchestrator only, to dispatch and update status)
-- `fp-audit/state/rule-briefs.json` — optional, used to give the fix sub-agent the `suggested_predicate` from synthesis as a hint (not authoritative)
-- `tests/analyzer/js-positive.test.ts` — contains per-rule `it('no FPs: <rule>', …)` blocks added by stage 3
-- `tests/fixtures/sample-js-project-positive/` — positive fixture project with FP patterns appended by stage 3
-- `tests/fixtures/sample-js-project-negative/` — negative fixture project with TP patterns (marked `// VIOLATION: <rule>`) appended by stage 4
+- `fp-audit/state/fp.jsonl` — global FP ledger
+- `fp-audit/state/rule-briefs.json` — optional, hint only
+- `tests/analyzer/js-positive.test.ts` — positive fixture contract (rule X must fire 0× after fix)
+- `tests/analyzer/js-negative.test.ts` — negative fixture contract (rule X's `// VIOLATION:` markers must still fire)
+- `tests/fixtures/sample-js-project-positive/` — positive fixtures from stage 3
+- `tests/fixtures/sample-js-project-negative/` — negative fixtures from stage 4
 
 # Outputs
 
-- Edits to `packages/analyzer/src/rules/<category>/...` visitor files
-- `fp-audit/state/fp.jsonl` — for each FP row whose rule was successfully fixed and that no longer fires after re-analyze:
-  - `status: "fixed"`
-  - `fixed_by_commit: <current HEAD of analyzer repo>`
-- For rows whose rule was reported `fixed` but still fire after re-analyze: `status: "surviving"`
-- `fp-audit/state/fix-report.jsonl` — one JSON line per rule attempted: `{ rule, outcome, edited_files, iterations, final_failures }`
+- Edits to `packages/analyzer/src/rules/<category>/...`, **committed one rule per commit** with message format `stage5: fix <rule-key>` (e.g. `stage5: fix code-quality/deterministic/magic-string`).
+- `fp-audit/state/fix-report.jsonl` — one JSON line per rule: `{rule, outcome, edited_files, iterations, commit_sha, final_failures}`
+- `fp-audit/state/patches/<rule_safe>.patch` — backup of each successful sub-agent's diff (gitignored; survives any reset)
+- `fp-audit/state/fp.jsonl` row status transitions:
+  - `fixtures-ready` → `fix-attempted` (orchestrator stamps before dispatch)
+  - `fix-attempted` → `fixed` (re-analyze step 6 confirms documenso row no longer fires)
+  - `fix-attempted` → `surviving` (re-analyze finds row still fires)
+  - `fix-attempted` → `fixtures-ready` (sub-agent reported failed; rolled back)
 
 # Preconditions
 
 A rule is **eligible to fix** only when:
-1. It has at least one row with `class === "FP"` and `status === "fixtures-ready"` (or `positive-fixture-ready` if stage 4 hasn't touched the rule yet but a negative test already existed — orchestrator checks).
-2. Every such row has a non-null `positive_fixture_path`.
-3. The rule has a non-null `negative_fixture_path` on at least one of its FP rows.
+1. ≥1 row has `class === "FP"` AND `status === "fixtures-ready"`
+2. Every such row has non-null `positive_fixture_path`
+3. The rule has non-null `negative_fixture_path` on ≥1 of its FP rows
 
-Skip rules that fail these gates (log to `decisions.jsonl` with the missing piece named). Do not invent fixtures here — that's stages 3 and 4.
+Skip rules failing these gates. Log to `decisions.jsonl` with the missing piece named.
+
+# Sub-agent model
+
+**Opus** (default). Visitor edits require AST literacy + non-trivial reasoning about what guard distinguishes the FP shape from the TP shape.
 
 # Steps
 
-1. **Orchestrator reads fp.jsonl** to identify eligible rules. For each eligible rule, collect:
-   - `positive_tests`: distinct `positive_fixture_path` values across the rule's FP rows
-   - `negative_tests`: distinct `negative_fixture_path` values across the rule's FP rows
-   - `suggested_predicate` from `rule-briefs.json` (if present — hint only)
+## 1. Setup
 
-   The sub-agent does NOT read fp.jsonl. The fixtures are the contract.
+```bash
+mkdir -p fp-audit/state/patches
+test -f fp-audit/state/fix-report.jsonl || touch fp-audit/state/fix-report.jsonl
+```
 
-2. **Pre-dispatch plan:**
-   ```
-   ── stage 5 dispatch plan ────────────────────────────────
-   eligible rules:           <R>
-   skipped (missing pieces): <S>
-   total sub-agents:         <R>     (one per rule)
-   wave size:                10      (fix is heavier — fewer per wave)
-   estimated waves:          <ceil(R / 10)>
-   ```
+Confirm the working tree is clean before starting (`git status --porcelain`). If not, ABORT and surface the dirty state — the orchestrator must start from a known baseline.
 
-3. **Wave-based dispatch.** For each eligible rule, dispatch one sub-agent (Agent tool, `subagent_type=general-purpose`, default model = Opus). Send in waves of ~10 (fix is heavier than classify — keep waves small for vitest CPU sanity). Same loop pattern as earlier stages.
+## 2. Build eligible rule list
 
-   For each rule in the batch:
-   - **Mark the rule's FP rows status = `"fix-attempted"`** before dispatch. Atomic-write fp.jsonl. This is the incremental write — if the orchestrator crashes mid-wave we know which rules were in-flight.
-   - Dispatch with the prompt template below.
-   - On sub-agent return: read its line in `fix-report.jsonl`:
-     - `outcome: "fixed"` → keep status `"fix-attempted"` for now; final `"fixed"` flip waits for re-analyze in step 5.
-     - `outcome: "failed"` → revert status of those rows to `"fixtures-ready"` (or `"positive-fixture-ready"` if appropriate). Log the failure. Continue.
-   - Atomic-write fp.jsonl after each sub-agent. Do NOT batch end-of-wave.
+Read `fp.jsonl`. For each eligible rule (see Preconditions), collect:
+- `positive_tests`: distinct `positive_fixture_path` values across the rule's FP rows
+- `negative_tests`: distinct `negative_fixture_path` values across the rule's FP rows
+- `suggested_predicate` from `rule-briefs.json` (hint, optional)
 
-4. **Rebuild the CLI.** After ALL waves complete: `cd "${ANALYZER_ROOT}" && pnpm build:dist`. If build fails, ABORT stage 5. Surface the build error. Inspect `fix-report.jsonl` for which sub-agent's edits broke it. (User's job — pipeline does not auto-revert.)
+Skip rules whose `stage5: fix <rule>` commit already exists in `git log --grep` (resumability). Skip rules where every member FP row is already at status `fixed` or `surviving`.
 
-5. **Re-analyze each affected target.** For each target that contributed FP rows for any rule whose sub-agent reported `outcome: "fixed"`:
-   - Re-invoke `fp-audit/agents/01-clone-analyze/SKILL.md` with `repo_url` + `branch` from that target's `state.json`, `label="re-analyze"`. Agent 01 appends a new snapshot to `<audit>/snapshots/<iso>_re-analyze.json` using the freshly rebuilt `dist/cli.mjs`.
+## 3. Pre-dispatch summary
 
-6. **Diff and finalize fp.jsonl status.** For each FP row whose rule was reported `fixed`:
-   - Build key: `(repo, file, line, rule)`.
-   - Look up matching violation in the latest `_re-analyze` snapshot.
-   - No match in new snapshot → `status: "fixed"`, `fixed_by_commit: <git -C ${ANALYZER_ROOT} rev-parse HEAD>`.
-   - Still matches → `status: "surviving"`. The visitor edit didn't eliminate this specific instance.
-   - Atomic-write fp.jsonl row-by-row (or per-rule batch — either is fine; the row count is small now).
+```
+── stage 5 dispatch plan ────────────────────────────────
+eligible rules:           <R>
+already fixed (skipped):  <S>
+remaining to dispatch:    <D>
+dispatch model:           opus
+parallelism:              SEQUENTIAL (one rule at a time)
+estimated time:           ~<D × 6 minutes>
+```
 
-7. **Print summary:**
-   ```
-   ═══ stage 5 complete ═════════════════════════════════
-   rules attempted:      <R>
-     fixed (sub-agent):  <F>
-     failed:             <X>
-   rows after re-analyze:
-     fixed:              <K>
-     surviving:          <L>
-   visitor edits in: packages/analyzer/src/rules/
-   ```
+## 4. Per-rule loop
 
-   Stage 6 (audit) runs next — verifies the disappearances are really FPs, not silently-suppressed TPs.
+For each remaining rule:
+
+### 4a. Mark in-flight
+
+Update every member FP row's status from `fixtures-ready` → `fix-attempted`. Atomic-write fp.jsonl.
+
+### 4b. Verify baseline
+
+Before dispatching, sanity-check:
+- `pnpm vitest run tests/analyzer/js-positive.test.ts 2>&1 | grep -c '<rule>'` returns N > 0 (rule currently fires in positive fixture — there's something to fix)
+- `pnpm vitest run tests/analyzer/js-negative.test.ts -t 'finds violations for each expected marker'` passes for this rule (TP marker currently fires)
+
+If either fails, the fixture contract is broken for this rule. Log to `decisions.jsonl` with `reason: "broken-contract-pre-dispatch"`, revert the rule's rows to `fixtures-ready`, continue with next rule.
+
+### 4c. Dispatch ONE sub-agent
+
+Use the prompt template below. Substitute the rule's `{{positive_tests}}`, `{{negative_tests}}`, `{{suggested_predicate}}`, and `{{report_path}}` (which is `fp-audit/state/fix-reports/<rule_safe>.json`).
+
+The sub-agent edits visitor files in the working tree and writes a single JSON line to `{{report_path}}`. **The sub-agent NEVER runs git commands.**
+
+### 4d. Validate sub-agent's claim
+
+Parse `{{report_path}}`. If `outcome: "fixed"`:
+
+```bash
+# Positive contract: rule no longer fires on positive fixture
+pnpm vitest run tests/analyzer/js-positive.test.ts 2>&1 | tee /tmp/pos.txt
+positive_count=$(grep -c '<rule>' /tmp/pos.txt || echo 0)
+
+# Negative contract: rule still fires on TP markers
+pnpm vitest run tests/analyzer/js-negative.test.ts -t 'finds violations for each expected marker' 2>&1 | tee /tmp/neg.txt
+negative_pass=$(grep -c "Rule coverage: .*/.* expected rules detected" /tmp/neg.txt)
+neg_missing=$(grep "MISSING VIOLATIONS" /tmp/neg.txt | grep -c '<rule>' || echo 0)
+```
+
+Pass criteria: `positive_count == 0` AND `neg_missing == 0`.
+
+### 4e. Commit or revert
+
+If pass criteria met:
+```bash
+# Capture patch as safety backup
+git diff -- packages/analyzer/ > fp-audit/state/patches/<rule_safe>.patch
+
+# Commit
+git add packages/analyzer/
+git commit -m "stage5: fix <rule-key>"
+
+# Update fix-report.jsonl
+echo '{"rule":"<rule>","outcome":"fixed","edited_files":[...],"commit_sha":"$(git rev-parse HEAD)","iterations":<n>}' >> fp-audit/state/fix-report.jsonl
+```
+
+If pass criteria NOT met (sub-agent reported fixed but tests don't agree, or sub-agent reported failed):
+```bash
+# Hard revert all uncommitted edits
+git checkout HEAD -- packages/analyzer/
+
+# Revert rule's fp.jsonl rows
+# from fix-attempted → fixtures-ready
+
+# Log
+echo '{"rule":"<rule>","outcome":"failed","reason":"<short>","iterations":<n>}' >> fp-audit/state/fix-report.jsonl
+```
+
+The working tree is now clean again. The next rule starts from a known state.
+
+### 4f. Progress checkpoint every 10 rules
+
+After every 10 rules processed, print:
+```
+Progress: <X>/<D> rules dispatched
+  fixed: <F>, failed: <E>
+  last fixed: <rule>
+  last failed: <rule>
+```
+
+## 5. Rebuild CLI
+
+After all rules processed: `pnpm build:dist`. If build fails, ABORT — the partial state is committed but the analyzer dist is broken. Surface to user.
+
+## 6. Re-analyze each target
+
+For each target in fp.jsonl that contributed FP rows: invoke `fp-audit/agents/01-clone-analyze/SKILL.md` with `repo_url`, `branch`, `label="re-analyze-stage5"`. Agent 01 appends a new snapshot using the rebuilt `dist/cli.mjs`.
+
+## 7. Finalize fp.jsonl status
+
+For each FP row at status `fix-attempted`:
+- Build key `(repo, file, line, rule)`
+- Look up in latest `_re-analyze-stage5` snapshot
+- Not present → `status: "fixed"`, `fixed_by_commit: <last stage5 commit>`
+- Present → `status: "surviving"`
+
+Atomic-write fp.jsonl.
+
+## 8. Summary
+
+```
+═══ stage 5 complete ═════════════════════════════════
+rules attempted:    <D>
+  fixed (sub-agent + tests + commit): <F>
+  failed:                              <E>
+
+documenso rows after re-analyze:
+  fixed:      <K>
+  surviving:  <L>
+
+commits: <F> commits, all prefixed "stage5: fix <rule>"
+patches: <F> files in fp-audit/state/patches/
+```
 
 # Sub-agent prompt template
 
-Substitute `{{rule}}`, `{{positive_tests}}` (list), `{{negative_tests}}` (list), `{{suggested_predicate}}` (string, may be empty), `{{report_path}}`.
+Substitute `{{rule}}`, `{{positive_tests}}` (list of fixture file paths), `{{negative_tests}}` (list of fixture file paths), `{{suggested_predicate}}`, `{{report_path}}`.
 
 ````
 You are fixing the visitor for rule `{{rule}}` so that:
   (a) the rule no longer fires on the FP patterns in the positive fixture project
   (b) the rule still fires on the TP patterns in the negative fixture project
 
-Positive check (violations for {{rule}} must be 0 after your fix):
-  pnpm vitest run tests/analyzer/js-positive.test.ts 2>&1 | tee /tmp/pos-result.txt
-  Then: grep '{{rule}}' /tmp/pos-result.txt | wc -l
-  Target: 0 lines matching the rule → no longer fires on the positive fixture.
+Positive check (target: 0 firings of {{rule}}):
+  pnpm vitest run tests/analyzer/js-positive.test.ts 2>&1 | tee /tmp/pos.txt
+  grep -c '{{rule}}' /tmp/pos.txt
 
-  The positive fixture has FP patterns for this rule in
-  tests/fixtures/sample-js-project-positive/ appended by stage 3.
+Negative check (target: still detected):
+  pnpm vitest run tests/analyzer/js-negative.test.ts -t 'finds violations for each expected marker' 2>&1 | tee /tmp/neg.txt
+  Confirm {{rule}} is NOT in any "MISSING VIOLATIONS" output.
 
-Negative check (must still pass — {{rule}} TP markers still detected):
-  pnpm vitest run tests/analyzer/js-negative.test.ts -t 'finds violations for each expected marker'
-  Must PASS. The negative fixture has // VIOLATION: {{rule}} markers that
-  your fix must not kill.
-
-Hint from synthesis (not authoritative — use as a starting point):
+Hint from synthesis (not authoritative):
   {{suggested_predicate}}
-
-DO NOT read fp.jsonl. The fixture projects are the complete contract. If your fix
-makes the contract green, the rule is fixed by definition.
 
 # Where the visitor lives
 
-Rule visitors live under `packages/analyzer/src/rules/<category>/visitors/<language>/`
-or are pattern-based in `packages/analyzer/src/rules/<category>/deterministic.ts`.
+`packages/analyzer/src/rules/<category>/visitors/<language>/` or pattern-based
+in `packages/analyzer/src/rules/<category>/deterministic.ts`.
 
-Locate the visitor for `{{rule}}`:
+Locate it:
   1. grep -rn '{{rule}}' packages/analyzer/src/rules/
-  2. Identify the visitor function or pattern entry that emits this ruleKey.
-  3. Read it carefully along with the helper functions it calls.
+  2. Read the visitor function and the helper functions it calls.
 
-# Iteration loop
+# Iteration loop (up to 10 iterations)
 
-Up to 10 iterations (raised from 5 because the per-shape fixture contract now contains many distinct AST shapes per rule — a single guard rarely passes on the first attempt). On each iteration:
+Per iteration:
+  1. Edit the visitor to add a guard that suppresses the FP shape while
+     preserving the TP shape. Be surgical — minimal change, scoped to this
+     visitor. Do NOT add broad escape hatches.
+  2. Run positive check. Count must reach 0.
+  3. Run negative check. {{rule}} must NOT be in MISSING.
+  4. If both pass → write report and exit.
+  5. Otherwise refine the guard and iterate.
 
-  1. Edit the visitor to add a guard that suppresses the FP shape captured by
-     the positive fixture project, while preserving the TP shape captured by
-     the negative fixture project. The hint above describes the predicate to add.
-     Translate it into actual TypeScript/Python AST checks.
+# Writing the report
 
-     Do NOT add broad escape hatches that weaken detection across many rules.
-     The fix must be minimal and surgical — scoped to this rule's visitor.
+When done (success or failure), write a SINGLE JSON object to {{report_path}}:
 
-  2. Run the positive check:
-       pnpm vitest run tests/analyzer/js-positive.test.ts 2>&1 | tee /tmp/pos.txt
-       grep -c '{{rule}}' /tmp/pos.txt || true
-     Must return 0 (rule no longer fires in the positive fixture).
+Success:
+{
+  "rule": "{{rule}}",
+  "outcome": "fixed",
+  "edited_files": ["packages/analyzer/src/rules/.../foo.ts", ...],
+  "iterations": <n>,
+  "final_failures": []
+}
 
-  3. Run the negative check:
-       pnpm vitest run tests/analyzer/js-negative.test.ts -t 'finds violations for each expected marker'
-     Must PASS (// VIOLATION: {{rule}} marker still detected).
+Failure (after 10 iterations):
+{
+  "rule": "{{rule}}",
+  "outcome": "failed",
+  "edited_files": ["packages/analyzer/src/rules/.../foo.ts", ...],
+  "iterations": 10,
+  "final_failures": ["positive count = N", "negative MISSING: rule was killed"]
+}
 
-  4. If both pass → done. Append one line to {{report_path}}:
-       {"rule": "{{rule}}", "outcome": "fixed", "edited_files": [...], "iterations": <n>, "final_failures": []}
+# Absolute constraints
 
-  5. If positive still fails OR negative breaks → analyze vitest output, refine the guard, iterate.
+- NEVER run `git` commands. Not `git checkout`, not `git reset`, not `git stash`,
+  not anything. The orchestrator owns version control. If you need to undo an
+  edit, just edit the file again with the original content (which you can read
+  from the file's pre-edit state — keep a copy if needed).
+- NEVER edit test files. Positive/negative tests are immutable contracts.
+- NEVER edit unrelated rules' visitors or shared utilities outside this rule's
+  visitor unless absolutely necessary; if you do, list the file in edited_files.
+- NEVER ask the user a question.
+- Do NOT read fp-audit/state/fp.jsonl. The fixture projects are the contract.
+- Output ONLY the JSON file at {{report_path}}. No other stdout.
 
-# Failure exit
+If after 10 iterations the contracts still aren't both green:
+  - DO NOT revert your edits. Leave them in the working tree.
+  - The orchestrator will revert via `git checkout HEAD -- packages/analyzer/`
+    after reading your failed report.
+  - Write the "failed" report and exit.
 
-If after 10 iterations both contracts still aren't satisfied:
-  - revert your edits: `git checkout -- packages/analyzer/src/rules/<changed paths>`
-  - append: {"rule": "{{rule}}", "outcome": "failed", "edited_files": [...], "iterations": 5, "final_failures": [...]}
-  - exit
+# Why this matters
 
-Do NOT leave a half-broken visitor.
-
-# Constraints
-
-- Never edit the test files. Positive and negative tests are immutable contracts.
-- Never delete or weaken an unrelated rule.
-- Do not commit. The orchestrator (or human) decides when to commit.
-- Do not modify shared utilities outside this rule's visitor unless absolutely
-  necessary; if you do, list the file in `edited_files`.
-- Do NOT read fp-audit/state/fp.jsonl. You don't need it.
-- Output ONLY the JSON line in {{report_path}}. No other stdout.
-- NEVER ask the user a question. If stuck after 10 iterations, revert and report failed.
-- The positive fixture now contains MANY shape snippets per rule (stage 3 wrote one
-  per (rule, shape_sig) group). Your guard must handle ALL of them — not just the
-  first one you fix. Run `js-positive.test.ts` and grep for `{{rule}}` to count
-  remaining firings; iterate until that count is zero.
+In previous runs, sub-agents that ran `git checkout` on failure clobbered
+sister sub-agents' edits in shared helper files. The orchestrator now ensures
+exclusive working-tree access by running you one at a time, and rolls back
+your edits on failure itself. You only edit; the orchestrator owns state.
 ````
 
 # Failure modes
 
-- Sub-agent reports `outcome: "failed"` → orchestrator reverts those rows' status to `"fixtures-ready"` (or prior). Logged in `fix-report.jsonl`. Other rules continue.
-- `pnpm build:dist` fails after sub-agents finish → ABORT stage 5. The bad edit is somewhere in the union of `edited_files` across sub-agents reporting `fixed`. User inspects.
-- Re-analyze on a target fails → log; that target's rows stay at `status: "fix-attempted"` until manual re-run.
-- Re-analyze finds an FP row whose rule was `fixed` is still firing → row's `status = "surviving"`. Either the visitor edit missed this instance (real failure) OR the original classification was wrong (false flag). Stage 6 spot-checks.
+- **Sub-agent reports failed**: orchestrator runs `git checkout HEAD -- packages/analyzer/`, reverts the rule's fp.jsonl rows to `fixtures-ready`. The next rule starts clean.
+- **Sub-agent reports fixed but post-validation fails** (positive count > 0 or negative MISSING contains the rule): same as failed — revert + log.
+- **`pnpm build:dist` fails after all rules done**: ABORT stage 5. Surface the build error. Inspect recent commits to find the breaking change. The user reverts the specific commit(s) and re-runs from step 5.
+- **Re-analyze fails for a target**: log; that target's rows stay at `fix-attempted` for manual re-run.
+- **A row whose rule was `fixed` still fires on re-analyze** → `status: "surviving"`. Either the visitor edit missed this instance OR the original classification was wrong. Stage 6 audits.
 
 # Resumability
 
-The orchestrator's per-row status field tracks progress:
-- `fixtures-ready` → not yet attempted
-- `fix-attempted` → sub-agent currently/recently running
-- `fixed` / `surviving` → re-analyze settled
+The orchestrator can be killed and restarted at any point. On restart:
+1. Read `fix-report.jsonl` — skip rules already with outcome `fixed` (their commit exists).
+2. Read `fp.jsonl` — skip rules whose all member rows are at `fixed`/`surviving`.
+3. Re-dispatch only the remaining rules.
 
-A crashed run can resume by re-reading fp.jsonl and dispatching only rules whose rows are still at `fixtures-ready`.
+A clean working tree is required at startup. If the previous run died mid-rule, the orchestrator runs `git checkout HEAD -- packages/analyzer/` once at the top to discard any abandoned edits before starting the loop.
+
+# Why no parallelism here
+
+Earlier designs ran 5–10 sub-agents per wave in a shared working tree. Two failure modes emerged:
+1. A sub-agent's `git checkout` on failure clobbered overlapping edits from successful sister sub-agents in shared helper files (`_helpers.ts`, etc.).
+2. Periodic `git reset --hard HEAD` events (cause unidentified) wiped the entire uncommitted working tree, losing all in-flight successes.
+
+Sequential dispatch + per-rule commit eliminates both:
+- Only one sub-agent is in the working tree at a time → no contamination
+- Each success is committed before the next sub-agent starts → no reset can wipe past wins
+- The patches/ directory is a redundant backup → even if the orchestrator crashes between sub-agent return and commit, the patch survives
+
+This is slower in wall-clock time but produces reliable, durable progress that can be measured precisely (one commit = one rule fixed).
