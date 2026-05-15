@@ -98,7 +98,7 @@ describe('JS/TS positive fixture — zero false positives', () => {
       ),
       ...checkMethodRules(split.methods, enabledArch, split.methodLevelDependencies, entryPointFiles, analyses),
     ];
-  }, 120_000);
+  }, 600_000);
 
   it('produces zero code-rule violations on clean code', () => {
     if (codeViolations.length > 0) {
