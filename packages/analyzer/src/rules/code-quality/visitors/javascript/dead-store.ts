@@ -28,6 +28,25 @@ export const deadStoreVisitor: CodeRuleVisitor = {
       }
     }
 
+    // A value is "trivially dead" only when it is a simple literal with no
+    // side effects. Function calls, tagged templates, `new` expressions, object
+    // and array constructors, and the `null` sentinel are all common
+    // intentional pre-initialization patterns (typed-init, SQL-fragment
+    // placeholders, etc.) and must not be flagged.
+    function isTrackableInitial(value: SyntaxNode): boolean {
+      switch (value.type) {
+        case 'number':
+        case 'string':
+        case 'template_string':
+        case 'true':
+        case 'false':
+        case 'regex':
+          return true
+        default:
+          return false
+      }
+    }
+
     function processStmts(stmts: SyntaxNode[]): CodeViolation | null {
       for (const stmt of stmts) {
         if (stmt.type === 'lexical_declaration' || stmt.type === 'variable_declaration') {
@@ -37,7 +56,14 @@ export const deadStoreVisitor: CodeRuleVisitor = {
               const value = decl.childForFieldName('value')
               if (nameNode?.type === 'identifier') {
                 if (value) markReadsInExpr(value)
-                lastAssign.set(nameNode.text, { assignNode: decl, hasBeenRead: false })
+                // Only track declarations whose initial value is a trivial
+                // literal — otherwise the "dead" value may carry side effects
+                // or be an intentional sentinel.
+                if (value && isTrackableInitial(value)) {
+                  lastAssign.set(nameNode.text, { assignNode: decl, hasBeenRead: false })
+                } else {
+                  lastAssign.delete(nameNode.text)
+                }
               }
             }
           }
@@ -63,7 +89,11 @@ export const deadStoreVisitor: CodeRuleVisitor = {
                   'Remove the dead assignment or use the value before overwriting it.',
                 )
               }
-              lastAssign.set(varName, { assignNode: expr, hasBeenRead: false })
+              if (isTrackableInitial(right)) {
+                lastAssign.set(varName, { assignNode: expr, hasBeenRead: false })
+              } else {
+                lastAssign.delete(varName)
+              }
               continue
             }
           }

@@ -21,14 +21,16 @@ export const redundantTypeArgumentVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (!parent) return null
 
-    // Get the generic function/type being parameterized
-    let target = parent.type === 'call_expression'
+    // Get the generic function/type being parameterized.
+    // Only consider call/new sites — for explicit type annotations (`generic_type`),
+    // the type checker returns the error/`any` type for the type-argument position,
+    // which would cause false positives for `Array<T>`, `Set<T>` annotations where
+    // T is a real (non-`any`) type but appears as `any` to the checker.
+    const target = parent.type === 'call_expression'
       ? parent.childForFieldName('function')
       : parent.type === 'new_expression'
         ? parent.childForFieldName('constructor')
-        : parent.type === 'generic_type'
-          ? parent.namedChildren[0]
-          : null
+        : null
 
     if (!target) return null
 

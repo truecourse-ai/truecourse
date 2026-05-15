@@ -9,6 +9,14 @@ export const jsStylePreferenceVisitor: CodeRuleVisitor = {
     // Flag use of var
     const firstChild = node.children[0]
     if (firstChild?.text === 'var') {
+      // `var` inside `declare global { ... }` / `declare module '...' { ... }`
+      // is required TypeScript syntax for global augmentation (const/let are
+      // invalid in that position). Skip those declarations.
+      let parent = node.parent
+      while (parent) {
+        if (parent.type === 'ambient_declaration') return null
+        parent = parent.parent
+      }
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Use of var instead of const/let',

@@ -361,6 +361,25 @@ export function checkModuleRules(
       modules.filter((m) => m.kind === 'class').map((m) => m.name)
     )
 
+    // Build map of exported name → set of file paths that export it.
+    // Used to skip flagging exports whose name appears in multiple files —
+    // duplicate-name exports often indicate a convention (e.g. per-module
+    // `getStatusCodes`) where consumers pick one by import path; the analyzer
+    // cannot determine which is "the" canonical one from name alone.
+    const exportNameToFiles = new Map<string, Set<string>>()
+    if (fileAnalyses) {
+      for (const fa of fileAnalyses) {
+        for (const exp of fa.exports) {
+          // Only count source-declared exports, not re-exports (`export { x } from 'y'`).
+          if (exp.source) continue
+          if (!exportNameToFiles.has(exp.name)) {
+            exportNameToFiles.set(exp.name, new Set())
+          }
+          exportNameToFiles.get(exp.name)!.add(fa.filePath)
+        }
+      }
+    }
+
     // Build set of route handler names — functions consumed by the framework
     // via decorators (@app.route, @router.get) or router bindings (router.get('/', handler))
     const routeHandlerNames = new Set<string>()
@@ -392,6 +411,25 @@ export function checkModuleRules(
       }
     }
 
+    // Stage 1: collect candidate unused-export violations per file.
+    // Stage 2: apply a per-file threshold — if a file has many unused exports,
+    // treat them as intentional public API surface (library/fixture file).
+    type Candidate = {
+      kind: 'method' | 'class'
+      name: string
+      moduleName: string
+      filePath: string
+      serviceName: string
+      startLine?: number
+      endLine?: number
+    }
+    const candidatesByFile = new Map<string, Candidate[]>()
+    const pushCandidate = (c: Candidate) => {
+      const arr = candidatesByFile.get(c.filePath) || []
+      arr.push(c)
+      candidatesByFile.set(c.filePath, arr)
+    }
+
     for (const method of methods) {
       if (method.isExported && !importedTargets.has(method.name)) {
         // Skip exports from entry point files — they're consumed by the framework/runtime
@@ -414,6 +452,12 @@ export function checkModuleRules(
         const fileBasename = method.filePath.split('/').pop()?.replace(/\.\w+$/, '')
         if (fileBasename && dynamicImportModuleBasenames.has(fileBasename)) continue
 
+        // Skip exported names that are declared as exports in 2+ files.
+        // Duplicate exported names usually mean per-module helpers chosen by
+        // import path, not by name — the analyzer can't tell which is unused.
+        const exportingFiles = exportNameToFiles.get(method.name)
+        if (exportingFiles && exportingFiles.size >= 2) continue
+
         // Skip exported functions referenced in any call or import across the codebase
         if (fileAnalyses) {
           let referencedAnywhere = false
@@ -428,17 +472,14 @@ export function checkModuleRules(
           if (referencedAnywhere) continue
         }
 
-        violations.push({
-          ruleKey: 'architecture/deterministic/unused-export',
-          title: `Unused export: \`${method.name}\``,
-          description: `\`${method.name}\` is exported from \`${method.moduleName}\` but never imported elsewhere in the codebase.`,
-          severity: 'low',
-          serviceName: method.serviceName,
+        pushCandidate({
+          kind: 'method',
+          name: method.name,
           moduleName: method.moduleName,
-          methodName: method.name,
           filePath: method.filePath,
-          lineStart: method.startLine,
-          lineEnd: method.endLine,
+          serviceName: method.serviceName,
+          startLine: method.startLine,
+          endLine: method.endLine,
         })
       }
     }
@@ -450,17 +491,57 @@ export function checkModuleRules(
         // Skip classes used as type annotations (params, return types, superclasses)
         if (usedAsType.has(mod.name)) continue
 
-        violations.push({
-          ruleKey: 'architecture/deterministic/unused-export',
-          title: `Unused export: \`${mod.name}\``,
-          description: `Class \`${mod.name}\` appears exported but is never imported elsewhere in the codebase.`,
-          severity: 'low',
-          serviceName: mod.serviceName,
+        // Skip class names that are exported in 2+ files (duplicate-name heuristic).
+        const exportingFiles = exportNameToFiles.get(mod.name)
+        if (exportingFiles && exportingFiles.size >= 2) continue
+
+        pushCandidate({
+          kind: 'class',
+          name: mod.name,
           moduleName: mod.name,
           filePath: mod.filePath,
-          lineStart: mod.startLine,
-          lineEnd: mod.endLine,
+          serviceName: mod.serviceName,
+          startLine: mod.startLine,
+          endLine: mod.endLine,
         })
+      }
+    }
+
+    // Per-file unused-export threshold: a file with many unused exports is
+    // almost always a library/fixture file whose exports are intentional
+    // public API surface (e.g., utility modules, middleware bundles). Real
+    // dead-code cleanup targets typically have 1 unused export per file.
+    const UNUSED_EXPORTS_PER_FILE_THRESHOLD = 2
+
+    for (const [, fileCandidates] of candidatesByFile) {
+      if (fileCandidates.length >= UNUSED_EXPORTS_PER_FILE_THRESHOLD) continue
+      for (const c of fileCandidates) {
+        if (c.kind === 'method') {
+          violations.push({
+            ruleKey: 'architecture/deterministic/unused-export',
+            title: `Unused export: \`${c.name}\``,
+            description: `\`${c.name}\` is exported from \`${c.moduleName}\` but never imported elsewhere in the codebase.`,
+            severity: 'low',
+            serviceName: c.serviceName,
+            moduleName: c.moduleName,
+            methodName: c.name,
+            filePath: c.filePath,
+            lineStart: c.startLine,
+            lineEnd: c.endLine,
+          })
+        } else {
+          violations.push({
+            ruleKey: 'architecture/deterministic/unused-export',
+            title: `Unused export: \`${c.name}\``,
+            description: `Class \`${c.name}\` appears exported but is never imported elsewhere in the codebase.`,
+            severity: 'low',
+            serviceName: c.serviceName,
+            moduleName: c.name,
+            filePath: c.filePath,
+            lineStart: c.startLine,
+            lineEnd: c.endLine,
+          })
+        }
       }
     }
   }

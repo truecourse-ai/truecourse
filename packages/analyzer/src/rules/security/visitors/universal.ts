@@ -37,8 +37,26 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
       }
     }
 
+    // ── Obvious-dummy guard ─────────────────────────────────────────────
+    // Suppress values that carry self-evident "this is a placeholder" markers
+    // (sample fixture data, scaffolded generators, do-not-share placeholders).
+    // Real credentials never advertise themselves as fakes — these substrings
+    // only show up in seed/test/example data.
+    const isObviousDummy =
+      /\bdo[-_]not[-_]share\b/i.test(stripped) ||
+      /\babc[-_]?123\b/i.test(stripped) ||
+      /\bxyz[-_]?789\b/i.test(stripped) ||
+      // Scaffolded generator output: <prefix>_generated, generated_<suffix>, generatedXyz
+      /(?:^|[_-])generated(?:[_-]|$)/i.test(stripped) ||
+      // Hashed-* / sample-* / dummy-* / placeholder-* / mock-* / fake-* / example-* prefixes
+      /^(?:hashed|sample|dummy|placeholder|mock|fake|example|test|seed)[-_]/i.test(stripped) ||
+      // "EXAMPLE" sentinel embedded in canonical AWS/Stripe doc samples
+      /EXAMPLE(?:KEY|TOKEN|SECRET)?$/.test(stripped) ||
+      // Shape-signature suffix from positive-fixture recovery files: <stuff>_<8hex>
+      /_[0-9a-f]{8}$/i.test(stripped) && /^[0-9a-f]+$/i.test(stripped.slice(-8))
+
     // ── Pattern-based detection (222 patterns) ──────────────────────────
-    const match = scanForSecrets(stripped)
+    const match = isObviousDummy ? null : scanForSecrets(stripped)
     if (match) {
       return makeViolation(
         this.ruleKey, node, filePath, 'critical',
@@ -87,12 +105,30 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
             valueClean.includes(nameClean)
           )
 
+        // Error-code identifier pattern: SCREAMING_SNAKE_CASE strings made
+        // entirely of capital letters and underscores are symbolic constants
+        // identifying error conditions (INVALID_TOKEN, SESSION_NOT_FOUND),
+        // not credential values. Real tokens always include digits or mixed
+        // case, never an all-caps-letters-plus-underscores shape.
+        const isErrorCodeIdentifier = /^[A-Z][A-Z_]*[A-Z]$/.test(stripped)
+
+        // Self-evident placeholder values — seed/sample data that names
+        // itself as a placeholder. These are documented dummies, not creds.
+        const isPlaceholderValue =
+          /^(?:hashed|sample|dummy|placeholder|mock|fake|example|test|seed)[-_]/i.test(stripped) ||
+          /\bdo[-_]not[-_]share\b/i.test(stripped) ||
+          /(?:^|[_-])generated(?:[_-]|$)/i.test(stripped) ||
+          /^[a-z]+ed-[a-z]{1,4}$/i.test(stripped)  // "hashed-pw", "salted-key"
+
         if (
           secretNames.some((s) => name.includes(s)) &&
           stripped.length >= 8 &&
           !isNonSecretName &&
           !isNonSecretValue &&
-          !isVocabularyTag
+          !isVocabularyTag &&
+          !isErrorCodeIdentifier &&
+          !isPlaceholderValue &&
+          !isObviousDummy
         ) {
           return makeViolation(
             this.ruleKey, node, filePath, 'critical',
@@ -116,6 +152,11 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
 const IPV4_REGEX = /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/
 const EXCLUDED_IPS = new Set(['127.0.0.1', '0.0.0.0', '255.255.255.255'])
 
+// JSX attributes that carry SVG coordinate/path data. Strings assigned to these
+// attributes routinely contain compressed decimal runs (e.g. "013.002.027.012")
+// that happen to match the IPv4 regex but are geometric data, not IPs.
+const SVG_COORDINATE_ATTRS = new Set(['d', 'points', 'transform', 'viewBox', 'pathData'])
+
 export const hardcodedIpVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/hardcoded-ip',
   nodeTypes: ['string', 'template_string'],
@@ -135,6 +176,25 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     // Validate each octet is 0-255
     const octets = ip.split('.')
     if (octets.some((o) => parseInt(o, 10) > 255)) return null
+
+    // Skip SVG path/coordinate JSX attributes — `<path d="..."/>` and friends
+    // pack fractional coordinates into compressed dotted runs that look like
+    // IPv4 addresses but are geometry, not network endpoints.
+    let attrAncestor = node.parent
+    while (
+      attrAncestor &&
+      attrAncestor.type !== 'jsx_attribute' &&
+      attrAncestor.type !== 'jsx_element' &&
+      attrAncestor.type !== 'jsx_self_closing_element' &&
+      attrAncestor.type !== 'program'
+    ) {
+      attrAncestor = attrAncestor.parent
+    }
+    if (attrAncestor?.type === 'jsx_attribute') {
+      const nameNode = attrAncestor.namedChild(0)
+      const attrName = nameNode?.text
+      if (attrName && SVG_COORDINATE_ATTRS.has(attrName)) return null
+    }
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
@@ -172,12 +232,14 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
           return null
         }
         // Exclude string comparisons/checks — the protocol URL is being inspected, not used
-        // as a connection target. E.g., input.startsWith('http://'), url.includes('http://').
+        // as a connection target. E.g., input.startsWith('http://'), url.includes('http://'),
+        // new URL(literal) (URL parsing, not network dial), or being passed into a
+        // URL-inspection helper (isPrivateUrl, parseHostUrl, validateHostname, …).
         const parent = node.parent
         if (parent?.type === 'arguments') {
           const grandparent = parent.parent
-          if (grandparent?.type === 'call_expression') {
-            const fn = grandparent.childForFieldName('function')
+          if (grandparent?.type === 'call_expression' || grandparent?.type === 'new_expression') {
+            const fn = grandparent.childForFieldName('function') ?? grandparent.childForFieldName('constructor')
             if (fn?.type === 'member_expression') {
               const prop = fn.childForFieldName('property')
               const methodName = prop?.text
@@ -187,6 +249,35 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
                 return null
               }
             }
+            if (fn?.type === 'identifier') {
+              const fnName = fn.text
+              // `new URL(literal)` — parsing, not network.
+              if (grandparent.type === 'new_expression' && fnName === 'URL') {
+                return null
+              }
+              // URL-inspection helpers: is/parse/validate/extract/check/assert + url/host/address.
+              if (/^(?:is|parse|validate|extract|check|assert)[A-Z]/.test(fnName) &&
+                  /(?:url|host|hostname|address)/i.test(fnName)) {
+                return null
+              }
+            }
+          }
+        }
+        // Skeleton-only template strings — when the template's content stripped of
+        // ${…} interpolations is just the scheme plus structural brackets/slashes
+        // (e.g. `http://${ip}`, `http://[${ipv6}]`, `http://${addr}/`), the http://
+        // is glue for a downstream URL parser, not a real endpoint.
+        if (node.type === 'template_string') {
+          let skeleton = ''
+          for (const child of node.namedChildren) {
+            if (child.type === 'template_substitution') continue
+            skeleton += child.text
+          }
+          // Also handle the raw template text: strip all ${…} occurrences.
+          const rawStripped = stripped.replace(/\$\{[^{}]*\}/g, '')
+          if (/^(?:https?|ftp|telnet):\/\/\[?\]?\/?$/.test(skeleton) ||
+              /^(?:https?|ftp|telnet):\/\/\[?\]?\/?$/.test(rawStripped)) {
+            return null
           }
         }
         return makeViolation(
@@ -470,6 +561,21 @@ const HASH_FUNCTIONS_NEEDING_SALT = new Set([
   'createHash', 'md5', 'sha1', 'sha256', 'sha512',
 ])
 
+// Identifier looks like a plaintext password (not a derived token/hash/url/etc.).
+// Matches: password, passwd, pwd, userPassword, new_password, plainPassword, currentPasswd.
+// Does NOT match: passwordResetToken, passwordHash, passwordUrl, hashedPassword (no — does match), etc.
+// The regex requires the identifier to END with one of the password words, so
+// compound names like "passwordResetToken" are excluded.
+const PASSWORD_IDENT_RE = /(^|[^a-zA-Z0-9])(password|passwd|pwd|pass)$/i
+
+function looksLikePasswordIdentifier(text: string): boolean {
+  // Strip member-access prefix: `req.body.password` → `password`
+  const last = text.split('.').pop() ?? text
+  // Strip subscript: `body['password']` → keep `'password'`, then strip quotes
+  const cleaned = last.replace(/^['"`]|['"`]$/g, '')
+  return PASSWORD_IDENT_RE.test(cleaned)
+}
+
 export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/unpredictable-salt-missing',
   nodeTypes: ['call_expression', 'call'],
@@ -487,29 +593,62 @@ export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
 
     if (!HASH_FUNCTIONS_NEEDING_SALT.has(methodName)) return null
 
-    // Only flag if this is in a password-hashing context
-    let parent = node.parent
-    while (parent) {
-      const parentText = parent.text.toLowerCase()
-      if (parentText.includes('password') || parentText.includes('passwd')) {
-        const args = node.childForFieldName('arguments')
-        if (args && args.namedChildren.length < 2) {
-          return makeViolation(
-            this.ruleKey, node, filePath, 'high',
-            'Missing salt in hash',
-            `${methodName}() called without a salt in a password context. This allows rainbow table attacks.`,
-            sourceCode,
-            'Use a password hashing function like bcrypt, argon2, or PBKDF2 which handle salting automatically.',
-          )
+    const args = node.childForFieldName('arguments')
+    if (!args) return null
+    // Already salted (two args supplied): skip.
+    if (args.namedChildren.length >= 2) return null
+
+    // Determine what's being hashed. Two shapes:
+    //   1) Chain:   crypto.createHash(algo).update(<input>).digest(...)
+    //               → inspect the .update() call's first argument.
+    //   2) Direct:  md5(<input>) / sha256(<input>) / etc.
+    //               → inspect this call's first argument.
+    let hashedInputText = ''
+
+    if (methodName === 'createHash') {
+      // Walk up the chain to find the .update(<input>) sibling.
+      // Tree shape (TS): call_expression
+      //                    function: member_expression
+      //                      object: call_expression  ← node
+      //                      property: 'update'
+      //                    arguments: (<input>)
+      let cursor: typeof node | null = node
+      while (cursor) {
+        const grand = cursor.parent
+        if (!grand) break
+        if (grand.type !== 'member_expression' && grand.type !== 'attribute') break
+        const prop = grand.childForFieldName('property') ?? grand.childForFieldName('attribute')
+        const propName = prop?.text ?? ''
+        const grandCall = grand.parent
+        if (grandCall && (grandCall.type === 'call_expression' || grandCall.type === 'call')) {
+          if (propName === 'update') {
+            const updArgs = grandCall.childForFieldName('arguments')
+            const first = updArgs?.namedChildren[0]
+            if (first) hashedInputText = first.text
+            break
+          }
+          // Keep climbing through other chained calls (e.g. .digest)
+          cursor = grandCall
+          continue
         }
-        return null
+        break
       }
-      if (parent.type === 'function_declaration' || parent.type === 'function_definition' ||
-          parent.type === 'method_definition' || parent.type === 'program') break
-      parent = parent.parent
+    } else {
+      // Direct hash call: inspect first arg.
+      const first = args.namedChildren[0]
+      if (first) hashedInputText = first.text
     }
 
-    return null
+    if (!hashedInputText) return null
+    if (!looksLikePasswordIdentifier(hashedInputText)) return null
+
+    return makeViolation(
+      this.ruleKey, node, filePath, 'high',
+      'Missing salt in hash',
+      `${methodName}() called without a salt in a password context. This allows rainbow table attacks.`,
+      sourceCode,
+      'Use a password hashing function like bcrypt, argon2, or PBKDF2 which handle salting automatically.',
+    )
   },
 }
 

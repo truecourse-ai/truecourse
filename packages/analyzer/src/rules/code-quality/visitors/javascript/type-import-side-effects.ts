@@ -22,30 +22,30 @@ export const typeImportSideEffectsVisitor: CodeRuleVisitor = {
 
     if (hasTopLevelType) return null // Already a type import, fine
 
-    // Check for inline type specifiers in named imports
+    // Check for inline type specifiers in named imports.
+    // Also account for default imports / namespace imports as value imports —
+    // e.g. `import Foo, { type Bar } from '...'` or `import * as NS, { type Bar } ...`
+    // means the module is loaded for its value side anyway.
     let hasInlineType = false
     let hasValueImport = false
-    function findNamedImports(n: any) {
-      for (let i = 0; i < n.childCount; i++) {
-        const child = n.child(i)
-        if (!child) continue
-        if (child.type === 'named_imports') {
-          for (let j = 0; j < child.childCount; j++) {
-            const spec = child.child(j)
-            if (!spec || spec.type !== 'import_specifier') continue
-            const tok0 = spec.child(0)
-            if (tok0?.type === 'type') {
-              hasInlineType = true
-            } else {
-              hasValueImport = true
-            }
+    for (let i = 0; i < importClause.childCount; i++) {
+      const child = importClause.child(i)
+      if (!child) continue
+      if (child.type === 'identifier' || child.type === 'namespace_import') {
+        hasValueImport = true
+      } else if (child.type === 'named_imports') {
+        for (let j = 0; j < child.childCount; j++) {
+          const spec = child.child(j)
+          if (!spec || spec.type !== 'import_specifier') continue
+          const tok0 = spec.child(0)
+          if (tok0?.type === 'type') {
+            hasInlineType = true
+          } else {
+            hasValueImport = true
           }
-        } else if (child.type === 'import_clause') {
-          findNamedImports(child)
         }
       }
     }
-    findNamedImports(node)
 
     if (!hasInlineType) return null
 

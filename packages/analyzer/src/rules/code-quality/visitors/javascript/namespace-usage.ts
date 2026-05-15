@@ -9,6 +9,13 @@ export const namespaceUsageVisitor: CodeRuleVisitor = {
     const keywordChild = node.children.find((c) => c.type === 'namespace' || c.text === 'namespace')
     if (!keywordChild) return null
 
+    // Skip ambient-declaration files (`*.d.ts`). These files exist only for type
+    // augmentation — `declare namespace`, `declare global { namespace … }`, and
+    // `declare module 'pkg' { namespace … }` are the canonical (and only) way to
+    // extend ambient/third-party namespaces, not the runtime-namespace anti-pattern
+    // this rule targets.
+    if (filePath.endsWith('.d.ts')) return null
+
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text ?? 'namespace'
 

@@ -11,17 +11,16 @@ export const filenameClassMismatchVisitor: CodeRuleVisitor = {
     const isDefault = node.children.some((c) => c.text === 'default')
     if (!isDefault) return null
 
-    // Get the class or identifier being exported
+    // Get the class being exported — only inline `export default class ClassName {}`
+    // form. We deliberately ignore `export default someIdentifier;` because that
+    // identifier is typically a built object (router, app, config, page
+    // component, template, etc.), not a class whose name should match the file.
     let exportedName: string | null = null
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i)
       if (!child) continue
       if (child.type === 'class_declaration') {
         exportedName = child.childForFieldName('name')?.text ?? null
-        break
-      }
-      if (child.type === 'identifier') {
-        exportedName = child.text
         break
       }
     }

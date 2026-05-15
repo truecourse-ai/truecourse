@@ -40,6 +40,11 @@ export const missingDestructuringVisitor: CodeRuleVisitor = {
     const objText0 = objNode.text
     if (objText0.includes('as any') || objText0.includes('as unknown')) return null
 
+    // Skip if the object expression is itself a member access (e.g. `claim.flags.X`).
+    // Destructuring chained accesses is a separate concern from the canonical
+    // "extract several props off the same identifier" case.
+    if (objNode.type !== 'identifier') return null
+
     const objText = objNode.text
 
     // Only flag when there are 2+ sequential property accesses from the same object
@@ -61,6 +66,31 @@ export const missingDestructuringVisitor: CodeRuleVisitor = {
       if (sibObj?.text === objText) sameObjectCount++
     }
     if (sameObjectCount < 2) return null
+
+    // Restrict to the canonical case: the source object is a direct identifier
+    // parameter of the enclosing function (e.g. `function f(config) { const x = config.x; ... }`).
+    // This excludes locally-aliased sources (`const req = c.req; const path = req.path;`),
+    // sources destructured out of a wrapper param (`function f({ params }) { const x = params.x; ... }`),
+    // and sources produced by a call/expression — all of which represent deliberate intermediate
+    // bindings where re-destructuring would not be a clear improvement.
+    const FUNCTION_TYPES = new Set([
+      'function_declaration', 'function_expression', 'arrow_function',
+      'method_definition', 'generator_function_declaration', 'generator_function',
+    ])
+    let fn: typeof node | null = node.parent
+    while (fn && !FUNCTION_TYPES.has(fn.type)) fn = fn.parent
+    if (!fn) return null
+    const paramsNode = fn.childForFieldName('parameters')
+    if (!paramsNode) return null
+    const isDirectIdentifierParam = paramsNode.namedChildren.some((p) => {
+      if (p.type === 'identifier' && p.text === objText) return true
+      if (p.type === 'required_parameter' || p.type === 'optional_parameter') {
+        const pat = p.childForFieldName('pattern')
+        if (pat && pat.type === 'identifier' && pat.text === objText) return true
+      }
+      return false
+    })
+    if (!isDirectIdentifierParam) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'low',

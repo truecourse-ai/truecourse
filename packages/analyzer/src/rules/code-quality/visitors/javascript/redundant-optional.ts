@@ -13,24 +13,53 @@ export const redundantOptionalVisitor: CodeRuleVisitor = {
     const typeAnnotation = node.namedChildren.find((c) => c.type === 'type_annotation')
     if (!typeAnnotation) return null
 
-    function hasUndefinedMember(n: SyntaxNode): boolean {
+    // Unwrap the `type_annotation` (`: T`) wrapper to get the actual type node.
+    const typeNode = typeAnnotation.namedChildren.find((c) => c.type !== 'comment')
+    if (!typeNode) return null
+
+    // Recognize `undefined` as either the `undefined` predefined keyword or a
+    // literal-type wrapping it. We only treat the type as redundantly-undefined
+    // when `undefined` appears at the TOP LEVEL of the annotation, i.e. either:
+    //   - as a member of a union that is itself the top-level type, or
+    //   - through parenthesized-type wrappers that don't change semantics.
+    // We must NOT descend into nested constructors like function_type,
+    // generic_type, object_type, array_type, tuple_type, mapped_type, etc. —
+    // an `undefined` appearing inside e.g. `Record<string, string | undefined>`
+    // or `(x: T | undefined) => void` is meaningful, not redundant.
+    function isUndefinedType(n: SyntaxNode): boolean {
       if (n.type === 'predefined_type' && n.text === 'undefined') return true
       if (n.type === 'literal_type' && n.text === 'undefined') return true
-      if (n.type === 'union_type') {
+      if (n.type === 'parenthesized_type') {
         for (let i = 0; i < n.namedChildCount; i++) {
           const child = n.namedChild(i)
-          if (child && hasUndefinedMember(child)) return true
+          if (child && isUndefinedType(child)) return true
         }
-        return false
-      }
-      for (let i = 0; i < n.namedChildCount; i++) {
-        const child = n.namedChild(i)
-        if (child && hasUndefinedMember(child)) return true
       }
       return false
     }
 
-    if (hasUndefinedMember(typeAnnotation)) {
+    function unionHasUndefined(n: SyntaxNode): boolean {
+      if (n.type === 'parenthesized_type') {
+        for (let i = 0; i < n.namedChildCount; i++) {
+          const child = n.namedChild(i)
+          if (child && unionHasUndefined(child)) return true
+        }
+        return false
+      }
+      if (n.type !== 'union_type') return false
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const child = n.namedChild(i)
+        if (!child) continue
+        if (isUndefinedType(child)) return true
+        // Allow nested unions / parens within the top-level union.
+        if (child.type === 'union_type' || child.type === 'parenthesized_type') {
+          if (unionHasUndefined(child)) return true
+        }
+      }
+      return false
+    }
+
+    if (unionHasUndefined(typeNode)) {
       const nameNode = node.childForFieldName('name') ?? node.childForFieldName('pattern')
       const name = nameNode?.text ?? 'property'
       return makeViolation(

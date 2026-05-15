@@ -15,8 +15,10 @@ export const unusedConstructorResultVisitor: CodeRuleVisitor = {
     if (intentionalCtors.some((ic) => name.includes(ic))) return null
 
     // Skip standard validation patterns where the constructor throws on invalid input
-    // and the object is intentionally unused (e.g., new URL(input), new RegExp(pattern))
+    // and the object is intentionally unused (e.g., new URL(input), new RegExp(pattern),
+    // new Intl.Locale(tag) for BCP-47 validation)
     if (name === 'URL' || name === 'RegExp') return null
+    if (name.startsWith('Intl.')) return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',

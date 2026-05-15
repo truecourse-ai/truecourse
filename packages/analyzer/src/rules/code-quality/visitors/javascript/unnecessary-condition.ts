@@ -43,6 +43,16 @@ export const unnecessaryConditionVisitor: CodeRuleVisitor = {
     // Skip any/unknown
     if (typeStr === 'any' || typeStr === 'unknown') return null
 
+    // Skip identifier conditions whose type is a literal `true` or `false`.
+    // TypeScript narrows `let x = false; ... if (x)` to `false` based on its
+    // local flow analysis, but it cannot see reassignments performed via
+    // closures (e.g. `return () => { x = true; }` in `useEffect`, abort
+    // handlers, transaction callbacks). Those are runtime-variable in
+    // practice, so a literal `true`/`false` on an identifier is too noisy.
+    // Literal-`true`/`false` AST nodes (e.g. `if (true)`) keep firing because
+    // they have node type `true`/`false`, not `identifier`.
+    if (expr.type === 'identifier' && (typeStr === 'true' || typeStr === 'false')) return null
+
     // Always truthy types
     const alwaysTruthy = new Set(['object', 'Function', 'symbol', 'RegExp'])
     if (typeStr === 'true' || alwaysTruthy.has(typeStr)) {
