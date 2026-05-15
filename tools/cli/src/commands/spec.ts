@@ -200,37 +200,6 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// diff (docs vs current canonical)
-// ---------------------------------------------------------------------------
-
-export async function runSpecDiff(opts: RunSpecOptions = {}): Promise<void> {
-  const root = repoRoot(opts);
-  p.intro("Spec diff");
-
-  // Run apply in dry-run mode — we materialize against a tmp dir to
-  // see what content would be written, then compare to the on-disk
-  // canonical. Since the materializer overwrites, the cleanest dry
-  // run is to scan + show the conflict delta vs decisions.json.
-  const { renderer, tracker } = withTracker(SCAN_STEPS);
-  try {
-    const { consolidate } = await scanInProcess(root, { tracker });
-    renderer.dispose();
-    const { merge } = consolidate;
-    if (merge.openConflicts.length === 0) {
-      p.log.success("No drift — every claim is decided or resolved.");
-      p.outro("Up to date.");
-      return;
-    }
-    p.log.warn(`${merge.openConflicts.length} open conflicts.`);
-    summarizeConflicts("Pending", merge.openConflicts);
-    p.outro("Resolve and re-apply to update the canonical spec.");
-  } catch (e) {
-    renderer.dispose();
-    p.cancel(`Failed: ${(e as Error).message}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // verify
 // ---------------------------------------------------------------------------
 

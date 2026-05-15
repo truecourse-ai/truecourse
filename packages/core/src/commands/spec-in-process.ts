@@ -250,8 +250,16 @@ export async function scanInProcess(
 ): Promise<SpecScanInProcessResult> {
   const { tracker } = options;
   let docsSeen = 0;
-  let blocksSeen = 0;
+  let blocksTotal = 0;
+  let blocksDone = 0;
   let extractStarted = false;
+
+  const renderExtractDetail = (): string => {
+    if (blocksTotal === 0) {
+      return `${docsSeen} docs`;
+    }
+    return `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
+  };
 
   tracker?.start('discover');
   let result: ConsolidateResult;
@@ -269,11 +277,15 @@ export async function scanInProcess(
           extractStarted = true;
         }
         docsSeen++;
-        tracker?.detail('extract', `${docsSeen} docs, ${blocksSeen} blocks`);
+        tracker?.detail('extract', renderExtractDetail());
       },
-      onDocDone: (_doc, blockCount) => {
-        blocksSeen += blockCount;
-        tracker?.detail('extract', `${docsSeen} docs, ${blocksSeen} blocks`);
+      onBlocksReady: (total) => {
+        blocksTotal = total;
+        tracker?.detail('extract', renderExtractDetail());
+      },
+      onBlockDone: () => {
+        blocksDone++;
+        tracker?.detail('extract', renderExtractDetail());
       },
     });
   } catch (e) {
@@ -458,10 +470,18 @@ export async function applyInProcess(
 ): Promise<SpecApplyInProcessResult> {
   const { tracker } = options;
   let docsSeen = 0;
-  let blocksSeen = 0;
+  let blocksTotal = 0;
+  let blocksDone = 0;
   let sectionsDone = 0;
   let extractStarted = false;
   let materializeStarted = false;
+
+  const renderExtractDetail = (): string => {
+    if (blocksTotal === 0) {
+      return `${docsSeen} docs`;
+    }
+    return `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
+  };
 
   tracker?.start('discover');
   let result: ConsolidateResult;
@@ -480,15 +500,19 @@ export async function applyInProcess(
           extractStarted = true;
         }
         docsSeen++;
-        tracker?.detail('extract', `${docsSeen} docs, ${blocksSeen} blocks`);
+        tracker?.detail('extract', renderExtractDetail());
       },
-      onDocDone: (_doc, blockCount) => {
-        blocksSeen += blockCount;
-        tracker?.detail('extract', `${docsSeen} docs, ${blocksSeen} blocks`);
+      onBlocksReady: (total) => {
+        blocksTotal = total;
+        tracker?.detail('extract', renderExtractDetail());
+      },
+      onBlockDone: () => {
+        blocksDone++;
+        tracker?.detail('extract', renderExtractDetail());
       },
       onSectionDone: () => {
         if (!materializeStarted) {
-          if (extractStarted) tracker?.done('extract', `${blocksSeen} blocks`);
+          if (extractStarted) tracker?.done('extract', `${blocksDone} blocks`);
           tracker?.done('merge');
           tracker?.start('materialize');
           materializeStarted = true;

@@ -85,6 +85,16 @@ export interface ConsolidateOptions {
   onDocDone?: (doc: import('./discovery.js').DocCandidate, blockCount: number, claimCount: number) => void;
   onBlockFailure?: (block: Block, error: string) => void;
   onSectionDone?: (section: RenderedSection) => void;
+  /** Total block count, fired once after slicing. */
+  onBlocksReady?: (total: number) => void;
+  /**
+   * Fires whenever a single block finishes (either a cache hit or an
+   * LLM subprocess returning). Pairs with `onBlocksReady(total)` so
+   * progress UIs can show "N / total blocks" ticking during the long
+   * extraction phase. Cache hits all fire synchronously at the start
+   * of the run.
+   */
+  onBlockDone?: () => void;
 }
 
 export interface ConsolidateResult {
@@ -134,13 +144,18 @@ export async function consolidate(
   const winnersByChain = resolveChainWinners(chainConflicts, decisions);
 
   // ---- Extract (cache-wrapped) -----------------------------------------
-  const blockRunner = wrapBlockRunner(repoRoot, opts.blockRunner ?? spawnRunner());
+  const blockRunner = wrapBlockRunner(
+    repoRoot,
+    opts.blockRunner ?? spawnRunner({ onBlockDone: () => opts.onBlockDone?.() }),
+    opts.onBlockDone,
+  );
   const extract = await extractClaims(repoRoot, {
     runner: blockRunner,
     skipGit: opts.skipGit,
     onDocStart: opts.onDocStart,
     onDocDone: opts.onDocDone,
     onBlockFailure: opts.onBlockFailure,
+    onBlocksReady: opts.onBlocksReady,
   });
 
   // ---- Apply chain decisions: drop claims from superseded docs ---------
@@ -474,7 +489,11 @@ export function writeDecisions(repoRoot: string, decisions: DecisionsFile): void
 // Cache-wrapping runners
 // ---------------------------------------------------------------------------
 
-function wrapBlockRunner(repoRoot: string, inner: BlockRunner): BlockRunner {
+function wrapBlockRunner(
+  repoRoot: string,
+  inner: BlockRunner,
+  onBlockDone?: () => void,
+): BlockRunner {
   return async (blocks) => {
     const out: BlockRunResult[] = [];
     const misses: Block[] = [];
@@ -482,6 +501,10 @@ function wrapBlockRunner(repoRoot: string, inner: BlockRunner): BlockRunner {
       const cached = readBlockCache(repoRoot, block.id);
       if (cached) {
         out.push({ block, extraction: cached, durationMs: 0 });
+        // Count cache hits as "done" so the progress bar starts from
+        // an accurate baseline. Misses are counted by the inner
+        // runner's `onBlockDone` hook.
+        onBlockDone?.();
       } else {
         misses.push(block);
       }
