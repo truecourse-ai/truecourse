@@ -10,6 +10,11 @@ export const syncRequireInHandlerVisitor: CodeRuleVisitor = {
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'identifier' || fn.text !== 'require') return null
 
+    // CLI scripts, seed runners, and migration drivers run once at process
+    // startup and exit — there is no event loop to block. The rule is about
+    // request-handler latency, so file-path-based scoping is appropriate.
+    if (/\/scripts\/|(?:^|\/)seed[^/]*\.[tj]sx?$|\/migrations?\//i.test(filePath)) return null
+
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 
     return makeViolation(
