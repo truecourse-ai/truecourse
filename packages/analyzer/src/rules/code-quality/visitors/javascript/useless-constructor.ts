@@ -9,6 +9,14 @@ export const uselessConstructorVisitor: CodeRuleVisitor = {
     const nameNode = node.childForFieldName('name')
     if (nameNode?.text !== 'constructor') return null
 
+    // Private/protected constructors are intentional (singleton, abstract base,
+    // factory-only construction) — the constructor's purpose is access control,
+    // not body-level work. Removing it would change visibility semantics.
+    const hasAccessibilityModifier = node.children.some(
+      (c) => c.type === 'accessibility_modifier' && (c.text === 'private' || c.text === 'protected'),
+    )
+    if (hasAccessibilityModifier) return null
+
     const body = node.namedChildren.find((c) => c.type === 'statement_block')
     if (!body) return null
 
@@ -30,6 +38,14 @@ export const uselessConstructorVisitor: CodeRuleVisitor = {
     const args = expr.childForFieldName('arguments')
 
     if (!params || !args) return null
+
+    // TS parameter properties (e.g. `constructor(public code: string) {}`) declare
+    // a class field as a side effect of the parameter — removing the constructor
+    // would erase that field, so this is not a useless forwarding pattern.
+    const hasParameterProperty = params.namedChildren.some((p) =>
+      p.children.some((c) => c.type === 'accessibility_modifier' || c.type === 'readonly'),
+    )
+    if (hasParameterProperty) return null
 
     const paramTexts = params.namedChildren.map((p) => {
       const n = p.childForFieldName('pattern') ?? p
