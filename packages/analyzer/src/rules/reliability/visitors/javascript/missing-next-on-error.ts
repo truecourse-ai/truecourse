@@ -23,9 +23,12 @@ export const missingNextOnErrorVisitor: CodeRuleVisitor = {
       return nameNode.text.replace(/:.+/, '').trim()
     })
 
-    // Must have a next-like param (usually 3rd or 4th param)
-    const hasNext = paramNames.some((n) => n === 'next')
-    if (!hasNext) return null
+    // Must have a next-like param at position ≥2 (Express signature is (req, res, next, ...)
+    // or (err, req, res, next)). Hono middleware uses (c, next) where next is callable
+    // without arguments — that's a fundamentally different middleware contract, not the
+    // Express next(error) pattern this rule targets.
+    const nextIdx = paramNames.indexOf('next')
+    if (nextIdx < 2) return null
 
     // Check the catch body for next(
     const body = node.childForFieldName('body')
