@@ -10,7 +10,9 @@ const RESTRICTED_GLOBALS = new Map<string, string>([
   ['event', 'Implicit global event object — use explicit event parameter instead'],
   ['fdescribe', 'Focused test suite — will skip other tests in CI'],
   ['fit', 'Focused test — will skip other tests in CI'],
-  ['location', 'Direct location mutation — use router navigation instead'],
+  // `location` removed: assigning `location.href = url` is the standard way to
+  // perform a full-page navigation in vanilla SPAs (no router). Outside of a
+  // router-managed app, this is the correct API, not a restricted one.
 ])
 
 const RESTRICTED_PROPERTIES = new Map<string, string>([
