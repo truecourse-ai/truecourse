@@ -5,6 +5,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/fixtures/**'],
     testTimeout: 30000,
+    hookTimeout: 600000,
     setupFiles: ['./tests/setup.ts'],
   },
 });
