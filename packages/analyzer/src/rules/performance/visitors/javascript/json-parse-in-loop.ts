@@ -14,7 +14,10 @@ export const jsonParseInLoopVisitor: CodeRuleVisitor = {
     const obj = fn.childForFieldName('object')
     const prop = fn.childForFieldName('property')
     if (obj?.text !== 'JSON') return null
-    if (prop?.text !== 'parse' && prop?.text !== 'stringify') return null
+    // Match the rule name: only flag JSON.parse. JSON.stringify in a loop is
+    // typically logging/serializing iteration state that's intentionally
+    // recomputed each pass, not a cacheable static cost.
+    if (prop?.text !== 'parse') return null
 
     if (!isInsideLoop(node)) return null
 
