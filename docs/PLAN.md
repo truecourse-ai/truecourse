@@ -142,6 +142,7 @@ truecourse/
 - **Fixture project:** `tests/fixtures/sample-project/` — a small multi-service TS/JS repo used by analyzer and server tests
 - **Convention:** Test files named `*.test.ts`
 - **Categories:** Unit tests (no I/O), integration tests (filesystem/DB), E2E tests (full server + client)
+- **Root resolution:** `vitest.config.ts` maps workspace package imports, including `@truecourse/core/*` public subpaths, to source files so tests do not require prebuilt `dist/` output.
 - **Each phase must include a test plan and passing tests before the phase is considered complete.**
 - **Run:** `pnpm test` (all tests)
 
