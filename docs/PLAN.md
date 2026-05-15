@@ -3199,6 +3199,7 @@ Current task status:
 - Phase 5 compliance matchers: `STATUS: DONE`
 - Phase 6 CLI and dashboard integration: `STATUS: DONE`
 - Phase 7 hardening and expansion: `STATUS: DONE`
+- Phase 8 CLI command extraction and matching follow-up: `STATUS: DONE`
 
 Initial scope:
 
@@ -3222,3 +3223,9 @@ Phase 7 hardening status:
 - Remaining expansion: larger mixed-domain snapshot. `STATUS: DONE`
 - Minimal React todo fixture with structured product requirements for manual and regression spec-compliance runs. `STATUS: DONE`
 - Requested Phase 7 test/build sweep (`pnpm test -- tests/analyzer tests/core tests/cli tests/dashboard-server`, `pnpm build`). `STATUS: DONE`
+
+Phase 8 CLI command extraction status:
+
+- Package `bin` metadata now emits `cli.binary` facts without churning existing package script/metadata fact IDs. `STATUS: DONE`
+- Commander-based TypeScript/JavaScript CLIs now emit static binary, command, option, and argument facts. `STATUS: DONE`
+- CLI binary, command, option, and argument requirements now have deterministic matchers, including `must_not`, missing, partial, and unverifiable handling. `STATUS: DONE`

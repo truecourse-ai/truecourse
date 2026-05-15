@@ -167,9 +167,30 @@ produce API route requirements with operation IDs, status codes, request and
 response schema hints, required request fields, and auth/security metadata.
 Implementation facts include Express routes, visible request body field usage,
 returned status codes, auth checks, React/UI facts, statically resolvable
-composed React labels and route constants, package scripts, Docker Compose
-services, GitHub Actions jobs, and schema facts from Prisma, Drizzle, and
-SQLAlchemy models.
+composed React labels and route constants, package scripts, package `bin`
+metadata, Commander CLI commands/options/arguments, Docker Compose services,
+GitHub Actions jobs, and schema facts from Prisma, Drizzle, and SQLAlchemy
+models.
+
+Structured specs can target CLI surfaces directly:
+
+```yaml
+requirements:
+  - kind: cli
+    subject: analyze command
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse analyze
+  - kind: cli
+    subject: spec compliance option
+    action: define
+    constraints:
+      - type: cliCommand
+        value: truecourse analyze
+      - type: cliOption
+        value: --spec-compliance
+```
 
 Result statuses:
 

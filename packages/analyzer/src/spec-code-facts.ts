@@ -7,6 +7,7 @@ import {
   type CodeFact,
 } from '@truecourse/shared'
 import { extractAuthFacts } from './spec-code-facts/auth.js'
+import { extractCliFacts } from './spec-code-facts/cli.js'
 import { discoverCodeFactInputs } from './spec-code-facts/discovery.js'
 import { extractEnvFacts } from './spec-code-facts/env.js'
 import { emitExpressFacts } from './spec-code-facts/express.js'
@@ -31,6 +32,7 @@ function extractFromSourceUnit(unit: SourceUnit, resolver: ReturnType<typeof cre
   extractReactRouteFacts(unit, resolver)
   extractJsxFacts(unit, resolver)
   extractTestFacts(unit)
+  extractCliFacts(unit, resolver)
 }
 
 export async function extractCodeFacts(rootDir: string): Promise<CodeFactExtractionResult> {

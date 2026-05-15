@@ -1,0 +1,10 @@
+{
+  "name": "spec-compliance-cli-fixture",
+  "private": true,
+  "bin": {
+    "truecourse": "src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  }
+}

@@ -4,6 +4,10 @@ import { complianceResult, invertStatus } from './result.js';
 import {
   authFacts,
   containsAny,
+  extractCliArgument,
+  extractCliBinary,
+  extractCliCommand,
+  extractCliOption,
   extractEnvVar,
   extractField,
   extractRole,
@@ -87,6 +91,55 @@ function routeHasAuth(route: CodeFact, facts: CodeFact[]): CodeFact[] {
   });
   const authMiddlewareFacts = AUTH_PATTERN.test(middlewareNames.join(' ')) ? [route] : [];
   return [...authMiddlewareFacts, ...routeAuthFacts];
+}
+
+function cliFacts(facts: CodeFact[]): CodeFact[] {
+  return facts.filter((fact) => fact.kind.startsWith('cli.'));
+}
+
+function cliBinaryFacts(facts: CodeFact[]): CodeFact[] {
+  return facts.filter((fact) => fact.kind === 'cli.binary' && fact.predicate === 'binary.defined');
+}
+
+function cliCommandFacts(facts: CodeFact[]): CodeFact[] {
+  return facts.filter((fact) => fact.kind === 'cli.command' && fact.predicate === 'command.defined');
+}
+
+function hasCliConstraint(requirement: { constraints: Array<{ type: string }> }, type: string): boolean {
+  return requirement.constraints.some((constraint) => normalizedCli(constraint.type) === normalizedCli(type));
+}
+
+function naturalRequirementText(requirement: { subject: string; action: string; object?: string; evidenceText: string }): string {
+  return [requirement.subject, requirement.action, requirement.object, requirement.evidenceText].filter(Boolean).join(' ');
+}
+
+function normalizedCli(value: unknown): string {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function commandFactMatchesTarget(fact: CodeFact, target: string, hasBinaryFacts: boolean): boolean {
+  const value = record(fact.value);
+  const expected = normalizedCli(target);
+  const fullName = normalizedCli(value.fullName);
+  if (fullName === expected) return true;
+  const path = Array.isArray(value.path) ? normalizedCli(value.path.join(' ')) : '';
+  if (!hasBinaryFacts && path === expected) return true;
+  return false;
+}
+
+function optionFactMatches(fact: CodeFact, command: CodeFact, option: string): boolean {
+  const value = record(fact.value);
+  const commandValue = record(command.value);
+  return normalizedCli(value.command) === normalizedCli(commandValue.fullName)
+    && [value.name, value.shortName].some((candidate) => typeof candidate === 'string' && normalizedCli(candidate) === normalizedCli(option));
+}
+
+function argumentFactMatches(fact: CodeFact, command: CodeFact, arg: string): boolean {
+  const value = record(fact.value);
+  const commandValue = record(command.value);
+  return normalizedCli(value.command) === normalizedCli(commandValue.fullName)
+    && typeof value.name === 'string'
+    && normalizedCli(value.name) === normalizedCli(arg);
 }
 
 export const complianceMatchers = [
@@ -282,6 +335,107 @@ export const complianceMatchers = [
         matchingFacts: requirement.modality === 'must_not' ? [] : matches,
         conflictingFacts: requirement.modality === 'must_not' ? matches : [],
         message: matches.length > 0 ? `Validation message matching "${message}" exists.` : `Validation message matching "${message}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'cli.binary.exists',
+    (requirement) => requirement.kind === 'cli'
+      && Boolean(extractCliBinary(requirement))
+      && (hasCliConstraint(requirement, 'cliBinary') || containsAny(naturalRequirementText(requirement), ['binary', 'bin'])),
+    ({ requirement, facts }, metadata) => {
+      const target = extractCliBinary(requirement)!;
+      const allCliFacts = cliFacts(facts);
+      if (requirement.modality !== 'must_not' && allCliFacts.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `CLI facts are unavailable for "${requirement.subject}".` });
+      }
+      const matches = cliBinaryFacts(facts).filter((fact) => normalizedCli(record(fact.value).name) === normalizedCli(target));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `CLI binary "${target}" exists.` : `CLI binary "${target}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'cli.command.exists',
+    (requirement) => requirement.kind === 'cli' && Boolean(extractCliCommand(requirement)) && !extractCliOption(requirement) && !extractCliArgument(requirement),
+    ({ requirement, facts }, metadata) => {
+      const target = extractCliCommand(requirement)!;
+      const allCliFacts = cliFacts(facts);
+      if (requirement.modality !== 'must_not' && allCliFacts.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `CLI facts are unavailable for "${requirement.subject}".` });
+      }
+      const hasBinaryFacts = cliBinaryFacts(facts).length > 0;
+      const matches = cliCommandFacts(facts).filter((fact) => commandFactMatchesTarget(fact, target, hasBinaryFacts));
+      const status = invertStatus(requirement, matches.length > 0);
+      return complianceResult(requirement, metadata, status, {
+        matchingFacts: requirement.modality === 'must_not' ? [] : matches,
+        conflictingFacts: requirement.modality === 'must_not' ? matches : [],
+        message: matches.length > 0 ? `CLI command "${target}" exists.` : `CLI command "${target}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'cli.option.exists',
+    (requirement) => requirement.kind === 'cli' && Boolean(extractCliOption(requirement)),
+    ({ requirement, facts }, metadata) => {
+      const option = extractCliOption(requirement)!;
+      const commandTarget = extractCliCommand(requirement);
+      const allCliFacts = cliFacts(facts);
+      if (requirement.modality !== 'must_not' && allCliFacts.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `CLI facts are unavailable for "${requirement.subject}".` });
+      }
+      const hasBinaryFacts = cliBinaryFacts(facts).length > 0;
+      const commands = commandTarget
+        ? cliCommandFacts(facts).filter((fact) => commandFactMatchesTarget(fact, commandTarget, hasBinaryFacts))
+        : cliCommandFacts(facts);
+      const matches = facts.filter((fact) => fact.kind === 'cli.option' && commands.some((command) => optionFactMatches(fact, command, option)));
+      if (requirement.modality === 'must_not') {
+        const status = matches.length > 0 ? 'conflicting' : 'satisfied';
+        return complianceResult(requirement, metadata, status, {
+          conflictingFacts: status === 'conflicting' ? matches : [],
+          message: status === 'conflicting' ? `Prohibited CLI option "${option}" exists.` : `Prohibited CLI option "${option}" is absent.`,
+        });
+      }
+      if (commands.length === 0) {
+        return complianceResult(requirement, metadata, 'missing', { message: `CLI command is missing for option "${option}".` });
+      }
+      return complianceResult(requirement, metadata, matches.length > 0 ? 'satisfied' : 'partial', {
+        matchingFacts: matches.length > 0 ? [...commands, ...matches] : commands,
+        message: matches.length > 0 ? `CLI option "${option}" exists.` : `CLI command exists but option "${option}" is missing.`,
+      });
+    },
+  ),
+  makeMatcher(
+    'cli.argument.exists',
+    (requirement) => requirement.kind === 'cli' && Boolean(extractCliArgument(requirement)),
+    ({ requirement, facts }, metadata) => {
+      const arg = extractCliArgument(requirement)!;
+      const commandTarget = extractCliCommand(requirement);
+      const allCliFacts = cliFacts(facts);
+      if (requirement.modality !== 'must_not' && allCliFacts.length === 0) {
+        return complianceResult(requirement, metadata, 'unverifiable', { message: `CLI facts are unavailable for "${requirement.subject}".` });
+      }
+      const hasBinaryFacts = cliBinaryFacts(facts).length > 0;
+      const commands = commandTarget
+        ? cliCommandFacts(facts).filter((fact) => commandFactMatchesTarget(fact, commandTarget, hasBinaryFacts))
+        : cliCommandFacts(facts);
+      const matches = facts.filter((fact) => fact.kind === 'cli.argument' && commands.some((command) => argumentFactMatches(fact, command, arg)));
+      if (requirement.modality === 'must_not') {
+        const status = matches.length > 0 ? 'conflicting' : 'satisfied';
+        return complianceResult(requirement, metadata, status, {
+          conflictingFacts: status === 'conflicting' ? matches : [],
+          message: status === 'conflicting' ? `Prohibited CLI argument "${arg}" exists.` : `Prohibited CLI argument "${arg}" is absent.`,
+        });
+      }
+      if (commands.length === 0) {
+        return complianceResult(requirement, metadata, 'missing', { message: `CLI command is missing for argument "${arg}".` });
+      }
+      return complianceResult(requirement, metadata, matches.length > 0 ? 'satisfied' : 'partial', {
+        matchingFacts: matches.length > 0 ? [...commands, ...matches] : commands,
+        message: matches.length > 0 ? `CLI argument "${arg}" exists.` : `CLI command exists but argument "${arg}" is missing.`,
       });
     },
   ),

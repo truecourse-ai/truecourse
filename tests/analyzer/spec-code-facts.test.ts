@@ -229,12 +229,14 @@ describe('extractCodeFacts', () => {
       name: 'root-package',
       version: '1.0.0',
       private: true,
+      bin: 'dist/index.js',
       scripts: { build: 'tsc', test: 'vitest run' },
       dependencies: { express: '^4.0.0' },
       devDependencies: { typescript: '^5.0.0' },
     }, null, 2))
     writeFixture(root, 'packages/app/package.json', JSON.stringify({
       name: '@scope/app',
+      bin: { app: 'src/index.ts' },
       scripts: { dev: 'vite' },
       dependencies: { react: '^19.0.0' },
     }, null, 2))
@@ -251,6 +253,56 @@ describe('extractCodeFacts', () => {
       expect.objectContaining({ name: 'root-package', dependencies: ['express'], devDependencies: ['typescript'] }),
       expect.objectContaining({ name: '@scope/app', dependencies: ['react'], devDependencies: [] }),
     ]))
+    expect(values<{ name: string; entry?: string; packageName?: string }>(result.facts, 'cli.binary')).toEqual(expect.arrayContaining([
+      { name: 'root-package', entry: 'dist/index.js', packageName: 'root-package' },
+      { name: 'app', entry: 'src/index.ts', packageName: '@scope/app' },
+    ]))
+  })
+
+  it('extracts Commander CLI commands, options, arguments, aliases, actions, and static signatures', async () => {
+    const root = tempProject()
+    writeFixture(root, 'src/constants.ts', [
+      'export const COMMANDS = { analyze: "analyze", rules: "rules" } as const',
+      'export const SPEC_OPTION = "-s, --spec-compliance <globs>"',
+    ].join('\n'))
+    writeFixture(root, 'src/index.ts', [
+      'import { Command } from "commander"',
+      'import { COMMANDS, SPEC_OPTION } from "./constants"',
+      'const program = new Command()',
+      'program.name("truecourse").version("1.0.0").description("TrueCourse CLI")',
+      'program.command(COMMANDS.analyze).description("Analyze repo").option(SPEC_OPTION, "Spec globs").requiredOption("--project <path>", "Project path").option("--no-llm", "Disable LLM").action(runAnalyze)',
+      'const rulesCmd = program.command(COMMANDS.rules).alias("r").description("Manage rules")',
+      'rulesCmd.command("enable <ruleKey>").argument("[scope...]", "Rule scope").action(enableRule)',
+      'program.command(makeName()).action(dynamic)',
+    ].join('\n'))
+
+    const first = await extractCodeFacts(root)
+    const second = await extractCodeFacts(root)
+    expect(first.errors).toEqual([])
+    expect(JSON.stringify(first.facts)).toBe(JSON.stringify(second.facts))
+
+    expect(values<{ name: string; source?: string }>(first.facts, 'cli.binary')).toEqual(expect.arrayContaining([
+      { name: 'truecourse', source: 'commander' },
+    ]))
+    expect(values<{ name: string; fullName: string; path: string[]; parentPath: string[]; aliases: string[]; hasAction: boolean }>(first.facts, 'cli.command')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'analyze', fullName: 'truecourse analyze', path: ['analyze'], parentPath: [], hasAction: true }),
+      expect.objectContaining({ name: 'rules', fullName: 'truecourse rules', path: ['rules'], parentPath: [], aliases: ['r'], hasAction: false }),
+      expect.objectContaining({ name: 'enable', fullName: 'truecourse rules enable', path: ['rules', 'enable'], parentPath: ['rules'], hasAction: true }),
+    ]))
+    expect(values<{ fullName: string }>(first.facts, 'cli.command')).not.toContainEqual(expect.objectContaining({ fullName: 'truecourse dynamic' }))
+    expect(values<{ command: string; name: string; shortName?: string; argument?: string; required: boolean; negated: boolean }>(first.facts, 'cli.option')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'truecourse analyze', name: '--spec-compliance', shortName: '-s', argument: 'globs', required: false, negated: false }),
+      expect.objectContaining({ command: 'truecourse analyze', name: '--project', argument: 'path', required: true, negated: false }),
+      expect.objectContaining({ command: 'truecourse analyze', name: '--no-llm', required: false, negated: true }),
+    ]))
+    expect(values<{ command: string; name: string; required: boolean; variadic: boolean }>(first.facts, 'cli.argument')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'truecourse rules enable', name: 'ruleKey', required: true, variadic: false }),
+      expect.objectContaining({ command: 'truecourse rules enable', name: 'scope', required: false, variadic: true }),
+    ]))
+
+    for (const fact of first.facts) {
+      expect(CodeFactSchema.parse(fact)).toEqual(fact)
+    }
   })
 
   it('extracts Prisma, Drizzle, SQLAlchemy, Docker Compose, and GitHub Actions facts', async () => {

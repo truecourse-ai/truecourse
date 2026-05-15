@@ -104,6 +104,43 @@ export function extractRole(requirement: Requirement): string | undefined {
     ?? requirement.evidenceText.match(/\b(admin|owner|user|member|manager|editor|viewer)\b/i)?.[0];
 }
 
+function constraintValue(requirement: Requirement, type: string): string | undefined {
+  return requirement.constraints
+    .find((constraint) => normalizeText(constraint.type) === normalizeText(type))
+    ?.value as string | undefined;
+}
+
+export function normalizeCliPhrase(value: string): string {
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+export function extractCliBinary(requirement: Requirement): string | undefined {
+  const explicit = constraintValue(requirement, 'cliBinary');
+  if (typeof explicit === 'string' && explicit.trim()) return normalizeCliPhrase(explicit);
+  const backticked = requirementText(requirement).match(/`([^`\s]+)(?:\s[^`]*)?`/)?.[1];
+  return backticked ? normalizeCliPhrase(backticked) : undefined;
+}
+
+export function extractCliCommand(requirement: Requirement): string | undefined {
+  const explicit = constraintValue(requirement, 'cliCommand');
+  if (typeof explicit === 'string' && explicit.trim()) return normalizeCliPhrase(explicit);
+  const backticked = requirementText(requirement).match(/`([^`]*\s[^`]*)`/)?.[1];
+  return backticked ? normalizeCliPhrase(backticked.replace(/\s+--[^\s]+.*$/, '')) : undefined;
+}
+
+export function extractCliOption(requirement: Requirement): string | undefined {
+  const explicit = constraintValue(requirement, 'cliOption');
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
+  return requirementText(requirement).match(/--[a-z0-9][a-z0-9-]*/i)?.[0];
+}
+
+export function extractCliArgument(requirement: Requirement): string | undefined {
+  const explicit = constraintValue(requirement, 'cliArgument');
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
+  const match = requirementText(requirement).match(/[<[]([a-zA-Z][\w-]*)(?:\.\.\.)?[>\]]/);
+  return match?.[1];
+}
+
 export function factValueText(fact: CodeFact): string {
   return stringsFromUnknown(fact.value).join(' ');
 }
@@ -137,4 +174,3 @@ export function uiPathMatches(path: string, fact: CodeFact): boolean {
 export function sortCanonical<T>(values: T[]): T[] {
   return [...values].sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)));
 }
-

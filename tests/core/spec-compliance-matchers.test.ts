@@ -211,6 +211,91 @@ describe('evaluateSpecCompliance', () => {
     expect(evaluateSpecCompliance({ requirements, facts, includeSatisfiedResults: true }).results.map((item) => item.status)).toEqual(['satisfied', 'satisfied', 'satisfied'])
   })
 
+  it('matches CLI binaries, commands, options, and arguments', () => {
+    const requirements = [
+      req('req_binary', { kind: 'cli', subject: 'truecourse binary', constraints: [{ type: 'cliBinary', value: 'truecourse' }] }),
+      req('req_command', { kind: 'cli', subject: 'analyze command', constraints: [{ type: 'cliCommand', value: 'truecourse analyze' }] }),
+      req('req_option', {
+        kind: 'cli',
+        subject: 'analyze spec option',
+        constraints: [
+          { type: 'cliCommand', value: 'truecourse analyze' },
+          { type: 'cliOption', value: '--spec-compliance' },
+        ],
+      }),
+      req('req_argument', {
+        kind: 'cli',
+        subject: 'rules enable argument',
+        constraints: [
+          { type: 'cliCommand', value: 'truecourse rules enable' },
+          { type: 'cliArgument', value: 'ruleKey' },
+        ],
+      }),
+    ]
+    const facts = [
+      fact('fact_bin', { kind: 'cli.binary', predicate: 'binary.defined', value: { name: 'truecourse' } }),
+      fact('fact_analyze', { kind: 'cli.command', predicate: 'command.defined', value: { name: 'analyze', fullName: 'truecourse analyze', path: ['analyze'], parentPath: [], aliases: [], source: 'commander', hasAction: true } }),
+      fact('fact_rules_enable', { kind: 'cli.command', predicate: 'command.defined', value: { name: 'enable', fullName: 'truecourse rules enable', path: ['rules', 'enable'], parentPath: ['rules'], aliases: [], source: 'commander', hasAction: true } }),
+      fact('fact_option', { kind: 'cli.option', predicate: 'option.defined', value: { command: 'truecourse analyze', commandPath: ['analyze'], name: '--spec-compliance', required: false, negated: false } }),
+      fact('fact_arg', { kind: 'cli.argument', predicate: 'argument.defined', value: { command: 'truecourse rules enable', commandPath: ['rules', 'enable'], name: 'ruleKey', required: true, variadic: false } }),
+    ]
+
+    expect(Object.fromEntries(evaluateSpecCompliance({ requirements, facts, includeSatisfiedResults: true }).results.map((item) => [item.matcher.name, item.status]))).toEqual({
+      'cli.argument.exists': 'satisfied',
+      'cli.binary.exists': 'satisfied',
+      'cli.command.exists': 'satisfied',
+      'cli.option.exists': 'satisfied',
+    })
+  })
+
+  it('handles missing, partial, unverifiable, and prohibited CLI requirements', () => {
+    const facts = [
+      fact('fact_bin', { kind: 'cli.binary', predicate: 'binary.defined', value: { name: 'truecourse' } }),
+      fact('fact_analyze', { kind: 'cli.command', predicate: 'command.defined', value: { name: 'analyze', fullName: 'truecourse analyze', path: ['analyze'], parentPath: [], aliases: [], source: 'commander', hasAction: true } }),
+      fact('fact_option', { kind: 'cli.option', predicate: 'option.defined', value: { command: 'truecourse analyze', commandPath: ['analyze'], name: '--debug', required: false, negated: false } }),
+    ]
+    const requirements = [
+      req('req_missing_command', { kind: 'cli', subject: 'deploy command', constraints: [{ type: 'cliCommand', value: 'truecourse deploy' }] }),
+      req('req_partial_option', {
+        kind: 'cli',
+        subject: 'analyze required option',
+        constraints: [
+          { type: 'cliCommand', value: 'truecourse analyze' },
+          { type: 'cliOption', value: '--spec-compliance' },
+        ],
+      }),
+      req('req_partial_argument', {
+        kind: 'cli',
+        subject: 'analyze path argument',
+        constraints: [
+          { type: 'cliCommand', value: 'truecourse analyze' },
+          { type: 'cliArgument', value: 'path' },
+        ],
+      }),
+      req('req_forbidden_command', { kind: 'cli', modality: 'must_not', subject: 'analyze command', constraints: [{ type: 'cliCommand', value: 'truecourse analyze' }] }),
+      req('req_forbidden_option', {
+        kind: 'cli',
+        modality: 'must_not',
+        subject: 'debug option',
+        constraints: [
+          { type: 'cliCommand', value: 'truecourse analyze' },
+          { type: 'cliOption', value: '--debug' },
+        ],
+      }),
+      req('req_unverifiable', { kind: 'cli', subject: 'truecourse binary', constraints: [{ type: 'cliBinary', value: 'truecourse' }] }),
+    ]
+
+    const result = evaluateSpecCompliance({ requirements: requirements.slice(0, -1), facts, includeSatisfiedResults: true })
+    expect(Object.fromEntries(result.results.map((item) => [item.requirementId, item.status]))).toEqual({
+      req_forbidden_command: 'conflicting',
+      req_forbidden_option: 'conflicting',
+      req_missing_command: 'missing',
+      req_partial_argument: 'partial',
+      req_partial_option: 'partial',
+    })
+    expect(evaluateSpecCompliance({ requirements: [requirements[5]!], facts: [], includeSatisfiedResults: true }).results[0]?.status).toBe('unverifiable')
+  })
+
   it('returns unverifiable for request and data fields when future fact taxonomy is absent, and matches when present', () => {
     const requirements = [
       req('req_request', { kind: 'api', subject: 'create user payload', object: 'email', evidenceText: 'POST /users request body must include email field.' }),
@@ -241,7 +326,7 @@ describe('evaluateSpecCompliance', () => {
     })
   })
 
-  it('emits unspecified implementation findings for unmatched API routes, UI routes, and env vars', () => {
+  it('emits unspecified implementation findings for unmatched API routes, UI routes, env vars, CLI binaries, and CLI commands', () => {
     const result = evaluateSpecCompliance({
       requirements: [req('req_route', { kind: 'api', subject: 'health route', object: 'GET /health' })],
       facts: [
@@ -249,12 +334,15 @@ describe('evaluateSpecCompliance', () => {
         fact('fact_admin', { kind: 'api.route', predicate: 'route.exists', value: { method: 'GET', path: '/admin', middlewares: [] } }),
         fact('fact_ui', { kind: 'ui.route', predicate: 'route.exists', value: { path: '/settings' } }),
         fact('fact_env', { kind: 'config.env', predicate: 'env.read', value: { name: 'SECRET_KEY', access: 'dot' } }),
+        fact('fact_cli_bin', { kind: 'cli.binary', predicate: 'binary.defined', value: { name: 'truecourse' } }),
+        fact('fact_cli_command', { kind: 'cli.command', predicate: 'command.defined', value: { name: 'rules', fullName: 'truecourse rules', path: ['rules'], parentPath: [], aliases: [], source: 'commander', hasAction: false } }),
+        fact('fact_cli_option', { kind: 'cli.option', predicate: 'option.defined', value: { command: 'truecourse rules', commandPath: ['rules'], name: '--json', required: false, negated: false } }),
       ],
       includeSatisfiedResults: true,
       includeUnspecifiedFindings: true,
     })
 
-    expect(result.findings.filter((item) => item.status === 'unspecified').map((item) => item.factId)).toEqual(['fact_admin', 'fact_env', 'fact_ui'])
+    expect(result.findings.filter((item) => item.status === 'unspecified').map((item) => item.factId)).toEqual(['fact_admin', 'fact_cli_bin', 'fact_cli_command', 'fact_env', 'fact_ui'])
   })
 
   it('is byte-stable under canonical JSON', () => {

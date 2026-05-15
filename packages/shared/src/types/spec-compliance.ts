@@ -35,6 +35,7 @@ export const RequirementKindSchema = z.enum([
   'data',
   'infra',
   'config',
+  'cli',
   'workflow',
   'test',
   'quality',

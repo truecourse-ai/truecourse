@@ -56,6 +56,33 @@ export function extractPackageFacts(rootDir: string, absPath: string): { facts: 
   }
 
   const packageName = readString('name')
+  const binProp = readProperty(root, 'bin')
+  if (binProp) {
+    const emitBinary = (name: string, entry?: string, rangeNode: ts.Node = binProp): void => {
+      pushFact(
+        facts,
+        sourceFile,
+        jsonRangeOf(ast, rangeNode),
+        'cli.binary',
+        'binary.defined',
+        { name, ...(entry ? { entry } : {}), ...(packageName ? { packageName } : {}) },
+        EXTRACTORS.packageCli,
+      )
+    }
+
+    const binString = stringLiteralValue(binProp.initializer)
+    if (binString && packageName) {
+      emitBinary(packageName.startsWith('@') ? packageName.split('/').pop() ?? packageName : packageName, binString)
+    } else if (ts.isObjectLiteralExpression(binProp.initializer)) {
+      for (const prop of binProp.initializer.properties) {
+        if (!ts.isPropertyAssignment(prop)) continue
+        const name = textOfName(prop.name)
+        const entry = stringLiteralValue(prop.initializer)
+        if (name) emitBinary(name, entry, prop)
+      }
+    }
+  }
+
   const scriptsProp = readProperty(root, 'scripts')
   if (scriptsProp && ts.isObjectLiteralExpression(scriptsProp.initializer)) {
     for (const prop of scriptsProp.initializer.properties) {

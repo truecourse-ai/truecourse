@@ -568,7 +568,7 @@ function extractOpenApiRequirements(sourceFile: string, content: string, root: R
 }
 
 function normalizeRequirementKind(value: unknown): RequirementKind {
-  const allowed = new Set<RequirementKind>(['api', 'ui', 'ux', 'auth', 'data', 'infra', 'config', 'workflow', 'test', 'quality', 'unknown'])
+  const allowed = new Set<RequirementKind>(['api', 'ui', 'ux', 'auth', 'data', 'infra', 'config', 'cli', 'workflow', 'test', 'quality', 'unknown'])
   return typeof value === 'string' && allowed.has(value as RequirementKind) ? value as RequirementKind : 'unknown'
 }
 
