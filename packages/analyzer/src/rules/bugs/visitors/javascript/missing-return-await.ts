@@ -9,7 +9,8 @@ export const missingReturnAwaitVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/missing-return-await',
   languages: JS_LANGUAGES,
   nodeTypes: ['try_statement'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     // Check if we're inside an async function
     let parent = node.parent
     let insideAsync = false
@@ -36,6 +37,21 @@ export const missingReturnAwaitVisitor: CodeRuleVisitor = {
     // Look for return statements returning a call expression (likely a Promise) without await
     const bareReturn = findReturnWithoutAwait(tryBody)
     if (!bareReturn) return null
+
+    // typeQuery: only fire if the returned expression is actually Promise-like.
+    // Synchronous call returns (`return parse(x)` where parse returns string)
+    // are FPs — no rejection to catch, await would be a no-op.
+    if (typeQuery) {
+      const returnValue = bareReturn.namedChildren[0]
+      if (returnValue) {
+        const start = returnValue.startPosition
+        const end = returnValue.endPosition
+        const isPromise = typeQuery.isPromiseLike(
+          filePath, start.row, start.column, end.row, end.column,
+        )
+        if (!isPromise) return null
+      }
+    }
 
     return makeViolation(
       this.ruleKey, bareReturn, filePath, 'medium',
