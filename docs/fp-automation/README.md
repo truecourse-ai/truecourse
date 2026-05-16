@@ -4,14 +4,14 @@ A loop that runs Truecourse against open-source repos, identifies false
 positives (FPs), and converts each one into a fixture + visitor fix, one PR at
 a time. Sessions are short-lived and triggered by GitHub events; cross-session
 state lives in two places: a committed campaigns file
-(`docs/fp-campaigns.yaml` — which repos in what order, plus baseline / final
+(`docs/fp-automation/campaigns.yaml` — which repos in what order, plus baseline / final
 analyze results) and GitHub issues (one per rule with FPs).
 
 Status: design only. Not yet wired up.
 
 ## Goal
 
-Targets and order are defined in `docs/fp-campaigns.yaml`. Sessions pick the
+Targets and order are defined in `docs/fp-automation/campaigns.yaml`. Sessions pick the
 first campaign with `status: pending` (or `discovering` / `in_progress`).
 When a campaign finishes, sessions update that file in the same PR that
 closes the campaign.
@@ -39,7 +39,7 @@ For each target OSS repo:
    is picked up automatically.
 6. When no `fp-fix` issues remain open for the current target, re-run
    `truecourse analyze --no-llm`. If TP rate ≥ 90 %, open a **campaign-close
-   PR** (see below) that updates `docs/fp-campaigns.yaml` and bumps the
+   PR** (see below) that updates `docs/fp-automation/campaigns.yaml` and bumps the
    version. When that PR merges, a tag-push workflow fires and the existing
    `publish.yml` releases to npm. The next pending campaign starts on the
    tag-push merge event.
@@ -48,7 +48,7 @@ For each target OSS repo:
 
 When a campaign hits ≥ 90 % TP, the session opens a single PR that:
 
-- Sets `status: done` for the campaign in `docs/fp-campaigns.yaml`.
+- Sets `status: done` for the campaign in `docs/fp-automation/campaigns.yaml`.
 - Fills the `final.*` block (analyzed_at, target_ref, total_violations,
   tp, fp, tp_rate).
 - Bumps the patch version (FP fixes are bug fixes) in all four required
@@ -67,7 +67,7 @@ existing `.github/workflows/publish.yml` picks the tag up and publishes
 `truecourse` to npm.
 
 The same merge event also kicks the next `fp-discover` run for the next
-pending campaign in `docs/fp-campaigns.yaml`.
+pending campaign in `docs/fp-automation/campaigns.yaml`.
 
 ### Borderline FPs
 
@@ -110,7 +110,7 @@ So an FP fix means:
 
 ```
 ┌──────────────────────────┐        ┌─────────────────────────┐
-│ docs/fp-campaigns.yaml   │───────▶│ Discovery workflow      │
+│ campaigns.yaml           │───────▶│ Discovery workflow      │
 │ ordered repo list +      │ next   │ (analyze --no-llm,      │
 │ baseline / final results │        │  writes baseline back,  │
 └──────────────────────────┘        │  files fp-fix issues)   │
@@ -258,7 +258,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Read docs/fp-campaigns.yaml from main, find first pending,
+            // Read docs/fp-automation/campaigns.yaml from main, find first pending,
             // dispatch fp-discover.yml with that target_repo.
             // (Body sketched; not implemented here.)
 ```
@@ -314,7 +314,7 @@ Stored at `.github/prompts/fp-next-issue.md`. Key sections:
      `truecourse analyze --no-llm`, compute TP rate:
      - ≥ 90 %: open a **campaign-close PR** on branch
        `fp-campaign-close/<owner>-<repo>` with:
-       - `docs/fp-campaigns.yaml` updated (`status: done`, `final.*` filled),
+       - `docs/fp-automation/campaigns.yaml` updated (`status: done`, `final.*` filled),
        - patch version bumped in all four locations from CLAUDE.md
          (`tools/cli/package.json`, `packages/core/package.json`,
          `apps/dashboard/server/package.json`, `tools/cli/src/index.ts`),
@@ -343,7 +343,7 @@ An **fp-fix PR** is mergeable when:
 
 A **campaign-close PR** is mergeable when:
 
-- The targeted campaign in `docs/fp-campaigns.yaml` is updated to
+- The targeted campaign in `docs/fp-automation/campaigns.yaml` is updated to
   `status: done` with `final.*` filled.
 - Patch version is bumped consistently in all four required locations
   (CLAUDE.md "Releasing" section).
@@ -374,7 +374,7 @@ tagged. The campaigns file is the audit trail.
    (repo setting).
 6. **Concurrency**: session adds `fp-in-progress` to the picked issue
    before doing anything else; competing sessions skip labelled issues.
-7. **Target order**: `docs/fp-campaigns.yaml` is the source of truth.
+7. **Target order**: `docs/fp-automation/campaigns.yaml` is the source of truth.
    Sessions pick the first non-`done`, non-`skipped` campaign.
 
 ## What's next
@@ -389,7 +389,7 @@ If green-lit:
    prompt needed.)
 3. Enable "Automatically delete head branches" in repo settings.
 4. Manual-dispatch `fp-discover` — it reads the first `pending` campaign
-   from `docs/fp-campaigns.yaml` (today: `documenso/documenso`), runs
+   from `docs/fp-automation/campaigns.yaml` (today: `documenso/documenso`), runs
    `truecourse analyze --no-llm`, writes the `baseline.*` block back, and
    files one `fp-fix` issue per rule with FPs.
 5. Manual-dispatch `fp-automation` once → it picks the first issue and
