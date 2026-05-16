@@ -3,7 +3,7 @@
 A loop that runs Truecourse against open-source repos, identifies false
 positives (FPs), and converts each one into a fixture + visitor fix, one PR at
 a time. Sessions are short-lived and triggered by GitHub events; cross-session
-state lives in a tracking issue.
+state lives in GitHub issues — one issue per rule with FPs.
 
 Status: design only. Not yet wired up.
 
@@ -13,203 +13,248 @@ For each target OSS repo:
 
 1. Run `truecourse analyze`.
 2. Triage violations into TPs / FPs.
-3. For each rule that has FPs, in priority order:
-   a. Paraphrase one FP-triggering snippet into the `sample-js-project-negative`
-      (or `…-python-…`) fixture, annotated to assert **no violation**.
-   b. Add a paired snippet to the corresponding `…-positive` fixture so the
-      rule still catches the genuine bug pattern.
-   c. Fix the visitor / rule so both tests pass.
-   d. Commit, push to a feature branch, open a PR. End the session.
-4. When the PR merges, a fresh session picks the next rule.
-5. Once no FPs remain, re-run `truecourse analyze`. If TP rate ≥ 90 %, mark the
-   repo done and move on to the next.
+3. For every rule with at least one FP, file one GitHub issue labelled
+   `fp-fix` describing the rule, the target repo, links to OSS snippets, and
+   the FP count.
+4. The Action consumes the open `fp-fix` issues one at a time:
+   a. Paraphrase one FP-triggering snippet from the issue into the
+      `sample-js-project-positive` (or `…-python-positive`) fixture — the
+      positive project asserts **zero violations**, so adding FP code there
+      makes the test fail until the visitor is fixed.
+   b. Add a paraphrased true-bug counterpart to the `…-negative` fixture with
+      a `// VIOLATION: <rule-key>` comment, so we don't over-correct and
+      break genuine detection.
+   c. Fix the visitor / rule until both tests pass and full `pnpm test` is
+      green.
+   d. Commit, push to `fp-fix/<rule-key>`, open a PR that closes the issue.
+5. When the PR merges (closing the issue), the next `fp-fix`-labelled issue
+   is picked up automatically.
+6. When no `fp-fix` issues remain open for the current target, re-run
+   `truecourse analyze`. If TP rate ≥ 90 %, move on to the next repo:
+   re-run discovery, file fresh `fp-fix` issues, loop continues.
 
-### Terminology clarification
+### Fixture convention (confirmed against the repo)
 
-The repo's fixture convention is the inverse of how the request was phrased:
+| Fixture                  | Test asserts                                     | FP workflow role     |
+|--------------------------|--------------------------------------------------|----------------------|
+| `…-positive` project     | **Zero** violations across the whole project     | host for FP cases    |
+| `…-negative` project     | Violations match `// VIOLATION: rule-key` comments | host for regression / true-bug cases |
 
-| Repo term  | Meaning                                  | FP workflow role |
-|------------|------------------------------------------|------------------|
-| `positive` | code that **should** trigger a violation | regression case  |
-| `negative` | code that should **not** trigger         | the FP case      |
+`tests/analyzer/js-positive.test.ts`:
+> Runs the full analyzer against `sample-js-project-positive` and asserts
+> **ZERO code violations. Any violation found is a false positive.**
 
-So fixing an FP means: add a paraphrased FP case to the **negative** fixture
-(currently fails because the rule wrongly fires) and a paraphrased true-bug
-case to the **positive** fixture (must still pass after the fix).
+So an FP fix means:
+- drop the paraphrased FP into `tests/fixtures/sample-{js,python}-project-positive/` (no annotation needed — its presence asserts "should not fire");
+- drop the paraphrased true-bug into `…-project-negative/` with `// VIOLATION: <rule-key>`;
+- before the visitor fix, the positive test fails;
+- after the fix, both tests pass.
 
 ## Architecture
 
 ```
-┌──────────────────────┐         ┌────────────────────────┐
-│ Tracking issue       │◄────────│ GitHub Action          │
-│ (state, checklists)  │         │ on PR merged           │
-└─────────┬────────────┘         └───────────┬────────────┘
-          │ read state                       │ kicks off
-          ▼                                  ▼
+┌─────────────────────────┐         ┌────────────────────────┐
+│ N × GitHub issues       │◄────────│ Discovery workflow     │
+│ label: fp-fix           │         │ (runs `analyze`,       │
+│ one per rule with FPs   │         │  files issues)         │
+└──────────┬──────────────┘         └────────────────────────┘
+           │ oldest open issue
+           ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Claude Code session (fresh container, one rule)          │
+│ Claude Code session (fresh container, one issue)         │
 │                                                          │
-│ 1. Read tracking issue → next pending rule, target repo  │
-│ 2. Clone target repo to /tmp, run `truecourse analyze`   │
-│ 3. Confirm FP for that rule (re-validate, in case fixed) │
-│ 4. Edit fixtures + visitor in this repo                  │
-│ 5. Run `pnpm test --filter analyzer`, ensure green       │
-│ 6. Commit to feature branch, push, open PR               │
-│ 7. Update tracking issue (mark rule "in review")         │
-│ 8. End session                                           │
+│ 1. Read oldest open fp-fix issue → rule, repo, snippets  │
+│ 2. Clone target repo, re-confirm FP still reproduces     │
+│ 3. Paraphrase into …-positive fixture (no annotation)    │
+│ 4. Paraphrase true-bug into …-negative fixture (+ marker)│
+│ 5. Run tests, fix visitor until green                    │
+│ 6. Commit, push fp-fix/<rule-key>, open PR (closes #N)   │
+│ 7. End session                                           │
+└──────────────────────────────────────────────────────────┘
+           ▲                                  │
+           │ on PR merge                      │
+┌──────────┴──────────────────────────────────▼────────────┐
+│ Trigger workflow (PR closed+merged, label fp-fix)        │
+│  → picks next open fp-fix issue and starts a session     │
+│  → if no open fp-fix issues: re-analyze target,          │
+│     compute TP rate, advance to next repo (re-discover)  │
 └──────────────────────────────────────────────────────────┘
 ```
 
 No subscriptions, no idle waits — each merge re-kicks a new session via the
 GitHub Action.
 
-## State: tracking issue
+## State: one issue per FP rule
 
-One pinned issue per target OSS repo, owned by the
-`truecourse-ai/truecourse` repo. Body is a machine-readable YAML block in a
-fenced code block, followed by a human-readable checklist.
+Each `fp-fix` issue is the source of truth for one (rule, target repo) pair.
+Body is a machine-readable YAML block followed by a human-readable section.
 
 ```yaml
 target_repo: vercel/next.js
 target_ref: main@abc1234              # commit pinned for reproducibility
-campaign_started: 2026-05-16
-baseline:
-  total_violations: 412
-  tp: 280
-  fp: 132
-  tp_rate: 0.68
-status: in_progress                   # in_progress | done | blocked
-current:
-  rule_key: bugs/missing-await
-  pr: 123                             # null when no PR is open
-queue:                                # ordered, highest-FP-count first
-  - rule_key: bugs/missing-await
-    fp_count: 41
-    status: in_review                 # pending | in_review | merged | skipped
-    pr: 123
-  - rule_key: code-quality/dead-code
-    fp_count: 28
-    status: pending
-done: []
-next_repo: facebook/react             # picked once tp_rate ≥ 0.9
+rule_key: bugs/missing-await
+fp_count: 41
+samples:                              # up to 5 representative FP locations
+  - url: https://github.com/vercel/next.js/blob/abc1234/packages/next/src/server/lib/router-utils/filesystem.ts#L210
+    why_fp: "promise is awaited inside Array.from(..., async fn) which we don't follow"
+  - url: …
+status: open                          # open | in_review | merged | skipped | blocked
+pr: null                              # filled when the fix PR is opened
 ```
 
-The Claude session is the only writer. Concurrency is bounded because the
-Action only fires one session per merge and the previous session ends before
-opening its PR.
+Labels:
+- `fp-fix` — gates the trigger workflow.
+- `fp-target:<owner-repo>` — groups issues by campaign; used to detect
+  "campaign done" (no open issues with this label and `fp-fix`).
+- `fp-skipped` / `fp-blocked` — set by the session when bailing out.
 
-## Trigger: GitHub Action
+The Claude session is the only writer. Ordering is "oldest open issue first"
+unless overridden by an explicit `priority` label.
 
-`.github/workflows/fp-automation.yml` (sketch — not added yet):
+## Triggers: two workflows
+
+### 1. `fp-discover.yml` — populate issues
+
+Runs on `workflow_dispatch` (with `target_repo` + optional `target_ref` input)
+or on a schedule. Spawns a Claude session that:
+
+1. Clones the target repo at the requested ref.
+2. Runs `truecourse analyze`.
+3. Triages violations per rule, classifies TP/FP.
+4. For each rule with ≥ 1 FP: files an `fp-fix` + `fp-target:<owner-repo>`
+   issue using the YAML schema above.
+5. Records the baseline (TP/FP counts) in a campaign-summary comment on a
+   single "campaign" issue with label `fp-campaign:<owner-repo>` (lightweight
+   audit trail; not consumed by the fix loop).
+
+### 2. `fp-automation.yml` — consume issues on merge
 
 ```yaml
 on:
   pull_request:
     types: [closed]
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:                  # manual kickoff for the first iteration
     inputs:
-      tracking_issue: { required: true, type: number }
+      target_label: { required: true, type: string }   # e.g. "fp-target:vercel-next.js"
 
 jobs:
-  next-rule:
-    if: github.event.pull_request.merged == true &&
-        startsWith(github.event.pull_request.head.ref, 'fp-fix/')
+  next-issue:
+    # Only fire on merged FP-fix PRs — no other PR can trigger us.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'fp-fix') &&
+       startsWith(github.event.pull_request.head.ref, 'fp-fix/'))
     runs-on: ubuntu-latest
     steps:
       - name: Kick off Claude session
         uses: anthropics/claude-code-action@v1
         with:
-          prompt-file: .github/prompts/fp-next-rule.md
+          prompt-file: .github/prompts/fp-next-issue.md
           inputs: |
-            tracking_issue=${{ vars.FP_TRACKING_ISSUE }}
-            merged_pr=${{ github.event.pull_request.number }}
+            merged_pr=${{ github.event.pull_request.number || '' }}
+            target_label=${{ github.event.inputs.target_label || '' }}
 ```
 
-Branch prefix `fp-fix/<rule-key>` is what gates the workflow — unrelated PRs
-don't trigger it.
-
-Manual kickoff (`workflow_dispatch`) is provided for: starting the first
-iteration on a new repo, restarting after a `blocked` status, or skipping a
-stuck rule.
+Trigger scoping uses **two** signals so unrelated PRs can't kick the loop:
+1. PR head branch must start with `fp-fix/`.
+2. PR must carry the `fp-fix` label (set automatically when the session
+   opens the PR).
 
 ## Per-session prompt outline
 
-Stored at `.github/prompts/fp-next-rule.md`. Key sections:
+Stored at `.github/prompts/fp-next-issue.md`. Key sections:
 
-1. **Identity**: "You are working on a single rule from the FP-fix tracking
-   issue. Do not start a second rule in this session."
-2. **Inputs**: tracking issue number, optional merged PR number.
+1. **Identity**: "You are working on a single FP issue. Do not start a second
+   issue in this session."
+2. **Inputs**: merged PR number (for context) and/or target label.
 3. **Steps**:
-   - Read tracking issue, pick first `pending` rule (or `current.rule_key` if
-     re-entry).
+   - Use the GitHub MCP server to list open issues with label `fp-fix`
+     (optionally filtered by `target_label`). Pick the oldest.
+   - Parse the YAML block from the issue body → rule key, target repo, ref,
+     sample URLs.
    - Clone target repo at `target_ref` to `/tmp/target`.
    - `pnpm build && pnpm exec truecourse analyze /tmp/target`.
-   - Filter violations to the chosen rule; sample up to 10 instances and
-     classify TP/FP. If FP rate < 10 % for this rule, mark it `skipped` and
-     end.
-   - Pick the most representative FP. Paraphrase (rename identifiers, change
-     trivial structure) into `tests/fixtures/sample-js-project-negative/`
-     (language depends on the offending file).
-   - Add the matching true-positive case to `…-positive/` with a
+   - Re-confirm the FP still reproduces for this rule. If not (someone else
+     fixed it, or upstream code changed), close the issue with comment
+     "no longer reproduces" and end.
+   - Pick the most representative FP sample. Paraphrase (rename identifiers,
+     change trivial structure, drop unrelated context) into
+     `tests/fixtures/sample-{js,python}-project-positive/`. **No** `// VIOLATION`
+     comment — the positive project asserts zero violations.
+   - Paraphrase a true-bug variant into `…-project-negative/` with a
      `// VIOLATION: <rule-key>` comment.
-   - Run `pnpm test --filter @truecourse/analyzer 2>&1 | tee /tmp/test.log`.
-     Confirm the new negative test fails and the new positive test passes.
+   - Run `pnpm test 2>&1 | tee /tmp/test.log`. Confirm the new positive case
+     fails and the negative case passes.
    - Edit the rule under `packages/analyzer/src/rules/<domain>/…` until both
-     tests pass. No other changes.
-   - Update tracking issue: move the rule to `in_review`, fill `current.pr`.
-   - Branch `fp-fix/<rule-key>`, commit, push, open PR linking the tracking
-     issue.
-4. **Stop conditions**: PR opened, OR rule skipped, OR queue empty. In the
-   last case, re-run `truecourse analyze` against the target repo, recompute
-   TP rate, and:
-   - if ≥ 90 %: set `status: done`, open a new tracking issue for
-     `next_repo`, end.
-   - if < 90 %: append newly-discovered FP rules to the queue, end.
+     tests pass and full `pnpm test` is green. No unrelated changes.
+   - Branch `fp-fix/<rule-key>`, commit, push. Open a PR with:
+     - Label `fp-fix` (required for the next trigger to fire).
+     - Body that includes `Closes #<issue>` and links the OSS sample URLs.
+   - Comment on the issue with the PR link; leave the issue open (it will be
+     auto-closed when the PR merges).
+4. **Stop conditions**:
+   - PR opened → end.
+   - FP no longer reproduces → close issue, end.
+   - No open `fp-fix` issues for the target → run `truecourse analyze`,
+     compute TP rate:
+     - ≥ 90 %: comment on the campaign issue with "done", trigger
+       `fp-discover.yml` for `next_repo` (if specified) via the GitHub MCP
+       tool, end.
+     - < 90 %: re-discover FPs for the same repo, file new `fp-fix` issues,
+       end.
+   - Session can't fix the rule (needs unrelated refactor): comment, add
+     `fp-blocked` label, end.
 
 ## Acceptance criteria
 
 A PR is mergeable when:
 
-- New negative test cases for the FP exist and pass.
-- New positive test cases for the true-bug pattern exist and pass.
-- Full `pnpm test` is green (no regressions in other rules).
-- PR description quotes the original OSS snippet (link, not paste — to avoid
-  license issues) and the paraphrased fixture.
-- Tracking issue is updated in the same PR? **No** — the issue is updated by
-  the session before opening the PR, so the PR diff stays focused on
-  fixture + visitor.
+- New positive-fixture case for the FP exists and the test passes (no
+  violation fires).
+- New negative-fixture case for the true-bug pattern exists with `// VIOLATION:`
+  comment and the test passes.
+- Full `pnpm test` is green (no regressions).
+- PR body links the original OSS snippet (URL only — no paste, to keep clear
+  of upstream licences) and shows the paraphrased fixture diff inline.
+- PR closes its parent issue.
 
-A repo is "done" when the queue is empty and `tp_rate ≥ 0.9` on a fresh
-analyze.
+A repo is "done" when no `fp-fix` + `fp-target:<owner-repo>` issues are open
+and a fresh `truecourse analyze` shows `tp_rate ≥ 0.9`.
 
 ## Open questions / risks
 
-1. **Paraphrasing licence**: paraphrased snippets in fixtures should be far
-   enough from the original to be uncontroversial. PR description links the
-   source rather than embedding it. Worth a quick legal sanity-check before
-   running across many GPL/AGPL repos.
-2. **FP triage is judgement-heavy**: the session needs a clear rubric for
-   "is this an FP?" — propose adding a one-page rubric per rule domain, or
-   letting Claude classify and surfacing borderline cases to the tracking
-   issue for human review.
+1. **Paraphrasing licence**: paraphrased snippets must be far enough from the
+   original to avoid licence questions. PR description links the source
+   rather than embedding it. Worth a quick legal sanity-check before running
+   across many GPL/AGPL repos.
+2. **FP triage is judgement-heavy**: discovery needs a clear rubric for
+   "is this an FP?" — propose a short rubric per rule domain (committed to
+   `docs/`), with borderline cases filed as separate issues for human
+   review instead of auto-fix.
 3. **Stuck rules**: if a rule's visitor can't be fixed without a refactor
-   (e.g. needs type info we don't have), the session should mark it
-   `blocked` with a comment and skip, not loop forever.
-4. **Cost control**: each session re-runs `truecourse analyze` on a large
-   OSS repo. Caching the analyze output keyed on `(repo, ref)` in the
-   tracking issue (or as an artifact) would cut this.
-5. **Branch hygiene**: stale `fp-fix/*` branches accumulate. A cleanup step
-   on PR merge (delete head branch) is standard but worth confirming.
-6. **First target**: which OSS repo do we start with? Suggest something
-   small/medium in TS (e.g. a popular Express app or a Next.js example) for
-   the first run, then graduate to larger codebases.
+   (e.g. needs type info we don't currently extract), session adds
+   `fp-blocked` and ends. A human triages later.
+4. **Cost control**: each session re-runs `truecourse analyze` against a
+   large OSS repo. Cache the analyze output keyed on `(repo, ref)` as a
+   workflow artifact and reuse across sessions for the same campaign.
+5. **Branch hygiene**: stale `fp-fix/*` branches accumulate. Auto-delete on
+   merge (standard repo setting).
+6. **Concurrency**: if two `fp-fix` PRs merge in quick succession, two
+   sessions could pick the same next issue. Mitigation: the session takes a
+   lock by adding label `fp-in-progress` to the issue it picked **before**
+   doing anything else; competing sessions skip labelled issues.
+7. **First target**: which OSS repo do we start with? Suggest a small/medium
+   TS codebase (popular Express app, Next.js example) for the first run,
+   then graduate.
 
 ## What's next
 
 If green-lit:
 
-1. Add `.github/workflows/fp-automation.yml` + `.github/prompts/fp-next-rule.md`.
-2. Open the first tracking issue (target repo TBD) with a baseline analyze.
-3. Manual-dispatch the workflow to kick off rule 1.
-4. Iterate.
+1. Add `.github/workflows/fp-discover.yml` + `.github/workflows/fp-automation.yml`.
+2. Add `.github/prompts/fp-discover.md` + `.github/prompts/fp-next-issue.md`.
+3. Manual-dispatch `fp-discover` against the first target repo → it files
+   one `fp-fix` issue per rule.
+4. Manual-dispatch `fp-automation` once → it picks the first issue and
+   opens PR 1. From there, PR merges drive the loop.
