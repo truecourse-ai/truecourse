@@ -12,6 +12,7 @@ import { config } from "@truecourse/core/config";
 import { exitMissingNonInteractiveFlag, isInteractive, promptInstallSkills, renderViolationsSummary } from "./helpers.js";
 import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
+import { recordAnalyzeAndMaybePrompt } from "../community-prompts.js";
 
 function ensureClaudeCli(): void {
   const binary = config.claudeCodeBinary;
@@ -308,6 +309,7 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     stopSpinner();
     p.log.success("Analysis complete");
     renderViolationsSummary([], result.violationsSummary);
+    recordAnalyzeAndMaybePrompt();
     p.outro("Analysis complete — view results with: truecourse dashboard");
   } catch (err) {
     stopSpinner();
@@ -404,6 +406,7 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
       summary: diff.summary,
       isStale: false,
     });
+    recordAnalyzeAndMaybePrompt();
     p.outro("Diff complete — view results with: truecourse dashboard");
   } catch (err) {
     stopSpinner();
