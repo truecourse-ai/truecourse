@@ -127,8 +127,9 @@ So an FP fix means:
            ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Routine: fp-next-fix                                     │
-│ trigger: pull_request.closed, is_merged=true,            │
-│   head ∼ claude/fp-fix/*, label = fp-fix                 │
+│ trigger: pull_request.closed                             │
+│   Is merged=true, Head Branch starts-with                │
+│   claude/fp-fix/, Labels is-one-of fp-fix                │
 │                                                          │
 │ 1. Pick oldest open fp-fix issue                         │
 │ 2. Clone target OSS repo, re-confirm FP                  │
@@ -145,9 +146,10 @@ So an FP fix means:
            │                              ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Routine: fp-campaign-close (parallel with fp-discover)   │
-│ trigger: pull_request.closed, is_merged=true,            │
-│   head ∼ claude/fp-campaign-close/*,                     │
-│   label = fp-campaign-complete                           │
+│ trigger: pull_request.closed                             │
+│   Is merged=true, Head Branch starts-with                │
+│   claude/fp-campaign-close/,                             │
+│   Labels is-one-of fp-campaign-complete                  │
 │                                                          │
 │ 1. Read new version from tools/cli/package.json          │
 │ 2. git tag vX.Y.Z, git push --tags                       │
@@ -207,7 +209,7 @@ record — keep them in sync).
 | Field | Value |
 |---|---|
 | **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `is_merged = true` AND `head branch starts with claude/fp-campaign-close/` AND `labels contains fp-campaign-complete` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
 | **Bootstrap** | First-time run is **Run now** from the routine page (no PR has merged yet). Same button works for any manual re-run. |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed only) |
@@ -241,7 +243,7 @@ Steps the session takes:
 | Field | Value |
 |---|---|
 | **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `is_merged = true` AND `head branch starts with claude/fp-fix/` AND `labels contains fp-fix` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` |
 | **Repositories** | `truecourse-ai/truecourse` (target OSS repo cloned inside the session into `/tmp/target`) |
 | **Branch push policy** | Default — branches are `claude/fp-fix/<rule-key>`, which fits the `claude/`-prefix rule |
 | **Environment** | `fp-automation` |
@@ -298,7 +300,7 @@ needed` note, add `fp-blocked` label, end. The user triages later.
 | Field | Value |
 |---|---|
 | **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `is_merged = true` AND `head branch starts with claude/fp-campaign-close/` AND `labels contains fp-campaign-complete` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default — only needs to push a tag, not a branch |
 | **Environment** | `fp-automation` |
