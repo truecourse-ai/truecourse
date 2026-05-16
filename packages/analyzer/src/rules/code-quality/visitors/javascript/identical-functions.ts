@@ -140,7 +140,7 @@ function isUniformCallSequence(body: SyntaxNode): boolean {
     if (!expr) return false
     // Peel off `void` unary expressions: `void animate(...)`
     while (expr && (expr.type === 'unary_expression' || expr.type === 'await_expression')) {
-      const inner = expr.childForFieldName('argument') ?? expr.namedChild(0)
+      const inner: SyntaxNode | null = expr.childForFieldName('argument') ?? expr.namedChild(0)
       if (!inner) return false
       expr = inner
     }

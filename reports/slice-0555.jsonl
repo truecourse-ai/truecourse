@@ -1,0 +1,1 @@
+{"rule":"regex-anchor-precedence","shape_sig":"84adcb92f0d8","class":"FP","why":"RFC 5322 email regex uses ^ and $ at outermost level with no top-level alternation (| is inside non-capturing groups). Anchors correctly bound the entire expression; no precedence issue exists.","skip_hint":"Rule should not flag regexes where ^ and $ are outermost with no top-level | alternation"}

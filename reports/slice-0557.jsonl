@@ -1,0 +1,1 @@
+{"rule":"regex-complexity","shape_sig":"1883ca5a2fd8","class":"TP","why":"Path router regex groups 6 distinct URL prefixes plus wildcard suffixes in a single alternation. Real complexity; a comment exists but extraction to named constants or a simple array check would be clearer.","skip_hint":null}

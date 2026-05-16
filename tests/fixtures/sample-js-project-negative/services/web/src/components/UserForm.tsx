@@ -32,7 +32,6 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
   // VIOLATION: code-quality/deterministic/missing-return-type
   function validate() {
     const newErrors: Record<string, string> = {};
-    // VIOLATION: code-quality/deterministic/magic-number
     if (name.length < 3) {
       newErrors.name = 'Name must be at least 3 characters';
     }

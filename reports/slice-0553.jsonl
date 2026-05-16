@@ -1,0 +1,1 @@
+{"rule":"redundant-type-argument","shape_sig":"cbe5f6d3d73b","class":"UNCERTAIN","why":"Outer Array<T> type arg is not redundant. Inner InngestFunction<InngestFunction.Options,Handler.Any,Handler.Any> may be redundant if those are its defaults, but this requires inspecting inngest library typedefs.","skip_hint":null}

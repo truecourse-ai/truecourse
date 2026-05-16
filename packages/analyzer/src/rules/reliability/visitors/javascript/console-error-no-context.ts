@@ -35,6 +35,25 @@ export const consoleErrorNoContextVisitor: CodeRuleVisitor = {
       parent = parent.parent
     }
 
+    // Only flag bare console.error(err) inside a catch whose enclosing try
+    // ALSO has a finally clause — that pattern is structured error swallowing
+    // with cleanup, where the absent context message is a real defect.
+    // Simple `try { } catch (e) { console.error(e); }` without cleanup is
+    // typically debug/scaffolding scaffold code, too noisy to flag.
+    let catchBody: typeof node | null = null
+    let cursor: typeof node | null = node.parent
+    while (cursor) {
+      if (cursor.type === 'catch_clause') { catchBody = cursor; break }
+      if (cursor.type === 'function_declaration' || cursor.type === 'function_expression' ||
+          cursor.type === 'arrow_function' || cursor.type === 'method_definition') break
+      cursor = cursor.parent
+    }
+    if (!catchBody) return null
+    const tryStmt = catchBody.parent
+    if (!tryStmt || tryStmt.type !== 'try_statement') return null
+    const hasFinally = tryStmt.namedChildren.some((c) => c.type === 'finally_clause')
+    if (!hasFinally) return null
+
     const arg = args.namedChildren[0]
     if (arg.type === 'identifier') {
       const name = arg.text.toLowerCase()

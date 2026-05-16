@@ -614,12 +614,12 @@ export const unpredictableSaltMissingVisitor: CodeRuleVisitor = {
       //                    arguments: (<input>)
       let cursor: typeof node | null = node
       while (cursor) {
-        const grand = cursor.parent
+        const grand: typeof node | null = cursor.parent
         if (!grand) break
         if (grand.type !== 'member_expression' && grand.type !== 'attribute') break
         const prop = grand.childForFieldName('property') ?? grand.childForFieldName('attribute')
         const propName = prop?.text ?? ''
-        const grandCall = grand.parent
+        const grandCall: typeof node | null = grand.parent
         if (grandCall && (grandCall.type === 'call_expression' || grandCall.type === 'call')) {
           if (propName === 'update') {
             const updArgs = grandCall.childForFieldName('arguments')

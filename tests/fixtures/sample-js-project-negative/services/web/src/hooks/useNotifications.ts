@@ -11,7 +11,6 @@ interface Notification {
 }
 
 // VIOLATION: code-quality/deterministic/missing-return-type
-// VIOLATION: code-quality/deterministic/missing-boundary-types
 export function useNotifications(userId: string) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);

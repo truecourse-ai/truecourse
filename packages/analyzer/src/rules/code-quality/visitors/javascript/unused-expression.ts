@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'web-tree-sitter'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
@@ -13,7 +13,7 @@ function unwrap(node: SyntaxNode): SyntaxNode {
       cur.type === 'satisfies_expression' ||
       cur.type === 'non_null_expression')
   ) {
-    const inner = cur.namedChildren[0]
+    const inner: SyntaxNode | undefined = cur.namedChildren[0]
     if (!inner) break
     cur = inner
   }
@@ -111,7 +111,7 @@ export const unusedExpressionVisitor: CodeRuleVisitor = {
     // When the RHS is itself a side-effectful expression the statement is an
     // intentional conditional call, not a discarded value.
     if (expr.type === 'binary_expression') {
-      const opNode = expr.children.find((c) => !c.isNamed)
+      const opNode = expr.children.find((c: SyntaxNode | null) => c && !c.isNamed)
       const op = opNode?.text
       if ((op === '&&' || op === '||' || op === '??') && hasSideEffect(expr.namedChildren[1])) {
         return null

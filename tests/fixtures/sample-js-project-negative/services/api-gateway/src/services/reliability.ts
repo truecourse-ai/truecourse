@@ -111,10 +111,13 @@ export async function rethrowWithoutContext() {
 
 // VIOLATION: reliability/deterministic/console-error-no-context
 export function logError() {
+  let parsed: unknown = null;
   try {
-    JSON.parse('invalid');
+    parsed = JSON.parse('invalid');
   } catch (error) {
     console.error(error);
+  } finally {
+    if (parsed === null) parsed = undefined;
   }
 }
 

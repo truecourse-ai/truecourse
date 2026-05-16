@@ -1,6 +1,16 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+// React components (PascalCase) and hooks (use*) rely on inference; framework
+// route/lifecycle exports follow framework signatures. Neither needs explicit
+// return-type annotations — adding them is noise.
+const FRAMEWORK_NAMES = new Set([
+  'loader', 'action', 'meta', 'links', 'headers', 'default',
+  'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
+  'clientLoader', 'clientAction', 'shouldRevalidate', 'middleware',
+  'generateMetadata', 'generateStaticParams', 'generateViewport',
+])
+
 export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-boundary-types',
   languages: ['typescript', 'tsx'],
@@ -27,6 +37,14 @@ export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
 
     const nameNode = funcNode.childForFieldName('name')
     const name = nameNode?.text ?? 'function'
+
+    // Skip React components, hooks, framework-prescribed exports.
+    const isReactComponent = /^[A-Z][A-Za-z0-9]*$/.test(name)
+    const isHook = /^use[A-Z0-9]/.test(name)
+    const isFrameworkExport = FRAMEWORK_NAMES.has(name)
+    if (isReactComponent || isHook || isFrameworkExport) {
+      return null
+    }
 
     return makeViolation(
       this.ruleKey, funcNode, filePath, 'low',

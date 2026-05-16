@@ -143,7 +143,7 @@ function getEnclosingBindingName(node: SyntaxNode): string | null {
   while (cur && depth < 6) {
     const direct = getAssignedName(cur)
     if (direct) return direct
-    const p = cur.parent
+    const p: SyntaxNode | null = cur.parent
     if (!p) break
     // Step through wrappers: arguments → call/new_expression → variable_declarator/assignment
     if (p.type === 'arguments' || p.type === 'call_expression' || p.type === 'new_expression' || p.type === 'parenthesized_expression') {

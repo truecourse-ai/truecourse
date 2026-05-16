@@ -18,7 +18,8 @@ export default class WrongNameClass {
 import { something } from 'lodash/internal/baseClone';
 
 // VIOLATION: code-quality/deterministic/mixed-type-imports
-import { type SomeType, someValue } from './helpers';
+import type { SomeType } from './helpers';
+import { someValue } from './helpers';
 
 // VIOLATION: code-quality/deterministic/type-import-side-effects
 import { type SideEffectType } from './side-effect-module';

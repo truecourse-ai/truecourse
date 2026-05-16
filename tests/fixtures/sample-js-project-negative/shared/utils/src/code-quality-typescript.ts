@@ -35,7 +35,6 @@ export function anyConstraint<T extends unknown>(x: T): T {
 // VIOLATION: code-quality/deterministic/triple-slash-reference
 /// <reference path="./types.d.ts" />
 
-// VIOLATION: code-quality/deterministic/useless-empty-export
 export {};
 
 // VIOLATION: code-quality/deterministic/unknown-catch-variable
@@ -82,7 +81,8 @@ export function returnsAny(data: unknown): any {
 }
 
 // VIOLATION: code-quality/deterministic/mixed-type-exports
-export { type MixedType, mixedValue };
+export type { MixedType };
+export { mixedValue };
 type MixedType = string;
 const mixedValue = 42;
 

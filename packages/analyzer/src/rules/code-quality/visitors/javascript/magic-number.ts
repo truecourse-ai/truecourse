@@ -78,6 +78,15 @@ export const magicNumberVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip threshold comparisons (length < N, count >= N, score > N, etc.) —
+    // these are guard predicates where the numeric value is the threshold itself,
+    // not a magic constant worth extracting. Common shape: <ident.prop> OP N.
+    if (parentType === 'binary_expression') {
+      const op = parent.children.find((c) => !c.isNamed)?.text ?? ''
+      const COMPARISON_OPS = new Set(['<', '<=', '>', '>=', '==', '===', '!=', '!=='])
+      if (COMPARISON_OPS.has(op)) return null
+    }
+
     // Walk ancestors — skip if inside a named constant (e.g., const TIMEOUT_MS = 60 * 1000)
     let ancestor: typeof parent | null = parent
     while (ancestor) {
