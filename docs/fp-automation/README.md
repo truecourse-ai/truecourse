@@ -198,11 +198,40 @@ without `fp-in-progress` first".
 
 All three routines run as Anthropic-managed cloud sessions on the same
 cloud environment. Configuration is set up via the web UI at
-[claude.ai/code/routines](https://claude.ai/code/routines). The
-source-controlled copies of the prompts live in
-`docs/fp-automation/prompts/` (the routine's actual prompt is edited in
-the web UI; the `docs/` copy is the review surface and version-history
-record — keep them in sync).
+[claude.ai/code/routines](https://claude.ai/code/routines).
+
+**Prompt convention**: the routine config in the web UI holds a tiny
+**bootstrap prompt** that points to the real prompt file in the cloned
+repo. The actual instructions live under
+`docs/fp-automation/prompts/<routine>.md` — this is the source of
+truth, edited via PR and reviewable in diffs. The routine config
+itself doesn't need to be kept in sync after the bootstrap prompt is
+set.
+
+Bootstrap prompt template (paste this into the routine's prompt field,
+substituting the right file name):
+
+```
+Execute the instructions in `docs/fp-automation/prompts/<routine>.md`
+from the cloned `truecourse-ai/truecourse` repository. Treat that file
+as the authoritative prompt; follow every step exactly. If the file is
+missing or unreadable, post a short failure note in the session and end.
+```
+
+The three actual bootstrap prompts (paste verbatim into each routine):
+
+- `fp-discover`:
+  > Execute the instructions in `docs/fp-automation/prompts/fp-discover.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
+
+- `fp-next-fix`:
+  > Execute the instructions in `docs/fp-automation/prompts/fp-next-fix.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
+
+- `fp-campaign-close`:
+  > Execute the instructions in `docs/fp-automation/prompts/fp-campaign-close.md` from the cloned `truecourse-ai/truecourse` repository. Treat that file as the authoritative prompt; follow every step exactly. If the file is missing or unreadable, post a short failure note in the session and end.
+
+To change a prompt: edit the file under `docs/fp-automation/prompts/`,
+open a PR, merge. The next routine fire reads the new version. No
+web-UI edit needed.
 
 ### 1. `fp-discover` — populate issues for a campaign
 
@@ -214,7 +243,7 @@ record — keep them in sync).
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed only) |
 | **Environment** | `fp-automation` (shared with the other two routines) |
-| **Prompt source** | `docs/fp-automation/prompts/fp-discover.md` |
+| **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-discover.md` |
 
 `fp-discover` shares its trigger event with `fp-campaign-close` — both
 routines fire in parallel on every campaign-close PR merge. `fp-discover`
@@ -247,7 +276,7 @@ Steps the session takes:
 | **Repositories** | `truecourse-ai/truecourse` (target OSS repo cloned inside the session into `/tmp/target`) |
 | **Branch push policy** | Default — branches are `claude/fp-fix/<rule-key>`, which fits the `claude/`-prefix rule |
 | **Environment** | `fp-automation` |
-| **Prompt source** | `docs/fp-automation/prompts/fp-next-fix.md` |
+| **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-next-fix.md` |
 
 Steps the session takes:
 1. List open issues with label `fp-fix` (excluding `fp-in-progress`).
@@ -304,7 +333,7 @@ needed` note, add `fp-blocked` label, end. The user triages later.
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default — only needs to push a tag, not a branch |
 | **Environment** | `fp-automation` |
-| **Prompt source** | `docs/fp-automation/prompts/fp-campaign-close.md` |
+| **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-campaign-close.md` |
 
 Steps the session takes:
 1. Check out `main` at the merge commit. Read the version from
