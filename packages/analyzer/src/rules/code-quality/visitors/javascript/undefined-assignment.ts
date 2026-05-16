@@ -23,6 +23,12 @@ export const undefinedAssignmentVisitor: CodeRuleVisitor = {
     if (node.type === 'variable_declarator') {
       const value = node.childForFieldName('value')
       if (value?.text === 'undefined') {
+        // Skip when declarator has type annotation including `undefined` —
+        // `let x: Foo | undefined = undefined` is idiomatic for a slot that
+        // may legitimately hold undefined later.
+        const typeAnnot = node.namedChildren.find((c) => c.type === 'type_annotation')
+        if (typeAnnot && /\bundefined\b/.test(typeAnnot.text)) return null
+
         const name = node.childForFieldName('name')
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
