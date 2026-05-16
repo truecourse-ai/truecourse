@@ -21,6 +21,16 @@ export const unsafeTypeAssertionVisitor: CodeRuleVisitor = {
     const typeAnnotation = node.namedChildren[1]
     if (!expr || !typeAnnotation) return null
 
+    // Skip `as const` — narrows literal types, never unsafe by definition.
+    if (typeAnnotation.text === 'const') return null
+
+    // Skip `x as unknown as Y` / `x as any as Y` — explicit double-assertion
+    // pattern; the dev acknowledged the unsafe conversion.
+    if (expr.type === 'as_expression') {
+      const innerType = expr.namedChildren[1]
+      if (innerType && (innerType.text === 'unknown' || innerType.text === 'any')) return null
+    }
+
     const exprType = typeQuery.getTypeAtPosition(
       filePath,
       expr.startPosition.row,
