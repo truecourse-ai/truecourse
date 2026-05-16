@@ -3,15 +3,23 @@
 A loop that runs Truecourse against open-source repos, identifies false
 positives (FPs), and converts each one into a fixture + visitor fix, one PR at
 a time. Sessions are short-lived and triggered by GitHub events; cross-session
-state lives in GitHub issues — one issue per rule with FPs.
+state lives in two places: a committed campaigns file
+(`docs/fp-campaigns.yaml` — which repos in what order, plus baseline / final
+analyze results) and GitHub issues (one per rule with FPs).
 
 Status: design only. Not yet wired up.
 
 ## Goal
 
+Targets and order are defined in `docs/fp-campaigns.yaml`. Sessions pick the
+first campaign with `status: pending` (or `discovering` / `in_progress`).
+When a campaign finishes, sessions update that file in the same PR that
+closes the campaign.
+
 For each target OSS repo:
 
-1. Run `truecourse analyze`.
+1. Run `truecourse analyze --no-llm` (deterministic rules only — keeps cost
+   bounded; LLM-rule FPs are a separate phase).
 2. Triage violations into TPs / FPs.
 3. For every rule with at least one FP, file one GitHub issue labelled
    `fp-fix` describing the rule, the target repo, links to OSS snippets, and
@@ -30,8 +38,30 @@ For each target OSS repo:
 5. When the PR merges (closing the issue), the next `fp-fix`-labelled issue
    is picked up automatically.
 6. When no `fp-fix` issues remain open for the current target, re-run
-   `truecourse analyze`. If TP rate ≥ 90 %, move on to the next repo:
-   re-run discovery, file fresh `fp-fix` issues, loop continues.
+   `truecourse analyze --no-llm`. Update the campaign's `final.*` block in
+   `docs/fp-campaigns.yaml`. If TP rate ≥ 90 %, mark `status: done` and pick
+   the next `pending` campaign — re-run discovery, file fresh `fp-fix` issues,
+   loop continues.
+
+### Borderline FPs
+
+Classification is not always clean. If a session is uncertain whether a
+violation is a TP or FP, it does **not** auto-fix. Instead it posts a
+comment on the relevant `fp-fix` issue (or on the campaign tracking comment
+if no rule-specific issue exists yet) tagged `borderline:`, with the OSS
+snippet URL and a one-paragraph case for each interpretation. The user
+triages these by adding `fp-confirmed` or `tp-confirmed` labels; the loop
+only auto-fixes the confirmed FPs.
+
+### Visitor refactors
+
+If fixing a rule requires a refactor beyond the visitor itself — extracting
+new type info, threading a new data-flow channel, changing the rule's
+contract — the session does **not** attempt it. It still opens the PR with
+the fixture additions and a `## Refactor needed` section in the PR body
+describing what would be required, then labels the PR `needs-design` and
+ends. The user decides whether to greenlight the refactor in a follow-up
+or skip the rule.
 
 ### Fixture convention (confirmed against the repo)
 
@@ -53,11 +83,17 @@ So an FP fix means:
 ## Architecture
 
 ```
-┌─────────────────────────┐         ┌────────────────────────┐
-│ N × GitHub issues       │◄────────│ Discovery workflow     │
-│ label: fp-fix           │         │ (runs `analyze`,       │
-│ one per rule with FPs   │         │  files issues)         │
-└──────────┬──────────────┘         └────────────────────────┘
+┌──────────────────────────┐        ┌─────────────────────────┐
+│ docs/fp-campaigns.yaml   │───────▶│ Discovery workflow      │
+│ ordered repo list +      │ next   │ (analyze --no-llm,      │
+│ baseline / final results │        │  writes baseline back,  │
+└──────────────────────────┘        │  files fp-fix issues)   │
+                                    └────────────┬────────────┘
+┌─────────────────────────┐                      │
+│ N × GitHub issues       │◄─────────────────────┘
+│ label: fp-fix           │
+│ one per rule with FPs   │
+└──────────┬──────────────┘
            │ oldest open issue
            ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -174,7 +210,7 @@ Stored at `.github/prompts/fp-next-issue.md`. Key sections:
    - Parse the YAML block from the issue body → rule key, target repo, ref,
      sample URLs.
    - Clone target repo at `target_ref` to `/tmp/target`.
-   - `pnpm build && pnpm exec truecourse analyze /tmp/target`.
+   - `pnpm build && pnpm exec truecourse analyze /tmp/target --no-llm`.
    - Re-confirm the FP still reproduces for this rule. If not (someone else
      fixed it, or upstream code changed), close the issue with comment
      "no longer reproduces" and end.
@@ -196,11 +232,12 @@ Stored at `.github/prompts/fp-next-issue.md`. Key sections:
 4. **Stop conditions**:
    - PR opened → end.
    - FP no longer reproduces → close issue, end.
-   - No open `fp-fix` issues for the target → run `truecourse analyze`,
-     compute TP rate:
-     - ≥ 90 %: comment on the campaign issue with "done", trigger
-       `fp-discover.yml` for `next_repo` (if specified) via the GitHub MCP
-       tool, end.
+   - No open `fp-fix` issues for the target → run
+     `truecourse analyze --no-llm`, compute TP rate, update
+     `docs/fp-campaigns.yaml` `final.*` block:
+     - ≥ 90 %: set `status: done` in the campaigns file, find the next
+       `pending` campaign, dispatch `fp-discover.yml` for it via the GitHub
+       MCP tool, end.
      - < 90 %: re-discover FPs for the same repo, file new `fp-fix` issues,
        end.
    - Session can't fix the rule (needs unrelated refactor): comment, add
@@ -222,31 +259,27 @@ A PR is mergeable when:
 A repo is "done" when no `fp-fix` + `fp-target:<owner-repo>` issues are open
 and a fresh `truecourse analyze` shows `tp_rate ≥ 0.9`.
 
-## Open questions / risks
+## Resolved decisions
 
 1. **Paraphrasing licence**: paraphrased snippets must be far enough from the
-   original to avoid licence questions. PR description links the source
-   rather than embedding it. Worth a quick legal sanity-check before running
-   across many GPL/AGPL repos.
-2. **FP triage is judgement-heavy**: discovery needs a clear rubric for
-   "is this an FP?" — propose a short rubric per rule domain (committed to
-   `docs/`), with borderline cases filed as separate issues for human
-   review instead of auto-fix.
-3. **Stuck rules**: if a rule's visitor can't be fixed without a refactor
-   (e.g. needs type info we don't currently extract), session adds
-   `fp-blocked` and ends. A human triages later.
-4. **Cost control**: each session re-runs `truecourse analyze` against a
-   large OSS repo. Cache the analyze output keyed on `(repo, ref)` as a
-   workflow artifact and reuse across sessions for the same campaign.
-5. **Branch hygiene**: stale `fp-fix/*` branches accumulate. Auto-delete on
-   merge (standard repo setting).
-6. **Concurrency**: if two `fp-fix` PRs merge in quick succession, two
-   sessions could pick the same next issue. Mitigation: the session takes a
-   lock by adding label `fp-in-progress` to the issue it picked **before**
-   doing anything else; competing sessions skip labelled issues.
-7. **First target**: which OSS repo do we start with? Suggest a small/medium
-   TS codebase (popular Express app, Next.js example) for the first run,
-   then graduate.
+   original to stand alone. PR description links the source rather than
+   embedding it. Open question — still worth a legal sanity-check before
+   running across GPL/AGPL repos.
+2. **Borderline FPs**: not auto-fixed. Session posts a `borderline:` comment
+   on the issue with both interpretations; user adds `fp-confirmed` /
+   `tp-confirmed` to decide. See "Borderline FPs" above.
+3. **Visitor refactors**: not auto-attempted. Session opens the PR with the
+   fixtures and a `## Refactor needed` note, labels it `needs-design`, ends.
+   See "Visitor refactors" above.
+4. **Cost control**: analyze runs `--no-llm` (deterministic rules only).
+   Cache the analyze output as a workflow artifact keyed on `(repo, ref)`
+   for reuse across sessions in the same campaign.
+5. **Branch hygiene**: auto-delete `fp-fix/*` head branches on merge
+   (repo setting).
+6. **Concurrency**: session adds `fp-in-progress` to the picked issue
+   before doing anything else; competing sessions skip labelled issues.
+7. **Target order**: `docs/fp-campaigns.yaml` is the source of truth.
+   Sessions pick the first non-`done`, non-`skipped` campaign.
 
 ## What's next
 
@@ -254,7 +287,10 @@ If green-lit:
 
 1. Add `.github/workflows/fp-discover.yml` + `.github/workflows/fp-automation.yml`.
 2. Add `.github/prompts/fp-discover.md` + `.github/prompts/fp-next-issue.md`.
-3. Manual-dispatch `fp-discover` against the first target repo → it files
-   one `fp-fix` issue per rule.
-4. Manual-dispatch `fp-automation` once → it picks the first issue and
+3. Enable "Automatically delete head branches" in repo settings.
+4. Manual-dispatch `fp-discover` — it reads the first `pending` campaign
+   from `docs/fp-campaigns.yaml` (today: `documenso/documenso`), runs
+   `truecourse analyze --no-llm`, writes the `baseline.*` block back, and
+   files one `fp-fix` issue per rule with FPs.
+5. Manual-dispatch `fp-automation` once → it picks the first issue and
    opens PR 1. From there, PR merges drive the loop.
