@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { Github, Menu, X } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
+import { DiscordIcon } from './DiscordIcon';
+
+const DISCORD_URL = 'https://discord.gg/8AYwf26A';
 
 type NavItem = { href: string; label: string; external?: boolean };
 
@@ -64,6 +67,15 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           <a
+            href={DISCORD_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="hidden h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-[#5865F2] sm:inline-flex"
+            aria-label="Join the TrueCourse Discord"
+          >
+            <DiscordIcon className="h-4 w-4" />
+          </a>
+          <a
             href="https://github.com/truecourse-ai/truecourse"
             target="_blank"
             rel="noreferrer"
@@ -114,6 +126,15 @@ export function Header() {
             >
               <Github className="h-4 w-4" />
               GitHub
+            </a>
+            <a
+              href={DISCORD_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            >
+              <DiscordIcon className="h-4 w-4" />
+              Discord
             </a>
           </nav>
         </div>
