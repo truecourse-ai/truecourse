@@ -30,6 +30,11 @@ export const invalidVoidTypeVisitor: CodeRuleVisitor = {
 }
 
 function findVoidType(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
+  // Skip subtrees rooted at a function_type / constructor_type — `void` in
+  // those positions is the function's RETURN type, which is valid.
+  // Also skip `Promise<void>`, `Awaited<void>`, etc. — type-argument positions.
+  if (node.type === 'function_type' || node.type === 'constructor_type') return null
+  if (node.type === 'type_arguments') return null
   for (const child of node.children) {
     if (child.type === 'void_type') return child
     if (child.type === 'predefined_type' && child.text === 'void') return child
