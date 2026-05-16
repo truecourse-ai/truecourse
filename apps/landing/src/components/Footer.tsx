@@ -1,5 +1,8 @@
 import { Github, Mail } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { DiscordIcon } from './DiscordIcon';
+
+const DISCORD_URL = 'https://discord.gg/8AYwf26A';
 
 export function Footer() {
   return (
@@ -27,6 +30,15 @@ export function Footer() {
                 <Github className="h-4 w-4" />
               </a>
               <a
+                href={DISCORD_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-[#5865F2]"
+                aria-label="Discord"
+              >
+                <DiscordIcon className="h-4 w-4" />
+              </a>
+              <a
                 href="mailto:mushegh@truecourse.dev"
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
                 aria-label="Email"
@@ -50,6 +62,7 @@ export function Footer() {
             title="Resources"
             links={[
               { href: 'https://github.com/truecourse-ai/truecourse', label: 'GitHub' },
+              { href: DISCORD_URL, label: 'Discord' },
               { href: 'https://www.npmjs.com/package/truecourse', label: 'npm' },
               {
                 href: 'https://github.com/truecourse-ai/truecourse#readme',
