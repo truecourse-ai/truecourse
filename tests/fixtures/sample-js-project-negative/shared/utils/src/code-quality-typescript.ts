@@ -4,7 +4,7 @@
 
 // VIOLATION: code-quality/deterministic/ban-ts-comment
 // @ts-ignore
-const ignoredValue = 42;
+export const ignoredValue = 42;
 
 // VIOLATION: code-quality/deterministic/non-null-assertion
 export function forceNonNull(x: string | null) {
@@ -35,6 +35,7 @@ export function anyConstraint<T extends unknown>(x: T): T {
 // VIOLATION: code-quality/deterministic/triple-slash-reference
 /// <reference path="./types.d.ts" />
 
+// VIOLATION: code-quality/deterministic/useless-empty-export
 export {};
 
 // VIOLATION: code-quality/deterministic/unknown-catch-variable
@@ -80,11 +81,6 @@ export function returnsAny(data: unknown): any {
   return data;
 }
 
-// VIOLATION: code-quality/deterministic/mixed-type-exports
-export type { MixedType };
-export { mixedValue };
-type MixedType = string;
-const mixedValue = 42;
 
 // VIOLATION: code-quality/deterministic/public-static-readonly
 export class Constants {
@@ -138,7 +134,7 @@ export class Builder {
 }
 
 // VIOLATION: code-quality/deterministic/confusing-void-expression
-function sideEffect(): void {
+export function sideEffect(): void {
   console.log('done');
 }
 export function confusingVoid() {

@@ -116,6 +116,7 @@ export function logError() {
     parsed = JSON.parse('invalid');
   } catch (error) {
     console.error(error);
+    return;
   } finally {
     if (parsed === null) parsed = undefined;
   }

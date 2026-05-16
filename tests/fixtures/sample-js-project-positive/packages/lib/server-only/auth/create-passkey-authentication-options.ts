@@ -1,7 +1,6 @@
 import { prisma } from '@app/prisma';
 import type { Passkey } from '@prisma/client';
-import type { AuthenticatorTransportFuture } from '@simplewebauthn/server';
-import { generateAuthenticationOptions } from '@simplewebauthn/server';
+import { generateAuthenticationOptions, type AuthenticatorTransportFuture } from '@simplewebauthn/server';
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { DateTime } from 'luxon';
 

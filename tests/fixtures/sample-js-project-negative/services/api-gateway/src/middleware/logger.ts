@@ -36,6 +36,8 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
       idx++;
     }
 
+    // VIOLATION: code-quality/deterministic/magic-number
+    setTimeout(() => { logs.length = 0; }, 5000);
     if (duration > 500) {
       // VIOLATION: code-quality/deterministic/console-log
       console.log(`Slow request: ${req.method} ${req.path} took ${duration}ms`);

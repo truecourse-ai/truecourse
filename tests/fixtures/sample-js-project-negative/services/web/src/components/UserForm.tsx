@@ -32,6 +32,8 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
   // VIOLATION: code-quality/deterministic/missing-return-type
   function validate() {
     const newErrors: Record<string, string> = {};
+    // VIOLATION: code-quality/deterministic/magic-number
+    setTimeout(() => { setName(''); }, 5000);
     if (name.length < 3) {
       newErrors.name = 'Name must be at least 3 characters';
     }
@@ -53,6 +55,7 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
     } catch (error) {
       // VIOLATION: reliability/deterministic/console-error-no-context
       console.error(error);
+      return;
     } finally {
       setSubmitting(false);
     }

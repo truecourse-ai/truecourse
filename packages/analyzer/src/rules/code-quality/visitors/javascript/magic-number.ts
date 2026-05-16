@@ -87,6 +87,14 @@ export const magicNumberVisitor: CodeRuleVisitor = {
       if (COMPARISON_OPS.has(op)) return null
     }
 
+    // Skip when the magic number is part of an arithmetic expression that is
+    // immediately returned — common idiomatic offset / pure-fn shape:
+    //   return x + 5;   return acc * 2;   return base - 1;
+    if (parentType === 'binary_expression') {
+      const gp = parent.parent
+      if (gp?.type === 'return_statement') return null
+    }
+
     // Walk ancestors — skip if inside a named constant (e.g., const TIMEOUT_MS = 60 * 1000)
     let ancestor: typeof parent | null = parent
     while (ancestor) {

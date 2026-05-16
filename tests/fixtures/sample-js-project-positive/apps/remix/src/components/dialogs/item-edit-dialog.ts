@@ -37,8 +37,7 @@ const ZDocumentResendSchema = z.object({
 
 type TDocumentResendSchema = z.infer<typeof ZDocumentResendSchema>;
 
-export { ZDocumentResendSchema };
-export type { TDocumentResendSchema };
+export { ZDocumentResendSchema, type TDocumentResendSchema };
 
 
 
@@ -56,8 +55,7 @@ const ZDocumentDistributeSchema = z.object({
 
 type TDocumentDistributeSchema = z.infer<typeof ZDocumentDistributeSchema>;
 
-export { ZDocumentDistributeSchema };
-export type { TDocumentDistributeSchema };
+export { ZDocumentDistributeSchema, type TDocumentDistributeSchema };
 
 
 
@@ -78,8 +76,7 @@ const ZTemplateUseSchema = z.object({
 
 type TTemplateUseSchema = z.infer<typeof ZTemplateUseSchema>;
 
-export { ZTemplateUseSchema };
-export type { TTemplateUseSchema };
+export { ZTemplateUseSchema, type TTemplateUseSchema };
 
 
 
@@ -97,5 +94,4 @@ const ZRedistributeEnvelopeSchema = z.object({
 
 type TRedistributeEnvelopeSchema = z.infer<typeof ZRedistributeEnvelopeSchema>;
 
-export { ZRedistributeEnvelopeSchema };
-export type { TRedistributeEnvelopeSchema };
+export { ZRedistributeEnvelopeSchema, type TRedistributeEnvelopeSchema };

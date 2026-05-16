@@ -46,6 +46,23 @@ export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // Skip files in Next.js `app/` directories — route handlers, layouts,
+    // metadata generators, robots.ts, sitemap.ts, etc., all rely on framework
+    // type inference rather than explicit annotations.
+    if (/\/apps\/[^/]+\/app\//.test(filePath) || /\/(?:src\/)?app\/[^/]*\.tsx?$/.test(filePath)) {
+      return null
+    }
+
+    // Skip generator functions whose name starts with `generate` — Next.js
+    // metadata generator pattern (generateMetadata, generateRobots,
+    // generateImageMetadata, etc.).
+    if (/^generate[A-Z]/.test(name)) return null
+
+    // Skip framework conventions for robots.ts, sitemap.ts, manifest.ts, etc.
+    if (/\/(?:robots|sitemap|manifest|opengraph-image|twitter-image|icon|apple-icon|favicon)\.tsx?$/.test(filePath)) {
+      return null
+    }
+
     return makeViolation(
       this.ruleKey, funcNode, filePath, 'low',
       `Exported function '${name}' missing return type`,

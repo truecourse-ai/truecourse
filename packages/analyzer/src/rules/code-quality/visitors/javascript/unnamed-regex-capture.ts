@@ -9,7 +9,7 @@ export const unnamedRegexCaptureVisitor: CodeRuleVisitor = {
     const pattern = node.namedChildren.find((c) => c.type === 'regex_pattern')
     const src = pattern?.text ?? ''
 
-    let hasUnnamed = false
+    let captureCount = 0
     let inCharClass = false
 
     for (let i = 0; i < src.length; i++) {
@@ -67,11 +67,14 @@ export const unnamedRegexCaptureVisitor: CodeRuleVisitor = {
       // value the caller reads via match[1].
       if (/^\[\^[^\]]+\][*+?]?$/.test(groupContent)) continue
 
-      hasUnnamed = true
-      break
+      captureCount++
     }
 
-    if (hasUnnamed) {
+    // Skip regexes with a single unnamed capture — typically content
+    // extractors (e.g., /^r(\d+)$/, /\{(\S+)\}/) where the capture is
+    // structural; multi-capture regexes (/(\d{4})-(\d{2})-(\d{2})/) more
+    // strongly suggest positional-value extraction worth naming.
+    if (captureCount > 1) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Unnamed capture group',
