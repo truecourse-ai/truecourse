@@ -12,20 +12,21 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 - The repository `truecourse-ai/truecourse` is cloned at the default
   branch.
-- Optional `text` body parameter: a single `owner/repo` string. If
-  present, override the "next pending campaign" pick with this target
-  (used for re-discovery after a < 90 % TP rate result).
+- The routine fires either from a **Run now** click (first-time
+  bootstrap, or manual re-run) or from a GitHub event:
+  `pull_request.closed` on a campaign-close PR. In both cases the
+  next campaign to run is determined by reading
+  `docs/fp-automation/campaigns.yaml` — there are no per-invocation
+  parameters.
 
 ## Step-by-step
 
 ### 1. Pick the campaign
 
 - Read `docs/fp-automation/campaigns.yaml`.
-- If `text` is set: find the campaign whose `target_repo` matches and
-  treat it as the one to run.
-- Otherwise: pick the first campaign with `status: pending` in the file.
-- If no candidate exists, comment nothing, post a brief end-of-run
-  summary in the session, and stop.
+- Pick the first campaign with `status: pending` in the file.
+- If no candidate exists, post a brief end-of-run summary in the
+  session ("no pending campaigns; nothing to do") and stop.
 
 ### 2. Mark the campaign `discovering`
 

@@ -62,11 +62,14 @@ When a campaign hits ≥ 90 % TP, the session opens a single PR that:
 - Carries the **`fp-campaign-complete`** label.
 - Branch name `claude/fp-campaign-close/<owner>-<repo>`.
 
-On merge, the **fp-campaign-close** routine reads the new version from
-`tools/cli/package.json`, creates and pushes `vX.Y.Z`, and POSTs to the
-**fp-discover** routine's `/fire` endpoint to kick off the next campaign.
-The existing `.github/workflows/publish.yml` picks the tag up and
-publishes `truecourse` to npm.
+On merge, two routines fire in parallel on the same event:
+- **fp-campaign-close** reads the new version from
+  `tools/cli/package.json`, creates and pushes `vX.Y.Z`. The existing
+  `.github/workflows/publish.yml` picks the tag up and publishes
+  `truecourse` to npm + creates the GitHub Release.
+- **fp-discover** reads `campaigns.yaml` (which the merged PR already
+  flipped to `status: done` for the just-closed campaign), picks the
+  next `pending` campaign, and starts discovery.
 
 ### Borderline FPs
 
@@ -109,9 +112,11 @@ So an FP fix means:
 ```
 ┌──────────────────────────┐        ┌─────────────────────────┐
 │ campaigns.yaml           │───────▶│ Routine: fp-discover    │
-│ ordered repo list +      │ next   │ trigger: API /fire      │
-│ baseline / final results │        │ (analyze --no-llm,      │
-└──────────────────────────┘        │  writes baseline back,  │
+│ ordered repo list +      │ next   │ trigger: same as        │
+│ baseline / final results │        │  fp-campaign-close,     │
+└──────────────────────────┘        │  + Run now for bootstrap│
+                                    │ (analyze --no-llm,      │
+                                    │  writes baseline back,  │
                                     │  files fp-fix issues)   │
 ┌─────────────────────────┐         └────────────┬────────────┘
 │ N × GitHub issues       │◄─────────────────────┘
@@ -139,15 +144,19 @@ So an FP fix means:
            │ on fp-fix PR merge           │
            │                              ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Routine: fp-campaign-close                               │
+│ Routine: fp-campaign-close (parallel with fp-discover)   │
 │ trigger: pull_request.closed, is_merged=true,            │
 │   head ∼ claude/fp-campaign-close/*,                     │
 │   label = fp-campaign-complete                           │
 │                                                          │
 │ 1. Read new version from tools/cli/package.json          │
 │ 2. git tag vX.Y.Z, git push --tags                       │
-│    (existing publish.yml then ships to npm)              │
-│ 3. POST to fp-discover /fire endpoint → next campaign    │
+│    (existing publish.yml ships to npm + GitHub Release)  │
+│                                                          │
+│ fp-discover listens to the SAME merge event and runs in  │
+│ parallel — it reads campaigns.yaml on main (which the    │
+│ merged PR already flipped to status: done) and starts    │
+│ discovery for the next pending campaign.                 │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -197,12 +206,18 @@ record — keep them in sync).
 
 | Field | Value |
 |---|---|
-| **Trigger** | API (`/fire` endpoint). Manually invoked to start the first campaign; chained from `fp-campaign-close` for subsequent campaigns. |
+| **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
+| **Filters** | `is_merged = true` AND `head branch starts with claude/fp-campaign-close/` AND `labels contains fp-campaign-complete` |
+| **Bootstrap** | First-time run is **Run now** from the routine page (no PR has merged yet). Same button works for any manual re-run. |
 | **Repositories** | `truecourse-ai/truecourse` |
-| **Branch push policy** | Default (`claude/`-prefixed only — no issues opened on branches, so this is fine) |
+| **Branch push policy** | Default (`claude/`-prefixed only) |
 | **Environment** | `fp-automation` (shared with the other two routines) |
 | **Prompt source** | `docs/fp-automation/prompts/fp-discover.md` |
-| **Body param** | `text` field optional; if present, overrides "next pending campaign" with a specific target repo (used for re-discovery after `< 90%` TP) |
+
+`fp-discover` shares its trigger event with `fp-campaign-close` — both
+routines fire in parallel on every campaign-close PR merge. `fp-discover`
+reads `campaigns.yaml` on `main` (the merged PR already flipped the
+just-closed campaign to `status: done`) and picks the next `pending` one.
 
 Steps the session takes:
 1. Read `docs/fp-automation/campaigns.yaml` from `main` on
@@ -286,7 +301,7 @@ needed` note, add `fp-blocked` label, end. The user triages later.
 | **Filters** | `is_merged = true` AND `head branch starts with claude/fp-campaign-close/` AND `labels contains fp-campaign-complete` |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default — only needs to push a tag, not a branch |
-| **Environment** | `fp-automation` (must have `FP_DISCOVER_API_URL` + `FP_DISCOVER_API_TOKEN` env vars set — see Setup below) |
+| **Environment** | `fp-automation` |
 | **Prompt source** | `docs/fp-automation/prompts/fp-campaign-close.md` |
 
 Steps the session takes:
@@ -294,11 +309,11 @@ Steps the session takes:
    `tools/cli/package.json`.
 2. `git tag v<version> && git push origin v<version>`. The existing
    `.github/workflows/publish.yml` triggers on the tag and publishes
-   `truecourse` to npm — no change required there.
-3. POST to the `fp-discover` `/fire` endpoint
-   (`$FP_DISCOVER_API_URL` / `$FP_DISCOVER_API_TOKEN`) with an empty body
-   to fire the next campaign.
-4. End.
+   `truecourse` to npm + creates the GitHub Release.
+3. End.
+
+`fp-discover` fires on the same event independently — there's no chained
+call from this routine.
 
 ## Setup checklist
 
@@ -310,23 +325,20 @@ One-time, before the first run:
 2. **Enable "Automatically delete head branches"** in repo settings →
    General. Keeps `claude/fp-fix/*` and `claude/fp-campaign-close/*`
    branches tidy.
-3. **Create the cloud environment** at
-   [claude.ai/code](https://claude.ai/code) named `fp-automation` with:
+3. **Create the three routines** at
+   [claude.ai/code/routines](https://claude.ai/code/routines), pasting
+   the prompts from `docs/fp-automation/prompts/`. In the routine form,
+   the cloud icon next to the prompt opens the environment selector —
+   the first routine you create can use it to **Add environment** named
+   `fp-automation` with:
    - Network access: **Trusted** (default allowlist covers npm, GitHub,
      and the OSS repos we clone over HTTPS).
    - Setup script: `pnpm install && pnpm build`.
-   - Env vars (added after step 5 below): `FP_DISCOVER_API_URL`,
-     `FP_DISCOVER_API_TOKEN`.
-4. **Create the three routines** at
-   [claude.ai/code/routines](https://claude.ai/code/routines) with the
-   trigger configs above and the prompts copied from
-   `docs/fp-automation/prompts/`. Use the same `fp-automation`
-   environment for all three.
-5. **Generate the API token for `fp-discover`** (in its routine settings →
-   API trigger → Generate token). Copy the URL and token into the
-   `fp-automation` environment's env vars as `FP_DISCOVER_API_URL` and
-   `FP_DISCOVER_API_TOKEN`.
-6. **Kick off the first run** by clicking **Run now** on `fp-discover`.
+   - Environment variables: none required.
+
+   The other two routines pick the existing `fp-automation` from the
+   same selector. Trigger configs are listed under each routine above.
+4. **Kick off the first run** by clicking **Run now** on `fp-discover`.
    It reads `campaigns.yaml`, finds the first pending campaign
    (today: `documenso/documenso`), and files the initial `fp-fix`
    issues. From here, the loop drives itself.
@@ -364,7 +376,10 @@ campaign. The campaigns file is the audit trail.
 ## Resolved decisions
 
 1. **Runtime**: Claude Code **Routines** (Anthropic-managed cloud
-   sessions), triggered by GitHub events. No self-hosted runners.
+   sessions), triggered entirely by GitHub events
+   (`pull_request.closed` + filters). No self-hosted runners, no API
+   tokens, no env vars on the environment. First-time bootstrap is a
+   manual **Run now** click on `fp-discover`.
 2. **Paraphrasing licence**: paraphrased snippets must be far enough from
    the original to stand alone. PR description links the source rather
    than embedding it. Open question — still worth a legal sanity-check
@@ -392,15 +407,17 @@ campaign. The campaigns file is the audit trail.
 
 If green-lit:
 
-1. Author the three prompts in `docs/fp-automation/prompts/`:
+1. Prompts are committed under `docs/fp-automation/prompts/`:
    - `fp-discover.md`
    - `fp-next-fix.md`
    - `fp-campaign-close.md`
 2. Walk through the "Setup checklist" above to install the GitHub App,
-   create the cloud environment, create the three routines, and wire
-   the API token.
+   enable branch auto-delete, and create the three routines (sharing
+   the `fp-automation` cloud environment).
 3. Click **Run now** on `fp-discover`. From there:
    - Inner loop: fp-fix PR merges drive `fp-next-fix` until the campaign
      queue is empty.
-   - Outer loop: campaign-close PR merges drive `fp-campaign-close`,
-     which tags + publishes + fires the next campaign's discovery.
+   - Outer loop: campaign-close PR merges fire both `fp-campaign-close`
+     (tags the release; publish.yml ships to npm) and `fp-discover`
+     (starts the next campaign's discovery) in parallel on the same
+     event.
