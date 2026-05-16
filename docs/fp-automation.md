@@ -38,10 +38,36 @@ For each target OSS repo:
 5. When the PR merges (closing the issue), the next `fp-fix`-labelled issue
    is picked up automatically.
 6. When no `fp-fix` issues remain open for the current target, re-run
-   `truecourse analyze --no-llm`. Update the campaign's `final.*` block in
-   `docs/fp-campaigns.yaml`. If TP rate ≥ 90 %, mark `status: done` and pick
-   the next `pending` campaign — re-run discovery, file fresh `fp-fix` issues,
-   loop continues.
+   `truecourse analyze --no-llm`. If TP rate ≥ 90 %, open a **campaign-close
+   PR** (see below) that updates `docs/fp-campaigns.yaml` and bumps the
+   version. When that PR merges, a tag-push workflow fires and the existing
+   `publish.yml` releases to npm. The next pending campaign starts on the
+   tag-push merge event.
+
+### Campaign-close PR
+
+When a campaign hits ≥ 90 % TP, the session opens a single PR that:
+
+- Sets `status: done` for the campaign in `docs/fp-campaigns.yaml`.
+- Fills the `final.*` block (analyzed_at, target_ref, total_violations,
+  tp, fp, tp_rate).
+- Bumps the patch version (FP fixes are bug fixes) in all four required
+  places, per CLAUDE.md:
+  1. `tools/cli/package.json`
+  2. `packages/core/package.json`
+  3. `apps/dashboard/server/package.json`
+  4. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call
+- Carries the **`fp-campaign-complete`** label (this is what the tag-push
+  workflow keys off — `fp-fix` PRs don't trigger it).
+- Branch name `fp-campaign-close/<owner>-<repo>`.
+
+On merge, `fp-campaign-tag.yml` reads the new version from
+`tools/cli/package.json`, creates and pushes `vX.Y.Z`, and ends. The
+existing `.github/workflows/publish.yml` picks the tag up and publishes
+`truecourse` to npm.
+
+The same merge event also kicks the next `fp-discover` run for the next
+pending campaign in `docs/fp-campaigns.yaml`.
 
 ### Borderline FPs
 
@@ -110,10 +136,12 @@ So an FP fix means:
            ▲                                  │
            │ on PR merge                      │
 ┌──────────┴──────────────────────────────────▼────────────┐
-│ Trigger workflow (PR closed+merged, label fp-fix)        │
-│  → picks next open fp-fix issue and starts a session     │
-│  → if no open fp-fix issues: re-analyze target,          │
-│     compute TP rate, advance to next repo (re-discover)  │
+│ Trigger workflow (PR closed+merged)                      │
+│  • label fp-fix         → next fp-fix issue → session    │
+│  • label fp-campaign-   → bump version commit landed →   │
+│    complete                push tag vX.Y.Z (→ publish)   │
+│                          → dispatch fp-discover for      │
+│                            next pending campaign         │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -147,7 +175,7 @@ Labels:
 The Claude session is the only writer. Ordering is "oldest open issue first"
 unless overridden by an explicit `priority` label.
 
-## Triggers: two workflows
+## Triggers: three workflows
 
 ### 1. `fp-discover.yml` — populate issues
 
@@ -197,6 +225,56 @@ Trigger scoping uses **two** signals so unrelated PRs can't kick the loop:
 2. PR must carry the `fp-fix` label (set automatically when the session
    opens the PR).
 
+### 3. `fp-campaign-tag.yml` — bump version, push tag on campaign close
+
+```yaml
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  tag-and-publish:
+    if: >
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'fp-campaign-complete') &&
+      startsWith(github.event.pull_request.head.ref, 'fp-campaign-close/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write           # to push the tag
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, ref: main }
+      - id: version
+        run: |
+          v=$(node -p "require('./tools/cli/package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Push tag
+        run: |
+          git config user.name  "truecourse-bot"
+          git config user.email "bot@truecourse.dev"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+      - name: Dispatch next campaign discovery
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Read docs/fp-campaigns.yaml from main, find first pending,
+            // dispatch fp-discover.yml with that target_repo.
+            // (Body sketched; not implemented here.)
+```
+
+The tag push fires the existing `.github/workflows/publish.yml`, which
+publishes `truecourse` to npm — no change required there. The dispatch
+step kicks `fp-discover.yml` for the next campaign so the loop continues
+without manual intervention.
+
+Trigger scoping for this workflow:
+1. PR head branch must start with `fp-campaign-close/`.
+2. PR must carry the `fp-campaign-complete` label.
+
+Both labels are set by the session that opens the close PR; they should
+**not** be applied to any other PR.
+
 ## Per-session prompt outline
 
 Stored at `.github/prompts/fp-next-issue.md`. Key sections:
@@ -233,11 +311,18 @@ Stored at `.github/prompts/fp-next-issue.md`. Key sections:
    - PR opened → end.
    - FP no longer reproduces → close issue, end.
    - No open `fp-fix` issues for the target → run
-     `truecourse analyze --no-llm`, compute TP rate, update
-     `docs/fp-campaigns.yaml` `final.*` block:
-     - ≥ 90 %: set `status: done` in the campaigns file, find the next
-       `pending` campaign, dispatch `fp-discover.yml` for it via the GitHub
-       MCP tool, end.
+     `truecourse analyze --no-llm`, compute TP rate:
+     - ≥ 90 %: open a **campaign-close PR** on branch
+       `fp-campaign-close/<owner>-<repo>` with:
+       - `docs/fp-campaigns.yaml` updated (`status: done`, `final.*` filled),
+       - patch version bumped in all four locations from CLAUDE.md
+         (`tools/cli/package.json`, `packages/core/package.json`,
+         `apps/dashboard/server/package.json`, `tools/cli/src/index.ts`),
+       - label `fp-campaign-complete`,
+       - body listing the campaign's rule fixes (linked by PR number) and
+         the before/after TP-rate.
+       Then end. The tag-push + next-campaign dispatch is handled by
+       `fp-campaign-tag.yml` on merge.
      - < 90 %: re-discover FPs for the same repo, file new `fp-fix` issues,
        end.
    - Session can't fix the rule (needs unrelated refactor): comment, add
@@ -245,7 +330,7 @@ Stored at `.github/prompts/fp-next-issue.md`. Key sections:
 
 ## Acceptance criteria
 
-A PR is mergeable when:
+An **fp-fix PR** is mergeable when:
 
 - New positive-fixture case for the FP exists and the test passes (no
   violation fires).
@@ -256,8 +341,19 @@ A PR is mergeable when:
   of upstream licences) and shows the paraphrased fixture diff inline.
 - PR closes its parent issue.
 
-A repo is "done" when no `fp-fix` + `fp-target:<owner-repo>` issues are open
-and a fresh `truecourse analyze` shows `tp_rate ≥ 0.9`.
+A **campaign-close PR** is mergeable when:
+
+- The targeted campaign in `docs/fp-campaigns.yaml` is updated to
+  `status: done` with `final.*` filled.
+- Patch version is bumped consistently in all four required locations
+  (CLAUDE.md "Releasing" section).
+- No other file changes (no fixture or visitor edits — those go in
+  fp-fix PRs).
+- PR carries `fp-campaign-complete` and branch matches
+  `fp-campaign-close/<owner>-<repo>`.
+
+A repo is "done" when its campaign-close PR is merged and `vX.Y.Z` is
+tagged. The campaigns file is the audit trail.
 
 ## Resolved decisions
 
@@ -285,12 +381,18 @@ and a fresh `truecourse analyze` shows `tp_rate ≥ 0.9`.
 
 If green-lit:
 
-1. Add `.github/workflows/fp-discover.yml` + `.github/workflows/fp-automation.yml`.
+1. Add `.github/workflows/fp-discover.yml`,
+   `.github/workflows/fp-automation.yml`, and
+   `.github/workflows/fp-campaign-tag.yml`.
 2. Add `.github/prompts/fp-discover.md` + `.github/prompts/fp-next-issue.md`.
+   (Campaign-close behaviour lives inside `fp-next-issue.md`; no separate
+   prompt needed.)
 3. Enable "Automatically delete head branches" in repo settings.
 4. Manual-dispatch `fp-discover` — it reads the first `pending` campaign
    from `docs/fp-campaigns.yaml` (today: `documenso/documenso`), runs
    `truecourse analyze --no-llm`, writes the `baseline.*` block back, and
    files one `fp-fix` issue per rule with FPs.
 5. Manual-dispatch `fp-automation` once → it picks the first issue and
-   opens PR 1. From there, PR merges drive the loop.
+   opens PR 1. From there, fp-fix PR merges drive the inner loop, and
+   campaign-close PR merges drive the outer loop (tag → publish → next
+   campaign).
