@@ -264,6 +264,16 @@ export interface TypeQueryService {
   areTypesCompatible(filePath: string, line1: number, col1: number, line2: number, col2: number): boolean
   /** Check if the TS compiler reports a type error in a line range */
   hasTypeErrorInRange(filePath: string, startLine: number, endLine: number): boolean
+  /** Same as hasTypeErrorInRange, but filtered to a set of TS diagnostic codes. */
+  hasTypeErrorInRangeWithCodes(filePath: string, startLine: number, endLine: number, codes: number[]): boolean
+  /**
+   * Get the declared (non-narrowed) type of the symbol referenced at a position.
+   * For an identifier reference, this returns the type at the declaration site
+   * (e.g. `string | undefined` for a variable declared with that type) rather
+   * than the flow-narrowed type at the use site.
+   * Returns null if no symbol can be resolved.
+   */
+  getDeclaredTypeAtPosition(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): string | null
 }
 
 /**
@@ -538,6 +548,46 @@ export function createTypeQueryService(
         // Skip — diagnostics unavailable
       }
       return false
+    },
+
+    hasTypeErrorInRangeWithCodes(filePath, startLine, endLine, codes) {
+      const sp = getProgramForFile(filePath)
+      if (!sp) return false
+      const sf = sp.program.getSourceFile(filePath)
+      if (!sf) return false
+      const codeSet = new Set(codes)
+      try {
+        const diagnostics = sp.program.getSemanticDiagnostics(sf)
+        for (const d of diagnostics) {
+          if (d.start === undefined || d.file !== sf) continue
+          if (!codeSet.has(d.code)) continue
+          const diagLine = sf.getLineAndCharacterOfPosition(d.start).line
+          if (diagLine >= startLine && diagLine <= endLine) return true
+        }
+      } catch {
+        // Skip — diagnostics unavailable
+      }
+      return false
+    },
+
+    getDeclaredTypeAtPosition(filePath, line, column, endLine?, endColumn?) {
+      const sp = getProgramForFile(filePath)
+      if (!sp) return null
+      const sf = sp.program.getSourceFile(filePath)
+      if (!sf) return null
+      const node = getNodeAtPosition(sf, line, column, endLine, endColumn)
+      if (!node) return null
+      try {
+        const symbol = sp.checker.getSymbolAtLocation(node)
+        if (!symbol) return null
+        const decls = symbol.getDeclarations()
+        if (!decls || decls.length === 0) return null
+        // Use the symbol's declared type (not the narrowed type at the reference).
+        const type = sp.checker.getTypeOfSymbolAtLocation(symbol, decls[0])
+        return typeToString(filePath, type)
+      } catch {
+        return null
+      }
     },
   }
 }

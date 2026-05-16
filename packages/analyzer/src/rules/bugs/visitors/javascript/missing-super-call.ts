@@ -8,9 +8,21 @@ export const missingSuperCallVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['class_declaration', 'class'],
   visit(node, filePath, sourceCode) {
-    // Check if this class has an extends clause
+    // Skip ambient declarations: `declare class X extends Y { ... }` only
+    // describes a type and has no runtime constructor body.
+    let ancestor: SyntaxNode | null = node.parent
+    while (ancestor) {
+      if (ancestor.type === 'ambient_declaration') return null
+      ancestor = ancestor.parent
+    }
+
+    // Check if this class has an extends clause specifically. `class_heritage`
+    // covers both `extends` and `implements`; only `extends` requires super().
     const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
     if (!heritage) return null
+    const hasExtends = heritage.namedChildren.some((c) => c.type === 'extends_clause')
+      || heritage.children.some((c) => c.text === 'extends')
+    if (!hasExtends) return null
 
     const body = node.childForFieldName('body')
     if (!body) return null

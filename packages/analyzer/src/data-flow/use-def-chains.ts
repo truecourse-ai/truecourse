@@ -118,6 +118,19 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
       if (v.kind === 'var' || v.kind === 'function' || v.kind === 'import' || v.kind === 'global' || v.kind === 'nonlocal' || v.kind === 'for-variable' || v.kind === 'catch-parameter') continue
       if (v.useSites.length === 0) continue
 
+      // Skip `declare const X: ...` / `declare function X(...)` — ambient
+      // declarations are erased at compile time; no runtime TDZ applies.
+      let p: SyntaxNode | null = v.declarationNode.parent
+      let isAmbient = false
+      while (p) {
+        if (p.type === 'ambient_declaration') { isAmbient = true; break }
+        // Stop at scope boundaries
+        if (p.type === 'program' || p.type === 'statement_block' ||
+            p.type === 'function_declaration' || p.type === 'method_definition') break
+        p = p.parent
+      }
+      if (isAmbient) continue
+
       // Skip walrus-bound names: PEP 572 walrus assigns the name *before*
       // the surrounding expression evaluates each branch, so a use textually
       // earlier than the `:=` token can still be evaluation-order correct.

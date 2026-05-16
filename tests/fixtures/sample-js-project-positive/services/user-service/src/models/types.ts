@@ -15,3 +15,21 @@ export class ConfigStore {
   private readonly store = new Map<string, string>();
   getValue(): string { return this.store.get('current') ?? 'default'; }
 }
+
+
+// Type alias inside declare global namespace required by prisma-json-types-generator for JSON column binding
+declare namespace OrmJsonTypes {
+  interface DefaultSignerConfig {
+    name: string;
+    email: string;
+    role: 'signer' | 'viewer' | 'approver';
+    accessCode?: string;
+  }
+}
+
+declare global {
+  namespace PrismaJson {
+    type DefaultSignerConfig = OrmJsonTypes.DefaultSignerConfig;
+  }
+}
+

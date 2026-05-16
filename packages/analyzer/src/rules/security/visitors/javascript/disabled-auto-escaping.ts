@@ -10,6 +10,15 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
     if (node.type === 'jsx_attribute') {
       const name = node.namedChildren[0]
       if (name && name.text === 'dangerouslySetInnerHTML') {
+        // Extract the `__html` value from the inline object literal, when
+        // possible: `dangerouslySetInnerHTML={{ __html: <value> }}`. The
+        // attribute fires only when that value carries a clear user-input
+        // signal. Library-rendered SVG, hardcoded markup, admin-controlled
+        // config, and operator-supplied env config are the dominant FP
+        // shapes; suppress them.
+        const htmlValue = extractHtmlValue(node)
+        if (htmlValue && isTrustedHtmlValue(htmlValue)) return null
+
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Disabled auto-escaping',
@@ -53,6 +62,63 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+// Walk `dangerouslySetInnerHTML={{ __html: <value> }}` and return the AST
+// node for `<value>`. Returns null when the attribute is shaped any other
+// way (variable spread, conditional, etc.) — in that case the visitor
+// falls through to firing.
+function extractHtmlValue(
+  attr: import('web-tree-sitter').Node,
+): import('web-tree-sitter').Node | null {
+  // attr.namedChild(1) is the jsx_expression wrapping the value
+  const jsxExpr = attr.namedChild(1)
+  if (!jsxExpr || jsxExpr.type !== 'jsx_expression') return null
+  const obj = jsxExpr.namedChild(0)
+  if (!obj || obj.type !== 'object') return null
+  for (let i = 0; i < obj.namedChildCount; i++) {
+    const pair = obj.namedChild(i)
+    if (!pair || pair.type !== 'pair') continue
+    const key = pair.childForFieldName('key')
+    if (!key || key.text !== '__html') continue
+    return pair.childForFieldName('value')
+  }
+  return null
+}
+
+// True when the JSX __html value lacks any clear user-input signal.
+// Static markup, library-call output (renderQrSvg(...), mermaid.render),
+// admin/config member access (banner.data.content), and template strings
+// whose substitutions are static / JSON.stringify / escape calls are all
+// treated as deliberate, trusted uses. Plain `+` concatenation with
+// non-escaped operands remains a sink.
+function isTrustedHtmlValue(node: import('web-tree-sitter').Node): boolean {
+  // Hardcoded markup / numeric / boolean literal.
+  if (isStaticStringLiteral(node)) return true
+  if (node.type === 'number' || node.type === 'true' || node.type === 'false' || node.type === 'null' || node.type === 'undefined') return true
+  // Library / helper invocation — developer explicitly opted into the
+  // function's output (renderQrSvg, mermaid.render, sanitize, etc.).
+  if (node.type === 'call_expression') return true
+  // Identifier or member expression — typically state set from a library
+  // (`const [svg, setSvg] = useState(); ... __html: svg`) or
+  // admin-controlled config (`banner.data.content`). No direct user-input
+  // sink without flow analysis.
+  if (node.type === 'identifier' || node.type === 'member_expression') return true
+  // Template string: trusted only when every substitution is itself a
+  // trusted value (escape call, JSON.stringify, static, identifier, etc.).
+  if (node.type === 'template_string') {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i)
+      if (!child) continue
+      if (child.type === 'template_substitution') {
+        const inner = child.namedChild(0)
+        if (!inner) return false
+        if (!isTrustedHtmlValue(inner) && !isFullyEscapedRhs(inner)) return false
+      }
+    }
+    return true
+  }
+  return false
 }
 
 function isStaticStringLiteral(node: import('web-tree-sitter').Node): boolean {

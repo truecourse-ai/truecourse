@@ -10,7 +10,9 @@ const RESTRICTED_GLOBALS = new Map<string, string>([
   ['event', 'Implicit global event object — use explicit event parameter instead'],
   ['fdescribe', 'Focused test suite — will skip other tests in CI'],
   ['fit', 'Focused test — will skip other tests in CI'],
-  ['location', 'Direct location mutation — use router navigation instead'],
+  // `location` removed: assigning `location.href = url` is the standard way to
+  // perform a full-page navigation in vanilla SPAs (no router). Outside of a
+  // router-managed app, this is the correct API, not a restricted one.
 ])
 
 const RESTRICTED_PROPERTIES = new Map<string, string>([
@@ -39,19 +41,24 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
       if (parent.type === 'property_identifier') return null
       if (parent.type === 'import_specifier' || parent.type === 'export_specifier') return null
 
-      // Skip if identifier is declared as a local variable or parameter in scope
-      const declPattern = new RegExp(`\\b(?:const|let|var)\\s+${node.text}\\b`)
+      // Skip if identifier is declared as a local variable or parameter in any enclosing scope.
+      // Walk the FULL chain — do not break at the first function — because the identifier may
+      // be declared in an outer scope while appearing inside a nested callback.
+      const name = node.text
+      const nameWord = new RegExp(`\\b${name}\\b`)
+      const declPattern = new RegExp(`\\b(?:const|let|var)\\s+(?:\\{[^}]*\\b)?${name}\\b`)
       let scope: typeof node.parent = node.parent
       while (scope) {
-        if (scope.type === 'statement_block' || scope.type === 'program') {
+        if (scope.type === 'statement_block' || scope.type === 'program' ||
+            scope.type === 'class_body') {
           if (declPattern.test(scope.text)) return null
         }
-        // Also check function parameters
+        // Also check function parameters (don't break — keep walking up).
         if (scope.type === 'arrow_function' || scope.type === 'function_declaration' ||
-            scope.type === 'function_expression' || scope.type === 'method_definition') {
+            scope.type === 'function_expression' || scope.type === 'method_definition' ||
+            scope.type === 'generator_function' || scope.type === 'generator_function_declaration') {
           const params = scope.childForFieldName('parameters')
-          if (params && params.text.includes(node.text)) return null
-          break
+          if (params && nameWord.test(params.text)) return null
         }
         scope = scope.parent
       }

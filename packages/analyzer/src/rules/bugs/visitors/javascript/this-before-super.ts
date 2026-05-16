@@ -8,8 +8,22 @@ export const thisBeforeSuperVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['class_declaration', 'class'],
   visit(node, filePath, sourceCode) {
+    // Skip ambient declarations: `declare class X extends Y { ... }` only
+    // describes a type and has no runtime constructor body.
+    let ambientAncestor: SyntaxNode | null = node.parent
+    while (ambientAncestor) {
+      if (ambientAncestor.type === 'ambient_declaration') return null
+      ambientAncestor = ambientAncestor.parent
+    }
+
+    // Require an actual `extends` clause. `class_heritage` covers both
+    // `extends` and `implements`; only `extends` introduces a superclass
+    // constructor — `implements` requires no super().
     const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
     if (!heritage) return null
+    const hasExtends = heritage.namedChildren.some((c) => c.type === 'extends_clause')
+      || heritage.children.some((c) => c.text === 'extends')
+    if (!hasExtends) return null
 
     const body = node.childForFieldName('body')
     if (!body) return null

@@ -1,6 +1,14 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
+// Receivers we treat as jsonwebtoken-style JWT call sites. Bare `sign()` (no
+// receiver), call-chain receivers (jose builder pattern), and unrelated
+// receivers like `pdfDoc.sign(...)` are deliberately excluded.
+function isJwtReceiver(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower === 'jwt' || lower === 'jsonwebtoken' || lower.endsWith('jwt')
+}
+
 export const jwtNoExpiryVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/jwt-no-expiry',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -9,22 +17,30 @@ export const jwtNoExpiryVisitor: CodeRuleVisitor = {
     const fn = node.childForFieldName('function')
     if (!fn) return null
 
-    let methodName = ''
-    if (fn.type === 'member_expression') {
-      const prop = fn.childForFieldName('property')
-      if (prop) methodName = prop.text
-    } else if (fn.type === 'identifier') {
-      methodName = fn.text
-    }
+    // Only match `<receiver>.sign(...)` where the receiver is an identifier
+    // resembling a jsonwebtoken-style JWT module. This filters out:
+    //   - bare `sign(data)` calls (custom HMAC/webhook signers)
+    //   - chained builder calls like `new SignJWT(...).setX(...).sign(secret)`
+    //     (jose-style — receiver is a `call_expression`, not an identifier)
+    //   - unrelated `.sign(...)` methods on non-JWT objects (e.g. `pdfDoc.sign`).
+    if (fn.type !== 'member_expression') return null
 
-    if (methodName !== 'sign') return null
+    const prop = fn.childForFieldName('property')
+    if (!prop || prop.text !== 'sign') return null
+
+    const object = fn.childForFieldName('object')
+    if (!object || object.type !== 'identifier') return null
+    if (!isJwtReceiver(object.text)) return null
 
     const args = node.childForFieldName('arguments')
     if (!args) return null
 
-    // jwt.sign(payload, secret) — only two args, no options
+    // jsonwebtoken's sign() takes (payload, secret[, options]). Anything with
+    // fewer than 2 args isn't the JWT signing shape.
+    if (args.namedChildren.length < 2) return null
+
+    // jwt.sign(payload, secret) — no options object at all
     if (args.namedChildren.length < 3) {
-      // Make sure it's likely jwt by checking for sign pattern
       return makeViolation(
         this.ruleKey, node, filePath, 'high',
         'JWT signed without expiration',

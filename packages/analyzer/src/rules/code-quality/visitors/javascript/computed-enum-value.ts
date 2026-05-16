@@ -6,7 +6,7 @@ export const computedEnumValueVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx'],
   nodeTypes: ['enum_assignment'],
   visit(node, filePath, sourceCode) {
-    const value = node.namedChildren[0]
+    const value = node.childForFieldName('value')
     if (!value) return null
 
     if (value.type === 'string' || value.type === 'number') return null

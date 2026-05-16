@@ -42,6 +42,12 @@ function checkFunctionDeclaration(
     // const fn = (...) => {} or const fn = function() {}
     const declarator = decl.namedChildren.find((c) => c.type === 'variable_declarator')
     if (!declarator) return null
+    // If the declarator itself carries a type annotation (e.g.
+    //   const fn: SomeFunctionType = (a, b) => ...
+    //   const C: React.FC<Props> = ({ a, b }) => ...
+    // ), the parameter and return types are supplied by the LHS type and the
+    // function literal does not need redundant per-parameter / return annotations.
+    if (declarator.childForFieldName('type')) return null
     const value = declarator.childForFieldName('value')
     if (value && (value.type === 'arrow_function' || value.type === 'function_expression' || value.type === 'function')) {
       fnNode = value

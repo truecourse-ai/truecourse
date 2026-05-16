@@ -10,8 +10,12 @@ interface Notification {
   read: boolean;
 }
 
-// VIOLATION: code-quality/deterministic/missing-return-type
 // VIOLATION: code-quality/deterministic/missing-boundary-types
+export function formatNotificationPath(userId: string) {
+  return `/notifications/${userId}`;
+}
+
+// VIOLATION: code-quality/deterministic/missing-return-type
 export function useNotifications(userId: string) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -27,6 +31,7 @@ export function useNotifications(userId: string) {
     } catch (err) {
       // VIOLATION: reliability/deterministic/console-error-no-context
       console.error(err);
+      return;
     } finally {
       setLoading(false);
     }

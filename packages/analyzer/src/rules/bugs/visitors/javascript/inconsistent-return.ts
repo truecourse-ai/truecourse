@@ -7,7 +7,8 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/inconsistent-return',
   languages: JS_LANGUAGES,
   nodeTypes: ['function_declaration', 'function', 'arrow_function', 'method_definition'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     let body: SyntaxNode | null = null
 
     if (node.type === 'method_definition') {
@@ -219,6 +220,27 @@ export const inconsistentReturnVisitor: CodeRuleVisitor = {
         }
       }
     }
+
+    // Skip when the void return is EXPLICIT (`return;`) — dev intentionally
+    // exits without a value, often as a guard / early-exit on an invalid
+    // input shape. The implicit fall-through case (no return at end) IS the
+    // bug we want to catch (callers get undefined unintentionally).
+    let hasExplicitEmptyReturn = false
+    function scanExplicit(n: SyntaxNode) {
+      if (n.type === 'return_statement' && n.namedChildren.length === 0) {
+        hasExplicitEmptyReturn = true
+        return
+      }
+      if (n.id !== body?.id &&
+          (n.type === 'function_declaration' || n.type === 'function' ||
+           n.type === 'arrow_function' || n.type === 'method_definition')) return
+      for (let i = 0; i < n.childCount; i++) {
+        const c = n.child(i)
+        if (c) scanExplicit(c)
+      }
+    }
+    scanExplicit(body)
+    if (hasValueReturn && hasVoidReturn && hasExplicitEmptyReturn) return null
 
     if (hasValueReturn && hasVoidReturn) {
       const namePart = node.type === 'function_declaration'

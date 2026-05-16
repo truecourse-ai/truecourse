@@ -33,9 +33,17 @@ export const envInLibraryCodeVisitor: CodeRuleVisitor = {
     // Allow in script files
     if (lowerPath.includes('/scripts/')) return null
 
-    // Only flag process.env in packages/ directories — these are true shared libraries.
-    // Files under apps/ are application code, not reusable libraries, even if in apps/*/lib/.
-    if (!lowerPath.includes('/packages/')) return null
+    // Only flag process.env in true shared-library code — i.e. files inside a
+    // `lib/` subdirectory of a package whose own name is NOT `lib`. This
+    // matches paths like `packages/shared/lib/helpers.ts` (genuine reusable
+    // utility code consumed broadly) but excludes:
+    //   • the `packages/lib/**` package itself (its source IS the library,
+    //     so reading env at module boundaries is intentional)
+    //   • per-feature packages such as `packages/auth/server/`,
+    //     `packages/email/`, `packages/prisma/src/` — those are self-
+    //     contained config/client/helper modules, not deep utility code.
+    // Files under apps/ are application code, not reusable libraries.
+    if (!/\/packages\/(?!lib\/)[^/]+\/lib\//.test(lowerPath)) return null
 
     // Allow in API route / entry point directories (Next.js, Express, etc.)
     if (lowerPath.includes('/app/api/') || lowerPath.includes('/pages/api/') || lowerPath.includes('/routes/')) return null

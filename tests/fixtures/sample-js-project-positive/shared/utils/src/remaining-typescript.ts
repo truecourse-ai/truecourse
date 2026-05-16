@@ -46,3 +46,29 @@ const HTTP_INTERNAL_ERROR = 500;
 export function errorResponse(_req: unknown, res: { status: (code: number) => { json: (data: unknown) => undefined } }): undefined {
   return res.status(HTTP_INTERNAL_ERROR).json({ error: 'Something failed' });
 }
+
+
+
+const THEME_STATES = {
+  default: 'default',
+  focused: 'focused',
+  disabled: 'disabled',
+  error: 'error',
+};
+
+const COLOR_MODES = {
+  light: 'light',
+  dark: 'dark',
+  auto: 'auto',
+};
+
+export const STYLE_CONFIG = {
+  pattern: new RegExp(`(bg|text|border)-(primary|secondary)-(100|200|300)$`),
+  states: Object.values(THEME_STATES),
+  modes: Object.values(COLOR_MODES),
+};
+
+export function getThemeState(index: number): string {
+  const states = Object.values(THEME_STATES);
+  return states[index % states.length];
+}

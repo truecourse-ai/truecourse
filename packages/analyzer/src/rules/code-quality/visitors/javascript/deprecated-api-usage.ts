@@ -16,26 +16,36 @@ export const deprecatedApiUsageVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
-    // Step 1: collect names of @deprecated declarations
-    const deprecatedNames = new Set<string>()
-    const declarationNodes = new Set<SyntaxNode>()
-    collectDeprecatedDeclarations(node, deprecatedNames, declarationNodes)
+    // Step 1: collect names of @deprecated declarations.
+    // Map deprecated name -> set of declaration node IDs (the symbol can be re-declared, e.g. type+const).
+    const deprecatedDeclIds = new Map<string, Set<number>>()
+    collectDeprecatedDeclarations(node, deprecatedDeclIds)
 
-    if (deprecatedNames.size === 0) return null
+    if (deprecatedDeclIds.size === 0) return null
 
     // Step 2: find first reference to any deprecated name (not in declaration position)
-    return findFirstDeprecatedReference(node, deprecatedNames, declarationNodes, filePath, sourceCode, this.ruleKey)
+    return findFirstDeprecatedReference(node, deprecatedDeclIds, filePath, sourceCode, this.ruleKey)
   },
 }
 
 /**
  * Walk the AST collecting all declaration names that have a preceding @deprecated JSDoc comment.
+ * Tree-sitter node wrappers are not reference-stable across `.parent`/`.child` calls, so we
+ * compare by `.id` (Set<number>) instead of by object identity.
  */
 function collectDeprecatedDeclarations(
   root: SyntaxNode,
-  names: Set<string>,
-  declarationNodes: Set<SyntaxNode>,
+  deprecatedDeclIds: Map<string, Set<number>>,
 ): void {
+  function record(name: string, declId: number): void {
+    let ids = deprecatedDeclIds.get(name)
+    if (!ids) {
+      ids = new Set<number>()
+      deprecatedDeclIds.set(name, ids)
+    }
+    ids.add(declId)
+  }
+
   function walk(node: SyntaxNode): void {
     // Check statements that can have JSDoc comments
     if (
@@ -47,10 +57,8 @@ function collectDeprecatedDeclarations(
       node.type === 'export_statement'
     ) {
       if (hasPrecedingDeprecatedJsDoc(node)) {
-        // Extract declared names
         extractDeclaredNames(node).forEach((name) => {
-          names.add(name)
-          declarationNodes.add(node)
+          record(name, node.id)
         })
       }
     }
@@ -117,30 +125,70 @@ function hasPrecedingDeprecatedJsDoc(stmt: SyntaxNode): boolean {
 
 function findFirstDeprecatedReference(
   root: SyntaxNode,
-  names: Set<string>,
-  declarationNodes: Set<SyntaxNode>,
+  deprecatedDeclIds: Map<string, Set<number>>,
   filePath: string,
   sourceCode: string,
   ruleKey: string,
 ): CodeViolation | null {
+  function isInsideOwnDeclaration(node: SyntaxNode, declIds: Set<number>): boolean {
+    let ancestor: SyntaxNode | null = node.parent
+    while (ancestor) {
+      if (declIds.has(ancestor.id)) return true
+      ancestor = ancestor.parent
+    }
+    return false
+  }
+
   function walk(node: SyntaxNode): CodeViolation | null {
-    if (node.type === 'identifier' && names.has(node.text)) {
-      // Skip if this identifier IS the declaration (inside a declarationNode)
-      let ancestor: SyntaxNode | null = node.parent
-      let inDecl = false
-      while (ancestor) {
-        if (declarationNodes.has(ancestor)) {
-          inDecl = true
-          break
-        }
-        ancestor = ancestor.parent
-      }
-      if (!inDecl) {
-        // Also skip if this is a property access (a.deprecated — 'deprecated' is a property, not a reference)
+    if (node.type === 'identifier') {
+      const declIds = deprecatedDeclIds.get(node.text)
+      if (declIds) {
         const parent = node.parent
-        if (parent?.type === 'member_expression' && parent.childForFieldName('property')?.id === node.id) {
-          // Skip — this is property access, not a reference
-        } else {
+        // Skip property access: `a.deprecated` — 'deprecated' here is a property name, not a reference.
+        const isPropertyName =
+          parent?.type === 'member_expression' && parent.childForFieldName('property')?.id === node.id
+        // Skip shorthand property names in object literals: `{ deprecated }` would shadow.
+        const isShorthandProp = parent?.type === 'shorthand_property_identifier'
+        // Skip import specifiers (importing a same-named symbol from elsewhere is not a reference to the local deprecated one).
+        const isImportSpecifier =
+          parent?.type === 'import_specifier' || parent?.type === 'namespace_import' || parent?.type === 'import_clause'
+        // Skip export specifiers (re-exporting a name does not consume the deprecated API).
+        const isExportSpecifier = parent?.type === 'export_specifier'
+        // Skip type-position identifiers (type annotations, type references — these aren't runtime uses).
+        const isTypePosition =
+          parent?.type === 'type_identifier' ||
+          parent?.type === 'type_annotation' ||
+          parent?.type === 'type_reference' ||
+          parent?.type === 'predefined_type'
+        // Skip identifiers that are themselves a declaration name. A re-declaration of a same-named symbol
+        // is not a "use" of the deprecated API — e.g. `function hashPassword()` and a separate
+        // `@deprecated const hashPassword = ...` both bind the name but neither calls the other.
+        const isDeclarationName =
+          (parent?.type === 'function_declaration' ||
+            parent?.type === 'generator_function_declaration' ||
+            parent?.type === 'class_declaration' ||
+            parent?.type === 'method_definition' ||
+            parent?.type === 'variable_declarator' ||
+            parent?.type === 'required_parameter' ||
+            parent?.type === 'optional_parameter' ||
+            parent?.type === 'rest_pattern' ||
+            parent?.type === 'arrow_function' ||
+            parent?.type === 'function_expression' ||
+            parent?.type === 'function_signature') &&
+          parent.childForFieldName('name')?.id === node.id
+        // Skip labeled statements (label identifiers are not value references).
+        const isLabel = parent?.type === 'labeled_statement' || parent?.type === 'break_statement' || parent?.type === 'continue_statement'
+
+        if (
+          !isPropertyName &&
+          !isShorthandProp &&
+          !isImportSpecifier &&
+          !isExportSpecifier &&
+          !isTypePosition &&
+          !isDeclarationName &&
+          !isLabel &&
+          !isInsideOwnDeclaration(node, declIds)
+        ) {
           return makeViolation(
             ruleKey,
             node,

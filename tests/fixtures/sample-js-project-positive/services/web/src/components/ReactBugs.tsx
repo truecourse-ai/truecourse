@@ -66,3 +66,158 @@ export function UserProfile({ userId }: UserProfileProps): JSX.Element {
   }, []);
   return <div data-user={user?.id}>{user?.email}</div>;
 }
+
+
+
+// argument-type-mismatch: .map() in JSX with correctly typed callback parameter
+interface TeamMember {
+  id: string;
+  name: string;
+  role: string;
+}
+
+declare const teamMembers: TeamMember[];
+
+export function TeamMemberList(): JSX.Element {
+  return (
+    <ul className="team-list">
+      {teamMembers.map((member) => (
+        <li key={member.id}>
+          <div className="member-card">
+            <span className="member-name">{member.name}</span>
+            <span className="member-role">{member.role}</span>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+
+
+// argument-type-mismatch: Object.values returns correctly typed array, map is valid
+declare const THEME_OPTIONS: {
+  light: { id: string; label: string };
+  dark: { id: string; label: string };
+  auto: { id: string; label: string };
+};
+
+interface MenuItemProps {
+  key: string;
+  label: string;
+  onSelect: () => void;
+}
+
+declare function MenuItem(props: MenuItemProps): JSX.Element;
+
+export function ThemeSelector(): JSX.Element {
+  return (
+    <div>
+      {Object.values(THEME_OPTIONS).map((theme) => (
+        <MenuItem
+          key={theme.id}
+          label={theme.label}
+          onSelect={() => console.log(theme.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+
+
+// argument-type-mismatch: React.forwardRef with correct type parameters (no mismatch)
+export const Badge = React.forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement>>(
+  ({ className, ...props }, ref) => <span ref={ref} className={className} {...props} />,
+);
+
+// argument-type-mismatch: React.forwardRef for button with extended props (no mismatch)
+interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  icon?: string;
+}
+export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
+  ({ icon, className, ...props }, ref) => <button ref={ref} className={className} {...props} />,
+);
+
+// argument-type-mismatch: React.forwardRef for div with custom props (no mismatch)
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  elevation?: number;
+}
+export const Card = React.forwardRef<HTMLDivElement, CardProps>(
+  ({ elevation, className, ...props }, ref) => <div ref={ref} className={className} {...props} />,
+);
+
+
+
+// Positive: argument-type-mismatch — callback passing string from mapped array (no actual type mismatch)
+declare const Dialog: React.ComponentType<{ open: boolean; onOpenChange: (value: boolean) => void; children: React.ReactNode }>;
+declare const OptionItem: React.ComponentType<{ onSelect: () => void; value: string; children: React.ReactNode }>;
+
+interface ChoiceDialogProps {
+  handler: { complete: (selection: string | null) => void };
+  options: Array<{ label: string }>;
+}
+
+export function ChoiceDialog({ handler, options }: ChoiceDialogProps): JSX.Element {
+  const labels = options.map((opt) => opt.label);
+  
+  return (
+    <Dialog open={true} onOpenChange={(val) => (!val ? handler.complete(null) : null)}>
+      {labels.map((label, idx) => (
+        <OptionItem onSelect={() => handler.complete(label)} key={idx} value={label}>
+          {label}
+        </OptionItem>
+      ))}
+    </Dialog>
+  );
+}
+
+
+// FP: route module that uses useQuery but has no local ErrorBoundary.
+// Errors bubble up the route hierarchy to the root layout ErrorBoundary;
+// route-specific boundaries are only needed for fine-grained recovery UX.
+declare function useQuery<T>(opts: object): { data: T | undefined; isLoading: boolean };
+interface DomainRecord { id: string; name: string; verified: boolean }
+
+export function AdminDomainDetailPage({ domainId }: { domainId: string }): JSX.Element {
+  const { data: domain } = useQuery<DomainRecord>({ queryKey: ['domain', domainId] });
+  return <div>{domain?.name ?? 'Loading...'}</div>;
+}
+
+
+
+// FP: React context provider (not a route) that uses useQuery for session data.
+// Context providers are consumed within routes; boundary responsibility belongs
+// to the enclosing route or root layout, not the provider itself.
+declare function createContext<T>(defaultValue: T): React.Context<T>;
+declare function useQuery<T>(opts: object): { data: T | undefined; isLoading: boolean };
+interface AuthSession { userId: string; role: string; expiresAt: number }
+
+const AuthSessionContext = createContext<{ session: AuthSession | undefined }>({ session: undefined });
+
+export function AuthSessionProvider({ children }: { children: React.ReactNode }): JSX.Element {
+  const { data: session } = useQuery<AuthSession>({ queryKey: ['auth-session'] });
+  return <AuthSessionContext.Provider value={{ session }}>{children}</AuthSessionContext.Provider>;
+}
+
+
+
+// FP: ts-pattern match().with() for role-based JSX rendering — exhaustive(), correct usage
+declare function match<T>(val: T): {
+  with<R>(pattern: T, handler: () => R): {
+    with<R2>(pattern: T, handler: () => R2): { exhaustive: () => R | R2 };
+    exhaustive: () => R;
+  };
+};
+
+type ParticipantRole = 'SIGNER' | 'VIEWER' | 'APPROVER' | 'CC';
+declare const participantRole: ParticipantRole;
+
+function ParticipantActionBadge(): JSX.Element {
+  const actionLabel = match(participantRole)
+    .with('SIGNER', () => 'Sign Report')
+    .with('VIEWER', () => 'View Report')
+    .exhaustive();
+  return <span className="rounded px-2 py-0.5 text-xs font-medium">{actionLabel}</span>;
+}
+

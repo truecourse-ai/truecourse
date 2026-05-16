@@ -7,6 +7,7 @@ import { Request, Response } from 'express';
 export function requireAuth(req: Request): { userId: string; role: string } {
   const token = req.headers.authorization;
   // VIOLATION: code-quality/deterministic/magic-number
+  setTimeout(() => { /* refresh */ }, 5000);
   if (!token || token.length < 8) {
     throw new Error('Invalid token');
   }

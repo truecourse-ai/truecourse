@@ -1,0 +1,3 @@
+reliability/deterministic/catch-without-error-type	packages/lib/client-only/hooks/use-debounced-save.ts:31	Catch without error type discrimination
+reliability/deterministic/catch-without-error-type	services/web/src/components/MediaViewer.tsx:92	Catch without error type discrimination
+reliability/deterministic/catch-without-error-type	services/web/src/pdf-renderer.ts:15	Catch without error type discrimination

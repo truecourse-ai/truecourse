@@ -11,9 +11,21 @@ export const importFormattingVisitor: CodeRuleVisitor = {
     if (!parent || parent.type !== 'program') return null
 
     let sawNonImport = false
+    let lastNonImportEndRow = -1
     for (const child of parent.namedChildren) {
       if (child?.id === node.id) {
         if (sawNonImport) {
+          // If there is a multi-blank-line gap (>=3 lines between the end of
+          // the previous non-import statement and the start of this import),
+          // treat it as a logical module boundary (e.g. aggregated source
+          // files where multiple self-contained sections coexist) and skip
+          // the violation. A single blank line + comment is normal spacing
+          // (gap == 2); only 3+ blank/comment lines indicate a section break.
+          const importStartRow = node.startPosition.row
+          // Rows are 0-indexed; "lines between" = (startRow - endRow - 1).
+          if (importStartRow - lastNonImportEndRow - 1 >= 3) {
+            return null
+          }
           return makeViolation(
             this.ruleKey, node, filePath, 'low',
             'Import not at top of file',
@@ -38,7 +50,24 @@ export const importFormattingVisitor: CodeRuleVisitor = {
           const expr = child.namedChildren[0]
           if (expr?.type === 'string') continue
         }
+        // Skip TypeScript type-only / ambient declarations — they have no
+        // runtime emission, so an import that follows them is still
+        // effectively at the top of the runtime module.
+        // - ambient_declaration: `declare const/function/class/var/...`
+        // - interface_declaration: `interface Foo {}`
+        // - type_alias_declaration: `type Foo = ...`
+        // - module_declaration: `declare module 'x' {}` / `namespace N {}`
+        if (
+          child.type === 'ambient_declaration' ||
+          child.type === 'interface_declaration' ||
+          child.type === 'type_alias_declaration' ||
+          child.type === 'module_declaration' ||
+          child.type === 'internal_module'
+        ) {
+          continue
+        }
         sawNonImport = true
+        lastNonImportEndRow = child.endPosition.row
       }
     }
 

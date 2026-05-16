@@ -23,6 +23,85 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
     const envVarName = prop.text
     if (!envVarName || envVarName === 'env') return null
 
+    // ------------------------------------------------------------------
+    // Structural FP suppressions (parent-chain inspection)
+    // ------------------------------------------------------------------
+
+    // 1. Non-null assertion: `process.env.X!` — author explicitly asserts presence.
+    //    AST: member_expression → non_null_expression
+    if (node.parent?.type === 'non_null_expression') return null
+
+    // 2. Boolean presence-check: `!process.env.X` or `!!process.env.X` — value
+    //    is coerced to boolean, never consumed as a string. Common feature-flag idiom.
+    //    AST: member_expression → unary_expression (operator "!")
+    if (node.parent?.type === 'unary_expression') {
+      const opChild = node.parent.child(0)
+      if (opChild && opChild.text === '!') return null
+    }
+
+    // 3. Explicit Boolean/String coercion: `Boolean(process.env.X)`, `String(process.env.X)`.
+    //    AST: member_expression → arguments → call_expression
+    if (node.parent?.type === 'arguments' && node.parent.parent?.type === 'call_expression') {
+      const callee = node.parent.parent.childForFieldName('function')
+      if (callee && (callee.text === 'Boolean' || callee.text === 'String')) return null
+    }
+
+    // 4. Template-literal substitution: `${process.env.X}/path` — env appears inside
+    //    a template; this is a runtime composition, not an unvalidated bare read.
+    //    Authors rely on the deployment to set the prefix; downstream URL parsing
+    //    will fail loudly anyway.
+    //    AST: member_expression → template_substitution
+    if (node.parent?.type === 'template_substitution') return null
+
+    // 5. Top-level exported config constant:
+    //      export const X = process.env.Y;
+    //      // or
+    //      const X = process.env.Y;
+    //      export { X };
+    //    These are config-surface declarations whose callers validate at point of use.
+    //    AST: member_expression → variable_declarator → lexical_declaration →
+    //         (a) export_statement → program  (inline export const)
+    //         (b) program, then a later sibling export_statement names the binding
+    if (node.parent?.type === 'variable_declarator') {
+      const declarator = node.parent
+      const lexDecl = declarator.parent
+      if (lexDecl?.type === 'lexical_declaration') {
+        const lexParent = lexDecl.parent
+        // (a) inline `export const X = process.env.Y`
+        if (lexParent?.type === 'export_statement' && lexParent.parent?.type === 'program') {
+          return null
+        }
+        // (b) `const X = process.env.Y; ... export { X }`
+        if (lexParent?.type === 'program') {
+          const nameNode = declarator.childForFieldName('name')
+          const bindingName = nameNode?.type === 'identifier' ? nameNode.text : null
+          if (bindingName) {
+            const program = lexParent
+            for (let i = 0; i < program.childCount; i++) {
+              const sib = program.child(i)
+              if (!sib || sib.type !== 'export_statement') continue
+              // Look for `export_clause` listing this identifier (e.g. `export { X };`)
+              for (let j = 0; j < sib.childCount; j++) {
+                const sc = sib.child(j)
+                if (sc?.type !== 'export_clause') continue
+                for (let k = 0; k < sc.childCount; k++) {
+                  const spec = sc.child(k)
+                  if (spec?.type !== 'export_specifier') continue
+                  const specName = spec.childForFieldName('name')
+                  if (specName?.text === bindingName) return null
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Existing ancestor walk: skip when env access is part of an
+    // if/binary/ternary/logical expression (validation in place).
+    // ------------------------------------------------------------------
+
     let ancestor = node.parent
     let depth = 0
     while (ancestor && depth < 5) {

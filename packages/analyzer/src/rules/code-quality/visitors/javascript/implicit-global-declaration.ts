@@ -25,13 +25,19 @@ export const implicitGlobalDeclarationVisitor: CodeRuleVisitor = {
     }
 
     if (node.type === 'function_declaration') {
+      // TypeScript files (.ts/.tsx) are modules by default per TS module
+      // resolution rules — top-level declarations are module-scoped.
+      if (/\.tsx?$/.test(filePath)) return null
+
       // In ES modules, top-level declarations are module-scoped, not global.
-      // Detect modules by presence of import/export statements.
+      // Detect modules by presence of import/export/ambient statements.
       const program = parent
       for (let i = 0; i < program.namedChildCount; i++) {
         const child = program.namedChild(i)
-        if (child && (child.type === 'import_statement' || child.type === 'export_statement')) {
-          return null // ES module — function is module-scoped
+        if (child && (child.type === 'import_statement' ||
+                      child.type === 'export_statement' ||
+                      child.type === 'ambient_declaration')) {
+          return null
         }
       }
 

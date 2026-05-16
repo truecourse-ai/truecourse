@@ -1,0 +1,49 @@
+
+ RUN  v3.2.4 /Users/musheghgevorgyan/repos/truecourse/.claude/worktrees/fp-audit-pipeline
+
+stdout | tests/analyzer/js-negative.test.ts > JS/TS negative fixture — code rules > finds violations for each expected marker
+
+MISSING VIOLATIONS (1):
+  code-quality/deterministic/useless-empty-export at shared/utils/src/code-quality-typescript.ts:39
+
+Rule coverage: 550/551 expected rules detected
+Total violations found: 2750
+
+ ❯ tests/analyzer/js-negative.test.ts (8 tests | 1 failed | 7 skipped) 3041ms
+   ↓ JS/TS negative fixture — code rules > has expected violation markers
+   × JS/TS negative fixture — code rules > finds violations for each expected marker 23ms
+     → expected 1 to be +0 // Object.is equality
+   ↓ JS/TS negative fixture — code rules > does not produce unexpected violations in violation source files
+   ↓ JS/TS negative fixture — architecture > detects the correct services
+   ↓ JS/TS negative fixture — architecture > detects the correct service dependencies
+   ↓ JS/TS negative fixture — architecture > detects the correct modules
+   ↓ JS/TS negative fixture — architecture > detects the correct module dependencies
+   ↓ JS/TS negative fixture — architecture > finds architecture violations for each expected marker
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/analyzer/js-negative.test.ts > JS/TS negative fixture — code rules > finds violations for each expected marker
+AssertionError: expected 1 to be +0 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 1[39m
+
+ ❯ tests/analyzer/js-negative.test.ts:198:28
+    196|     console.log(`Total violations found: ${violations.length}`);
+    197| 
+    198|     expect(missing.length).toBe(0);
+       |                            ^
+    199|   });
+    200| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 7 skipped (8)
+   Start at  07:42:32
+   Duration  7.94s (transform 2.74s, setup 45ms, collect 4.52s, tests 3.04s, environment 0ms, prepare 49ms)
+

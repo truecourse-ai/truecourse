@@ -22,34 +22,65 @@ export const unassignedVariableVisitor: CodeRuleVisitor = {
     const assigned = new Set<string>()
     const readBeforeAssign = new Set<string>()
 
-    function processNode(n: SyntaxNode) {
+    function isNestedFunctionNode(n: SyntaxNode): boolean {
+      return n.type === 'function_declaration' || n.type === 'arrow_function'
+        || n.type === 'function' || n.type === 'function_expression'
+        || n.type === 'method_definition'
+    }
+
+    // Pass 1: collect declarations only in THIS function's own scope (skip
+    // nested function bodies — their declarations are in a different scope).
+    function collectDeclarations(n: SyntaxNode) {
       if (n.type === 'variable_declaration' || n.type === 'lexical_declaration') {
         for (const declarator of n.namedChildren) {
           if (declarator.type === 'variable_declarator') {
             const name = declarator.childForFieldName('name')
             const value = declarator.childForFieldName('value')
             if (name?.type === 'identifier' && !value) {
+              // Skip TypeScript definite-assignment assertion (`let x!: T`).
+              // The `!` token tells the compiler the variable is assigned
+              // before use elsewhere (e.g. inside a synchronous Promise
+              // constructor callback or a closure passed to a function
+              // that invokes it immediately). Honor that intent.
+              if (declarator.text.includes('!')) continue
+              // Skip declarations under `declare const X: ...` / `declare let X`
+              // — these are ambient type declarations, not runtime variables.
+              let ambientAncestor: SyntaxNode | null = declarator.parent
+              while (ambientAncestor) {
+                if (ambientAncestor.type === 'ambient_declaration') break
+                ambientAncestor = ambientAncestor.parent
+              }
+              if (ambientAncestor) continue
               declaredNoInit.set(name.text, declarator)
             }
           }
         }
       }
+      if (n.id !== body?.id && isNestedFunctionNode(n)) return
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child) collectDeclarations(child)
+      }
+    }
 
+    // Pass 2: collect assignments including those inside nested closures.
+    // Closures defined in this scope can capture and mutate the outer
+    // variable (event handler pattern, Promise constructor pattern,
+    // callback pattern), so an assignment anywhere within the function
+    // counts as "the variable does get assigned".
+    function collectAssignments(n: SyntaxNode) {
       if (n.type === 'assignment_expression') {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier') assigned.add(left.text)
       }
-
-      // Don't recurse into nested functions
-      if (n.id !== body?.id && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return
-
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
-        if (child) processNode(child)
+        if (child) collectAssignments(child)
       }
     }
 
-    processNode(body)
+    collectDeclarations(body)
+    collectAssignments(body)
 
     // Find a variable that was declared without assignment and never assigned
     for (const [name, declNode] of declaredNoInit) {

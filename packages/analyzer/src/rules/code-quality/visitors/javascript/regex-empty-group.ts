@@ -10,7 +10,7 @@ export const regexEmptyGroupVisitor: CodeRuleVisitor = {
     const src = getRegexSource(node)
     if (!src) return null
 
-    if (/(?<!\?[=!<])\(\)/.test(src)) {
+    if (hasEmptyGroup(src)) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Empty regex group',
@@ -21,4 +21,36 @@ export const regexEmptyGroupVisitor: CodeRuleVisitor = {
     }
     return null
   },
+}
+
+// Scan regex source for empty `()` groups outside of character classes.
+// Skips escapes (\(, \[, \\), character classes ([...]), and lookarounds/non-capturing groups.
+function hasEmptyGroup(src: string): boolean {
+  let i = 0
+  let inClass = false
+  while (i < src.length) {
+    const ch = src[i]
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (inClass) {
+      if (ch === ']') inClass = false
+      i++
+      continue
+    }
+    if (ch === '[') {
+      inClass = true
+      i++
+      continue
+    }
+    if (ch === '(') {
+      // Check group opener: only flag plain `()` — not `(?:)`, `(?=)`, `(?!)`, `(?<=)`, `(?<!)`, `(?<name>)`.
+      if (src[i + 1] === ')') return true
+      i++
+      continue
+    }
+    i++
+  }
+  return false
 }

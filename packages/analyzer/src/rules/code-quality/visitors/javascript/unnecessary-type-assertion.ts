@@ -23,6 +23,15 @@ export const unnecessaryTypeAssertionVisitor: CodeRuleVisitor = {
     const typeAnnotation = node.namedChildren[1]
     if (!expr || !typeAnnotation) return null
 
+    // Skip chained `as` expressions (e.g. `value as unknown as string`).
+    // A double cast is an explicit escape hatch the author chose deliberately —
+    // typically to bypass a structural mismatch where neither direct cast nor
+    // declaration changes would work. Flagging the outer cast as redundant is
+    // wrong: positional type queries report the type of the innermost expression
+    // rather than the type produced by the inner `as` cast, so the comparison is
+    // not meaningful for chained assertions.
+    if (expr.type === 'as_expression') return null
+
     const exprType = typeQuery.getTypeAtPosition(
       filePath,
       expr.startPosition.row,

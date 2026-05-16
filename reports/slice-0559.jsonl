@@ -1,0 +1,1 @@
+{"rule":"regex-complexity","shape_sig":"84adcb92f0d8","class":"TP","why":"RFC 5322 email regex has deeply nested non-capturing groups, Unicode ranges, and repeated domain-segment sub-patterns. Genuinely high complexity; already compiled at module level but the pattern itself warrants a comment reference.","skip_hint":null}

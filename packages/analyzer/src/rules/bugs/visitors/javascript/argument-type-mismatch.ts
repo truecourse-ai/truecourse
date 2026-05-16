@@ -16,11 +16,13 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
     if (!typeQuery) return null
 
     // Use the TS compiler's own diagnostics to detect argument type mismatches.
-    // This is the only reliable way — our own type comparison fails on generics,
-    // overloads, and complex type inference that TypeScript handles correctly.
+    // Filter to specific TS error codes for argument-type-mismatch:
+    //   2345 - Argument of type X is not assignable to parameter of type Y
+    //   2554 - Expected N arguments, but got M (wrong arity)
+    //   2769 - No overload matches this call
     const startLine = node.startPosition.row
     const endLine = node.endPosition.row
-    const hasError = typeQuery.hasTypeErrorInRange(filePath, startLine, endLine)
+    const hasError = typeQuery.hasTypeErrorInRangeWithCodes(filePath, startLine, endLine, [2345, 2554, 2769])
     if (!hasError) return null
 
     // There's a real TS type error at this call site — get details for the message

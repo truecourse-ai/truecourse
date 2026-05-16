@@ -1,0 +1,1 @@
+{"rule":"regex-complexity","shape_sig":"3da40390c4d7","class":"TP","why":"Vite config exclusion regex uses nested optional alternation with backreferences: inline|url|no-inline|raw|import(&(inline|url|no-inline|raw)?)?. Legitimately complex; a comment or named variable would help maintainability.","skip_hint":null}

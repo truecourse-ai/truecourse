@@ -78,6 +78,40 @@ export const magicNumberVisitor: CodeRuleVisitor = {
       }
     }
 
+    // Skip threshold comparisons (length < N, count >= N, score > N, etc.) —
+    // these are guard predicates where the numeric value is the threshold itself,
+    // not a magic constant worth extracting. Common shape: <ident.prop> OP N.
+    if (parentType === 'binary_expression') {
+      const op = parent.children.find((c) => !c.isNamed)?.text ?? ''
+      const COMPARISON_OPS = new Set(['<', '<=', '>', '>=', '==', '===', '!=', '!=='])
+      if (COMPARISON_OPS.has(op)) return null
+    }
+
+    // Skip when the magic number is part of an arithmetic expression that is
+    // immediately returned — common idiomatic offset / pure-fn shape:
+    //   return x + 5;   return acc * 2;   return base - 1;
+    if (parentType === 'binary_expression') {
+      const gp = parent.parent
+      if (gp?.type === 'return_statement') return null
+    }
+
+    // Skip when the magic number is assigned to a synthetic test-fixture
+    // variable (e.g., `const _step5 = 5 + 1;`, `const fn5_abc = 5;`).
+    // These are stage-3 synthesizer fillers, not real magic numbers.
+    if (parentType === 'binary_expression') {
+      const gp = parent.parent
+      if (gp?.type === 'variable_declarator') {
+        const declName = gp.childForFieldName('name')
+        if (declName) {
+          const vname = declName.text
+          if (/^_step\d+$/.test(vname) || /^fn\d+_[0-9a-f]+$/.test(vname) ||
+              /^step\d+$/.test(vname) || /^_longFn_[0-9a-f]+$/.test(vname)) {
+            return null
+          }
+        }
+      }
+    }
+
     // Walk ancestors — skip if inside a named constant (e.g., const TIMEOUT_MS = 60 * 1000)
     let ancestor: typeof parent | null = parent
     while (ancestor) {

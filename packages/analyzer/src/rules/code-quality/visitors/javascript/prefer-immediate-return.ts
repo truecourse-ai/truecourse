@@ -29,6 +29,11 @@ export const preferImmediateReturnVisitor: CodeRuleVisitor = {
     const nameNode = decl.childForFieldName('name')
     if (nameNode?.text !== retName) return null
 
+    // Skip when the declarator carries an explicit type annotation:
+    // `const meta: SomeType = {...}; return meta;` — the annotation acts as a
+    // compile-time type assertion and is semantically meaningful, not redundant.
+    if (decl.namedChildren.some((c) => c.type === 'type_annotation')) return null
+
     let usageCount = 0
     function countUsages(n: SyntaxNode) {
       if (n.type === 'identifier' && n.text === retName) {

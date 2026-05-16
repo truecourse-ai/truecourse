@@ -16,36 +16,42 @@ function hasTypePredicate(node: SyntaxNode): boolean {
 }
 
 function returnTypeIsBoolish(node: SyntaxNode): boolean {
+  // Require an explicit `boolean` (or `Boolean`) return annotation. Without
+  // one we can't reliably tell a type-guard candidate from a React component
+  // or any other plain function that happens to contain a `typeof` check.
   const returnType = node.childForFieldName('return_type')
-  if (!returnType) return true // no annotation — could be boolean inferred
+  if (!returnType) return false
   const t = returnType.text.replace(/^:\s*/, '').trim()
   return t === 'boolean' || t === 'Boolean'
 }
+
+const FUNCTION_NODE_TYPES = new Set([
+  'arrow_function',
+  'function_declaration',
+  'function_expression',
+  'function',
+  'method_definition',
+  'generator_function',
+  'generator_function_declaration',
+])
 
 function containsTypeNarrowingCheck(bodyNode: SyntaxNode): boolean {
   let found = false
 
   function walk(n: SyntaxNode) {
     if (found) return
+    // Don't recurse into nested functions — their checks aren't part of this guard.
+    if (n !== bodyNode && FUNCTION_NODE_TYPES.has(n.type)) return
     if (n.type === 'binary_expression') {
       const op = n.children.find((c) => c.type === 'instanceof' || c.text === 'instanceof')
       if (op) { found = true; return }
-    }
-    if (n.type === 'binary_expression') {
       const left = n.childForFieldName('left')
-      const op = n.children.find((c) => c.text === '===')
-      if (left?.type === 'unary_expression' && left.children.some((c) => c.text === 'typeof') && op) {
-        found = true
-        return
-      }
-    }
-    // Also check: typeof x === 'string' pattern
-    if (n.type === 'unary_expression') {
-      const op = n.child(0)
-      if (op?.text === 'typeof') {
-        // Parent should be a comparison
-        const parent = n.parent
-        if (parent?.type === 'binary_expression') {
+      const right = n.childForFieldName('right')
+      const cmp = n.children.find((c) => c.text === '===' || c.text === '!==' || c.text === '==' || c.text === '!=')
+      if (cmp) {
+        const isTypeofUnary = (x: SyntaxNode | null | undefined) =>
+          !!x && x.type === 'unary_expression' && x.children.some((c) => c.text === 'typeof')
+        if (isTypeofUnary(left) || isTypeofUnary(right)) {
           found = true
           return
         }
@@ -66,17 +72,11 @@ function hasBooleanReturn(bodyNode: SyntaxNode): boolean {
 
   function walk(n: SyntaxNode) {
     if (found) return
+    if (n !== bodyNode && FUNCTION_NODE_TYPES.has(n.type)) return
     if (n.type === 'return_statement') {
       const val = n.namedChildren[0]
       if (!val) return
-      if (val.type === 'true' || val.type === 'false') { found = true; return }
-      // return x instanceof Foo or return typeof x === 'string'
-      if (val.type === 'binary_expression') {
-        const hasInstanceof = val.children.some((c) => c.text === 'instanceof')
-        const hasBoolOp = val.children.some((c) => c.text === '===' || c.text === '!==')
-        if (hasInstanceof || hasBoolOp) { found = true; return }
-      }
-      if (val.type === 'parenthesized_expression') { found = true; return }
+      if (returnsBooleanExpression(val)) { found = true; return }
     }
     for (let i = 0; i < n.childCount; i++) {
       const child = n.child(i)
@@ -84,8 +84,48 @@ function hasBooleanReturn(bodyNode: SyntaxNode): boolean {
     }
   }
 
+  // For arrow function expression bodies, `bodyNode` itself is the expression.
+  if (bodyNode.type !== 'statement_block') {
+    return returnsBooleanExpression(bodyNode)
+  }
+
   walk(bodyNode)
   return found
+}
+
+function returnsBooleanExpression(val: SyntaxNode): boolean {
+  if (val.type === 'true' || val.type === 'false') return true
+  if (val.type === 'parenthesized_expression') {
+    const inner = val.namedChildren[0]
+    return inner ? returnsBooleanExpression(inner) : false
+  }
+  if (val.type === 'binary_expression') {
+    const hasInstanceof = val.children.some((c) => c.text === 'instanceof')
+    if (hasInstanceof) return true
+    const cmp = val.children.some((c) => c.text === '===' || c.text === '!==' || c.text === '==' || c.text === '!=')
+    if (cmp) {
+      const left = val.childForFieldName('left')
+      const right = val.childForFieldName('right')
+      const isTypeofUnary = (x: SyntaxNode | null | undefined) =>
+        !!x && x.type === 'unary_expression' && x.children.some((c) => c.text === 'typeof')
+      return isTypeofUnary(left) || isTypeofUnary(right)
+    }
+    // Logical && / || between boolean-shaped sub-expressions
+    const logical = val.children.some((c) => c.text === '&&' || c.text === '||')
+    if (logical) {
+      const left = val.childForFieldName('left')
+      const right = val.childForFieldName('right')
+      return (left ? returnsBooleanExpression(left) : false) || (right ? returnsBooleanExpression(right) : false)
+    }
+  }
+  if (val.type === 'unary_expression') {
+    const op = val.child(0)
+    if (op?.text === '!') {
+      const arg = val.namedChildren[0]
+      return arg ? returnsBooleanExpression(arg) : false
+    }
+  }
+  return false
 }
 
 export const typeGuardPreferenceVisitor: CodeRuleVisitor = {

@@ -15,9 +15,27 @@ export const unreadPrivateAttributeVisitor: CodeRuleVisitor = {
     const body = node.namedChildren.find((c) => c.type === 'class_body')
     if (!body) return null
 
-    // Collect private field definitions (non-method)
+    // Collect private field definitions (non-method) and method names.
+    // We only report when a class exhibits a setter/getter accessor shape — i.e.
+    // it has both at least one `set*` method AND at least one `get*` method
+    // (the canonical "data accessor was wired up but the read path is broken")
+    // pattern. Classes that merely cache resources, store handles, or expose
+    // setters without a corresponding getter are out of scope: their reads
+    // typically happen through external/instance access patterns the visitor
+    // cannot follow, so flagging them produces too many false positives.
     const privateFields = new Map<string, SyntaxNode>()
+    let hasSetterMethod = false
+    let hasGetterMethod = false
     for (const member of body.namedChildren) {
+      if (member.type === 'method_definition') {
+        const methodNameNode = member.children.find(
+          (c) => c.type === 'property_identifier' || c.type === 'private_property_identifier',
+        )
+        const methodName = methodNameNode?.text.replace(/^#/, '') ?? ''
+        if (/^set[A-Z_]/.test(methodName) || methodName === 'set') hasSetterMethod = true
+        if (/^get[A-Z_]/.test(methodName) || methodName === 'get') hasGetterMethod = true
+        continue
+      }
       if (member.type !== 'field_definition' && member.type !== 'public_field_definition') continue
       const isPrivate =
         member.children.some((c) => c.type === 'accessibility_modifier' && c.text === 'private') ||
@@ -35,6 +53,7 @@ export const unreadPrivateAttributeVisitor: CodeRuleVisitor = {
     }
 
     if (privateFields.size === 0) return null
+    if (!hasSetterMethod || !hasGetterMethod) return null
 
     // Track reads vs writes of this.field
     const readNames = new Set<string>()

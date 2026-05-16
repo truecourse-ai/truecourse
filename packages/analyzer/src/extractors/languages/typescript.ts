@@ -397,6 +397,36 @@ function extractExportName(node: SyntaxNode): string | null {
 }
 
 /**
+ * Extract all export names from export statement.
+ * Handles multi-specifier export clauses like `export { a, b, c } from 'x'`.
+ */
+function extractExportNames(node: SyntaxNode): string[] {
+  // export function name() {}
+  const declaration = node.childForFieldName('declaration')
+  if (declaration) {
+    const name = declaration.childForFieldName('name')
+    return name?.text ? [name.text] : []
+  }
+
+  // export { a, b, c } or export { a, b, c } from '...'
+  const exportClause = node.children.find((c) => c.type === 'export_clause')
+  if (exportClause) {
+    const names: string[] = []
+    for (const specifier of exportClause.children) {
+      if (specifier.type !== 'export_specifier') continue
+      // Prefer the alias (after `as`) if present, otherwise the original name.
+      const aliasNode = specifier.childForFieldName('alias')
+      const nameNode = specifier.childForFieldName('name')
+      const exportedName = aliasNode?.text || nameNode?.text
+      if (exportedName) names.push(exportedName)
+    }
+    return names
+  }
+
+  return []
+}
+
+/**
  * Check if export is default export
  */
 function isDefaultExport(node: SyntaxNode): boolean {
@@ -642,17 +672,19 @@ export function extractTypeScriptExports(
       continue
     }
 
-    const name = extractExportName(node)
-    if (!name) continue
+    const names = extractExportNames(node)
+    if (names.length === 0) continue
 
     const isDefault = isDefaultExport(node)
     const source = extractReexportSource(node)
 
-    exports.push({
-      name,
-      isDefault,
-      source,
-    })
+    for (const name of names) {
+      exports.push({
+        name,
+        isDefault,
+        source,
+      })
+    }
   }
 
   return exports

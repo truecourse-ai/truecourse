@@ -1,0 +1,1 @@
+{"rule":"regex-duplicate-char-class","shape_sig":"84adcb92f0d8","class":"TP","why":"The char class [a-zA-Z0-9\\u{0080}-\\u{FFFF}] and its dash-inclusive variant appear 4+ times in the RFC 5322 email regex. Copy-pasted repeated classes; extracting to a named variable or using a factory would remove duplication.","skip_hint":null}

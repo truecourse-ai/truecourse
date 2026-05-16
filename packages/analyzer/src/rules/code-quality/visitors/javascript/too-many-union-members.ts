@@ -20,17 +20,33 @@ export const tooManyUnionMembersVisitor: CodeRuleVisitor = {
       ancestor = ancestor.parent
     }
 
-    function countMembers(n: SyntaxNode): number {
-      if (n.type !== 'union_type') return 1
-      let total = 0
+    function collectMembers(n: SyntaxNode, out: SyntaxNode[]): void {
+      if (n.type !== 'union_type') {
+        out.push(n)
+        return
+      }
       for (let i = 0; i < n.namedChildCount; i++) {
         const child = n.namedChild(i)
-        if (child) total += countMembers(child)
+        if (child) collectMembers(child, out)
       }
-      return total
     }
 
-    const memberCount = countMembers(node)
+    const members: SyntaxNode[] = []
+    collectMembers(node, members)
+
+    // Only flag string-literal enum-like unions. Numeric-literal unions
+    // (HTTP status codes), primitive/builtin unions (JsonPrimitive-style),
+    // and type-reference unions (cross-environment event types) are
+    // legitimate domain types — flagging them is noise.
+    const isStringLiteralMember = (m: SyntaxNode): boolean => {
+      if (m.type !== 'literal_type') return false
+      const inner = m.namedChild(0)
+      return inner?.type === 'string'
+    }
+    const allStringLiterals = members.length > 0 && members.every(isStringLiteralMember)
+    if (!allStringLiterals) return null
+
+    const memberCount = members.length
     if (memberCount > 5) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',

@@ -14,6 +14,28 @@ export const explicitAnyInReturnVisitor: CodeRuleVisitor = {
       if (child.type === 'type_annotation') {
         const typeNode = child.namedChildren[0]
         if (typeNode?.type === 'predefined_type' && typeNode.text === 'any') {
+          // Respect explicit eslint suppression on the preceding line(s).
+          // The canonical pattern is:
+          //   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          //   export function foo(): any { ... }
+          // When the developer has explicitly disabled the upstream ESLint
+          // rule for this declaration, honor that suppression instead of
+          // reporting a duplicate violation.
+          const startLine = node.startPosition.row
+          const sourceLines = sourceCode.split('\n')
+          // Look up to 2 lines above the function start for a suppression
+          // comment (allows for an intervening decorator/blank line).
+          for (let l = startLine - 1; l >= Math.max(0, startLine - 2); l--) {
+            const line = sourceLines[l] ?? ''
+            if (/eslint-disable(?:-next-line)?[^\n]*no-explicit-any/.test(line)) {
+              return null
+            }
+            // Stop scanning once we hit a non-comment, non-blank line.
+            const trimmed = line.trim()
+            if (trimmed !== '' && !trimmed.startsWith('//') && !trimmed.startsWith('/*') && !trimmed.startsWith('*')) {
+              break
+            }
+          }
           const nameNode = node.childForFieldName('name')
           return makeViolation(
             this.ruleKey, child, filePath, 'medium',

@@ -4,6 +4,23 @@ import { makeViolation } from '../../../types.js'
 const MAX_REGEX_LENGTH = 50
 const MAX_GROUPS = 5
 
+/**
+ * A "flat literal alternation" is a pattern of the form `word|word|word`,
+ * containing only word characters (letters/digits/underscore) and `|`
+ * separators. It has no groups, anchors, quantifiers, character classes,
+ * escapes, or special metacharacters, so length alone is not a signal of
+ * structural complexity (e.g. bot-detection lists, browser-family lists).
+ */
+function isFlatLiteralAlternation(pattern: string): boolean {
+  if (!pattern.includes('|')) return false
+  // Only word characters and pipes allowed.
+  if (!/^[A-Za-z0-9_|]+$/.test(pattern)) return false
+  // Must look like a real alternation: at least two non-empty alternatives.
+  const parts = pattern.split('|')
+  if (parts.length < 2) return false
+  return parts.every((p) => p.length > 0)
+}
+
 export const regexComplexityVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/regex-complexity',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -23,15 +40,18 @@ export const regexComplexityVisitor: CodeRuleVisitor = {
     ]
     if (wellKnownPatterns.some((wp) => wp.test(pattern))) return null
 
-    if (pattern.length < MAX_REGEX_LENGTH) {
-      // Count groups
-      const groupCount = (pattern.match(/\(/g) || []).length
-      if (groupCount < MAX_GROUPS) return null
-    }
+    // Flat alternation of literal words is structurally trivial regardless of
+    // length — the only "complexity" is the number of listed alternatives.
+    if (isFlatLiteralAlternation(pattern)) return null
+
+    // Count groups (excludes non-capturing `(?:`, lookarounds `(?=`, `(?!`,
+    // `(?<=`, `(?<!`, and named groups `(?<name>` are still capturing groups).
+    const groupCount = (pattern.match(/\((?!\?[:=!<])/g) || []).length
+
+    if (pattern.length < MAX_REGEX_LENGTH && groupCount < MAX_GROUPS) return null
 
     // Check for excessive nesting or lookaheads
     const hasLookahead = pattern.includes('(?=') || pattern.includes('(?!') || pattern.includes('(?<=') || pattern.includes('(?<!')
-    const groupCount = (pattern.match(/\(/g) || []).length
     const isComplex = pattern.length >= MAX_REGEX_LENGTH || groupCount >= MAX_GROUPS || hasLookahead
 
     if (!isComplex) return null

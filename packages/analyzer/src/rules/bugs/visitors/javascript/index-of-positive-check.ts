@@ -22,31 +22,54 @@ export const indexOfPositiveCheckVisitor: CodeRuleVisitor = {
       return prop?.text === 'indexOf' || prop?.text === 'lastIndexOf'
     }
 
-    // Flag any comparison to a non-negative integer (0 or positive) — only -1 is meaningful
-    function isNonNegativeNumber(n: SyntaxNode): boolean {
+    // Flag only patterns that genuinely miss index 0:
+    //   indexOf(x) > 0      — excludes position 0 (BUG)
+    //   indexOf(x) > N>0    — excludes positions 0..N (BUG)
+    //   0 < indexOf(x)      — same as above, reversed
+    // Correct patterns we must NOT flag:
+    //   indexOf(x) >= 0     — canonical "found" check (matches at 0 inclusive)
+    //   indexOf(x) === 0    — find-at-first-position check
+    //   indexOf(x) !== -1   — canonical "found"
+    //   indexOf(x) === -1   — canonical "not found"
+    function isPositiveInteger(n: SyntaxNode): boolean {
       if (n.type !== 'number') return false
       const val = Number(n.text)
-      return Number.isInteger(val) && val >= 0
+      return Number.isInteger(val) && val > 0
+    }
+    function isZero(n: SyntaxNode): boolean {
+      return n.type === 'number' && Number(n.text) === 0
     }
 
-    if (isIndexOfCall(left) && isNonNegativeNumber(right)) {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'medium',
-        'indexOf compared to positive number',
-        `\`indexOf()\` returns -1 when not found. Comparing to \`${right.text}\` misses the case where the element is at index 0. Use \`!== -1\` to check if found.`,
-        sourceCode,
-        'Compare to -1: use `indexOf(x) !== -1` (found) or `indexOf(x) === -1` (not found).',
-      )
+    const op = operator.text
+
+    // indexOf() OP <constant>
+    if (isIndexOfCall(left)) {
+      // > 0, > N (N>0), >= N (N>0): all miss positions 0..N
+      if ((op === '>' && (isZero(right) || isPositiveInteger(right))) ||
+          (op === '>=' && isPositiveInteger(right))) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'indexOf compared to positive number',
+          `\`indexOf()\` returns -1 when not found. Comparing to \`${right.text}\` with \`${op}\` misses the case where the element is at index 0. Use \`!== -1\` to check if found.`,
+          sourceCode,
+          'Compare to -1: use `indexOf(x) !== -1` (found) or `indexOf(x) === -1` (not found).',
+        )
+      }
     }
 
-    if (isIndexOfCall(right) && isNonNegativeNumber(left)) {
-      return makeViolation(
-        this.ruleKey, node, filePath, 'medium',
-        'indexOf compared to positive number',
-        `\`indexOf()\` returns -1 when not found. Comparing to \`${left.text}\` misses the case where the element is at index 0. Use \`!== -1\` to check if found.`,
-        sourceCode,
-        'Compare to -1: use `indexOf(x) !== -1` (found) or `indexOf(x) === -1` (not found).',
-      )
+    // <constant> OP indexOf()  (mirror)
+    if (isIndexOfCall(right)) {
+      // 0 < indexOf(), N < indexOf() (N>=0), N <= indexOf() (N>0): mirrors of above
+      if ((op === '<' && (isZero(left) || isPositiveInteger(left))) ||
+          (op === '<=' && isPositiveInteger(left))) {
+        return makeViolation(
+          this.ruleKey, node, filePath, 'medium',
+          'indexOf compared to positive number',
+          `\`indexOf()\` returns -1 when not found. Comparing to \`${left.text}\` with \`${op}\` misses the case where the element is at index 0. Use \`!== -1\` to check if found.`,
+          sourceCode,
+          'Compare to -1: use `indexOf(x) !== -1` (found) or `indexOf(x) === -1` (not found).',
+        )
+      }
     }
 
     return null

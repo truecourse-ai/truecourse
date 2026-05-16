@@ -11,6 +11,19 @@ export const functionInLoopVisitor: CodeRuleVisitor = {
     // These are standard patterns: Promise callbacks, .map(), .then(), setTimeout, etc.
     if (node.type === 'arrow_function') {
       if (node.parent?.type === 'arguments' || node.parent?.type === 'new_expression') return null
+      // Skip arrow functions assigned to a local `const` binding. The const
+      // declaration creates a fresh per-iteration binding (ES6+), so capturing
+      // by reference is well-defined. These are typically named local helpers
+      // invoked synchronously within the same iteration (Promise.all batching,
+      // small extracted callbacks). The classic closure-in-loop bug requires
+      // a non-arrow `function` expression or a `var`-bound mutable index.
+      if (node.parent?.type === 'variable_declarator') {
+        const declaration = node.parent.parent
+        if (declaration?.type === 'lexical_declaration') {
+          const kindNode = declaration.firstChild
+          if (kindNode?.text === 'const') return null
+        }
+      }
     }
 
     // Skip functions used as property values in objects (config callbacks, options)

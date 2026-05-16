@@ -1,0 +1,1 @@
+{"rule":"redundant-type-argument","shape_sig":"6907f0c23b7e","class":"FP","why":"Array<T> always requires its type argument; the intersection type Field & { signature: Signature | null } is the element type, not a redundant default. Removing it would break the type.","skip_hint":"Array<T> type args are never redundant — the rule should not flag Array<ComplexType>"}

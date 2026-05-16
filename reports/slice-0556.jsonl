@@ -1,0 +1,1 @@
+{"rule":"regex-complexity","shape_sig":"0770cdcf2e2d","class":"TP","why":"Domain validation regex uses two nested negative lookaheads, a repeated labeled group, and multiple char classes. Genuinely complex; could be decomposed or documented more clearly.","skip_hint":null}

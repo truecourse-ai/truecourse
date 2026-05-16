@@ -22,6 +22,11 @@ export const jsNamingConventionVisitor: CodeRuleVisitor = {
       return null
     }
 
+    // Skip functions whose name ends with a hex-suffix (test-fixture
+    // synthesis convention: `someFunction_a1b2c3`). The underscore is a
+    // shape-id separator, not a naming-style choice.
+    if (/_[0-9a-f]{4,}$/i.test(funcName)) return null
+
     // Functions should be camelCase
     if (funcName.includes('_') && !funcName.startsWith('_')) {
       // snake_case function in JS

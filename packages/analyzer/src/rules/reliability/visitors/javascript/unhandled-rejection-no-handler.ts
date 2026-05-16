@@ -12,6 +12,17 @@ export const unhandledRejectionNoHandlerVisitor: CodeRuleVisitor = {
     if (lowerPath.includes('/packages/') || lowerPath.includes('/lib/')) {
       return null
     }
+
+    // Framework-managed modules — not Node.js process entry points.
+    // Remix / React Router conventions: files under `app/routes/` are route
+    // modules; `.server.ts(x)` files are server-only utility modules; and
+    // `entry.server.{ts,tsx}` is the per-request SSR handler. None of these
+    // own the process lifecycle, so they have no obligation to install a
+    // top-level unhandledRejection listener.
+    if (lowerPath.includes('/app/routes/')) return null
+    if (lowerPath.endsWith('.server.ts') || lowerPath.endsWith('.server.tsx')) return null
+    if (lowerPath.endsWith('/entry.server.ts') || lowerPath.endsWith('/entry.server.tsx')) return null
+
     if (
       !lowerPath.includes('index.') &&
       !lowerPath.includes('main.') &&
@@ -29,6 +40,20 @@ export const unhandledRejectionNoHandlerVisitor: CodeRuleVisitor = {
     // CDK synthesis scripts are short-lived; crashing on misconfiguration is
     // the desired behavior, so a swallowing handler would mask deploy issues.
     if (looksLikeAwsCdkScript(sourceCode)) return null
+
+    // Require a concrete process-startup signal. Without one, the file is most
+    // likely a re-export shim, helper module, or framework-managed component
+    // that happens to live at an `index.*` / `server.*` path — not a process
+    // bootstrap that needs a top-level rejection handler. Look for the common
+    // server-bootstrap call shapes: `<x>.listen(`, `serve(`, `createServer(`,
+    // `app.run(`, or the standalone `start()` invocation pattern.
+    const hasStartupSignal =
+      /\b\w+\.listen\s*\(/.test(sourceCode) ||
+      /\bserve\s*\(/.test(sourceCode) ||
+      /\bcreateServer\s*\(/.test(sourceCode) ||
+      /\bapp\.run\s*\(/.test(sourceCode) ||
+      /\bstart\s*\(\s*\)\s*;?\s*$/m.test(sourceCode)
+    if (!hasStartupSignal) return null
 
     // Strip comment lines so VIOLATION markers don't trigger false negatives
     const text = sourceCode.replace(/\/\/.*$/gm, '')

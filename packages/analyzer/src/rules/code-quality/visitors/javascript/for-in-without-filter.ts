@@ -29,7 +29,50 @@ export const forInWithoutFilterVisitor: CodeRuleVisitor = {
       return false
     }
 
-    if (!hasOwnPropertyCheck(body)) {
+    // Any conditional inside the body (if, ternary, &&/||) acts as a filter
+    // gating which iterations produce side effects. ESLint's canonical
+    // `guard-for-in` rule is satisfied by any guard, not just hasOwnProperty.
+    function hasGuardInBody(n: SyntaxNode): boolean {
+      if (
+        n.type === 'if_statement' ||
+        n.type === 'ternary_expression' ||
+        n.type === 'continue_statement'
+      ) {
+        return true
+      }
+      for (let i = 0; i < n.childCount; i++) {
+        const child = n.child(i)
+        if (child && hasGuardInBody(child)) return true
+      }
+      return false
+    }
+
+    if (!hasOwnPropertyCheck(body) && !hasGuardInBody(body)) {
+      // Respect explicit author opt-outs via `eslint-disable` for the canonical
+      // ESLint rule `guard-for-in`. The pragma may be placed immediately
+      // preceding the `for...in` statement or preceding its enclosing function
+      // (when the guard is conceptually about the entire helper).
+      const nodeStartLine = node.startPosition.row
+      const sourceLines = sourceCode.split('\n')
+      let scanStart = nodeStartLine
+      let parent: SyntaxNode | null = node.parent
+      while (parent) {
+        if (
+          parent.type === 'function_declaration' ||
+          parent.type === 'function_expression' ||
+          parent.type === 'arrow_function' ||
+          parent.type === 'method_definition'
+        ) {
+          scanStart = parent.startPosition.row
+          break
+        }
+        parent = parent.parent
+      }
+      const windowLines = sourceLines.slice(Math.max(0, scanStart - 3), nodeStartLine + 1)
+      if (windowLines.some((line) => /eslint-disable(?:-next-line)?[^\n]*guard-for-in/.test(line))) {
+        return null
+      }
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'for-in without hasOwnProperty check',

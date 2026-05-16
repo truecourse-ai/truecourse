@@ -33,6 +33,12 @@ export const arrayCallbackMissingReturnVisitor: CodeRuleVisitor = {
     if (!firstArg) return null
     if (firstArg.type !== 'arrow_function' && firstArg.type !== 'function' && firstArg.type !== 'function_expression') return null
 
+    // Skip async callbacks: an async function implicitly returns a Promise.
+    // The canonical pattern is `Promise.all(items.map(async (x) => { … }))` —
+    // no explicit `return` is needed.
+    const isAsync = firstArg.children.some((c) => c.type === 'async' || c.text === 'async')
+    if (isAsync) return null
+
     const body = firstArg.childForFieldName('body')
     if (!body || body.type !== 'statement_block') return null
 
