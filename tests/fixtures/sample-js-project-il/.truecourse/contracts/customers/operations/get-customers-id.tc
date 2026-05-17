@@ -1,0 +1,23 @@
+operation GET "/api/customers/{id}" {
+  origin SPEC.md "Operations — Customers / GET /api/customers/:id" 156..156
+
+  request {
+    path-param id: uuid {
+      on-invalid status 400 error-code validation_failed
+    }
+  }
+
+  response 200 on success {
+    body Entity:Customer
+  }
+
+  response 404 on not_found {
+    resource Entity:Customer
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code customer_not_found
+    }
+    forbid status 200 when resource-missing
+  }
+
+  response 401 inherits AuthRequirement:auth.bearer.api
+}

@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import { Button, buttonVariants } from '@/components/ui/button';
 import type { AnalysisSummary } from '@/lib/api';
+import { SectionSwitcher } from './SectionSwitcher';
+import type { DashboardSection } from './LeftSidebar';
 
 function DiscordIcon({ className }: { className?: string }) {
   return (
@@ -32,6 +34,15 @@ type HeaderProps = {
   selectedAnalysisId?: string | null;
   onSelectAnalysis?: (analysisId: string | null) => void;
   currentAnalysisId?: string | null;
+  /** When provided, render the section switcher next to the logo. */
+  dashboardSection?: DashboardSection;
+  onDashboardSectionChange?: (next: DashboardSection) => void;
+  /** Section-specific action buttons (e.g. Apply for Spec, Run for
+   * Verify). Rendered just before the Analyze button so global actions
+   * for the current section sit alongside Analyze instead of in a
+   * separate row that disappears when switching tabs (which caused the
+   * left sidebar to visibly shift). */
+  sectionActions?: React.ReactNode;
 };
 
 export function Header({
@@ -48,6 +59,9 @@ export function Header({
   selectedAnalysisId,
   onSelectAnalysis,
   currentAnalysisId,
+  dashboardSection,
+  onDashboardSectionChange,
+  sectionActions,
 }: HeaderProps) {
   const [isDark, setIsDark] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -89,6 +103,12 @@ export function Header({
           <img src="/logo.svg" alt="TrueCourse" className="h-7 w-7" />
           TrueCourse
         </Link>
+        {dashboardSection && onDashboardSectionChange && (
+          <>
+            <span className="text-muted-foreground/60">/</span>
+            <SectionSwitcher value={dashboardSection} onChange={onDashboardSectionChange} />
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-3">
@@ -176,6 +196,9 @@ export function Header({
               </div>
             </div>
           </div>
+        )}
+        {sectionActions && (
+          <div className="flex items-center gap-2">{sectionActions}</div>
         )}
         {onAnalyze && (
           <div className="relative flex items-center">

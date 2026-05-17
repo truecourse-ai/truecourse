@@ -47,6 +47,7 @@ export type RepoResponse = {
   lastAnalyzed?: string;
   branches?: string[];
   defaultBranch?: string;
+  isGitRepo?: boolean;
   latestAnalysis?: {
     id: string;
     status: string;
@@ -642,5 +643,276 @@ export function getAnalyticsResolution(
   if (analysisId) params.set('analysisId', analysisId);
   const qs = params.toString();
   return fetchApi<ResolutionResponse>(`/api/repos/${repoId}/analytics/resolution${qs ? `?${qs}` : ''}`);
+}
+
+// ---------------------------------------------------------------------------
+// Spec Consolidation (Module 1)
+// ---------------------------------------------------------------------------
+
+export type SpecClaim = {
+  id: string;
+  topic: string;
+  subject: string;
+  content: unknown;
+  provenance: { file: string; line: number; quote: string };
+  metadata: { docKind: string; status?: string; lastTouched: string };
+};
+
+export type SpecConflictCandidate = {
+  index: number;
+  weight: 'newest' | 'newer' | 'older' | 'oldest';
+  claim: SpecClaim;
+};
+
+export type SpecConflict = {
+  id: string;
+  topic: string;
+  subject: string;
+  module?: string;
+  candidates: SpecConflictCandidate[];
+  defaultPick: number;
+  /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
+  candidateFingerprint: string;
+};
+
+export type SpecResolution =
+  | { kind: 'pick'; candidateIndex: number }
+  | { kind: 'custom'; content: string };
+
+export type SpecDecision = {
+  conflictId: string;
+  resolution: SpecResolution;
+  resolvedAt: string;
+  candidateFingerprint: string;
+  note?: string;
+};
+
+export type SpecDecisionsFile = {
+  version: 1;
+  decisions: SpecDecision[];
+};
+
+export type SpecScanResponse = {
+  /** Set on persisted state and on fresh scans. Absent on legacy responses. */
+  scannedAt?: string;
+  docsScanned: number;
+  blocksAttempted: number;
+  claimsExtracted: number;
+  resolved: number;
+  decided: number;
+  openConflicts: SpecConflict[];
+  decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
+};
+
+export type IlValidationIssue = {
+  artifactKey: string;
+  message: string;
+  severity: 'hard' | 'soft';
+  tcSource?: string;
+};
+
+export type SpecApplyResponse = {
+  merge: { resolved: number; decided: number; open: number };
+  materialize: {
+    written: number;
+    failures: Array<{ module: string; fileName: string; error: string }>;
+  } | null;
+  /** Fresh scan-state produced by the apply pipeline. Clients should
+   *  setScan() from this instead of issuing a follow-up GET /spec/scan,
+   *  which would re-run a full scan and emit a second progress popup. */
+  scanState: SpecScanResponse;
+};
+
+export type ContractsGenerateResponse = {
+  il:
+    | {
+        written: number;
+        validationIssues: IlValidationIssue[];
+        mergeDiagnostics: unknown[];
+      }
+    | { error: string }
+    | { skipped: string };
+};
+
+export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
+  return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
+}
+
+export type CanonicalSpecTree = {
+  hasCanonical: boolean;
+  shared: Array<{ name: string; path: string }>;
+  modules: Array<{
+    name: string;
+    manifest: Record<string, unknown> | null;
+    files: Array<{ name: string; path: string }>;
+  }>;
+};
+
+export type CanonicalSpecFile = {
+  path: string;
+  content: string;
+};
+
+export function getSpecCanonicalTree(repoId: string): Promise<CanonicalSpecTree> {
+  return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree`);
+}
+
+export function getSpecCanonicalFile(repoId: string, filePath: string): Promise<CanonicalSpecFile> {
+  return fetchApi<CanonicalSpecFile>(
+    `/api/repos/${repoId}/spec/canonical/file?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Contracts (Module 2)
+// ---------------------------------------------------------------------------
+
+export type ContractsTree = {
+  hasContracts: boolean;
+  modules: Array<{
+    name: string;
+    files: Array<{ name: string; path: string }>;
+  }>;
+};
+
+export type ContractsFile = {
+  path: string;
+  content: string;
+};
+
+export function getContractsTree(repoId: string): Promise<ContractsTree> {
+  return fetchApi<ContractsTree>(`/api/repos/${repoId}/contracts/tree`);
+}
+
+export function getContractsFile(repoId: string, filePath: string): Promise<ContractsFile> {
+  return fetchApi<ContractsFile>(
+    `/api/repos/${repoId}/contracts/file?path=${encodeURIComponent(filePath)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Verify (Module 3 — code vs contracts drift detection)
+// ---------------------------------------------------------------------------
+
+export type DriftSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
+
+export type ContractDrift = {
+  id: string;
+  artifactRef?: { kind: string; identity: string } | null;
+  obligationKey: string;
+  severity: DriftSeverity;
+  message: string;
+  filePath?: string | null;
+  lineStart?: number | null;
+  lineEnd?: number | null;
+  specSide?: unknown;
+  codeSide?: unknown;
+};
+
+export type VerifyState = {
+  verifiedAt: string;
+  contractsDir: string;
+  codeDir: string;
+  artifactCount: number;
+  extractedOperationCount: number;
+  drifts: ContractDrift[];
+  resolverErrors: string[];
+  unresolvedRefs: string[];
+};
+
+/**
+ * Persisted verify state. Returns null on 404 (no run yet); other
+ * errors propagate.
+ */
+export async function getVerifyState(repoId: string): Promise<VerifyState | null> {
+  try {
+    return await fetchApi<VerifyState>(`/api/repos/${repoId}/verify/state`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export function postVerifyRun(repoId: string): Promise<VerifyState> {
+  return fetchApi<VerifyState>(`/api/repos/${repoId}/verify/run`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * Read the persisted scan-state. Returns null when the server
+ * responds 404 (no scan has been run yet) — any other error
+ * propagates so the caller can show it.
+ */
+export async function getSpecScanState(repoId: string): Promise<SpecScanResponse | null> {
+  try {
+    return await fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan-state`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export function getSpecDecisions(repoId: string): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`);
+}
+
+export function deleteSpecDecision(
+  repoId: string,
+  conflictId: string,
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(
+    `/api/repos/${repoId}/spec/decisions/${encodeURIComponent(conflictId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function postSpecDecision(
+  repoId: string,
+  payload: { conflictId: string; resolution: SpecResolution; candidateFingerprint: string; note?: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postSpecDecisionsBatch(
+  repoId: string,
+  mode: 'all-defaults',
+): Promise<{ added: number; decisions: SpecDecisionsFile }> {
+  return fetchApi(`/api/repos/${repoId}/spec/decisions/batch`, {
+    method: 'POST',
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export function postSpecApply(repoId: string): Promise<SpecApplyResponse> {
+  return fetchApi<SpecApplyResponse>(`/api/repos/${repoId}/spec/apply`, {
+    method: 'POST',
+  });
+}
+
+export function postContractsGenerate(
+  repoId: string,
+): Promise<ContractsGenerateResponse> {
+  return fetchApi<ContractsGenerateResponse>(
+    `/api/repos/${repoId}/contracts/generate`,
+    { method: 'POST' },
+  );
+}
+
+export type SpecStalenessResponse = {
+  specStale: boolean;
+  contractsStale: boolean;
+  verifyStale: boolean;
+  hasDecisions: boolean;
+  hasApplied: boolean;
+  hasGenerated: boolean;
+  hasVerified: boolean;
+};
+
+export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse> {
+  return fetchApi<SpecStalenessResponse>(`/api/repos/${repoId}/spec/staleness`);
 }
 

@@ -143,6 +143,14 @@ const skillsSrc = path.join(ROOT, 'tools/cli/skills');
 const skillsDest = path.join(DIST, 'skills');
 copyDir(skillsSrc, skillsDest);
 
+// 7b. Copy bundled VS Code extension for `.tc` syntax highlighting.
+// Installed silently into the user's editor extensions dir on first
+// `truecourse analyze` — see `syncShippedTcSyntax` in commands/helpers.ts.
+console.log('Copying VS Code extension...');
+const tcExtSrc = path.join(ROOT, 'tools/cli/vscode-extension');
+const tcExtDest = path.join(DIST, 'vscode-extension');
+copyDir(tcExtSrc, tcExtDest);
+
 // 8. Copy README and README assets used by npm package page rendering
 console.log('Copying README and assets...');
 fs.copyFileSync(path.join(ROOT, 'README.md'), path.join(DIST, 'README.md'));

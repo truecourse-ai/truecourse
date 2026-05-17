@@ -1,0 +1,42 @@
+operation POST "/api/orders/{id}/pay" {
+  origin SPEC.md "Operations — Orders / POST /api/orders/:id/pay" 133..135
+
+  request {
+    path-param id: uuid
+    header idempotency-key optional idempotent-under
+  }
+
+  preconditions {
+    state-transition StateMachine:Order.status {
+      from [placed]
+      to paid
+    }
+  }
+
+  response 200 on success {
+    body Entity:Order {
+      invariant-after status = "paid"
+    }
+    effect emits Effect:order.paid
+    effect state-transition StateMachine:Order.status to paid
+  }
+
+  response 404 on not_found {
+    resource Entity:Order
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code order_not_found
+    }
+  }
+
+  response 409 on state_precondition_violated {
+    machine StateMachine:Order.status
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code illegal_transition
+    }
+  }
+
+  response 401 inherits AuthRequirement:auth.bearer.api
+  response 403 inherits AuthorizationRule:order.owner-only
+
+  tags [transition, idempotent]
+}

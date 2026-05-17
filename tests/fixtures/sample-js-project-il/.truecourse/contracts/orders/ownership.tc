@@ -1,0 +1,29 @@
+authorization-rule order.owner-only {
+  origin SPEC.md "Business rules / Order ownership" 178..189
+
+  // Per-row authorization. Auth (bearer + role) lets the caller IN; this
+  // rule says WHICH ROWS the caller is allowed to act on once they're in.
+  applies-to {
+    operations [
+      Operation:"GET /api/orders/{id}",
+      Operation:"POST /api/orders/{id}/pay",
+      Operation:"POST /api/orders/{id}/ship",
+      Operation:"POST /api/orders/{id}/cancel",
+    ]
+  }
+
+  // The predicate uses two well-known scopes:
+  //   request — the inbound HTTP request (auth context attached)
+  //   loaded  — the resource resolved from the URL path
+  predicate "request.auth.userId == loaded.Order.customerId"
+
+  except {
+    role admin
+  }
+
+  on-violation {
+    status 403
+    error-code forbidden
+    body ErrorEnvelope:error.envelope.standard
+  }
+}

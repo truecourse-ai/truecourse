@@ -14,6 +14,9 @@ import databasesRouter from './routes/databases.js';
 import rulesRouter from './routes/rules.js';
 import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
+import specRouter from './routes/spec.js';
+import contractsRouter from './routes/contracts.js';
+import verifyRouter from './routes/verify.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +43,9 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
   app.use('/api/repos', projectResolver, databasesRouter);
   app.use('/api/repos', projectResolver, flowsRouter);
   app.use('/api/repos', projectResolver, analyticsRouter);
+  app.use('/api/repos', projectResolver, specRouter);
+  app.use('/api/repos', projectResolver, contractsRouter);
+  app.use('/api/repos', projectResolver, verifyRouter);
   app.use('/api/rules', rulesRouter);
 
   app.get('/api/health', (_req, res) => {

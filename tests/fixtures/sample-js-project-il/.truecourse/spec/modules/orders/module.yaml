@@ -1,0 +1,13 @@
+name: orders
+status: shipped
+description: Order create/list/transition operations under /api/orders.
+sourceDocs:
+  - docs/PRDs/orders_PRDv2.md
+scope:
+  paths:
+    - /api/orders/**
+outOfScope:
+  - id: /api/orders/-id/replace
+    source: docs/PRDs/orders_PRDv2.md:213
+  - id: /api/orders/-id/refund
+    source: docs/PRDs/orders_PRDv2.md:214

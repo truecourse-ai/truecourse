@@ -20,6 +20,18 @@ import {
   runRulesLlm,
   runRulesReset,
 } from "./commands/rules.js";
+import {
+  runContractsGenerate,
+  runContractsList,
+  runContractsValidate,
+} from "./commands/contracts.js";
+import {
+  runSpecScan,
+  runSpecResolve,
+  runSpecApply,
+  runSpecStatus,
+  runVerify,
+} from "./commands/spec.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -150,6 +162,76 @@ program
         severity: parseSeverityFlag(options.severity),
       });
     }
+  });
+
+// Contract framework — spec → .tc extraction + validation.
+const contractsCmd = program
+  .command("contracts")
+  .description("Manage spec-driven contract artifacts");
+
+contractsCmd
+  .command("generate")
+  .description("Extract .tc artifacts from prose specs (LLM, cached)")
+  .option("--diff", "Dry run — show what would change without writing")
+  .action(async (options) => {
+    await runContractsGenerate({ diff: !!options.diff });
+  });
+
+contractsCmd
+  .command("list")
+  .description("List the .tc artifacts in this repo")
+  .action(async () => {
+    await runContractsList();
+  });
+
+contractsCmd
+  .command("validate")
+  .description("Parse and resolve all .tc files, report any issues")
+  .action(async () => {
+    await runContractsValidate();
+  });
+
+// Spec consolidation — docs → claims → conflicts → canonical .truecourse/spec/.
+const specCmd = program
+  .command("spec")
+  .description("Consolidate scattered docs into a canonical spec");
+
+specCmd
+  .command("scan")
+  .description("Walk docs, extract claims, surface conflicts (no writes)")
+  .action(async () => {
+    await runSpecScan();
+  });
+
+specCmd
+  .command("resolve")
+  .description("Resolve open conflicts (interactive runs in the dashboard)")
+  .option("--all-defaults", "Accept the engine's pre-pick on every open conflict")
+  .action(async (options) => {
+    await runSpecResolve({ allDefaults: !!options.allDefaults });
+  });
+
+specCmd
+  .command("apply")
+  .description("Write .truecourse/spec/ from current decisions")
+  .action(async () => {
+    await runSpecApply();
+  });
+
+specCmd
+  .command("status")
+  .description("Summary of docs, claims, modules, and pending decisions")
+  .action(async () => {
+    await runSpecStatus();
+  });
+
+// Verify — compares generated TC contracts against the code.
+program
+  .command("verify")
+  .description("Compare code against the canonical TC contracts")
+  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
+  .action(async (options) => {
+    await runVerify({ codeDir: options.codeDir });
   });
 
 // Rules management — reads/writes per-repo config.json directly. No server needed.

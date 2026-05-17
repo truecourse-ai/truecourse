@@ -1,8 +1,34 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Home, AlertTriangle, FolderTree, Workflow, Database, ClipboardList, Network } from 'lucide-react';
+import {
+  Home,
+  AlertTriangle,
+  AlertCircle,
+  FolderTree,
+  Workflow,
+  Database,
+  ClipboardList,
+  Network,
+  BookOpen,
+  FileCode2,
+  ShieldCheck,
+  GitMerge,
+} from 'lucide-react';
+import { HoverPopover } from '@/components/ui/hover-popover';
 
-export type LeftTab = 'home' | 'graphs' | 'files' | 'flows' | 'databases' | 'analyses';
+export type LeftTab =
+  | 'home'
+  | 'graphs'
+  | 'files'
+  | 'flows'
+  | 'databases'
+  | 'analyses'
+  | 'spec'
+  | 'contracts'
+  | 'verify'
+  | 'decisions';
+
+export type DashboardSection = 'analysis' | 'drift';
 
 const TAB_LABELS: Record<LeftTab, string> = {
   home: 'Home',
@@ -11,20 +37,18 @@ const TAB_LABELS: Record<LeftTab, string> = {
   flows: 'Flows',
   databases: 'Databases',
   analyses: 'Analyses',
+  spec: 'Spec',
+  contracts: 'Contracts',
+  verify: 'Verify',
+  decisions: 'Decisions',
 };
 
+/** Tabs that render no sidebar panel (the icon click is the entire UX). */
 const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
 
-type LeftSidebarProps = {
-  activeTab: LeftTab | null;
-  onTabChange: (tab: LeftTab | null) => void;
-  children: React.ReactNode;
-  defaultWidth?: number;
-  minWidth?: number;
-  badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
-};
+type TabConfig = { id: LeftTab; icon: typeof AlertTriangle; label: string };
 
-const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
+const ANALYSIS_TABS: TabConfig[] = [
   { id: 'home', icon: Home, label: 'Home' },
   { id: 'graphs', icon: Network, label: 'Graphs' },
   { id: 'flows', icon: Workflow, label: 'Flows' },
@@ -33,17 +57,53 @@ const tabs: { id: LeftTab; icon: typeof AlertTriangle; label: string }[] = [
   { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
 ];
 
+const DRIFT_TABS: TabConfig[] = [
+  { id: 'spec', icon: BookOpen, label: 'Spec' },
+  { id: 'contracts', icon: FileCode2, label: 'Contracts' },
+  { id: 'verify', icon: ShieldCheck, label: 'Verify' },
+  { id: 'decisions', icon: GitMerge, label: 'Decisions' },
+];
+
+export function tabsForSection(section: DashboardSection): TabConfig[] {
+  return section === 'drift' ? DRIFT_TABS : ANALYSIS_TABS;
+}
+
+/** Default left tab for a given section. */
+export function defaultTabForSection(section: DashboardSection): LeftTab {
+  return section === 'drift' ? 'spec' : 'home';
+}
+
+type LeftSidebarProps = {
+  section: DashboardSection;
+  activeTab: LeftTab | null;
+  onTabChange: (tab: LeftTab | null) => void;
+  children: React.ReactNode;
+  defaultWidth?: number;
+  minWidth?: number;
+  badgeCounts?: Partial<Record<LeftTab, number | { newCount: number; resolvedCount: number }>>;
+  /**
+   * Per-tab advisory: when set, an amber warning icon is rendered on the
+   * rail button and (for the active tab) inside the panel header. The
+   * value is the tooltip text shown on hover.
+   */
+  tabWarnings?: Partial<Record<LeftTab, string | null>>;
+};
+
 export function LeftSidebar({
+  section,
   activeTab,
   onTabChange,
   children,
   defaultWidth = 350,
   minWidth = 260,
   badgeCounts,
+  tabWarnings,
 }: LeftSidebarProps) {
   const [width, setWidth] = useState(defaultWidth);
   const [maxWidth, setMaxWidth] = useState(800);
   const isDragging = useRef(false);
+
+  const tabs = tabsForSection(section);
 
   useEffect(() => {
     const calc = () => Math.floor(window.innerWidth * 0.8);
@@ -143,6 +203,17 @@ export function LeftSidebar({
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {activeTab ? TAB_LABELS[activeTab] : ''}
             </span>
+            {(() => {
+              const warning = activeTab ? tabWarnings?.[activeTab] : undefined;
+              if (!warning) return null;
+              return (
+                <HoverPopover align="start" width="wide" content={warning}>
+                  <span className="flex items-center text-amber-400">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                  </span>
+                </HoverPopover>
+              );
+            })()}
             {(() => {
               const badge = activeTab ? badgeCounts?.[activeTab] : undefined;
               if (badge == null) return null;

@@ -1,0 +1,41 @@
+operation POST "/api/orders/{id}/cancel" {
+  origin SPEC.md "Operations — Orders / POST /api/orders/:id/cancel" 139..140
+
+  request {
+    path-param id: uuid
+  }
+
+  preconditions {
+    state-transition StateMachine:Order.status {
+      from [placed, paid]
+      to cancelled
+    }
+  }
+
+  response 200 on success {
+    body Entity:Order {
+      invariant-after status = "cancelled"
+    }
+    effect emits Effect:order.cancelled
+    effect state-transition StateMachine:Order.status to cancelled
+  }
+
+  response 404 on not_found {
+    resource Entity:Order
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code order_not_found
+    }
+  }
+
+  response 409 on state_precondition_violated {
+    machine StateMachine:Order.status
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code illegal_transition
+    }
+  }
+
+  response 401 inherits AuthRequirement:auth.bearer.api
+  response 403 inherits AuthorizationRule:order.owner-only
+
+  tags [transition]
+}

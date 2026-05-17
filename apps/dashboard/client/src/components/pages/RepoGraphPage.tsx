@@ -1,9 +1,29 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
-import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX } from 'lucide-react';
+import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
-import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
+import {
+  LeftSidebar,
+  defaultTabForSection,
+  type DashboardSection,
+  type LeftTab,
+} from '@/components/layout/LeftSidebar';
+import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
+import { SpecApplyResultToaster } from '@/components/spec/SpecApplyResultToaster';
+import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
+import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
+import { ContractsPanel } from '@/components/drift/ContractsPanel';
+import { ContractsFile } from '@/components/drift/ContractsFile';
+import { VerifyPanel } from '@/components/drift/VerifyPanel';
+import { VerifyHeaderActions } from '@/components/drift/VerifyHeaderActions';
+import { VerifyDriftDetail, VerifyEmptyState } from '@/components/drift/VerifyDriftDetail';
+import { useVerifyState } from '@/hooks/useVerifyState';
+import { useContractsGenerate } from '@/hooks/useContractsGenerate';
+import { useSpecStaleness } from '@/hooks/useSpecStaleness';
+import { ContractsHeaderActions } from '@/components/drift/ContractsHeaderActions';
+import { ContractsGenerateResultToaster } from '@/components/drift/ContractsGenerateResultToaster';
+import { DecisionsPanel } from '@/components/drift/DecisionsPanel';
 import { GraphCanvas } from '@/components/graph/GraphCanvas';
 import { HomePanel } from '@/components/pages/HomePanel';
 import { FileTree } from '@/components/files/FileTree';
@@ -13,7 +33,13 @@ import { CodeViewerPanel } from '@/components/code/CodeViewerPanel';
 import { SchemaPanel } from '@/components/schema/SchemaPanel';
 import { DatabaseList } from '@/components/schema/DatabaseList';
 import { AnalysesPanel } from '@/components/analyses/AnalysesPanel';
+import { SpecPanel } from '@/components/spec/SpecPanel';
+import { SpecProvider } from '@/components/spec/SpecContext';
+import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
+import { SpecCanonicalFile } from '@/components/spec/SpecCanonicalFile';
 import { useGraph } from '@/hooks/useGraph';
+import { useContractsTree } from '@/hooks/useContractsTree';
+import { useCanonicalSpecTree } from '@/hooks/useCanonicalSpecTree';
 import { useSocket } from '@/hooks/useSocket';
 import { useViolations } from '@/hooks/useViolations';
 import { useDiffCheck } from '@/hooks/useDiffCheck';
@@ -53,6 +79,10 @@ const VALID_LEFT_TABS = new Set<LeftTab>([
   'flows',
   'databases',
   'analyses',
+  'spec',
+  'contracts',
+  'verify',
+  'decisions',
 ]);
 
 const MAIN_CONTENT_TABS = new Set<LeftTab>([
@@ -60,6 +90,8 @@ const MAIN_CONTENT_TABS = new Set<LeftTab>([
   'graphs',
   'analyses',
 ]);
+
+const DRIFT_TABS = new Set<LeftTab>(['spec', 'contracts', 'verify', 'decisions']);
 
 export default function RepoGraphPage() {
   const { repoId = '' } = useParams();
@@ -124,6 +156,14 @@ export default function RepoGraphPage() {
   }, [navigate, scopedServiceId, scopedModuleId]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Top-level dashboard section: 'analysis' (code architecture world)
+  // or 'drift' (spec/contracts/verify world). Persisted via
+  // `?section=drift`. Default 'analysis'.
+  const sectionFromUrl = searchParams?.get('section');
+  const [dashboardSection, setDashboardSectionState] = useState<DashboardSection>(
+    sectionFromUrl === 'drift' ? 'drift' : 'analysis',
+  );
+
   const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
     const tabParam = searchParams?.get('tab');
     // Legacy URL compat: ?tab=violations now maps to the Graphs tab.
@@ -135,8 +175,32 @@ export default function RepoGraphPage() {
     }
     if (searchParams?.get('flow')) return 'flows';
     if (searchParams?.get('file')) return 'files';
-    return 'home';
+    return defaultTabForSection(
+      searchParams?.get('section') === 'drift' ? 'drift' : 'analysis',
+    );
   });
+
+  const setDashboardSection = useCallback((next: DashboardSection) => {
+    setDashboardSectionState(next);
+    // Reset leftTab to the section's default tab. The URL captures
+    // both pieces, so reloads stay coherent.
+    const nextTab = defaultTabForSection(next);
+    setLeftTabState(nextTab);
+    const url = new URL(window.location.href);
+    if (next === 'drift') {
+      url.searchParams.set('section', 'drift');
+    } else {
+      url.searchParams.delete('section');
+    }
+    // Drop tab-scoped params that don't apply in the new section.
+    for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
+      url.searchParams.delete(key);
+    }
+    if (nextTab !== 'home') {
+      url.searchParams.set('tab', nextTab);
+    }
+    navigate(url.pathname + url.search);
+  }, [navigate]);
   const setLeftTab = useCallback((tab: LeftTab | null) => {
     setLeftTabState(tab);
     const url = new URL(window.location.href);
@@ -244,13 +308,88 @@ export default function RepoGraphPage() {
     setActiveDbIdState(id);
   }, []);
 
+  // Spec tab: which conflict is currently being reviewed in the
+  // main content slot. The list (sidebar) and the detail (main)
+  // share state via SpecProvider; this id just tracks which conflict
+  // the user picked.
+  const [activeSpecConflictId, setActiveSpecConflictId] = useState<string | null>(null);
+  // Spec tab — canonical file viewer selection. The sidebar view
+  // itself (conflicts vs canonical) is derived from scan state inside
+  // SpecPanel, not toggled by the user.
+  const [activeCanonicalPath, setActiveCanonicalPath] = useState<string | null>(null);
+  // Multi-tab canonical-spec viewer state — same pattern as
+  // openFiles/openFlows/openDatabases. Single-click in the tree
+  // replaces the transient tab; double-click pins it.
+  const [openCanonicalFiles, setOpenCanonicalFiles] = useState<
+    Array<{ path: string; pinned: boolean }>
+  >([]);
+  // Same multi-tab pattern for the BL-drift Contracts viewer.
+  const [activeContractsPath, setActiveContractsPath] = useState<string | null>(null);
+  const [openContractsFiles, setOpenContractsFiles] = useState<
+    Array<{ path: string; pinned: boolean }>
+  >([]);
+
+  const handleOpenContracts = useCallback((path: string, pinned: boolean) => {
+    setOpenContractsFiles((prev) => {
+      const existing = prev.find((f) => f.path === path);
+      if (existing) {
+        return prev.map((f) => (f.path === path ? { ...f, pinned: pinned || f.pinned } : f));
+      }
+      if (pinned) return [...prev, { path, pinned: true }];
+      const hasUnpinned = prev.find((f) => !f.pinned);
+      if (hasUnpinned) return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
+      return [...prev, { path, pinned: false }];
+    });
+    setActiveContractsPath(path);
+  }, []);
+
+  const handleCloseContracts = useCallback(
+    (path: string) => {
+      setOpenContractsFiles((prev) => prev.filter((f) => f.path !== path));
+      if (activeContractsPath === path) {
+        const remaining = openContractsFiles.filter((f) => f.path !== path);
+        setActiveContractsPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
+      }
+    },
+    [openContractsFiles, activeContractsPath],
+  );
+
+  const handleOpenCanonical = useCallback((path: string, pinned: boolean) => {
+    setOpenCanonicalFiles((prev) => {
+      const existing = prev.find((f) => f.path === path);
+      if (existing) {
+        return prev.map((f) =>
+          f.path === path ? { ...f, pinned: pinned || f.pinned } : f,
+        );
+      }
+      if (pinned) return [...prev, { path, pinned: true }];
+      const hasUnpinned = prev.find((f) => !f.pinned);
+      if (hasUnpinned) {
+        return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
+      }
+      return [...prev, { path, pinned: false }];
+    });
+    setActiveCanonicalPath(path);
+  }, []);
+
+  const handleCloseCanonical = useCallback(
+    (path: string) => {
+      setOpenCanonicalFiles((prev) => prev.filter((f) => f.path !== path));
+      if (activeCanonicalPath === path) {
+        const remaining = openCanonicalFiles.filter((f) => f.path !== path);
+        setActiveCanonicalPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
+      }
+    },
+    [openCanonicalFiles, activeCanonicalPath],
+  );
+
   // Sync React state from the URL on every location change. This covers
   // browser Back / Forward (and deep-linked reloads) — without it, the URL
   // changes but in-memory state stays frozen at whatever the user last set.
   // Setters are idempotent, so running this on our own navigations is a no-op.
   useEffect(() => {
     const tabParam = searchParams?.get('tab') ?? null;
-    const nextTab: LeftTab =
+    const derivedTab: LeftTab =
       tabParam === 'violations'
         ? 'graphs'
         : tabParam === 'analytics'
@@ -262,7 +401,22 @@ export default function RepoGraphPage() {
               : searchParams?.get('file')
                 ? 'files'
                 : 'home';
-    setLeftTabState(nextTab);
+
+    const sectionParam = searchParams?.get('section');
+    const resolvedSection: DashboardSection = sectionParam === 'drift' ? 'drift' : 'analysis';
+
+    // Resolve the final tab in one pass before setting state, so the
+    // header's section-actions slot never momentarily renders the wrong
+    // buttons (e.g. spec actions for one frame when entering ?section=drift
+    // without a ?tab=).
+    const tabBelongsToSection =
+      resolvedSection === 'drift' ? DRIFT_TABS.has(derivedTab) : !DRIFT_TABS.has(derivedTab);
+    const finalTab: LeftTab = tabBelongsToSection
+      ? derivedTab
+      : defaultTabForSection(resolvedSection);
+
+    setLeftTabState(finalTab);
+    setDashboardSectionState(resolvedSection);
 
     const modeParam = searchParams?.get('mode') ?? '';
     setDepthLevelState(urlToDepth[modeParam] ?? 'services');
@@ -376,7 +530,9 @@ export default function RepoGraphPage() {
   const {
     isConnected,
     analysisProgress,
+    specProgress,
     clearProgress,
+    clearSpecProgress,
     onEvent,
     llmEstimate,
     respondToLlmEstimate,
@@ -464,6 +620,91 @@ export default function RepoGraphPage() {
     useFlows(repoId, { enabled: leftTab === 'flows', analysisId: graphAnalysisId });
   const flowSeverities = emptyViolations ? {} : rawFlowSeverities;
 
+  // BL Drift trees — same pattern as useGraph/useFlows. Hoisted here
+  // so the data survives tab switches and so spec:complete socket
+  // events (fired after a successful Apply) can refetch both via the
+  // listeners below.
+  const {
+    tree: contractsTree,
+    isLoading: contractsLoading,
+    error: contractsError,
+    refetch: refetchContracts,
+  } = useContractsTree(repoId);
+  const {
+    tree: canonicalTree,
+    isLoading: canonicalLoading,
+    error: canonicalError,
+    refetch: refetchCanonical,
+  } = useCanonicalSpecTree(repoId);
+  const {
+    state: verifyState,
+    isLoading: verifyLoading,
+    isRunning: verifyRunning,
+    error: verifyError,
+    refetch: refetchVerify,
+    run: runVerify,
+  } = useVerifyState(repoId);
+  const {
+    generating: contractsGenerating,
+    result: contractsGenerateResult,
+    run: runContractsGenerate,
+  } = useContractsGenerate(repoId);
+  const {
+    specStale,
+    contractsStale,
+    verifyStale,
+    refetch: refetchStaleness,
+  } = useSpecStaleness(repoId);
+  const [activeDriftId, setActiveDriftId] = useState<string | null>(null);
+  // Multi-tab drift viewer state — same preview/pin pattern as
+  // openFiles / openCanonicalFiles / openContractsFiles.
+  const [openDriftTabs, setOpenDriftTabs] = useState<
+    Array<{ id: string; pinned: boolean }>
+  >([]);
+
+  const handleOpenDrift = useCallback((id: string, pinned: boolean) => {
+    setOpenDriftTabs((prev) => {
+      const existing = prev.find((d) => d.id === id);
+      if (existing) {
+        return prev.map((d) =>
+          d.id === id ? { ...d, pinned: pinned || d.pinned } : d,
+        );
+      }
+      if (pinned) return [...prev, { id, pinned: true }];
+      const hasUnpinned = prev.find((d) => !d.pinned);
+      if (hasUnpinned) {
+        return prev.map((d) => (!d.pinned ? { id, pinned: false } : d));
+      }
+      return [...prev, { id, pinned: false }];
+    });
+    setActiveDriftId(id);
+  }, []);
+
+  const handleCloseDrift = useCallback(
+    (id: string) => {
+      setOpenDriftTabs((prev) => prev.filter((d) => d.id !== id));
+      if (activeDriftId === id) {
+        const remaining = openDriftTabs.filter((d) => d.id !== id);
+        setActiveDriftId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+      }
+    },
+    [openDriftTabs, activeDriftId],
+  );
+
+  // When the underlying verify run changes (re-run / fresh load), drop
+  // any open drift tabs whose ids no longer exist so we never show a
+  // stale tab pointing at nothing.
+  useEffect(() => {
+    if (!verifyState) {
+      setOpenDriftTabs([]);
+      setActiveDriftId(null);
+      return;
+    }
+    const validIds = new Set(verifyState.drifts.map((d) => d.id));
+    setOpenDriftTabs((prev) => prev.filter((d) => validIds.has(d.id)));
+    setActiveDriftId((prev) => (prev && validIds.has(prev) ? prev : null));
+  }, [verifyState]);
+
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
 
@@ -519,6 +760,39 @@ export default function RepoGraphPage() {
     });
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
+
+  // Refresh BL Drift trees after a successful Apply / Generate /
+  // Verify. The server emits `spec:complete` with one of four kinds —
+  // we fan out to the relevant hook's refetch so each tree stays in
+  // sync without polling. Apply writes the canonical (refetchCanonical),
+  // Generate writes contracts (refetchContracts), Verify writes the
+  // drift state (refetchVerify).
+  useEffect(() => {
+    const unsub = onEvent('spec:complete', (data) => {
+      const payload = data as
+        | { kind?: 'scan' | 'apply' | 'generate' | 'verify' }
+        | undefined;
+      if (payload?.kind === 'apply') {
+        refetchCanonical();
+      } else if (payload?.kind === 'generate') {
+        refetchContracts();
+      } else if (payload?.kind === 'verify') {
+        refetchVerify();
+      }
+      // Any spec lifecycle event can shift staleness — a scan refresh
+      // surfaces decision changes, an apply clears specStale, a
+      // generate clears contractsStale, a verify clears verifyStale.
+      if (
+        payload?.kind === 'scan' ||
+        payload?.kind === 'apply' ||
+        payload?.kind === 'generate' ||
+        payload?.kind === 'verify'
+      ) {
+        refetchStaleness();
+      }
+    });
+    return unsub;
+  }, [onEvent, refetchCanonical, refetchContracts, refetchVerify, refetchStaleness]);
 
   // Listen for violations ready
   useEffect(() => {
@@ -902,6 +1176,11 @@ export default function RepoGraphPage() {
   const showingCodeViewer = activeFilePath !== null && leftTab === 'files';
   const showingFlow = activeFlowId !== null && leftTab === 'flows';
   const showingDatabase = activeDbId !== null && leftTab === 'databases';
+  const showingSpecConflict =
+    activeSpecConflictId !== null &&
+    (leftTab === 'spec' || leftTab === 'decisions');
+  const showingCanonicalFile = activeCanonicalPath !== null && leftTab === 'spec';
+  const showingContractsFile = activeContractsPath !== null && leftTab === 'contracts';
 
   const hasAnalysis = repo?.lastAnalyzed != null;
 
@@ -917,21 +1196,49 @@ export default function RepoGraphPage() {
   }, [flowList]);
 
   return (
+    <SpecProvider repoId={repoId}>
     <div className="flex h-screen flex-col">
       <Header
         repoName={repo?.name}
         currentBranch={currentBranch}
-        onAnalyze={isViewingHistory || repoError ? undefined : handleAnalyze}
+        onAnalyze={
+          dashboardSection !== 'analysis' || isViewingHistory || repoError || repo?.isGitRepo === false
+            ? undefined
+            : handleAnalyze
+        }
         isAnalyzing={isAnalyzing || isDiffChecking}
         showBack
         backHref="/"
         isDiffMode={isDiffMode}
-        onEnterDiffMode={isViewingHistory ? undefined : handleEnterDiffMode}
-        onExitDiffMode={isViewingHistory ? undefined : handleExitDiffMode}
+        onEnterDiffMode={
+          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleEnterDiffMode
+        }
+        onExitDiffMode={
+          dashboardSection !== 'analysis' || isViewingHistory ? undefined : handleExitDiffMode
+        }
         analyses={analyses}
         selectedAnalysisId={selectedAnalysisId}
         onSelectAnalysis={setSelectedAnalysisId}
         currentAnalysisId={graphAnalysisId || (isDiffMode ? undefined : analyses?.[0]?.id)}
+        dashboardSection={dashboardSection}
+        onDashboardSectionChange={setDashboardSection}
+        sectionActions={
+          leftTab === 'spec' ? (
+            <SpecHeaderActions stale={specStale} />
+          ) : leftTab === 'contracts' ? (
+            <ContractsHeaderActions
+              isGenerating={contractsGenerating}
+              onGenerate={runContractsGenerate}
+              stale={contractsStale}
+            />
+          ) : leftTab === 'verify' ? (
+            <VerifyHeaderActions
+              isRunning={verifyRunning}
+              onRun={runVerify}
+              stale={verifyStale}
+            />
+          ) : null
+        }
       />
 
       {/* Page-level banners — span full width above both sidebar and main. */}
@@ -958,15 +1265,46 @@ export default function RepoGraphPage() {
           <span>Showing working tree state (uncommitted changes)</span>
         </div>
       )}
+      {repoError && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-destructive/10 border-b border-destructive/30 px-4 py-1.5 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{repoError}</span>
+        </div>
+      )}
+      {!repoError && repo?.isGitRepo === false && (
+        <div className="flex shrink-0 items-center justify-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-1.5 text-xs text-amber-500">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>This directory is not a git repository — branch switching and history are unavailable.</span>
+        </div>
+      )}
+
+      {/* Apply / Generate results surface as toasts (sonner's
+          <Toaster /> lives at the app root). These components are
+          render-less side effects — they listen for new results and
+          emit toasts, no layout impact. */}
+      <SpecApplyResultToaster />
+      <ContractsGenerateResultToaster result={contractsGenerateResult} />
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: icon rail + violations/rules panel */}
-        <LeftSidebar activeTab={leftTab} onTabChange={handleLeftTabChange} badgeCounts={{
-          home: allViolations.length,
-          flows: flowList.length,
-          databases: nodes.filter((n) => n.type === 'database').length,
-          analyses: analyses.length,
-        }}>
+        <LeftSidebar
+          section={dashboardSection}
+          activeTab={leftTab}
+          onTabChange={handleLeftTabChange}
+          badgeCounts={{
+            home: allViolations.length,
+            flows: flowList.length,
+            databases: nodes.filter((n) => n.type === 'database').length,
+            analyses: analyses.length,
+          }}
+          tabWarnings={{
+            verify: verifyState && verifyState.unresolvedRefs.length > 0
+              ? `${verifyState.unresolvedRefs.length} unresolved reference${
+                  verifyState.unresolvedRefs.length === 1 ? '' : 's'
+                } — some artifacts the spec mentions weren't extracted into contracts. Drifts against them won't be detected.`
+              : null,
+          }}
+        >
           {leftTab === 'flows' && (
             <FlowList
               flows={flowList}
@@ -1028,13 +1366,52 @@ export default function RepoGraphPage() {
               }}
             />
           )}
+          {leftTab === 'spec' && (
+            <SpecPanel
+              canonicalTree={canonicalTree}
+              canonicalLoading={canonicalLoading}
+              canonicalError={canonicalError}
+              activeConflictId={activeSpecConflictId}
+              onSelectConflict={setActiveSpecConflictId}
+              activeCanonicalPath={activeCanonicalPath}
+              onOpenCanonicalFile={handleOpenCanonical}
+              onSelectCanonicalFile={setActiveCanonicalPath}
+            />
+          )}
+          {leftTab === 'contracts' && (
+            <ContractsPanel
+              tree={contractsTree}
+              isLoading={contractsLoading}
+              error={contractsError}
+              activePath={activeContractsPath}
+              onOpen={handleOpenContracts}
+            />
+          )}
+          {leftTab === 'verify' && (
+            <VerifyPanel
+              state={verifyState}
+              isLoading={verifyLoading}
+              error={verifyError}
+              activeDriftId={activeDriftId}
+              onOpenDrift={handleOpenDrift}
+            />
+          )}
+          {leftTab === 'decisions' && (
+            <DecisionsPanel
+              activeConflictId={activeSpecConflictId}
+              onSelectConflict={setActiveSpecConflictId}
+            />
+          )}
         </LeftSidebar>
 
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
-          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases) */}
-          {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
-            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) && (
+          {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases/Spec canonical/Contracts/Verify) */}
+          {((leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
+            (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0)) ||
+          (leftTab === 'spec' && openCanonicalFiles.length > 0) ||
+          (leftTab === 'contracts' && openContractsFiles.length > 0) ||
+          (leftTab === 'verify' && openDriftTabs.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
               {/* File tabs */}
               {openFiles.map((file) => {
@@ -1126,8 +1503,105 @@ export default function RepoGraphPage() {
                   </div>
                 );
               })}
+              {/* Canonical spec tabs */}
+              {leftTab === 'spec' && openCanonicalFiles.map((f) => {
+                const fileName = f.path.split('/').pop() || f.path;
+                const isActive = activeCanonicalPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => setActiveCanonicalPath(f.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseCanonical(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Contracts tabs */}
+              {leftTab === 'contracts' && openContractsFiles.map((f) => {
+                const fileName = f.path.split('/').pop() || f.path;
+                const isActive = activeContractsPath === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => setActiveContractsPath(f.path)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={f.path}
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className={f.pinned ? 'font-medium' : 'italic'}>{fileName}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseContracts(f.path);
+                      }}
+                      className={`rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Drift tabs */}
+              {leftTab === 'verify' && openDriftTabs.map((t) => {
+                const drift = verifyState?.drifts.find((d) => d.id === t.id);
+                if (!drift) return null;
+                const label = drift.obligationKey || drift.id;
+                const isActive = activeDriftId === t.id;
+                const tooltip = drift.artifactRef
+                  ? `${drift.artifactRef.kind}:${drift.artifactRef.identity} — ${drift.obligationKey}`
+                  : drift.obligationKey;
+                return (
+                  <div
+                    key={t.id}
+                    onClick={() => setActiveDriftId(t.id)}
+                    className={`group shrink-0 flex items-center gap-1 px-3 py-1.5 border-r border-border cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-background text-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={tooltip}
+                  >
+                    <span className={`min-w-0 truncate max-w-[16rem] pr-0.5 ${t.pinned ? 'font-medium' : 'italic'}`}>{label}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCloseDrift(t.id);
+                      }}
+                      className={`shrink-0 rounded p-0.5 hover:bg-muted transition-opacity ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-          )}
+          ) : null}
 
           <div className="relative flex-1 overflow-hidden">
           {/* Code viewer */}
@@ -1155,6 +1629,51 @@ export default function RepoGraphPage() {
               violations={violations}
               isTab
             />
+          ) : showingCanonicalFile && activeCanonicalPath ? (
+            <SpecCanonicalFile repoId={repoId} filePath={activeCanonicalPath} />
+          ) : showingSpecConflict && activeSpecConflictId ? (
+            <SpecConflictDetail
+              conflictId={activeSpecConflictId}
+              onClose={() => setActiveSpecConflictId(null)}
+            />
+          ) : leftTab === 'spec' ? (
+            <SpecPanePlaceholder />
+          ) : showingContractsFile && activeContractsPath ? (
+            <ContractsFile repoId={repoId} filePath={activeContractsPath} />
+          ) : leftTab === 'contracts' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <p>Select a contract file from the list to view it.</p>
+            </div>
+          ) : leftTab === 'verify' ? (
+            (() => {
+              const activeDrift = activeDriftId
+                ? verifyState?.drifts.find((d) => d.id === activeDriftId)
+                : null;
+              if (activeDrift) {
+                return (
+                  <VerifyDriftDetail
+                    drift={activeDrift}
+                    onClose={() => handleCloseDrift(activeDrift.id)}
+                    onOpenFile={(filePath, line) => {
+                      // Cross-section navigation: drift refers to a
+                      // file → switch to Code Analysis and open the
+                      // file viewer at the right line.
+                      setDashboardSection('analysis');
+                      handleOpenFile(filePath, true, line);
+                    }}
+                  />
+                );
+              }
+              return <VerifyEmptyState />;
+            })()
+          ) : leftTab === 'decisions' ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+              <p className="max-w-md">
+                Every conflict you've resolved in the Spec tab lives in the
+                ledger on the left. Revoke a decision to re-open its
+                conflict — your other candidates are preserved.
+              </p>
+            </div>
           ) : leftTab === 'analyses' ? (
             <AnalysesPanel
               analyses={analyses}
@@ -1236,16 +1755,6 @@ export default function RepoGraphPage() {
                 </Button>
               </div>
             </div>
-          ) : repoError ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="flex flex-col items-center gap-3 text-center">
-                <AlertCircle className="h-10 w-10 text-amber-500" />
-                <Alert className="max-w-sm border-amber-500/30">
-                  <AlertTitle className="text-amber-500">Repository warning</AlertTitle>
-                  <AlertDescription className="text-amber-500/90">{repoError}</AlertDescription>
-                </Alert>
-              </div>
-            </div>
           ) : nodes.length === 0 && nodes.length === 0 &&
               !(depthLevel === 'modules' && !scopedServiceId) &&
               !(depthLevel === 'methods' && !scopedModuleId) ? (
@@ -1258,14 +1767,6 @@ export default function RepoGraphPage() {
                     Run an analysis to generate the architecture graph
                   </AlertDescription>
                 </Alert>
-                <Button
-                  onClick={() => handleAnalyze()}
-                  disabled={isAnalyzing}
-                  className="mt-2"
-                >
-                  {isAnalyzing && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isAnalyzing ? 'Analyzing...' : 'Analyze Repository'}
-                </Button>
                 {isDiffMode && diffError && (
                   <Alert className="mt-3 max-w-sm border-amber-500/30 text-amber-500">
                     <AlertCircle className="h-4 w-4" />
@@ -1534,6 +2035,10 @@ export default function RepoGraphPage() {
           )}
         </div>
       )}
+      {specProgress && (
+        <SpecProgressPopup progress={specProgress} onDismiss={clearSpecProgress} />
+      )}
     </div>
+    </SpecProvider>
   );
 }

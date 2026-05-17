@@ -39,12 +39,27 @@ export const ViolationStatusSchema = z.enum(['new', 'unchanged', 'resolved'])
 export type ViolationStatus = z.infer<typeof ViolationStatusSchema>
 
 // ---------------------------------------------------------------------------
+// Violation Category — the source the violation came from. `rule` is the
+// existing deterministic + LLM rule engine. `contract-drift` is produced by
+// the contract verifier (spec → .tc → comparator). One concept, two sources.
+// ---------------------------------------------------------------------------
+
+export const ViolationCategorySchema = z.enum(['rule', 'contract-drift'])
+export type ViolationCategory = z.infer<typeof ViolationCategorySchema>
+
+// ---------------------------------------------------------------------------
 // Violation
 // ---------------------------------------------------------------------------
 
 export const ViolationSchema = z.object({
   id: z.string(),
   type: ViolationTypeSchema,
+  /** Source of the violation. Defaults to 'rule' for back-compat with
+   *  pre-Phase-6 snapshots that don't carry the field. */
+  category: ViolationCategorySchema.default('rule'),
+  /** Optional finer classifier — for contract drifts this is the artifact
+   *  kind (`Operation`, `Entity`, …); for rule violations it's left null. */
+  subcategory: z.string().nullable().optional(),
   title: z.string(),
   content: z.string(),
   severity: ViolationSeveritySchema,

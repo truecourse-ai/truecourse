@@ -99,6 +99,7 @@ export function CodeViewerPanel({
           <CodeViewer
             content={content || ''}
             language={language}
+            filePath={filePath}
             violations={violations}
             scrollToLine={scrollToLine}
           />
