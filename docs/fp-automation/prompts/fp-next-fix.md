@@ -5,7 +5,11 @@ cloud session, autonomously, with no human in the loop. Your job is to
 take **one** open `fp-fix` issue, paraphrase its FP into the analyzer's
 test fixtures, fix the visitor, and open a PR that closes the issue.
 
-Run exactly one issue per invocation. Do **not** start a second.
+Per invocation, do at most one **PR-opening**, but you may **advance**
+through up to 5 issues that fail to produce a PR (blocked, FP no longer
+reproduces, malformed YAML, refactor required). See "Advancing to the
+next issue" below — this prevents the loop from stalling when the
+oldest issue is unfixable.
 
 ## Inputs
 
@@ -40,7 +44,8 @@ Run exactly one issue per invocation. Do **not** start a second.
   `target_ref`, `rule_key`, `samples[]`.
 - If the YAML is malformed: comment on the issue
   ("malformed YAML in body — needs human review"), add label
-  `fp-blocked`, remove `fp-in-progress`, end.
+  `fp-blocked`, remove `fp-in-progress`, **advance** (see "Advancing
+  to the next issue").
 
 ### 4. Clone the target and confirm the FP still reproduces
 
@@ -62,12 +67,12 @@ Run exactly one issue per invocation. Do **not** start a second.
   `.violations[]` to entries with `ruleKey == <rule_key>`. Cross-
   reference at least one of the URLs in `samples[].url` from the
   issue.
-- Filter `/tmp/analysis.json` to violations with `rule_key == <rule_key>`.
-  Cross-reference at least one of the URLs in `samples[].url`.
 - If no violations remain for this rule at this ref (upstream changed
   or a previous fix already resolved it): close the issue with comment
   "FP no longer reproduces at `<target_ref>`", remove `fp-in-progress`,
-  end.
+  **advance** (see "Advancing to the next issue"). This is a clean
+  outcome — closing one issue is real progress; advance to keep the
+  loop moving.
 
 ### 5. Add a paraphrased FP to the positive fixture
 
@@ -108,7 +113,9 @@ To make sure the visitor fix doesn't over-correct and miss real bugs:
   - The new negative case **passes** (rule fires where it should).
 - If the negative case fails too: the rule is broken in more ways than
   the FP — comment on the issue with the test output, add label
-  `fp-blocked`, remove `fp-in-progress`, end.
+  `fp-blocked`, remove `fp-in-progress`, **advance** (see "Advancing
+  to the next issue"). Revert the fixture files you just added before
+  advancing — they belong to the blocked issue, not the next one.
 
 ### 8. Fix the visitor
 
@@ -206,20 +213,46 @@ If step 1 found no open `fp-fix` issues for the current campaign:
 
 If step 8 reveals the fix needs a refactor across modules:
 
-1. Revert any partial visitor changes.
+1. Revert any partial visitor changes **and** the positive/negative
+   fixture files you added in steps 5–6.
 2. On the issue: post a `## Refactor needed` comment explaining what
    would be required (which types/services/extractors would need to
    change), and why a localized visitor fix isn't possible.
 3. Add label `fp-blocked` to the issue.
 4. Remove `fp-in-progress`.
-5. End.
+5. **Advance** (see "Advancing to the next issue").
 
 The user will read the comment and decide whether to greenlight the
 refactor.
 
+## Advancing to the next issue
+
+Whenever you hit a path that ends with "advance" (malformed YAML, FP
+no longer reproduces, broken-beyond-FP, refactor required), do the
+following instead of ending the session:
+
+1. Increment an internal counter (start at 0; this counts
+   non-PR-producing attempts in this session).
+2. If the counter has reached **5**, end the session. The user will
+   click **Run now** if they want to keep clearing blocked issues.
+3. Otherwise, return to step 1 ("Pick the next issue") and try
+   again with the next oldest open `fp-fix` issue.
+
+The cap exists so a stretch of all-blocked issues can't burn through
+your routine cap on a single session. PR-opening (step 10) always
+ends the session — the merge of that PR will fire fp-next-fix again
+via Trigger B, which is the normal continuation path.
+
+If the queue becomes empty during advancement, take the queue-empty
+path immediately — don't count it against the advance budget.
+
 ## Hard constraints
 
-- One issue per session. Never start a second.
+- At most one **PR-opening** per session — opening the PR ends the
+  session, and its merge fires the next one via Trigger B.
+- Up to **5 advances** per session for issues that can't produce a PR
+  (blocked / no-reproduces / refactor-required). See "Advancing to
+  the next issue".
 - Never push outside `claude/`-prefixed branches.
 - Never run `truecourse analyze` without `--no-llm`.
 - **Never use `npx truecourse`, `npx -y truecourse@<…>`, or
