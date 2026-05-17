@@ -148,11 +148,14 @@ So an FP fix means:
            │ oldest open issue
            ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Routine: fp-next-fix                                     │
-│ trigger A (bootstrap): pull_request.closed               │
+│ Routines: fp-next-fix + fp-next-fix-bootstrap            │
+│ (two routines sharing one bootstrap prompt; the          │
+│  Routines UI allows only one GitHub trigger per routine) │
+│                                                          │
+│ fp-next-fix-bootstrap: pull_request.closed               │
 │   Is merged=true, Head Branch starts-with                │
 │   claude/fp-discover/, Labels is-one-of fp-discover      │
-│ trigger B (continue):  pull_request.closed               │
+│ fp-next-fix:           pull_request.closed               │
 │   Is merged=true, Head Branch starts-with                │
 │   claude/fp-fix/, Labels is-one-of fp-fix                │
 │                                                          │
@@ -219,11 +222,16 @@ Labels:
 The Claude session is the only writer. Ordering is "oldest open issue
 without `fp-in-progress` first".
 
-## Triggers: three Routines
+## Triggers: four Routines
 
-All three routines run as Anthropic-managed cloud sessions on the same
+All four routines run as Anthropic-managed cloud sessions on the same
 cloud environment. Configuration is set up via the web UI at
 [claude.ai/code/routines](https://claude.ai/code/routines).
+
+Note `fp-next-fix` and `fp-next-fix-bootstrap` are two routines that
+share the same bootstrap prompt — they differ only in trigger config.
+This is a workaround for the Routines UI allowing only one GitHub
+trigger per routine.
 
 **Prompt convention**: the routine config in the web UI holds a tiny
 **bootstrap prompt** that points to the real prompt file in the cloned
@@ -267,7 +275,7 @@ web-UI edit needed.
 | **Bootstrap** | First-time run is **Run now** from the routine page (no PR has merged yet). Same button works for any manual re-run. |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed only) |
-| **Environment** | **Default** (shared by all three routines; no customization needed) |
+| **Environment** | **Default** (shared by all four routines; no customization needed) |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-discover.md` |
 
 `fp-discover` shares its trigger event with `fp-campaign-close` — both
@@ -294,30 +302,37 @@ Steps the session takes:
    `fp-target:<owner>-<repo>` issue using the YAML schema above.
    Borderline cases get a comment on the issue, not auto-fix.
 7. Commit a `baseline.*` update to the same discovery PR.
-8. End. fp-next-fix fires automatically when the user merges the
-   discovery PR (via fp-next-fix's Trigger A — `Head Branch` starts
-   with `claude/fp-discover/`, `Labels` is one of `fp-discover`) and
-   then on every subsequent fp-fix PR merge (Trigger B).
+8. End. The `fp-next-fix-bootstrap` routine fires automatically when
+   the user merges the discovery PR (`Head Branch` starts with
+   `claude/fp-discover/`, `Labels` is one of `fp-discover`); the
+   `fp-next-fix` routine then fires on every subsequent fp-fix PR
+   merge.
 
 ### 2. `fp-next-fix` — consume one fp-fix issue on each merge
 
-| Field | Value |
-|---|---|
-| **Triggers (2)** | Both are `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Trigger A — discovery PR merge (bootstraps inner loop)** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-discover/` AND `Labels` is one of `fp-discover` |
-| **Trigger B — fp-fix PR merge (continues inner loop)** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` |
-| **Repositories** | `truecourse-ai/truecourse` (target OSS repo cloned inside the session into `/tmp/target`) |
-| **Branch push policy** | Default — branches are `claude/fp-fix/<rule-key>`, which fits the `claude/`-prefix rule |
-| **Environment** | **Default** |
-| **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-next-fix.md` |
+Implemented as **two routines** that share the same bootstrap prompt
+(the Routines UI only allows one GitHub trigger per routine). Both
+routines point to `docs/fp-automation/prompts/fp-next-fix.md` — no
+prompt drift, just two trigger configs.
 
-Why two triggers: the inner loop kicks off when you merge the
-discovery PR (the moment baseline lands on main, and all fp-fix issues
-have been filed). From the first fp-fix PR onward, each merge fires
-the next session via Trigger B. This eliminates the manual "Run now
-on fp-next-fix" bootstrap step that the previous design required, and
-guarantees `campaigns.yaml`'s baseline numbers are on main before any
-fp-fix work begins.
+| Field | `fp-next-fix` (continues inner loop) | `fp-next-fix-bootstrap` (kicks off inner loop) |
+|---|---|---|
+| **Trigger** | `pull_request.closed` | `pull_request.closed` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-discover/` AND `Labels` is one of `fp-discover` |
+| **Repositories** | `truecourse-ai/truecourse` | `truecourse-ai/truecourse` |
+| **Branch push policy** | Default (`claude/`-prefixed) | Default (`claude/`-prefixed) |
+| **Environment** | **Default** | **Default** |
+| **Prompt** | Bootstrap pointer → `docs/fp-automation/prompts/fp-next-fix.md` | Bootstrap pointer → `docs/fp-automation/prompts/fp-next-fix.md` |
+
+Why two routines: the inner loop kicks off when you merge the
+discovery PR — `fp-next-fix-bootstrap` fires there. From the first
+fp-fix PR onward, each merge fires `fp-next-fix`. This eliminates the
+manual "Run now on fp-next-fix" bootstrap step that the previous
+design required, and guarantees `campaigns.yaml`'s baseline numbers
+are on main before any fp-fix work begins.
+
+No concurrency worry: discovery PR merges and fp-fix PR merges never
+coincide, so the two routines never fire simultaneously.
 
 Steps the session takes:
 1. List open issues with label `fp-fix` (excluding `fp-in-progress`).
@@ -410,9 +425,13 @@ One-time, before the first run:
 2. **Enable "Automatically delete head branches"** in repo settings →
    General. Keeps `claude/fp-fix/*` and `claude/fp-campaign-close/*`
    branches tidy.
-3. **Create the three routines** at
+3. **Create the four routines** at
    [claude.ai/code/routines](https://claude.ai/code/routines), pasting
-   the bootstrap prompts (see [Prompt convention](#triggers-three-routines)).
+   the bootstrap prompts (see [Prompt convention](#triggers-four-routines)).
+   Note `fp-next-fix` and `fp-next-fix-bootstrap` share the same
+   bootstrap prompt (pointing to `fp-next-fix.md`) but have different
+   trigger filters.
+
    Trigger configs are listed under each routine above — note that
    `fp-discover` and `fp-campaign-close` share the exact same trigger
    (they fire in parallel on each campaign-close PR merge).
@@ -481,9 +500,11 @@ trail.
 ## Resolved decisions
 
 1. **Runtime**: Claude Code **Routines** (Anthropic-managed cloud
-   sessions). All three routines fire on `pull_request.closed` events
+   sessions). All four routines fire on `pull_request.closed` events
    with filters; `fp-discover` and `fp-campaign-close` share the same
-   trigger and fire in parallel. First-time bootstrap is **Run now**.
+   trigger and fire in parallel; `fp-next-fix-bootstrap` fires on the
+   discovery PR merge; `fp-next-fix` fires on each fp-fix PR merge.
+   First-time-ever bootstrap is **Run now** on `fp-discover`.
    No self-hosted runners, no API tokens, no env vars.
 2. **Verification is pre-release**, against the local `dist/` build:
    `pnpm build:dist` produces the exact artifact publish.yml ships to
@@ -523,7 +544,7 @@ If green-lit:
    - `fp-next-fix.md`
    - `fp-campaign-close.md`
 2. Walk through the "Setup checklist" above to install the GitHub App,
-   enable branch auto-delete, and create the three routines (all on the
+   enable branch auto-delete, and create the four routines (all on the
    **Default** cloud environment).
 3. Click **Run now** on `fp-discover` to start the first campaign.
    From there:
