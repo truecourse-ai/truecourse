@@ -146,17 +146,15 @@ If step 1 found no open `fp-fix` issues for the current campaign:
 1. Find the campaign in `docs/fp-automation/campaigns.yaml` with
    `status: in_progress` or `status: discovering`. There should be
    exactly one.
-2. Clone the campaign's `target_repo` at the campaign's recorded
-   `baseline.target_ref` (or HEAD if missing) to `/tmp/target`.
-3. Re-run `pnpm exec truecourse analyze /tmp/target --no-llm`.
-4. Classify violations as in fp-discover step 4. Compute final `tp`,
-   `fp`, `tp_rate`.
-5. **If `tp_rate >= 0.90`**: open a campaign-close PR.
+2. **Do not** run analyze in this session. The "did we hit 90 %" check
+   happens after the release, in `fp-campaign-close`, against the
+   npm-published artifact — not against the local build.
+3. Open a campaign-close PR.
    - Branch: `claude/fp-campaign-close/<owner>-<repo>`.
    - File changes:
      - `docs/fp-automation/campaigns.yaml`: set the campaign's
-       `status: done`, fill `final.*` (analyzed_at, target_ref,
-       total_violations, tp, fp, tp_rate).
+       `status: verifying`. Do **not** fill `final.*` — that's
+       fp-campaign-close's job after the post-release analyze.
      - Patch-bump the version in all four required locations from
        CLAUDE.md:
        1. `tools/cli/package.json` — `version`
@@ -165,15 +163,20 @@ If step 1 found no open `fp-fix` issues for the current campaign:
        4. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call on
           the commander program
      - **No** fixture or visitor changes.
-   - Title: `chore(fp): close <owner>/<repo> campaign, bump to vX.Y.Z`.
+   - Title: `chore(fp): release vX.Y.Z (verifying <owner>/<repo>)`.
    - Labels: `fp-campaign-complete`.
    - Body: list merged fp-fix PRs from this campaign (search by label
-     `fp-target:<owner>-<repo>` + state merged), the before/after
-     TP-rate, and the new version.
+     `fp-target:<owner>-<repo>` + state merged) and the new version.
+     Note explicitly: "TP-rate verification happens after this PR
+     merges, in the fp-campaign-close routine, using the
+     npm-published version."
    - End.
-6. **If `tp_rate < 0.90`**: act like fp-discover step 5 — file new
-   `fp-fix` issues for newly-surfaced FPs at the new analyze run.
-   Leave the campaign `status` as is (`in_progress`). End.
+
+Note: a single campaign can produce **multiple** campaign-close PRs
+(and therefore multiple version bumps) if the post-release verify
+finds the TP rate is still < 90 %. Each release ships real fixes;
+the campaign is only considered `done` when a post-release verify
+clears the 90 % gate.
 
 ## Refactor-required path
 
