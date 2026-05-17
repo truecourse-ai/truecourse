@@ -613,6 +613,12 @@
       "layer": "service"
     },
     {
+      "name": "processAbandonedQueue",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "PropertyStore",
       "service": "utils",
       "kind": "class",
