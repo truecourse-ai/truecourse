@@ -12,12 +12,12 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 - The repository `truecourse-ai/truecourse` is cloned at the default
   branch.
-- The routine fires either from a **Run now** click (first-time
-  bootstrap, or manual re-run) or from a GitHub event:
-  `pull_request.closed` on a campaign-close PR. In both cases the
-  next campaign to run is determined by reading
-  `docs/fp-automation/campaigns.yaml` — there are no per-invocation
-  parameters.
+- The routine is **manual-only**: it fires from a **Run now** click in
+  the web UI. There is no GitHub trigger and no API trigger. A human
+  decides when to start a campaign (typically after reviewing the
+  previous campaign's outcome).
+- The next campaign to run is determined entirely by reading
+  `docs/fp-automation/campaigns.yaml` — no per-invocation parameters.
 
 ## Step-by-step
 
