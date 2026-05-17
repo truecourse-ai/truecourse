@@ -253,7 +253,7 @@ web-UI edit needed.
 | **Trigger** | **Manual only** (no triggers configured). Fired from the **Run now** button on the routine page when a human decides to start a new campaign. |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed only) |
-| **Environment** | `fp-automation` (shared with the other two routines) |
+| **Environment** | **Default** (shared by all three routines; no customization needed) |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-discover.md` |
 
 Manual control: `fp-discover` is deliberately not chained from
@@ -287,7 +287,7 @@ Steps the session takes:
 | **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` |
 | **Repositories** | `truecourse-ai/truecourse` (target OSS repo cloned inside the session into `/tmp/target`) |
 | **Branch push policy** | Default — branches are `claude/fp-fix/<rule-key>`, which fits the `claude/`-prefix rule |
-| **Environment** | `fp-automation` |
+| **Environment** | **Default** |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-next-fix.md` |
 
 Steps the session takes:
@@ -344,7 +344,7 @@ needed` note, add `fp-blocked` label, end. The user triages later.
 | **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default — only needs to push a tag, not a branch |
-| **Environment** | `fp-automation` |
+| **Environment** | **Default** |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-campaign-close.md` |
 
 Two-phase responsibilities:
@@ -387,21 +387,18 @@ One-time, before the first run:
    branches tidy.
 3. **Create the three routines** at
    [claude.ai/code/routines](https://claude.ai/code/routines), pasting
-   the prompts from `docs/fp-automation/prompts/`. In the routine form,
-   the cloud icon next to the prompt opens the environment selector —
-   the first routine you create can use it to **Add environment** named
-   `fp-automation` with:
-   - Network access: **Trusted** (default allowlist covers npm, GitHub,
-     and the OSS repos we clone over HTTPS).
-   - Setup script: **empty**. (Per the Claude Code on the web docs,
-     setup scripts run before the repo is cloned, so `pnpm install` /
-     `pnpm build` would fail with `ERR_PNPM_NO_PKG_MANIFEST`. pnpm is
-     already pre-installed in the environment; project deps run inside
-     the session per the prompt's first step.)
-   - Environment variables: none required.
+   the bootstrap prompts (see [Prompt convention](#triggers-three-routines)).
+   Use the **Default** environment for all three — no custom env is
+   needed because:
+   - Default already uses **Trusted** network access (allowlist covers
+     npm, GitHub, and the OSS repos we clone over HTTPS).
+   - pnpm is pre-installed; project deps (`pnpm install && pnpm build`)
+     run inside each session as the prompt's first step, not via a
+     setup script. (Setup scripts run **before** the per-session repo
+     clone, so they can't `pnpm install` anything from the repo.)
+   - No env vars are required.
 
-   The other two routines pick the existing `fp-automation` from the
-   same selector. Trigger configs are listed under each routine above.
+   Trigger configs are listed under each routine above.
 4. **Kick off the first campaign** by clicking **Run now** on
    `fp-discover`. It reads `campaigns.yaml`, finds the first pending
    campaign (today: `documenso/documenso`), and files the initial
@@ -495,8 +492,8 @@ If green-lit:
    - `fp-next-fix.md`
    - `fp-campaign-close.md`
 2. Walk through the "Setup checklist" above to install the GitHub App,
-   enable branch auto-delete, and create the three routines (sharing
-   the `fp-automation` cloud environment).
+   enable branch auto-delete, and create the three routines (all on the
+   **Default** cloud environment).
 3. Click **Run now** on `fp-discover` to start the first campaign.
    From there:
    - **Inner loop** (auto): fp-fix PR merges drive `fp-next-fix` until
