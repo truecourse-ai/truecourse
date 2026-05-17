@@ -21,12 +21,15 @@ finishes, sessions update that file in the campaign-close PR.
 
 For each target OSS repo:
 
-1. Run `truecourse analyze --no-llm` (deterministic rules only — keeps cost
-   bounded; LLM-rule FPs are a separate phase).
+1. `pnpm install && pnpm build:dist` in the truecourse working copy, then
+   `node dist/cli.mjs analyze /tmp/target --no-llm` (deterministic rules
+   only — keeps cost bounded). We always invoke the analyzer via the
+   freshly-built `dist/` artifact — same bytes publish.yml will ship to
+   npm. We never `npx truecourse` or `npm install truecourse`.
 2. Triage violations into TPs / FPs.
 3. For every rule with at least one FP, file one GitHub issue labelled
-   `fp-fix` describing the rule, the target repo, links to OSS snippets, and
-   the FP count.
+   `fp-fix` describing the rule, the target repo, links to OSS snippets,
+   and the FP count.
 4. The fix loop consumes the open `fp-fix` issues one at a time:
    a. Paraphrase one FP-triggering snippet from the issue into the
       `sample-js-project-positive` (or `…-python-positive`) fixture — the
@@ -41,26 +44,25 @@ For each target OSS repo:
       issue.
 5. When the PR merges (closing the issue), the routine fires again and the
    next `fp-fix`-labelled issue is picked up automatically.
-6. When no `fp-fix` issues remain open for the current target, open a
-   **campaign-close PR** (see below) that bumps the version and flips
-   the campaign to `status: verifying`. **No local analyze is run** at
-   this point — the "did we hit 90 %" check happens post-release.
-7. When the campaign-close PR merges, `fp-campaign-close` runs in two
-   phases: tag + npm publish (Phase 1), then analyze with the
-   just-published `npx -y truecourse@<version>` (Phase 2). Phase 2
-   decides whether the campaign is `done` (TP ≥ 90 %) or continues
-   (TP < 90 %, file new `fp-fix` issues, another release follows).
-8. Once a campaign is `done`, the user clicks **Run now** on
-   `fp-discover` to start the next pending campaign. No auto-chain.
+6. When no `fp-fix` issues remain for the current target, fp-next-fix
+   **re-runs analyze against the freshly-built local dist** (containing
+   every merged fix). If TP ≥ 90 %, it opens a **campaign-close PR**
+   (see below) that bumps the version and flips campaign `status: done`.
+   If TP < 90 %, it files new `fp-fix` issues; the campaign continues
+   without a release.
+7. When the campaign-close PR merges, two routines fire in parallel:
+   `fp-campaign-close` pushes `vX.Y.Z` (publish.yml ships from dist —
+   byte-equal to what fp-next-fix just verified), and `fp-discover`
+   starts the next pending campaign.
 
 ### Campaign-close PR
 
-When fp-next-fix runs out of `fp-fix` issues for a campaign, it opens
-a campaign-close PR that:
+When fp-next-fix's queue-empty path measures `tp_rate >= 0.90` against
+the freshly-built dist, it opens a campaign-close PR that:
 
-- Sets `status: verifying` for the campaign in
-  `docs/fp-automation/campaigns.yaml`. Does **not** fill `final.*` —
-  fp-campaign-close fills that after the post-release verify.
+- Sets `status: done` for the campaign in
+  `docs/fp-automation/campaigns.yaml` and fills `final.*` (analyzed_at,
+  target_ref, total_violations, tp, fp, tp_rate).
 - Bumps the patch version (FP fixes are bug fixes) in all four required
   places, per CLAUDE.md:
   1. `tools/cli/package.json`
@@ -70,16 +72,9 @@ a campaign-close PR that:
 - Carries the **`fp-campaign-complete`** label.
 - Branch name `claude/fp-campaign-close/<owner>-<repo>`.
 
-On merge, `fp-campaign-close` runs Phase 1 (tag + wait for npm publish)
-then Phase 2 (analyze with `npx -y truecourse@<version>` against the
-target). Phase 2 either:
-- Opens a `fp-verify` PR flipping `status: done` + filling `final.*`
-  (TP ≥ 90 %), or
-- Files new `fp-fix` issues and leaves `status: verifying` so the next
-  queue-empty path produces another release (TP < 90 %).
-
-A campaign can therefore produce multiple version bumps before it's
-marked done.
+On merge, `fp-campaign-close` pushes the tag (publish.yml ships to npm)
+and `fp-discover` fires on the same event to start the next pending
+campaign — both routines run in parallel, each doing one job.
 
 ### Borderline FPs
 
@@ -122,10 +117,11 @@ So an FP fix means:
 ```
 ┌──────────────────────────┐        ┌─────────────────────────┐
 │ campaigns.yaml           │───────▶│ Routine: fp-discover    │
-│ ordered repo list +      │ pick   │ trigger: MANUAL ONLY    │
-│ baseline / final results │  next  │ (Run now from web UI)   │
-└──────────────────────────┘        │ (analyze --no-llm,      │
-                                    │  writes baseline back,  │
+│ ordered repo list +      │ pick   │ trigger: same as        │
+│ baseline / final results │  next  │  fp-campaign-close,     │
+└──────────────────────────┘        │  + Run now for bootstrap│
+                                    │ (analyze via node       │
+                                    │  dist/cli.mjs --no-llm, │
                                     │  files fp-fix issues)   │
 ┌─────────────────────────┐         └────────────┬────────────┘
 │ N × GitHub issues       │◄─────────────────────┘
@@ -154,24 +150,20 @@ So an FP fix means:
            │ on fp-fix PR merge           │
            │                              ▼
 ┌──────────────────────────────────────────────────────────┐
-│ Routine: fp-campaign-close                               │
+│ Routine: fp-campaign-close (parallel with fp-discover)   │
 │ trigger: pull_request.closed                             │
 │   Is merged=true, Head Branch starts-with                │
 │   claude/fp-campaign-close/,                             │
 │   Labels is-one-of fp-campaign-complete                  │
 │                                                          │
-│ Phase 1: tag → publish.yml ships to npm                  │
-│   1. Read new version, sanity-check 4 locations          │
-│   2. git tag vX.Y.Z, git push origin vX.Y.Z              │
-│   3. Poll `npm view truecourse@X.Y.Z` until live         │
+│ 1. Read new version from tools/cli/package.json,         │
+│    sanity-check the 4 locations agree                    │
+│ 2. git tag vX.Y.Z, git push origin vX.Y.Z                │
+│    (publish.yml ships dist/ to npm + creates GH Release) │
 │                                                          │
-│ Phase 2: verify against the published version            │
-│   4. Clone target at baseline.target_ref                 │
-│   5. `npx -y truecourse@X.Y.Z analyze … --no-llm`        │
-│   6. If TP ≥ 90%: open fp-verify PR (status: done)       │
-│      If TP < 90%: file new fp-fix issues, status stays   │
-│                  verifying (next queue-empty cuts        │
-│                  another release)                        │
+│ No analyze, no verification — fp-next-fix already        │
+│ measured TP ≥ 90% against the same dist artifact         │
+│ publish.yml is about to ship.                            │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -250,33 +242,36 @@ web-UI edit needed.
 
 | Field | Value |
 |---|---|
-| **Trigger** | **Manual only** (no triggers configured). Fired from the **Run now** button on the routine page when a human decides to start a new campaign. |
+| **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
+| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
+| **Bootstrap** | First-time run is **Run now** from the routine page (no PR has merged yet). Same button works for any manual re-run. |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default (`claude/`-prefixed only) |
-| **Environment** | `fp-automation` (shared with the other two routines) |
+| **Environment** | **Default** (shared by all three routines; no customization needed) |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-discover.md` |
 
-Manual control: `fp-discover` is deliberately not chained from
-`fp-campaign-close`. After a campaign finishes (a `fp-verify` PR
-merges marking it `status: done`), the user reviews the outcome and
-clicks **Run now** on `fp-discover` to start the next pending campaign.
-This gives a natural review checkpoint between campaigns.
+`fp-discover` shares its trigger event with `fp-campaign-close` — both
+routines fire in parallel on every campaign-close PR merge.
+`fp-discover` reads `campaigns.yaml` on `main` (the merged PR already
+flipped the just-closed campaign to `status: done`) and picks the next
+`pending` one.
 
 Steps the session takes:
-1. Read `docs/fp-automation/campaigns.yaml` from `main` on
-   `truecourse-ai/truecourse`. Pick first campaign with `status: pending`
-   (unless `text` overrides).
-2. Set its `status: discovering` (PR to bump the YAML is allowed; the
-   campaign-close PR will flip to `done` later).
-3. Clone the target repo at HEAD; record commit SHA as `target_ref`.
-4. `pnpm build && pnpm exec truecourse analyze /tmp/target --no-llm`.
-5. Per rule with ≥ 1 violation: sample up to 10 violations, classify
-   TP/FP. If FP rate ≥ 10 %, file an `fp-fix` + `fp-target:<owner>-<repo>`
-   issue using the YAML schema above. Borderline cases get a comment
-   on the issue, not auto-fix.
-6. Commit a `baseline.*` update PR to `docs/fp-automation/campaigns.yaml`
-   (separate from any FP fix PRs).
-7. End. The next `fp-next-fix` invocation (manual the first time, then
+1. Read `docs/fp-automation/campaigns.yaml`. Pick the first campaign
+   with `status: pending`. If none, end with "no pending campaigns".
+2. Set its `status: discovering` on a `claude/fp-discover/<owner>-<repo>`
+   branch + PR.
+3. `pnpm install && pnpm build:dist` in the truecourse working copy
+   (produces `dist/cli.mjs`, byte-equal to what publish.yml would
+   ship). We never analyze via `npx truecourse` or `npm install`.
+4. Clone the target repo at HEAD; record commit SHA as `target_ref`.
+5. `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
+6. Per rule with ≥ 1 violation: sample up to 10 violations, classify
+   TP/FP. If FP rate ≥ 10 %, file an `fp-fix` +
+   `fp-target:<owner>-<repo>` issue using the YAML schema above.
+   Borderline cases get a comment on the issue, not auto-fix.
+7. Commit a `baseline.*` update to the same discovery PR.
+8. End. The next `fp-next-fix` invocation (manual the first time, then
    automatic on each PR merge) consumes the issues.
 
 ### 2. `fp-next-fix` — consume one fp-fix issue on each merge
@@ -287,7 +282,7 @@ Steps the session takes:
 | **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` |
 | **Repositories** | `truecourse-ai/truecourse` (target OSS repo cloned inside the session into `/tmp/target`) |
 | **Branch push policy** | Default — branches are `claude/fp-fix/<rule-key>`, which fits the `claude/`-prefix rule |
-| **Environment** | `fp-automation` |
+| **Environment** | **Default** |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-next-fix.md` |
 
 Steps the session takes:
@@ -296,8 +291,9 @@ Steps the session takes:
 2. Add label `fp-in-progress` to the issue (concurrency lock).
 3. Parse the YAML block from the issue body. Clone target repo at
    `target_ref` to `/tmp/target`.
-4. `pnpm build && pnpm exec truecourse analyze /tmp/target --no-llm`.
-   Filter to this rule.
+4. `pnpm install && pnpm build:dist`, then
+   `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
+   Filter to this rule. (Always dist, never `npx truecourse`.)
 5. Re-confirm the FP still reproduces. If not (upstream fixed, or a
    previous fix already resolved it), close the issue with comment
    "no longer reproduces" and end.
@@ -320,18 +316,25 @@ Steps the session takes:
 
 **Queue empty path** (no open `fp-fix` issues for the current campaign):
 
-1. Re-run `truecourse analyze /tmp/target --no-llm`. Compute TP rate.
-2. If ≥ 90 %: open a **campaign-close PR** on
+1. `pnpm install && pnpm build:dist` to rebuild dist with all merged
+   fixes on `main`.
+2. Re-clone target at `baseline.target_ref` and run
+   `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/final.json`.
+   Compute TP rate.
+3. **If ≥ 90 %**: open a **campaign-close PR** on
    `claude/fp-campaign-close/<owner>-<repo>` containing:
    - `docs/fp-automation/campaigns.yaml` updated (`status: done`,
      `final.*` filled),
    - patch version bumped in all four locations from CLAUDE.md,
    - label `fp-campaign-complete`,
    - body listing the campaign's rule fixes by PR number and the
-     before/after TP-rate.
-3. If < 90 %: file new `fp-fix` issues for newly-discovered FPs (same
-   shape as discovery). Leave campaign `status: in_progress`.
-4. End. The campaign-close PR merge fires `fp-campaign-close`.
+     before/after TP-rate (noting the measurement was taken against
+     `node dist/cli.mjs` from the freshly-built dist).
+4. **If < 90 %**: file new `fp-fix` issues for newly-discovered FPs
+   (same shape as discovery). Leave campaign `status: in_progress`.
+   **No campaign-close PR is opened** — no release is cut.
+5. End. The campaign-close PR merge fires `fp-campaign-close` and
+   `fp-discover` in parallel.
 
 **Refactor-required path**: comment on the issue with a `## Refactor
 needed` note, add `fp-blocked` label, end. The user triages later.
@@ -344,36 +347,20 @@ needed` note, add `fp-blocked` label, end. The user triages later.
 | **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-campaign-close/` AND `Labels` is one of `fp-campaign-complete` |
 | **Repositories** | `truecourse-ai/truecourse` |
 | **Branch push policy** | Default — only needs to push a tag, not a branch |
-| **Environment** | `fp-automation` |
+| **Environment** | **Default** |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-campaign-close.md` |
 
-Two-phase responsibilities:
-
-**Phase 1 — Ship the release**
+Steps the session takes:
 1. Read new version from `tools/cli/package.json`. Sanity-check the
    other three locations agree (CLAUDE.md "Releasing").
 2. `git tag v<version> && git push origin v<version>`. The existing
-   `.github/workflows/publish.yml` triggers, ships to npm, creates the
-   GitHub Release.
-3. Poll `npm view truecourse@<version>` every 15 s (timeout 15 min)
-   until the version is live on the registry.
+   `.github/workflows/publish.yml` triggers, ships `dist/` to npm,
+   creates the GitHub Release.
+3. End. No verification step — fp-next-fix already measured TP ≥ 90 %
+   against the same dist artifact publish.yml is shipping.
 
-**Phase 2 — Verify against the published artifact**
-4. Find the campaign with `status: verifying` in
-   `docs/fp-automation/campaigns.yaml`.
-5. Clone the campaign's `target_repo` at `baseline.target_ref`.
-6. Analyze with `npx -y truecourse@<version> analyze /tmp/target --no-llm`
-   — explicitly the just-published version, not the local build.
-7. Classify, compute `tp_rate`.
-   - **TP ≥ 90 %**: open a `fp-verify` PR that flips campaign to
-     `status: done` and fills `final.*`. Body links the release.
-   - **TP < 90 %**: file new `fp-fix` issues for newly-surfaced FPs.
-     Leave campaign `status: verifying` (the next queue-empty path
-     will cut another release).
-
-A single campaign may produce multiple campaign-close PRs (and version
-bumps) if early releases don't clear the gate. Each release ships real
-fixes; the campaign is only `done` when a post-release verify passes.
+`fp-discover` listens to the same merge event and runs in parallel,
+starting the next pending campaign from `campaigns.yaml`.
 
 ## Setup checklist
 
@@ -387,33 +374,35 @@ One-time, before the first run:
    branches tidy.
 3. **Create the three routines** at
    [claude.ai/code/routines](https://claude.ai/code/routines), pasting
-   the prompts from `docs/fp-automation/prompts/`. In the routine form,
-   the cloud icon next to the prompt opens the environment selector —
-   the first routine you create can use it to **Add environment** named
-   `fp-automation` with:
-   - Network access: **Trusted** (default allowlist covers npm, GitHub,
-     and the OSS repos we clone over HTTPS).
-   - Setup script: `pnpm install && pnpm build`.
-   - Environment variables: none required.
+   the bootstrap prompts (see [Prompt convention](#triggers-three-routines)).
+   Trigger configs are listed under each routine above — note that
+   `fp-discover` and `fp-campaign-close` share the exact same trigger
+   (they fire in parallel on each campaign-close PR merge).
 
-   The other two routines pick the existing `fp-automation` from the
-   same selector. Trigger configs are listed under each routine above.
-4. **Kick off the first campaign** by clicking **Run now** on
-   `fp-discover`. It reads `campaigns.yaml`, finds the first pending
-   campaign (today: `documenso/documenso`), and files the initial
-   `fp-fix` issues.
+   Use the **Default** environment for all three — no custom env is
+   needed because:
+   - Default already uses **Trusted** network access (allowlist covers
+     npm, GitHub, and the OSS repos we clone over HTTPS).
+   - pnpm is pre-installed; project deps (`pnpm install && pnpm build:dist`)
+     run inside each session as the prompt's first step, not via a
+     setup script. (Setup scripts run **before** the per-session repo
+     clone, so they can't `pnpm install` anything from the repo.)
+   - No env vars are required.
+4. **Bootstrap the first campaign** by clicking **Run now** on
+   `fp-discover` (no campaign-close PR has merged yet, so the GitHub
+   trigger has nothing to fire on). It reads `campaigns.yaml`, finds
+   the first pending campaign (today: `documenso/documenso`), and
+   files the initial `fp-fix` issues.
 5. **Start the inner loop** by clicking **Run now** on `fp-next-fix`
    once any `fp-fix` issues exist. From this first PR onward, fp-fix
-   PR merges fire fp-next-fix automatically until the campaign queue
-   is empty.
-6. **The outer loop is event-driven**: when the queue empties,
-   fp-next-fix opens a campaign-close PR. Merging it fires
-   fp-campaign-close, which tags, publishes to npm, then verifies
-   against the published version. The cycle continues (more release +
-   verify) until TP ≥ 90 %, at which point a `fp-verify` PR marks the
-   campaign `done`.
-7. **Start the next campaign** by clicking **Run now** on
-   `fp-discover` again. Manual decision — no auto-chain.
+   PR merges fire `fp-next-fix` automatically until the campaign
+   queue is empty.
+6. **Outer loop is fully automatic**: when the queue empties,
+   fp-next-fix re-analyzes against the freshly-built dist; if TP ≥ 90 %
+   it opens a campaign-close PR. Merging that PR fires
+   `fp-campaign-close` (tags + publishes) and `fp-discover` (starts
+   the next pending campaign) in parallel — no human action needed
+   between campaigns.
 
 ## Acceptance criteria
 
@@ -441,24 +430,25 @@ A **campaign-close PR** is mergeable when:
 - Branch matches `claude/fp-campaign-close/<owner>-<repo>` and carries
   label `fp-campaign-complete`.
 
-A repo is "done" when its campaign-close PR is merged, `vX.Y.Z` is tagged,
-and the `fp-campaign-close` routine has fired `fp-discover` for the next
-campaign. The campaigns file is the audit trail.
+A repo is "done" when its campaign-close PR is merged and `vX.Y.Z` is
+tagged. The 90 % gate was verified pre-merge by fp-next-fix against the
+dist artifact; `fp-discover` fires on the same merge event to start the
+next pending campaign automatically. The campaigns file is the audit
+trail.
 
 ## Resolved decisions
 
 1. **Runtime**: Claude Code **Routines** (Anthropic-managed cloud
-   sessions). fp-next-fix and fp-campaign-close fire on
-   `pull_request.closed` events with filters. **fp-discover is manual
-   only** — humans decide when to start the next campaign by clicking
-   Run now. No self-hosted runners, no API tokens, no env vars on the
-   environment.
-2. **Verification is post-release**: the 90 % TP gate is checked by
-   fp-campaign-close against the **just-published npm version**
-   (`npx -y truecourse@<version>`), not against the local source.
-   That means the artifact users get is what we measure. A campaign
-   can produce multiple version bumps if early releases don't clear
-   the gate.
+   sessions). All three routines fire on `pull_request.closed` events
+   with filters; `fp-discover` and `fp-campaign-close` share the same
+   trigger and fire in parallel. First-time bootstrap is **Run now**.
+   No self-hosted runners, no API tokens, no env vars.
+2. **Verification is pre-release**, against the local `dist/` build:
+   `pnpm build:dist` produces the exact artifact publish.yml ships to
+   npm (no transformation in between). So `node dist/cli.mjs analyze`
+   gives the same answer the eventual published version would. We
+   never `npx truecourse` or `npm install truecourse` from any
+   routine; the local dist is the authoritative invocation.
 3. **Paraphrasing licence**: paraphrased snippets must be far enough from
    the original to stand alone. PR description links the source rather
    than embedding it. Open question — still worth a legal sanity-check
@@ -475,7 +465,7 @@ campaign. The campaigns file is the audit trail.
    `ANTHROPIC_API_KEY`).
 7. **Branch hygiene**: branches use the `claude/` prefix
    (`claude/fp-fix/<rule-key>`, `claude/fp-campaign-close/<owner>-<repo>`,
-   `claude/fp-verify/<owner>-<repo>-vX.Y.Z`) to fit the routine default
+   `claude/fp-discover/<owner>-<repo>`) to fit the routine default
    push policy. Auto-delete head branches on merge.
 8. **Concurrency**: session adds `fp-in-progress` to the picked issue
    before doing anything else; competing sessions skip labelled issues.
@@ -491,8 +481,8 @@ If green-lit:
    - `fp-next-fix.md`
    - `fp-campaign-close.md`
 2. Walk through the "Setup checklist" above to install the GitHub App,
-   enable branch auto-delete, and create the three routines (sharing
-   the `fp-automation` cloud environment).
+   enable branch auto-delete, and create the three routines (all on the
+   **Default** cloud environment).
 3. Click **Run now** on `fp-discover` to start the first campaign.
    From there:
    - **Inner loop** (auto): fp-fix PR merges drive `fp-next-fix` until

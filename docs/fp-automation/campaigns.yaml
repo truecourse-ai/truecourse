@@ -8,11 +8,10 @@
 #   pending      — not yet started
 #   discovering  — fp-discover analyze + issue filing in progress
 #   in_progress  — at least one fp-fix issue still open
-#   verifying    — campaign-close PR opened/merged; awaiting post-release
-#                  verify in fp-campaign-close (can cycle through multiple
-#                  releases until TP rate clears 90%)
-#   done         — final.tp_rate >= 0.90 confirmed against the
-#                  npm-published version
+#   done         — fp-next-fix verified tp_rate >= 0.90 against the
+#                  freshly-built dist (byte-equal to what publish.yml
+#                  ships); campaign-close PR merged; vX.Y.Z tagged
+#                  and released
 #   skipped      — manually deprioritized; note explains why
 #
 # Each campaign also writes its open issues with label
