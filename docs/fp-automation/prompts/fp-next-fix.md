@@ -46,10 +46,22 @@ Run exactly one issue per invocation. Do **not** start a second.
 
 - `git clone https://github.com/<target_repo>.git /tmp/target`.
 - `git -C /tmp/target checkout <target_ref>`.
-- In truecourse: `pnpm install && pnpm build:dist`. The dist build is
-  the artifact publish.yml ships to npm; we always analyze against this,
-  never `npx truecourse@…`. See "Hard constraints".
-- `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
+- In the truecourse working copy: `pnpm install && pnpm build:dist`.
+  The dist build is the artifact publish.yml ships to npm; we always
+  analyze against this, never `npx truecourse@…`. See "Hard
+  constraints".
+- Run analyze **from inside the target repo** — the CLI operates on the
+  current working directory and writes results to `<cwd>/.truecourse/`:
+  ```
+  cd /tmp/target && \
+    node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm --no-stash --no-skills
+  ```
+  (`$TRUECOURSE_DIR` is the path the truecourse-ai/truecourse repo was
+  cloned to in this session — typically `/home/user/truecourse`.)
+- Read results from `/tmp/target/.truecourse/LATEST.json`. Filter
+  `.violations[]` to entries with `ruleKey == <rule_key>`. Cross-
+  reference at least one of the URLs in `samples[].url` from the
+  issue.
 - Filter `/tmp/analysis.json` to violations with `rule_key == <rule_key>`.
   Cross-reference at least one of the URLs in `samples[].url`.
 - If no violations remain for this rule at this ref (upstream changed
@@ -151,8 +163,13 @@ If step 1 found no open `fp-fix` issues for the current campaign:
 2. Re-build truecourse from local source (with all merged fixes):
    - `pnpm install && pnpm build:dist`.
 3. Re-clone the campaign's target at the recorded `baseline.target_ref`
-   to `/tmp/target` and run analyze against the freshly-built dist:
-   - `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/final.json`.
+   to `/tmp/target` and analyze against the freshly-built dist:
+   ```
+   cd /tmp/target && \
+     node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm --no-stash --no-skills
+   ```
+   Read `/tmp/target/.truecourse/LATEST.json` and process
+   `.violations[]`.
 4. Classify violations and compute final `tp`, `fp`, `tp_rate` using
    the same rubric as fp-discover step 5.
 5. **If `tp_rate >= 0.90`** — campaign is done. Open a campaign-close PR:

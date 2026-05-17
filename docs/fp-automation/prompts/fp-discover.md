@@ -49,11 +49,23 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 ### 4. Clone and analyze the target repo
 
 - `git clone --depth=1 https://github.com/<target_repo>.git /tmp/target`.
-- Record the commit SHA as `target_ref` (full hash).
-- `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
-- If analyze fails: post the failure in a comment on the discovery PR
-  from step 2 with the error tail, set the campaign `status: blocked`
-  in the same PR, end.
+- Record the commit SHA as `target_ref` (full hash). Get it with
+  `git -C /tmp/target rev-parse HEAD`.
+- Run analyze **from inside the target repo** — the CLI operates on the
+  current working directory and writes results to `<cwd>/.truecourse/`:
+  ```
+  cd /tmp/target && \
+    node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm --no-stash --no-skills
+  ```
+  (`$TRUECOURSE_DIR` is the path the truecourse-ai/truecourse repo was
+  cloned to in this session — typically `/home/user/truecourse`.)
+- After analyze completes, read results from
+  `/tmp/target/.truecourse/LATEST.json`. The schema is `LatestSnapshot`
+  from `packages/core/src/types/snapshot.ts` — the field you care about
+  is `.violations[]` (each entry has `ruleKey`, file location, etc.).
+- If analyze fails (non-zero exit, or LATEST.json missing): post the
+  failure in a comment on the discovery PR from step 2 with the error
+  tail, set the campaign `status: blocked` in the same PR, end.
 
 ### 5. Triage violations
 
