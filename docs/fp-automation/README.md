@@ -393,7 +393,11 @@ One-time, before the first run:
    `fp-automation` with:
    - Network access: **Trusted** (default allowlist covers npm, GitHub,
      and the OSS repos we clone over HTTPS).
-   - Setup script: `pnpm install && pnpm build`.
+   - Setup script: **empty**. (Per the Claude Code on the web docs,
+     setup scripts run before the repo is cloned, so `pnpm install` /
+     `pnpm build` would fail with `ERR_PNPM_NO_PKG_MANIFEST`. pnpm is
+     already pre-installed in the environment; project deps run inside
+     the session per the prompt's first step.)
    - Environment variables: none required.
 
    The other two routines pick the existing `fp-automation` from the
