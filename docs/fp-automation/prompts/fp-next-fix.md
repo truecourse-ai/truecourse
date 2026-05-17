@@ -46,8 +46,10 @@ Run exactly one issue per invocation. Do **not** start a second.
 
 - `git clone https://github.com/<target_repo>.git /tmp/target`.
 - `git -C /tmp/target checkout <target_ref>`.
-- In truecourse: `pnpm install && pnpm build`.
-- `pnpm exec truecourse analyze /tmp/target --no-llm --output /tmp/analysis.json`.
+- In truecourse: `pnpm install && pnpm build:dist`. The dist build is
+  the artifact publish.yml ships to npm; we always analyze against this,
+  never `npx truecourse@…`. See "Hard constraints".
+- `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
 - Filter `/tmp/analysis.json` to violations with `rule_key == <rule_key>`.
   Cross-reference at least one of the URLs in `samples[].url`.
 - If no violations remain for this rule at this ref (upstream changed
@@ -146,15 +148,19 @@ If step 1 found no open `fp-fix` issues for the current campaign:
 1. Find the campaign in `docs/fp-automation/campaigns.yaml` with
    `status: in_progress` or `status: discovering`. There should be
    exactly one.
-2. **Do not** run analyze in this session. The "did we hit 90 %" check
-   happens after the release, in `fp-campaign-close`, against the
-   npm-published artifact — not against the local build.
-3. Open a campaign-close PR.
+2. Re-build truecourse from local source (with all merged fixes):
+   - `pnpm install && pnpm build:dist`.
+3. Re-clone the campaign's target at the recorded `baseline.target_ref`
+   to `/tmp/target` and run analyze against the freshly-built dist:
+   - `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/final.json`.
+4. Classify violations and compute final `tp`, `fp`, `tp_rate` using
+   the same rubric as fp-discover step 5.
+5. **If `tp_rate >= 0.90`** — campaign is done. Open a campaign-close PR:
    - Branch: `claude/fp-campaign-close/<owner>-<repo>`.
    - File changes:
      - `docs/fp-automation/campaigns.yaml`: set the campaign's
-       `status: verifying`. Do **not** fill `final.*` — that's
-       fp-campaign-close's job after the post-release analyze.
+       `status: done`. Fill `final.*` (analyzed_at, target_ref,
+       total_violations, tp, fp, tp_rate).
      - Patch-bump the version in all four required locations from
        CLAUDE.md:
        1. `tools/cli/package.json` — `version`
@@ -163,20 +169,21 @@ If step 1 found no open `fp-fix` issues for the current campaign:
        4. `tools/cli/src/index.ts` — the `.version("X.Y.Z")` call on
           the commander program
      - **No** fixture or visitor changes.
-   - Title: `chore(fp): release vX.Y.Z (verifying <owner>/<repo>)`.
+   - Title: `chore(fp): close <owner>/<repo> campaign, bump to vX.Y.Z`.
    - Labels: `fp-campaign-complete`.
    - Body: list merged fp-fix PRs from this campaign (search by label
-     `fp-target:<owner>-<repo>` + state merged) and the new version.
-     Note explicitly: "TP-rate verification happens after this PR
-     merges, in the fp-campaign-close routine, using the
-     npm-published version."
-   - End.
-
-Note: a single campaign can produce **multiple** campaign-close PRs
-(and therefore multiple version bumps) if the post-release verify
-finds the TP rate is still < 90 %. Each release ships real fixes;
-the campaign is only considered `done` when a post-release verify
-clears the 90 % gate.
+     `fp-target:<owner>-<repo>` + state merged), the before/after
+     TP-rate, and the new version. Note in the body that the TP rate
+     was measured against `node dist/cli.mjs` from the freshly-built
+     dist — the exact artifact publish.yml will ship.
+   - End. When this PR merges, fp-campaign-close pushes the tag and
+     fp-discover (firing on the same event) starts the next campaign.
+6. **If `tp_rate < 0.90`** — campaign continues. File one new fp-fix
+   issue per rule with FPs (same shape as discovery). Leave the
+   campaign's `status` as `in_progress`. **Do not** open a
+   campaign-close PR; no release is cut. The next fp-fix PR merge
+   will refire fp-next-fix to keep working through the new issues.
+   End.
 
 ## Refactor-required path
 
@@ -198,6 +205,10 @@ refactor.
 - One issue per session. Never start a second.
 - Never push outside `claude/`-prefixed branches.
 - Never run `truecourse analyze` without `--no-llm`.
+- **Never use `npx truecourse`, `npx -y truecourse@<…>`, or
+  `npm install truecourse`.** Always analyze with `node dist/cli.mjs`
+  from a fresh `pnpm build:dist`. The dist artifact is exactly what
+  publish.yml ships to npm, so it's the authoritative local invocation.
 - Never copy-paste OSS code — paraphrase only. Link the source by URL
   in the PR body.
 - Never change anything outside `packages/analyzer/src/rules/`,

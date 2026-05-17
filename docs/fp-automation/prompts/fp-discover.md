@@ -12,12 +12,12 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
 
 - The repository `truecourse-ai/truecourse` is cloned at the default
   branch.
-- The routine is **manual-only**: it fires from a **Run now** click in
-  the web UI. There is no GitHub trigger and no API trigger. A human
-  decides when to start a campaign (typically after reviewing the
-  previous campaign's outcome).
-- The next campaign to run is determined entirely by reading
-  `docs/fp-automation/campaigns.yaml` — no per-invocation parameters.
+- The routine fires either from a **Run now** click (first-time bootstrap
+  for a fresh repo) or from a GitHub event:
+  `pull_request.closed` on a campaign-close PR. In both cases the next
+  campaign to run is determined by reading
+  `docs/fp-automation/campaigns.yaml` — there are no per-invocation
+  parameters.
 
 ## Step-by-step
 
@@ -38,17 +38,24 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
   for it to merge — this PR is informational and can be merged at any
   time. Continue.
 
-### 3. Clone and analyze the target repo
+### 3. Build truecourse from local source
+
+- `pnpm install`.
+- `pnpm build:dist`. This produces `dist/cli.mjs`, the **same artifact**
+  that publish.yml ships to npm. Always use this — never `npx
+  truecourse@<...>` or `npm install truecourse`. See "Hard constraints"
+  below.
+
+### 4. Clone and analyze the target repo
 
 - `git clone --depth=1 https://github.com/<target_repo>.git /tmp/target`.
 - Record the commit SHA as `target_ref` (full hash).
-- In the truecourse working copy: `pnpm install && pnpm build`.
-- `pnpm exec truecourse analyze /tmp/target --no-llm --output /tmp/analysis.json`.
+- `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
 - If analyze fails: post the failure in a comment on the discovery PR
   from step 2 with the error tail, set the campaign `status: blocked`
   in the same PR, end.
 
-### 4. Triage violations
+### 5. Triage violations
 
 - Group violations by `rule_key`.
 - For each rule with at least one violation:
@@ -58,7 +65,7 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
      or **borderline** (could go either way).
   3. Compute the FP rate (FP count / sampled count).
 
-### 5. File one issue per rule with FPs
+### 6. File one issue per rule with FPs
 
 For each rule where FP rate ≥ 10 % (i.e. at least one clear FP out of
 the sample):
@@ -94,7 +101,7 @@ For rules where every sample is borderline (no clear FPs), do **not**
 file an issue. Instead, add a comment on the discovery PR from step 2
 listing the rule and the borderline cases for human triage.
 
-### 6. Update baseline in campaigns.yaml
+### 7. Update baseline in campaigns.yaml
 
 - Compute totals across **all** sampled violations (not just rules with
   FPs):
@@ -107,7 +114,7 @@ listing the rule and the borderline cases for human triage.
   `tp`, `fp`, `tp_rate`. Leave `status` as `discovering`.
 - Commit, push to the existing PR (do **not** open a new one).
 
-### 7. End
+### 8. End
 
 - Post a final comment on the discovery PR summarising: number of issues
   filed, baseline TP rate, target ref. Stop.
@@ -121,6 +128,12 @@ fp-next-fix; you do not need to fire it yourself.
 - One campaign per session. Never analyze a second repo.
 - Never push outside `claude/`-prefixed branches.
 - Never run `truecourse analyze` without `--no-llm`.
+- **Never use `npx truecourse`, `npx -y truecourse@<…>`, or
+  `npm install truecourse`.** Always analyze with `node dist/cli.mjs`
+  from a fresh `pnpm build:dist`. The dist artifact is exactly what
+  publish.yml ships to npm, so it's the authoritative local invocation —
+  using npm to install would either give us a stale published version
+  or introduce a layer of indirection for no benefit.
 - Never paste OSS code into issue bodies — link by URL only.
 - If anything is ambiguous (cannot pick a campaign, analyze output
   unparseable, etc.), comment on the discovery PR with the ambiguity
