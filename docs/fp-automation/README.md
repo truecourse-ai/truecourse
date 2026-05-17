@@ -32,8 +32,13 @@ For each target OSS repo:
 2. Triage violations into TPs / FPs.
 3. For every rule with at least one FP, file one GitHub issue labelled
    `fp-fix` describing the rule, the target repo, links to OSS snippets,
-   and the FP count.
-4. The fix loop consumes the open `fp-fix` issues one at a time:
+   and the FP count. Open a discovery PR labelled `fp-discover` that
+   updates `campaigns.yaml` with `status: discovering` + baseline
+   numbers. The user reviews and merges this PR when ready to start
+   the inner loop.
+4. **Merging the discovery PR** lands the baseline on main and fires
+   `fp-next-fix` (via its discovery-PR trigger). The fix loop then
+   consumes the open `fp-fix` issues one at a time:
    a. Paraphrase one FP-triggering snippet from the issue into the
       `sample-js-project-positive` (or `…-python-positive`) fixture — the
       positive project asserts **zero violations**, so adding FP code there
@@ -127,15 +132,27 @@ So an FP fix means:
                                     │  dist/cli.mjs --no-llm, │
                                     │  files fp-fix issues)   │
 ┌─────────────────────────┐         └────────────┬────────────┘
-│ N × GitHub issues       │◄─────────────────────┘
-│ label: fp-fix           │
-│ one per rule with FPs   │
+│ Discovery PR            │◄─────────────────────┘
+│ branch: claude/         │  baseline + status: discovering
+│   fp-discover/<repo>    │  PR labelled fp-discover
+│ label: fp-discover      │
+└──────────┬──────────────┘
+           │ you merge the discovery PR
+           │ (baseline lands on main + fires fp-next-fix)
+           ▼
+┌─────────────────────────┐
+│ N × GitHub issues       │
+│ label: fp-fix           │  (already filed by fp-discover,
+│ one per rule with FPs   │   before the discovery PR merged)
 └──────────┬──────────────┘
            │ oldest open issue
            ▼
 ┌──────────────────────────────────────────────────────────┐
 │ Routine: fp-next-fix                                     │
-│ trigger: pull_request.closed                             │
+│ trigger A (bootstrap): pull_request.closed               │
+│   Is merged=true, Head Branch starts-with                │
+│   claude/fp-discover/, Labels is-one-of fp-discover      │
+│ trigger B (continue):  pull_request.closed               │
 │   Is merged=true, Head Branch starts-with                │
 │   claude/fp-fix/, Labels is-one-of fp-fix                │
 │                                                          │
@@ -277,19 +294,30 @@ Steps the session takes:
    `fp-target:<owner>-<repo>` issue using the YAML schema above.
    Borderline cases get a comment on the issue, not auto-fix.
 7. Commit a `baseline.*` update to the same discovery PR.
-8. End. The next `fp-next-fix` invocation (manual the first time, then
-   automatic on each PR merge) consumes the issues.
+8. End. fp-next-fix fires automatically when the user merges the
+   discovery PR (via fp-next-fix's Trigger A — `Head Branch` starts
+   with `claude/fp-discover/`, `Labels` is one of `fp-discover`) and
+   then on every subsequent fp-fix PR merge (Trigger B).
 
 ### 2. `fp-next-fix` — consume one fp-fix issue on each merge
 
 | Field | Value |
 |---|---|
-| **Trigger** | GitHub event: `pull_request.closed` on `truecourse-ai/truecourse` |
-| **Filters** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` |
+| **Triggers (2)** | Both are `pull_request.closed` on `truecourse-ai/truecourse` |
+| **Trigger A — discovery PR merge (bootstraps inner loop)** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-discover/` AND `Labels` is one of `fp-discover` |
+| **Trigger B — fp-fix PR merge (continues inner loop)** | `Is merged` equals `true` AND `Head Branch` starts with `claude/fp-fix/` AND `Labels` is one of `fp-fix` |
 | **Repositories** | `truecourse-ai/truecourse` (target OSS repo cloned inside the session into `/tmp/target`) |
 | **Branch push policy** | Default — branches are `claude/fp-fix/<rule-key>`, which fits the `claude/`-prefix rule |
 | **Environment** | **Default** |
 | **Prompt** | Bootstrap pointer (see [Prompt convention](#triggers-three-routines)) → `docs/fp-automation/prompts/fp-next-fix.md` |
+
+Why two triggers: the inner loop kicks off when you merge the
+discovery PR (the moment baseline lands on main, and all fp-fix issues
+have been filed). From the first fp-fix PR onward, each merge fires
+the next session via Trigger B. This eliminates the manual "Run now
+on fp-next-fix" bootstrap step that the previous design required, and
+guarantees `campaigns.yaml`'s baseline numbers are on main before any
+fp-fix work begins.
 
 Steps the session takes:
 1. List open issues with label `fp-fix` (excluding `fp-in-progress`).
@@ -401,18 +429,22 @@ One-time, before the first run:
 4. **Bootstrap the first campaign** by clicking **Run now** on
    `fp-discover` (no campaign-close PR has merged yet, so the GitHub
    trigger has nothing to fire on). It reads `campaigns.yaml`, finds
-   the first pending campaign (today: `documenso/documenso`), and
-   files the initial `fp-fix` issues.
-5. **Start the inner loop** by clicking **Run now** on `fp-next-fix`
-   once any `fp-fix` issues exist. From this first PR onward, fp-fix
-   PR merges fire `fp-next-fix` automatically until the campaign
-   queue is empty.
+   the first pending campaign (today: `documenso/documenso`), files
+   the initial `fp-fix` issues, and opens the discovery PR labelled
+   `fp-discover`.
+5. **Review and merge the discovery PR.** Merging it lands the
+   baseline numbers on main *and* fires `fp-next-fix` (via its
+   discovery-PR trigger), kicking off the inner loop on the first
+   issue. From this first fp-fix PR onward, every fp-fix PR merge
+   fires `fp-next-fix` automatically until the campaign queue is
+   empty.
 6. **Outer loop is fully automatic**: when the queue empties,
    fp-next-fix re-analyzes against the freshly-built dist; if TP ≥ 90 %
    it opens a campaign-close PR. Merging that PR fires
    `fp-campaign-close` (tags + publishes) and `fp-discover` (starts
-   the next pending campaign) in parallel — no human action needed
-   between campaigns.
+   the next pending campaign's discovery) in parallel — and merging
+   *that* next discovery PR restarts the inner loop. No "Run now"
+   needed after the very first campaign.
 
 ## Acceptance criteria
 
