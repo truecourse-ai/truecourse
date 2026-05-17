@@ -152,6 +152,8 @@ To make sure the visitor fix doesn't over-correct and miss real bugs:
     negative-fixture file.
   - A "## Visitor change" section with a 2-3 sentence summary of what
     you changed and why.
+  - End the body with a line `cc @mushgev` so the reviewer gets a
+    notification email on PR creation.
 - Labels: `fp-fix` (this label must be on the PR — it's what fires the
   next routine invocation on merge).
 - Comment on the issue with the PR URL. Leave the issue open; it
@@ -199,7 +201,9 @@ If step 1 found no open `fp-fix` issues for the current campaign:
      `fp-target:<owner>-<repo>` + state merged), the before/after
      TP-rate, and the new version. Note in the body that the TP rate
      was measured against `node dist/cli.mjs` from the freshly-built
-     dist — the exact artifact publish.yml will ship.
+     dist — the exact artifact publish.yml will ship. End the body
+     with a line `cc @mushgev` so the reviewer gets an email on PR
+     creation.
    - End. When this PR merges, fp-campaign-close pushes the tag and
      fp-discover (firing on the same event) starts the next campaign.
 6. **If `tp_rate < 0.90`** — campaign continues. File one new fp-fix

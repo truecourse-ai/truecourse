@@ -35,6 +35,9 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
   in `docs/fp-automation/campaigns.yaml`.
 - Open a PR titled `chore(fp): start discovery for <owner>/<repo>`
   with body explaining you're starting a discovery run.
+- End the PR body with a line `cc @mushgev` — GitHub fires a
+  notification email on @mention regardless of authorship, so the
+  reviewer is alerted as soon as the PR appears.
 - **Apply label `fp-discover` to this PR.** This is what fires
   fp-next-fix when the PR merges, kicking off the inner loop. Without
   this label, the chain doesn't start automatically.

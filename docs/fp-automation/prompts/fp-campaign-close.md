@@ -32,7 +32,8 @@ the next pending campaign — you don't chain to it.
 - If any of the four disagree: do **not** push the tag. Open an issue
   on `truecourse-ai/truecourse` titled `[fp-campaign-close] version
   mismatch after merge` with the four observed values and the merge
-  commit SHA, and end.
+  commit SHA. End the issue body with `cc @mushgev` so the reviewer
+  is notified. End the session.
 
 ### 2. Push the tag
 
@@ -59,7 +60,7 @@ the next pending campaign — you don't chain to it.
 
 - **Tag push fails** (e.g. permissions): do not retry. Open an issue
   titled `[fp-campaign-close] tag push failed for v<version>` with
-  the error, end.
+  the error. End the issue body with `cc @mushgev`. End the session.
 - **Version mismatch across the four locations**: see step 1. Do not
   push; open the mismatch issue and end.
 
