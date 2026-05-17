@@ -1,0 +1,81 @@
+# FP-fix campaigns — source of truth for which repos we analyze, in what order, and the results.
+#
+# Owned by the fp-discover / fp-automation workflows. Humans may add new
+# entries or reorder; sessions update `status`, `baseline`, `final`, and
+# `notes`. Always read the latest from `main` — never trust a stale checkout.
+#
+# Status values:
+#   pending      — not yet started
+#   discovering  — analyze + issue filing in progress
+#   in_progress  — at least one fp-fix issue still open
+#   done         — final.tp_rate >= 0.90 and no open fp-fix issues
+#   skipped      — manually deprioritized; note explains why
+#
+# Each campaign also writes its open issues with label
+# `fp-target:<owner>-<repo>` so a session can find them without crawling
+# this file.
+
+campaigns:
+  # ---- Tier 1, suggested first three (from docs/outreach-targets.md) ----
+  - target_repo: documenso/documenso
+    tech_stack: [typescript, nextjs, prisma]
+    priority: 1
+    status: pending
+    baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    final:    { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    notes: []
+
+  - target_repo: triggerdotdev/trigger.dev
+    tech_stack: [typescript, monorepo, state-machines]
+    priority: 2
+    status: pending
+    baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    final:    { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    notes: []
+
+  - target_repo: All-Hands-AI/OpenHands
+    tech_stack: [python, react, cross-language]
+    priority: 3
+    status: pending
+    baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    final:    { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
+    notes: []
+
+  # ---- Tier 1, expansion after the first three land cleanly ----
+  - { target_repo: calcom/cal.com,            tech_stack: [typescript, nextjs, trpc, prisma], priority: 4,  status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: twentyhq/twenty,           tech_stack: [typescript, nestjs, react],        priority: 5,  status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: formbricks/formbricks,     tech_stack: [typescript, nextjs],               priority: 6,  status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: payloadcms/payload,        tech_stack: [typescript, nextjs, cms],          priority: 7,  status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: continuedev/continue,      tech_stack: [typescript, python, cross-language], priority: 8, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: run-llama/llama_index,     tech_stack: [python],                           priority: 9,  status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: reflex-dev/reflex,         tech_stack: [python, full-stack],               priority: 10, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: outline/outline,           tech_stack: [typescript, react, koa],           priority: 11, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: medusajs/medusa,           tech_stack: [typescript, node, commerce],       priority: 12, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: Aider-AI/aider,            tech_stack: [python, cli],                      priority: 13, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: litestar-org/litestar,     tech_stack: [python, asgi],                     priority: 14, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: supabase/supabase,         tech_stack: [typescript, monorepo, mega],       priority: 15, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+
+  # ---- Tier 1 Python — remaining entries from outreach-targets.md ----
+  - { target_repo: langchain-ai/langchain,    tech_stack: [python, llm-framework],            priority: 16, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: ["Massive monorepo — analyze a sub-package (e.g. langchain-community) rather than the whole repo."] }
+  - { target_repo: microsoft/autogen,         tech_stack: [python, multi-agent],              priority: 17, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: crewAIInc/crewAI,          tech_stack: [python, multi-agent],              priority: 18, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: stanfordnlp/dspy,          tech_stack: [python, ml-framework],             priority: 19, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+
+  # ---- Tier 2 — big frameworks (more eyeballs, harder to break through) ----
+  # Use #contributors / #dev channels; lead with a real PR or issue.
+  - { target_repo: nestjs/nest,               tech_stack: [typescript, node, framework],      priority: 20, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: nuxt/nuxt,                 tech_stack: [typescript, vue, framework],       priority: 21, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: withastro/astro,           tech_stack: [typescript, framework],            priority: 22, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: remix-run/remix,           tech_stack: [typescript, react, framework],     priority: 23, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: sveltejs/kit,              tech_stack: [javascript, svelte, framework],    priority: 24, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: trpc/trpc,                 tech_stack: [typescript, rpc, library],         priority: 25, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: drizzle-team/drizzle-orm,  tech_stack: [typescript, orm],                  priority: 26, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: better-auth/better-auth,   tech_stack: [typescript, auth],                 priority: 27, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: mastra-ai/mastra,          tech_stack: [typescript, ai-framework],         priority: 28, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: strapi/strapi,             tech_stack: [typescript, cms],                  priority: 29, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: directus/directus,         tech_stack: [typescript, cms],                  priority: 30, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: excalidraw/excalidraw,     tech_stack: [typescript, react, app],           priority: 31, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: fastapi/fastapi,           tech_stack: [python, asgi, framework],          priority: 32, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: pydantic/pydantic,         tech_stack: [python, validation],               priority: 33, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: home-assistant/core,       tech_stack: [python, app],                      priority: 34, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
+  - { target_repo: Chainlit/chainlit,         tech_stack: [python, ai-ui],                    priority: 35, status: pending, baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, final: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }, notes: [] }
