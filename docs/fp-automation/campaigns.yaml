@@ -24,7 +24,7 @@ campaigns:
   - target_repo: documenso/documenso
     tech_stack: [typescript, nextjs, prisma]
     priority: 1
-    status: pending
+    status: discovering
     baseline: { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
     final:    { analyzed_at: null, target_ref: null, total_violations: null, tp: null, fp: null, tp_rate: null }
     notes: []
