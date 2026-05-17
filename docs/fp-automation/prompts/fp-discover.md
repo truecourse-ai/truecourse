@@ -34,9 +34,14 @@ Run exactly one campaign per invocation. Do **not** loop across campaigns.
   `truecourse-ai/truecourse`, set the campaign's `status: discovering`
   in `docs/fp-automation/campaigns.yaml`.
 - Open a PR titled `chore(fp): start discovery for <owner>/<repo>`
-  with body explaining you're starting a discovery run. Do **not** wait
-  for it to merge — this PR is informational and can be merged at any
-  time. Continue.
+  with body explaining you're starting a discovery run.
+- **Apply label `fp-discover` to this PR.** This is what fires
+  fp-next-fix when the PR merges, kicking off the inner loop. Without
+  this label, the chain doesn't start automatically.
+- Do **not** wait for the PR to merge — the user merges it when
+  they're ready to start the inner loop. Continue with the analyze
+  and issue-filing steps below; the PR keeps getting commits pushed
+  to it.
 
 ### 3. Build truecourse from local source
 
