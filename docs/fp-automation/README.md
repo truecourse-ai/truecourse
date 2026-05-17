@@ -21,11 +21,14 @@ finishes, sessions update that file in the campaign-close PR.
 
 For each target OSS repo:
 
-1. `pnpm install && pnpm build:dist` in the truecourse working copy, then
-   `node dist/cli.mjs analyze /tmp/target --no-llm` (deterministic rules
-   only — keeps cost bounded). We always invoke the analyzer via the
-   freshly-built `dist/` artifact — same bytes publish.yml will ship to
-   npm. We never `npx truecourse` or `npm install truecourse`.
+1. `pnpm install && pnpm build:dist` in the truecourse working copy,
+   then `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs analyze
+   --no-llm --no-stash --no-skills` (the CLI operates on the cwd and
+   writes results to `<cwd>/.truecourse/LATEST.json` — there's no path
+   argument and no `--output` flag). Deterministic rules only — keeps
+   cost bounded. We always invoke via the freshly-built `dist/`
+   artifact — same bytes publish.yml will ship to npm. We never
+   `npx truecourse` or `npm install truecourse`.
 2. Triage violations into TPs / FPs.
 3. For every rule with at least one FP, file one GitHub issue labelled
    `fp-fix` describing the rule, the target repo, links to OSS snippets,
@@ -265,7 +268,10 @@ Steps the session takes:
    (produces `dist/cli.mjs`, byte-equal to what publish.yml would
    ship). We never analyze via `npx truecourse` or `npm install`.
 4. Clone the target repo at HEAD; record commit SHA as `target_ref`.
-5. `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
+5. `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm
+   --no-stash --no-skills`. Read results from
+   `/tmp/target/.truecourse/LATEST.json` (the `LatestSnapshot.violations[]`
+   array).
 6. Per rule with ≥ 1 violation: sample up to 10 violations, classify
    TP/FP. If FP rate ≥ 10 %, file an `fp-fix` +
    `fp-target:<owner>-<repo>` issue using the YAML schema above.
@@ -292,8 +298,10 @@ Steps the session takes:
 3. Parse the YAML block from the issue body. Clone target repo at
    `target_ref` to `/tmp/target`.
 4. `pnpm install && pnpm build:dist`, then
-   `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/analysis.json`.
-   Filter to this rule. (Always dist, never `npx truecourse`.)
+   `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm
+   --no-stash --no-skills`. Read `/tmp/target/.truecourse/LATEST.json`
+   and filter `.violations[]` to this rule. (Always dist, never
+   `npx truecourse`.)
 5. Re-confirm the FP still reproduces. If not (upstream fixed, or a
    previous fix already resolved it), close the issue with comment
    "no longer reproduces" and end.
@@ -318,9 +326,11 @@ Steps the session takes:
 
 1. `pnpm install && pnpm build:dist` to rebuild dist with all merged
    fixes on `main`.
-2. Re-clone target at `baseline.target_ref` and run
-   `node dist/cli.mjs analyze /tmp/target --no-llm --output /tmp/final.json`.
-   Compute TP rate.
+2. Re-clone target at `baseline.target_ref` to `/tmp/target`, then
+   `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs analyze
+   --no-llm --no-stash --no-skills`. Read
+   `/tmp/target/.truecourse/LATEST.json`; compute TP rate from
+   `.violations[]`.
 3. **If ≥ 90 %**: open a **campaign-close PR** on
    `claude/fp-campaign-close/<owner>-<repo>` containing:
    - `docs/fp-automation/campaigns.yaml` updated (`status: done`,
