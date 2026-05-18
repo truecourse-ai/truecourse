@@ -13,8 +13,10 @@ import { extractEnvFacts } from './spec-code-facts/env.js'
 import { emitExpressFacts } from './spec-code-facts/express.js'
 import { extractJsxFacts } from './spec-code-facts/jsx.js'
 import { SPEC_CODE_FACT_EXTRACTORS } from './spec-code-facts/metadata.js'
+import { extractNextjsFacts } from './spec-code-facts/nextjs.js'
 import { extractInfraConfigFacts } from './spec-code-facts/infra-config.js'
 import { extractPackageFacts } from './spec-code-facts/package-manifest.js'
+import { createCodeFactProjectContext } from './spec-code-facts/project-context.js'
 import { extractReactRouteFacts } from './spec-code-facts/react-router.js'
 import { extractSchemaFacts } from './spec-code-facts/schema.js'
 import { createStaticValueResolver } from './spec-code-facts/static-values.js'
@@ -41,6 +43,7 @@ export async function extractCodeFacts(rootDir: string): Promise<CodeFactExtract
   const errors: CodeFactExtractionError[] = []
   const files = discoverCodeFactInputs(resolvedRoot)
   const knownFiles = new Set(files.map((file) => normalizePath(resolve(file))))
+  const projectContext = createCodeFactProjectContext(resolvedRoot, files)
   const sourceUnits: SourceUnit[] = []
 
   for (const absPath of files) {
@@ -87,6 +90,7 @@ export async function extractCodeFacts(rootDir: string): Promise<CodeFactExtract
   for (const unit of sourceUnits) {
     try {
       extractFromSourceUnit(unit, staticValueResolver)
+      extractNextjsFacts(unit, projectContext)
     } catch (error) {
       unit.errors.push({ sourceFile: unit.sourceFile, message: error instanceof Error ? error.message : String(error) })
     }

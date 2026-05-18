@@ -84,12 +84,18 @@ describe('extractCodeFacts', () => {
   it('extracts statically visible Express request body fields and response statuses', async () => {
     const root = tempProject()
     writeFixture(root, 'src/api.ts', [
+      'import express from "express"',
       'const app = express()',
       'app.post("/users", (req, res) => {',
       '  if (!req.body.email) return res.status(400).json({ error: "email" })',
       '  return res.status(201).json({ id: "u1", email: req.body["email"] })',
       '})',
       'app.delete("/users/:id", (_req, res) => res.sendStatus(204))',
+      'const server = express()',
+      'server.get("/ready", readyHandler)',
+      'response.headers.get("retry-after")',
+      'searchParams.get("page")',
+      'new FormData().get("title")',
     ].join('\n'))
 
     const result = await extractCodeFacts(root)
@@ -101,6 +107,14 @@ describe('extractCodeFacts', () => {
       { method: 'POST', path: '/users', statusCode: 201 },
       { method: 'POST', path: '/users', statusCode: 400 },
       { method: 'DELETE', path: '/users/:id', statusCode: 204 },
+    ]))
+    expect(values<{ path: string }>(result.facts, 'api.route')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '/ready' }),
+    ]))
+    expect(values<{ path: string }>(result.facts, 'api.route')).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '/retry-after' }),
+      expect.objectContaining({ path: '/page' }),
+      expect.objectContaining({ path: '/title' }),
     ]))
   })
 
@@ -115,6 +129,12 @@ describe('extractCodeFacts', () => {
       '  ] }',
       '])',
       'export function App() {',
+      '  const isSaving = false',
+      '  const isOpen = true',
+      '  const onClose = () => undefined',
+      '  const handleClose = () => { if (!isSaving) { onClose() } }',
+      '  const handleDelete = async () => { await fetch("/api/articles", { method: "DELETE" }) }',
+      '  if (!isOpen) return null',
       '  return <main>',
       '    <Routes>',
       '      <Route path="/dashboard" element={<Dashboard />}>',
@@ -128,6 +148,11 @@ describe('extractCodeFacts', () => {
       '    <input id="email" name="email" type="email" required />',
       '    <label>Display name<input name="displayName" /></label>',
       '    <button type="submit">Save profile</button>',
+      '    <button type="button" onClick={handleDelete}>Delete</button>',
+      '    <button type="button" onClick={handleClose}>Cancel</button>',
+      '    <button type="button" onClick={onClose} aria-label="Close"></button>',
+      '    <label>Priority</label>',
+      '    <button type="button">1</button>',
       '    <p role="alert">Email is required</p>',
       '  </main>',
       '}',
@@ -154,8 +179,18 @@ describe('extractCodeFacts', () => {
     expect(values<{ tag: string; name?: string; id?: string; label?: string; required: boolean }>(result.facts, 'ui.form_field')).toEqual(expect.arrayContaining([
       expect.objectContaining({ tag: 'input', id: 'email', name: 'email', label: 'Email address', required: true }),
       expect.objectContaining({ tag: 'input', name: 'displayName', label: 'Display name', required: false }),
+      expect.objectContaining({ tag: 'label', label: 'Priority', required: false }),
     ]))
     expect(values<{ label: string; type?: string }>(result.facts, 'ui.button')).toContainEqual({ label: 'Save profile', type: 'submit' })
+    expect(values<{ action: string; handler?: string; method?: string; path?: string; guarded?: boolean }>(result.facts, 'ui.action')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'delete', handler: 'handleDelete', method: 'DELETE', path: '/api/articles' }),
+      expect.objectContaining({ action: 'close', handler: 'handleClose', guarded: true }),
+      expect.objectContaining({ action: 'close', handler: 'onClose', guarded: false }),
+    ]))
+    expect(values<{ event: string; handler: string; conditions: string[] }>(result.facts, 'ui.guard')).toEqual(expect.arrayContaining([
+      { event: 'close', handler: 'handleClose', conditions: ['!isSaving'] },
+    ]))
+    expect(values<{ controlledBy: string }>(result.facts, 'ui.modal')).toContainEqual({ controlledBy: 'isOpen' })
   })
 
   it('extracts statically resolvable composed React routes, labels, fields, and text', async () => {
@@ -221,6 +256,212 @@ describe('extractCodeFacts', () => {
       { text: 'Continue' },
     ]))
     expect(values<{ text: string }>(result.facts, 'ui.text')).not.toContainEqual({ text: 'email' })
+  })
+
+  it('extracts Next.js App Router and Pages Router API/UI facts', async () => {
+    const root = tempProject()
+    writeFixture(root, 'package.json', JSON.stringify({
+      dependencies: { next: '^15.0.0', react: '^19.0.0' },
+    }, null, 2))
+    writeFixture(root, 'app/api/users/[id]/route.ts', [
+      'import { NextResponse } from "next/server"',
+      'import { requireAuth } from "@/auth"',
+      'export async function GET(request: Request) {',
+      '  await requireAuth()',
+      '  const token = request.headers.get("authorization")',
+      '  const tab = request.nextUrl.searchParams.get("tab")',
+      '  return NextResponse.json({ ok: Boolean(token) }, { status: 200 })',
+      '}',
+      'export const POST = async (request: Request) => {',
+      '  const body = await request.json()',
+      '  const searchParams = request.nextUrl.searchParams',
+      '  const source = searchParams.get("source")',
+      '  const { displayName } = body',
+      '  if (!body.email) return NextResponse.json({ error: "email" }, { status: 400 })',
+      '  if (!body.url || !URL.canParse(body.url)) return NextResponse.json({ error: "url" }, { status: 400 })',
+      '  const userSchema = z.object({ website: z.string().url().optional() })',
+      '  userSchema.safeParse(body)',
+      '  await db.update(users).set({',
+      '    email: body["email"],',
+      '    displayName,',
+      '    updatedAt: new Date(),',
+      '    ...(body.website ? { website: body.website } : {}),',
+      '  })',
+      '  return Response.json({ id: "u1", email: body["email"], displayName }, { status: 201 })',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'app/webhooks/stripe/route.ts', [
+      'const stripeHandler = (_request: Request) => {',
+      '  return new Response(null, { status: 204 })',
+      '}',
+      'export const POST = stripeHandler',
+    ].join('\n'))
+    writeFixture(root, 'app/(dashboard)/settings/page.tsx', [
+      'export default function SettingsPage() {',
+      '  return <h1>Settings</h1>',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'middleware.ts', [
+      'import { clerkMiddleware } from "@clerk/nextjs/server"',
+      'export default clerkMiddleware(async (auth, request) => {',
+      '  await auth.protect()',
+      '})',
+    ].join('\n'))
+    writeFixture(root, 'pages/account/[tab].tsx', [
+      'const AccountTab = () => <main>Account tab</main>',
+      'export default AccountTab',
+    ].join('\n'))
+    writeFixture(root, 'pages/api/invites/[token].ts', [
+      'export default function handler(req, res) {',
+      '  switch (req.method) {',
+      '    case "POST": {',
+      '      if (!req.body.email) return res.status(400).json({ error: "email" })',
+      '      return res.status(201).json({ token: req.body["token"] })',
+      '    }',
+      '    default:',
+      '      return res.status(405).end()',
+      '  }',
+      '}',
+    ].join('\n'))
+
+    const result = await extractCodeFacts(root)
+    expect(result.errors).toEqual([])
+
+    expect(values<{ method: string; path: string; framework?: string; router?: string }>(result.facts, 'api.route')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'GET', path: '/api/users/:id', framework: 'nextjs', router: 'app' }),
+      expect.objectContaining({ method: 'POST', path: '/api/users/:id', framework: 'nextjs', router: 'app' }),
+      expect.objectContaining({ method: 'POST', path: '/webhooks/stripe', framework: 'nextjs', router: 'app' }),
+      expect.objectContaining({ method: 'POST', path: '/api/invites/:token', framework: 'nextjs', router: 'pages' }),
+    ]))
+    expect(values<{ method: string; path: string; statusCode: number }>(result.facts, 'api.response.status')).toEqual(expect.arrayContaining([
+      { method: 'GET', path: '/api/users/:id', statusCode: 200 },
+      { method: 'POST', path: '/api/users/:id', statusCode: 201 },
+      { method: 'POST', path: '/api/users/:id', statusCode: 400 },
+      { method: 'POST', path: '/webhooks/stripe', statusCode: 204 },
+      { method: 'POST', path: '/api/invites/:token', statusCode: 201 },
+      { method: 'POST', path: '/api/invites/:token', statusCode: 400 },
+    ]))
+    expect(values<{ method: string; path: string; name: string }>(result.facts, 'api.request.field')).toEqual(expect.arrayContaining([
+      { method: 'POST', path: '/api/users/:id', name: 'displayName' },
+      { method: 'POST', path: '/api/users/:id', name: 'email' },
+      { method: 'POST', path: '/api/invites/:token', name: 'email' },
+      { method: 'POST', path: '/api/invites/:token', name: 'token' },
+    ]))
+    expect(values<{ method: string; path: string; name: string; required?: boolean; format?: string; failureStatus?: number; source: string }>(result.facts, 'api.validation.field')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'POST', path: '/api/users/:id', name: 'email', required: true, failureStatus: 400, source: 'manual-guard' }),
+      expect.objectContaining({ method: 'POST', path: '/api/users/:id', name: 'url', required: true, format: 'url', failureStatus: 400, source: 'manual-guard' }),
+      expect.objectContaining({ method: 'POST', path: '/api/users/:id', name: 'website', required: false, format: 'url', source: 'zod' }),
+      expect.objectContaining({ method: 'POST', path: '/api/invites/:token', name: 'email', required: true, failureStatus: 400, source: 'manual-guard' }),
+    ]))
+    expect(values<{ method: string; path: string; operation: string; entity?: string; field: string }>(result.facts, 'api.mutation.field')).toEqual(expect.arrayContaining([
+      { method: 'POST', path: '/api/users/:id', operation: 'update', entity: 'users', field: 'displayName' },
+      { method: 'POST', path: '/api/users/:id', operation: 'update', entity: 'users', field: 'email' },
+      { method: 'POST', path: '/api/users/:id', operation: 'update', entity: 'users', field: 'updatedAt' },
+      { method: 'POST', path: '/api/users/:id', operation: 'update', entity: 'users', field: 'website' },
+    ]))
+    expect(values<{ method: string; path: string; name: string }>(result.facts, 'api.query.param')).toEqual(expect.arrayContaining([
+      { method: 'GET', path: '/api/users/:id', name: 'tab' },
+      { method: 'POST', path: '/api/users/:id', name: 'source' },
+    ]))
+    expect(values<{ signal?: string; route?: string; source: string }>(result.facts, 'auth.signal')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ route: '/api/users/:id', source: 'guard-call' }),
+      expect.objectContaining({ route: '/api/users/:id', source: 'header-check' }),
+      expect.objectContaining({ signal: expect.stringContaining('clerkMiddleware'), source: 'middleware' }),
+      expect.objectContaining({ signal: 'auth.protect()', source: 'guard-call' }),
+    ]))
+    expect(values<{ path: string; componentName?: string; framework?: string; router?: string }>(result.facts, 'ui.route')).toEqual(expect.arrayContaining([
+      { path: '/settings', componentName: 'SettingsPage', framework: 'nextjs', router: 'app' },
+      { path: '/account/:tab', componentName: 'AccountTab', framework: 'nextjs', router: 'pages' },
+    ]))
+  })
+
+  it('only extracts Next.js facts inside detected Next.js project roots', async () => {
+    const root = tempProject()
+    writeFixture(root, 'package.json', JSON.stringify({
+      workspaces: ['apps/*', 'packages/*'],
+      dependencies: { next: '^15.0.0' },
+    }, null, 2))
+    writeFixture(root, 'app/api/root/route.ts', [
+      'export function GET() {',
+      '  return new Response(null, { status: 204 })',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'packages/util/package.json', JSON.stringify({
+      dependencies: { react: '^19.0.0' },
+    }, null, 2))
+    writeFixture(root, 'packages/util/app/api/ghost/route.ts', [
+      'export function GET() {',
+      '  return new Response(null, { status: 204 })',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'apps/web/package.json', JSON.stringify({
+      dependencies: { react: '^19.0.0' },
+    }, null, 2))
+    writeFixture(root, 'apps/web/next.config.js', 'export default {}\n')
+    writeFixture(root, 'apps/web/pages/api/ping.ts', [
+      'export default function handler(req, res) {',
+      '  if (req.method === "POST") return res.status(201).json({ ok: true })',
+      '  return res.status(405).end()',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'apps/plain/pages/api/nope.ts', [
+      'export default function handler(req, res) {',
+      '  if (req.method === "POST") return res.status(201).json({ ok: true })',
+      '}',
+    ].join('\n'))
+
+    const result = await extractCodeFacts(root)
+    expect(result.errors).toEqual([])
+
+    const nextRoutes = values<{ method: string; path: string; framework?: string; router?: string }>(result.facts, 'api.route')
+      .filter((route) => route.framework === 'nextjs')
+    expect(nextRoutes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'GET', path: '/api/root', router: 'app' }),
+      expect.objectContaining({ method: 'POST', path: '/api/ping', router: 'pages' }),
+    ]))
+    expect(nextRoutes.some((route) => route.path === '/api/ghost')).toBe(false)
+    expect(nextRoutes.some((route) => route.path === '/api/nope')).toBe(false)
+  })
+
+  it('does not infer framework facts from unbound generic names', async () => {
+    const root = tempProject()
+    writeFixture(root, 'src/fake-express.ts', [
+      'const app = { get: (_path: string, _handler: unknown) => undefined }',
+      'const router = { get: (_path: string, _handler: unknown) => undefined }',
+      'app.get("/fake-app", handler)',
+      'router.get("/fake-router", handler)',
+    ].join('\n'))
+    writeFixture(root, 'src/FakeRoutes.tsx', [
+      'export function FakeRoutes() {',
+      '  return <Route path="/fake-route" element={<Fake />} />',
+      '}',
+    ].join('\n'))
+    writeFixture(root, 'src/fake-cli.ts', [
+      'class Command {',
+      '  name(_value: string) { return this }',
+      '  command(_value: string) { return this }',
+      '  action(_handler: unknown) { return this }',
+      '}',
+      'const program = new Command()',
+      'program.name("fake").command("run").action(handler)',
+    ].join('\n'))
+    writeFixture(root, 'src/schema.ts', [
+      'const pgTable = (name: string) => name',
+      'export const fake = pgTable("fake_table")',
+    ].join('\n'))
+    writeFixture(root, 'src/not-a-test.ts', [
+      'describe("fake suite", () => {',
+      '  it("fake case", () => {})',
+      '})',
+    ].join('\n'))
+
+    const result = await extractCodeFacts(root)
+    expect(result.errors).toEqual([])
+    expect(values<{ path: string }>(result.facts, 'api.route').some((route) => route.path.startsWith('/fake'))).toBe(false)
+    expect(values<{ path: string }>(result.facts, 'ui.route').some((route) => route.path === '/fake-route')).toBe(false)
+    expect(values<{ fullName: string }>(result.facts, 'cli.command').some((command) => command.fullName === 'fake run')).toBe(false)
+    expect(values<{ name: string }>(result.facts, 'data.table').some((table) => table.name === 'fake_table')).toBe(false)
+    expect(values<{ name: string }>(result.facts, 'test.case').some((testCase) => testCase.name === 'fake case')).toBe(false)
   })
 
   it('extracts package manifest facts from root and nested package.json files', async () => {
@@ -405,7 +646,11 @@ describe('extractCodeFacts', () => {
     const root = tempProject()
     writeFixture(root, '.gitignore', 'ignored-by-git.ts\n')
     writeFixture(root, '.truecourseignore', 'ignored-by-truecourse.ts\n')
-    writeFixture(root, 'src/index.ts', 'app.get("/ok", handler)\n')
+    writeFixture(root, 'src/index.ts', [
+      'import express from "express"',
+      'const app = express()',
+      'app.get("/ok", handler)',
+    ].join('\n'))
     writeFixture(root, 'ignored-by-git.ts', 'app.get("/hidden-git", handler)\n')
     writeFixture(root, 'ignored-by-truecourse.ts', 'app.get("/hidden-truecourse", handler)\n')
 

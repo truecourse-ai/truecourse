@@ -13,6 +13,7 @@ export const EXTRACTORS = {
   testHint: { name: 'test-hint-extractor', version: '1.0.0' },
   schema: { name: 'schema-fact-extractor', version: '1.0.0' },
   infraConfig: { name: 'infra-config-extractor', version: '1.0.0' },
+  nextjs: { name: 'nextjs-route-extractor', version: '1.0.0' },
 } satisfies Record<string, ExtractorMetadata>
 
 export const SPEC_CODE_FACT_EXTRACTORS = [
@@ -28,4 +29,5 @@ export const SPEC_CODE_FACT_EXTRACTORS = [
   EXTRACTORS.testHint,
   EXTRACTORS.schema,
   EXTRACTORS.infraConfig,
+  EXTRACTORS.nextjs,
 ]

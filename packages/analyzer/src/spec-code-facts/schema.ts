@@ -8,8 +8,12 @@ import { pushFact } from './utils.js'
 
 function parserFor(sourceFile: string, content: string): (() => { tables: TableInfo[]; relations: RelationInfo[] }) | null {
   if (basename(sourceFile) === 'schema.prisma') return () => parsePrismaSchema(content)
-  if (/\b(?:pgTable|mysqlTable|sqliteTable)\s*\(/.test(content)) return () => parseDrizzleSchema(content)
-  if (sourceFile.endsWith('.py') && content.includes('__tablename__')) return () => parseSqlAlchemySchema(content)
+  if (/\b(?:from|require\s*\()\s*['"]drizzle-orm(?:\/|['"])/.test(content) && /\b(?:pgTable|mysqlTable|sqliteTable)\s*\(/.test(content)) {
+    return () => parseDrizzleSchema(content)
+  }
+  if (sourceFile.endsWith('.py') && /\b(?:from\s+sqlalchemy\b|import\s+sqlalchemy\b)/.test(content) && content.includes('__tablename__')) {
+    return () => parseSqlAlchemySchema(content)
+  }
   return null
 }
 

@@ -21,6 +21,11 @@ export interface SourceUnit {
   errors: CodeFactExtractionError[]
 }
 
+export interface CodeFactProjectContext {
+  packageRoots: Set<string>
+  nextjsProjectRoots: Set<string>
+}
+
 export interface RouteRegistration {
   sourceFile: string
   sourceRange: SourceRange
@@ -49,5 +54,6 @@ export interface FileRouteModel {
   routes: RouteRegistration[]
   mounts: RouterMount[]
   imports: ImportRef[]
+  appNames: Set<string>
   routerNames: Set<string>
 }

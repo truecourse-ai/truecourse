@@ -3,7 +3,58 @@ import { jsxAttributeValue, jsxAttrs, jsxTagName } from './jsx-helpers.js'
 import { EXTRACTORS } from './metadata.js'
 import type { StaticValueResolver } from './static-values.js'
 import type { SourceUnit } from './types.js'
-import { expressionName, joinRoutePath, pushFact, rangeOf, stringLiteralValue, textOfName } from './utils.js'
+import { joinRoutePath, pushFact, rangeOf, stringLiteralValue, textOfName } from './utils.js'
+
+interface ReactRouterBindingEvidence {
+  routeComponentNames: Set<string>
+  createBrowserRouterNames: Set<string>
+  namespaceNames: Set<string>
+}
+
+function isReactRouterModule(source: string): boolean {
+  return source === 'react-router' || source === 'react-router-dom'
+}
+
+function collectReactRouterBindingEvidence(unit: SourceUnit): ReactRouterBindingEvidence {
+  const evidence: ReactRouterBindingEvidence = {
+    routeComponentNames: new Set(),
+    createBrowserRouterNames: new Set(),
+    namespaceNames: new Set(),
+  }
+
+  for (const statement of unit.ast.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
+    if (!isReactRouterModule(statement.moduleSpecifier.text)) continue
+
+    const clause = statement.importClause
+    if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+      evidence.namespaceNames.add(clause.namedBindings.name.text)
+    }
+    if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+      for (const element of clause.namedBindings.elements) {
+        const importedName = (element.propertyName ?? element.name).text
+        if (importedName === 'Route') evidence.routeComponentNames.add(element.name.text)
+        if (importedName === 'createBrowserRouter') evidence.createBrowserRouterNames.add(element.name.text)
+      }
+    }
+  }
+
+  return evidence
+}
+
+function isRouteTag(tagName: string, evidence: ReactRouterBindingEvidence): boolean {
+  if (evidence.routeComponentNames.has(tagName)) return true
+  const [namespace, member] = tagName.split('.')
+  return member === 'Route' && Boolean(namespace && evidence.namespaceNames.has(namespace))
+}
+
+function isCreateBrowserRouterCall(node: ts.Expression, evidence: ReactRouterBindingEvidence): boolean {
+  if (ts.isIdentifier(node)) return evidence.createBrowserRouterNames.has(node.text)
+  if (ts.isPropertyAccessExpression(node) && node.name.text === 'createBrowserRouter' && ts.isIdentifier(node.expression)) {
+    return evidence.namespaceNames.has(node.expression.text)
+  }
+  return false
+}
 
 function routePathFromJsxAttr(
   unit: SourceUnit,
@@ -29,12 +80,21 @@ function componentNameFromElementAttr(attr: ts.JsxAttribute | undefined): string
 }
 
 export function extractReactRouteFacts(unit: SourceUnit, resolver?: StaticValueResolver): void {
+  const bindingEvidence = collectReactRouterBindingEvidence(unit)
+  if (
+    bindingEvidence.routeComponentNames.size === 0
+    && bindingEvidence.createBrowserRouterNames.size === 0
+    && bindingEvidence.namespaceNames.size === 0
+  ) {
+    return
+  }
+
   const emit = (node: ts.Node, value: Record<string, unknown>): void => {
     pushFact(unit.facts, unit.sourceFile, rangeOf(unit.ast, node), 'ui.route', 'route.exists', value, EXTRACTORS.react)
   }
 
   const visitJsxRoutes = (node: ts.Node, parentPath = ''): void => {
-    if (ts.isJsxElement(node) && jsxTagName(node.openingElement) === 'Route') {
+    if (ts.isJsxElement(node) && isRouteTag(jsxTagName(node.openingElement), bindingEvidence)) {
       const attrs = jsxAttrs(node.openingElement)
       const route = routePathFromJsxAttr(unit, attrs, resolver)
       if (!route.index && attrs.has('path') && route.path === undefined) return
@@ -49,7 +109,7 @@ export function extractReactRouteFacts(unit: SourceUnit, resolver?: StaticValueR
       return
     }
 
-    if (ts.isJsxSelfClosingElement(node) && jsxTagName(node) === 'Route') {
+    if (ts.isJsxSelfClosingElement(node) && isRouteTag(jsxTagName(node), bindingEvidence)) {
       const attrs = jsxAttrs(node)
       const route = routePathFromJsxAttr(unit, attrs, resolver)
       if (!route.index && attrs.has('path') && route.path === undefined) return
@@ -115,7 +175,7 @@ export function extractReactRouteFacts(unit: SourceUnit, resolver?: StaticValueR
   }
 
   const visitObjectRoutes = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && expressionName(node.expression) === 'createBrowserRouter') {
+    if (ts.isCallExpression(node) && isCreateBrowserRouterCall(node.expression, bindingEvidence)) {
       const routesArg = node.arguments[0]
       if (routesArg && ts.isArrayLiteralExpression(routesArg)) {
         for (const route of routesArg.elements) {

@@ -15,10 +15,78 @@ import {
 
 const ROUTE_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
 
-function isRouterFactory(node: ts.Expression): boolean {
+interface ExpressBindingEvidence {
+  expressNames: Set<string>
+  expressNamespaceNames: Set<string>
+  routerFactoryNames: Set<string>
+}
+
+function isRequireExpress(node: ts.Expression | undefined): boolean {
+  return Boolean(
+    node
+    && ts.isCallExpression(node)
+    && ts.isIdentifier(node.expression)
+    && node.expression.text === 'require'
+    && stringLiteralValue(node.arguments[0]) === 'express',
+  )
+}
+
+function collectExpressBindingEvidence(unit: SourceUnit): ExpressBindingEvidence {
+  const evidence: ExpressBindingEvidence = {
+    expressNames: new Set(),
+    expressNamespaceNames: new Set(),
+    routerFactoryNames: new Set(),
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text === 'express') {
+      const clause = node.importClause
+      if (clause?.name) evidence.expressNames.add(clause.name.text)
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+        evidence.expressNamespaceNames.add(clause.namedBindings.name.text)
+      }
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const element of clause.namedBindings.elements) {
+          const importedName = (element.propertyName ?? element.name).text
+          if (importedName === 'Router') evidence.routerFactoryNames.add(element.name.text)
+        }
+      }
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer && isRequireExpress(node.initializer)) {
+      if (ts.isIdentifier(node.name)) {
+        evidence.expressNames.add(node.name.text)
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name)) continue
+          const importedName = element.propertyName && ts.isIdentifier(element.propertyName)
+            ? element.propertyName.text
+            : element.name.text
+          if (importedName === 'Router') evidence.routerFactoryNames.add(element.name.text)
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(unit.ast)
+  return evidence
+}
+
+function isRouterFactory(node: ts.Expression, evidence: ExpressBindingEvidence): boolean {
   if (!ts.isCallExpression(node)) return false
   const parts = calleeParts(node.expression)
-  return parts.join('.') === 'express.Router' || parts.join('.') === 'Router'
+  if (parts.length === 1) return evidence.routerFactoryNames.has(parts[0]!)
+  return parts.length === 2
+    && parts[1] === 'Router'
+    && (evidence.expressNames.has(parts[0]!) || evidence.expressNamespaceNames.has(parts[0]!))
+}
+
+function isExpressFactory(node: ts.Expression, evidence: ExpressBindingEvidence): boolean {
+  if (!ts.isCallExpression(node)) return false
+  const parts = calleeParts(node.expression)
+  return parts.length === 1 && evidence.expressNames.has(parts[0]!)
 }
 
 function getCallTargetAndMethod(node: ts.CallExpression): { target: string; method: string } | null {
@@ -126,12 +194,16 @@ function resolveImportPath(fromFile: string, specifier: string, knownFiles: Set<
 }
 
 function collectExpressModel(unit: SourceUnit, knownFiles: Set<string>): FileRouteModel {
+  const bindingEvidence = collectExpressBindingEvidence(unit)
   const model: FileRouteModel = {
     routes: [],
     mounts: [],
     imports: [],
-    routerNames: new Set(['router']),
+    appNames: new Set(),
+    routerNames: new Set(),
   }
+
+  const isRouteTarget = (target: string): boolean => model.appNames.has(target) || model.routerNames.has(target)
 
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -147,8 +219,12 @@ function collectExpressModel(unit: SourceUnit, knownFiles: Set<string>): FileRou
       }
     }
 
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isRouterFactory(node.initializer)) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isRouterFactory(node.initializer, bindingEvidence)) {
       model.routerNames.add(node.name.text)
+    }
+
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isExpressFactory(node.initializer, bindingEvidence)) {
+      model.appNames.add(node.name.text)
     }
 
     if (ts.isCallExpression(node)) {
@@ -157,7 +233,7 @@ function collectExpressModel(unit: SourceUnit, knownFiles: Set<string>): FileRou
         const { target, method } = targetAndMethod
         const firstArg = node.arguments[0]
 
-        if (ROUTE_METHODS.has(method) && firstArg) {
+        if (ROUTE_METHODS.has(method) && firstArg && isRouteTarget(target)) {
           const path = stringLiteralValue(firstArg)
           if (path) {
             const handlerName = routeHandlerName(node.arguments)
@@ -176,7 +252,7 @@ function collectExpressModel(unit: SourceUnit, knownFiles: Set<string>): FileRou
           }
         }
 
-        if (method === 'use' && firstArg) {
+        if (method === 'use' && firstArg && isRouteTarget(target)) {
           const prefix = stringLiteralValue(firstArg)
           const secondArg = node.arguments[1]
           const routerRef = secondArg ? expressionName(secondArg) : undefined
@@ -218,7 +294,7 @@ export function emitExpressFacts(units: SourceUnit[], knownFiles: Set<string>): 
   }
 
   for (const [sourceFile, model] of models) {
-    addPrefix(sourceFile, 'app', '')
+    for (const appName of model.appNames) addPrefix(sourceFile, appName, '')
     for (const routerName of model.routerNames) addPrefix(sourceFile, routerName, '')
   }
 
@@ -234,9 +310,7 @@ export function emitExpressFacts(units: SourceUnit[], knownFiles: Set<string>): 
           if (imported) {
             const importedUnit = fileByAbs.get(normalizePath(imported.targetFile))
             const importedModel = importedUnit ? models.get(importedUnit.sourceFile) : undefined
-            const targetRouters = importedModel && importedModel.routerNames.size > 0
-              ? [...importedModel.routerNames]
-              : ['router']
+            const targetRouters = importedModel ? [...importedModel.routerNames] : []
             if (importedUnit) {
               for (const routerName of targetRouters) {
                 changed = addPrefix(importedUnit.sourceFile, routerName, combinedPrefix) || changed

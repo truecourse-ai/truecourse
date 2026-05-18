@@ -38,6 +38,11 @@ interface RootModel {
   descriptions: string[]
 }
 
+interface CommanderBindingEvidence {
+  commandConstructorNames: Set<string>
+  namespaceNames: Set<string>
+}
+
 function normalizeSpaces(value: string): string {
   return value.trim().replace(/\s+/g, ' ')
 }
@@ -83,11 +88,80 @@ function variableNameFromDeclarationName(name: ts.BindingName): string | undefin
   return ts.isIdentifier(name) ? name.text : undefined
 }
 
-function isNewCommand(node: ts.Node): boolean {
-  return ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Command'
+function isCommanderModule(source: string): boolean {
+  return source === 'commander'
+}
+
+function isRequireCommander(node: ts.Expression | undefined): boolean {
+  return Boolean(
+    node
+    && ts.isCallExpression(node)
+    && ts.isIdentifier(node.expression)
+    && node.expression.text === 'require'
+    && node.arguments[0]
+    && ts.isStringLiteralLike(node.arguments[0])
+    && isCommanderModule(node.arguments[0].text),
+  )
+}
+
+function collectCommanderBindingEvidence(unit: SourceUnit): CommanderBindingEvidence {
+  const evidence: CommanderBindingEvidence = {
+    commandConstructorNames: new Set(),
+    namespaceNames: new Set(),
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && isCommanderModule(node.moduleSpecifier.text)) {
+      const clause = node.importClause
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+        evidence.namespaceNames.add(clause.namedBindings.name.text)
+      }
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const element of clause.namedBindings.elements) {
+          const importedName = (element.propertyName ?? element.name).text
+          if (importedName === 'Command') evidence.commandConstructorNames.add(element.name.text)
+        }
+      }
+    }
+
+    if (ts.isVariableDeclaration(node) && node.initializer && isRequireCommander(node.initializer)) {
+      if (ts.isIdentifier(node.name)) {
+        evidence.namespaceNames.add(node.name.text)
+      } else if (ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name)) continue
+          const importedName = element.propertyName && ts.isIdentifier(element.propertyName)
+            ? element.propertyName.text
+            : element.name.text
+          if (importedName === 'Command') evidence.commandConstructorNames.add(element.name.text)
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit)
+  }
+
+  visit(unit.ast)
+  return evidence
+}
+
+function isNewCommand(node: ts.Node, evidence: CommanderBindingEvidence): boolean {
+  if (!ts.isNewExpression(node)) return false
+  if (ts.isIdentifier(node.expression)) return evidence.commandConstructorNames.has(node.expression.text)
+  if (
+    ts.isPropertyAccessExpression(node.expression)
+    && node.expression.name.text === 'Command'
+    && ts.isIdentifier(node.expression.expression)
+  ) {
+    return evidence.namespaceNames.has(node.expression.expression.text)
+  }
+  return false
 }
 
 export function extractCliFacts(unit: SourceUnit, resolver: StaticValueResolver): void {
+  const bindingEvidence = collectCommanderBindingEvidence(unit)
+  if (bindingEvidence.commandConstructorNames.size === 0 && bindingEvidence.namespaceNames.size === 0) return
+
   const rootRefs = new Set<string>()
   const commandRefs = new Map<string, CommandModel>()
   const commandsByCall = new Map<string, CommandModel>()
@@ -173,7 +247,7 @@ export function extractCliFacts(unit: SourceUnit, resolver: StaticValueResolver)
   const visit = (node: ts.Node): void => {
     if (ts.isVariableDeclaration(node) && node.initializer) {
       const varName = variableNameFromDeclarationName(node.name)
-      if (varName && isNewCommand(node.initializer)) {
+      if (varName && isNewCommand(node.initializer, bindingEvidence)) {
         rootRefs.add(varName)
       }
       if (varName) {

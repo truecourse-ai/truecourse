@@ -4,14 +4,14 @@ import type { SourceUnit } from './types.js'
 import { expressionName, pushFact, rangeOf } from './utils.js'
 
 export function isAuthName(name: string): boolean {
-  return /(auth|authenticated|requireAuth|requireRole|role|permission|guard|jwt|session|admin|authorize|ensureUser)/i.test(name)
+  return /(auth|authenticated|requireAuth|requireRole|role|permission|guard|jwt|session|admin|authorize|ensureUser|protect|clerk|middleware)/i.test(name)
 }
 
 export function extractAuthFacts(unit: SourceUnit): void {
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const name = expressionName(node.expression)
-      if (name && /^(requireAuth|requireRole|authorize|ensureAuth|requirePermission|canAccess)$/i.test(name)) {
+      if (name && /^(requireAuth|requireRole|authorize|ensureAuth|requirePermission|canAccess|protect|clerkMiddleware)$/i.test(name)) {
         const args = node.arguments.map((arg) => arg.getText(unit.ast))
         const signal = node.getText(unit.ast)
         pushFact(
@@ -24,6 +24,8 @@ export function extractAuthFacts(unit: SourceUnit): void {
             signal,
             source: name.toLowerCase().includes('role')
               ? 'role-check'
+              : name.toLowerCase().includes('clerk')
+                ? 'middleware'
               : name.toLowerCase().includes('permission')
                 ? 'permission-check'
                 : name.toLowerCase().includes('access')

@@ -3,6 +3,27 @@ import { EXTRACTORS } from './metadata.js'
 import type { SourceUnit } from './types.js'
 import { calleeParts, pushFact, rangeOf, stringLiteralValue } from './utils.js'
 
+const TEST_FRAMEWORK_MODULES = new Set([
+  'vitest',
+  'jest',
+  '@jest/globals',
+  'node:test',
+  '@playwright/test',
+])
+
+function isTestSourceFile(sourceFile: string): boolean {
+  return /(^|\/)(__tests__|tests?)\//i.test(sourceFile)
+    || /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(sourceFile)
+}
+
+function importsTestFramework(unit: SourceUnit): boolean {
+  for (const statement of unit.ast.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
+    if (TEST_FRAMEWORK_MODULES.has(statement.moduleSpecifier.text)) return true
+  }
+  return false
+}
+
 function isTestCallName(node: ts.Expression): { kind: 'describe' | 'test' } | null {
   const parts = calleeParts(node)
   const base = parts[0]
@@ -25,6 +46,8 @@ function collectStringReferences(node: ts.Node): string[] {
 }
 
 export function extractTestFacts(unit: SourceUnit): void {
+  if (!isTestSourceFile(unit.sourceFile) && !importsTestFramework(unit)) return
+
   const suitePath: string[] = []
 
   const visit = (node: ts.Node): void => {
