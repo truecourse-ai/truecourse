@@ -19,6 +19,7 @@ export const AnalyzeRepoSchema = z.object({
    *  only way to opt out for a single run. */
   skipGit: z.boolean().optional().default(false),
   specCompliance: z.boolean().optional(),
+  specComplianceOnly: z.boolean().optional(),
   specs: z.array(z.string().min(1)).optional(),
   showSatisfied: z.boolean().optional(),
   noLlm: z.boolean().optional(),

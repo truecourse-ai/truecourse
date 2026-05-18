@@ -67,6 +67,7 @@ export interface AnalyzeCoreOptions {
   enabledCategoriesOverride?: string[];
   enableLlmRulesOverride?: boolean;
   specCompliance?: boolean;
+  specComplianceOnly?: boolean;
   specs?: string[];
   showSatisfied?: boolean;
   noLlm?: boolean;
@@ -153,8 +154,9 @@ export async function analyzeCore(
     const effectiveCategories = options.enabledCategoriesOverride?.length
       ? options.enabledCategoriesOverride
       : projectConfig.enabledCategories ?? undefined;
-    const effectiveLlmRules =
-      projectConfig.enableLlmRules ?? options.enableLlmRulesOverride ?? true;
+    const effectiveLlmRules = options.specComplianceOnly
+      ? false
+      : projectConfig.enableLlmRules ?? options.enableLlmRulesOverride ?? true;
 
     // ------------------------------------------------------------
     // Stash dirty working tree so the entire pipeline (parse + LLM scan +
@@ -292,9 +294,9 @@ export async function analyzeCore(
     // ------------------------------------------------------------
     // Violation pipeline
     // ------------------------------------------------------------
-    const specConfigEnabled = projectConfig.specCompliance?.enabled === true;
-    const specEnabled = options.specCompliance ?? specConfigEnabled;
-    const specUseLlm = !(options.noLlm ?? !effectiveLlmRules)
+    const specConfigEnabled = projectConfig.specCompliance?.enabled;
+    const specEnabled = options.specCompliance ?? specConfigEnabled ?? true;
+    const specUseLlm = !(options.noLlm ?? false)
       && (projectConfig.specCompliance?.useLlm ?? true);
     const provider = options.provider ?? ((effectiveLlmRules || (specEnabled && specUseLlm)) ? createLLMProvider() : undefined);
     if (provider) {
@@ -303,31 +305,39 @@ export async function analyzeCore(
       if (signal) provider.setAbortSignal(signal);
     }
 
-    const pipelineResult = await runViolationPipeline({
-      repoPath: project.path,
-      analysisId,
-      now,
-      result,
-      serviceIdMap,
-      moduleIdMap,
-      methodIdMap,
-      dbIdMap,
-      previousActiveViolations: previousNormalViolations,
-      changedFileSet,
-      tracker: options.tracker,
-      enabledCategories: effectiveCategories,
-      enableLlmRules: effectiveLlmRules,
-      disabledRules: projectConfig.disabledRules,
-      provider,
-      signal,
-      onLlmEstimate: options.onLlmEstimate
-        ? async (estimate) => {
-            const proceed = await options.onLlmEstimate!(estimate);
-            options.onLlmResolved?.(proceed);
-            return proceed;
-          }
-        : undefined,
-    });
+    const pipelineResult = options.specComplianceOnly
+      ? {
+          serviceDescriptions: [],
+          added: [],
+          resolved: [],
+          unchanged: [],
+          resolvedRefs: [],
+        }
+      : await runViolationPipeline({
+          repoPath: project.path,
+          analysisId,
+          now,
+          result,
+          serviceIdMap,
+          moduleIdMap,
+          methodIdMap,
+          dbIdMap,
+          previousActiveViolations: previousNormalViolations,
+          changedFileSet,
+          tracker: options.tracker,
+          enabledCategories: effectiveCategories,
+          enableLlmRules: effectiveLlmRules,
+          disabledRules: projectConfig.disabledRules,
+          provider,
+          signal,
+          onLlmEstimate: options.onLlmEstimate
+            ? async (estimate) => {
+                const proceed = await options.onLlmEstimate!(estimate);
+                options.onLlmResolved?.(proceed);
+                return proceed;
+              }
+            : undefined,
+        });
 
     // Apply LLM-generated service descriptions to the graph in-place.
     if (pipelineResult.serviceDescriptions.length > 0) {
@@ -345,7 +355,7 @@ export async function analyzeCore(
         enabled: true,
         specs: options.specs,
         showSatisfied: options.showSatisfied,
-        noLlm: options.noLlm ?? !effectiveLlmRules,
+        noLlm: options.noLlm ?? false,
         provider,
       });
       const specLifecycle = computeSpecComplianceViolationLifecycle({

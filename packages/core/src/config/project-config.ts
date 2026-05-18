@@ -9,7 +9,7 @@ export interface ProjectConfig {
   enableLlmRules?: boolean | null;
   /** Rule keys explicitly disabled for this project. Defaults are enabled. */
   disabledRules?: string[];
-  /** Spec compliance analyzer settings. Present only when users opt into the feature. */
+  /** Spec compliance analyzer settings. Missing config uses product defaults; enabled=false opts out. */
   specCompliance?: SpecComplianceConfig;
 }
 

@@ -108,6 +108,8 @@ program
   .option("--stash", "Pre-approve stashing pending changes before analysis")
   .option("--no-stash", "Analyze the working tree as-is without stashing")
   .option("--spec-compliance", "Run spec compliance checks")
+  .option("--no-spec-compliance", "Skip spec compliance checks for this run")
+  .option("--spec-compliance-only", "Run only spec compliance checks")
   .option("--specs <globs>", "Comma-separated spec include globs")
   .option("--show-satisfied", "Include satisfied spec compliance results")
   .option("--output <format>", "Output format: text or json", "text")
@@ -116,18 +118,30 @@ program
   .action(async (options) => {
     const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
     const stash: boolean | undefined = typeof options.stash === "boolean" ? options.stash : undefined;
+    const specCompliance: boolean | undefined = typeof options.specCompliance === "boolean"
+      ? options.specCompliance
+      : undefined;
     const installSkills = resolveInstallSkills(options);
     const specs = typeof options.specs === "string"
       ? options.specs.split(",").map((s: string) => s.trim()).filter(Boolean)
       : undefined;
     if (options.diff) {
-      await runAnalyzeDiff({ llm, stash, installSkills });
+      await runAnalyzeDiff({
+        llm,
+        stash,
+        installSkills,
+        specCompliance,
+        specComplianceOnly: options.specComplianceOnly === true,
+        specs,
+        showSatisfied: options.showSatisfied,
+      });
     } else {
       await runAnalyze({
         llm,
         stash,
         installSkills,
-        specCompliance: options.specCompliance,
+        specCompliance,
+        specComplianceOnly: options.specComplianceOnly === true,
         specs,
         showSatisfied: options.showSatisfied,
         output: options.output === "json" ? "json" : "text",

@@ -139,7 +139,7 @@ describe('CLI analyze pipeline (e2e)', () => {
     expect(fresh?.lastAnalyzed).toBeTruthy();
   }, 120_000);
 
-  it('threads spec compliance options through analyze and returns stable JSON-compatible data', async () => {
+  it('runs spec compliance by default and returns stable JSON-compatible data', async () => {
     fs.mkdirSync(path.join(workDir, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(workDir, 'docs', 'openapi.yaml'), [
       'openapi: 3.0.0',
@@ -155,7 +155,6 @@ describe('CLI analyze pipeline (e2e)', () => {
     const result = await analyzeInProcess(project, {
       enableLlmRulesOverride: false,
       skipStash: true,
-      specCompliance: true,
       specs: ['docs/openapi.yaml'],
       showSatisfied: true,
       noLlm: true,
@@ -176,6 +175,21 @@ describe('CLI analyze pipeline (e2e)', () => {
       violationsSummary: result.violationsSummary,
       specCompliance: result.specCompliance,
     }))).toBeTruthy();
+  }, 120_000);
+
+  it('can run only spec compliance for focused testing', async () => {
+    const result = await analyzeInProcess(project, {
+      enableLlmRulesOverride: false,
+      skipStash: true,
+      specComplianceOnly: true,
+      specs: ['docs/openapi.yaml'],
+      noLlm: true,
+    });
+
+    expect(result.specCompliance?.summary.requirements).toBe(1);
+    const latest = readLatest(workDir);
+    expect(latest?.violations.length).toBeGreaterThan(0);
+    expect(latest?.violations.every((v) => v.type === 'spec-compliance')).toBe(true);
   }, 120_000);
 });
 

@@ -81,6 +81,7 @@ describe('AnalyzeRepoSchema', () => {
     const result = AnalyzeRepoSchema.safeParse({
       mode: 'full',
       specCompliance: true,
+      specComplianceOnly: true,
       specs: ['docs/**/*.md', 'specs/**/*.yaml'],
       showSatisfied: true,
       noLlm: true,

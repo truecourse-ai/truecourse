@@ -86,6 +86,8 @@ truecourse analyze                    # Analyze current repo (prompts before sta
 truecourse analyze --stash            # Pre-approve stashing pending changes (CI-friendly)
 truecourse analyze --no-stash         # Analyze working tree as-is, no stash
 truecourse analyze --diff             # New/resolved violations from your uncommitted changes
+truecourse analyze --no-spec-compliance  # Skip spec compliance for this run
+truecourse analyze --spec-compliance-only # Run only spec compliance checks
 truecourse list                       # Show violations from latest analysis
 truecourse list --all                 # Show all violations (no pagination)
 truecourse list --diff                # Show diff check results
@@ -133,26 +135,28 @@ In the dashboard you can also toggle rules from the Rules panel
 (Shield icon in the top-right) or silence a noisy rule directly from
 any violation card via the **⋮** menu → **Disable rule for this repo**.
 
-`config.json` also supports an opt-in `specCompliance` section. When enabled,
-analysis discovers configured Markdown, MDX, text, JSON, and YAML specs,
-extracts structured and prose requirements, extracts deterministic code facts,
+Spec compliance runs by default during analysis. It discovers configured
+Markdown, MDX, text, JSON, and YAML specs, extracts structured and prose
+requirements, extracts deterministic code facts,
 evaluates compliance, persists the full artifact at
-`metadata.specCompliance`, and surfaces non-satisfied findings as
+`metadata.specCompliance`, and surfaces non-satisfied requirement findings as
 `spec-compliance` violations in the dashboard.
 
 ```bash
-truecourse analyze --spec-compliance
-truecourse analyze --spec-compliance --specs "docs/**/*.md,specs/**/*.yaml"
-truecourse analyze --spec-compliance --no-llm
-truecourse analyze --spec-compliance --show-satisfied
-truecourse analyze --spec-compliance --output json
+truecourse analyze
+truecourse analyze --specs "docs/**/*.md,specs/**/*.yaml"
+truecourse analyze --no-llm
+truecourse analyze --show-satisfied
+truecourse analyze --output json
+truecourse analyze --no-spec-compliance
+truecourse analyze --spec-compliance-only
 ```
 
 For a tiny deterministic sample, run the React todo fixture:
 
 ```bash
 cd tests/fixtures/spec-compliance-todo-react
-pnpm tsx ../../../tools/cli/src/index.ts analyze --no-llm --no-stash --no-skills --spec-compliance --specs docs/** --show-satisfied --output json
+pnpm tsx ../../../tools/cli/src/index.ts analyze --no-llm --no-stash --no-skills --specs docs/** --show-satisfied --output json
 ```
 
 `--no-llm` disables both normal LLM rules and prose requirement extraction.
@@ -165,12 +169,19 @@ and caches results under
 Spec compliance uses deterministic evidence where possible. OpenAPI specs
 produce API route requirements with operation IDs, status codes, request and
 response schema hints, required request fields, and auth/security metadata.
-Implementation facts include Express routes, visible request body field usage,
-returned status codes, auth checks, React/UI facts, statically resolvable
-composed React labels and route constants, package scripts, package `bin`
-metadata, Commander CLI commands/options/arguments, Docker Compose services,
-GitHub Actions jobs, and schema facts from Prisma, Drizzle, and SQLAlchemy
-models.
+Implementation facts include Express and Next.js App/Pages Router API routes,
+visible request body field usage, returned status codes, auth checks, React/UI
+facts, statically resolvable composed React labels and route constants, package
+scripts, package `bin` metadata, Commander CLI commands/options/arguments,
+Docker Compose services, GitHub Actions jobs, and schema facts from Prisma,
+Drizzle, and SQLAlchemy models. Next.js route facts are emitted only inside
+detected Next.js project roots, identified by a manifest `next` dependency or
+`next.config.*`, and respect nested package boundaries. Framework-specific
+extractors also require local evidence before emitting facts: Express apps and
+routers must come from Express factories/imports, React Router facts require
+React Router imports, Commander facts require Commander imports, test hints are
+limited to test files or files importing a test framework, and Drizzle/SQLAlchemy
+schema facts require ORM imports.
 
 Structured specs can target CLI surfaces directly:
 
@@ -202,6 +213,9 @@ Result statuses:
 - `unverifiable`: no supported fact taxonomy is available for the requirement.
 - `unspecified`: implementation evidence exists without a matching requirement.
 
+Unspecified findings are useful for auditing spec coverage, but they are noisy
+on broad repos, so they are opt-in via `includeUnspecifiedFindings`.
+
 The persisted artifact also includes `metrics.timingsMs` for spec discovery,
 requirement extraction, fact extraction, matching, and finding conversion, plus
 cache counters for requirement cache hits/misses, skipped prose chunks, LLM call
@@ -215,10 +229,14 @@ Example `.truecourse/config.json`:
     "enabled": true,
     "specGlobs": ["docs/**/*.md", "specs/**/*.yaml"],
     "useLlm": true,
-    "includeSatisfiedResults": false
+    "includeSatisfiedResults": false,
+    "includeUnspecifiedFindings": false
   }
 }
 ```
+
+Set `"enabled": false` or pass `--no-spec-compliance` to skip spec compliance
+for a repo or a single run.
 
 ### Git Hooks
 

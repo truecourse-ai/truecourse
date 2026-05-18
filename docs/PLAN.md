@@ -3201,6 +3201,7 @@ Current task status:
 - Phase 6 CLI and dashboard integration: `STATUS: DONE`
 - Phase 7 hardening and expansion: `STATUS: DONE`
 - Phase 8 CLI command extraction and matching follow-up: `STATUS: DONE`
+- Phase 9 default-on analysis integration: `STATUS: DONE`
 
 Initial scope:
 
@@ -3210,17 +3211,26 @@ Initial scope:
 - Compare requirements to facts using deterministic matchers
 - Report missing, conflicting, partial, ambiguous, unverifiable, and unspecified implementation findings
 - Prove repeated runs over identical inputs produce identical output
+- Run spec compliance by default for full and diff analysis, with
+  `.truecourse/config.json` and `--no-spec-compliance` as explicit opt-outs
+- Support `truecourse analyze --spec-compliance-only` for focused spec
+  compliance test runs without normal rule checks
 
 Phase 7 hardening status:
 
 - OpenAPI operation requirements now include operation IDs, status codes, request/response schema hints, required request fields, response field hints, auth, and security scheme metadata. `STATUS: DONE`
 - Express facts now include statically visible response status codes and request body field usage. `STATUS: DONE`
+- Next.js App Router and Pages Router facts now include API/UI routes, statically visible request body field usage, returned status codes, and route-scoped auth signals. Extraction is gated to detected Next.js project roots from manifest `next` dependencies or `next.config.*` files and respects nested package boundaries. `STATUS: DONE`
+- Framework-specific extractors now require framework evidence before emitting facts: Express imports/factories, React Router imports, Commander imports, test file/framework context, and Drizzle/SQLAlchemy ORM imports. `STATUS: DONE`
 - Schema/data facts now emit `data.table`, `data.field`, `data.index`, and `data.relation` from Prisma, Drizzle, and SQLAlchemy schema parser output. `STATUS: DONE`
 - Auth facts now normalize role, permission, admin-only, public-route, and ownership-style signals when statically visible. `STATUS: DONE`
 - Test coverage hints now compare requirement IDs, subject/object text, evidence text, acceptance criteria, test names, and static string references. `STATUS: DONE`
 - Infra/config facts now cover Docker Compose services, GitHub Actions jobs, and package scripts. `STATUS: DONE`
 - Spec-compliance artifacts now expose phase timing metadata and cache/LLM counters. `STATUS: DONE`
+- Spec-compliance hardening now canonicalizes prose field/path targets, prevents same-evidence requirement ID collisions, extracts Next.js query parameters, recognizes Clerk auth/protect signals, and treats standalone form labels as controls for button-group UI fields. `STATUS: DONE`
+- Behavioral spec-compliance extraction now emits route-scoped Next.js validation-field facts, Drizzle mutation field facts, UI action facts, modal facts, and guarded-close facts so matchers can verify persistence, validation, and workflow semantics instead of only route/field presence. `STATUS: DONE`
 - React/UI extraction now resolves same-file and relative imported static string constants, object property reads, route constants, composed field labels, and composed display text props without executing code. `STATUS: DONE`
+- Unspecified implementation findings are opt-in via `includeUnspecifiedFindings` so broad repos do not surface unmatched implementation evidence as default violations. `STATUS: DONE`
 - Remaining expansion: larger mixed-domain snapshot. `STATUS: DONE`
 - Minimal React todo fixture with structured product requirements for manual and regression spec-compliance runs. `STATUS: DONE`
 - Requested Phase 7 test/build sweep (`pnpm test -- tests/analyzer tests/core tests/cli tests/dashboard-server`, `pnpm build`). `STATUS: DONE`

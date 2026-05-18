@@ -37,6 +37,7 @@ export interface AnalyzeInProcessOptions {
   enabledCategoriesOverride?: string[];
   enableLlmRulesOverride?: boolean;
   specCompliance?: boolean;
+  specComplianceOnly?: boolean;
   specs?: string[];
   showSatisfied?: boolean;
   noLlm?: boolean;

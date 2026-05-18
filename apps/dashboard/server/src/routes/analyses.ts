@@ -64,7 +64,7 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     const id = req.params.id as string;
     const parsed = AnalyzeRepoSchema.safeParse(req.body);
     if (!parsed.success) throw createAppError('Invalid request body', 400);
-    const { mode, skipGit, specCompliance, specs, showSatisfied, noLlm } = parsed.data;
+    const { mode, skipGit, specCompliance, specComplianceOnly, specs, showSatisfied, noLlm } = parsed.data;
 
     const repo = resolveProjectForRequest(id);
 
@@ -76,14 +76,22 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
 
     const projectConfig = readProjectConfig(repo.path);
     const effectiveCategories = projectConfig.enabledCategories ?? undefined;
-    const effectiveLlmRules = noLlm ? false : projectConfig.enableLlmRules ?? true;
+    const effectiveLlmRules = specComplianceOnly || noLlm ? false : projectConfig.enableLlmRules ?? true;
+    const effectiveSpecCompliance = specComplianceOnly
+      ? specCompliance ?? true
+      : specCompliance ?? projectConfig.specCompliance?.enabled ?? true;
 
     // Register before the 202 so POST /analyses/cancel can find this run.
     const abortController = registerAnalysis(id, 'pending');
 
     res.status(202).json({ message: `${mode === 'diff' ? 'Diff check' : 'Analysis'} started`, repoId: id, mode });
 
-    const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+    const trackerSteps = buildAnalysisSteps(
+      effectiveCategories,
+      effectiveLlmRules,
+      effectiveSpecCompliance,
+      !specComplianceOnly,
+    );
     const tracker = createSocketTracker(id, trackerSteps);
 
     pushLogger({
@@ -97,7 +105,8 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
           skipGit,
           effectiveCategories,
           effectiveLlmRules,
-          specCompliance,
+          specCompliance: effectiveSpecCompliance,
+          specComplianceOnly,
           specs,
           showSatisfied,
           noLlm,
@@ -108,6 +117,11 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
         await runDiffAnalyze(id, repo, {
           tracker,
           signal: abortController.signal,
+          specCompliance: effectiveSpecCompliance,
+          specComplianceOnly,
+          specs,
+          showSatisfied,
+          noLlm,
         });
       }
     } catch (error) {
@@ -322,6 +336,7 @@ interface StartRunOptions {
   effectiveCategories?: string[];
   effectiveLlmRules: boolean;
   specCompliance?: boolean;
+  specComplianceOnly?: boolean;
   specs?: string[];
   showSatisfied?: boolean;
   noLlm?: boolean;
@@ -377,9 +392,10 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
     enabledCategoriesOverride: opts.effectiveCategories,
     enableLlmRulesOverride: opts.effectiveLlmRules,
     specCompliance: opts.specCompliance,
+    specComplianceOnly: opts.specComplianceOnly,
     specs: opts.specs,
     showSatisfied: opts.showSatisfied,
-    noLlm: opts.noLlm ?? !opts.effectiveLlmRules,
+    noLlm: opts.noLlm ?? false,
     tracker: opts.tracker,
     signal: opts.signal,
     provider,
@@ -391,10 +407,19 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
   emitAnalysisComplete(id, outcome.analysisId);
 }
 
-async function runDiffAnalyze(id: string, repo: RegistryEntry, opts: Pick<StartRunOptions, 'tracker' | 'signal'>): Promise<void> {
+async function runDiffAnalyze(
+  id: string,
+  repo: RegistryEntry,
+  opts: Pick<StartRunOptions, 'tracker' | 'signal' | 'specCompliance' | 'specComplianceOnly' | 'specs' | 'showSatisfied' | 'noLlm'>,
+): Promise<void> {
   const { diff } = await diffInProcess(repo, {
     tracker: opts.tracker,
     signal: opts.signal,
+    specCompliance: opts.specCompliance,
+    specComplianceOnly: opts.specComplianceOnly,
+    specs: opts.specs,
+    showSatisfied: opts.showSatisfied,
+    noLlm: opts.noLlm ?? false,
     source: 'dashboard',
     onLlmEstimate: createSocketLlmEstimateHandler(id),
   });

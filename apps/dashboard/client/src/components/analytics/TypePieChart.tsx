@@ -24,6 +24,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   'code-quality': 'Code Quality',
   database: 'Database',
   style: 'Style',
+  'spec-compliance': 'Spec Compliance',
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -35,6 +36,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   'code-quality': 'var(--chart-1)',
   database: 'var(--chart-2)',
   style: 'var(--chart-3)',
+  'spec-compliance': 'var(--chart-4)',
 };
 
 function buildConfig(byCategory: Record<string, number>): ChartConfig {
