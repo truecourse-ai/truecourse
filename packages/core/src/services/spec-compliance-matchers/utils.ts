@@ -11,8 +11,28 @@ export function normalizeText(value: unknown): string {
 }
 
 export function normalizePath(value: string): string {
-  const normalized = value.trim().replace(/\/+/g, '/');
+  const pathOnly = value.trim().split(/[?#]/, 1)[0] ?? '';
+  const normalized = pathOnly
+    .replace(/\[\[\.\.\.([^\]]+)\]\]/g, ':$1*')
+    .replace(/\[\.\.\.([^\]]+)\]/g, ':$1*')
+    .replace(/\[([^\]]+)\]/g, ':$1')
+    .replace(/\{([^}]+)\}/g, ':$1')
+    .replace(/\/+/g, '/');
   return normalized.length > 1 ? normalized.replace(/\/$/, '') : normalized;
+}
+
+export function normalizeTargetName(value: unknown): string {
+  let normalized = normalizeText(value)
+    .replace(/[`'"“”]/g, '')
+    .replace(/\*/g, '')
+    .trim();
+
+  normalized = normalized
+    .replace(/^(?:the|a|an)\s+/, '')
+    .replace(/\s+(?:field|fields|input|inputs|column|columns|property|properties|param|params|parameter|parameters)$/i, '')
+    .trim();
+
+  return normalizeText(normalized);
 }
 
 export function record(value: unknown): Record<string, unknown> {
@@ -47,6 +67,20 @@ export function constraintValues(requirement: Requirement, pattern: RegExp): str
     .filter((value) => value.trim().length > 0);
 }
 
+function splitTargetList(value: string): string[] {
+  const cleaned = value
+    .replace(/[`'"“”]/g, '')
+    .replace(/\*/g, '')
+    .replace(/\s+(?:field|fields|input|inputs|column|columns|property|properties|param|params|parameter|parameters)\b/gi, '')
+    .trim();
+
+  const parts = /,|\s+and\s+/i.test(cleaned)
+    ? cleaned.split(/\s*,\s*|\s+and\s+/i)
+    : [cleaned];
+
+  return parts.map(normalizeTargetName).filter((part) => part.length > 0);
+}
+
 export function containsAny(text: string, needles: string[]): boolean {
   const normalized = normalizeText(text);
   return needles.some((needle) => {
@@ -69,7 +103,7 @@ export function hasSubstantialOverlap(haystack: string, needle: string): boolean
 export function extractRoute(requirement: Requirement): { method?: string; path?: string } {
   const text = requirementText(requirement);
   const method = ROUTE_METHODS.find((candidate) => new RegExp(`\\b${candidate}\\b`, 'i').test(text));
-  const path = text.match(/\/[a-z0-9_{}:.*?/-]*/i)?.[0];
+  const path = text.match(/\/[a-z0-9_{}:[\].*?/-]*(?:\?[a-z0-9_{}:[\].=&%-]*)?/i)?.[0];
   return {
     ...(method ? { method } : {}),
     ...(path ? { path: normalizePath(path) } : {}),
@@ -85,7 +119,57 @@ export function extractUiPath(requirement: Requirement): string | undefined {
 }
 
 export function extractField(requirement: Requirement): string | undefined {
-  return constraintValues(requirement, /(field|input|property|column|name)/i)[0] ?? requirement.object;
+  return extractFields(requirement)[0];
+}
+
+export function extractFields(requirement: Requirement): string[] {
+  const explicit = constraintValues(requirement, /(field|input|property|column|name|param|parameter)/i);
+  const values = explicit.length > 0 ? explicit : (requirement.object ? [requirement.object] : []);
+  const fields = values.flatMap(splitTargetList);
+  return [...new Set(fields)];
+}
+
+export function extractTable(requirement: Requirement): string | undefined {
+  const explicit = constraintValues(requirement, /(table|model|entity)/i)[0];
+  const sourceText = [requirement.subject, requirement.object, requirement.evidenceText].filter(Boolean).join(' ');
+  const text = requirementText(requirement);
+  const candidate = explicit
+    ?? sourceText.match(/`([^`]+)`\s+table/i)?.[1]
+    ?? sourceText.match(/\b([a-zA-Z_][\w-]*)\s+table\b/i)?.[1]
+    ?? text.match(/\btable\s+(?:named\s+)?[`'"]?([a-zA-Z_][\w-]*)[`'"]?/i)?.[1];
+  return candidate ? normalizeTargetName(candidate) : undefined;
+}
+
+export function extractQueryParams(requirement: Requirement): string[] {
+  const explicit = constraintValues(requirement, /(query|queryParam|query_param|searchParam|search_param|param|parameter)/i);
+  const queryStringParams = [...requirementText(requirement).matchAll(/[?&]([a-zA-Z_][\w-]*)=/g)].map((match) => match[1]!);
+  const values = explicit.length > 0 ? explicit : queryStringParams;
+  return [...new Set(values.flatMap(splitTargetList))];
+}
+
+export function extractValidationFormat(requirement: Requirement): string | undefined {
+  const explicit = constraintValues(requirement, /(format|validator|validation)/i)
+    .find((value) => /\burl|email|uuid|date|number|string\b/i.test(value));
+  const text = requirementText(requirement);
+  const value = explicit ?? text.match(/\b(url|email|uuid|date|number|string)\b/i)?.[1];
+  return value ? normalizeTargetName(value) : undefined;
+}
+
+export function extractUiAction(requirement: Requirement): string | undefined {
+  const explicit = constraintValues(requirement, /^uiAction$/i)[0];
+  const text = normalizeText([
+    explicit,
+    requirement.action,
+    requirement.object,
+    requirement.evidenceText,
+    ...constraintValues(requirement, /(action|workflow)/i),
+  ].filter(Boolean).join(' ').replace(/([a-z])([A-Z])/g, '$1 $2'));
+  if (/\b(delete|remove|trash)\b/.test(text)) return 'delete';
+  if (/\b(close|cancel|dismiss)\b/.test(text)) return 'close';
+  if (/\b(save|submit)\b/.test(text)) return 'save';
+  if (/\b(update|edit)\b/.test(text)) return 'update';
+  if (/\b(create|add)\b/.test(text)) return 'create';
+  return undefined;
 }
 
 export function extractTextRequirement(requirement: Requirement): string | undefined {

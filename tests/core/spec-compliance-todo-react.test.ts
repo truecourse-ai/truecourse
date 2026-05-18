@@ -89,7 +89,7 @@ describe('todo React spec compliance fixture', () => {
     expect(first.summary).toMatchObject({
       requirements: 1,
       results: 1,
-      findings: 2,
+      findings: 1,
       byStatus: {
         satisfied: 0,
         missing: 1,
@@ -97,7 +97,7 @@ describe('todo React spec compliance fixture', () => {
         conflicting: 0,
         ambiguous: 0,
         unverifiable: 0,
-        unspecified: 1,
+        unspecified: 0,
       },
       bySeverity: {
         info: 0,

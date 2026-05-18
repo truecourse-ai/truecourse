@@ -5,7 +5,7 @@ export const SPEC_COMPLIANCE_REQUIREMENT_SCHEMA_VERSION = 'spec-requirement.v1'
 export const SPEC_COMPLIANCE_CODE_FACT_SCHEMA_VERSION = 'spec-code-fact.v1'
 export const SPEC_COMPLIANCE_RESULT_SCHEMA_VERSION = 'spec-compliance-result.v1'
 export const SPEC_COMPLIANCE_MATCHER_VERSION = 'spec-compliance-matcher.v1'
-export const SPEC_COMPLIANCE_PROMPT_VERSION = 'spec-compliance-prompt.v1'
+export const SPEC_COMPLIANCE_PROMPT_VERSION = 'spec-compliance-prompt.v2'
 export const SPEC_COMPLIANCE_SPEC_MANIFEST_VERSION = 'spec-manifest.v1'
 
 export const SpecComplianceFindingCategory = 'spec-compliance' as const
@@ -177,7 +177,7 @@ export const SpecExtractionManifestSchema = z.object({
 export type SpecExtractionManifest = z.infer<typeof SpecExtractionManifestSchema>
 
 export const SpecComplianceConfigSchema = z.object({
-  enabled: z.boolean().default(false),
+  enabled: z.boolean().default(true),
   specGlobs: z.array(z.string().min(1)).default([
     'docs/**',
     'specs/**',
@@ -195,6 +195,7 @@ export const SpecComplianceConfigSchema = z.object({
   ]),
   useLlm: z.boolean().default(true),
   includeSatisfiedResults: z.boolean().default(false),
+  includeUnspecifiedFindings: z.boolean().default(false),
   failOnMalformedOutput: z.boolean().default(true),
 })
 
@@ -256,6 +257,13 @@ export interface RequirementIdInput {
   sourceRange: SourceRange
   evidenceText: string
   extractorVersion: string
+  kind?: string
+  modality?: string
+  subject?: string
+  action?: string
+  object?: string
+  constraints?: unknown
+  acceptanceCriteria?: string[]
 }
 
 export function createRequirementId(input: RequirementIdInput): string {
@@ -263,6 +271,13 @@ export function createRequirementId(input: RequirementIdInput): string {
     sourceFile: normalizePath(input.sourceFile),
     sourceRange: input.sourceRange,
     evidenceText: normalizeText(input.evidenceText),
+    kind: input.kind,
+    modality: input.modality,
+    subject: input.subject ? normalizeText(input.subject) : undefined,
+    action: input.action ? normalizeText(input.action) : undefined,
+    object: input.object ? normalizeText(input.object) : undefined,
+    constraints: input.constraints,
+    acceptanceCriteria: input.acceptanceCriteria?.map(normalizeText),
     extractorVersion: input.extractorVersion,
   })
 }

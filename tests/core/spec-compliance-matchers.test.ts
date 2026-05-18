@@ -196,6 +196,128 @@ describe('evaluateSpecCompliance', () => {
     ])
   })
 
+  it('normalizes extracted field and route targets from prose requirements', () => {
+    const requirements = [
+      req('req_data_field', {
+        kind: 'data',
+        subject: '`article` table',
+        action: 'include',
+        object: '`id` field',
+        evidenceText: '`id` | uuid | Stable article identifier.',
+      }),
+      req('req_ui_fields', {
+        kind: 'ui',
+        subject: 'create mode UI',
+        action: 'require',
+        object: 'title and URL fields',
+        evidenceText: 'Required fields in the UI: title and URL.',
+      }),
+      req('req_query_route', {
+        kind: 'api',
+        subject: 'DELETE /api/articles?id={id}',
+        action: 'delete',
+        object: 'DELETE /api/articles?id={id}',
+      }),
+      req('req_dynamic_route_field', {
+        kind: 'api',
+        subject: 'publish route',
+        action: 'accept',
+        object: 'POST /api/articles/[id]/publish',
+        constraints: [{ type: 'requestField', value: 'updatedAt field' }],
+      }),
+    ]
+    const facts = [
+      fact('fact_id', { kind: 'data.field', predicate: 'field.exists', value: { table: 'article', name: 'id' } }),
+      fact('fact_title', { kind: 'ui.form_field', predicate: 'field.exists', value: { id: 'title', label: 'Title *' } }),
+      fact('fact_url', { kind: 'ui.form_field', predicate: 'field.exists', value: { id: 'url', label: 'URL *' } }),
+      fact('fact_delete_route', { kind: 'api.route', predicate: 'route.exists', value: { method: 'DELETE', path: '/api/articles', middlewares: [] } }),
+      fact('fact_delete_param', { kind: 'api.query.param', predicate: 'param.used', value: { method: 'DELETE', path: '/api/articles', name: 'id' } }),
+      fact('fact_publish_route', { kind: 'api.route', predicate: 'route.exists', value: { method: 'POST', path: '/api/articles/:id/publish', middlewares: [] } }),
+      fact('fact_publish_field', { kind: 'api.request.field', predicate: 'field.used', value: { method: 'POST', path: '/api/articles/:id/publish', name: 'updatedAt' } }),
+    ]
+
+    expect(Object.fromEntries(evaluateSpecCompliance({ requirements, facts, includeSatisfiedResults: true }).results.map((item) => [item.requirementId, [item.matcher.name, item.status]]))).toEqual({
+      req_data_field: ['data.field_exists', 'satisfied'],
+      req_dynamic_route_field: ['api.openapi_operation', 'satisfied'],
+      req_query_route: ['api.query.param_exists', 'satisfied'],
+      req_ui_fields: ['ui.form.field_exists', 'satisfied'],
+    })
+  })
+
+  it('matches API validation, mutation fields, and UI workflow semantics', () => {
+    const requirements = [
+      req('req_title_validation', {
+        kind: 'api',
+        subject: 'create article validation',
+        object: 'POST /api/articles',
+        constraints: [{ type: 'validationField', value: 'title' }],
+        evidenceText: 'POST /api/articles must validate required title.',
+      }),
+      req('req_url_validation', {
+        kind: 'api',
+        subject: 'create article URL validation',
+        object: 'POST /api/articles',
+        constraints: [
+          { type: 'validationField', value: 'url' },
+          { type: 'format', value: 'url' },
+        ],
+        evidenceText: 'POST /api/articles must validate required URL.',
+      }),
+      req('req_patch_flags', {
+        kind: 'api',
+        subject: 'manual article review update',
+        object: 'PATCH /api/articles',
+        constraints: [{ type: 'mutationField', value: 'reviewed and published' }],
+        evidenceText: 'PATCH /api/articles must update reviewed and published.',
+      }),
+      req('req_delete_action', {
+        kind: 'ui',
+        subject: 'delete article action',
+        object: 'delete article',
+        evidenceText: 'The admin UI must expose a delete action for articles.',
+      }),
+      req('req_article_review_delete_action', {
+        kind: 'ui',
+        subject: 'Article Review delete action',
+        object: 'delete article',
+        evidenceText: 'The Article Review UI must expose a delete action for articles.',
+      }),
+      req('req_close_guard', {
+        kind: 'ui',
+        subject: 'modal close guard',
+        object: 'close',
+        evidenceText: 'The modal close action must be guarded while save is in flight.',
+      }),
+      req('req_modal', {
+        kind: 'ui',
+        subject: 'article review modal',
+        object: 'article review modal',
+        evidenceText: 'The article review modal must exist.',
+      }),
+    ]
+    const facts = [
+      fact('fact_post_route', { kind: 'api.route', predicate: 'route.exists', value: { method: 'POST', path: '/api/articles', middlewares: [] } }),
+      fact('fact_patch_route', { kind: 'api.route', predicate: 'route.exists', value: { method: 'PATCH', path: '/api/articles', middlewares: [] } }),
+      fact('fact_title_validation', { kind: 'api.validation.field', predicate: 'field.validated', value: { method: 'POST', path: '/api/articles', name: 'title', required: true, failureStatus: 400 } }),
+      fact('fact_reviewed', { kind: 'api.mutation.field', predicate: 'field.set', value: { method: 'PATCH', path: '/api/articles', operation: 'update', entity: 'articles', field: 'reviewed' } }),
+      fact('fact_delete_action', { kind: 'ui.action', predicate: 'action.exists', sourceFile: 'apps/admin/components/PostEditor/ArticleBlock.tsx', value: { action: 'delete', label: 'Delete', handler: 'handleDelete' } }),
+      fact('fact_guarded_close', { kind: 'ui.action', predicate: 'action.exists', value: { action: 'close', label: 'Cancel', handler: 'handleClose', guarded: true } }),
+      fact('fact_unguarded_close', { kind: 'ui.action', predicate: 'action.exists', value: { action: 'close', handler: 'onClose', guarded: false } }),
+      fact('fact_close_guard', { kind: 'ui.guard', predicate: 'guard.exists', value: { event: 'close', handler: 'handleClose', conditions: ['!isSaving'] } }),
+      fact('fact_modal', { kind: 'ui.modal', predicate: 'modal.exists', value: { controlledBy: 'isOpen' } }),
+    ]
+
+    expect(Object.fromEntries(evaluateSpecCompliance({ requirements, facts, includeSatisfiedResults: true }).results.map((item) => [item.requirementId, [item.matcher.name, item.status]]))).toEqual({
+      req_article_review_delete_action: ['ui.action.exists', 'missing'],
+      req_close_guard: ['ui.close.guard_required', 'partial'],
+      req_delete_action: ['ui.action.exists', 'satisfied'],
+      req_modal: ['ui.modal.exists', 'satisfied'],
+      req_patch_flags: ['api.mutation.field_set', 'partial'],
+      req_title_validation: ['api.validation.field_required', 'satisfied'],
+      req_url_validation: ['api.validation.field_required', 'missing'],
+    })
+  })
+
   it('matches role, env var, and test coverage hint requirements', () => {
     const requirements = [
       req('req_role', { kind: 'auth', subject: 'admin access', object: 'admin', evidenceText: 'Only admin role may access settings.' }),
@@ -334,6 +456,7 @@ describe('evaluateSpecCompliance', () => {
         fact('fact_admin', { kind: 'api.route', predicate: 'route.exists', value: { method: 'GET', path: '/admin', middlewares: [] } }),
         fact('fact_ui', { kind: 'ui.route', predicate: 'route.exists', value: { path: '/settings' } }),
         fact('fact_env', { kind: 'config.env', predicate: 'env.read', value: { name: 'SECRET_KEY', access: 'dot' } }),
+        fact('fact_env_duplicate', { kind: 'config.env', predicate: 'env.read', value: { name: 'SECRET_KEY', access: 'dot' } }),
         fact('fact_cli_bin', { kind: 'cli.binary', predicate: 'binary.defined', value: { name: 'truecourse' } }),
         fact('fact_cli_command', { kind: 'cli.command', predicate: 'command.defined', value: { name: 'rules', fullName: 'truecourse rules', path: ['rules'], parentPath: [], aliases: [], source: 'commander', hasAction: false } }),
         fact('fact_cli_option', { kind: 'cli.option', predicate: 'option.defined', value: { command: 'truecourse rules', commandPath: ['rules'], name: '--json', required: false, negated: false } }),

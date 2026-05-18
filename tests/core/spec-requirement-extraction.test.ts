@@ -118,7 +118,7 @@ describe('LLM requirement extraction', () => {
     expect(buildRequirementExtractionCacheKey({ ...base, chunkHash: 'chunk-b' })).not.toBe(key);
     expect(buildRequirementExtractionCacheKey({ ...base, model: 'model-b' })).not.toBe(key);
     expect(buildRequirementExtractionCacheKey({ ...base, schemaVersion: 'spec-requirement.v2' })).not.toBe(key);
-    expect(buildRequirementExtractionCacheKey({ ...base, promptVersion: 'spec-compliance-prompt.v2' })).not.toBe(key);
+    expect(buildRequirementExtractionCacheKey({ ...base, promptVersion: 'spec-compliance-prompt.v5' })).not.toBe(key);
   });
 
   it('redacts secrets before sending chunk text or prompt to the provider', async () => {

@@ -62,6 +62,7 @@ export interface RunSpecComplianceOptions {
   enabled?: boolean;
   specs?: string[];
   showSatisfied?: boolean;
+  includeUnspecifiedFindings?: boolean;
   noLlm?: boolean;
   provider?: Pick<LLMProvider, 'model' | 'extractProseRequirements'>;
 }
@@ -129,6 +130,7 @@ function resolveConfig(repoPath: string, options: RunSpecComplianceOptions): Spe
     ...(options.enabled !== undefined ? { enabled: options.enabled } : {}),
     ...(options.specs?.length ? { specGlobs: options.specs } : {}),
     ...(options.showSatisfied !== undefined ? { includeSatisfiedResults: options.showSatisfied } : {}),
+    ...(options.includeUnspecifiedFindings !== undefined ? { includeUnspecifiedFindings: options.includeUnspecifiedFindings } : {}),
     ...(options.noLlm !== undefined ? { useLlm: !options.noLlm } : {}),
   });
 }
@@ -162,7 +164,7 @@ export async function runSpecComplianceAnalysis(
     requirements: requirementResult.requirements,
     facts: factResult.facts,
     includeSatisfiedResults: config.includeSatisfiedResults,
-    includeUnspecifiedFindings: true,
+    includeUnspecifiedFindings: config.includeUnspecifiedFindings,
   });
   const matching = performance.now() - matchingStart;
   const findingStart = performance.now();

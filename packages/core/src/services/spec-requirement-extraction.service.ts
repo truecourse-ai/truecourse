@@ -81,14 +81,25 @@ const RequirementCandidateSchema = RequirementSchema
     sourceFile: true,
     sourceRange: true,
     extractor: true,
+    constraints: true,
+    object: true,
+    acceptanceCriteria: true,
   })
   .extend({
-    sourceRange: RequirementSchema.shape.sourceRange.optional(),
+    object: z.string().min(1),
+    constraints: z.array(z.object({
+      type: z.string().min(1),
+      value: z.string().min(1),
+    }).strict()),
   })
   .strict();
 
-export const ProseRequirementExtractionOutputSchema = z.union([
-  z.object({ requirements: z.array(RequirementCandidateSchema) }).strict(),
+export const ProseRequirementExtractionOutputSchema = z.object({
+  requirements: z.array(RequirementCandidateSchema),
+}).strict();
+
+const ProseRequirementExtractionParseSchema = z.union([
+  ProseRequirementExtractionOutputSchema,
   z.array(RequirementCandidateSchema),
 ]);
 
@@ -103,10 +114,18 @@ export function buildProseRequirementExtractionPrompt(input: Omit<ProseRequireme
     '',
     'Convert only the provided prose spec chunk into atomic requirements.',
     'Do not extract code facts. Do not inspect implementation code. Do not decide compliance.',
-    'Return strict JSON with a top-level `requirements` array. Each item must contain only fields compatible with RequirementSchema except id, sourceFile, sourceRange, and extractor, which are assigned by TrueCourse.',
-    'Use kind values: api, ui, ux, auth, data, infra, config, workflow, test, quality, unknown.',
+    'Return strict JSON with a top-level `requirements` array. Each item must include exactly: kind, modality, subject, action, object, constraints, evidenceText, confidence.',
+    'Use constraint values as concise strings. Do not return nested objects or arrays inside constraint values.',
+    'Use canonical target names in constraints and objects: `id`, not "`id` field"; `url`, not "URL field"; `/api/users/:id`, not `/api/users/[id]`.',
+    'Split compound requirements into one item per required field, route, query parameter, status code, UI field, or visible text.',
+    'For API query parameters use constraint type `queryParam`. For request body fields use `requestField`. For response fields use `responseField`.',
+    'For API validation requirements use constraint type `validationField`; include `format` for constraints such as url/email/uuid when stated.',
+    'For API persistence/update requirements use constraint type `mutationField` and object as the canonical field that must be written.',
+    'For UI workflow actions use constraint type `uiAction` with canonical values like delete, close, save, update, or create.',
+    'For data schema requirements use constraint type `table` for the table/model and object as the canonical field name.',
+    'Use kind values: api, ui, ux, auth, data, infra, config, cli, workflow, test, quality, unknown.',
     'Use modality values: must, should, may, must_not.',
-    'If the chunk contains no actionable requirement, return an empty array.',
+    'If the chunk contains no actionable requirement, return {"requirements":[]}.',
     '',
     `Source file: ${input.sourceFile}`,
     `Source range: ${input.sourceRange.startLine}-${input.sourceRange.endLine}`,
@@ -144,18 +163,24 @@ export function redactSpecText(text: string): string {
 }
 
 function normalizeProviderOutput(output: unknown): z.infer<typeof RequirementCandidateSchema>[] {
-  const parsed = ProseRequirementExtractionOutputSchema.parse(output);
+  const parsed = ProseRequirementExtractionParseSchema.parse(output);
   return Array.isArray(parsed) ? parsed : parsed.requirements;
 }
 
 function candidateToRequirement(chunk: SpecChunk, candidate: z.infer<typeof RequirementCandidateSchema>): Requirement {
-  const sourceRange = candidate.sourceRange ?? chunk.sourceRange;
+  const sourceRange = chunk.sourceRange;
   const evidenceText = candidate.evidenceText.trim();
   const requirement: Requirement = {
     id: createRequirementId({
       sourceFile: chunk.sourceFile,
       sourceRange,
       evidenceText,
+      kind: candidate.kind,
+      modality: candidate.modality,
+      subject: candidate.subject,
+      action: candidate.action,
+      object: candidate.object,
+      constraints: candidate.constraints,
       extractorVersion: SPEC_REQUIREMENT_LLM_EXTRACTOR.version,
     }),
     sourceFile: chunk.sourceFile,
@@ -164,9 +189,8 @@ function candidateToRequirement(chunk: SpecChunk, candidate: z.infer<typeof Requ
     modality: candidate.modality,
     subject: candidate.subject.trim(),
     action: candidate.action.trim(),
-    object: candidate.object?.trim(),
+    object: candidate.object.trim(),
     constraints: candidate.constraints,
-    acceptanceCriteria: candidate.acceptanceCriteria,
     evidenceText,
     confidence: candidate.confidence,
     extractor: SPEC_REQUIREMENT_LLM_EXTRACTOR,

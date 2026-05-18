@@ -101,12 +101,13 @@ describe('spec compliance schemas', () => {
 })
 
 describe('spec compliance config', () => {
-  it('applies conservative defaults', () => {
+  it('enables checks by default with conservative output settings', () => {
     const config = SpecComplianceConfigSchema.parse({})
 
-    expect(config.enabled).toBe(false)
+    expect(config.enabled).toBe(true)
     expect(config.useLlm).toBe(true)
     expect(config.includeSatisfiedResults).toBe(false)
+    expect(config.includeUnspecifiedFindings).toBe(false)
     expect(config.failOnMalformedOutput).toBe(true)
     expect(config.specGlobs).toContain('docs/**')
     expect(config.excludeGlobs).toContain('**/.truecourse/**')
@@ -152,6 +153,33 @@ describe('stable spec compliance IDs', () => {
 
     expect(first).toBe(second)
     expect(first).toMatch(/^req_[a-f0-9]{12}$/)
+  })
+
+  it('distinguishes requirements split from the same evidence text', () => {
+    const title = createRequirementId({
+      sourceFile: 'docs/editor.md',
+      sourceRange: { startLine: 10, endLine: 10 },
+      evidenceText: 'Required fields in the UI: title and URL.',
+      kind: 'ui',
+      modality: 'must',
+      subject: 'create mode UI',
+      action: 'require',
+      object: 'title field',
+      extractorVersion: '1.0.0',
+    })
+    const url = createRequirementId({
+      sourceFile: 'docs/editor.md',
+      sourceRange: { startLine: 10, endLine: 10 },
+      evidenceText: 'Required fields in the UI: title and URL.',
+      kind: 'ui',
+      modality: 'must',
+      subject: 'create mode UI',
+      action: 'require',
+      object: 'URL field',
+      extractorVersion: '1.0.0',
+    })
+
+    expect(title).not.toBe(url)
   })
 
   it('creates stable code fact IDs from canonical values', () => {

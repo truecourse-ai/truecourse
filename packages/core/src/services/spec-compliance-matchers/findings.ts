@@ -71,9 +71,19 @@ export function unspecifiedFacts(results: ComplianceResult[], facts: CodeFact[])
     ...resultValue.evidence.matchingFacts,
     ...resultValue.evidence.conflictingFacts,
   ]).filter((fact) => fact.kind === 'cli.command').map((fact) => String((fact.value as { fullName?: unknown }).fullName ?? '').toLowerCase()));
+  const matchedEnvVars = new Set(results.flatMap((resultValue) => [
+    ...resultValue.evidence.matchingFacts,
+    ...resultValue.evidence.conflictingFacts,
+  ]).filter((fact) => fact.kind === 'config.env').map((fact) => String((fact.value as { name?: unknown }).name ?? '').toLowerCase()));
+  const seenUnspecifiedEnvVars = new Set<string>();
 
   return facts.filter((fact) => {
     if (!['api.route', 'ui.route', 'config.env', 'cli.binary', 'cli.command'].includes(fact.kind) || matchedFactIds.has(fact.id)) return false;
+    if (fact.kind === 'config.env') {
+      const name = String((fact.value as { name?: unknown }).name ?? '').toLowerCase();
+      if (!name || matchedEnvVars.has(name) || seenUnspecifiedEnvVars.has(name)) return false;
+      seenUnspecifiedEnvVars.add(name);
+    }
     if (fact.kind === 'cli.binary' && matchedCliBinaries.has(String((fact.value as { name?: unknown }).name ?? '').toLowerCase())) return false;
     if (fact.kind === 'cli.command' && matchedCliCommands.has(String((fact.value as { fullName?: unknown }).fullName ?? '').toLowerCase())) return false;
     return true;
