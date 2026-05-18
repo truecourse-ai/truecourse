@@ -2,6 +2,7 @@ import type { Violation } from '@truecourse/shared';
 import { ClaudeCodeProvider } from './cli-provider.js';
 import type { FlowEnrichmentContext } from './prompts.js';
 import type { UsageData } from '../usage.service.js';
+import type { ProseRequirementExtractionInput } from '../spec-requirement-extraction.service.js';
 
 // ---------------------------------------------------------------------------
 // Focused violation context types (one per LLM call)
@@ -228,6 +229,7 @@ export interface UsageRecord {
 }
 
 export interface LLMProvider {
+  model: string;
   generateServiceViolations(
     context: ServiceViolationContext,
     opts?: { onStart?: () => void },
@@ -247,6 +249,7 @@ export interface LLMProvider {
     opts?: { onStart?: () => void },
   ): Promise<CodeViolationsResult>;
   generateAllCodeViolations(batches: CodeViolationContext[]): Promise<CodeViolationsResult>;
+  extractProseRequirements(input: ProseRequirementExtractionInput): Promise<unknown>;
   enrichFlow(context: FlowEnrichmentContext): Promise<FlowEnrichmentResult>;
   setAnalysisId(id: string): void;
   setRepoId(repoId: string): void;

@@ -142,6 +142,7 @@ truecourse/
 - **Fixture project:** `tests/fixtures/sample-project/` — a small multi-service TS/JS repo used by analyzer and server tests
 - **Convention:** Test files named `*.test.ts`
 - **Categories:** Unit tests (no I/O), integration tests (filesystem/DB), E2E tests (full server + client)
+- **Root resolution:** `vitest.config.ts` maps workspace package imports, including `@truecourse/core/*` public subpaths, to source files so tests do not require prebuilt `dist/` output.
 - **Each phase must include a test plan and passing tests before the phase is considered complete.**
 - **Run:** `pnpm test` (all tests)
 
@@ -3180,3 +3181,62 @@ Token-based comparison algorithm to detect copy-pasted code blocks across the co
 3. Hash each window, compare across files
 4. Merge overlapping matches into contiguous duplicate blocks
 5. Report duplicate blocks with file locations and percentage
+
+---
+
+## Phase 37: Spec Compliance Analyzer `STATUS: DONE`
+
+Validate whether repo implementation matches repo specs by extracting atomic requirements from spec documents, extracting deterministic code facts from source/config/test files, and comparing both sides with idempotent matchers.
+
+Product requirements live in `docs/prds/spec-compliance-analyzer/PRD.md`.
+Task breakdowns live in `docs/prds/spec-compliance-analyzer/tasks/`.
+
+Current task status:
+
+- Phase 1 core data model: `STATUS: DONE`
+- Phase 2 spec discovery and parsing: `STATUS: DONE`
+- Phase 3 LLM requirement extraction: `STATUS: DONE`
+- Phase 4 code fact extraction: `STATUS: DONE`
+- Phase 5 compliance matchers: `STATUS: DONE`
+- Phase 6 CLI and dashboard integration: `STATUS: DONE`
+- Phase 7 hardening and expansion: `STATUS: DONE`
+- Phase 8 CLI command extraction and matching follow-up: `STATUS: DONE`
+- Phase 9 default-on analysis integration: `STATUS: DONE`
+
+Initial scope:
+
+- Discover Markdown and structured spec files
+- Extract requirement graphs with stable IDs and cached LLM support for prose specs
+- Extract deterministic code fact graphs for APIs, UI, config, auth, data, and tests
+- Compare requirements to facts using deterministic matchers
+- Report missing, conflicting, partial, ambiguous, unverifiable, and unspecified implementation findings
+- Prove repeated runs over identical inputs produce identical output
+- Run spec compliance by default for full and diff analysis, with
+  `.truecourse/config.json` and `--no-spec-compliance` as explicit opt-outs
+- Support `truecourse analyze --spec-compliance-only` for focused spec
+  compliance test runs without normal rule checks
+
+Phase 7 hardening status:
+
+- OpenAPI operation requirements now include operation IDs, status codes, request/response schema hints, required request fields, response field hints, auth, and security scheme metadata. `STATUS: DONE`
+- Express facts now include statically visible response status codes and request body field usage. `STATUS: DONE`
+- Next.js App Router and Pages Router facts now include API/UI routes, statically visible request body field usage, returned status codes, and route-scoped auth signals. Extraction is gated to detected Next.js project roots from manifest `next` dependencies or `next.config.*` files and respects nested package boundaries. `STATUS: DONE`
+- Framework-specific extractors now require framework evidence before emitting facts: Express imports/factories, React Router imports, Commander imports, test file/framework context, and Drizzle/SQLAlchemy ORM imports. `STATUS: DONE`
+- Schema/data facts now emit `data.table`, `data.field`, `data.index`, and `data.relation` from Prisma, Drizzle, and SQLAlchemy schema parser output. `STATUS: DONE`
+- Auth facts now normalize role, permission, admin-only, public-route, and ownership-style signals when statically visible. `STATUS: DONE`
+- Test coverage hints now compare requirement IDs, subject/object text, evidence text, acceptance criteria, test names, and static string references. `STATUS: DONE`
+- Infra/config facts now cover Docker Compose services, GitHub Actions jobs, and package scripts. `STATUS: DONE`
+- Spec-compliance artifacts now expose phase timing metadata and cache/LLM counters. `STATUS: DONE`
+- Spec-compliance hardening now canonicalizes prose field/path targets, prevents same-evidence requirement ID collisions, extracts Next.js query parameters, recognizes Clerk auth/protect signals, and treats standalone form labels as controls for button-group UI fields. `STATUS: DONE`
+- Behavioral spec-compliance extraction now emits route-scoped Next.js validation-field facts, Drizzle mutation field facts, UI action facts, modal facts, and guarded-close facts so matchers can verify persistence, validation, and workflow semantics instead of only route/field presence. `STATUS: DONE`
+- React/UI extraction now resolves same-file and relative imported static string constants, object property reads, route constants, composed field labels, and composed display text props without executing code. `STATUS: DONE`
+- Unspecified implementation findings are opt-in via `includeUnspecifiedFindings` so broad repos do not surface unmatched implementation evidence as default violations. `STATUS: DONE`
+- Remaining expansion: larger mixed-domain snapshot. `STATUS: DONE`
+- Minimal React todo fixture with structured product requirements for manual and regression spec-compliance runs. `STATUS: DONE`
+- Requested Phase 7 test/build sweep (`pnpm test -- tests/analyzer tests/core tests/cli tests/dashboard-server`, `pnpm build`). `STATUS: DONE`
+
+Phase 8 CLI command extraction status:
+
+- Package `bin` metadata now emits `cli.binary` facts without churning existing package script/metadata fact IDs. `STATUS: DONE`
+- Commander-based TypeScript/JavaScript CLIs now emit static binary, command, option, and argument facts. `STATUS: DONE`
+- CLI binary, command, option, and argument requirements now have deterministic matchers, including `must_not`, missing, partial, and unverifiable handling. `STATUS: DONE`

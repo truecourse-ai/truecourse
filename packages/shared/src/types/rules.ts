@@ -12,7 +12,7 @@ export const CODE_DOMAINS: readonly RuleDomain[] = DOMAIN_ORDER.filter(d => d !=
 /** Domains enabled by default (everything except style which is opt-in) */
 export const DEFAULT_DOMAINS: readonly RuleDomain[] = DOMAIN_ORDER.filter(d => d !== 'style')
 
-export const RuleCategorySchema = z.enum(['service', 'database', 'module', 'method', 'code'])
+export const RuleCategorySchema = z.enum(['service', 'database', 'module', 'method', 'code', 'spec-compliance'])
 export type RuleCategory = z.infer<typeof RuleCategorySchema>
 
 export const RuleSeveritySchema = z.enum(['info', 'low', 'medium', 'high', 'critical'])

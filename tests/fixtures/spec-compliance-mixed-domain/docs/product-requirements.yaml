@@ -1,0 +1,68 @@
+requirements:
+  - kind: ui
+    subject: Profile page route
+    action: render
+    object: /profile
+    evidenceText: The profile page route /profile must exist.
+  - kind: ui
+    subject: Profile welcome text
+    action: show
+    object: Welcome back
+    evidenceText: The UI must show text Welcome back.
+  - kind: ui
+    subject: Profile email field
+    action: include
+    object: email
+    evidenceText: The profile form must include an email field.
+  - kind: auth
+    subject: Admin reports access
+    action: require
+    object: admin
+    evidenceText: Only admin role may access reports.
+  - kind: config
+    subject: API secret
+    action: read
+    object: API_SECRET
+    evidenceText: The service must read API_SECRET.
+  - kind: data
+    subject: User email field
+    action: store
+    object: email
+    evidenceText: User.email must exist in the data schema.
+  - kind: infra
+    subject: Docker Compose api service
+    action: define
+    object: api
+    evidenceText: Docker Compose must define api service.
+  - kind: infra
+    subject: CI test job
+    action: define
+    object: test
+    evidenceText: GitHub Actions CI must define test job.
+  - kind: infra
+    subject: Package build script
+    action: define
+    object: build
+    evidenceText: The package must define build script.
+  - kind: test
+    subject: Duplicate email test coverage
+    action: cover
+    object: duplicate email
+    evidenceText: Tests must cover duplicate-email handling.
+  - kind: ui
+    subject: Billing page route
+    action: render
+    object: /billing
+    evidenceText: The billing page route /billing must exist.
+  - kind: api
+    modality: must_not
+    subject: Legacy route
+    action: expose
+    object: GET /legacy
+    evidenceText: The API must not expose GET /legacy.
+  - kind: workflow
+    modality: should
+    subject: Manual approval workflow
+    action: require
+    object: finance approval
+    evidenceText: Refund workflows should require finance approval before payout.

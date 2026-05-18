@@ -139,6 +139,11 @@ export interface AnalyzeOptions {
   stash?: boolean;
   /** Force-install / force-skip the Claude Code skills first-run prompt. */
   installSkills?: boolean;
+  specCompliance?: boolean;
+  specComplianceOnly?: boolean;
+  specs?: string[];
+  showSatisfied?: boolean;
+  output?: "text" | "json";
 }
 
 /** Resolve the per-run `enableLlmRules` decision from flag + config + TTY state. */
@@ -226,17 +231,33 @@ export async function resolveStashDecision(
 }
 
 export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
-  p.intro("Analyzing repository");
-  ensureClaudeCli();
-  showFirstRunNotice();
+  const jsonOutput = options.output === "json";
+  if (!jsonOutput) p.intro("Analyzing repository");
+  if (!jsonOutput) showFirstRunNotice();
 
   const project = resolveOrInitProject();
-  p.log.step(`Repository: ${project.name}`);
+  if (!jsonOutput) p.log.step(`Repository: ${project.name}`);
 
   // First-time setup convenience: offer to install Claude Code skills if
   // they haven't been installed for this repo yet. `--install-skills` /
   // `--no-skills` bypasses the prompt; non-interactive runs skip silently.
-  await promptInstallSkills(project.path, { install: options.installSkills });
+  if (!jsonOutput) {
+    await promptInstallSkills(project.path, { install: options.installSkills });
+  }
+
+  const config = readProjectConfig(project.path);
+  const enabledCategories = config.enabledCategories ?? undefined;
+  const llmDecision = options.specComplianceOnly
+    ? { enabled: false, autoApproveEstimate: false }
+    : resolveLlmDecision(options, config.enableLlmRules ?? true);
+  const enableLlmRules = !options.specComplianceOnly && llmDecision.enabled;
+  const enableSpecCompliance = options.specComplianceOnly
+    ? options.specCompliance ?? true
+    : options.specCompliance ?? config.specCompliance?.enabled ?? true;
+  const specUsesLlm = enableSpecCompliance
+    && options.llm !== false
+    && (config.specCompliance?.useLlm ?? true);
+  if (enableLlmRules || specUsesLlm) ensureClaudeCli();
 
   // All internal pipeline logs (`[Pipeline]`, `[LLM]`, `[CLI]`, `[Analyzer]`,
   // `[Flows]`, `[Violations]`) go to this repo's analyze.log. The terminal
@@ -245,11 +266,6 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   configureLogger({
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
-
-  const config = readProjectConfig(project.path);
-  const enabledCategories = config.enabledCategories ?? undefined;
-  const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
-  const enableLlmRules = llmDecision.enabled;
 
   // Resolve stash decision before any analyzer work — keeps the prompt out
   // of the shared core service (which the dashboard server also calls).
@@ -265,9 +281,14 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     p.log.info("Legacy Postgres data wiped. Re-analyze to repopulate.");
   }
 
-  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const stepDefs = buildAnalysisSteps(
+    enabledCategories,
+    enableLlmRules,
+    enableSpecCompliance,
+    !options.specComplianceOnly,
+  );
   const tracker = new StepTracker((payload) => {
-    if (payload.steps) renderSteps(payload.steps);
+    if (!jsonOutput && payload.steps) renderSteps(payload.steps);
   }, stepDefs);
 
   const abortController = new AbortController();
@@ -293,6 +314,11 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
       skipStash: stashDecision.skipStash,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
+      specCompliance: enableSpecCompliance,
+      specComplianceOnly: options.specComplianceOnly,
+      specs: options.specs,
+      showSatisfied: options.showSatisfied,
+      noLlm: options.llm === false,
       source: "cli",
       onLlmEstimate: async (estimate) => {
         stopSpinner();
@@ -307,6 +333,16 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
     });
 
     stopSpinner();
+    if (jsonOutput) {
+      process.stdout.write(`${JSON.stringify({
+        serviceCount: result.serviceCount,
+        fileCount: result.fileCount,
+        architecture: result.architecture,
+        violationsSummary: result.violationsSummary,
+        ...(result.specCompliance ? { specCompliance: result.specCompliance } : {}),
+      }, null, 2)}\n`);
+      return;
+    }
     p.log.success("Analysis complete");
     renderViolationsSummary([], result.violationsSummary);
     recordAnalyzeAndMaybePrompt();
@@ -314,10 +350,14 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
   } catch (err) {
     stopSpinner();
     if (err instanceof DOMException && err.name === "AbortError") {
-      p.outro("Analysis cancelled");
+      if (!jsonOutput) p.outro("Analysis cancelled");
       process.exit(130);
     }
-    p.log.error(err instanceof Error ? err.message : String(err));
+    if (jsonOutput) {
+      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    } else {
+      p.log.error(err instanceof Error ? err.message : String(err));
+    }
     process.exit(1);
   } finally {
     process.removeListener("SIGINT", onSigint);
@@ -335,7 +375,6 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   const { renderDiffResultsSummary } = await import("./helpers.js");
 
   p.intro("Running diff check");
-  ensureClaudeCli();
   showFirstRunNotice();
 
   const project = resolveOrInitProject();
@@ -344,14 +383,23 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   // Same first-run skill convenience as `runAnalyze`.
   await promptInstallSkills(project.path, { install: options.installSkills });
 
+  const config = readProjectConfig(project.path);
+  const enabledCategories = config.enabledCategories ?? undefined;
+  const llmDecision = options.specComplianceOnly
+    ? { enabled: false, autoApproveEstimate: false }
+    : resolveLlmDecision(options, config.enableLlmRules ?? true);
+  const enableLlmRules = !options.specComplianceOnly && llmDecision.enabled;
+  const enableSpecCompliance = options.specComplianceOnly
+    ? options.specCompliance ?? true
+    : options.specCompliance ?? config.specCompliance?.enabled ?? true;
+  const specUsesLlm = enableSpecCompliance
+    && options.llm !== false
+    && (config.specCompliance?.useLlm ?? true);
+  if (enableLlmRules || specUsesLlm) ensureClaudeCli();
+
   configureLogger({
     filePath: path.join(project.path, ".truecourse/logs/analyze.log"),
   });
-
-  const config = readProjectConfig(project.path);
-  const enabledCategories = config.enabledCategories ?? undefined;
-  const llmDecision = resolveLlmDecision(options, config.enableLlmRules ?? true);
-  const enableLlmRules = llmDecision.enabled;
 
   // Diff is by definition working-tree analysis — it never stashes, so
   // --stash / --no-stash are accepted (for symmetry with `analyze`) but the
@@ -362,7 +410,12 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
   // `renderedLineCount` globals.
   renderPhase = enableLlmRules ? "pre-llm" : "all";
 
-  const stepDefs = buildAnalysisSteps(enabledCategories, enableLlmRules);
+  const stepDefs = buildAnalysisSteps(
+    enabledCategories,
+    enableLlmRules,
+    enableSpecCompliance,
+    !options.specComplianceOnly,
+  );
   const tracker = new StepTracker((payload) => {
     if (payload.steps) renderSteps(payload.steps);
   }, stepDefs);
@@ -386,6 +439,11 @@ export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void
       signal: abortController.signal,
       enabledCategoriesOverride: enabledCategories,
       enableLlmRulesOverride: enableLlmRules,
+      specCompliance: enableSpecCompliance,
+      specComplianceOnly: options.specComplianceOnly,
+      specs: options.specs,
+      showSatisfied: options.showSatisfied,
+      noLlm: options.llm === false,
       source: "cli",
       onLlmEstimate: async (estimate) => {
         stopSpinner();

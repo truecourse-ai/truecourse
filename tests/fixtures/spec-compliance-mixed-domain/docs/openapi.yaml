@@ -1,0 +1,55 @@
+openapi: 3.1.0
+info:
+  title: Mixed Domain API
+  version: 1.0.0
+security:
+  - bearerAuth: []
+paths:
+  /admin/reports:
+    get:
+      operationId: listAdminReports
+      summary: List admin reports
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Reports are available
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /users:
+    post:
+      operationId: createUser
+      summary: Create user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

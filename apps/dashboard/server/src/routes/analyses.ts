@@ -64,7 +64,7 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     const id = req.params.id as string;
     const parsed = AnalyzeRepoSchema.safeParse(req.body);
     if (!parsed.success) throw createAppError('Invalid request body', 400);
-    const { mode, skipGit } = parsed.data;
+    const { mode, skipGit, specCompliance, specComplianceOnly, specs, showSatisfied, noLlm } = parsed.data;
 
     const repo = resolveProjectForRequest(id);
 
@@ -76,14 +76,22 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
 
     const projectConfig = readProjectConfig(repo.path);
     const effectiveCategories = projectConfig.enabledCategories ?? undefined;
-    const effectiveLlmRules = projectConfig.enableLlmRules ?? true;
+    const effectiveLlmRules = specComplianceOnly || noLlm ? false : projectConfig.enableLlmRules ?? true;
+    const effectiveSpecCompliance = specComplianceOnly
+      ? specCompliance ?? true
+      : specCompliance ?? projectConfig.specCompliance?.enabled ?? true;
 
     // Register before the 202 so POST /analyses/cancel can find this run.
     const abortController = registerAnalysis(id, 'pending');
 
     res.status(202).json({ message: `${mode === 'diff' ? 'Diff check' : 'Analysis'} started`, repoId: id, mode });
 
-    const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+    const trackerSteps = buildAnalysisSteps(
+      effectiveCategories,
+      effectiveLlmRules,
+      effectiveSpecCompliance,
+      !specComplianceOnly,
+    );
     const tracker = createSocketTracker(id, trackerSteps);
 
     pushLogger({
@@ -97,6 +105,11 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
           skipGit,
           effectiveCategories,
           effectiveLlmRules,
+          specCompliance: effectiveSpecCompliance,
+          specComplianceOnly,
+          specs,
+          showSatisfied,
+          noLlm,
           tracker,
           signal: abortController.signal,
         });
@@ -104,6 +117,11 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
         await runDiffAnalyze(id, repo, {
           tracker,
           signal: abortController.signal,
+          specCompliance: effectiveSpecCompliance,
+          specComplianceOnly,
+          specs,
+          showSatisfied,
+          noLlm,
         });
       }
     } catch (error) {
@@ -208,6 +226,48 @@ router.get('/:id/analyses/diff', async (req: Request, res: Response, next: NextF
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/repos/:id/spec-compliance — persisted latest/historical artifact
+// ---------------------------------------------------------------------------
+
+router.get('/:id/spec-compliance', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const repo = resolveProjectForRequest(id);
+    const analysisId = req.query.analysisId as string | undefined;
+    const showSatisfied = req.query.showSatisfied === 'true' || req.query.showSatisfied === '1';
+
+    let metadata: Record<string, unknown> | null | undefined;
+    const latest = readLatest(repo.path);
+    if (!analysisId || latest?.analysis.id === analysisId) {
+      metadata = latest?.analysis.metadata;
+    } else {
+      const filename = findAnalysisFilename(repo.path, analysisId);
+      metadata = filename ? readAnalysis(repo.path, filename)?.metadata : null;
+    }
+
+    const artifact = metadata?.specCompliance;
+    if (!artifact || typeof artifact !== 'object') {
+      res.json(null);
+      return;
+    }
+
+    if (!showSatisfied) {
+      res.json(artifact);
+      return;
+    }
+
+    const value = artifact as Record<string, unknown>;
+    const results = Array.isArray(value.results) ? value.results : [];
+    const summary = value.summary && typeof value.summary === 'object'
+      ? { ...(value.summary as Record<string, unknown>), visibleResults: results.length }
+      : value.summary;
+    res.json({ ...value, visibleResults: results, summary });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/repos/:id/analyses/:analysisId/usage
 // ---------------------------------------------------------------------------
 
@@ -275,6 +335,11 @@ interface StartRunOptions {
   skipGit?: boolean;
   effectiveCategories?: string[];
   effectiveLlmRules: boolean;
+  specCompliance?: boolean;
+  specComplianceOnly?: boolean;
+  specs?: string[];
+  showSatisfied?: boolean;
+  noLlm?: boolean;
   tracker: StepTracker;
   signal: AbortSignal;
 }
@@ -326,6 +391,11 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
     skipStash: stashDecision === 'no-stash',
     enabledCategoriesOverride: opts.effectiveCategories,
     enableLlmRulesOverride: opts.effectiveLlmRules,
+    specCompliance: opts.specCompliance,
+    specComplianceOnly: opts.specComplianceOnly,
+    specs: opts.specs,
+    showSatisfied: opts.showSatisfied,
+    noLlm: opts.noLlm ?? false,
     tracker: opts.tracker,
     signal: opts.signal,
     provider,
@@ -337,10 +407,19 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
   emitAnalysisComplete(id, outcome.analysisId);
 }
 
-async function runDiffAnalyze(id: string, repo: RegistryEntry, opts: Pick<StartRunOptions, 'tracker' | 'signal'>): Promise<void> {
+async function runDiffAnalyze(
+  id: string,
+  repo: RegistryEntry,
+  opts: Pick<StartRunOptions, 'tracker' | 'signal' | 'specCompliance' | 'specComplianceOnly' | 'specs' | 'showSatisfied' | 'noLlm'>,
+): Promise<void> {
   const { diff } = await diffInProcess(repo, {
     tracker: opts.tracker,
     signal: opts.signal,
+    specCompliance: opts.specCompliance,
+    specComplianceOnly: opts.specComplianceOnly,
+    specs: opts.specs,
+    showSatisfied: opts.showSatisfied,
+    noLlm: opts.noLlm ?? false,
     source: 'dashboard',
     onLlmEstimate: createSocketLlmEstimateHandler(id),
   });

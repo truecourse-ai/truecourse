@@ -48,6 +48,7 @@ export interface PersistFullResult {
   architecture: string;
   durationMs: number;
   violationsSummary: { total: number; bySeverity: Record<string, number> };
+  specCompliance?: unknown;
 }
 
 export function persistFullAnalysis(
@@ -99,6 +100,9 @@ export function persistFullAnalysis(
     architecture: core.architecture,
     durationMs: Date.now() - startedAt,
     violationsSummary: { total, bySeverity },
+    ...(snapshot.metadata && 'specCompliance' in snapshot.metadata
+      ? { specCompliance: snapshot.metadata.specCompliance }
+      : {}),
   };
 }
 

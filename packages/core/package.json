@@ -92,6 +92,18 @@
       "types": "./dist/services/rules.service.d.ts",
       "import": "./dist/services/rules.service.js"
     },
+    "./services/spec-requirement-extraction": {
+      "types": "./dist/services/spec-requirement-extraction.service.d.ts",
+      "import": "./dist/services/spec-requirement-extraction.service.js"
+    },
+    "./services/spec-compliance-matchers": {
+      "types": "./dist/services/spec-compliance-matchers.service.d.ts",
+      "import": "./dist/services/spec-compliance-matchers.service.js"
+    },
+    "./services/spec-compliance": {
+      "types": "./dist/services/spec-compliance.service.d.ts",
+      "import": "./dist/services/spec-compliance.service.js"
+    },
     "./services/stable-keys": {
       "types": "./dist/services/stable-keys.d.ts",
       "import": "./dist/services/stable-keys.js"
