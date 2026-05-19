@@ -38,8 +38,10 @@ For each target OSS repo:
    the inner loop.
 4. **Merging the discovery PR** lands the baseline on main and fires
    `fp-next-fix` (via its discovery-PR trigger). The fix loop then
-   consumes the open `fp-fix` issues one at a time:
-   a. Paraphrase one FP-triggering snippet from the issue into the
+   consumes the open `fp-fix` issues in **batches of up to 5 per
+   session** (to fit within the 15-runs/day routine cap — see "Batched
+   mode" below). For each issue in the batch:
+   a. Paraphrase the FP-triggering snippet into the
       `sample-js-project-positive` (or `…-python-positive`) fixture — the
       positive project asserts **zero violations**, so adding FP code there
       makes the test fail until the visitor is fixed.
@@ -48,10 +50,12 @@ For each target OSS repo:
       and break genuine detection.
    c. Fix the visitor / rule until both tests pass and full `pnpm test` is
       green.
-   d. Commit, push to `claude/fp-fix/<rule-key>`, open a PR that closes the
-      issue.
-5. When the PR merges (closing the issue), the routine fires again and the
-   next `fp-fix`-labelled issue is picked up automatically.
+
+   At the end of the batch, commit all fixture + visitor changes, push
+   to `claude/fp-fix/batch-<YYYYMMDDHHMM>`, and open one PR that closes
+   all N issues in the batch.
+5. When the batched PR merges (auto-closing all linked issues), the
+   routine fires again and processes the next batch.
 6. When no `fp-fix` issues remain for the current target, fp-next-fix
    **re-runs analyze against the freshly-built local dist** (containing
    every merged fix). If TP ≥ 90 %, it opens a **campaign-close PR**
@@ -159,12 +163,13 @@ So an FP fix means:
 │   Is merged=true, Head Branch starts-with                │
 │   claude/fp-fix/, Labels is-one-of fp-fix                │
 │                                                          │
-│ 1. Pick oldest open fp-fix issue                         │
-│ 2. Clone target OSS repo, re-confirm FP                  │
-│ 3. Paraphrase into …-positive fixture (no annotation)    │
-│ 4. Paraphrase true-bug into …-negative (+ marker)        │
-│ 5. Fix visitor, full tests green                         │
-│ 6. Push claude/fp-fix/<rule-key>, open PR (closes #N)    │
+│ Batched: per session, up to 5 fixes (cap 10 attempts)    │
+│ Per issue: pick oldest, lock, paraphrase FP into         │
+│   …-positive fixture, paraphrase true-bug into           │
+│   …-negative (+ // VIOLATION marker), fix visitor,       │
+│   full tests green, accumulate.                          │
+│ At end: push claude/fp-fix/batch-<YYYYMMDDHHMM>,         │
+│   open ONE PR with Closes #N per fixed issue             │
 │ — OR, if queue empty and TP ≥ 90%:                       │
 │   open campaign-close PR on claude/fp-campaign-close/*   │
 │ — OR, if queue empty and TP < 90%: re-discover           │
@@ -334,36 +339,49 @@ are on main before any fp-fix work begins.
 No concurrency worry: discovery PR merges and fp-fix PR merges never
 coincide, so the two routines never fire simultaneously.
 
-Steps the session takes:
-1. List open issues with label `fp-fix` (excluding `fp-in-progress`).
-   Pick the oldest. If none → go to "queue empty" path below.
-2. Add label `fp-in-progress` to the issue (concurrency lock).
-3. Parse the YAML block from the issue body. Clone target repo at
-   `target_ref` to `/tmp/target`.
-4. `pnpm install && pnpm build:dist`, then
-   `cd /tmp/target && node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm
-   --no-stash --no-skills`. Read `/tmp/target/.truecourse/LATEST.json`
-   and filter `.violations[]` to this rule. (Always dist, never
-   `npx truecourse`.)
-5. Re-confirm the FP still reproduces. If not (upstream fixed, or a
-   previous fix already resolved it), close the issue with comment
-   "no longer reproduces" and end.
-6. Pick the most representative FP sample. Paraphrase (rename
-   identifiers, change trivial structure, drop unrelated context) into
-   `tests/fixtures/sample-{js,python}-project-positive/`. **No** `// VIOLATION`
-   comment — the positive project asserts zero violations.
-7. Paraphrase a true-bug variant into `…-project-negative/` with a
-   `// VIOLATION: <rule-key>` comment.
-8. Run `pnpm test 2>&1 | tee /tmp/test.log`. Confirm the new positive
-   case fails and the new negative case passes.
-9. Edit the rule under `packages/analyzer/src/rules/<domain>/…` until
-   both pass and full `pnpm test` is green. No unrelated changes.
-10. Push branch `claude/fp-fix/<rule-key>`. Open a PR with:
-    - Label `fp-fix` (required for the next trigger to fire).
-    - Body that includes `Closes #<issue>` and links the OSS sample URLs.
-11. Comment on the issue with the PR link; leave the issue open (it auto-
-    closes when the PR merges).
-12. End. The next merge of that PR will refire the routine.
+**Batched mode**: each session processes up to **5 successful fixes**
+(cap **10 attempts** total to allow for skipped issues). All fixture +
+visitor changes accumulate in one branch, and one PR is opened at the
+end with `Closes #N` lines for every fixed issue. This trades a bigger
+review surface per PR for ~5× throughput within the 15-runs/day routine
+cap. See the per-issue loop in
+`docs/fp-automation/prompts/fp-next-fix.md` for the full mechanics
+(success vs attempt counters, skipped-issue handling, partial-batch
+revert rules).
+
+**Session setup (once)**: `pnpm install && pnpm build:dist`; lazily
+clone target repo and run analyze on first issue. Counters:
+`successes`, `attempts`, `fixed_issues`.
+
+**Per-issue loop** (continues while `successes < 5 AND attempts < 10`):
+1. List open `fp-fix` issues (excluding `fp-in-progress`, `fp-blocked`,
+   `fp-skipped`, and any already in `fixed_issues`). Pick oldest. If
+   none → exit loop, go to "Open the batched PR".
+2. Add `fp-in-progress` label (concurrency lock; retry next-oldest on
+   collision, max 3 retries).
+3. Parse YAML; on malformed → mark blocked, increment `attempts`,
+   continue loop.
+4. Filter `LATEST.json` to this rule; on no-reproduce → close issue,
+   increment `attempts`, continue.
+5. Add paraphrased FP to positive fixture (no annotation).
+6. Add true-bug to negative fixture (with `// VIOLATION: <rule-key>`).
+7. Run tests; if negative case fails too → revert this issue's
+   fixtures, mark blocked, increment `attempts`, continue.
+8. Edit the rule's visitor / pattern. If can't without a cross-module
+   refactor → revert this issue's fixtures, post `## Refactor needed`,
+   mark blocked, increment `attempts`, continue.
+9. Re-run full tests; on unrelated breakage → revert this issue's
+   visitor AND fixtures, mark blocked, increment `attempts`, continue.
+10. Record success: append to `fixed_issues`. Increment both
+    `successes` AND `attempts`. Keep `fp-in-progress` label until the
+    batch PR opens. If caps hit → exit loop.
+
+**Open the batched PR**:
+- If `successes == 0` → end session, no PR.
+- Else → push `claude/fp-fix/batch-<YYYYMMDDHHMM>`, open one PR with
+  one `Closes #N` per fixed issue, per-rule sections in body, optional
+  "## Skipped this batch" section, label `fp-fix`. Comment + unlock
+  each fixed issue. End.
 
 **Queue empty path** (no open `fp-fix` issues for the current campaign):
 
@@ -469,16 +487,16 @@ One-time, before the first run:
 
 An **fp-fix PR** is mergeable when:
 
-- New positive-fixture case for the FP exists and the test passes (no
-  violation fires).
-- New negative-fixture case for the true-bug pattern exists with
-  `// VIOLATION:` comment and the test passes.
-- Full `pnpm test` is green (no regressions).
-- PR body links the original OSS snippet (URL only — no paste, to keep
-  clear of upstream licences) and shows the paraphrased fixture diff
-  inline.
-- PR closes its parent issue.
-- Branch matches `claude/fp-fix/<rule-key>` and carries label `fp-fix`.
+- Contains 1–5 rule fixes (typically 5).
+- For each fix: a new positive-fixture case (test asserts no
+  violation), a new negative-fixture case with `// VIOLATION:`
+  comment, and a scoped visitor edit under `packages/analyzer/src/`.
+- Full `pnpm test` is green (no regressions across the whole batch).
+- PR body has one `Closes #N` line per fixed issue (auto-closes all
+  on merge), per-rule sections with OSS source URLs (URL only — no
+  paste, to keep clear of upstream licences) and fixture diffs.
+- Branch matches `claude/fp-fix/batch-<YYYYMMDDHHMM>` and carries
+  label `fp-fix`.
 
 A **campaign-close PR** is mergeable when:
 
@@ -527,7 +545,8 @@ trail.
    cap + regular subscription usage (not API spend on an
    `ANTHROPIC_API_KEY`).
 7. **Branch hygiene**: branches use the `claude/` prefix
-   (`claude/fp-fix/<rule-key>`, `claude/fp-campaign-close/<owner>-<repo>`,
+   (`claude/fp-fix/batch-<YYYYMMDDHHMM>`,
+   `claude/fp-campaign-close/<owner>-<repo>`,
    `claude/fp-discover/<owner>-<repo>`) to fit the routine default
    push policy. Auto-delete head branches on merge.
 8. **Concurrency**: session adds `fp-in-progress` to the picked issue
