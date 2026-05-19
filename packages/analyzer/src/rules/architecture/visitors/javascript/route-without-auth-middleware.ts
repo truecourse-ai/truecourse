@@ -34,6 +34,17 @@ function isPublicPath(path: string): boolean {
 }
 
 /**
+ * Routes that embed a credential in the URL path (`:token`, `:apiKey`,
+ * `:secret`, `:hash`) are themselves token-authenticated — the handler reads
+ * the token from `params` and validates it. Treat them as authed.
+ */
+const URL_CREDENTIAL_PARAMS = /:(?:token|apiKey|api_key|secret|hash|signature)(?:\/|$)/i
+
+function isUrlCredentialAuthedPath(path: string): boolean {
+  return URL_CREDENTIAL_PARAMS.test(path)
+}
+
+/**
  * Extract identifier names from the middleware arguments to a route definition.
  * Express/Koa/Hono pattern: `app.get('/path', mw1, mw2, handler)`
  * — middleware are args[1..n-2], handler is args[n-1].
@@ -140,18 +151,28 @@ export const routeWithoutAuthMiddlewareVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     if (!isRouteHandler(node)) return null
 
+    // `app.use(...)` / `router.use(...)` is middleware registration, not a
+    // route handler — applying it as a global hook or mounting a sub-router.
+    // Auth on those is governed by what's *inside* the mounted router or by
+    // the order of middleware, not by the .use() call's own argument list.
+    const fn = node.childForFieldName('function')
+    const prop = fn?.childForFieldName('property')
+    if (prop?.text === 'use') return null
+
     // Skip if we don't recognize the framework — can't reason about middleware
     // chains we don't understand.
     const framework = detectWebFramework(node)
     if (framework === 'unknown') return null
 
-    // Skip public endpoints by path
+    // Skip public endpoints by path, and routes that authenticate via a
+    // credential embedded in the URL path itself.
     const args = node.childForFieldName('arguments')
     if (!args) return null
     const firstArg = args.namedChildren[0]
-    if (firstArg?.type === 'string') {
+    if (firstArg?.type === 'string' || firstArg?.type === 'template_string') {
       const path = firstArg.text.replace(/^['"`]|['"`]$/g, '')
       if (isPublicPath(path)) return null
+      if (isUrlCredentialAuthedPath(path)) return null
     }
 
     // Check this specific route's middleware chain

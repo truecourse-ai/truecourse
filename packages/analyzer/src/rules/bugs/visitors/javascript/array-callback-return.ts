@@ -25,6 +25,12 @@ export const arrayCallbackReturnVisitor: CodeRuleVisitor = {
     // The callback must be arrow_function, function, or function_expression
     if (firstArg.type !== 'arrow_function' && firstArg.type !== 'function' && firstArg.type !== 'function_expression') return null
 
+    // Async callbacks always return a Promise (the body's value is wrapped in
+    // Promise.resolve regardless of explicit return). The idiomatic
+    // `Promise.all(arr.map(async (x) => { await … }))` collects those promises,
+    // so a missing return is not a bug.
+    if (firstArg.children.some((c) => c.type === 'async' || c.text === 'async')) return null
+
     const body = firstArg.childForFieldName('body')
     if (!body) return null
 

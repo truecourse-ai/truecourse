@@ -24,7 +24,17 @@ export const processExitInLibraryVisitor: CodeRuleVisitor = {
       lowerPath.includes('server.') ||
       lowerPath.includes('app.') ||
       lowerPath.endsWith('/worker.ts') || lowerPath.endsWith('/worker.js') ||
-      lowerPath.includes('entrypoint.')
+      lowerPath.includes('entrypoint.') ||
+      // Seed scripts (`packages/prisma/seed-database.ts`, `prisma/seed.ts`,
+      // `seeds/initial.ts`) are CLI entrypoints invoked by the framework
+      // (Prisma's `prisma db seed`, custom seed runners) — process.exit is
+      // the conventional way they terminate after running.
+      /(?:^|\/)seeds?(?:[-.\/]|$)/.test(lowerPath) ||
+      // Example scripts (`packages/api/v1/examples/*.ts`) are runnable demos,
+      // not library code. They're executed as standalone scripts.
+      lowerPath.includes('/examples/') ||
+      // Migration scripts are one-shot entrypoints just like seeds.
+      /(?:^|\/)migrations?(?:[-.\/]|$)/.test(lowerPath)
     ) {
       return null
     }

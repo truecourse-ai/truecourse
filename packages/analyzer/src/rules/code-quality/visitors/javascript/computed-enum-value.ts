@@ -6,7 +6,11 @@ export const computedEnumValueVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx'],
   nodeTypes: ['enum_assignment'],
   visit(node, filePath, sourceCode) {
-    const value = node.namedChildren[0]
+    // tree-sitter exposes the RHS via the `value` field — `namedChildren[0]`
+    // was returning the LHS `property_identifier` (the enum member name), so
+    // string-literal initializers like `FREE = 'free'` were being misclassified
+    // as non-literal "computed" values.
+    const value = node.childForFieldName('value')
     if (!value) return null
 
     if (value.type === 'string' || value.type === 'number') return null
