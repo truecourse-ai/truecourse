@@ -78,6 +78,11 @@ export function exitProcess(code: number) {
   process.exit(code);
 }
 
+// VIOLATION: reliability/deterministic/process-exit-in-library
+export function failHard() {
+  process.exit(2);
+}
+
 // VIOLATION: reliability/deterministic/unchecked-array-access
 export function getElement(arr: number[], index: number) {
   const value = arr[index].toFixed(2);

@@ -257,4 +257,18 @@ export async function forgot() {
   return p;
 }
 
+// VIOLATION: bugs/deterministic/array-callback-missing-return
+export function doubleAll(nums: readonly number[]): number[] {
+  return nums.map((n) => {
+    n * 2;
+  });
+}
+
+// VIOLATION: bugs/deterministic/array-callback-return
+export function squaredOnly(nums: readonly number[]): number[] {
+  return nums.filter((n) => {
+    n > 0;
+  });
+}
+
 export { readFile };

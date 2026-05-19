@@ -54,6 +54,11 @@ export function assertEverything(data: unknown) {
   return { str, num, arr, obj };
 }
 
+// VIOLATION: architecture/deterministic/route-without-auth-middleware
+router.post('/api/admin/audit-logs/wipe', (req, res) => {
+  res.json({ cleared: true });
+});
+
 // VIOLATION: architecture/deterministic/unused-import
 import { HealthService } from '../services/health.service';
 

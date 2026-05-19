@@ -164,5 +164,11 @@ export class UselessDefault {
   constructor(public value: string = undefined) {}
 }
 
+// VIOLATION: code-quality/deterministic/computed-enum-value
+export enum DerivedEnum {
+  BASE = 10,
+  DOUBLED = 10 * 2,
+}
+
 declare const UserId: any;
 declare const ignoredValueRef: any;
