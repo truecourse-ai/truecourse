@@ -32,6 +32,18 @@ Per invocation:
 
 Before the per-issue loop:
 
+- **Create the batch branch FIRST**, before any other work in the
+  truecourse repo. The routine starts the session on a default
+  randomly-named branch (e.g. `claude/<adjective-noun-XXXX>`); pushing
+  from that branch will **not** fire Trigger B because its filter is
+  `Head Branch starts-with claude/fp-fix/`. Run:
+  ```
+  git fetch origin main && \
+    git checkout -b claude/fp-fix/batch-$(date -u +%Y%m%d%H%M) origin/main
+  ```
+  Remember the exact branch name; you'll push to it in the final
+  step. **All commits this session go on this branch.** If you find
+  yourself on any other branch when about to commit, stop and switch.
 - Track three counters in your head: `successes = 0`, `attempts = 0`,
   and a list `fixed_issues = []` of `(issue_number, rule_key,
   positive_fixture_path, negative_fixture_path, visitor_summary)`.
@@ -181,8 +193,16 @@ After the loop:
   most recent `fp-fix` issue noting that the session ended with no
   successful fixes after `attempts` attempts.)
 - If `successes >= 1`:
+  - **Verify your branch.** Run `git rev-parse --abbrev-ref HEAD` and
+    confirm it starts with `claude/fp-fix/batch-`. If it doesn't —
+    e.g. you're still on the routine's default `claude/<random>`
+    branch — STOP. Create the correct branch now
+    (`git checkout -b claude/fp-fix/batch-$(date -u +%Y%m%d%H%M)`),
+    cherry-pick or move your in-progress commits onto it, then
+    delete the wrong branch locally. Pushing from the wrong branch
+    will not fire Trigger B and the chain will stall.
   - Branch: `claude/fp-fix/batch-<YYYYMMDDHHMM>` (use the session start
-    time in UTC).
+    time in UTC; this is the branch you created in session setup).
   - Commit message: `fix(fp): resolve <N> FPs from <owner>/<repo>`
     where N = `successes`.
   - PR title: same as commit message.
