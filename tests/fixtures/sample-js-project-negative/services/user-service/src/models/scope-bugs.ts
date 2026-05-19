@@ -101,10 +101,16 @@ export class SetterWithReturn {
 }
 
 // VIOLATION: bugs/deterministic/unbound-method
+// VIOLATION: bugs/deterministic/unbound-method
 export class EventEmitter {
   items: string[] = [];
   processAll() {
     this.items.forEach(this.processItem);
+  }
+  // Second true-bug case in the same class — same shape, exercises another
+  // call site so the visitor still has to walk class members per call.
+  startTasks() {
+    return this.items.map(this.processItem);
   }
   processItem(item: string) {
     console.log(item);
