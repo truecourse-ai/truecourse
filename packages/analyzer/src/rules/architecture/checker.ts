@@ -490,6 +490,34 @@ export function checkModuleRules(
       moduleMethodNames.set(mKey, arr)
     }
 
+    // Safety net for the case where module-extractor drops a module-level edge because
+    // the importer consumes an exported constant (not a tracked class/function) or the
+    // importer file has no extracted module (e.g. a framework router).  If a file is
+    // imported directly AND the importer is not merely re-exporting it through a barrel,
+    // the file is reachable and should not be flagged as dead.
+    //
+    // "Truly imported" means: ∃ a raw file dep (source→target) where target = mod.filePath
+    // AND not every imported name from that dep is re-exported by source unchanged.
+    // This excludes barrel files (export { X } from '...') which just pass names through.
+    const fileReExportNames = new Map<string, Set<string>>()
+    if (fileAnalyses) {
+      for (const fa of fileAnalyses) {
+        const reExports = new Set<string>()
+        for (const exp of fa.exports) {
+          if (exp.source) reExports.add(exp.name)
+        }
+        if (reExports.size > 0) fileReExportNames.set(fa.filePath, reExports)
+      }
+    }
+    const trulyImportedFiles = new Set<string>()
+    for (const dep of fileDependencies) {
+      const reExports = fileReExportNames.get(dep.source)
+      const allAreReExports =
+        dep.importedNames.length > 0 &&
+        dep.importedNames.every((name) => reExports?.has(name))
+      if (!allAreReExports) trulyImportedFiles.add(dep.target)
+    }
+
     for (const mod of modules) {
       const key = `${mod.serviceName}::${mod.name}`
       if (!connectedModules.has(key) && !dbConnectedModuleKeys?.has(key)) {
@@ -510,6 +538,9 @@ export function checkModuleRules(
           const modMethods = moduleMethodNames.get(key) || []
           if (sameFileRefs.has(mod.name) || modMethods.some((m) => sameFileRefs.has(m))) continue
         }
+
+        // Skip modules whose file is genuinely imported (not just re-exported by a barrel).
+        if (trulyImportedFiles.has(mod.filePath)) continue
 
         violations.push({
           ruleKey: 'architecture/deterministic/dead-module',
