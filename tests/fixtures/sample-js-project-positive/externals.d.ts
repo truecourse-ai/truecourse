@@ -103,6 +103,10 @@ declare module 'csv-parser' {
   export default csvParser;
 }
 
+declare module 'react-colorful' {
+  export function setNonce(nonce: string): void;
+}
+
 declare module '@sample/shared-utils' {
   export const logger: {
     info(message: string): void;

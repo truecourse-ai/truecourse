@@ -55,6 +55,20 @@ export function UselessSetState() {
   return <div>{value}</div>;
 }
 
+// VIOLATION: code-quality/deterministic/react-useless-set-state
+export function UselessSetStateFromDocumenso() {
+  // Paraphrased true-bug companion to the documenso FPs: the setter and
+  // argument both come from the same useState destructure, and no local
+  // shadowing variable intervenes — so this really is a no-op write.
+  const [count, setCount] = useState(0);
+
+  const noop = () => {
+    setCount(count);
+  };
+
+  return <button onClick={noop}>{count}</button>;
+}
+
 // VIOLATION: code-quality/deterministic/react-readonly-props
 interface MutatingComponentProps {
   items: string[];
