@@ -12,14 +12,24 @@ export const uncaughtExceptionNoHandlerVisitor: CodeRuleVisitor = {
     if (lowerPath.includes('/packages/') || lowerPath.includes('/lib/')) {
       return null
     }
-    if (
-      !lowerPath.includes('index.') &&
-      !lowerPath.includes('main.') &&
-      !lowerPath.includes('server.') &&
-      !lowerPath.includes('app.') &&
-      !lowerPath.endsWith('/worker.ts') && !lowerPath.endsWith('/worker.js') &&
-      !lowerPath.includes('bin/')
-    ) {
+    // Skip framework route modules — these are imported by the framework
+    // runtime, not started as their own process. Remix v2 puts route files
+    // under `app/routes/`; Next.js Pages router uses `pages/`.
+    if (lowerPath.includes('/routes/') || lowerPath.includes('/pages/')) {
+      return null
+    }
+    // Match on the basename so we only catch real entry-point filenames
+    // (`index.ts`, `server.ts`, `main.ts`, `app.ts`). A `.includes('index.')`
+    // / `.includes('server.')` check on the full path leaks across Remix's
+    // `_index.tsx` route files and `*.server.ts` server-only modules.
+    const basename = (lowerPath.split('/').pop() ?? lowerPath)
+    const isEntryBasename =
+      basename.startsWith('index.') ||
+      basename.startsWith('main.') ||
+      basename.startsWith('server.') ||
+      basename.startsWith('app.') ||
+      basename === 'worker.ts' || basename === 'worker.js'
+    if (!isEntryBasename && !lowerPath.includes('/bin/')) {
       return null
     }
 

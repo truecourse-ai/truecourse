@@ -130,6 +130,40 @@ function checkDirectMemberAccess(node: SyntaxNode): UserInputSource | null {
 }
 
 /**
+ * Returns true if `variable` is a positional function parameter — i.e., its
+ * declaration is a direct identifier in a `formal_parameters` list, not nested
+ * inside an `object_pattern` or `array_pattern`.
+ *
+ * Pattern 2 in `findUserInputAccess` only applies to positional params:
+ * `(req, res) => ...` makes `req` mean "the HTTP request object", but
+ * `({ ctx, input }) => ...` (the standard tRPC handler shape) destructures
+ * `ctx` out of a procedure context object — it is NOT a request, even though
+ * the name overlaps with Koa's positional `ctx` handler param.
+ */
+function isPositionalParameter(variable: Variable): boolean {
+  let current: SyntaxNode | null = variable.declarationNode
+  while (current) {
+    if (current.type === 'object_pattern' || current.type === 'array_pattern') {
+      return false
+    }
+    if (current.type === 'formal_parameters') {
+      return true
+    }
+    if (
+      current.type === 'function_declaration' ||
+      current.type === 'arrow_function' ||
+      current.type === 'function_expression' ||
+      current.type === 'method_definition' ||
+      current.type === 'program'
+    ) {
+      return false
+    }
+    current = current.parent
+  }
+  return false
+}
+
+/**
  * Walk up from a Variable's declarationNode to find the assigned value
  * (the right-hand side of `const x = ...`).
  *
@@ -199,8 +233,15 @@ export function findUserInputAccess(
     if (n.type === 'identifier' && dataFlow) {
       const variable = dataFlow.resolveReference(n)
       if (variable) {
-        // Pattern 2: parameter named like a request object
-        if (variable.kind === 'parameter' && REQUEST_OBJECT_NAMES.has(variable.name)) {
+        // Pattern 2: positional parameter named like a request object.
+        // Destructured params (e.g. tRPC's `({ ctx, input }) => ...`) are
+        // skipped because the name overlap is incidental — the destructured
+        // `ctx` is a procedure context, not an HTTP request.
+        if (
+          variable.kind === 'parameter' &&
+          REQUEST_OBJECT_NAMES.has(variable.name) &&
+          isPositionalParameter(variable)
+        ) {
           return { kind: 'parameter', accessor: variable.name }
         }
         // Pattern 3: variable initialized from a user input source

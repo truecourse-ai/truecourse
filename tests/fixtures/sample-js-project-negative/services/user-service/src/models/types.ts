@@ -15,6 +15,11 @@ export function unusableParam(param: void) {
   return param;
 }
 
+// VIOLATION: bugs/deterministic/invalid-void-type
+export function optionalUnusableParam(value?: void) {
+  return value;
+}
+
 // VIOLATION: bugs/deterministic/getter-setter-type-mismatch
 export class Config {
   private _timeout: string = '5000';

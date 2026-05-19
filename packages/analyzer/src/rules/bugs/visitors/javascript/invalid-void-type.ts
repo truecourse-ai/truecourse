@@ -14,7 +14,16 @@ export const invalidVoidTypeVisitor: CodeRuleVisitor = {
     const typeAnnotation = node.namedChildren.find((c) => c.type === 'type_annotation')
     if (!typeAnnotation) return null
 
-    const voidType = findVoidType(typeAnnotation)
+    // Only flag `void` when it is the parameter's direct type. `void` nested
+    // inside a function return type (`(cb: () => void) => void`), a generic
+    // argument (`Promise<void>`), or similar wrapper is a valid usage.
+    const directType = typeAnnotation.namedChildren[0]
+    if (!directType) return null
+    const voidType =
+      directType.type === 'void_type' ||
+      (directType.type === 'predefined_type' && directType.text === 'void')
+        ? directType
+        : null
     if (!voidType) return null
 
     const paramName = node.namedChildren[0]?.text ?? 'parameter'
@@ -29,12 +38,3 @@ export const invalidVoidTypeVisitor: CodeRuleVisitor = {
   },
 }
 
-function findVoidType(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
-  for (const child of node.children) {
-    if (child.type === 'void_type') return child
-    if (child.type === 'predefined_type' && child.text === 'void') return child
-    const found = findVoidType(child)
-    if (found) return found
-  }
-  return null
-}

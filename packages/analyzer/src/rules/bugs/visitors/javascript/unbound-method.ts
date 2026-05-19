@@ -72,16 +72,28 @@ export const unboundMethodVisitor: CodeRuleVisitor = {
 
     const methodName = property.text
 
-    // Skip if the method is an arrow function property (lexically bound this)
+    // Walk the enclosing class body to figure out whether `methodName` refers
+    // to an actual method (callable, has `this` binding) or just a data field.
+    // Fields whose value/type isn't a function never had `this` bound to
+    // begin with, so referencing them as values is not an unbound-method risk.
     let classBody: SyntaxNode | null = node.parent
     while (classBody && classBody.type !== 'class_body') classBody = classBody.parent
     if (classBody) {
       for (const member of classBody.namedChildren) {
         if (member.type === 'public_field_definition' || member.type === 'field_definition') {
           const nameNode = member.children.find((c) => c.type === 'property_identifier')
-          if (nameNode?.text === methodName) {
-            const value = member.childForFieldName('value')
-            if (value?.type === 'arrow_function') return null
+          if (nameNode?.text !== methodName) continue
+          const value = member.childForFieldName('value')
+          // Arrow / function field — bound by construction.
+          if (value?.type === 'arrow_function' || value?.type === 'function_expression') return null
+          // Field with any other initializer — data, not a method.
+          if (value) return null
+          // No initializer: look at the type annotation. Anything that isn't
+          // a function type means it's a data field assigned later.
+          const typeAnnot = member.namedChildren.find((c) => c.type === 'type_annotation')
+          const typeChild = typeAnnot?.namedChildren[0]
+          if (typeChild && typeChild.type !== 'function_type' && typeChild.type !== 'constructor_type') {
+            return null
           }
         }
       }

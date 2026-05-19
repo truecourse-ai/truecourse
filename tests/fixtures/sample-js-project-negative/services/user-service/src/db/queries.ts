@@ -95,3 +95,9 @@ export async function createFromDestructuredRequest(req: any) {
   const { body } = req;
   await User.create(body);
 }
+
+// VIOLATION: database/deterministic/unvalidated-external-data
+// Positional Koa-style handler still passes req.body straight through.
+export async function createFromKoaHandler(ctx: any) {
+  await User.create(ctx.request.body);
+}
