@@ -1,0 +1,73 @@
+name: Notify on routine activity
+
+# Why: routine sessions run as the PR/issue author (mushgev), and GitHub
+# never sends notifications for your own actions — including @mentions of
+# yourself and self-review-requests. This workflow fires on PR/issue
+# creation events that look like routine output and POSTs to the Telegram
+# Bot API instead, bypassing the self-notify rule.
+#
+# Add two repo secrets before this works:
+#   TELEGRAM_BOT_TOKEN — bot token from @BotFather
+#   TELEGRAM_CHAT_ID   — your chat ID (DM the bot once, then GET
+#                        https://api.telegram.org/bot<TOKEN>/getUpdates
+#                        and copy chat.id)
+
+on:
+  pull_request:
+    types: [opened]
+  issues:
+    types: [opened]
+
+jobs:
+  notify-pr:
+    if: >
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.pull_request.head.ref, 'claude/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
+            exit 0
+          fi
+          MESSAGE=$(printf "🔔 New routine PR #%s\n%s\n\nBranch: %s\n%s" \
+            "$PR_NUMBER" "$PR_TITLE" "$PR_BRANCH" "$PR_URL")
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            > /dev/null
+
+  notify-issue:
+    if: >
+      github.event_name == 'issues' &&
+      (contains(github.event.issue.labels.*.name, 'fp-fix') ||
+       contains(github.event.issue.labels.*.name, 'fp-blocked') ||
+       startsWith(github.event.issue.title, '[fp-campaign-close]'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Telegram message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
+            exit 0
+          fi
+          MESSAGE=$(printf "🔔 New routine issue #%s\n%s\n\n%s" \
+            "$ISSUE_NUMBER" "$ISSUE_TITLE" "$ISSUE_URL")
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            > /dev/null
