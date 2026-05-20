@@ -20,6 +20,10 @@ export const unusedPrivateMemberVisitor: CodeRuleVisitor = {
         const nameNode = member.children.find((c) => c.type === 'property_identifier' || c.type === 'private_property_identifier')
         if (nameNode) {
           const name = nameNode.text.replace(/^#/, '')
+          // Constructors are invoked implicitly by `new` (often kept
+          // private deliberately to enforce the Singleton pattern), which
+          // the `this.X` usage detector below cannot see.
+          if (name === 'constructor') continue
           privateMembers.set(name, nameNode)
         }
       }
