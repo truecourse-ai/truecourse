@@ -3,10 +3,14 @@
 // It IS imported by job-registry-from-documenso-documenso.ts, so the dead-module
 // rule must NOT fire here.
 
+export function notifyUserJobRun(userId: string): string {
+  return `notifying ${userId}`;
+}
+
 export const NOTIFY_USER_JOB = {
   id: 'notify-user',
   name: 'Notify User',
   version: '1.0.0',
   trigger: { name: 'notify-user' },
-  run: (userId: string): string => `notifying ${userId}`,
+  run: notifyUserJobRun,
 } as const;

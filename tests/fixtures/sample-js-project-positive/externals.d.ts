@@ -122,4 +122,8 @@ declare module '@sample/shared-utils' {
     createdAt: string;
   };
   export function validateEmail(email: string): boolean;
+  export function validateName(name: string): boolean;
+  export function formatDate(date: Date): string;
+  export interface ProfileInput { id: string; name: string; email: string; createdAt: string }
+  export function describeUser(user: ProfileInput): string;
 }
