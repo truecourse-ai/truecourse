@@ -135,7 +135,14 @@ export function buildDataFlowContext(rootNode: SyntaxNode, language: SupportedLa
       // even though the textual use precedes the assignment. Restrict the
       // position check to use sites in the same scope as the declaration
       // (or non-function descendant blocks).
-      const directUseSites = v.useSites.filter((u) => !isInNestedFunctionScope(u.scope, v.scope))
+      //
+      // Also skip TS type-position uses: `type T = typeof X[number]` and
+      // `Awaited<ReturnType<typeof X>>` are resolved at type-check time
+      // and erased before execution, so they cannot trigger TDZ at runtime
+      // even when X is declared further down in the module.
+      const directUseSites = v.useSites.filter(
+        (u) => !isInNestedFunctionScope(u.scope, v.scope) && !u.isTypePosition,
+      )
       if (directUseSites.length === 0) continue
 
       const declPos = v.declarationNode.startIndex
