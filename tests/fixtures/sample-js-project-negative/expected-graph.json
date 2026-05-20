@@ -79,10 +79,22 @@
       "layer": "service"
     },
     {
+      "name": "insecure-random-prod-token",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "logger",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "api"
+    },
+    {
+      "name": "logImplicitGlobalEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "performance",
@@ -107,6 +119,12 @@
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "api"
+    },
+    {
+      "name": "StringFormatter",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "service"
     },
     {
       "name": "UserController",
@@ -781,7 +799,19 @@
       "layer": "service"
     },
     {
+      "name": "CompletelyUnrelatedWidget",
+      "service": "web",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Dashboard",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "IdenticalFunctionsBlockBody",
       "service": "web",
       "kind": "standalone",
       "layer": "service"

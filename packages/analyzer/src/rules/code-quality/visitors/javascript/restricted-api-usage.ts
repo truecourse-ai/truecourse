@@ -39,19 +39,20 @@ export const restrictedApiUsageVisitor: CodeRuleVisitor = {
       if (parent.type === 'property_identifier') return null
       if (parent.type === 'import_specifier' || parent.type === 'export_specifier') return null
 
-      // Skip if identifier is declared as a local variable or parameter in scope
+      // Skip if identifier is declared as a local variable or parameter
+      // in any enclosing scope. Closures can reference outer-scope bindings,
+      // so the walk must continue past function boundaries.
       const declPattern = new RegExp(`\\b(?:const|let|var)\\s+${node.text}\\b`)
+      const paramPattern = new RegExp(`\\b${node.text}\\b`)
       let scope: typeof node.parent = node.parent
       while (scope) {
         if (scope.type === 'statement_block' || scope.type === 'program') {
           if (declPattern.test(scope.text)) return null
         }
-        // Also check function parameters
         if (scope.type === 'arrow_function' || scope.type === 'function_declaration' ||
             scope.type === 'function_expression' || scope.type === 'method_definition') {
           const params = scope.childForFieldName('parameters')
-          if (params && params.text.includes(node.text)) return null
-          break
+          if (params && paramPattern.test(params.text)) return null
         }
         scope = scope.parent
       }

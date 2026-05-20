@@ -29,15 +29,14 @@ export const unusedPrivateMethodVisitor: CodeRuleVisitor = {
       )
       if (!nameNode) continue
       const name = nameNode.text.replace(/^#/, '')
-      // Don't flag constructor, getters/setters
-      const isStatic = member.children.some((c) => c.text === 'static')
-      const kind = member.children.find((c) => c.type === 'property_identifier' || c.type === 'private_property_identifier')
+      // Skip constructors — they're invoked implicitly by `new` (or kept
+      // deliberately private to enforce the Singleton pattern), neither of
+      // which the AST-level call detector below can see.
+      if (name === 'constructor') continue
       // Skip getters/setters — they are "called" implicitly
       const hasGetSet = member.children.some((c) => c.text === 'get' || c.text === 'set')
       if (hasGetSet) continue
-      if (!isStatic || name !== 'constructor') {
-        privateMethods.set(name, nameNode)
-      }
+      privateMethods.set(name, nameNode)
     }
 
     if (privateMethods.size === 0) return null
