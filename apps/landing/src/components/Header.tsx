@@ -13,6 +13,7 @@ const NAV: NavItem[] = [
   // Hidden until we have real OSS analysis reports — see HomePage.tsx for the matching toggle.
   // { href: '/#reports', label: 'Reports' },
   { href: '/#capabilities', label: 'What it catches' },
+  { href: '/knowledge', label: 'Knowledge base' },
   { href: '/teams', label: 'For teams' },
 ];
 
