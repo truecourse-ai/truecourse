@@ -234,7 +234,7 @@ function Hero() {
           className="animate-fade-up mt-9 flex flex-wrap items-center justify-center gap-3"
         >
           <Link
-            to="/teams"
+            to="/request-access"
             className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
           >
             Get early access
@@ -524,7 +524,7 @@ function InferredSection() {
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="grid grid-cols-1 items-start gap-12 lg:grid-cols-2">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.18em] text-violet-400">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-sky-400">
               Undocumented decisions
             </p>
             <h2 className="mt-3 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -532,7 +532,7 @@ function InferredSection() {
             </h2>
             <p className="mt-4 text-base leading-relaxed text-muted-foreground">
               TrueCourse scans your codebase for patterns with no corresponding spec entry and
-              surfaces them as <span className="font-mono text-violet-400">[INFERRED]</span> claims.
+              surfaces them as <span className="font-mono text-sky-400">[INFERRED]</span> claims.
               Your team reviews, promotes what&apos;s accurate, and discards the rest. Promoted
               claims become contracts — protected going forward.
             </p>
@@ -543,16 +543,16 @@ function InferredSection() {
               <div
                 key={ex.field}
                 style={{ '--delay': `${i * 80}ms` } as React.CSSProperties}
-                className="flex flex-col gap-3 rounded-2xl border border-violet-400/20 bg-card/40 p-5 sm:flex-row sm:items-start"
+                className="flex flex-col gap-3 rounded-2xl border border-sky-400/20 bg-card/40 p-5 sm:flex-row sm:items-start"
               >
                 <div className="shrink-0">
-                  <span className="inline-block rounded-md border border-violet-400/30 bg-violet-400/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-violet-400">
+                  <span className="inline-block rounded-md border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider text-sky-400">
                     INFERRED
                   </span>
                 </div>
                 <div className="min-w-0">
                   <p className="font-mono text-sm font-semibold text-foreground">{ex.field}</p>
-                  <p className="mt-0.5 font-mono text-xs italic text-violet-400">{ex.kind}</p>
+                  <p className="mt-0.5 font-mono text-xs italic text-sky-400">{ex.kind}</p>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{ex.detail}</p>
                 </div>
               </div>
@@ -578,7 +578,7 @@ function CtaSection() {
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
-            to="/teams"
+            to="/request-access"
             className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
           >
             Request early access
