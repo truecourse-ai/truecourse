@@ -787,6 +787,12 @@
       "layer": "service"
     },
     {
+      "name": "CompletelyUnrelatedWidget",
+      "service": "web",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Dashboard",
       "service": "web",
       "kind": "standalone",
