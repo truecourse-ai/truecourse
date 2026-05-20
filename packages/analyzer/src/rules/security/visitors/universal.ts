@@ -132,6 +132,17 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     // Skip version-like numbers in User-Agent strings, semver, etc.
     if (/Mozilla|Chrome|Safari|Firefox|AppleWebKit|Gecko/i.test(stripped)) return null
 
+    // Skip when the match is embedded in a longer numeric sequence — SVG
+    // `<path d="...">` coordinate strings are the main source of these,
+    // e.g. `013.002.027.012` snapped out of `.013.002.027.012.013`. The
+    // regex's `\b` anchors don't distinguish a real IP from a path
+    // command, but the surrounding `.` does.
+    const matchStart = match.index
+    const matchEnd = matchStart + match[0].length
+    const before = matchStart > 0 ? stripped[matchStart - 1] : ''
+    const after = matchEnd < stripped.length ? stripped[matchEnd] : ''
+    if (before === '.' || after === '.') return null
+
     // Validate each octet is 0-255
     const octets = ip.split('.')
     if (octets.some((o) => parseInt(o, 10) > 255)) return null

@@ -121,6 +121,12 @@
       "layer": "api"
     },
     {
+      "name": "serveTemplate",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "StringFormatter",
       "service": "api-gateway",
       "kind": "class",
@@ -368,6 +374,12 @@
     },
     {
       "name": "connection",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "createWidgetWithAudit",
       "service": "user-service",
       "kind": "standalone",
       "layer": "data"

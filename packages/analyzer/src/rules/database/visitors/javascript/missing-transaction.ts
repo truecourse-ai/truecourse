@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { getMethodName, ORM_WRITE_METHODS, getEnclosingFunctionBody, bodyHasTransactionCall } from './_helpers.js'
+import { getMethodName, ORM_WRITE_METHODS, getEnclosingFunctionBody, bodyHasTransactionCall, isInsideTransactionCallback } from './_helpers.js'
 
 export const missingTransactionVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-transaction',
@@ -16,6 +16,10 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
 
     // If there's already a transaction call in this body, skip
     if (bodyHasTransactionCall(body)) return null
+
+    // If this function is itself the callback to a *.transaction() /
+    // *.$transaction() call, the writes are already inside a transaction.
+    if (isInsideTransactionCallback(node)) return null
 
     // Count write calls in the body, tracking DIFFERENT table names.
     // A single insert or single update on the same table doesn't need a transaction.

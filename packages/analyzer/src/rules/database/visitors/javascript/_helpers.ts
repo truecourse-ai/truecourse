@@ -124,3 +124,43 @@ export function bodyHasTransactionCall(body: SyntaxNode): boolean {
     /\b(transaction|begintransaction|begin_transaction|withTransaction|begin\(\))\b/.test(text)
   )
 }
+
+const TRANSACTION_CALLEE_NAMES = new Set([
+  'transaction', '$transaction', 'withTransaction', 'runInTransaction',
+])
+
+/**
+ * True when `node` lives inside a function that is being passed as an argument
+ * to a `*.transaction()` / `*.$transaction()` style call (e.g. Prisma's
+ * `prisma.$transaction(async (tx) => { ... })`). The substring check in
+ * `bodyHasTransactionCall` misses these because the call wraps the function
+ * rather than appearing inside it.
+ */
+export function isInsideTransactionCallback(node: SyntaxNode): boolean {
+  let current: SyntaxNode | null = node.parent
+  while (current) {
+    if (
+      current.type === 'arrow_function' ||
+      current.type === 'function' ||
+      current.type === 'function_declaration' ||
+      current.type === 'method_definition'
+    ) {
+      let argParent: SyntaxNode | null = current.parent
+      if (argParent?.type === 'arguments') {
+        const call = argParent.parent
+        if (call?.type === 'call_expression') {
+          const fn = call.childForFieldName('function')
+          let mName = ''
+          if (fn?.type === 'member_expression') {
+            mName = fn.childForFieldName('property')?.text ?? ''
+          } else if (fn?.type === 'identifier') {
+            mName = fn.text
+          }
+          if (TRANSACTION_CALLEE_NAMES.has(mName)) return true
+        }
+      }
+    }
+    current = current.parent
+  }
+  return false
+}
