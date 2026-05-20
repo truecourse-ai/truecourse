@@ -38,13 +38,13 @@ export function TeamsHero() {
           style={{ ['--delay' as string]: '320ms' }}
           className="animate-fade-up mt-9 flex flex-wrap items-center justify-center gap-3"
         >
-          <a
-            href="#access"
+          <Link
+            to="/request-access"
             className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
           >
             Request access
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-          </a>
+          </Link>
           <Link
             to="/#open-source"
             className="inline-flex h-12 items-center gap-2 rounded-xl border border-border bg-card/60 px-5 text-sm font-medium backdrop-blur-md transition-colors hover:border-border-strong"
