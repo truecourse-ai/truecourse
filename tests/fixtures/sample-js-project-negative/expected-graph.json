@@ -577,6 +577,12 @@
       "layer": "service"
     },
     {
+      "name": "fetchAllRecords",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "formatters",
       "service": "utils",
       "kind": "standalone",
@@ -685,7 +691,19 @@
       "layer": "service"
     },
     {
+      "name": "squareAll",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "style",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "undefined-passed-as-optional",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"

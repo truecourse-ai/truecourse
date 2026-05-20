@@ -179,6 +179,28 @@ function isTypePosition(node: SyntaxNode): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Check if identifier is the source-name half of an aliased import_specifier.
+//
+//   import { Foo as Bar } from '…'
+//
+// `Foo` here is the name *of the symbol exported by the module being
+// imported* — not a reference to anything in the current module. It must
+// not be treated as a use site, otherwise an unrelated local binding
+// named `Foo` declared elsewhere in the file looks "used before defined".
+// The alias half (`Bar`) is the actual local declaration and is already
+// handled by isJsDeclarationPosition.
+// ---------------------------------------------------------------------------
+
+function isAliasedImportSourceName(node: SyntaxNode): boolean {
+  const parent = node.parent
+  if (!parent || parent.type !== 'import_specifier') return false
+  const alias = parent.childForFieldName('alias')
+  if (!alias) return false
+  const nameField = parent.childForFieldName('name')
+  return nameField?.id === node.id
+}
+
+// ---------------------------------------------------------------------------
 // Check if identifier is the right side of a property access (a.b -> b is property)
 // ---------------------------------------------------------------------------
 
@@ -1057,7 +1079,7 @@ export function buildScopeTree(
       if (isJs) {
         if (isJsDeclarationPosition(node)) {
           declareJsVariable(node, scope)
-        } else if (!isPropertyAccess(node)) {
+        } else if (!isPropertyAccess(node) && !isAliasedImportSourceName(node)) {
           deferredRefs.push({ node, scope })
         }
       } else {

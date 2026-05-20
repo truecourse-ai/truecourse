@@ -11,10 +11,13 @@ export const useBeforeDefineVisitor: CodeRuleVisitor = {
     if (!dataFlow) return null
     const vars = dataFlow.usedBeforeDefined()
     for (const v of vars) {
-      // Find the earliest use site that is before the declaration
+      // Find the earliest use site that is before the declaration.
+      // Skip type-position references (`typeof X` inside a type alias,
+      // `Awaited<ReturnType<typeof X>>`, etc.) — these are erased before
+      // runtime and cannot hit TDZ.
       const declPos = v.declarationNode.startIndex
       const earliestUseSite = v.useSites
-        .filter(u => u.node.startIndex < declPos)
+        .filter(u => u.node.startIndex < declPos && !u.isTypePosition)
         .sort((a, b) => a.node.startIndex - b.node.startIndex)[0]
       if (!earliestUseSite) continue
 
