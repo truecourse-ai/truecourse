@@ -240,12 +240,6 @@ function Hero() {
             Get early access
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
-          <Link
-            to="/#capabilities"
-            className="inline-flex h-12 items-center rounded-xl border border-border bg-card/60 px-5 text-sm font-medium backdrop-blur-md transition-colors hover:border-border-strong"
-          >
-            What we catch
-          </Link>
         </div>
       </div>
     </section>
