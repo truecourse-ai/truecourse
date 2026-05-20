@@ -15,6 +15,24 @@ export const undefinedPassedAsOptionalVisitor: CodeRuleVisitor = {
     const lastArg = argList[argList.length - 1]
     if (lastArg.text !== 'undefined') return null
 
+    // Require at least three positional arguments before flagging.
+    //
+    // With one or two args we cannot tell from syntax alone whether the
+    // trailing `undefined` is a redundant optional or a meaningful "clear"
+    // value passed to a required parameter. Real-world callers regularly
+    // hand `undefined` to required params on purpose:
+    //
+    //   form.setValue(name, undefined)      // RHF: value is required
+    //   field.onChange(undefined)           // RHF: value is required
+    //   createContext<T | undefined>(undefined)  // React: default required
+    //   buildMeta(settings, undefined)      // domain-specific, value required
+    //
+    // The rule is intentionally conservative here — a function whose only
+    // trailing arg is genuinely optional almost always has 3+ args in real
+    // codebases (the optional param is typically `options?`, `meta?`,
+    // `signal?` after a series of required args).
+    if (argList.length < 3) return null
+
     // Skip React hooks where undefined is the standard initial value
     // Handles both `useState(undefined)` and `React.useState(undefined)`
     const fn = node.childForFieldName('function')

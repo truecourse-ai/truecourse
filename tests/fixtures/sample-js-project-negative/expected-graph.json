@@ -691,6 +691,12 @@
       "layer": "service"
     },
     {
+      "name": "undefined-passed-as-optional",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "UnreadAttribute",
       "service": "utils",
       "kind": "class",

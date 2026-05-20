@@ -193,11 +193,11 @@ export function assignUndefined() {
 }
 
 // VIOLATION: code-quality/deterministic/undefined-passed-as-optional
-export function optionalParam(a: number, b?: string) {
-  return a;
+export function optionalParam(a: number, b: number, c?: string) {
+  return a + b;
 }
 export function callOptional() {
-  return optionalParam(1, undefined);
+  return optionalParam(1, 2, undefined);
 }
 
 // VIOLATION: code-quality/deterministic/unnecessary-boolean-compare
