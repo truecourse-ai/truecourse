@@ -1,7 +1,50 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 const SENSITIVE_COMPARISON_PATTERNS = /(?:token|secret|hmac|signature|apikey|api_key|hash|digest|password|passwd)/i
+
+const TYPEOF_RETURN_VALUES = new Set([
+  'string', 'number', 'boolean', 'object', 'undefined', 'function', 'symbol', 'bigint',
+])
+
+function isTypeofExpression(node: SyntaxNode): boolean {
+  return node.type === 'unary_expression' && node.children.some((c) => c.text === 'typeof')
+}
+
+function isTypeofReturnLiteral(node: SyntaxNode): boolean {
+  if (node.type !== 'string') return false
+  const inner = node.text.slice(1, -1)
+  return TYPEOF_RETURN_VALUES.has(inner)
+}
+
+function isLengthAccess(node: SyntaxNode): boolean {
+  if (node.type !== 'member_expression') return false
+  const prop = node.childForFieldName('property')
+  return prop?.text === 'length'
+}
+
+/**
+ * Return the most specific identifier on this side of a comparison — the
+ * variable name for a plain identifier, the final property segment for a
+ * member access, or the string literal for `obj['x-api-key']`-style
+ * subscripts. The sensitive-name check runs against the leaf so a parent
+ * path like `decodedToken.scope` is not flagged just because it contains
+ * the word "token".
+ */
+function leafIdentifier(node: SyntaxNode): string {
+  if (node.type === 'identifier') return node.text
+  if (node.type === 'member_expression') {
+    const prop = node.childForFieldName('property')
+    if (prop?.text) return prop.text
+  }
+  if (node.type === 'subscript_expression') {
+    const index = node.childForFieldName('index')
+    if (index?.type === 'string') return index.text.slice(1, -1)
+    if (index?.text) return index.text
+  }
+  return node.text
+}
 
 export const timingAttackComparisonVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/timing-attack-comparison',
@@ -14,11 +57,24 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
 
     if (!operator || !left || !right) return null
 
-    // Check if either side references a sensitive variable name
-    const leftText = left.text
-    const rightText = right.text
+    // Skip type guards: `typeof X === 'string'`, `typeof X !== 'number'`, etc.
+    if (isTypeofExpression(left) || isTypeofExpression(right)) return null
+    if (isTypeofReturnLiteral(left) || isTypeofReturnLiteral(right)) return null
 
-    if (SENSITIVE_COMPARISON_PATTERNS.test(leftText) || SENSITIVE_COMPARISON_PATTERNS.test(rightText)) {
+    // Skip `.length` comparisons (structural, not value-of-secret).
+    if (isLengthAccess(left) || isLengthAccess(right)) return null
+
+    // Skip comparisons against numeric literals (length / count checks).
+    if (left.type === 'number' || right.type === 'number') return null
+
+    // Apply the sensitive-name check against the leaf identifier so that
+    // member access paths like `decodedToken.scope` are recognized by
+    // their final segment (`scope`) rather than by ancestor names that
+    // happen to contain a sensitive word.
+    const leftLeaf = leafIdentifier(left)
+    const rightLeaf = leafIdentifier(right)
+
+    if (SENSITIVE_COMPARISON_PATTERNS.test(leftLeaf) || SENSITIVE_COMPARISON_PATTERNS.test(rightLeaf)) {
       // Skip if the file already uses timingSafeEqual — the === is likely a format check, not a secret comparison
       if (sourceCode.includes('timingSafeEqual')) return null
       return makeViolation(

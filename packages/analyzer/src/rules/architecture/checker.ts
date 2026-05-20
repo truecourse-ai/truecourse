@@ -1,6 +1,54 @@
+import { readFileSync } from 'node:fs'
 import type { ServiceInfo, ServiceDependencyInfo, ModuleInfo, MethodInfo, ModuleDependency, ModuleLevelDependency, MethodLevelDependency, AnalysisRule, FileAnalysis } from '@truecourse/shared'
 import { getMaxParameters } from '../../language-config.js'
 import { findCycles, type EdgeMetadata } from './tarjan.js'
+
+/**
+ * Detect whether a method definition is actually a property of an object
+ * literal — `{ foo: () => {…} }` or `{ async foo() {…} }`. Such functions
+ * are called by the framework / interface that consumes the surrounding
+ * object (e.g. tRPC links, `satisfies JobDefinition`, `DataTransformer`),
+ * not by any direct call site the analyzer can see, so they must not be
+ * flagged dead-method.
+ */
+const sourceLineCache = new Map<string, string[] | null>()
+function getSourceLines(filePath: string): string[] | null {
+  if (sourceLineCache.has(filePath)) return sourceLineCache.get(filePath)!
+  let lines: string[] | null = null
+  try {
+    lines = readFileSync(filePath, 'utf-8').split(/\r?\n/)
+  } catch {
+    lines = null
+  }
+  sourceLineCache.set(filePath, lines)
+  return lines
+}
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+function isObjectLiteralMethod(filePath: string, methodName: string, startLine?: number): boolean {
+  if (!startLine || startLine < 1) return false
+  const lines = getSourceLines(filePath)
+  if (!lines) return false
+  // The function's startLine points at the value expression. For
+  //   `<spaces><name>: (args) => …`              (arrow / function expr)
+  //   `<spaces><name>: function (args) {…}`      (function expression)
+  //   `<spaces>async <name>(args) {…}`           (object-shorthand method)
+  //   `<spaces><name>(args) {…}`                 (object-shorthand method)
+  // the value sits on the same line as the property key in normal code.
+  const line = lines[startLine - 1]
+  if (!line) return false
+  const name = escapeRegex(methodName)
+  const colonForm = new RegExp(`^\\s+${name}\\s*\\??\\s*:\\s*(?:async\\s+)?(?:function\\b|\\()`)
+  const shorthandForm = new RegExp(`^\\s+(?:async\\s+)?${name}\\s*\\(`)
+  if (!colonForm.test(line) && !shorthandForm.test(line)) return false
+  // Reject top-level declarations that happen to share the indentation
+  // pattern (`export function foo(`, `function foo(`, class methods inside
+  // a class body, etc.). Object-literal property functions never appear
+  // after these keywords on the same line.
+  if (/\b(?:export|function|class|interface|type)\b/.test(line.slice(0, line.indexOf(methodName)))) return false
+  return true
+}
 
 // ---------------------------------------------------------------------------
 // Violation types
@@ -397,6 +445,10 @@ export function checkModuleRules(
         // Skip exports from entry point files — they're consumed by the framework/runtime
         if (entryPointFiles?.has(method.filePath)) continue
 
+        // Skip exports from seed/fixture directories — their consumers are
+        // e2e specs and CLI seed scripts which are excluded from analysis.
+        if (SEED_PATH_PATTERN.test(method.filePath)) continue
+
         // Skip exports from shadcn/ui component library directories — these export all variants for consumer use
         if (/\/components\/ui\//.test(method.filePath)) continue
 
@@ -729,6 +781,14 @@ const DEEP_NESTING_THRESHOLD = 4
 const MIGRATION_PATH_PATTERN = /(?:alembic\/versions|\/migrations\/|\/seeds\/)\//i
 
 /**
+ * Matches file paths inside seed-helper directories. Exports from these
+ * files are typically consumed by e2e specs (`*.spec.ts`, `*.test.ts`)
+ * and CLI seed scripts — both excluded from analysis. Treating them as
+ * unused-export produces a steady stream of FPs.
+ */
+const SEED_PATH_PATTERN = /\/seed\//i
+
+/**
  * Check deterministic method-level rules and return violations.
  */
 export function checkMethodRules(
@@ -936,6 +996,10 @@ export function checkMethodRules(
         // Alembic/Django migration runner, never imported directly.
         if (MIGRATION_PATH_PATTERN.test(method.filePath)) continue
 
+        // Skip methods in seed-helper files — their callers are e2e specs
+        // and CLI seed scripts, both excluded from analysis.
+        if (SEED_PATH_PATTERN.test(method.filePath)) continue
+
         // Skip PascalCase exports — likely React components called via JSX
         // which the method-level dependency graph can't reliably track
         if (/^[A-Z][a-zA-Z0-9]*$/.test(method.name) && method.isExported) continue
@@ -964,6 +1028,13 @@ export function checkMethodRules(
         // Skip methods referenced as this.methodName or as a callback identifier
         // within their own file (a `this.foo` in another file does not make this method live).
         if (thisRefMethodsByFile.get(method.filePath)?.has(method.name)) continue
+
+        // Skip functions that are properties of an object literal (e.g.
+        // `{ headers: (opts) => {…}, serialize: (data) => {…} }`). These
+        // are invoked by the framework that consumes the surrounding
+        // object (tRPC links, `satisfies JobDefinition`, `DataTransformer`,
+        // etc.), not by any direct call site the analyzer can see.
+        if (isObjectLiteralMethod(method.filePath, method.name, method.startLine)) continue
 
         // Skip exported functions that are imported anywhere in the codebase
         // (handles dynamic imports like: const { getUserLocation } = await import('./geo'))
