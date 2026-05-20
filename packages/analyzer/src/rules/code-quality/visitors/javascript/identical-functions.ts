@@ -15,7 +15,12 @@ export const identicalFunctionsVisitor: CodeRuleVisitor = {
         // Skip functions that are arguments to calls (e.g., Drizzle column defs)
         if (n.parent?.type === 'arguments') { return }
         const body = getFunctionBody(n)
-        if (body && body.namedChildCount > 0) {
+        // Skip concise-body arrows (`(x) => expr`): these are by definition
+        // single-expression lambdas — typically trivial event handlers or
+        // prop adapters where identical text is JSX boilerplate, not
+        // duplicated logic worth extracting.
+        const isConciseArrow = n.type === 'arrow_function' && body !== null && body.type !== 'statement_block'
+        if (body && body.namedChildCount > 0 && !isConciseArrow) {
           const normalized = body.text.replace(/\s+/g, ' ').trim()
           bodies.push({ body: normalized, fnNode: n })
         }

@@ -787,6 +787,12 @@
       "layer": "service"
     },
     {
+      "name": "IdenticalFunctionsBlockBody",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Links",
       "service": "web",
       "kind": "standalone",
