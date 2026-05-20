@@ -87,21 +87,12 @@ export function Header() {
           </a>
           {/* Contextual CTA: on /teams it scrolls to the access form; on the
               OSS-focused home page it routes to the teams page first. */}
-          {pathname === '/teams' ? (
-            <a
-              href="#access"
-              className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
-            >
-              Request access
-            </a>
-          ) : (
-            <Link
-              to="/teams"
-              className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
-            >
-              For teams
-            </Link>
-          )}
+          <Link
+            to="/request-access"
+            className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"
+          >
+            Request access
+          </Link>
           <button
             type="button"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border md:hidden"

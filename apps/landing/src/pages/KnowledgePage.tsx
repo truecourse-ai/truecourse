@@ -234,7 +234,7 @@ function Hero() {
           className="animate-fade-up mt-9 flex flex-wrap items-center justify-center gap-3"
         >
           <Link
-            to="/teams"
+            to="/request-access"
             className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
           >
             Get early access
@@ -578,7 +578,7 @@ function CtaSection() {
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
-            to="/teams"
+            to="/request-access"
             className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
           >
             Request early access
