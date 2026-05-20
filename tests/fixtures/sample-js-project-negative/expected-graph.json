@@ -577,6 +577,12 @@
       "layer": "service"
     },
     {
+      "name": "fetchAllRecords",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "formatters",
       "service": "utils",
       "kind": "standalone",
