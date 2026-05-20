@@ -95,7 +95,15 @@ declare module '@prisma/client' {
     $connect(): Promise<void>;
     $disconnect(): Promise<void>;
   }
-  export { PrismaClient, User };
+  enum FieldType { TEXT = 'TEXT', NUMBER = 'NUMBER', DATE = 'DATE' }
+  interface Field {
+    id: string;
+    type: FieldType;
+    page: number;
+    width: number;
+    height: number;
+  }
+  export { PrismaClient, User, Field, FieldType };
 }
 
 declare module 'csv-parser' {
