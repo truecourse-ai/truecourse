@@ -118,9 +118,21 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
   triggers the rule.
 - Add the paraphrase as a new file under
   `tests/fixtures/sample-js-project-positive/` (or
-  `…-python-project-positive/` if the rule is Python) with a filename
-  that makes the source recognisable, e.g.
-  `<rule-key-slug>-from-<owner>-<repo>.ts`.
+  `…-python-project-positive/` if the rule is Python).
+- **Filename and content must not identify the upstream OSS project.**
+  The fixtures are committed to a public repo — don't expose which
+  projects we use as our FP corpus.
+  - Filename: `<rule-key-slug>.ts` (or `.tsx`/`.py` as appropriate).
+    If a fixture for that rule already exists, append a short
+    descriptive suffix that describes the *pattern shape*, not the
+    source — e.g. `<rule-key-slug>-typeof.ts`,
+    `<rule-key-slug>-shadowed-bindings.tsx`. Never use `-from-<owner>-<repo>`,
+    upstream filenames (`template-type`, `pdf-viewer`), or
+    upstream-specific identifiers.
+  - Content: rename all OSS-project-themed identifiers to neutral
+    domain-agnostic names. Comments must not name the upstream project
+    or its files. (Linking the OSS source URL in the **PR body** is
+    fine — that's a hyperlink, not a committed artifact.)
 - **No `// VIOLATION:` comment.** Remember the path as
   `positive_fixture_path` for the batch PR body.
 
@@ -131,6 +143,10 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
 - Add it under `tests/fixtures/sample-js-project-negative/` (or the
   Python equivalent) with `// VIOLATION: <rule-key>` on the offending
   line (or the language-appropriate comment for Python).
+- **Same anonymization rules as step 5**: filename based on rule key
+  + optional pattern-shape suffix (never `-from-<owner>-<repo>`);
+  content uses neutral identifiers and comments that don't name the
+  upstream OSS project.
 - Remember the path as `negative_fixture_path`.
 
 ### 7. Confirm expected pre-fix state
@@ -297,7 +313,13 @@ hit a true empty queue and run the close logic.
   from a fresh `pnpm build:dist`. The dist artifact is exactly what
   publish.yml ships to npm.
 - Never copy-paste OSS code — paraphrase only. Link the source by URL
-  in the PR body.
+  in the PR body (PR descriptions are review context, not committed
+  artifacts).
+- **No OSS-project identity in committed code.** Fixture filenames,
+  paths, identifiers, and comments must not reference the upstream
+  OSS owner/repo, the upstream's source filenames, or upstream-themed
+  identifiers. The committed fixture should look like generic
+  domain-agnostic code that happens to trigger the rule.
 - Never change anything outside `packages/analyzer/src/rules/`,
   `packages/analyzer/src/patterns/`, `tests/fixtures/sample-*/`, and
   (in the queue-empty path) `docs/fp-automation/campaigns.yaml` +
