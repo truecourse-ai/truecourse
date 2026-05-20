@@ -1,5 +1,5 @@
-import { Github, ShieldCheck, Sparkles, Users } from 'lucide-react';
-import { AccessForm } from '@/components/AccessForm';
+import { ArrowRight, Github, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const PERKS = [
   {
@@ -66,17 +66,21 @@ export function Commercial() {
             </div>
           </div>
 
-          {/* Right: access request form */}
+          {/* Right: CTA */}
           <div className="lg:sticky lg:top-24 lg:self-start">
             <div className="glow-border surface rounded-2xl border border-border p-6 shadow-2xl shadow-black/40 sm:p-8">
-              <h3 className="text-xl font-semibold">Request access</h3>
+              <h3 className="text-xl font-semibold">Ready to get started?</h3>
               <p className="mt-2 text-sm text-muted-foreground">
                 Teams is in closed beta and we&apos;re onboarding new orgs in waves.
                 Drop your details and we&apos;ll be in touch when the next batch opens.
               </p>
-              <div className="mt-6">
-                <AccessForm />
-              </div>
+              <Link
+                to="/request-access"
+                className="group mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-accent/40 bg-accent/15 px-4 text-sm font-medium text-foreground transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
+              >
+                Request access
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
             </div>
           </div>
         </div>
