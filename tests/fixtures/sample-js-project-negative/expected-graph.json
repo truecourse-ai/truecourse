@@ -91,6 +91,12 @@
       "layer": "api"
     },
     {
+      "name": "logImplicitGlobalEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "performance",
       "service": "api-gateway",
       "kind": "standalone",
