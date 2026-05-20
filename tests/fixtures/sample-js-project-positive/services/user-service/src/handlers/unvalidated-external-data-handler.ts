@@ -1,5 +1,4 @@
-// Paraphrased from documenso/documenso tRPC routes
-// (packages/trpc/server/.../*-router/* — many examples).
+// Positive fixture for database/deterministic/unvalidated-external-data.
 //
 // A tRPC procedure handler receives `{ input, ctx }` via destructuring. `ctx`
 // here is a tRPC procedure context (db client, logged-in user, etc.) — it is

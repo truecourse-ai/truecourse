@@ -1,6 +1,5 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * code-quality/deterministic/computed-enum-value.
+ * Positive fixture for code-quality/deterministic/computed-enum-value.
  *
  * String- and number-literal enum initializers (`FREE = 'free'`,
  * `FORBIDDEN = 'FORBIDDEN'`, `STATUS_OK = 200`) must not be flagged as

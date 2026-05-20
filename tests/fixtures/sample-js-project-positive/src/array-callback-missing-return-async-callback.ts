@@ -1,6 +1,5 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * bugs/deterministic/array-callback-missing-return.
+ * Positive fixture for bugs/deterministic/array-callback-missing-return.
  *
  * The idiomatic Promise.allSettled(arr.map(async ...)) pattern: the
  * async callback's return value is a Promise regardless of whether the

@@ -95,8 +95,8 @@ export function findItem(items: Array<{ id: number; name: string }>) {
 }
 
 // VIOLATION: reliability/deterministic/missing-null-check-after-find
-// Companion to documenso #126: real Array.prototype.find (T|undefined),
-// chained method call without a null check.
+// Real Array.prototype.find (T|undefined), chained method call without a
+// null check — companion to the non-Array `.find()` positive fixture.
 export function activateFirstOpen(items: Array<{ id: number; open: boolean; activate(): void }>) {
   items.find((it) => it.open).activate();
 }

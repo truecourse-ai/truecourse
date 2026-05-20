@@ -1,6 +1,5 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * architecture/deterministic/route-without-auth-middleware.
+ * Positive fixture for architecture/deterministic/route-without-auth-middleware.
  *
  * Two distinct shapes:
  *   1. `app.use(...)` / `router.use(...)` — middleware registration or

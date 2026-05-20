@@ -1,6 +1,5 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * architecture/deterministic/data-layer-depends-on-external.
+ * Positive fixture for architecture/deterministic/data-layer-depends-on-external.
  *
  * The visitor previously classified this React component as the `data`
  * layer because it imports a type (`Field`) from `@prisma/client`, and
@@ -8,9 +7,6 @@
  * contains "client". Neither side is actually doing data or external
  * work — the rule was firing on the file path + the `@prisma/client`
  * package name alone.
- *
- * Real example: packages/ui/components/field/envelope-field-tooltip.tsx
- * at documenso/documenso@8f6be474.
  */
 
 import type { Field } from '@prisma/client';

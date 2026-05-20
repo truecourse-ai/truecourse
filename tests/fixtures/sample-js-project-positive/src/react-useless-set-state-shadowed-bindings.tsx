@@ -1,12 +1,11 @@
 /**
- * Paraphrased FPs from documenso/documenso for
- * code-quality/deterministic/react-useless-set-state.
+ * Positive fixture for code-quality/deterministic/react-useless-set-state.
  *
  * The visitor used to match `setX(x)` purely by identifier name, without
  * checking whether the setter actually came from a `useState` destructure
  * and whether the argument was the matching binding from that destructure.
  *
- * Two flavors of FP, both real-world:
+ * Two real-world FP shapes:
  *   1. `setNonce(nonce)` where `setNonce` is imported from a third-party
  *      library (`react-colorful`) and `nonce` is a prop. Neither side is
  *      part of a useState pair.

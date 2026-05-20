@@ -1,11 +1,9 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * bugs/deterministic/array-callback-return.
+ * Positive fixture for bugs/deterministic/array-callback-return.
  *
- * Same shape as the sibling FP (#116) but exercising the
- * `Promise.all(arr.map(async ...))` idiom in a different setting — a webhook
- * trigger loop. The async callback's return value is always a Promise; a
- * missing explicit `return` is not a missing-result bug.
+ * Exercises the `Promise.all(arr.map(async ...))` idiom — a webhook
+ * trigger loop. The async callback's return value is always a Promise;
+ * a missing explicit `return` is not a missing-result bug.
  */
 
 interface WebhookSubscriber {

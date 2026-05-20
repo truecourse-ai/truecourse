@@ -1,14 +1,10 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * reliability/deterministic/missing-null-check-after-find.
+ * Positive fixture for reliability/deterministic/missing-null-check-after-find.
  *
  * Konva's `Node.find('Group')` (CSS-selector style) returns `Node[]`,
  * not a single node. `Array.prototype.find` is what the rule is really
  * looking for; matching by method name alone fires on every other
  * `.find()` API (Konva, jQuery, Cheerio, etc.).
- *
- * Real example: packages/lib/universal/field-renderer/render-grid-lines.ts
- * at documenso/documenso@8f6be474.
  */
 
 interface KonvaNode {

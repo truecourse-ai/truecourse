@@ -1,6 +1,5 @@
 /**
- * Paraphrased FP from documenso/documenso for
- * reliability/deterministic/process-exit-in-library.
+ * Positive fixture for reliability/deterministic/process-exit-in-library.
  *
  * Seed scripts and runnable example scripts are CLI entrypoints — they're
  * invoked by `prisma db seed`, by direct `node` invocation, or by README

@@ -2,8 +2,8 @@
 // can trace method-level usage and not flag any of them as dead.
 
 import { describeUser } from '@sample/shared-utils';
-import { jobRegistry } from '../jobs/job-registry-from-documenso-documenso';
-import { notifyUserJobRun } from '../jobs/notification-job-from-documenso-documenso';
+import { jobRegistry } from '../jobs/job-registry';
+import { notifyUserJobRun } from '../jobs/notification-job';
 import { checkLimit, getConstants } from '../middleware/rate-limiter';
 import { HealthService } from './health.service';
 import { UserService } from './user.service';
