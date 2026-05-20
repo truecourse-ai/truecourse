@@ -1,10 +1,8 @@
-// Paraphrased from documenso/documenso (packages/lib/jobs/client/inngest.ts,
-// packages/lib/server-only/telemetry/telemetry-client.ts,
-// packages/lib/jobs/client/bullmq.ts, packages/lib/utils/debugger.ts).
+// Positive fixture for code-quality/deterministic/unbound-method.
 //
 // `this.<field>` where `<field>` is a data field (not a method) is being
-// passed around as a value — that's not an unbound-method risk because the
-// field never had `this` bound to begin with.
+// passed around as a value — that's not an unbound-method risk because
+// the field never had `this` bound to begin with.
 
 type Client = { readonly id: string };
 type JobDef = { readonly id: string };

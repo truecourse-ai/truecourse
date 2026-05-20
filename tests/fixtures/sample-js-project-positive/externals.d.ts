@@ -95,12 +95,24 @@ declare module '@prisma/client' {
     $connect(): Promise<void>;
     $disconnect(): Promise<void>;
   }
-  export { PrismaClient, User };
+  enum FieldType { TEXT = 'TEXT', NUMBER = 'NUMBER', DATE = 'DATE' }
+  interface Field {
+    id: string;
+    type: FieldType;
+    page: number;
+    width: number;
+    height: number;
+  }
+  export { PrismaClient, User, Field, FieldType };
 }
 
 declare module 'csv-parser' {
   const csvParser: unknown;
   export default csvParser;
+}
+
+declare module 'react-colorful' {
+  export function setNonce(nonce: string): void;
 }
 
 declare module '@sample/shared-utils' {
@@ -118,4 +130,8 @@ declare module '@sample/shared-utils' {
     createdAt: string;
   };
   export function validateEmail(email: string): boolean;
+  export function validateName(name: string): boolean;
+  export function formatDate(date: Date): string;
+  export interface ProfileInput { id: string; name: string; email: string; createdAt: string }
+  export function describeUser(user: ProfileInput): string;
 }

@@ -289,6 +289,18 @@
       "layer": "data"
     },
     {
+      "name": "AuditEventsClient",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "external"
+    },
+    {
+      "name": "AuditLogRepository",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "BadConstructor",
       "service": "user-service",
       "kind": "class",
@@ -840,6 +852,15 @@
       "targetService": "notification-service",
       "importedNames": [
         "NotificationProcessor"
+      ]
+    },
+    {
+      "source": "AuditLogRepository",
+      "target": "AuditEventsClient",
+      "sourceService": "user-service",
+      "targetService": "user-service",
+      "importedNames": [
+        "AuditEventsClient"
       ]
     },
     {

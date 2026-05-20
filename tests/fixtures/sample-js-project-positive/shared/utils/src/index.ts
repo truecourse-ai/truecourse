@@ -1,6 +1,8 @@
 export { formatUser } from './formatters';
 export { validateEmail, validateName } from './validators';
 export { logger } from './logger';
+export type { ProfileInput } from './profile';
+export { describeUser } from './profile';
 
 process.on('uncaughtException', (err: Error) => {
   console.error(`Uncaught: ${err.message}`);

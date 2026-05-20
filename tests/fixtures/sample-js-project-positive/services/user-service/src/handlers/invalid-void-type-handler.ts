@@ -1,6 +1,4 @@
-// Paraphrased from documenso/documenso (apps/remix/.../use-scroll-to-page.ts,
-// packages/ui/.../canvas.ts, packages/email/.../mailchannels.ts,
-// packages/lib/.../use-autosave.ts).
+// Positive fixture for code-quality/deterministic/invalid-void-type.
 //
 // `void` as the RETURN type of a callback parameter type is valid. The rule
 // should only flag `void` when it is the direct type of the parameter itself.

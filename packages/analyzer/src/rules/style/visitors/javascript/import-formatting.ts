@@ -28,7 +28,12 @@ export const importFormattingVisitor: CodeRuleVisitor = {
       if (
         child.type !== 'import_statement' &&
         child.type !== 'comment' &&
-        child.type !== 'empty_statement'
+        child.type !== 'empty_statement' &&
+        // A `#!/usr/bin/env node` shebang is required to be the very first
+        // line of an executable script and is not "non-import code" — Node
+        // strips it before evaluation. Tree-sitter parses it as a sibling
+        // of program statements with the `hash_bang_line` node type.
+        child.type !== 'hash_bang_line'
       ) {
         // Skip directive prologues — string-literal expression statements that
         // appear before any code (per the ECMAScript "directive prologue" spec).

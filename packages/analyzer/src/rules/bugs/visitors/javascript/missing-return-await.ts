@@ -1,5 +1,7 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import type { TypeQueryService } from '../../../../ts-compiler.js'
 import { JS_LANGUAGES } from './_helpers.js'
 
 // Detects: async function with try/catch that returns a Promise without await
@@ -9,7 +11,8 @@ export const missingReturnAwaitVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/missing-return-await',
   languages: JS_LANGUAGES,
   nodeTypes: ['try_statement'],
-  visit(node, filePath, sourceCode) {
+  needsTypeQuery: true,
+  visit(node, filePath, sourceCode, _dataFlow, typeQuery) {
     // Check if we're inside an async function
     let parent = node.parent
     let insideAsync = false
@@ -34,7 +37,7 @@ export const missingReturnAwaitVisitor: CodeRuleVisitor = {
     if (!tryBody) return null
 
     // Look for return statements returning a call expression (likely a Promise) without await
-    const bareReturn = findReturnWithoutAwait(tryBody)
+    const bareReturn = findReturnWithoutAwait(tryBody, filePath, typeQuery)
     if (!bareReturn) return null
 
     return makeViolation(
@@ -47,7 +50,11 @@ export const missingReturnAwaitVisitor: CodeRuleVisitor = {
   },
 }
 
-function findReturnWithoutAwait(node: import('web-tree-sitter').Node): import('web-tree-sitter').Node | null {
+function findReturnWithoutAwait(
+  node: SyntaxNode,
+  filePath: string,
+  typeQuery?: TypeQueryService,
+): SyntaxNode | null {
   for (const child of node.namedChildren) {
     // Don't recurse into nested functions
     if (child.type === 'function_declaration' || child.type === 'arrow_function' ||
@@ -70,11 +77,34 @@ function findReturnWithoutAwait(node: import('web-tree-sitter').Node): import('w
           // Skip known synchronous methods (array methods, etc.) — these never return Promises
           if (/^(map|filter|reduce|find|findIndex|some|every|flatMap|forEach|sort|flat|join|slice|concat|includes|indexOf|lastIndexOf|toString|keys|values|entries)$/.test(propText)) continue
         }
+        // Type-aware check: only flag when the returned expression is
+        // actually Promise-like. Catches Hono's `c.json(...)`/`c.text(...)`
+        // (synchronous Response), string methods like `.trim()` returning
+        // strings, etc. — none of which need awaiting.
+        if (typeQuery) {
+          const isPromise = typeQuery.isPromiseLike(
+            filePath,
+            returnValue.startPosition.row,
+            returnValue.startPosition.column,
+            returnValue.endPosition.row,
+            returnValue.endPosition.column,
+          )
+          if (!isPromise) continue
+          // `any`-typed calls satisfy PromiseLike but can't be trusted.
+          const isAny = typeQuery.isAnyType(
+            filePath,
+            returnValue.startPosition.row,
+            returnValue.startPosition.column,
+            returnValue.endPosition.row,
+            returnValue.endPosition.column,
+          )
+          if (isAny) continue
+        }
         return child
       }
     }
 
-    const found = findReturnWithoutAwait(child)
+    const found = findReturnWithoutAwait(child, filePath, typeQuery)
     if (found) return found
   }
   return null

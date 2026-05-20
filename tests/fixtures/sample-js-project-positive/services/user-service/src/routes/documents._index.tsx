@@ -1,6 +1,5 @@
-// Paraphrased from documenso/documenso (apps/remix/.../t.$teamUrl+/documents._index.tsx).
 // Another Remix route module shape — basename starts with the route segment
-// name, then ends with `._index.tsx`. Old visitor matched `.includes('index.')`.
+// name, then ends with `._index.tsx`. The old visitor matched `.includes('index.')`.
 
 declare function listDocuments(): Promise<readonly string[]>;
 

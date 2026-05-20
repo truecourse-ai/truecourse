@@ -1,6 +1,5 @@
-// Paraphrased from documenso/documenso (apps/remix/app/routes/_index.tsx and
-// many other Remix route modules — unhandled-rejection-no-handler /
-// uncaught-exception-no-handler false positives).
+// Positive fixture for unhandled-rejection-no-handler /
+// uncaught-exception-no-handler on Remix route modules.
 //
 // Remix route modules are imported by the Remix runtime; they are NOT
 // process entry-points and must not be required to register process-level

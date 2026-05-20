@@ -84,12 +84,26 @@ function hasDataLayerPatterns(
 ): { match: boolean; reasons: string[] } {
   const reasons: string[] = []
 
-  // Check ORM imports
+  // Check ORM imports. `@prisma/client` doubles as the actual data client
+  // AND the generated-types module — a React component pulling `import type
+  // { Field } from '@prisma/client'` or `import { FieldType } from
+  // '@prisma/client'` (enum value) is not doing any data-layer work. Treat
+  // type-only imports and "generated names only" imports as non-signal.
   for (const imp of analysis.imports) {
-    if (dataLayerPatterns.orms.some(orm => matchesPattern(imp.source, orm))) {
-      reasons.push(`Imports ORM: ${imp.source}`)
-      return { match: true, reasons }
+    if (!dataLayerPatterns.orms.some(orm => matchesPattern(imp.source, orm))) continue
+    if (imp.isTypeOnly) continue
+    if (imp.source === '@prisma/client') {
+      // Real data-layer files import the runtime client (`PrismaClient`),
+      // a default import, or the whole namespace. Importing only generated
+      // enums/types (e.g. `FieldType`, `DocumentDataType`, `Prisma`,
+      // `ReadStatus`) is not enough.
+      const hasRuntimeClient = imp.specifiers.some(s =>
+        s.name === 'PrismaClient' || s.isDefault || s.isNamespace,
+      )
+      if (!hasRuntimeClient) continue
     }
+    reasons.push(`Imports ORM: ${imp.source}`)
+    return { match: true, reasons }
   }
 
   // Check database driver imports

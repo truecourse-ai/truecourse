@@ -94,6 +94,13 @@ export function findItem(items: Array<{ id: number; name: string }>) {
   return items.find((item) => item.id === 42).name;
 }
 
+// VIOLATION: reliability/deterministic/missing-null-check-after-find
+// Real Array.prototype.find (T|undefined), chained method call without a
+// null check — companion to the non-Array `.find()` positive fixture.
+export function activateFirstOpen(items: Array<{ id: number; open: boolean; activate(): void }>) {
+  items.find((it) => it.open).activate();
+}
+
 // VIOLATION: reliability/deterministic/missing-finally-cleanup
 export function queryWithoutCleanup() {
   const db = { createConnection: () => ({ query: () => 'data' }), close: () => {} };
