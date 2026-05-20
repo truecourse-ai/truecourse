@@ -48,9 +48,20 @@ export const KNOWN_ARG_ORDERS: Array<{ fn: string; params: string[][] }> = [
   { fn: 'substring', params: [['start', 'from', 'begin'], ['end', 'to', 'finish']] },
 ]
 
+// Method names that ALWAYS return undefined on every common receiver
+// (Array, Map, Set, Storage, DOM collections). Assigning their result
+// is unambiguously a bug.
+//
+// Methods deliberately omitted because they DO return a useful value
+// on common receivers:
+//   - pop / shift / splice  → return the removed element(s)
+//   - push / unshift        → return the new length
+//   - fill / sort / reverse → return the (chainable) array itself
+//   - set / add             → return the chainable Map / Set
+//   - delete                → boolean on Map/Set; chainable instance on
+//                             Hono / Express / etc. routers
 export const VOID_RETURNING_METHODS = new Set([
-  'forEach', 'push', 'pop', 'shift', 'unshift', 'splice', 'fill',
-  'delete', 'clear', 'set', 'add',
+  'forEach', 'clear',
 ])
 
 export const VOID_RETURNING_GLOBALS = new Set([

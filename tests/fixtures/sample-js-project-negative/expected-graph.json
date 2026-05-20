@@ -691,6 +691,12 @@
       "layer": "service"
     },
     {
+      "name": "squareAll",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "style",
       "service": "utils",
       "kind": "standalone",
