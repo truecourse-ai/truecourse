@@ -62,6 +62,18 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
     // demonstrably considered the issue.
     if (isAssignmentGuardedByKeyInObject(node, keyName, obj.text)) return null
 
+    // Skip when the key was destructured from a local variable —
+    // `const { readStatus, … } = row` inside a `forEach` / `map` /
+    // for-of body. The key's value comes from a typed field of an
+    // iteration item, not from user input.
+    if (isKeyDestructuredFromLocal(node, keyName)) return null
+
+    // Skip when the key is a locally-managed numeric counter
+    // (initialized to a number / mutated by `++`, `--`, or `+=`).
+    // A `number` index can never equal `"__proto__"` /
+    // `"constructor"` / `"prototype"`.
+    if (isKeyNumericCounter(node, keyName)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'high',
       'Prototype pollution',
@@ -202,6 +214,128 @@ function isAssignmentGuardedByKeyInObject(
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * True if `keyName` appears as an `object_pattern` member or an array
+ * destructuring binding in a `const`/`let`/`var` declarator within the
+ * enclosing function scope. Covers `const { readStatus, … } = row` and
+ * `const [k, v] = entry` patterns where the right-hand side is some
+ * locally-derived value rather than user input.
+ */
+function isKeyDestructuredFromLocal(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return false
+
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      if (name && (name.type === 'object_pattern' || name.type === 'array_pattern')) {
+        if (patternBindsName(name, keyName)) {
+          found = true
+          return
+        }
+      }
+    }
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
+  return found
+}
+
+function patternBindsName(pattern: SyntaxNode, keyName: string): boolean {
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (
+      (n.type === 'shorthand_property_identifier_pattern' || n.type === 'identifier') &&
+      n.text === keyName
+    ) {
+      found = true
+      return
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(pattern)
+  return found
+}
+
+/**
+ * True if `keyName` is a locally-managed numeric counter — declared
+ * with a number initializer (`let i = 0`) and/or mutated by `++` /
+ * `--` / `+=` / `-=` somewhere in the enclosing function scope. A
+ * number index value can never be `"__proto__"` etc.
+ */
+function isKeyNumericCounter(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return false
+
+  let numericInit = false
+  let numericMutation = false
+  function walk(n: SyntaxNode): void {
+    if (numericInit && numericMutation) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'identifier' && name.text === keyName && value?.type === 'number') {
+        numericInit = true
+      }
+    }
+    if (n.type === 'update_expression') {
+      const arg = n.childForFieldName('argument')
+      if (arg?.type === 'identifier' && arg.text === keyName) numericMutation = true
+    }
+    if (n.type === 'augmented_assignment_expression') {
+      const left = n.childForFieldName('left')
+      if (left?.type === 'identifier' && left.text === keyName) numericMutation = true
+    }
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
+  return numericInit || numericMutation
 }
 
 function isObjectEntriesOrKeys(node: SyntaxNode): boolean {

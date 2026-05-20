@@ -23,6 +23,18 @@ export const valuesNotConvertibleToNumberVisitor: CodeRuleVisitor = {
     const right = node.childForFieldName('right')
     if (!left || !right) return null
 
+    // tree-sitter-typescript misparses `tag<Type>\`…\`` (tagged template
+    // literal with an explicit type argument — Drizzle/Kysely's `sql<T>\`…\``)
+    // as `(tag < Type) > template_string`. Detect the misparse by walking
+    // to the outermost binary_expression in this `<`/`>` chain and checking
+    // for a template_string as its right operand.
+    let outermost = node as typeof node
+    while (outermost.parent && outermost.parent.type === 'binary_expression') {
+      outermost = outermost.parent
+    }
+    const outermostRight = outermost.childForFieldName('right')
+    if (outermostRight?.type === 'template_string') return null
+
     const leftType = typeQuery.getTypeAtPosition(filePath, left.startPosition.row, left.startPosition.column)
     const rightType = typeQuery.getTypeAtPosition(filePath, right.startPosition.row, right.startPosition.column)
     if (!leftType || !rightType) return null

@@ -259,6 +259,12 @@
       "layer": "service"
     },
     {
+      "name": "pruneStaleCacheEntries",
+      "service": "notification-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "queue-worker",
       "service": "notification-service",
       "kind": "standalone",
@@ -301,6 +307,12 @@
       "layer": "data"
     },
     {
+      "name": "authenticateApiKey",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "BadConstructor",
       "service": "user-service",
       "kind": "class",
@@ -311,6 +323,12 @@
       "service": "user-service",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "computeOrphanedAggregate",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "Config",
@@ -355,6 +373,12 @@
       "layer": "service"
     },
     {
+      "name": "isPriorityHigher",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Mergeable",
       "service": "user-service",
       "kind": "class",
@@ -389,6 +413,12 @@
       "service": "user-service",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "setExternalProperty",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "SetterWithReturn",
