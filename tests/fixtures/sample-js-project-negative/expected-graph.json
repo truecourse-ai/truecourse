@@ -79,6 +79,12 @@
       "layer": "service"
     },
     {
+      "name": "insecure-random-prod-token",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "logger",
       "service": "api-gateway",
       "kind": "standalone",
