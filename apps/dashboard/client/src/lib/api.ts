@@ -673,6 +673,8 @@ export type SpecConflict = {
   module?: string;
   candidates: SpecConflictCandidate[];
   defaultPick: number;
+  /** Plain-English LLM-generated explanation of how candidates differ. */
+  explanation?: string;
   /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
   candidateFingerprint: string;
 };

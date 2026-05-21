@@ -497,28 +497,20 @@ function ContentCandidate({
           {recommendationReason(candidate, conflict)}
         </div>
       )}
+      {conflict.explanation && (
+        <div className="mt-3 rounded border border-border bg-card px-3 py-2">
+          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            What differs
+          </div>
+          <p className="text-sm leading-relaxed text-foreground">{conflict.explanation}</p>
+        </div>
+      )}
       <DocPreview source={candidate.claim.provenance.quote} />
       {diffs.length > 0 && (
-        <div className="mt-3">
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Differs from other candidates · {diffs.length}
-          </div>
-          <ul className="rounded border border-border bg-muted/10 px-3 py-2 text-[11px]">
-            {diffs.slice(0, 12).map((d, i) => (
-              <li key={i} className="border-b border-border/40 py-1 last:border-0">
-                <span className="font-mono text-foreground">{d.path}</span>
-                <span className="ml-2 text-muted-foreground">
-                  here: <span className="font-mono text-foreground">{stringifyShort(d.thisValue)}</span>
-                  {' '}· vs <span className="font-mono">{d.otherFile.split('/').pop()}</span>:{' '}
-                  <span className="font-mono text-foreground">{stringifyShort(d.otherValue)}</span>
-                </span>
-              </li>
-            ))}
-            {diffs.length > 12 && (
-              <li className="py-1 text-muted-foreground">… and {diffs.length - 12} more</li>
-            )}
-          </ul>
-        </div>
+        <CollapsibleDiffList
+          diffs={diffs}
+          defaultExpanded={!conflict.explanation}
+        />
       )}
       {candidate.claim.content !== undefined && (
         <div className="mt-3">
@@ -529,6 +521,51 @@ function ContentCandidate({
             {JSON.stringify(candidate.claim.content, null, 2)}
           </pre>
         </div>
+      )}
+    </div>
+  );
+}
+
+interface DiffEntry {
+  path: string;
+  otherFile: string;
+  thisValue: unknown;
+  otherValue: unknown;
+}
+
+function CollapsibleDiffList({
+  diffs,
+  defaultExpanded,
+}: {
+  diffs: DiffEntry[];
+  defaultExpanded: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+      >
+        {expanded ? '▾' : '▸'} Raw diff · {diffs.length}
+      </button>
+      {expanded && (
+        <ul className="rounded border border-border bg-muted/10 px-3 py-2 text-[11px]">
+          {diffs.slice(0, 12).map((d, i) => (
+            <li key={i} className="border-b border-border/40 py-1 last:border-0">
+              <span className="font-mono text-foreground">{d.path}</span>
+              <span className="ml-2 text-muted-foreground">
+                here: <span className="font-mono text-foreground">{stringifyShort(d.thisValue)}</span>
+                {' '}· vs <span className="font-mono">{d.otherFile.split('/').pop()}</span>:{' '}
+                <span className="font-mono text-foreground">{stringifyShort(d.otherValue)}</span>
+              </span>
+            </li>
+          ))}
+          {diffs.length > 12 && (
+            <li className="py-1 text-muted-foreground">… and {diffs.length - 12} more</li>
+          )}
+        </ul>
       )}
     </div>
   );

@@ -55,6 +55,10 @@ import {
   type ChainRecheckRunner,
 } from './chain-recheck.js';
 import {
+  explainConflicts,
+  type ConflictExplainerRunner,
+} from './conflict-explainer.js';
+import {
   detectVersionChainsViaLlm,
   type ChainRunner,
 } from './version-chain-llm.js';
@@ -92,6 +96,16 @@ export interface ConsolidateOptions {
    * deterministic + upfront-LLM chain detectors still run.
    */
   disableChainRecheck?: boolean;
+  /**
+   * Override the per-conflict explainer runner. Tests pass a stub.
+   * When omitted, an LLM-backed runner is spawned automatically.
+   */
+  conflictExplainerRunner?: ConflictExplainerRunner;
+  /**
+   * When true, skip the per-conflict plain-English explanation LLM
+   * call. Conflicts still surface but without the readable summary.
+   */
+  disableConflictExplanations?: boolean;
   /**
    * Skip the git-log mtime resolution. Useful for tests; the harness
    * also passes this when the working dir isn't a git repo.
@@ -238,6 +252,17 @@ export async function consolidate(
   // surface in decidedConflicts. Either way the dashboard sees them
   // through the same shape as content conflicts.
   const stitchedMerge = stitchChainConflicts(merge, mergedChainConflicts, chainsForStitch, decisions);
+
+  // ---- Plain-English explanations for open conflicts -------------------
+  // Per-conflict LLM call (Haiku-tier) summarizing the substantive
+  // disagreement so non-engineers can decide without reading raw JSON.
+  // Best-effort: failures degrade silently. Cached per-conflict by
+  // candidate fingerprint, so re-runs with unchanged candidates skip
+  // the LLM call entirely.
+  await explainConflicts(repoRoot, stitchedMerge.openConflicts, {
+    runner: opts.conflictExplainerRunner,
+    enabled: opts.disableConflictExplanations !== true,
+  });
 
   if (!opts.materialize) {
     return { extract, merge: stitchedMerge, decisions };

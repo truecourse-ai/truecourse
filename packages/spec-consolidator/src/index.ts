@@ -123,6 +123,16 @@ export type {
 } from './chain-recheck.js';
 
 export {
+  explainConflicts,
+  CONFLICT_EXPLAINER_SYSTEM_PROMPT,
+} from './conflict-explainer.js';
+export type {
+  ConflictExplainerInput,
+  ConflictExplainerOptions,
+  ConflictExplainerRunner,
+} from './conflict-explainer.js';
+
+export {
   detectVersionChainsViaLlm,
   CHAIN_DETECTION_SYSTEM_PROMPT,
   buildChainDetectionUserPrompt,
