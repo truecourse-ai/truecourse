@@ -529,6 +529,12 @@
       "layer": "service"
     },
     {
+      "name": "CaseHelpers",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ClassA",
       "service": "utils",
       "kind": "class",
