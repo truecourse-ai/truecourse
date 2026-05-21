@@ -18,13 +18,16 @@ export const deprecatedApiUsageVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     // Step 1: collect names of @deprecated declarations
     const deprecatedNames = new Set<string>()
-    const declarationNodes = new Set<SyntaxNode>()
-    collectDeprecatedDeclarations(node, deprecatedNames, declarationNodes)
+    // Track declaration nodes by `id` rather than reference — web-tree-sitter
+    // returns fresh wrapper objects for repeated traversal, so reference-based
+    // Set membership would always miss.
+    const declarationNodeIds = new Set<number>()
+    collectDeprecatedDeclarations(node, deprecatedNames, declarationNodeIds)
 
     if (deprecatedNames.size === 0) return null
 
     // Step 2: find first reference to any deprecated name (not in declaration position)
-    return findFirstDeprecatedReference(node, deprecatedNames, declarationNodes, filePath, sourceCode, this.ruleKey)
+    return findFirstDeprecatedReference(node, deprecatedNames, declarationNodeIds, filePath, sourceCode, this.ruleKey)
   },
 }
 
@@ -34,7 +37,7 @@ export const deprecatedApiUsageVisitor: CodeRuleVisitor = {
 function collectDeprecatedDeclarations(
   root: SyntaxNode,
   names: Set<string>,
-  declarationNodes: Set<SyntaxNode>,
+  declarationNodeIds: Set<number>,
 ): void {
   function walk(node: SyntaxNode): void {
     // Check statements that can have JSDoc comments
@@ -50,7 +53,7 @@ function collectDeprecatedDeclarations(
         // Extract declared names
         extractDeclaredNames(node).forEach((name) => {
           names.add(name)
-          declarationNodes.add(node)
+          declarationNodeIds.add(node.id)
         })
       }
     }
@@ -118,24 +121,30 @@ function hasPrecedingDeprecatedJsDoc(stmt: SyntaxNode): boolean {
 function findFirstDeprecatedReference(
   root: SyntaxNode,
   names: Set<string>,
-  declarationNodes: Set<SyntaxNode>,
+  declarationNodeIds: Set<number>,
   filePath: string,
   sourceCode: string,
   ruleKey: string,
 ): CodeViolation | null {
   function walk(node: SyntaxNode): CodeViolation | null {
     if (node.type === 'identifier' && names.has(node.text)) {
-      // Skip if this identifier IS the declaration (inside a declarationNode)
+      // Skip if this identifier is at a declaration site (any ancestor is one of
+      // the captured @deprecated declaration nodes), or if it lives inside an
+      // import statement (refers to an external symbol that happens to share
+      // its name with a locally-deprecated one).
       let ancestor: SyntaxNode | null = node.parent
-      let inDecl = false
+      let skip = false
       while (ancestor) {
-        if (declarationNodes.has(ancestor)) {
-          inDecl = true
+        if (
+          ancestor.type === 'import_statement' ||
+          declarationNodeIds.has(ancestor.id)
+        ) {
+          skip = true
           break
         }
         ancestor = ancestor.parent
       }
-      if (!inDecl) {
+      if (!skip) {
         // Also skip if this is a property access (a.deprecated — 'deprecated' is a property, not a reference)
         const parent = node.parent
         if (parent?.type === 'member_expression' && parent.childForFieldName('property')?.id === node.id) {

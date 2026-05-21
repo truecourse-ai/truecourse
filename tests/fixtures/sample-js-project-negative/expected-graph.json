@@ -739,6 +739,12 @@
       "layer": "service"
     },
     {
+      "name": "resolveDocument",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Secretive",
       "service": "utils",
       "kind": "class",

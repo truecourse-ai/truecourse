@@ -115,6 +115,10 @@ declare module 'react-colorful' {
   export function setNonce(nonce: string): void;
 }
 
+declare module 'sample-crypto-shim' {
+  export function hashLegacy(input: string, rounds: number): string;
+}
+
 declare module '@sample/shared-utils' {
   export const logger: {
     info(message: string): void;
