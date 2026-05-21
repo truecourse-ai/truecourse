@@ -709,6 +709,18 @@
       "layer": "service"
     },
     {
+      "name": "loadHelper",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "loadRelated",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "logger",
       "service": "utils",
       "kind": "standalone",
@@ -752,6 +764,12 @@
     },
     {
       "name": "processAbandonedQueue",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "processOrder",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -824,6 +842,12 @@
     },
     {
       "name": "style",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "todoHandler",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -902,6 +926,12 @@
     },
     {
       "name": "Dashboard",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "DataTable",
       "service": "web",
       "kind": "standalone",
       "layer": "service"

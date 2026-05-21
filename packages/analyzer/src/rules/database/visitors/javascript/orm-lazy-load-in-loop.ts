@@ -32,6 +32,11 @@ export const ormLazyLoadInLoopVisitor: CodeRuleVisitor = {
     if (ORM_LAZY_TRIGGER_METHODS.has(methodName)) {
       const fn = node.childForFieldName('function')
       if (fn?.type === 'member_expression') {
+        const obj = fn.childForFieldName('object')
+        // Skip when the receiver is a PascalCase identifier — these are almost
+        // always classes/libraries (e.g. `PDFDocument.load(bytes)`,
+        // `Buffer.from(...)`), not entity instances that could lazy-load.
+        if (obj?.type === 'identifier' && /^[A-Z]/.test(obj.text)) return null
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'ORM lazy loading in loop (N+1)',
