@@ -162,11 +162,14 @@ Your job is to write a clean, free-form markdown section that describes everythi
 Rules:
 
   1. Faithfulness. Encode ONLY what the claims state. Do not add details from your own knowledge of similar systems. Do not guess defaults.
-  2. Free-form prose. Use natural language with markdown structure (H2/H3 headings, lists, fenced code blocks for examples). Do not output YAML front-matter or structured key-value blocks.
-  3. Group naturally. Endpoints can have a heading per route ("### POST /orders"); data shapes can have a heading per entity. Use whatever structure fits the content.
-  4. Status. When a claim has status: "planned" | "deferred" | "out-of-scope" | "deprecated", note that next to the claim's heading (e.g. "### POST /orders/refund — *planned*"). Don't note "shipped" — it's the default.
-  5. Provenance. Don't include file paths, line numbers, or "(from docs/PRDs/v2.md)" — the canonical spec stands on its own.
-  6. Output. Return ONLY the markdown body. No preamble, no fences around the whole thing, no commentary.`;
+  2. **Completeness — render every field of the claim, never drop information.** If the claim's content includes \`"idempotency": true\`, you MUST state in prose that the endpoint is idempotent (e.g., "This endpoint is idempotent under \`Idempotency-Key\`."). If the claim states \`"pagination": "cursor"\`, render the pagination model. If a claim has a \`forbidden\` / \`forbids\` / \`offsetForbidden\` field naming what is disallowed, render that as a prose sentence ("Offset- and page-number-based pagination is forbidden across this surface."). Dropping a claim field is a faithfulness violation.
+  3. Free-form prose. Use natural language with markdown structure (H2/H3 headings, lists, fenced code blocks for examples). Do not output YAML front-matter or structured key-value blocks.
+  4. Group naturally. Endpoints can have a heading per route ("### POST /orders"); data shapes can have a heading per entity. Use whatever structure fits the content.
+  5. **Sibling-section policy — bypass / exception subsections stay nested.** When a claim describes a rule with an "Admin bypass", "Exception", or "Override" — e.g., an ownership rule that admins may bypass — render the bypass as a SUBSECTION (H3) of the parent rule, NOT as a separate sibling section. Example: "## Order ownership" with "### Admin bypass" nested inside it. Never split them into two H2 siblings.
+  6. **Cross-cutting policy — keep the trigger and the consequence together.** If a claim states "all mutating endpoints accept Idempotency-Key", repeat the idempotency clause on each affected operation's section, not only in a separate Idempotency H2. The extractor downstream reads each operation in isolation.
+  7. Status. When a claim has status: "planned" | "deferred" | "out-of-scope" | "deprecated", note that next to the claim's heading (e.g. "### POST /orders/refund — *planned*"). Don't note "shipped" — it's the default.
+  8. Provenance. Don't include file paths, line numbers, or "(from docs/PRDs/v2.md)" — the canonical spec stands on its own.
+  9. Output. Return ONLY the markdown body. No preamble, no fences around the whole thing, no commentary.`;
 
 function buildUserPrompt(section: PendingSection): string {
   const heading = topicHeading(section.topic);

@@ -441,6 +441,25 @@ a SEPARATE \`auth-requirement\` with \`required-role <role>\`, identity
 \`forbidden\`. The role requirement is in ADDITION to the standard bearer
 requirement — do not collapse them into one artifact.
 
+**Role selector must enumerate operations, NEVER use a broad path-glob.** If
+the spec says "POST /api/customers requires admin", the role requirement's
+\`selector\` must be \`operations [Operation:"POST /api/customers"]\` — not
+\`path-glob "/api/**"\` or \`path-glob "/api/customers/**"\`. Broad path-globs on
+role requirements cause cascading false-positive drifts on every operation
+matched by the glob that isn't supposed to require the role.
+
+  auth-requirement auth.role.admin {
+    origin "<source>" "<section>" <lines>
+    scheme Bearer
+    required-role admin
+    selector operations [Operation:"POST /api/customers"]   // ← explicit ops list
+    on-violation {
+      status 403
+      error-code forbidden
+      body ErrorEnvelope:error.envelope.standard
+    }
+  }
+
 # Auth-requirement: except blocks
 
 When the spec says "all routes are protected … except X", or lists specific paths
@@ -548,6 +567,26 @@ fragment AND the enum fragment.
 emit (in \`field: Enum:X\` or \`states Enum:X\`) MUST have a matching \`enum X { … }\`
 artifact somewhere in the same slice (or you must assume another slice provides
 it; only assume this when the enum is named in another spec document).
+
+# Forbids clauses — REQUIRED whenever spec uses "forbidden" / "must not" / "no X on Y"
+
+**This is a hard rule, not a suggestion.** If the spec contains ANY of these
+trigger phrases, you MUST emit the corresponding \`forbids\` clause on the
+matching contract:
+
+- "offset/page (-number) pagination is forbidden" → \`forbid query-param offset\`
+  AND \`forbid query-param page\` (two separate \`forbid\` lines, both required)
+- "no event is emitted on failed/validation/error responses" /
+  "events emit ONLY on successful responses" /
+  "events are not emitted on 4xx/5xx" → \`forbid emission when-response-status [4xx, 5xx]\`
+- "missing resources never return silent null/empty" /
+  "X is never returned as a silent no-op" /
+  "404 must be returned for missing X" → on the matching response, add
+  \`forbid status 200 when resource-missing\`
+- "<scheme> is forbidden" → \`forbid <kind> <name>\` on the relevant contract
+
+The forbids block is NOT optional polish — it is what makes the verifier
+catch the corresponding planted bug. Missing forbids = missed drift.
 
 # Forbids clauses — map "forbidden" / "must not" / "no X on Y" to structured clauses
 
