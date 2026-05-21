@@ -529,6 +529,12 @@
       "layer": "service"
     },
     {
+      "name": "CaseHelpers",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "ClassA",
       "service": "utils",
       "kind": "class",
@@ -595,6 +601,12 @@
       "layer": "service"
     },
     {
+      "name": "computeDefaultTimeout",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Constants",
       "service": "utils",
       "kind": "class",
@@ -644,6 +656,12 @@
     },
     {
       "name": "fetchAllRecords",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "firstStringOver",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -734,6 +752,12 @@
     },
     {
       "name": "remaining-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "resolveDocument",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"

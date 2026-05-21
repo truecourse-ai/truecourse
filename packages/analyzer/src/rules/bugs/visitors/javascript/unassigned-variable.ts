@@ -22,8 +22,10 @@ export const unassignedVariableVisitor: CodeRuleVisitor = {
     const assigned = new Set<string>()
     const readBeforeAssign = new Set<string>()
 
-    function processNode(n: SyntaxNode) {
-      if (n.type === 'variable_declaration' || n.type === 'lexical_declaration') {
+    function processNode(n: SyntaxNode, inNestedScope: boolean) {
+      // Declarations from nested scopes are separate bindings and must not
+      // shadow the outer-scope declaredNoInit map.
+      if (!inNestedScope && (n.type === 'variable_declaration' || n.type === 'lexical_declaration')) {
         for (const declarator of n.namedChildren) {
           if (declarator.type === 'variable_declarator') {
             const name = declarator.childForFieldName('name')
@@ -35,21 +37,38 @@ export const unassignedVariableVisitor: CodeRuleVisitor = {
         }
       }
 
-      if (n.type === 'assignment_expression') {
+      if (n.type === 'assignment_expression' || n.type === 'augmented_assignment_expression') {
         const left = n.childForFieldName('left')
         if (left?.type === 'identifier') assigned.add(left.text)
       }
 
-      // Don't recurse into nested functions
-      if (n.id !== body?.id && (n.type === 'function_declaration' || n.type === 'arrow_function' || n.type === 'function' || n.type === 'method_definition')) return
+      if (n.type === 'update_expression') {
+        const argument = n.childForFieldName('argument')
+        if (argument?.type === 'identifier') assigned.add(argument.text)
+      }
+
+      // Always recurse — assignments inside nested closures (Promise executors,
+      // event handlers, object-literal setters, etc.) DO mutate the outer
+      // variable when they don't redeclare it. Track scope so nested
+      // declarations don't pollute declaredNoInit.
+      const isNestedFunction = n.id !== body?.id && (
+        n.type === 'function_declaration' ||
+        n.type === 'arrow_function' ||
+        n.type === 'function' ||
+        n.type === 'function_expression' ||
+        n.type === 'generator_function' ||
+        n.type === 'generator_function_declaration' ||
+        n.type === 'method_definition'
+      )
+      const childInNestedScope = inNestedScope || isNestedFunction
 
       for (let i = 0; i < n.childCount; i++) {
         const child = n.child(i)
-        if (child) processNode(child)
+        if (child) processNode(child, childInNestedScope)
       }
     }
 
-    processNode(body)
+    processNode(body, false)
 
     // Find a variable that was declared without assignment and never assigned
     for (const [name, declNode] of declaredNoInit) {

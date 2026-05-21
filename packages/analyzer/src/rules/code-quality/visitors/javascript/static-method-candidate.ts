@@ -18,6 +18,12 @@ export const staticMethodCandidateVisitor: CodeRuleVisitor = {
     // Skip methods in classes that extend or implement — they may be overriding base class methods
     const classNode = node.parent?.parent
     if (classNode) {
+      // Skip methods inside an abstract class: even concrete methods are
+      // typically stubs intended for subclass override (e.g. `throw new
+      // Error('Not implemented')`). Making them static would break polymorphic
+      // dispatch from the subclass.
+      if (classNode.type === 'abstract_class_declaration') return null
+
       for (let i = 0; i < classNode.childCount; i++) {
         const child = classNode.child(i)
         if (child && (child.type === 'class_heritage' || child.type === 'extends_clause' || child.type === 'implements_clause')) return null

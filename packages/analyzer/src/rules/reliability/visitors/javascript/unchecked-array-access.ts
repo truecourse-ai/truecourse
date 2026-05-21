@@ -1,7 +1,7 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { findContainingStatement } from './_helpers.js'
+import { findContainingStatement, findEnclosingFunction } from './_helpers.js'
 
 export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
   ruleKey: 'reliability/deterministic/unchecked-array-access',
@@ -39,8 +39,21 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     // Skip array writes (assignment targets) — writing to an index can't crash
     if (node.parent?.type === 'assignment_expression' && node.parent.childForFieldName('left')?.id === node.id) return null
 
-    // Skip when the result is used with a fallback (|| default, ?? default)
-    if (node.parent?.type === 'binary_expression' && /\|\||&&|\?\?/.test(node.parent.text.slice(node.text.length))) return null
+    // Skip augmented assignment targets (`obj[k] += 1`, `obj[k] ||= …`) — the
+    // read+write is an explicit update of that slot; treating it as an
+    // unguarded read confuses real reads with intentional in-place mutation.
+    if (node.parent?.type === 'augmented_assignment_expression' && node.parent.childForFieldName('left')?.id === node.id) return null
+
+    // Skip when the result (or a transparent wrapper around it) is used with a
+    // fallback. Common shape: `t(MAP[key]) ?? key` — the array access is buried
+    // in a call but the outer expression supplies a default.
+    if (hasFallbackAncestor(node)) return null
+
+    // Skip access to a local variable whose type annotation is a Record/Map —
+    // even without `noUncheckedIndexedAccess`, this is the explicit
+    // "exhaustive dictionary" pattern and the user has told the type system
+    // the keys are total.
+    if (object.type === 'identifier' && isRecordTypedLocal(object.text, node)) return null
 
     // Check if there is a bounds check nearby (same block)
     const statement = findContainingStatement(node)
@@ -104,4 +117,88 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
       'Add a bounds check (e.g., if (i < arr.length)) before accessing the array by index.',
     )
   },
+}
+
+/**
+ * Walk up through "transparent" wrappers (function call args, parens, type
+ * assertions) looking for a binary_expression with a short-circuit fallback
+ * (`||`, `??`, `&&`) where the walked-up subtree is the LEFT operand.
+ */
+function hasFallbackAncestor(start: SyntaxNode): boolean {
+  let cur: SyntaxNode = start
+  let parent: SyntaxNode | null = start.parent
+  while (parent) {
+    if (parent.type === 'binary_expression') {
+      const operator = parent.childForFieldName('operator')?.text
+      const left = parent.childForFieldName('left')
+      if (
+        left?.id === cur.id &&
+        (operator === '||' || operator === '??' || operator === '&&')
+      ) {
+        return true
+      }
+      return false
+    }
+    // Step through wrappers that don't change the value's identity for
+    // fallback-detection purposes.
+    if (
+      parent.type === 'arguments' ||
+      parent.type === 'call_expression' ||
+      parent.type === 'parenthesized_expression' ||
+      parent.type === 'as_expression' ||
+      parent.type === 'satisfies_expression' ||
+      parent.type === 'non_null_expression' ||
+      parent.type === 'type_assertion'
+    ) {
+      cur = parent
+      parent = parent.parent
+      continue
+    }
+    return false
+  }
+  return false
+}
+
+/**
+ * Look up the enclosing function for a `const/let <name>: Record<…> = {…}`
+ * declaration (or any Map/ReadonlyMap-typed declaration). If found, the
+ * subscript access is into a dictionary the author explicitly typed.
+ */
+function isRecordTypedLocal(name: string, accessNode: SyntaxNode): boolean {
+  const fn = findEnclosingFunction(accessNode)
+  if (!fn) return false
+  const body = fn.childForFieldName('body')
+  if (!body) return false
+
+  function walk(n: SyntaxNode): boolean {
+    if (n.type === 'lexical_declaration' || n.type === 'variable_declaration') {
+      for (let i = 0; i < n.namedChildCount; i++) {
+        const decl = n.namedChild(i)
+        if (decl?.type !== 'variable_declarator') continue
+        const nameNode = decl.childForFieldName('name')
+        if (nameNode?.type !== 'identifier' || nameNode.text !== name) continue
+        const typeNode = decl.childForFieldName('type')
+        if (typeNode && /\b(Record|ReadonlyMap|Map)\s*</.test(typeNode.text)) {
+          return true
+        }
+      }
+    }
+    // Don't recurse into nested functions — those are different scopes.
+    if (
+      n.id !== body!.id &&
+      (n.type === 'function_declaration' ||
+        n.type === 'arrow_function' ||
+        n.type === 'function' ||
+        n.type === 'function_expression' ||
+        n.type === 'method_definition')
+    ) {
+      return false
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const c = n.child(i)
+      if (c && walk(c)) return true
+    }
+    return false
+  }
+  return walk(body)
 }
