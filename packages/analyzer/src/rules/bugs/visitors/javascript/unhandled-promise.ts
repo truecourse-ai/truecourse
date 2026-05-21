@@ -19,6 +19,10 @@ export const unhandledPromiseVisitor: CodeRuleVisitor = {
     // Skip if already handled: void expr, expr.catch(), await expr
     if (expr.type === 'await_expression') return null
     if (expr.type === 'void_expression') return null
+    // Skip assignments — the promise is being stored (e.g. into a ref,
+    // module-level cache, or instance property), and can be awaited or
+    // chained later. This isn't a floating promise.
+    if (expr.type === 'assignment_expression') return null
     // Skip resolve/reject calls inside Promise constructors
     if (expr.type === 'call_expression') {
       const fn = expr.childForFieldName('function')

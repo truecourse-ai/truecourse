@@ -63,11 +63,13 @@ export const hardcodedSecretVisitor: CodeRuleVisitor = {
         const name = nameNode.text.toLowerCase()
         const secretNames = ['password', 'passwd', 'secret', 'apikey', 'api_key', 'token', 'auth_token', 'access_token', 'private_key']
         // Exclude variable names that are clearly not secrets (URIs, URLs, endpoints, types)
-        const isNonSecretName = /(?:uri|url|endpoint|type|scope|name|header|grant|method)/.test(name)
+        const isNonSecretName = /(?:uri|url|endpoint|type|scope|name|header|grant|method|identifier)/.test(name)
         const isNonSecretValue =
           /https?:\/\//.test(stripped)                          // URLs
           || /^(true|false|null|undefined|localhost|None|True|False|Bearer)$/i.test(stripped) // literals & common tokens
           || /[[\]<>{}()#.=\s]/.test(stripped)                  // selectors, HTML, format strings, paths
+          || /^[A-Z][A-Z0-9_]*$/.test(stripped)                 // UPPER_SNAKE_CASE enum/error codes
+          || /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(stripped)   // kebab-case identifier labels
 
         // Vocabulary-tag pattern: the literal *is* the field name (or a
         // plain-text extension of it). Catches things like

@@ -12,6 +12,11 @@ export function typeMismatch() {
 // VIOLATION: code-quality/deterministic/filename-class-mismatch
 export default class WrongNameClass {
   value = 42;
+
+  // VIOLATION: code-quality/deterministic/unnecessary-type-parameter
+  logVerbose<T>(x: T): string {
+    return String(x);
+  }
 }
 
 // VIOLATION: code-quality/deterministic/internal-api-usage
