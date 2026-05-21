@@ -15,6 +15,20 @@ export const unsafeJsonParseVisitor: CodeRuleVisitor = {
     const prop = fn.childForFieldName('property')
     if (obj?.text !== 'JSON' || prop?.text !== 'parse') return null
 
+    // `JSON.parse(JSON.stringify(x))` is the structured-clone idiom — the
+    // input is guaranteed valid JSON because it was just produced by
+    // JSON.stringify, so no try/catch is needed.
+    const args = node.childForFieldName('arguments')
+    const firstArg = args?.namedChildren[0]
+    if (firstArg?.type === 'call_expression') {
+      const innerFn = firstArg.childForFieldName('function')
+      if (innerFn?.type === 'member_expression') {
+        const innerObj = innerFn.childForFieldName('object')
+        const innerProp = innerFn.childForFieldName('property')
+        if (innerObj?.text === 'JSON' && innerProp?.text === 'stringify') return null
+      }
+    }
+
     if (isInsideTryCatch(node)) return null
 
     return makeViolation(

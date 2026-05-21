@@ -42,6 +42,10 @@ function checkFunctionDeclaration(
     // const fn = (...) => {} or const fn = function() {}
     const declarator = decl.namedChildren.find((c) => c.type === 'variable_declarator')
     if (!declarator) return null
+    // If the variable itself is typed (`const fn: SomeFunctionType = ...`),
+    // TypeScript infers each parameter's type from the contextual function
+    // type, so per-parameter annotations are redundant.
+    if (declarator.childForFieldName('type')) return null
     const value = declarator.childForFieldName('value')
     if (value && (value.type === 'arrow_function' || value.type === 'function_expression' || value.type === 'function')) {
       fnNode = value
