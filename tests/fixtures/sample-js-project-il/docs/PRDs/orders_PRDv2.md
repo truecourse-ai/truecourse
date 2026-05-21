@@ -103,7 +103,8 @@ Any other transition is illegal.
 
 ### POST /api/orders
 
-Create a new order.
+Create a new order. **Idempotent under `Idempotency-Key`** — a repeat request
+with the same key returns the original response.
 
 - **Request body**: `{ totalCents: integer, customerId: UUID }`.
 - **Validation**: `totalCents ≥ 0`; `customerId` references an existing

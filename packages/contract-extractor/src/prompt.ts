@@ -672,6 +672,53 @@ Always produce a COMPLETE \`authorization-rule\` with \`applies-to\`, \`predicat
 and \`on-violation\` when the slice describes one — even if the operation list spans
 multiple sub-sections of the same slice.
 
+**applies-to MUST enumerate operations, never just a tag.** When the spec lists
+the affected routes, emit:
+
+  applies-to {
+    operations [
+      Operation:"GET /api/orders/{id}",
+      Operation:"POST /api/orders/{id}/pay",
+      Operation:"POST /api/orders/{id}/ship",
+      Operation:"POST /api/orders/{id}/cancel",
+    ]
+  }
+
+NOT \`applies-to { tag orders }\` — the comparator binds drifts to specific
+operations, so it needs the enumerated list. Tag selectors don't fire the
+ownership check.
+
+# Authentication / authorization responses use \`inherits\`, not free-standing
+
+When an operation's 401 / 403 response is caused by a cross-cutting auth or
+authorization obligation (e.g., the bearer-auth requirement on \`/api/**\`, the
+admin-role requirement on a specific operation, the order-ownership rule), the
+operation contract MUST reference that rule via \`inherits\`, not declare the
+response as a literal:
+
+  // ✅ correct — defers the comparator to the authz rule's own check
+  response 401 inherits AuthRequirement:auth.bearer.api
+  response 403 inherits AuthorizationRule:order.owner-only
+
+  // ❌ wrong — the verifier looks for a literal res.status(403) at the
+  //   declaration site and false-positives when the actual enforcement
+  //   lives in middleware or a helper
+  response 403 on forbidden {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code forbidden
+    }
+  }
+
+**Rules:**
+
+- Any 401 on a route under an \`auth-requirement\` selector → \`inherits AuthRequirement:<id>\`.
+- Any 403 caused by an \`authorization-rule\` whose \`applies-to\` includes this
+  operation → \`inherits AuthorizationRule:<id>\`.
+- Any 403 caused by a role-based \`auth-requirement\` (admin only, etc.) →
+  \`inherits AuthRequirement:auth.role.<role>\`.
+- Only declare a literal \`response 401/403 on …\` when the spec describes the
+  response as standalone, NOT delegated to a rule.
+
 # Naming conventions for artifact identities
 
 Use these canonical identity formats:

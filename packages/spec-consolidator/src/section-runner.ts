@@ -167,6 +167,22 @@ Rules:
   4. Group naturally. Endpoints can have a heading per route ("### POST /orders"); data shapes can have a heading per entity. Use whatever structure fits the content.
   5. **Sibling-section policy — bypass / exception subsections stay nested.** When a claim describes a rule with an "Admin bypass", "Exception", or "Override" — e.g., an ownership rule that admins may bypass — render the bypass as a SUBSECTION (H3) of the parent rule, NOT as a separate sibling section. Example: "## Order ownership" with "### Admin bypass" nested inside it. Never split them into two H2 siblings.
   6. **Cross-cutting policy — keep the trigger and the consequence together.** If a claim states "all mutating endpoints accept Idempotency-Key", repeat the idempotency clause on each affected operation's section, not only in a separate Idempotency H2. The extractor downstream reads each operation in isolation.
+
+  6b. **Preserve enumerated operation lists.** When a rule, policy, or
+  authorization claim lists the specific routes / operations it applies
+  to ("This rule applies to: GET /api/orders/:id, POST /api/orders/:id/pay,
+  …"), render that list explicitly in prose as a bullet list of paths or
+  operations. Do NOT collapse it to "applies to the orders tag" or "all
+  /api/orders/* routes" — the extractor needs the explicit list to bind
+  the rule to specific operation artifacts. Collapsing the list loses
+  the binding.
+
+  6c. **Preserve negative obligations ("never X", "must not Y").** When
+  a claim states a response forbids a behavior — "missing orders never
+  return a silent no-op", "404 must be returned for missing resources,
+  not 200 with null body", "events must not emit on failure" — render
+  that prose verbatim. These negative obligations look small but are
+  what the extractor maps to structured \`forbids\` / \`forbid\` clauses.
   7. Status. When a claim has status: "planned" | "deferred" | "out-of-scope" | "deprecated", note that next to the claim's heading (e.g. "### POST /orders/refund — *planned*"). Don't note "shipped" — it's the default.
   8. Provenance. Don't include file paths, line numbers, or "(from docs/PRDs/v2.md)" — the canonical spec stands on its own.
   9. Output. Return ONLY the markdown body. No preamble, no fences around the whole thing, no commentary.`;
