@@ -304,6 +304,8 @@ function CandidateSidebar({
             : null
           : `:${cand.claim.provenance.line}`;
         const docKind = cand.claim.metadata.docKind;
+        const claimStatus = cand.claim.metadata.status;
+        const claimKind = cand.claim.kind;
         return (
           <button
             key={cand.index}
@@ -330,13 +332,35 @@ function CandidateSidebar({
                 {dir}/
               </div>
             )}
-            <div className="flex w-full items-center gap-1 text-[10px]">
+            <div className="flex w-full flex-wrap items-center gap-1 text-[10px]">
               <span className="rounded bg-muted px-1 py-0.5 uppercase tracking-wider text-muted-foreground">
                 {role}
               </span>
               {docKind && docKind !== 'unknown' && (
                 <span className="rounded bg-muted px-1 py-0.5 uppercase tracking-wider text-muted-foreground">
                   {docKind}
+                </span>
+              )}
+              {claimStatus && claimStatus !== 'shipped' && (
+                <span
+                  className={`rounded px-1 py-0.5 uppercase tracking-wider ${
+                    claimStatus === 'deferred' ||
+                    claimStatus === 'out-of-scope' ||
+                    claimStatus === 'deprecated'
+                      ? 'bg-amber-500/15 text-amber-300'
+                      : 'bg-muted text-muted-foreground'
+                  }`}
+                  title={`Lifecycle status: ${claimStatus}`}
+                >
+                  {claimStatus}
+                </span>
+              )}
+              {claimKind === 'constraint' && (
+                <span
+                  className="rounded bg-sky-500/15 px-1 py-0.5 uppercase tracking-wider text-sky-300"
+                  title="This claim narrows the subject (e.g. adding 403 responses to existing endpoints) rather than defining it from scratch."
+                >
+                  constraint
                 </span>
               )}
               {stat && <span className="ml-auto text-muted-foreground">{stat}</span>}
@@ -366,7 +390,7 @@ function CandidateDetail({
   if (isVersionChain) {
     return <VersionChainCandidate candidate={candidate} conflict={conflict} isDefault={isDefault} />;
   }
-  return <ContentCandidate candidate={candidate} isDefault={isDefault} />;
+  return <ContentCandidate candidate={candidate} conflict={conflict} isDefault={isDefault} />;
 }
 
 function VersionChainCandidate({
@@ -446,11 +470,25 @@ function VersionChainCandidate({
 
 function ContentCandidate({
   candidate,
+  conflict,
   isDefault,
 }: {
   candidate: SpecConflict['candidates'][number];
+  conflict: SpecConflict;
   isDefault: boolean;
 }) {
+  // Differences against the other candidates — actionable summary the
+  // user can read in seconds without diffing two raw JSON blobs by eye.
+  const others = conflict.candidates.filter((c) => c.index !== candidate.index);
+  const diffs = others.flatMap((other) =>
+    diffPaths(candidate.claim.content, other.claim.content).map((path) => ({
+      path,
+      otherIndex: other.index,
+      otherFile: other.claim.provenance.file,
+      thisValue: getPath(candidate.claim.content, path),
+      otherValue: getPath(other.claim.content, path),
+    })),
+  );
   return (
     <div className="mx-auto max-w-4xl">
       <CandidateHeading
@@ -459,7 +497,35 @@ function ContentCandidate({
         docKind={candidate.claim.metadata.docKind}
         isDefault={isDefault}
       />
+      {isDefault && (
+        <div className="mt-2 rounded border border-primary/30 bg-primary/5 px-3 py-1.5 text-[11px] text-muted-foreground">
+          <span className="font-medium text-primary">Recommended by engine.</span>{' '}
+          {recommendationReason(candidate, conflict)}
+        </div>
+      )}
       <DocPreview source={candidate.claim.provenance.quote} />
+      {diffs.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            Differs from other candidates · {diffs.length}
+          </div>
+          <ul className="rounded border border-border bg-muted/10 px-3 py-2 text-[11px]">
+            {diffs.slice(0, 12).map((d, i) => (
+              <li key={i} className="border-b border-border/40 py-1 last:border-0">
+                <span className="font-mono text-foreground">{d.path}</span>
+                <span className="ml-2 text-muted-foreground">
+                  here: <span className="font-mono text-foreground">{stringifyShort(d.thisValue)}</span>
+                  {' '}· vs <span className="font-mono">{d.otherFile.split('/').pop()}</span>:{' '}
+                  <span className="font-mono text-foreground">{stringifyShort(d.otherValue)}</span>
+                </span>
+              </li>
+            ))}
+            {diffs.length > 12 && (
+              <li className="py-1 text-muted-foreground">… and {diffs.length - 12} more</li>
+            )}
+          </ul>
+        </div>
+      )}
       {candidate.claim.content !== undefined && (
         <div className="mt-3">
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -472,6 +538,98 @@ function ContentCandidate({
       )}
     </div>
   );
+}
+
+/**
+ * Why the engine picked this candidate by default. Mirrors the
+ * priority order in buildConflict's default-pick rule: docKind authority
+ * > lastTouched > content richness.
+ */
+function recommendationReason(
+  candidate: SpecConflict['candidates'][number],
+  conflict: SpecConflict,
+): string {
+  const reasons: string[] = [];
+  const docKind = candidate.claim.metadata.docKind;
+  const others = conflict.candidates.filter((c) => c.index !== candidate.index);
+  const otherKinds = new Set(others.map((c) => c.claim.metadata.docKind));
+  // Higher authority than all others → "more authoritative doc kind"
+  if (docKind && docKind !== 'unknown') {
+    const beats = [...otherKinds].filter((k) => kindRank(docKind) > kindRank(k));
+    if (beats.length > 0) {
+      reasons.push(`higher-authority doc kind (${docKind} beats ${beats.join(', ')})`);
+    }
+  }
+  // Newest by lastTouched
+  const allTouched = conflict.candidates.map((c) => c.claim.metadata.lastTouched);
+  const newest = allTouched.reduce((a, b) => (a > b ? a : b));
+  if (candidate.claim.metadata.lastTouched === newest) {
+    reasons.push('newest source');
+  }
+  // Richest content
+  const myRichness = contentRichness(candidate.claim.content);
+  const maxRichness = Math.max(...conflict.candidates.map((c) => contentRichness(c.claim.content)));
+  if (myRichness === maxRichness && myRichness > 0) {
+    reasons.push('most structurally complete');
+  }
+  return reasons.length > 0 ? reasons.join(' · ') : 'no other candidate ranks higher';
+}
+
+function kindRank(kind: string): number {
+  if (kind === 'adr' || kind === 'rfc') return 4;
+  if (kind === 'prd' || kind === 'spec') return 3;
+  if (kind === 'design-note' || kind === 'runbook') return 2;
+  if (kind === 'readme') return 1;
+  return 0;
+}
+
+function contentRichness(value: unknown): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value !== 'object') return 1;
+  if (Array.isArray(value)) {
+    return (value as unknown[]).reduce<number>((acc, v) => acc + contentRichness(v), 0);
+  }
+  let total = 0;
+  for (const v of Object.values(value as Record<string, unknown>)) total += contentRichness(v);
+  return total;
+}
+
+/**
+ * Return all leaf paths (dot-joined) where `a` and `b` disagree.
+ * Treats missing keys as a difference (this side has it, other doesn't).
+ */
+function diffPaths(a: unknown, b: unknown, prefix = ''): string[] {
+  const out: string[] = [];
+  const aIsObj = a !== null && typeof a === 'object' && !Array.isArray(a);
+  const bIsObj = b !== null && typeof b === 'object' && !Array.isArray(b);
+  if (aIsObj && bIsObj) {
+    const keys = new Set([...Object.keys(a as object), ...Object.keys(b as object)]);
+    for (const k of keys) {
+      const childPath = prefix ? `${prefix}.${k}` : k;
+      out.push(...diffPaths((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], childPath));
+    }
+    return out;
+  }
+  if (JSON.stringify(a) !== JSON.stringify(b)) {
+    out.push(prefix || '(root)');
+  }
+  return out;
+}
+
+function getPath(value: unknown, path: string): unknown {
+  if (path === '(root)' || !path) return value;
+  let cur: unknown = value;
+  for (const part of path.split('.')) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur;
+}
+
+function stringifyShort(value: unknown): string {
+  if (value === undefined) return '∅';
+  const s = JSON.stringify(value);
+  return s.length > 60 ? s.slice(0, 60) + '…' : s;
 }
 
 function CandidateHeading({

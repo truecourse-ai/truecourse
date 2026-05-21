@@ -654,6 +654,8 @@ export type SpecClaim = {
   topic: string;
   subject: string;
   content: unknown;
+  /** 'definition' = the section's primary subject; 'constraint' = narrowing rule. */
+  kind?: 'definition' | 'constraint';
   provenance: { file: string; line: number; quote: string };
   metadata: { docKind: string; status?: string; lastTouched: string };
 };
