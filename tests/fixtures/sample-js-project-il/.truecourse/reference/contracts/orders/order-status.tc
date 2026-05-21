@@ -1,0 +1,4 @@
+enum OrderStatus {
+  origin ".truecourse/reference/specs/modules/orders/data.md" "OrderStatus" 17..17
+  values [placed, paid, shipped, delivered, cancelled]
+}

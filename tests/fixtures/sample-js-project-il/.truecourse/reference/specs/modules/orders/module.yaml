@@ -1,0 +1,16 @@
+name: orders
+status: shipped
+description: Order creation, listing, fetching, and state-transition operations under /api/orders.
+sourceDocs:
+  - docs/PRDs/orders_PRDv2.md
+  - docs/adr/0001-auth-bearer.md
+scope:
+  paths:
+    - /api/orders/**
+outOfScope:
+  - id: POST /api/orders/:id/replace
+    reason: excluded from V2; requires follow-up PRD
+    source: docs/PRDs/orders_PRDv2.md
+  - id: POST /api/orders/:id/refund
+    reason: excluded from V2; requires follow-up PRD
+    source: docs/PRDs/orders_PRDv2.md

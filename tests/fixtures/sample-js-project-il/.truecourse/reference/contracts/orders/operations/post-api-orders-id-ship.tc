@@ -1,0 +1,24 @@
+operation POST "/api/orders/{id}/ship" {
+  origin ".truecourse/reference/specs/modules/orders/endpoints.md" "POST /api/orders/:id/ship" 54..60
+  request {
+    path-param id: uuid
+  }
+  preconditions {
+    state-transition StateMachine:Order.status {
+      from [paid]
+      to shipped
+    }
+  }
+  response 200 on success {
+    body Entity:Order
+    effect emits Effect:order.shipped
+  }
+  response 409 on illegal_transition {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code illegal_transition
+    }
+  }
+  response 401 inherits AuthRequirement:auth.bearer.api
+  response 403 inherits AuthorizationRule:order.owner-only
+  tags [transition]
+}

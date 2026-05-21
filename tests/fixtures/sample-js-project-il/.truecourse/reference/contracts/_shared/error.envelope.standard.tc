@@ -1,0 +1,20 @@
+error-envelope error.envelope.standard {
+  origin ".truecourse/reference/specs/shared/errors.md" "Error envelope" 3..19
+  applies-to status-class [4xx, 5xx]
+  shape {
+    error {
+      field code: string format machine-identifier required
+      field message: string required
+      field details: object optional
+    }
+  }
+  known-codes [
+    validation_failed,
+    unauthenticated,
+    forbidden,
+    order_not_found,
+    customer_not_found,
+    illegal_transition,
+    email_taken,
+  ]
+}
