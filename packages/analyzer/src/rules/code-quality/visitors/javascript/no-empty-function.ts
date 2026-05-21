@@ -17,8 +17,13 @@ export const jsNoEmptyFunctionVisitor: CodeRuleVisitor = {
       if (child && child.type === 'comment') return null
     }
 
-    // Skip empty functions inside .catch() — intentional no-op error suppression
-    const parent = node.parent
+    // Skip empty functions used as intentional no-ops:
+    //  - inside .catch() — error suppression
+    //  - JSX attribute value — `onClick={() => {}}` placeholder for a required prop
+    //  - return value of another function — `return () => {}` no-op unsubscribe etc.
+    //  - default in `||` / `??` fallback — `cb || (() => {})` ensures a callable
+    let parent = node.parent
+    while (parent?.type === 'parenthesized_expression') parent = parent.parent
     if (parent?.type === 'arguments') {
       const grandparent = parent.parent
       if (grandparent?.type === 'call_expression') {
@@ -28,6 +33,12 @@ export const jsNoEmptyFunctionVisitor: CodeRuleVisitor = {
           if (gpProp?.text === 'catch') return null
         }
       }
+    }
+    if (parent?.type === 'jsx_expression' || parent?.type === 'jsx_attribute') return null
+    if (parent?.type === 'return_statement') return null
+    if (parent?.type === 'binary_expression') {
+      const op = parent.childForFieldName('operator')
+      if (op?.text === '||' || op?.text === '??') return null
     }
 
     const nameNode = node.childForFieldName('name')

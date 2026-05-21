@@ -15,6 +15,13 @@ export const requireImportVisitor: CodeRuleVisitor = {
     const argList = args.namedChildren
     if (argList.length === 0) return null
 
+    // Skip build/runtime config files — they commonly need CJS interop with
+    // `.cjs` configs even when their own extension is `.ts` (tailwind.config.ts,
+    // vite.config.ts, jest.config.ts, etc.).
+    const lowerPath = filePath.toLowerCase()
+    if (/\.config\.[cm]?[jt]s$/.test(lowerPath)) return null
+    if (lowerPath.endsWith('.cjs')) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'low',
       'require() in TypeScript',

@@ -20,9 +20,15 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
       if (nameNode?.text === 'constructor') return null
     }
 
-    // Skip empty arrow functions inside .catch() — intentional no-op error suppression
+    // Skip empty arrow functions used as intentional no-ops:
+    //  - inside .catch() — error suppression
+    //  - JSX attribute value — `onClick={() => {}}` placeholder for a required prop
+    //  - return value of another function — `return () => {}` no-op unsubscribe etc.
+    //  - default in `||` / `??` fallback — `cb || (() => {})` ensures a callable
     if (node.type === 'arrow_function') {
-      const parent = node.parent
+      let parent = node.parent
+      // Look through parentheses, e.g. `(() => {})` in `x || (() => {})`
+      while (parent?.type === 'parenthesized_expression') parent = parent.parent
       if (parent?.type === 'arguments') {
         const grandparent = parent.parent
         if (grandparent?.type === 'call_expression') {
@@ -32,6 +38,12 @@ export const jsEmptyFunctionVisitor: CodeRuleVisitor = {
             if (gpProp?.text === 'catch') return null
           }
         }
+      }
+      if (parent?.type === 'jsx_expression' || parent?.type === 'jsx_attribute') return null
+      if (parent?.type === 'return_statement') return null
+      if (parent?.type === 'binary_expression') {
+        const op = parent.childForFieldName('operator')
+        if (op?.text === '||' || op?.text === '??') return null
       }
     }
 

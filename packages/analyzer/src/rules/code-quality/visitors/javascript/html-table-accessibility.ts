@@ -47,6 +47,29 @@ function hasNonEmptyChildren(node: SyntaxNode): boolean {
   return false
 }
 
+/**
+ * Returns true if the JSX element (or self-closing element) carries a JSX
+ * spread attribute like `{...props}`. Such elements are typically generic
+ * primitive wrappers that forward content (including children) from the
+ * consumer — accessibility is the consumer's responsibility, not the
+ * primitive's.
+ */
+function hasJsxSpreadAttribute(node: SyntaxNode): boolean {
+  const attrParent =
+    node.type === 'jsx_self_closing_element'
+      ? node
+      : (node.childForFieldName('open_tag') ?? node.children[0])
+  if (!attrParent) return false
+  for (const child of attrParent.namedChildren) {
+    if (child.type === 'jsx_expression') {
+      for (const inner of child.namedChildren) {
+        if (inner.type === 'spread_element') return true
+      }
+    }
+  }
+  return false
+}
+
 export const htmlTableAccessibilityVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/html-table-accessibility',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -60,6 +83,10 @@ export const htmlTableAccessibilityVisitor: CodeRuleVisitor = {
 
     // S5256: <table> should have <th> or <thead>
     if (tagName === 'table') {
+      // Skip generic reusable table wrapper components that forward content
+      // via `{...props}` — accessibility is the consumer's responsibility.
+      if (hasJsxSpreadAttribute(node)) return null
+
       // Skip generic reusable table wrapper components that receive {children}
       // and pass content through — accessibility is the consumer's responsibility
       let ancestor: SyntaxNode | null = node.parent
