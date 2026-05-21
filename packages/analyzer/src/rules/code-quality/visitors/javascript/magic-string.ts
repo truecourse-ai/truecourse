@@ -29,6 +29,10 @@ export const magicStringVisitor: CodeRuleVisitor = {
           if (n.parent?.type === 'jsx_expression' && n.parent.parent?.type === 'jsx_attribute') return
           const text = n.text
           const inner = text.slice(1, -1) // strip quotes
+          // Single-identifier tokens (e.g. 'json', 'number', 'error') are typically
+          // framework API tokens, typeof return values, or status/kind discriminants —
+          // not magic strings worth extracting to a constant.
+          if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(inner)) return
           // Only flag non-trivial strings
           if (inner.length >= MIN_LENGTH && /^[a-zA-Z]/.test(inner) && !inner.includes('${')) {
             const existing = counts.get(text) ?? []

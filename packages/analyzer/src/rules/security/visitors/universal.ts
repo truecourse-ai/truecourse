@@ -184,6 +184,16 @@ export const clearTextProtocolVisitor: CodeRuleVisitor = {
         if (/w3\.org|schema\.org|xmlns|openxmlformats|xmlsoap|purl\.org/.test(lower)) {
           return null
         }
+        // Exclude template strings whose host is interpolated right after the
+        // protocol (e.g. `http://${addr}`, `http://[${addr}]`). These are URL
+        // templates built for parsing — `new URL(...)`, isPrivateUrl(...) /
+        // SSRF validators — not hardcoded plaintext connection targets.
+        if (node.type === 'template_string') {
+          const afterProtocol = stripped.slice(protocol.length)
+          if (afterProtocol.startsWith('${') || afterProtocol.startsWith('[${')) {
+            return null
+          }
+        }
         // Exclude string comparisons/checks — the protocol URL is being inspected, not used
         // as a connection target. E.g., input.startsWith('http://'), url.includes('http://').
         const parent = node.parent

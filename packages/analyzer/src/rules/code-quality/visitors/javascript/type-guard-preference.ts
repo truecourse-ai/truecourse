@@ -67,7 +67,14 @@ function hasBooleanReturn(bodyNode: SyntaxNode): boolean {
   function walk(n: SyntaxNode) {
     if (found) return
     if (n.type === 'return_statement') {
-      const val = n.namedChildren[0]
+      let val: SyntaxNode | undefined = n.namedChildren[0]
+      // Unwrap parenthesized expressions so `return (typeof x === 'string')`
+      // is treated the same as `return typeof x === 'string'`. Without
+      // unwrapping, React components that `return (<jsx />)` look like
+      // boolean returns and trip the rule.
+      while (val && val.type === 'parenthesized_expression') {
+        val = val.namedChildren[0]
+      }
       if (!val) return
       if (val.type === 'true' || val.type === 'false') { found = true; return }
       // return x instanceof Foo or return typeof x === 'string'
@@ -76,7 +83,6 @@ function hasBooleanReturn(bodyNode: SyntaxNode): boolean {
         const hasBoolOp = val.children.some((c) => c.text === '===' || c.text === '!==')
         if (hasInstanceof || hasBoolOp) { found = true; return }
       }
-      if (val.type === 'parenthesized_expression') { found = true; return }
     }
     for (let i = 0; i < n.childCount; i++) {
       const child = n.child(i)
