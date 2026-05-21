@@ -31,6 +31,20 @@ export const unnecessaryTypeConversionVisitor: CodeRuleVisitor = {
     const expectedType = conversionMap[fn.text]
     if (!expectedType) return null
 
+    // Skip logical-operator chains (`a || b`, `a && b`, `a ?? b`). The TS
+    // checker often narrows these to the target type when one operand already
+    // has that type, but the wrapper is a deliberate coercion idiom — the
+    // developer wants exactly `true | false` from a truthy chain, not the
+    // possibly-widened union of the operands. Flagging these is a false
+    // positive.
+    if (arg.type === 'binary_expression') {
+      for (const child of arg.children) {
+        if (child.type === '||' || child.type === '&&' || child.type === '??') {
+          return null
+        }
+      }
+    }
+
     const argType = typeQuery.getTypeAtPosition(
       filePath,
       arg.startPosition.row,

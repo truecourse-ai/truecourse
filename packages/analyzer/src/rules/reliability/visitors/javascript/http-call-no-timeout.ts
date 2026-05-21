@@ -22,8 +22,11 @@ export const httpCallNoTimeoutVisitor: CodeRuleVisitor = {
 
     const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'request', 'head'])
 
-    // fetch() call
-    if (funcName === 'fetch') {
+    // fetch() call. Only the bare global `fetch(...)` is the timeout-less
+    // browser/node API — `obj.fetch(...)` (e.g. Playwright's `request.fetch`
+    // from `page.context()`, or wrapper-client APIs) is a library method with
+    // its own timeout semantics. Treat those as out of scope.
+    if (funcName === 'fetch' && fn.type === 'identifier') {
       // Skip client-side React components fetching own API — browser fetch has default timeouts
       if (/\.tsx$/.test(filePath) && /\/components\//.test(filePath)) return null
       const args = node.childForFieldName('arguments')
@@ -37,6 +40,10 @@ export const httpCallNoTimeoutVisitor: CodeRuleVisitor = {
           const urlText = urlArg.text
           // Relative URLs start with '/' or backtick template starting with /
           if (urlText.startsWith("'/") || urlText.startsWith('"/') || urlText.startsWith('`/')) return null
+          // Skip bundled-asset URLs resolved at build time from
+          // `import.meta.url` — these are `file://`-style references to assets
+          // packaged with the app, not external HTTP endpoints.
+          if (urlText.includes('import.meta.url')) return null
         }
       }
       return makeViolation(
