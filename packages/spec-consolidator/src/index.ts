@@ -109,6 +109,20 @@ export { detectVersionChains, materializeManualChains } from './version-chain.js
 export type { VersionChain } from './version-chain.js';
 
 export {
+  existingChainPairKeys,
+  runChainRecheck,
+  selectRecheckPairs,
+  CHAIN_RECHECK_SYSTEM_PROMPT,
+} from './chain-recheck.js';
+export type {
+  ChainRecheckCandidatePair,
+  ChainRecheckOptions,
+  ChainRecheckResult,
+  ChainRecheckRunner,
+  ChainRecheckRunnerInput,
+} from './chain-recheck.js';
+
+export {
   detectVersionChainsViaLlm,
   CHAIN_DETECTION_SYSTEM_PROMPT,
   buildChainDetectionUserPrompt,

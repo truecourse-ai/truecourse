@@ -49,6 +49,12 @@ import {
 } from './types.js';
 import { detectVersionChains, materializeManualChains, type VersionChain } from './version-chain.js';
 import {
+  existingChainPairKeys,
+  runChainRecheck,
+  selectRecheckPairs,
+  type ChainRecheckRunner,
+} from './chain-recheck.js';
+import {
   detectVersionChainsViaLlm,
   type ChainRunner,
 } from './version-chain-llm.js';
@@ -75,6 +81,17 @@ export interface ConsolidateOptions {
    * detector still runs. Useful for tests and offline runs.
    */
   disableLlmChainDetection?: boolean;
+  /**
+   * Override the conflict-triggered chain re-check runner. Tests pass
+   * a stub. When omitted, an LLM-backed runner is spawned automatically.
+   */
+  chainRecheckRunner?: ChainRecheckRunner;
+  /**
+   * When true, skip the conflict-triggered chain re-check. Disables
+   * the second-pass LLM call that scans cross-doc PRD conflicts. The
+   * deterministic + upfront-LLM chain detectors still run.
+   */
+  disableChainRecheck?: boolean;
   /**
    * Skip the git-log mtime resolution. Useful for tests; the harness
    * also passes this when the working dir isn't a git repo.
@@ -176,15 +193,51 @@ export async function consolidate(
   // endpoints, data, effects)" instead of just a 5-line snippet.
   const enrichedChainConflicts = enrichChainConflictsWithStats(chainConflicts, extract.claims);
 
-  // ---- Merge -----------------------------------------------------------
+  // ---- Merge (first pass) ----------------------------------------------
   opts.onMergeStart?.();
-  const merge = mergeClaims(filteredClaims, decisions);
+  let merge = mergeClaims(filteredClaims, decisions);
+
+  // ---- Conflict-triggered chain re-check -------------------------------
+  // For every open content conflict on a cross-cutting subject (auth
+  // scheme, error envelope, pagination, etc.) where two+ PRDs disagree,
+  // call the LLM with both docs' FULL content and ask whether one is a
+  // superseded version of the other. Newly-confirmed chains feed back
+  // into the chain set and trigger a second merge pass with the older
+  // docs' claims filtered out.
+  const existingPairs = existingChainPairKeys(chains);
+  const recheckPairs = selectRecheckPairs(merge.openConflicts, docs, existingPairs);
+  const recheckChains = await runChainRecheck(repoRoot, recheckPairs, {
+    runner: opts.chainRecheckRunner,
+    enabled: opts.disableChainRecheck !== true,
+  });
+  let chainsForStitch = chains;
+  let mergedChainConflicts = enrichedChainConflicts;
+  if (recheckChains.length > 0) {
+    chainsForStitch = mergeChainResults(deterministicChains, llmChains, [
+      ...manualChains,
+      ...recheckChains,
+    ]);
+    const reFilteredClaims = filterByChainWinners(
+      extract.claims,
+      chainsForStitch,
+      resolveChainWinners(
+        chainsForStitch.map(synthesizeChainConflict),
+        chainsForStitch,
+        decisions,
+      ),
+    );
+    merge = mergeClaims(reFilteredClaims, decisions);
+    mergedChainConflicts = enrichChainConflictsWithStats(
+      chainsForStitch.map(synthesizeChainConflict),
+      extract.claims,
+    );
+  }
 
   // ---- Stitch chain conflicts into the merge result --------------------
   // Chains without a decision surface in openConflicts; chains with one
   // surface in decidedConflicts. Either way the dashboard sees them
   // through the same shape as content conflicts.
-  const stitchedMerge = stitchChainConflicts(merge, enrichedChainConflicts, chains, decisions);
+  const stitchedMerge = stitchChainConflicts(merge, mergedChainConflicts, chainsForStitch, decisions);
 
   if (!opts.materialize) {
     return { extract, merge: stitchedMerge, decisions };
