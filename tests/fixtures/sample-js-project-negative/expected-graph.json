@@ -559,6 +559,12 @@
       "layer": "service"
     },
     {
+      "name": "clear-text-protocol-hardcoded-host",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "code-quality-advanced",
       "service": "utils",
       "kind": "standalone",
@@ -643,6 +649,12 @@
       "layer": "service"
     },
     {
+      "name": "duplicate-string-error-message",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "EarlyThis",
       "service": "utils",
       "kind": "class",
@@ -685,6 +697,12 @@
       "layer": "service"
     },
     {
+      "name": "jwt-no-expiry-options-without-expiresin",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "legacy",
       "service": "utils",
       "kind": "standalone",
@@ -712,6 +730,12 @@
       "name": "MissingSuperCall",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "namespace-usage-internal-module",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -800,6 +824,12 @@
     },
     {
       "name": "style",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "type-guard-preference-typeof",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"

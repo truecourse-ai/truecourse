@@ -13,6 +13,11 @@ export const duplicateStringVisitor: CodeRuleVisitor = {
       if (n.type === 'string') {
         const content = n.text
         if (content.length <= 5) return
+        // Single-identifier tokens (e.g. 'json', 'number', 'error') are typically
+        // framework API tokens, typeof return values, or status/kind discriminants —
+        // not domain strings worth extracting to a constant.
+        const inner = content.slice(1, -1)
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(inner)) return
         const parent = n.parent
         // Skip TypeScript type keywords (e.g., `string` inside `predefined_type`)
         if (parent?.type === 'predefined_type') return

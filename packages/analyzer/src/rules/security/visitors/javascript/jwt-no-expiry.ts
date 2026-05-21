@@ -10,14 +10,23 @@ export const jwtNoExpiryVisitor: CodeRuleVisitor = {
     if (!fn) return null
 
     let methodName = ''
+    let receiverIsJwt = false
     if (fn.type === 'member_expression') {
       const prop = fn.childForFieldName('property')
       if (prop) methodName = prop.text
-    } else if (fn.type === 'identifier') {
-      methodName = fn.text
+      const obj = fn.childForFieldName('object')
+      // Only treat `jwt.sign`, `jsonwebtoken.sign`, `JWT.sign` as JWT calls.
+      // Other `.sign(...)` calls — pdf.sign, libsodium.sign, SignJWT fluent
+      // chains (jose) — are not jsonwebtoken-style and have their own expiry
+      // controls (or none, by design).
+      if (obj?.type === 'identifier' && /^(jwt|jsonwebtoken|JWT)$/.test(obj.text)) {
+        receiverIsJwt = true
+      }
     }
+    // Bare `sign(...)` (no receiver) is too ambiguous — usually an internal
+    // HMAC/crypto helper, not jwt.sign. Don't flag.
 
-    if (methodName !== 'sign') return null
+    if (methodName !== 'sign' || !receiverIsJwt) return null
 
     const args = node.childForFieldName('arguments')
     if (!args) return null
