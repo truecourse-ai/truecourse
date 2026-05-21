@@ -877,6 +877,26 @@ export function postSpecDecision(
   });
 }
 
+export function postSpecManualChain(
+  repoId: string,
+  payload: { older: string; newer: string; note?: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSpecManualChain(
+  repoId: string,
+  payload: { older: string; newer: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/chains/manual`, {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function postSpecDecisionsBatch(
   repoId: string,
   mode: 'all-defaults',

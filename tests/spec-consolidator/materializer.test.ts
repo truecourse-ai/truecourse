@@ -62,7 +62,7 @@ function stubRunner(): SectionRunner {
     }));
 }
 
-const emptyDecisions: DecisionsFile = { version: 1, decisions: [] };
+const emptyDecisions: DecisionsFile = { version: 1, decisions: [], manualChains: [] };
 
 describe('materializeSpec — directory layout', () => {
   it('writes modules/<name>/module.yaml + endpoints.md per detected module', async () => {

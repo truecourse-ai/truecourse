@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { detectVersionChains, type DocCandidate } from '../../packages/spec-consolidator/src/index.js';
+import {
+  detectVersionChains,
+  materializeManualChains,
+  type DocCandidate,
+} from '../../packages/spec-consolidator/src/index.js';
 
 /**
  * Detection signal coverage:
@@ -88,5 +92,55 @@ describe('detectVersionChains — multiple chains', () => {
     const subjects = chains.map((c) => c.docs.map((d) => d.path).join(' → ')).sort();
     expect(subjects[0]).toContain('api_PRDv1');
     expect(subjects[1]).toContain('auth_PRDv1');
+  });
+});
+
+describe('materializeManualChains — user-marked supersession', () => {
+  it('materializes a chain when both referenced docs are in the corpus', () => {
+    const docs = [
+      doc('docs/PRDs/PRD_DATA_COMPLIANCE_V1.md'),
+      doc('docs/PRDs/backend_PRDv2.md'),
+      doc('docs/auth0/overview.md'),
+    ];
+    const chains = materializeManualChains(
+      [{ older: 'docs/PRDs/PRD_DATA_COMPLIANCE_V1.md', newer: 'docs/PRDs/backend_PRDv2.md' }],
+      docs,
+    );
+    expect(chains).toHaveLength(1);
+    expect(chains[0].detectedFrom).toBe('manual');
+    expect(chains[0].docs.map((d) => d.path)).toEqual([
+      'docs/PRDs/PRD_DATA_COMPLIANCE_V1.md',
+      'docs/PRDs/backend_PRDv2.md',
+    ]);
+  });
+
+  it('drops chains referencing docs that no longer exist (silent)', () => {
+    const docs = [doc('docs/PRDs/v2.md')];
+    const chains = materializeManualChains(
+      [{ older: 'docs/PRDs/removed.md', newer: 'docs/PRDs/v2.md' }],
+      docs,
+    );
+    expect(chains).toEqual([]);
+  });
+
+  it('allows cross-directory chains (unlike the filename heuristic)', () => {
+    const docs = [
+      doc('docs/a/foo.md'),
+      doc('docs/b/bar.md'),
+    ];
+    const chains = materializeManualChains(
+      [{ older: 'docs/a/foo.md', newer: 'docs/b/bar.md' }],
+      docs,
+    );
+    expect(chains).toHaveLength(1);
+  });
+
+  it('rejects self-referential chains (older === newer)', () => {
+    const docs = [doc('docs/x.md')];
+    const chains = materializeManualChains(
+      [{ older: 'docs/x.md', newer: 'docs/x.md' }],
+      docs,
+    );
+    expect(chains).toEqual([]);
   });
 });

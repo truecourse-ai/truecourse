@@ -339,7 +339,7 @@ describe('consolidate — caching', () => {
 
 describe('readDecisions / writeDecisions', () => {
   it('returns empty default when decisions.json is missing', () => {
-    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [] });
+    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [] });
   });
 
   it('round-trips a written decisions file', () => {
@@ -351,6 +351,7 @@ describe('readDecisions / writeDecisions', () => {
         resolvedAt: '2026-05-01T00:00:00Z',
         candidateFingerprint: 'fp',
       }],
+      manualChains: [],
     };
     writeDecisions(repo, decisions);
     expect(readDecisions(repo)).toEqual(decisions);
@@ -360,6 +361,6 @@ describe('readDecisions / writeDecisions', () => {
     const decFile = path.join(repo, '.truecourse/specs/decisions.json');
     fs.mkdirSync(path.dirname(decFile), { recursive: true });
     fs.writeFileSync(decFile, '{ corrupt');
-    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [] });
+    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [] });
   });
 });

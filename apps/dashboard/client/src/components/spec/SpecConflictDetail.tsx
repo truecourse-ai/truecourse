@@ -35,7 +35,7 @@ interface SpecConflictDetailProps {
 }
 
 export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailProps) {
-  const { scan, busyConflictId, resolveConflict, revokeDecision } = useSpec();
+  const { scan, busyConflictId, resolveConflict, revokeDecision, markSuperseded } = useSpec();
   // Look in both lists — the detail view is rendered from the Spec tab
   // (where conflicts come from `openConflicts`) and from the Decisions
   // tab (where they come from `decidedConflicts`).
@@ -146,6 +146,14 @@ export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailPr
                   </Button>
                 </div>
               </div>
+            )}
+            {!isVersionChain && !isDecided && (
+              <SupersedeSection
+                conflict={conflict}
+                selectedIndex={selectedIndex}
+                busy={busy}
+                onMark={markSuperseded}
+              />
             )}
           </div>
         </div>
@@ -533,6 +541,83 @@ function DocPreview({ source }: { source: string }) {
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// "Mark as superseded" section — manual version-chain escape hatch
+// ---------------------------------------------------------------------------
+
+function SupersedeSection({
+  conflict,
+  selectedIndex,
+  busy,
+  onMark,
+}: {
+  conflict: SpecConflict;
+  selectedIndex: number;
+  busy: boolean;
+  onMark: (older: string, newer: string, note?: string) => Promise<void>;
+}) {
+  const [picking, setPicking] = useState(false);
+  const selected = conflict.candidates[selectedIndex];
+  if (!selected) return null;
+
+  // Build unique-by-file list of other candidates as supersede targets.
+  // When two candidates from the SAME file appear in the conflict (long
+  // doc redefines an entity), we don't offer that file as a target —
+  // marking a file as superseded by itself is nonsensical.
+  const selectedFile = selected.claim.provenance.file;
+  const seenFiles = new Set<string>([selectedFile]);
+  const targets: Array<{ file: string; weight: SpecConflict['candidates'][number]['weight'] }> = [];
+  for (const c of conflict.candidates) {
+    const f = c.claim.provenance.file;
+    if (seenFiles.has(f)) continue;
+    seenFiles.add(f);
+    targets.push({ file: f, weight: c.weight });
+  }
+  if (targets.length === 0) return null;
+
+  return (
+    <div className="mt-4 rounded border border-dashed border-border bg-muted/20 px-3 py-2">
+      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        <span>
+          Know that <span className="font-mono text-foreground">{selectedFile}</span> is an older
+          version of one of the other docs in this conflict? Mark it as superseded — claims from
+          this doc will be dropped from the merge corpus, and all conflicts that share this
+          v1/v2 split clear in one action.
+        </span>
+        {!picking && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => setPicking(true)}>
+            Mark as superseded by →
+          </Button>
+        )}
+      </div>
+      {picking && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">Superseded by:</span>
+          {targets.map((t) => (
+            <Button
+              key={t.file}
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={async () => {
+                await onMark(selectedFile, t.file);
+                setPicking(false);
+              }}
+              title={`Mark ${selectedFile} as superseded by ${t.file}`}
+            >
+              <span className="font-mono text-[11px]">{t.file}</span>
+              <span className="ml-1.5 text-[10px] opacity-60">({t.weight})</span>
+            </Button>
+          ))}
+          <Button size="sm" variant="ghost" onClick={() => setPicking(false)} disabled={busy}>
+            Cancel
+          </Button>
+        </div>
       )}
     </div>
   );

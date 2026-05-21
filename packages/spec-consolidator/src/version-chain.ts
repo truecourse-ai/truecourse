@@ -27,7 +27,34 @@ export interface VersionChain {
   /** Docs in oldest → newest order. */
   docs: DocCandidate[];
   /** Which signal surfaced this chain. */
-  detectedFrom: 'filename' | 'llm';
+  detectedFrom: 'filename' | 'llm' | 'manual';
+}
+
+/**
+ * Materialize user-marked chains (from `decisions.json#manualChains`)
+ * into VersionChain objects so they merge with the auto-detected ones.
+ * Drops entries whose referenced docs aren't in the discovered set —
+ * the user may have marked a chain against a doc that no longer
+ * exists; surfacing that as a hard error would be worse UX than
+ * silently dropping.
+ *
+ * Cross-directory chains ARE allowed here (unlike the filename
+ * detector's same-dir rule) — the user explicitly knows their docs.
+ */
+export function materializeManualChains(
+  manualChains: Array<{ older: string; newer: string }>,
+  docs: DocCandidate[],
+): VersionChain[] {
+  const byPath = new Map(docs.map((d) => [d.path, d]));
+  const out: VersionChain[] = [];
+  for (const m of manualChains) {
+    const olderDoc = byPath.get(m.older);
+    const newerDoc = byPath.get(m.newer);
+    if (!olderDoc || !newerDoc) continue;
+    if (olderDoc.path === newerDoc.path) continue;
+    out.push(makeChain([olderDoc, newerDoc], 'manual'));
+  }
+  return out;
 }
 
 export function detectVersionChains(docs: DocCandidate[]): VersionChain[] {

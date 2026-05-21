@@ -253,9 +253,31 @@ export const DecisionSchema = z.object({
 });
 export type Decision = z.infer<typeof DecisionSchema>;
 
+/**
+ * User-marked version chain — the manual escape hatch when neither the
+ * deterministic filename detector nor the LLM detector links two docs
+ * that the user knows are versions of each other.
+ *
+ * Stored alongside conflict decisions in decisions.json so a single
+ * file holds everything that survives a re-scan.
+ */
+export const ManualChainSchema = z.object({
+  /** Repo-relative path of the older / superseded doc. */
+  older: z.string(),
+  /** Repo-relative path of the newer / authoritative doc. */
+  newer: z.string(),
+  /** ISO timestamp when the user marked the chain. */
+  markedAt: z.string(),
+  /** Optional human-readable rationale ("v2 explicitly replaces v1"). */
+  note: z.string().optional(),
+});
+export type ManualChain = z.infer<typeof ManualChainSchema>;
+
 export const DecisionsFileSchema = z.object({
   version: z.literal(1),
   decisions: z.array(DecisionSchema),
+  /** User-marked supersessions (workstream 2 of conflict-resolution plan). */
+  manualChains: z.array(ManualChainSchema).default([]),
 });
 export type DecisionsFile = z.infer<typeof DecisionsFileSchema>;
 

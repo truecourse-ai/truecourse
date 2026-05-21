@@ -47,7 +47,7 @@ import {
   type ConflictCandidate,
   type DecisionsFile,
 } from './types.js';
-import { detectVersionChains, type VersionChain } from './version-chain.js';
+import { detectVersionChains, materializeManualChains, type VersionChain } from './version-chain.js';
 import {
   detectVersionChainsViaLlm,
   type ChainRunner,
@@ -141,9 +141,15 @@ export async function consolidate(
     runner: opts.chainRunner,
     enabled: opts.disableLlmChainDetection !== true,
   });
-  const chains = mergeChainResults(deterministicChains, llmChains);
+  // User-marked supersessions from decisions.json#manualChains are a
+  // third chain source. They merge in alongside auto-detected chains;
+  // when the user manually marked something the auto-detectors also
+  // found, dedupe by id and prefer the more-informative label
+  // (filename > llm > manual).
+  const manualChains = materializeManualChains(decisions.manualChains ?? [], docs);
+  const chains = mergeChainResults(deterministicChains, llmChains, manualChains);
   const chainConflicts = chains.map(synthesizeChainConflict);
-  const winnersByChain = resolveChainWinners(chainConflicts, decisions);
+  const winnersByChain = resolveChainWinners(chainConflicts, chains, decisions);
 
   // ---- Extract (cache-wrapped) -----------------------------------------
   const blockRunner = wrapBlockRunner(
@@ -178,7 +184,7 @@ export async function consolidate(
   // Chains without a decision surface in openConflicts; chains with one
   // surface in decidedConflicts. Either way the dashboard sees them
   // through the same shape as content conflicts.
-  const stitchedMerge = stitchChainConflicts(merge, enrichedChainConflicts, decisions);
+  const stitchedMerge = stitchChainConflicts(merge, enrichedChainConflicts, chains, decisions);
 
   if (!opts.materialize) {
     return { extract, merge: stitchedMerge, decisions };
@@ -269,19 +275,25 @@ function docToSyntheticClaim(doc: DocCandidate, chain: VersionChain): Claim {
 }
 
 /**
- * Merge deterministic and LLM-detected chains. Deduplication is by
- * chain id (which is sha256 of the sorted member paths), so any chain
- * the LLM found that the deterministic detector also found gets
- * dropped from the LLM list — the deterministic `filename` label is
- * more informative than the generic `llm` tag, so we keep it.
+ * Merge chain sources in priority order: deterministic > llm > manual.
+ * Deduplication is by chain id (sha256 of the sorted member paths).
+ * On dedupe we keep the more-informative label — a `manual` chain that
+ * the deterministic detector ALSO found stays labeled `filename`
+ * because the user gains nothing from seeing it as manual.
  */
 function mergeChainResults(
   deterministic: VersionChain[],
   llm: VersionChain[],
+  manual: VersionChain[] = [],
 ): VersionChain[] {
   const seen = new Set(deterministic.map((c) => c.id));
   const out = [...deterministic];
   for (const chain of llm) {
+    if (seen.has(chain.id)) continue;
+    seen.add(chain.id);
+    out.push(chain);
+  }
+  for (const chain of manual) {
     if (seen.has(chain.id)) continue;
     seen.add(chain.id);
     out.push(chain);
@@ -370,11 +382,24 @@ function stripHtmlComments(text: string): string {
  */
 function resolveChainWinners(
   chainConflicts: Conflict[],
+  chains: VersionChain[],
   decisions: DecisionsFile,
 ): Map<string, string | null> {
+  const chainsById = new Map(chains.map((c) => [c.id, c]));
   const out = new Map<string, string | null>();
   for (const conflict of chainConflicts) {
     const decision = decisions.decisions.find((d) => d.conflictId === conflict.id);
+
+    // Manual chains are user-marked supersessions — implicitly
+    // resolved with the newer (last) doc as winner. No need for the
+    // user to also write a `pick` decision; marking IS the decision.
+    const chain = chainsById.get(conflict.id);
+    if (!decision && chain?.detectedFrom === 'manual') {
+      const winnerDoc = chain.docs[chain.docs.length - 1];
+      out.set(conflict.id, winnerDoc.path);
+      continue;
+    }
+
     if (!decision) {
       out.set(conflict.id, null); // pending — surface as openConflict
       continue;
@@ -422,24 +447,44 @@ function filterByChainWinners(
 function stitchChainConflicts(
   merge: MergeResult,
   chainConflicts: Conflict[],
+  chains: VersionChain[],
   decisions: DecisionsFile,
 ): MergeResult {
+  const chainsById = new Map(chains.map((c) => [c.id, c]));
   const pending: Conflict[] = [];
   const decided: DecidedConflict[] = [];
   for (const conflict of chainConflicts) {
     const decision = decisions.decisions.find((d) => d.conflictId === conflict.id);
-    if (!decision) {
-      pending.push(conflict);
+    if (decision) {
+      decided.push({
+        conflict,
+        decision,
+        resolvedClaim:
+          decision.resolution.kind === 'pick'
+            ? conflict.candidates[decision.resolution.candidateIndex]?.claim
+            : undefined,
+      });
       continue;
     }
-    decided.push({
-      conflict,
-      decision,
-      resolvedClaim:
-        decision.resolution.kind === 'pick'
-          ? conflict.candidates[decision.resolution.candidateIndex]?.claim
-          : undefined,
-    });
+    // Manual chains are implicitly decided: the user marked the
+    // supersession, so synthesize a `pick` decision on the newest doc.
+    const chain = chainsById.get(conflict.id);
+    if (chain?.detectedFrom === 'manual') {
+      const newestIdx = conflict.candidates.length - 1;
+      decided.push({
+        conflict,
+        decision: {
+          conflictId: conflict.id,
+          resolution: { kind: 'pick', candidateIndex: newestIdx },
+          resolvedAt: new Date().toISOString(),
+          candidateFingerprint: 'manual-chain',
+          note: 'Implicit decision from manual supersession.',
+        },
+        resolvedClaim: conflict.candidates[newestIdx]?.claim,
+      });
+      continue;
+    }
+    pending.push(conflict);
   }
   return {
     resolvedClaims: merge.resolvedClaims,
@@ -452,7 +497,7 @@ function stitchChainConflicts(
 // Decisions file I/O
 // ---------------------------------------------------------------------------
 
-const EMPTY_DECISIONS: DecisionsFile = { version: 1, decisions: [] };
+const EMPTY_DECISIONS: DecisionsFile = { version: 1, decisions: [], manualChains: [] };
 
 export function decisionsPath(repoRoot: string): string {
   return path.join(repoRoot, '.truecourse', 'specs', 'decisions.json');

@@ -160,6 +160,7 @@ router.post(
       const next: DecisionsFile = {
         version: 1,
         decisions: [...filtered, decision],
+        manualChains: existing.manualChains ?? [],
       };
       writeDecisions(repo.path, next);
       res.json(next);
@@ -188,7 +189,82 @@ router.delete(
         res.json(existing);
         return;
       }
-      const nextFile: DecisionsFile = { version: 1, decisions: filtered };
+      const nextFile: DecisionsFile = {
+        version: 1,
+        decisions: filtered,
+        manualChains: existing.manualChains ?? [],
+      };
+      writeDecisions(repo.path, nextFile);
+      res.json(nextFile);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST /api/repos/:id/spec/chains/manual — mark older doc as superseded by newer
+// DELETE /api/repos/:id/spec/chains/manual — revoke a manual chain
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/:id/spec/chains/manual',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { older?: string; newer?: string; note?: string };
+      if (!body.older || !body.newer) {
+        res.status(400).json({ error: 'Missing older or newer doc path.' });
+        return;
+      }
+      if (body.older === body.newer) {
+        res.status(400).json({ error: 'older and newer must be different docs.' });
+        return;
+      }
+      const existing = readDecisions(repo.path);
+      const dedup = (existing.manualChains ?? []).filter(
+        (c) => !(c.older === body.older && c.newer === body.newer),
+      );
+      const nextFile: DecisionsFile = {
+        version: 1,
+        decisions: existing.decisions,
+        manualChains: [
+          ...dedup,
+          {
+            older: body.older,
+            newer: body.newer,
+            markedAt: new Date().toISOString(),
+            note: body.note,
+          },
+        ],
+      };
+      writeDecisions(repo.path, nextFile);
+      res.json(nextFile);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/spec/chains/manual',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { older?: string; newer?: string };
+      if (!body.older || !body.newer) {
+        res.status(400).json({ error: 'Missing older or newer doc path.' });
+        return;
+      }
+      const existing = readDecisions(repo.path);
+      const filtered = (existing.manualChains ?? []).filter(
+        (c) => !(c.older === body.older && c.newer === body.newer),
+      );
+      const nextFile: DecisionsFile = {
+        version: 1,
+        decisions: existing.decisions,
+        manualChains: filtered,
+      };
       writeDecisions(repo.path, nextFile);
       res.json(nextFile);
     } catch (e) {

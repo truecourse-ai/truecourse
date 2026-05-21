@@ -105,7 +105,7 @@ export {
 } from './orchestrator.js';
 export type { ConsolidateOptions, ConsolidateResult } from './orchestrator.js';
 
-export { detectVersionChains } from './version-chain.js';
+export { detectVersionChains, materializeManualChains } from './version-chain.js';
 export type { VersionChain } from './version-chain.js';
 
 export {

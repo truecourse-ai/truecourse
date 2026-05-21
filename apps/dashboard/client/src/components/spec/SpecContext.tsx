@@ -53,6 +53,8 @@ export interface SpecContextValue {
   /** Revoke a previously saved decision and re-scan so the conflict
    *  re-opens with its candidates intact. */
   revokeDecision: (conflictId: string) => Promise<void>;
+  /** Mark `older` as superseded by `newer` (manual version chain). */
+  markSuperseded: (older: string, newer: string, note?: string) => Promise<void>;
   /** Write the canonical spec + run IL extraction. */
   apply: () => Promise<void>;
 }
@@ -151,6 +153,21 @@ export function SpecProvider({
     [repoId, refresh],
   );
 
+  const markSuperseded = useCallback(
+    async (older: string, newer: string, note?: string) => {
+      setLoading(true);
+      try {
+        await api.postSpecManualChain(repoId, { older, newer, note });
+        await refresh();
+      } catch (e) {
+        reportError('Marking supersession failed', e, setError);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [repoId, refresh],
+  );
+
   const apply = useCallback(async () => {
     setApplying(true);
     setError(null);
@@ -187,6 +204,7 @@ export function SpecProvider({
       resolveConflict,
       acceptAllDefaults,
       revokeDecision,
+      markSuperseded,
       apply,
     }),
     [
@@ -202,6 +220,7 @@ export function SpecProvider({
       resolveConflict,
       acceptAllDefaults,
       revokeDecision,
+      markSuperseded,
       apply,
     ],
   );
