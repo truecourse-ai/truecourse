@@ -5,7 +5,7 @@ import { parseFile } from '../../packages/contract-verifier/src/parser/index.js'
 import { resolve } from '../../packages/contract-verifier/src/resolver/index.js';
 import type { OperationContract } from '../../packages/contract-verifier/src/types/index.js';
 
-const FIXTURE_IL = path.resolve(__dirname, '../fixtures/sample-js-project-il/.truecourse/contracts');
+const FIXTURE_IL = path.resolve(__dirname, '../fixtures/sample-js-project-il/reference/contracts');
 
 function loadAll() {
   const files: ReturnType<typeof parseFile>[] = [];

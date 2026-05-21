@@ -1,5 +1,5 @@
 authorization-rule order.owner-only {
-  origin ".truecourse/reference/specs/modules/orders/data.md" "Order ownership" 40..50
+  origin "reference/specs/modules/orders/data.md" "Order ownership" 40..50
   applies-to {
     operations [
       Operation:"GET /api/orders/{id}",

@@ -1,5 +1,5 @@
 auth-requirement auth.role.admin {
-  origin ".truecourse/reference/specs/shared/auth.md" "Authentication" 6..8
+  origin "reference/specs/shared/auth.md" "Authentication" 6..8
   scheme Bearer
   required-role admin
   selector operations [Operation:"POST /api/customers"]

@@ -1,5 +1,5 @@
 error-envelope error.envelope.standard {
-  origin ".truecourse/reference/specs/shared/errors.md" "Error envelope" 3..19
+  origin "reference/specs/shared/errors.md" "Error envelope" 3..19
   applies-to status-class [4xx, 5xx]
   shape {
     error {

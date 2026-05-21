@@ -1,5 +1,5 @@
 operation POST "/api/customers" {
-  origin ".truecourse/reference/specs/modules/customers/endpoints.md" "POST /api/customers" 3..16
+  origin "reference/specs/modules/customers/endpoints.md" "POST /api/customers" 3..16
   request {
     header content-type required value "application/json"
     body {

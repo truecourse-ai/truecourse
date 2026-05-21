@@ -1,5 +1,5 @@
 operation GET "/api/customers" {
-  origin ".truecourse/reference/specs/modules/customers/endpoints.md" "GET /api/customers" 18..20
+  origin "reference/specs/modules/customers/endpoints.md" "GET /api/customers" 18..20
   request {
     query {
       cursor: string optional

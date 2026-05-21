@@ -1,5 +1,5 @@
 formula order.tax-cents {
-  origin ".truecourse/reference/specs/modules/orders/data.md" "Pricing" 32..38
+  origin "reference/specs/modules/orders/data.md" "Pricing" 32..38
   output Entity:Order field taxCents
   inputs [
     Entity:Order.subtotalCents,

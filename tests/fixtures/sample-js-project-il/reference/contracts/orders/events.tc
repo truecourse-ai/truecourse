@@ -1,5 +1,5 @@
 effect-group order.lifecycle.events {
-  origin ".truecourse/reference/specs/modules/orders/effects.md" "Orders — Effects" 1..11
+  origin "reference/specs/modules/orders/effects.md" "Orders — Effects" 1..11
   channel event-bus
   payload-shape {
     id: uuid

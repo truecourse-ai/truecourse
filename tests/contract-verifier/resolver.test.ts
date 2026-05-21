@@ -4,7 +4,7 @@ import path from 'node:path';
 import { parseFile } from '../../packages/contract-verifier/src/parser/index.js';
 import { resolve, refKey, canonicalizePathParams } from '../../packages/contract-verifier/src/resolver/index.js';
 
-const FIXTURE_IL = path.resolve(__dirname, '../fixtures/sample-js-project-il/.truecourse/contracts');
+const FIXTURE_IL = path.resolve(__dirname, '../fixtures/sample-js-project-il/reference/contracts');
 
 function listTcFiles(root: string): string[] {
   const out: string[] = [];
@@ -72,7 +72,7 @@ describe('Contract resolver — fixture corpus', () => {
     const order = result.index.get('Entity:Order');
     expect(order).toBeDefined();
     expect(order!.origin).toBeTruthy();
-    expect(order!.origin!.source).toBe('SPEC.md');
+    expect(order!.origin!.source).toMatch(/orders\/data\.md$/);
     expect(order!.origin!.lines[0]).toBeGreaterThan(0);
   });
 });

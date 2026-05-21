@@ -1,5 +1,5 @@
 entity Order {
-  origin ".truecourse/reference/specs/modules/orders/data.md" "Order" 3..15
+  origin "reference/specs/modules/orders/data.md" "Order" 3..15
   field id: uuid {
     origin server-assigned
     immutable

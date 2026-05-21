@@ -1,4 +1,4 @@
 enum LoyaltyTier {
-  origin ".truecourse/reference/specs/modules/customers/data.md" "LoyaltyTier" 12..12
+  origin "reference/specs/modules/customers/data.md" "LoyaltyTier" 12..12
   values [standard, silver, gold]
 }

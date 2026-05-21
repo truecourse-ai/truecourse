@@ -1,5 +1,5 @@
 operation GET "/api/orders/{id}" {
-  origin ".truecourse/reference/specs/modules/orders/endpoints.md" "GET /api/orders/:id" 33..42
+  origin "reference/specs/modules/orders/endpoints.md" "GET /api/orders/:id" 33..42
   request {
     path-param id: uuid {
       on-invalid status 400 error-code validation_failed

@@ -1,5 +1,5 @@
 pagination-contract pagination.cursor.standard {
-  origin ".truecourse/reference/specs/shared/endpoints.md" "Pagination" 3..12
+  origin "reference/specs/shared/endpoints.md" "Pagination" 3..12
   scheme cursor
   query {
     cursor: string optional semantics opaque

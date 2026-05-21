@@ -462,6 +462,165 @@ Generate contracts only for the explicitly listed static routes.
 **When to keep the parameterized form**: if the spec does NOT enumerate static
 instances, the parameterized route IS a real endpoint — generate the contract.
 
+# Entity completeness — extract ALL fields, not per-subsection partials
+
+An entity's fields may be enumerated in one section and then constrained, computed,
+or marked immutable across SEVERAL subsections of the same slice (e.g., "Fields",
+"Immutability", "Pricing", "Creation state"). Produce ONE \`entity X { … }\` artifact
+that lists EVERY field mentioned across all subsections.
+
+**Do NOT** emit a sparse entity with only the fields named in one subsection — e.g.,
+if the "Immutability" subsection lists \`id\`, \`createdAt\` and the parent slice's
+table enumerates \`id\`, \`email\`, \`name\`, \`createdAt\`, the artifact must include
+all four fields. The \`immutable\` marker attaches to the relevant fields; it does
+not narrow the set.
+
+**Mutability/immutability rules:**
+
+- A field is \`immutable\` when the spec says: "immutable", "never changes after
+  creation", "server-assigned" + "cannot be modified", "set once at creation", or
+  appears in an "Immutability" list.
+- A field is \`mutability state-machine\` when its values come from a state machine
+  artifact (status fields).
+- A field is \`mutability refreshed-on-mutation\` for fields like \`updatedAt\` that
+  the spec says are "refreshed on every change" or "set on every mutation".
+- Otherwise, \`mutability mutable\` (or omit and rely on default).
+
+\`computed-at order-creation\` describes WHEN a field is computed; it is NOT a
+substitute for \`immutable\`. If a derived/server-computed field is also frozen
+after creation, emit BOTH \`computed-at\` AND \`immutable\`.
+
+# Enum extraction — required whenever spec defines an enum
+
+Whenever the spec text contains any of:
+
+- "X is an enum with values a, b, c"
+- "X is one of: a, b, c"
+- "Valid values for X: a | b | c"
+- A markdown table whose first column is \`Value\` and rows enumerate the valid options
+- A bare list like "OrderStatus: \`placed\` | \`paid\` | \`shipped\`"
+
+emit:
+
+  enum X {
+    origin "<source>" "<section>" <lines>
+    values [a, b, c]
+  }
+
+This applies even when the enum is mentioned as a sub-section of an entity's
+data document. If \`Entity:Customer\` references \`Enum:LoyaltyTier\` and the same
+slice contains "LoyaltyTier values: standard, silver, gold", emit BOTH the entity
+fragment AND the enum fragment.
+
+**Never reference an enum without defining it.** Every \`Enum:X\` identifier you
+emit (in \`field: Enum:X\` or \`states Enum:X\`) MUST have a matching \`enum X { … }\`
+artifact somewhere in the same slice (or you must assume another slice provides
+it; only assume this when the enum is named in another spec document).
+
+# Forbids clauses — map "forbidden" / "must not" / "no X on Y" to structured clauses
+
+When spec text contains phrases like:
+
+- "X is forbidden"
+- "must not accept Y"
+- "no Z is emitted on failure"
+- "Q is never returned"
+- "offset/page pagination is forbidden"
+- "events are not emitted on validation errors"
+
+emit a structured \`forbids { … }\` block on the matching contract. Examples:
+
+**Pagination — offset/page forbidden:**
+
+  pagination-contract pagination.cursor.standard {
+    …
+    forbids {
+      forbid query-param offset
+      forbid query-param page
+    }
+  }
+
+**EffectGroup — no event on 4xx/5xx:**
+
+  effect-group order.lifecycle.events {
+    …
+    forbids {
+      forbid emission when-response-status [4xx, 5xx]
+    }
+  }
+
+**Operation — forbid silent 200 on missing resource:**
+
+  operation GET "/api/orders/{id}" {
+    …
+    response 404 on not_found {
+      body envelope ErrorEnvelope:error.envelope.standard {
+        error-code order_not_found
+      }
+      forbid status 200 when resource-missing
+    }
+  }
+
+The \`forbids\` block is a first-class part of the contract — do not skip it just
+because the spec phrases the rule in prose rather than a structured list. If the
+spec says "missing orders never return a silent null", that is exactly
+\`forbid status 200 when resource-missing\`.
+
+# Authorization-rule: bypass/exception subsections become \`except\` clauses
+
+When the spec defines an authorization rule (e.g., "Order ownership") and then has
+a subsection like "Exceptions", "Bypass", "Admin override", do NOT emit a separate
+\`authorization-rule\` artifact for the exception. The exception belongs to the
+parent rule as an \`except\` clause:
+
+  authorization-rule order.owner-only {
+    origin "<source>" "Order ownership" <lines>
+    applies-to {
+      operations [
+        Operation:"GET /api/orders/{id}",
+        Operation:"POST /api/orders/{id}/pay",
+        …
+      ]
+    }
+    predicate "request.auth.userId == loaded.Order.customerId"
+    except {
+      role admin
+    }
+    on-violation {
+      status 403
+      error-code forbidden
+      body ErrorEnvelope:error.envelope.standard
+    }
+  }
+
+The "Exceptions → Admins can bypass" subsection becomes the \`except { role admin }\`
+clause. Do NOT emit a fragment artifact like \`order.owner-only.admin-bypass\` — that
+loses the \`applies-to\`, \`predicate\`, and \`on-violation\` and breaks the verifier.
+
+Always produce a COMPLETE \`authorization-rule\` with \`applies-to\`, \`predicate\`,
+and \`on-violation\` when the slice describes one — even if the operation list spans
+multiple sub-sections of the same slice.
+
+# Naming conventions for artifact identities
+
+Use these canonical identity formats:
+
+- Auth requirement (scheme + optional role):
+    - \`auth.<scheme>.<scope>\` — e.g., \`auth.bearer.api\`
+    - \`auth.role.<role-name>\` — e.g., \`auth.role.admin\` (NOT \`auth.admin.role\`)
+- Effect group:
+    - \`<resource>.<domain>.events\` — e.g., \`order.lifecycle.events\`, \`payment.refund.events\`
+    - One effect-group per resource+domain pair. Do NOT split per individual event
+      (no \`order.cancelled.event\`, no \`order.paid.event\` — use ONE \`order.lifecycle.events\`
+      with multiple \`effect\` clauses inside it).
+- Error envelope: \`error.envelope.standard\` (or \`error.envelope.<variant>\` if multiple).
+- Pagination: \`pagination.<scheme>.standard\` — e.g., \`pagination.cursor.standard\`.
+- Idempotency: \`idempotency.<header>.standard\` — e.g., \`idempotency.key.standard\`.
+
+When the spec lists multiple events under one heading ("Events", "Effects",
+"Domain events"), produce ONE \`effect-group\` artifact with ALL events as nested
+\`effect\` clauses inside it — NOT one artifact per event.
+
 # Hard rules
 
 1. Output ONLY the JSON object. No prose, no markdown fences, no preamble.

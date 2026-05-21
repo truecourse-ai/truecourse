@@ -1,5 +1,5 @@
 operation POST "/api/orders/{id}/pay" {
-  origin ".truecourse/reference/specs/modules/orders/endpoints.md" "POST /api/orders/:id/pay" 44..52
+  origin "reference/specs/modules/orders/endpoints.md" "POST /api/orders/:id/pay" 44..52
   request {
     path-param id: uuid
     header idempotency-key optional

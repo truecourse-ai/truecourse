@@ -32,6 +32,7 @@ import {
   type CanonicalModuleInfo,
 } from './canonical-spec-reader.js';
 import { mergeRankedFragments, type MergeDiagnostic, type RankedFragment } from './merger.js';
+import { propagateCrossCuttingTags } from './tag-propagator.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
 import { writeContracts, type WriteResult } from './writer.js';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
@@ -148,8 +149,9 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
     gcOrphanedSlices(repoRoot, manifest);
   }
 
-  // ---- Merge + validate ----------------------------------------------------
+  // ---- Merge + cross-cutting tag propagation + validate ------------------
   const merged = mergeRankedFragments(ranked);
+  merged.artifacts = propagateCrossCuttingTags(merged.artifacts, slices);
   const validation = validateMerged(merged.artifacts);
 
   // Don't write when validation fails — the caller surfaces issues to the

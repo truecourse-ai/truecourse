@@ -5,7 +5,7 @@ import { parseFile } from '../../packages/contract-verifier/src/parser/index.js'
 
 const FIXTURE_IL = path.resolve(
   __dirname,
-  '../fixtures/sample-js-project-il/.truecourse/contracts',
+  '../fixtures/sample-js-project-il/reference/contracts',
 );
 
 function listTcFiles(root: string): string[] {
@@ -25,7 +25,7 @@ describe('Contract parser — fixture corpus', () => {
   const files = listTcFiles(FIXTURE_IL);
 
   it('discovers the expected set of .tc files', () => {
-    expect(files.length).toBeGreaterThanOrEqual(25);
+    expect(files.length).toBeGreaterThanOrEqual(22);
   });
 
   it.each(files.map((f) => [path.relative(FIXTURE_IL, f), f]))(

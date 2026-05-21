@@ -1,5 +1,5 @@
 state-machine Order.status {
-  origin ".truecourse/reference/specs/modules/orders/data.md" "Order lifecycle" 19..30
+  origin "reference/specs/modules/orders/data.md" "Order lifecycle" 19..30
   scope {
     entity Entity:Order
     field status
