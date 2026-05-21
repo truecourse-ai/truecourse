@@ -147,25 +147,19 @@ export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailPr
                 </div>
               </div>
             )}
-            {!isVersionChain && !isDecided && (
-              <SupersedeSection
-                conflict={conflict}
-                selectedIndex={selectedIndex}
-                busy={busy}
-                onMark={markSuperseded}
-              />
-            )}
           </div>
         </div>
       </div>
       <ActionFooter
         conflict={conflict}
+        selectedIndex={selectedIndex}
         isVersionChain={isVersionChain}
         isDefault={isDefault}
         isDecided={isDecided}
         busy={busy}
         customMode={customMode}
         onPick={onPick}
+        onMarkSuperseded={markSuperseded}
         onKeepAll={onKeepAll}
         onOpenCustom={() => setCustomMode(true)}
         onRevoke={onRevoke}
@@ -705,88 +699,12 @@ function DocPreview({ source }: { source: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// "Mark as superseded" section — manual version-chain escape hatch
-// ---------------------------------------------------------------------------
-
-function SupersedeSection({
-  conflict,
-  selectedIndex,
-  busy,
-  onMark,
-}: {
-  conflict: SpecConflict;
-  selectedIndex: number;
-  busy: boolean;
-  onMark: (older: string, newer: string, note?: string) => Promise<void>;
-}) {
-  const [picking, setPicking] = useState(false);
-  const selected = conflict.candidates[selectedIndex];
-  if (!selected) return null;
-
-  // Build unique-by-file list of other candidates as supersede targets.
-  // When two candidates from the SAME file appear in the conflict (long
-  // doc redefines an entity), we don't offer that file as a target —
-  // marking a file as superseded by itself is nonsensical.
-  const selectedFile = selected.claim.provenance.file;
-  const seenFiles = new Set<string>([selectedFile]);
-  const targets: Array<{ file: string; weight: SpecConflict['candidates'][number]['weight'] }> = [];
-  for (const c of conflict.candidates) {
-    const f = c.claim.provenance.file;
-    if (seenFiles.has(f)) continue;
-    seenFiles.add(f);
-    targets.push({ file: f, weight: c.weight });
-  }
-  if (targets.length === 0) return null;
-
-  return (
-    <div className="mt-4 rounded border border-dashed border-border bg-muted/20 px-3 py-2">
-      <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-        <span>
-          Know that <span className="font-mono text-foreground">{selectedFile}</span> is an older
-          version of one of the other docs in this conflict? Mark it as superseded — claims from
-          this doc will be dropped from the merge corpus, and all conflicts that share this
-          v1/v2 split clear in one action.
-        </span>
-        {!picking && (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => setPicking(true)}>
-            Mark as superseded by →
-          </Button>
-        )}
-      </div>
-      {picking && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">Superseded by:</span>
-          {targets.map((t) => (
-            <Button
-              key={t.file}
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={async () => {
-                await onMark(selectedFile, t.file);
-                setPicking(false);
-              }}
-              title={`Mark ${selectedFile} as superseded by ${t.file}`}
-            >
-              <span className="font-mono text-[11px]">{t.file}</span>
-              <span className="ml-1.5 text-[10px] opacity-60">({t.weight})</span>
-            </Button>
-          ))}
-          <Button size="sm" variant="ghost" onClick={() => setPicking(false)} disabled={busy}>
-            Cancel
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Action footer
 // ---------------------------------------------------------------------------
 
 function ActionFooter({
   conflict,
+  selectedIndex,
   isVersionChain,
   isDefault,
   isDecided,
@@ -796,8 +714,10 @@ function ActionFooter({
   onKeepAll,
   onOpenCustom,
   onRevoke,
+  onMarkSuperseded,
 }: {
   conflict: SpecConflict;
+  selectedIndex: number;
   isVersionChain: boolean;
   isDefault: boolean;
   isDecided: boolean;
@@ -807,9 +727,29 @@ function ActionFooter({
   onKeepAll: () => void;
   onOpenCustom: () => void;
   onRevoke: () => void;
+  onMarkSuperseded: (older: string, newer: string) => Promise<void>;
 }) {
+  const [pickingTarget, setPickingTarget] = useState(false);
+
+  // Build supersede targets — files in this conflict that differ from
+  // the currently-selected candidate's file. Hidden if no valid target
+  // (e.g. all candidates from same source file).
+  const selected = conflict.candidates[selectedIndex];
+  const selectedFile = selected?.claim.provenance.file ?? '';
+  const seenFiles = new Set<string>([selectedFile]);
+  const targets: Array<{ file: string; weight: SpecConflict['candidates'][number]['weight'] }> = [];
+  if (selected) {
+    for (const c of conflict.candidates) {
+      const f = c.claim.provenance.file;
+      if (seenFiles.has(f)) continue;
+      seenFiles.add(f);
+      targets.push({ file: f, weight: c.weight });
+    }
+  }
+  const supersedeEligible = !isVersionChain && !isDecided && targets.length > 0;
+
   return (
-    <div className="flex shrink-0 items-center gap-2 border-t border-border bg-card px-6 py-3">
+    <div className="relative flex shrink-0 items-center gap-2 border-t border-border bg-card px-6 py-3">
       {isDecided && (
         <Button
           size="sm"
@@ -835,9 +775,22 @@ function ActionFooter({
           </Button>
         ) : (
           !customMode && (
-            <Button size="sm" variant="outline" onClick={onOpenCustom} disabled={busy}>
-              Write custom answer
-            </Button>
+            <>
+              {supersedeEligible && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPickingTarget((v) => !v)}
+                  disabled={busy}
+                  title={`Mark ${selectedFile} as an older version of one of the other docs — drops its claims from the corpus and clears every conflict caused by the same supersession.`}
+                >
+                  Mark superseded by →
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={onOpenCustom} disabled={busy}>
+                Write custom answer
+              </Button>
+            </>
           )
         )}
         <Button size="sm" onClick={onPick} disabled={busy}>
@@ -858,6 +811,38 @@ function ActionFooter({
           )}
         </Button>
       </div>
+      {pickingTarget && supersedeEligible && (
+        <div className="absolute bottom-full right-6 mb-2 w-[min(28rem,90vw)] rounded border border-border bg-popover p-3 shadow-lg">
+          <div className="mb-2 text-[11px] text-muted-foreground">
+            Mark <span className="font-mono text-foreground">{selectedFile}</span> as superseded by:
+          </div>
+          <ul className="flex flex-col gap-1">
+            {targets.map((t) => (
+              <li key={t.file}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setPickingTarget(false);
+                    await onMarkSuperseded(selectedFile, t.file);
+                  }}
+                  className="flex w-full items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1.5 text-left text-xs hover:border-primary hover:bg-primary/5"
+                >
+                  <span className="truncate font-mono">{t.file}</span>
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {t.weight}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex justify-end">
+            <Button size="sm" variant="ghost" onClick={() => setPickingTarget(false)} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
       <span className="sr-only">
         {conflict.candidates.length} candidates total
       </span>
