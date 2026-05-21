@@ -95,7 +95,13 @@ export function mergeClaims(
   // Sort group keys for deterministic output ordering.
   const sortedKeys = [...groups.keys()].sort();
   for (const key of sortedKeys) {
-    const list = sortClaims(dropEmptyContentClaims(groups.get(key)!));
+    let list = sortClaims(dropEmptyContentClaims(groups.get(key)!));
+
+    // Status auto-loses — drop `deferred`/`out-of-scope`/`deprecated`
+    // claims when at least one `shipped` (or unset-status) claim exists.
+    // Lifecycle-marked claims should never compete with active ones
+    // for the same subject; the lifecycle tag IS the resolution.
+    list = filterByStatus(list);
     if (list.length === 1) {
       resolvedClaims.push(list[0]);
       continue;
@@ -103,6 +109,26 @@ export function mergeClaims(
 
     if (allIdentical(list)) {
       resolvedClaims.push(mergeIdentical(list));
+      continue;
+    }
+
+    // Status-tolerant identical — same content, different status tags.
+    // Pick the most-authoritative status (shipped > undefined > deferred
+    // > out-of-scope > deprecated) and merge.
+    const statusTolerant = tryStatusTolerantIdentical(list);
+    if (statusTolerant) {
+      resolvedClaims.push(statusTolerant);
+      continue;
+    }
+
+    // Same-file consolidation — when every candidate originates from
+    // the same source file, the source doc was internally inconsistent
+    // (typically a long doc redefining the same entity in multiple
+    // sections). Deep-merge their contents instead of surfacing N+1
+    // competing candidates the user can't meaningfully choose between.
+    const sameFile = trySameFileConsolidation(list);
+    if (sameFile) {
+      resolvedClaims.push(sameFile);
       continue;
     }
 
@@ -184,6 +210,143 @@ function isEmptyContent(content: unknown): boolean {
   if (typeof content !== 'object') return false;
   if (Array.isArray(content)) return content.length === 0;
   return Object.keys(content as Record<string, unknown>).length === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Pre-conflict auto-resolve passes
+// ---------------------------------------------------------------------------
+
+/**
+ * Drop claims tagged with a non-active lifecycle status when at least
+ * one active-status claim exists in the group. "Active" = `shipped`
+ * (the default) OR no status tag at all. Lifecycle-marked claims like
+ * `deferred` / `out-of-scope` / `deprecated` describe intent, not
+ * current truth, and should never compete with active claims for the
+ * same subject.
+ *
+ * Keeps the group untouched when every candidate is non-active —
+ * better to surface the conflict than silently drop everything.
+ */
+function filterByStatus(list: Claim[]): Claim[] {
+  const isActive = (c: Claim): boolean => {
+    const s = c.metadata.status;
+    return s === undefined || s === null || s === 'shipped';
+  };
+  const active = list.filter(isActive);
+  return active.length > 0 ? active : list;
+}
+
+/**
+ * When candidates have byte-identical content but differing `status`
+ * tags, collapse them into one claim using the most-authoritative
+ * status. Without this rule, two PRDs that state the same auth scheme
+ * — one marked `shipped`, one with no tag — surface as a conflict
+ * even though they agree on the substance.
+ *
+ * Status priority: `shipped` > undefined > `deferred` > `out-of-scope`
+ * > `deprecated`. Returns null when contents disagree (caller falls
+ * through to the conflict path).
+ */
+function tryStatusTolerantIdentical(list: Claim[]): Claim | null {
+  if (list.length < 2) return null;
+  const contentFp = (c: Claim): string => stableStringify(c.content);
+  const firstFp = contentFp(list[0]);
+  for (let i = 1; i < list.length; i++) {
+    if (contentFp(list[i]) !== firstFp) return null;
+  }
+  // All contents identical. Pick the candidate with the
+  // highest-authority status as the "winner".
+  const priority = (s: string | null | undefined): number => {
+    if (s === 'shipped') return 4;
+    if (s === undefined || s === null) return 3;
+    if (s === 'deferred') return 2;
+    if (s === 'out-of-scope') return 1;
+    if (s === 'deprecated') return 0;
+    return 3;
+  };
+  let winner = list[0];
+  for (let i = 1; i < list.length; i++) {
+    if (priority(list[i].metadata.status) > priority(winner.metadata.status)) {
+      winner = list[i];
+    }
+  }
+  const others = list.filter((c) => c.id !== winner.id);
+  return {
+    ...winner,
+    provenance: {
+      file: winner.provenance.file,
+      line: winner.provenance.line,
+      quote: list
+        .map((c) => `[${c.provenance.file}:${c.provenance.line}] ${c.provenance.quote}`)
+        .join('\n---\n'),
+      additionalSources: others.map((c) => ({
+        file: c.provenance.file,
+        line: c.provenance.line,
+        quote: c.provenance.quote,
+      })),
+    },
+  };
+}
+
+/**
+ * When every candidate in a group originates from the SAME source file
+ * (typically a long doc that redefines the same entity / endpoint in
+ * multiple sections), deep-merge their contents instead of surfacing
+ * them as N+1 competing candidates. The user can't usefully choose
+ * between 10 partial views of the same entity in one doc.
+ *
+ * The merge unions object keys (deepest leaves win latest-section's
+ * value when they disagree, since `sortClaims` orders by lastTouched
+ * but within one file all candidates share a touched timestamp so
+ * deterministic line order takes over via the id tiebreaker).
+ *
+ * Returns null when:
+ *   - candidates come from more than one file (the conflict is between
+ *     docs, not within one doc — surface to user)
+ *   - deep-merge hits a leaf conflict (the file genuinely disagrees
+ *     with itself on a value — surface so the user sees it)
+ */
+function trySameFileConsolidation(list: Claim[]): Claim | null {
+  if (list.length < 2) return null;
+  const firstFile = list[0].provenance.file;
+  for (let i = 1; i < list.length; i++) {
+    if (list[i].provenance.file !== firstFile) return null;
+  }
+  // Pick merge strategy by topic. Entity claims (`topic === 'data'`) are
+  // typically partial field dictionaries — long docs describe an entity
+  // in pieces across sections, mentioning different field subsets and
+  // sometimes-conflicting validation rules each time. The union of all
+  // mentioned fields is the entity's full shape, and on validation-rule
+  // disagreement we last-write-wins (latest section in the doc usually
+  // reflects current understanding). Endpoint / auth / errors / effects
+  // claims use strict subset-merge: disjoint response codes or auth
+  // schemes are genuine alternatives even when stated in one file.
+  const isDataTopic = list[0].topic === 'data';
+  let acc: unknown = list[0].content;
+  for (let i = 1; i < list.length; i++) {
+    const merged = isDataTopic
+      ? lastWriteWinsDeepMerge(acc, list[i].content)
+      : trySubsetMerge(acc, list[i].content);
+    if (!merged.ok) return null;
+    acc = merged.value;
+  }
+  const head = list[0];
+  return {
+    ...head,
+    content: acc as Claim['content'],
+    provenance: {
+      file: head.provenance.file,
+      line: head.provenance.line,
+      quote: list
+        .map((c) => `[line ${c.provenance.line}] ${c.provenance.quote}`)
+        .join('\n---\n'),
+      additionalSources: list.slice(1).map((c) => ({
+        file: c.provenance.file,
+        line: c.provenance.line,
+        quote: c.provenance.quote,
+      })),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +624,32 @@ function tryDeepMerge(a: unknown, b: unknown): DeepMergeResult {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Last-write-wins deep merge — used only by same-file consolidation
+ * on the `data` topic. Object keys union recursively; conflicting leaf
+ * values take `b`'s value (the later-arriving claim). Suitable when
+ * the two claims come from sections of the same doc — the doc was
+ * internally inconsistent and the latest section is usually the
+ * intended version.
+ *
+ * Never returns `{ok: false}` — last-write-wins always succeeds.
+ */
+function lastWriteWinsDeepMerge(a: unknown, b: unknown): DeepMergeResult {
+  if (a === undefined) return { ok: true, value: b };
+  if (b === undefined) return { ok: true, value: a };
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const out: Record<string, unknown> = {};
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of keys) {
+      const sub = lastWriteWinsDeepMerge(a[k], b[k]);
+      out[k] = (sub as { ok: true; value: unknown }).value;
+    }
+    return { ok: true, value: out };
+  }
+  // Primitives, arrays, or one side is non-object: later value wins.
+  return { ok: true, value: b };
 }
 
 // ---------------------------------------------------------------------------

@@ -114,7 +114,14 @@ describe('mergeClaims — conflicts', () => {
     expect(out.resolvedClaims).toEqual([]);
   });
 
-  it('emits a Conflict when status differs even if content matches (Q2 strict)', () => {
+  it('resolves identical-content claims with differing status using status priority (shipped > unset > deferred > out-of-scope > deprecated)', () => {
+    // Updated from the original "Q2 strict" rule. On real projects the
+    // same claim routinely appears with mixed status tags (PRD says
+    // `shipped`, runbook has no tag, research log marks `deferred`) and
+    // asking the user to pick between identical contents is pure noise.
+    // The merger now picks the highest-priority status; `out-of-scope`
+    // and `deprecated` lose to active claims. Genuine content
+    // disagreements still surface as conflicts.
     const a = makeClaim({
       id: 'id-a',
       subject: 'POST /api/v1/wrong-job-type',
@@ -128,7 +135,12 @@ describe('mergeClaims — conflicts', () => {
       lastTouched: '2026-01-01T00:00:00Z',
     });
     const out = mergeClaims([a, b]);
-    expect(out.openConflicts).toHaveLength(1);
+    // `out-of-scope` lost to `shipped` via the status filter, leaving
+    // one active claim — surfaces as a singleton resolution, not a
+    // conflict.
+    expect(out.openConflicts).toHaveLength(0);
+    expect(out.resolvedClaims).toHaveLength(1);
+    expect(out.resolvedClaims[0].metadata.status).toBe('shipped');
   });
 
   it('orders candidates oldest → newest with defaultPick = newest (Q10)', () => {

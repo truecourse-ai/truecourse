@@ -351,9 +351,19 @@ describe('fixture: sample-js-project-il — discovery', () => {
     expect(map.get('docs/adr/0002-error-envelope.md')).toBe('adr');
   });
 
-  it('finds all 5 fixture docs (code/ has no .md)', () => {
+  it('finds the docs/ + README + reference/ markdown set (code/ has no .md)', () => {
     const docs = discoverDocs(workRoot, { skipGit: true });
-    expect(docs).toHaveLength(5);
+    // The fixture has docs/ (4 PRDs+ADRs), README.md (1), and
+    // reference/ (the hand-written ground truth + skill/eval docs).
+    // Discovery picks everything up; the consolidator's downstream
+    // weighting decides what's authoritative.
+    expect(docs.length).toBeGreaterThanOrEqual(5);
+    const paths = docs.map((d) => d.path);
+    expect(paths).toContain('README.md');
+    expect(paths).toContain('docs/PRDs/orders_PRDv1.md');
+    expect(paths).toContain('docs/PRDs/orders_PRDv2.md');
+    expect(paths).toContain('docs/adr/0001-auth-bearer.md');
+    expect(paths).toContain('docs/adr/0002-error-envelope.md');
   });
 });
 
