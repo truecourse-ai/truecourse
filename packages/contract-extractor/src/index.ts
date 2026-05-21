@@ -33,6 +33,7 @@ import {
 } from './canonical-spec-reader.js';
 import { mergeRankedFragments, type MergeDiagnostic, type RankedFragment } from './merger.js';
 import { propagateCrossCuttingTags } from './tag-propagator.js';
+import { repair } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
 import { writeContracts, type WriteResult } from './writer.js';
 import { spawnRunner, type SliceRunner, type SliceRunResult } from './claude-runner.js';
@@ -149,9 +150,24 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
     gcOrphanedSlices(repoRoot, manifest);
   }
 
-  // ---- Merge + cross-cutting tag propagation + validate ------------------
+  // ---- Merge + cross-cutting tag propagation + repair + validate ---------
   const merged = mergeRankedFragments(ranked);
   merged.artifacts = propagateCrossCuttingTags(merged.artifacts, slices);
+  // `repair` runs LLM-targeted re-prompts when an artifact references a
+  // missing cross-ref or violates a per-kind structural rule. Skipped
+  // when the caller injected a stub runner (test harness) — repair
+  // would otherwise try to spawn `claude` directly and bypass the stub.
+  if (slices.length > 0 && !dryRun && !opts.runner) {
+    const repaired = await repair(merged.artifacts, slices);
+    merged.artifacts = repaired.artifacts;
+    merged.diagnostics.push(
+      ...repaired.log.map((message) => ({
+        artifactKey: 'repair',
+        severity: 'info' as const,
+        message,
+      })),
+    );
+  }
   const validation = validateMerged(merged.artifacts);
 
   // Don't write when validation fails — the caller surfaces issues to the

@@ -1,0 +1,403 @@
+/**
+ * Post-extraction structural-completeness checks + targeted re-prompt.
+ *
+ * Runs after the merger and before `validateMerged` / writeContracts. Two
+ * passes:
+ *
+ *   1. **Missing artifacts** — any cross-reference (`inherits
+ *      AuthRequirement:X`, `Entity:X`, etc.) that doesn't resolve to a
+ *      defined artifact. For each gap, locate the most relevant slice and
+ *      re-prompt the LLM to produce the missing artifact.
+ *
+ *   2. **Incomplete artifacts** — per-kind DSL-structural rules. When an
+ *      artifact violates a rule, re-prompt the LLM with the prior tcSource
+ *      and the explicit issue list and accept the fixed artifact.
+ *
+ * Rules are purely DSL-structural — they match the comparator's
+ * binding requirements. No slice-text pattern matching; no per-bug
+ * shortcuts. If a rule can't be expressed as "this artifact lacks a
+ * structural element the comparator requires", it doesn't belong here.
+ */
+
+import { spawn } from 'node:child_process';
+import type { MergedArtifact } from './merger.js';
+import type { Fragment, SpecSlice } from './types.js';
+import { ExtractionResultSchema } from './types.js';
+
+export interface RepairIssue {
+  artifactKey: string;
+  kind: 'missing' | 'incomplete';
+  detail: string;
+}
+
+export interface RepairOptions {
+  bin?: string;
+  timeoutMs?: number;
+}
+
+export interface RepairOutcome {
+  issues: RepairIssue[];
+  artifacts: MergedArtifact[];
+  log: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Cross-reference scanner
+// ---------------------------------------------------------------------------
+
+const CROSS_REF_PATTERNS: Array<{ refLabel: string; targetKind: string; regex: RegExp }> = [
+  { refLabel: 'AuthRequirement', targetKind: 'auth-requirement', regex: /\bAuthRequirement:([\w.\-]+)/g },
+  { refLabel: 'AuthorizationRule', targetKind: 'authorization-rule', regex: /\bAuthorizationRule:([\w.\-]+)/g },
+  { refLabel: 'Entity', targetKind: 'entity', regex: /\bEntity:(\w+)/g },
+  { refLabel: 'Enum', targetKind: 'enum', regex: /\bEnum:(\w+)/g },
+  { refLabel: 'Effect', targetKind: 'effect-group', regex: /\bEffect:([\w.\-]+)/g },
+  { refLabel: 'Formula', targetKind: 'formula', regex: /\bFormula:([\w.\-]+)/g },
+  { refLabel: 'ErrorEnvelope', targetKind: 'error-envelope', regex: /\bErrorEnvelope:([\w.\-]+)/g },
+  { refLabel: 'StateMachine', targetKind: 'state-machine', regex: /\bStateMachine:([\w.\-]+)/g },
+  { refLabel: 'IdempotencyContract', targetKind: 'idempotency-contract', regex: /\bIdempotencyContract:([\w.\-]+)/g },
+  { refLabel: 'PaginationContract', targetKind: 'pagination-contract', regex: /\bPaginationContract:([\w.\-]+)/g },
+];
+
+function key(kind: string, identity: string): string {
+  return `${kind}:${identity}`;
+}
+
+function buildPresentSet(artifacts: MergedArtifact[]): Set<string> {
+  const present = new Set<string>();
+  for (const a of artifacts) {
+    present.add(key(a.kind, a.identity));
+    // Effects are nested inside effect-groups; index them under the same
+    // effect-group kind so `Effect:order.paid` resolves to its parent.
+    if (a.kind === 'effect-group') {
+      for (const m of a.winning.tcSource.matchAll(/^\s*effect\s+([\w.\-]+)\s*\{/gm)) {
+        present.add(key('effect-group', m[1]));
+      }
+    }
+  }
+  return present;
+}
+
+function detectMissingArtifacts(artifacts: MergedArtifact[]): RepairIssue[] {
+  const present = buildPresentSet(artifacts);
+  const seen = new Set<string>();
+  const out: RepairIssue[] = [];
+  for (const a of artifacts) {
+    for (const pattern of CROSS_REF_PATTERNS) {
+      pattern.regex.lastIndex = 0;
+      for (const m of a.winning.tcSource.matchAll(pattern.regex)) {
+        const id = m[1];
+        const targetKey = key(pattern.targetKind, id);
+        if (present.has(targetKey)) continue;
+        if (seen.has(targetKey)) continue;
+        seen.add(targetKey);
+        out.push({
+          artifactKey: targetKey,
+          kind: 'missing',
+          detail: `Referenced as ${pattern.refLabel}:${id} but no matching ${pattern.targetKind} artifact was generated.`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Per-kind structural rules
+// ---------------------------------------------------------------------------
+
+function detectIncompleteArtifacts(artifacts: MergedArtifact[]): RepairIssue[] {
+  const out: RepairIssue[] = [];
+  for (const a of artifacts) {
+    const details = rulesFor(a);
+    for (const detail of details) {
+      out.push({ artifactKey: key(a.kind, a.identity), kind: 'incomplete', detail });
+    }
+  }
+  return out;
+}
+
+function rulesFor(a: MergedArtifact): string[] {
+  const src = a.winning.tcSource;
+  const out: string[] = [];
+
+  if (a.kind === 'authorization-rule') {
+    const usesTagOnly =
+      /applies-to\s*\{\s*tag\s+/.test(src) &&
+      !/applies-to\s*\{[\s\S]*?operations\s*\[/.test(src);
+    if (usesTagOnly) {
+      out.push(
+        'applies-to uses `tag <slug>` only. Rewrite as ' +
+          '`applies-to { operations [Operation:"METHOD /path", ...] }` enumerating ' +
+          'the routes this rule applies to. The comparator binds drifts per-operation; ' +
+          'tag-only selectors silently no-op.',
+      );
+    }
+    if (!/\bpredicate\b/.test(src)) {
+      out.push('missing `predicate "..."` — the rule has no logical condition to evaluate.');
+    }
+    if (!/\bon-violation\s*\{/.test(src)) {
+      out.push('missing `on-violation { status ... }` — the comparator needs to know what response a violation produces.');
+    }
+  }
+
+  if (a.kind === 'auth-requirement') {
+    if (!/\bon-violation\s*\{/.test(src)) {
+      out.push('missing `on-violation { status ... error-code ... body ErrorEnvelope:... }`.');
+    }
+    if (/\brequired-role\b/.test(src) && /selector\s+path-glob\s+"\/api\/(\*\*|\*)"/.test(src)) {
+      out.push(
+        'role-based auth-requirement uses a broad `path-glob "/api/**"` selector. ' +
+          'Rewrite as `selector operations [Operation:"..."]` enumerating only the routes that require the role — ' +
+          'broad globs cascade false-positive drifts to every matched operation.',
+      );
+    }
+  }
+
+  if (a.kind === 'operation') {
+    // Any operation declaring `response 404 on not_found` MUST explicitly
+    // state its silent-200 stance. The forbid clause is the only way the
+    // comparator can catch silent-no-op drifts.
+    const block404 = src.match(/response\s+404\s+on\s+not_found\s*\{([\s\S]*?)\n\s*\}/);
+    if (block404 && !/\bforbid\s+status\s+200\s+when\s+resource-missing\b/.test(block404[1])) {
+      out.push(
+        'response 404 on not_found is declared but the response block lacks ' +
+          '`forbid status 200 when resource-missing`. Any 404-emitting operation ' +
+          'must take an explicit stance on silent-200 so the comparator can catch ' +
+          'silent-no-op drifts.',
+      );
+    }
+  }
+
+  if (a.kind === 'effect-group') {
+    // Lifecycle effect-groups (≥ 2 effects) should declare what they forbid
+    // — typically `forbid emission when-response-status [4xx, 5xx]` so the
+    // comparator catches events emitted from failure paths.
+    const effectCount = [...src.matchAll(/^\s*effect\s+[\w.\-]+\s*\{/gm)].length;
+    if (effectCount >= 2 && !/\bforbids\s*\{/.test(src)) {
+      out.push(
+        `effect-group has ${effectCount} effects but no \`forbids { ... }\` block. ` +
+          'Lifecycle effect-groups must declare what they forbid — typically ' +
+          '`forbids { forbid emission when-response-status [4xx, 5xx] }` so the ' +
+          'comparator catches events emitted from failure paths.',
+      );
+    }
+  }
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Slice mapping
+// ---------------------------------------------------------------------------
+
+function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSlice | null {
+  const origin = artifact.winning.origin;
+  return (
+    slices.find(
+      (s) =>
+        s.specPath === origin.source &&
+        s.lineRange[0] <= origin.lines[0] &&
+        s.lineRange[1] >= origin.lines[0],
+    ) ?? null
+  );
+}
+
+const SLICE_HINT_KEYWORDS: Record<string, string[]> = {
+  'auth-requirement': ['authentication', 'authorization', 'bearer', 'jwt', 'token', 'admin', 'role'],
+  'authorization-rule': ['ownership', 'authorization', 'role-based', 'admin only', 'bypass'],
+  'entity': ['fields', 'entity', 'data shape', 'record'],
+  'enum': ['enum', 'values', 'one of'],
+  'effect-group': ['events', 'effects', 'emitted', 'event bus'],
+  'formula': ['formula', 'computed', 'calculated', 'derived'],
+  'error-envelope': ['error envelope', 'error shape', 'error response'],
+  'state-machine': ['state', 'transition', 'lifecycle'],
+  'idempotency-contract': ['idempotency', 'idempotency-key', 'idempotent'],
+  'pagination-contract': ['pagination', 'cursor', 'limit'],
+};
+
+function findSliceForMissing(missingKey: string, slices: SpecSlice[]): SpecSlice | null {
+  const [k, id] = missingKey.split(':');
+  const keywords = [...(SLICE_HINT_KEYWORDS[k] ?? []), id.toLowerCase()];
+  let best: { slice: SpecSlice; score: number } | null = null;
+  for (const slice of slices) {
+    const lowered = slice.text.toLowerCase();
+    let score = 0;
+    for (const kw of keywords) if (lowered.includes(kw)) score++;
+    if (!best || score > best.score) best = { slice, score };
+  }
+  return best && best.score > 0 ? best.slice : null;
+}
+
+// ---------------------------------------------------------------------------
+// Re-prompt
+// ---------------------------------------------------------------------------
+
+const FIX_SYSTEM_PROMPT = `You are the contract-extraction reviewer. Your job is to fix one previously-extracted contract artifact (or produce one that was missed entirely), given:
+
+  - the source SPEC SLICE the artifact was extracted from,
+  - the previous TC SOURCE the extractor produced (may be empty if the artifact was missing entirely),
+  - a list of ISSUES describing exactly what's wrong.
+
+Output ONLY a JSON object matching the extraction schema:
+
+  { "fragments": [ { "kind": "...", "identity": "...", "tcSource": "...", "origin": { "source": "...", "section": "...", "lines": [N, M] }, "obligationKeys": [], "reason": "" } ] }
+
+Hard rules:
+
+  1. Address every issue in the ISSUES list. Each issue is mandatory.
+  2. Preserve fields the previous tcSource had correctly — don't drop unrelated structure while fixing the listed issues.
+  3. If the spec slice does NOT support a fix (e.g. asked to enumerate operations that the slice doesn't list), emit an UnenforceableObligation fragment with reason explaining what is missing from the spec.
+  4. Output ONLY the JSON object. No prose, no fences, no preamble.`;
+
+interface FixRequest {
+  previousArtifact: MergedArtifact | null;
+  missingKey?: string;
+  slice: SpecSlice;
+  issues: string[];
+}
+
+async function runFixOne(req: FixRequest, bin: string, timeoutMs: number): Promise<Fragment[] | null> {
+  const userPrompt = buildFixUserPrompt(req);
+  const args = [
+    '-p',
+    userPrompt,
+    '--output-format',
+    'json',
+    '--append-system-prompt',
+    FIX_SYSTEM_PROMPT,
+    '--setting-sources',
+    'project',
+  ];
+  return new Promise<Fragment[] | null>((resolve) => {
+    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout: Buffer[] = [];
+    const timer = setTimeout(() => {
+      proc.kill('SIGKILL');
+      resolve(null);
+    }, timeoutMs);
+    proc.stdout.on('data', (b: Buffer) => stdout.push(b));
+    proc.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return resolve(null);
+      try {
+        const envelope = JSON.parse(Buffer.concat(stdout).toString('utf-8'));
+        const text = typeof envelope === 'string' ? envelope : envelope.result;
+        if (typeof text !== 'string') return resolve(null);
+        const inner = JSON.parse(stripCodeFences(text));
+        const parsed = ExtractionResultSchema.parse(inner);
+        resolve(parsed.fragments);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+function stripCodeFences(text: string): string {
+  const trimmed = text.trim();
+  const m = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return m ? m[1] : trimmed;
+}
+
+function buildFixUserPrompt(req: FixRequest): string {
+  const parts: string[] = [];
+  if (req.previousArtifact) {
+    parts.push(`Artifact to fix: ${req.previousArtifact.kind}:${req.previousArtifact.identity}`);
+    parts.push('', 'Previous TC source:', '', req.previousArtifact.winning.tcSource, '');
+  } else if (req.missingKey) {
+    parts.push(`Missing artifact (need to produce it now): ${req.missingKey}`, '');
+  }
+  parts.push('Issues to address:');
+  for (const issue of req.issues) parts.push(`  - ${issue}`);
+  parts.push('');
+  parts.push(
+    `Source spec slice — ${req.slice.specPath}, lines ${req.slice.lineRange[0]}..${req.slice.lineRange[1]} (${req.slice.headingPath.join(' → ')}):`,
+  );
+  parts.push('', '--- slice ---', req.slice.text, '--- end slice ---', '');
+  parts.push('Produce the JSON object as specified by the system prompt.');
+  return parts.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+export async function repair(
+  artifacts: MergedArtifact[],
+  slices: SpecSlice[],
+  opts: RepairOptions = {},
+): Promise<RepairOutcome> {
+  const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
+  const timeoutMs = opts.timeoutMs ?? 240_000;
+  const log: string[] = [];
+  const allIssues: RepairIssue[] = [];
+
+  // Pass 1 — missing artifacts
+  const missing = detectMissingArtifacts(artifacts);
+  allIssues.push(...missing);
+  for (const issue of missing) {
+    const slice = findSliceForMissing(issue.artifactKey, slices);
+    if (!slice) {
+      log.push(`repair: missing ${issue.artifactKey} — no candidate slice found, skipping.`);
+      continue;
+    }
+    log.push(`repair: missing ${issue.artifactKey} — re-prompting "${slice.headingPath.join(' → ')}".`);
+    const fragments = await runFixOne(
+      { previousArtifact: null, missingKey: issue.artifactKey, slice, issues: [issue.detail] },
+      bin,
+      timeoutMs,
+    );
+    if (!fragments) {
+      log.push(`repair: re-prompt failed for ${issue.artifactKey}.`);
+      continue;
+    }
+    for (const fragment of fragments) {
+      artifacts.push({
+        kind: fragment.kind,
+        identity: fragment.identity,
+        winning: fragment,
+        winningRank: 0,
+        overridden: [],
+        sameRankConflicts: [],
+      });
+    }
+  }
+
+  // Pass 2 — incomplete artifacts (recomputed against the updated corpus)
+  const incomplete = detectIncompleteArtifacts(artifacts);
+  const grouped = new Map<string, RepairIssue[]>();
+  for (const issue of incomplete) {
+    const arr = grouped.get(issue.artifactKey) ?? [];
+    arr.push(issue);
+    grouped.set(issue.artifactKey, arr);
+  }
+  allIssues.push(...incomplete);
+
+  for (const [k, issues] of grouped) {
+    const artifact = artifacts.find((a) => key(a.kind, a.identity) === k);
+    if (!artifact) continue;
+    const slice = sliceForArtifact(artifact, slices);
+    if (!slice) {
+      log.push(`repair: incomplete ${k} — could not locate source slice, skipping.`);
+      continue;
+    }
+    log.push(`repair: incomplete ${k} (${issues.length} issue${issues.length === 1 ? '' : 's'}) — re-prompting.`);
+    const fragments = await runFixOne(
+      { previousArtifact: artifact, slice, issues: issues.map((i) => i.detail) },
+      bin,
+      timeoutMs,
+    );
+    if (!fragments || fragments.length === 0) {
+      log.push(`repair: re-prompt failed for ${k}.`);
+      continue;
+    }
+    const replacement = fragments.find((f) => `${f.kind}:${f.identity}` === k) ?? fragments[0];
+    artifact.winning = replacement;
+  }
+
+  return { issues: allIssues, artifacts, log };
+}
