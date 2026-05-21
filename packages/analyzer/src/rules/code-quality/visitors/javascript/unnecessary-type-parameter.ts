@@ -1,6 +1,20 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { TS_LANGUAGES } from './_helpers.js'
+
+function appearsInsideTypeArguments(root: SyntaxNode, paramName: string): boolean {
+  const re = new RegExp(`\\b${paramName}\\b`)
+  function walk(node: SyntaxNode): boolean {
+    if (node.type === 'type_arguments' && re.test(node.text)) return true
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i)
+      if (child && walk(child)) return true
+    }
+    return false
+  }
+  return walk(root)
+}
 
 /**
  * Detect: Generic type parameter that appears only once — unnecessary complexity.
@@ -67,6 +81,27 @@ export const unnecessaryTypeParameterVisitor: CodeRuleVisitor = {
               continue
             }
           }
+        }
+
+        // Skip when the type parameter is used inside another generic's type
+        // arguments (e.g. `param: Foo<T>` or `Component<TData>(...): JSX`).
+        // Removing T would change `Foo<T>` to `Foo<unknown>`, losing the
+        // caller's ability to instantiate the generic — that's not safely
+        // replaceable.
+        if (appearsInsideTypeArguments(params, paramName)
+          || (returnType && appearsInsideTypeArguments(returnType, paramName))) {
+          continue
+        }
+
+        // Skip when the type parameter is referenced by another type
+        // parameter's constraint or default (e.g. `<TFieldValues, TName extends
+        // FieldPath<TFieldValues>>`). The two parameters are linked.
+        const otherTparamsText = typeParams.namedChildren
+          .filter((other) => other.id !== tp.id)
+          .map((other) => other.text)
+          .join(' ')
+        if (new RegExp(`\\b${paramName}\\b`).test(otherTparamsText)) {
+          continue
         }
 
         return makeViolation(
