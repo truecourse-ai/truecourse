@@ -8,9 +8,19 @@ export const missingSuperCallVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['class_declaration', 'class'],
   visit(node, filePath, sourceCode) {
-    // Check if this class has an extends clause
+    // The rule only applies to *derived* classes — those with an `extends`
+    // clause. TypeScript `class_heritage` also covers `implements`, which
+    // does not require (and cannot use) a super() call.
     const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
     if (!heritage) return null
+    const hasExtends = heritage.type === 'extends_clause'
+      || heritage.namedChildren.some((c) => c.type === 'extends_clause')
+      // tree-sitter for JavaScript marks the `extends` keyword directly on
+      // class_heritage children (no extends_clause node), so fall back to a
+      // text check for that variant.
+      || (heritage.type !== 'class_heritage' && /^extends\b/.test(heritage.text))
+      || heritage.children.some((c) => c.text === 'extends')
+    if (!hasExtends) return null
 
     const body = node.childForFieldName('body')
     if (!body) return null

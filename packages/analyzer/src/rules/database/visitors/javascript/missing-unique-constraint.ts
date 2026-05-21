@@ -2,11 +2,19 @@ import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import type { SchemaIndex } from '../../../../services/schema-index.js'
 import { makeViolation } from '../../../types.js'
-import { getMethodName, ORM_WRITE_METHODS, getEnclosingFunctionBody } from './_helpers.js'
+import { getMethodName, getEnclosingFunctionBody } from './_helpers.js'
 
 const FIND_ONE_METHODS = new Set([
   'findOne', 'findUnique', 'findFirst', 'findByPk', 'findBy',
   'exists', 'count',
+])
+
+// Only methods that *insert new rows* can introduce duplicates a UNIQUE
+// constraint would defend against. `update`/`delete`/`updateMany`/`deleteMany`
+// do not race-create rows, so check-then-update or check-then-delete is not
+// the pattern this rule targets.
+const INSERT_WRITE_METHODS = new Set([
+  'create', 'insert', 'upsert', 'createMany', 'bulkCreate', 'save',
 ])
 
 /**
@@ -66,6 +74,54 @@ function extractTableFromCallee(callNode: SyntaxNode): string | null {
   return tableProp.text || null
 }
 
+/**
+ * Extract the target table of an insert-style write call. Handles both:
+ *  - Prisma/Sequelize: `prisma.users.create(...)` → `users` (via callee chain)
+ *  - Drizzle:          `db.insert(users).values(...)` → `users` (first arg)
+ *
+ * Returns null when the table can't be determined (caller decides how lenient
+ * to be).
+ */
+function extractWriteTable(callNode: SyntaxNode, methodName: string): string | null {
+  const fromCallee = extractTableFromCallee(callNode)
+  if (fromCallee) return fromCallee
+  if (methodName === 'insert') {
+    const args = callNode.childForFieldName('arguments')
+    if (args) {
+      for (let i = 0; i < args.namedChildCount; i++) {
+        const c = args.namedChild(i)
+        if (c?.type === 'identifier') return c.text
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Walk `body` looking for at least one insert-style call whose target table
+ * matches `findTable` (if known). When the write's table can't be resolved we
+ * accept the match — false negatives are preferable to false positives.
+ */
+function bodyHasMatchingInsert(body: SyntaxNode, findTable: string | null): boolean {
+  const stack: SyntaxNode[] = [body]
+  while (stack.length > 0) {
+    const n = stack.pop()!
+    if (n.type === 'call_expression') {
+      const m = getMethodName(n)
+      if (INSERT_WRITE_METHODS.has(m)) {
+        if (!findTable) return true
+        const writeTable = extractWriteTable(n, m)
+        if (!writeTable || writeTable === findTable) return true
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const c = n.child(i)
+      if (c) stack.push(c)
+    }
+  }
+  return false
+}
+
 export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-unique-constraint',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -101,12 +157,6 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
     const body = getEnclosingFunctionBody(node)
     if (!body) return null
 
-    const bodyText = body.text
-    const ormWriteArr = Array.from(ORM_WRITE_METHODS)
-    const hasWriteAfterCheck = ormWriteArr.some((m) => bodyText.includes(`.${m}(`))
-
-    if (!hasWriteAfterCheck) return null
-
     // Extract what column is being queried.
     const queried = extractQueriedColumn(node)
     if (!queried) return null
@@ -114,6 +164,12 @@ export const missingUniqueConstraintVisitor: CodeRuleVisitor = {
     const column = queried.column
     // Drizzle gives us the table directly; Prisma needs walking the callee chain
     const table = queried.table ?? extractTableFromCallee(node)
+
+    // Only fire when the enclosing function actually inserts new rows into the
+    // same table as the find. A check-then-update / check-then-delete on the
+    // same column, or a find on one table paired with a create on a different
+    // table, are not race-prone uniqueness patterns.
+    if (!bodyHasMatchingInsert(body, table)) return null
 
     // Skip queries on primary-key-shaped columns. We still try the schema index
     // first below, but this is a fast path for the common `id`/`_id`/`pk` case

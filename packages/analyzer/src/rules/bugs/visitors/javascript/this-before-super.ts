@@ -8,8 +8,16 @@ export const thisBeforeSuperVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['class_declaration', 'class'],
   visit(node, filePath, sourceCode) {
+    // Only derived classes (those with an `extends` clause) can have a
+    // this-before-super bug. TypeScript groups `implements` under
+    // class_heritage too, but `implements` doesn't bring a super constructor.
     const heritage = node.childForFieldName('heritage') || node.children.find((c) => c.type === 'class_heritage')
     if (!heritage) return null
+    const hasExtends = heritage.type === 'extends_clause'
+      || heritage.namedChildren.some((c) => c.type === 'extends_clause')
+      || (heritage.type !== 'class_heritage' && /^extends\b/.test(heritage.text))
+      || heritage.children.some((c) => c.text === 'extends')
+    if (!hasExtends) return null
 
     const body = node.childForFieldName('body')
     if (!body) return null

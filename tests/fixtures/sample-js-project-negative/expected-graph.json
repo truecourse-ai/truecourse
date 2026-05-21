@@ -313,6 +313,12 @@
       "layer": "data"
     },
     {
+      "name": "Animal",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
       "name": "array-bugs",
       "service": "user-service",
       "kind": "standalone",
@@ -338,6 +344,12 @@
     },
     {
       "name": "BadConstructor",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "Base",
       "service": "user-service",
       "kind": "class",
       "layer": "data"
@@ -379,9 +391,21 @@
       "layer": "data"
     },
     {
+      "name": "createPostIfAuthorMissing",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
       "name": "createWidgetWithAudit",
       "service": "user-service",
       "kind": "standalone",
+      "layer": "data"
+    },
+    {
+      "name": "Dog",
+      "service": "user-service",
+      "kind": "class",
       "layer": "data"
     },
     {
@@ -439,6 +463,12 @@
       "layer": "data"
     },
     {
+      "name": "runLs",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "scope-bugs",
       "service": "user-service",
       "kind": "standalone",
@@ -461,6 +491,12 @@
       "service": "user-service",
       "kind": "standalone",
       "layer": "api"
+    },
+    {
+      "name": "Subject",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "data"
     },
     {
       "name": "TokenService",
