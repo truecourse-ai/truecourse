@@ -90,9 +90,11 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     const specContract = artifact.contract as OperationContract;
     const code = codeByIdentity.get(artifact.ref.identity);
     if (!code) {
-      // Operation declared in spec but no matching route in code — that's
-      // its own drift class. Encoded as a synthetic "missing-implementation"
-      // entry so the user sees the gap explicitly.
+      // Planned/deferred/out-of-scope operations are not expected to have
+      // a code-side implementation yet — suppress the drift.
+      const st = specContract.status;
+      if (st === 'planned' || st === 'deferred' || st === 'out-of-scope') continue;
+
       drifts.push({
         id: cryptoRandomId(),
         type: 'contract-drift',

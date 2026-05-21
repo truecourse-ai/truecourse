@@ -1,7 +1,7 @@
 /**
  * Decisions tab — browsable, revokable ledger of every spec conflict
  * the user has resolved. Source of truth is
- * `.truecourse/spec/decisions.json`; the joined view (decision +
+ * `.truecourse/specs/decisions.json`; the joined view (decision +
  * matching conflict) comes from the scan-state held in `SpecContext`.
  *
  * Out of scope for now: drift decisions (mute/snooze on Verify drifts).

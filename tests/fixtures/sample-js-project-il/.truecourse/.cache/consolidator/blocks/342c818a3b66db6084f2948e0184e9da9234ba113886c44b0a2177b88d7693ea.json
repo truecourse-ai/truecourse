@@ -1,0 +1,33 @@
+{
+  "blockId": "342c818a3b66db6084f2948e0184e9da9234ba113886c44b0a2177b88d7693ea",
+  "extraction": {
+    "topics": [
+      "auth"
+    ],
+    "claims": [
+      {
+        "topic": "auth",
+        "subject": "auth scheme",
+        "content": {
+          "scheme": "Bearer JWT",
+          "scope": "/api/*",
+          "except": []
+        },
+        "kind": "definition",
+        "line": 8
+      },
+      {
+        "topic": "auth",
+        "subject": "admin role",
+        "content": {
+          "scheme": "Bearer JWT",
+          "scope": "tag:admin"
+        },
+        "kind": "constraint",
+        "line": 14
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.359Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

@@ -78,7 +78,7 @@ export function validateMerged(artifacts: MergedArtifact[]): ValidationResult {
     issues.push({
       artifactKey: 'resolver',
       message: `${err.filePath}:${err.line} ${err.message}`,
-      severity: 'hard',
+      severity: err.severity ?? 'hard',
     });
   }
   // The verifier surfaces forward refs to artifact kinds it doesn't yet

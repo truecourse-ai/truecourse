@@ -1,0 +1,35 @@
+{
+  "blockId": "a7518b0f0ed5ccbcfd5392d58ca350c361a2740db4627fc960b0749696f317e6",
+  "extraction": {
+    "topics": [
+      "endpoints"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "GET /api/orders/:id",
+        "content": {
+          "method": "GET",
+          "path": "/api/orders/:id",
+          "responses": {
+            "200": {
+              "description": "the order"
+            },
+            "400": {
+              "description": "id must be UUID"
+            },
+            "404": {
+              "error": {
+                "code": "order_not_found"
+              }
+            }
+          }
+        },
+        "kind": "definition",
+        "line": 126
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.360Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

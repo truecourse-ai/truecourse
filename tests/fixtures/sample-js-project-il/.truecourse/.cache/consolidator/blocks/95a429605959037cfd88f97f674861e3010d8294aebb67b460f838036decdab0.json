@@ -1,0 +1,29 @@
+{
+  "blockId": "95a429605959037cfd88f97f674861e3010d8294aebb67b460f838036decdab0",
+  "extraction": {
+    "topics": [
+      "data"
+    ],
+    "claims": [
+      {
+        "topic": "data",
+        "subject": "OrderStatus enum",
+        "content": {
+          "fields": {
+            "values": [
+              "placed",
+              "paid",
+              "shipped",
+              "delivered",
+              "cancelled"
+            ]
+          }
+        },
+        "kind": "definition",
+        "line": 70
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.359Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

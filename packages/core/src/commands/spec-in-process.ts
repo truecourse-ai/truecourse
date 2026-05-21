@@ -253,6 +253,7 @@ export async function scanInProcess(
   let blocksTotal = 0;
   let blocksDone = 0;
   let extractStarted = false;
+  let mergeStarted = false;
 
   const renderExtractDetail = (): string => {
     if (blocksTotal === 0) {
@@ -287,20 +288,34 @@ export async function scanInProcess(
         blocksDone++;
         tracker?.detail('extract', renderExtractDetail());
       },
+      onMergeStart: () => {
+        if (!mergeStarted) {
+          if (!extractStarted) {
+            tracker?.done('discover');
+            tracker?.start('extract');
+          }
+          tracker?.done('extract', `${blocksDone} blocks`);
+          tracker?.start('merge');
+          mergeStarted = true;
+        }
+      },
     });
   } catch (e) {
-    tracker?.error(extractStarted ? 'extract' : 'discover', (e as Error).message);
+    tracker?.error(mergeStarted ? 'merge' : extractStarted ? 'extract' : 'discover', (e as Error).message);
     throw e;
   }
 
+  // Stamp final detail on discover now that we have the full doc count.
+  tracker?.detail('discover', `${result.extract.docsScanned} docs`);
+  // Close any steps that didn't get a callback (e.g. empty repo, no docs).
   if (!extractStarted) {
     tracker?.done('discover', `${result.extract.docsScanned} docs`);
     tracker?.start('extract');
-  } else {
-    tracker?.detail('discover', `${result.extract.docsScanned} docs`);
   }
-  tracker?.done('extract', `${result.extract.claims.length} claims`);
-  tracker?.start('merge');
+  if (!mergeStarted) {
+    tracker?.done('extract', `${result.extract.claims.length} claims`);
+    tracker?.start('merge');
+  }
   tracker?.done(
     'merge',
     `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
@@ -474,6 +489,7 @@ export async function applyInProcess(
   let blocksDone = 0;
   let sectionsDone = 0;
   let extractStarted = false;
+  let mergeStarted = false;
   let materializeStarted = false;
 
   const renderExtractDetail = (): string => {
@@ -510,9 +526,19 @@ export async function applyInProcess(
         blocksDone++;
         tracker?.detail('extract', renderExtractDetail());
       },
+      onMergeStart: () => {
+        if (!mergeStarted) {
+          if (!extractStarted) {
+            tracker?.done('discover');
+            tracker?.start('extract');
+          }
+          tracker?.done('extract', `${blocksDone} blocks`);
+          tracker?.start('merge');
+          mergeStarted = true;
+        }
+      },
       onSectionDone: () => {
         if (!materializeStarted) {
-          if (extractStarted) tracker?.done('extract', `${blocksDone} blocks`);
           tracker?.done('merge');
           tracker?.start('materialize');
           materializeStarted = true;
@@ -524,30 +550,33 @@ export async function applyInProcess(
   } catch (e) {
     const activeKey = materializeStarted
       ? 'materialize'
-      : extractStarted
-        ? 'extract'
-        : 'discover';
+      : mergeStarted
+        ? 'merge'
+        : extractStarted
+          ? 'extract'
+          : 'discover';
     tracker?.error(activeKey, (e as Error).message);
     throw e;
   }
 
-  // Tidy up step-state for edge cases the callbacks didn't fire on.
+  // Stamp final detail on discover now that we have the full doc count.
+  tracker?.detail('discover', `${result.extract.docsScanned} docs`);
+  // Close any steps that didn't get a callback (e.g. empty repo, no docs).
   if (!extractStarted) {
     tracker?.done('discover', `${result.extract.docsScanned} docs`);
     tracker?.start('extract');
-  } else {
-    tracker?.detail('discover', `${result.extract.docsScanned} docs`);
   }
-  if (!materializeStarted) {
+  if (!mergeStarted) {
     tracker?.done('extract', `${result.extract.claims.length} claims`);
     tracker?.start('merge');
+  }
+  if (!materializeStarted) {
     tracker?.done(
       'merge',
       `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
     );
     tracker?.start('materialize');
   } else {
-    tracker?.detail('extract', `${result.extract.claims.length} claims`);
     tracker?.detail(
       'merge',
       `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
@@ -603,20 +632,47 @@ export async function generateContractsInProcess(
   }
 
   tracker?.start('il');
+  let slicesTotal = 0;
+  let slicesDone = 0;
+
+  const renderIlDetail = (): string => {
+    if (slicesTotal === 0) return '';
+    return `${slicesDone}/${slicesTotal} slices`;
+  };
+
   try {
     const il = await generateContracts({
       repoRoot,
-      runner: spawnExtractorRunner({ concurrency: defaultExtractorConcurrency() }),
+      runner: spawnExtractorRunner({
+        concurrency: defaultExtractorConcurrency(),
+        onSliceDone: () => {
+          slicesDone++;
+          tracker?.detail('il', renderIlDetail());
+        },
+      }),
+      onSlicesReady: (total) => {
+        slicesTotal = total;
+        tracker?.detail('il', renderIlDetail());
+      },
+      onSliceCacheHit: () => {
+        slicesDone++;
+        tracker?.detail('il', renderIlDetail());
+      },
+      onSliceDone: () => {
+        slicesDone++;
+        tracker?.detail('il', renderIlDetail());
+      },
     });
     const issueCount = il.validationIssues.length;
     const wrote = il.write.written.length;
+    const slicesSuffix = slicesDone > 0 ? `${slicesDone} slices · ` : '';
     tracker?.done(
       'il',
       issueCount === 0
         ? wrote === 0
-          ? 'up to date'
-          : `${wrote} files`
-        : `${wrote} files · ${issueCount} issue${issueCount === 1 ? '' : 's'}`,
+          ? `${slicesSuffix}up to date`
+          : `${slicesSuffix}${wrote} files`
+        : `${slicesSuffix}${wrote} files · ${issueCount} issue${issueCount === 1 ? '' : 's'}`,
     );
     // Stamp the generate marker only when validation passed — issues
     // mean the .tc corpus didn't fully land, so "fresh" would lie.

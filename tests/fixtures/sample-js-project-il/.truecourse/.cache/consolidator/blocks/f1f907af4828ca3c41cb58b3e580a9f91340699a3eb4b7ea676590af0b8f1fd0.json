@@ -1,0 +1,33 @@
+{
+  "blockId": "f1f907af4828ca3c41cb58b3e580a9f91340699a3eb4b7ea676590af0b8f1fd0",
+  "extraction": {
+    "topics": [
+      "errors"
+    ],
+    "claims": [
+      {
+        "topic": "errors",
+        "subject": "global error envelope",
+        "content": {
+          "envelope": {
+            "error": {
+              "code": "string",
+              "message": "string",
+              "details": "object (optional)"
+            }
+          },
+          "codes": {
+            "validation_failed": null,
+            "unauthenticated": null,
+            "forbidden": null,
+            "order_not_found": null
+          }
+        },
+        "kind": "definition",
+        "line": 18
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.359Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

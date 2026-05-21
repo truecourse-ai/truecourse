@@ -88,6 +88,8 @@ export interface OperationContract {
   responses: ResponseContract[];
   preconditions?: PreconditionsContract;
   tags: string[];
+  /** When set to planned/deferred/out-of-scope, implementation.missing is suppressed. */
+  status?: 'shipped' | 'planned' | 'deferred' | 'deprecated' | 'out-of-scope';
 }
 
 export interface RequestContract {
@@ -239,6 +241,8 @@ export interface AuthRequirementContract {
   scheme: 'Bearer' | 'Role' | string;
   requiredRole?: string;
   selector: SelectorExpr;
+  /** Paths/operations that are explicitly excluded from this requirement. */
+  except?: SelectorExpr[];
   onViolation: { status: number; errorCode: string; bodyRef?: ArtifactRef };
 }
 
@@ -311,6 +315,7 @@ export interface UnenforceableObligationContract {
 
 export type SelectorExpr =
   | { kind: 'path-glob'; pattern: string }
+  | { kind: 'path-exact'; path: string }
   | { kind: 'path-regex'; pattern: string }
   | { kind: 'method'; method: string }
   | { kind: 'protocol'; protocol: string }

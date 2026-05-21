@@ -46,7 +46,7 @@ let workRoot: string;
 
 beforeEach(() => {
   // Copy the fixture into a tmp dir so the consolidator can write
-  // .truecourse/spec/ + .truecourse/.cache/consolidator/ without
+  // .truecourse/specs/ + .truecourse/.cache/consolidator/ without
   // mutating the committed fixture.
   workRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-fix-'));
   copyDir(FIXTURE_ROOT, workRoot);
@@ -439,7 +439,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
     expect(apply.merge.openConflicts).toEqual([]);
     expect(apply.materialize?.failures).toEqual([]);
 
-    const specRoot = path.join(workRoot, '.truecourse/spec');
+    const specRoot = path.join(workRoot, '.truecourse/specs');
     expect(fs.existsSync(path.join(specRoot, 'modules/orders/module.yaml'))).toBe(true);
     expect(fs.existsSync(path.join(specRoot, 'modules/orders/endpoints.md'))).toBe(true);
     expect(fs.existsSync(path.join(specRoot, 'shared/auth.md'))).toBe(true);
@@ -457,7 +457,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       disableLlmChainDetection: true,    });
     const ordersManifest = yaml.load(
       fs.readFileSync(
-        path.join(workRoot, '.truecourse/spec/modules/orders/module.yaml'),
+        path.join(workRoot, '.truecourse/specs/modules/orders/module.yaml'),
         'utf-8',
       ),
     ) as Record<string, unknown>;
@@ -473,7 +473,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       expect(e.source).toMatch(/^docs\/PRDs\/orders_PRDv2\.md:\d+$/);
     }
     const endpointsMd = fs.readFileSync(
-      path.join(workRoot, '.truecourse/spec/modules/orders/endpoints.md'),
+      path.join(workRoot, '.truecourse/specs/modules/orders/endpoints.md'),
       'utf-8',
     );
     expect(endpointsMd).not.toContain('refund');
@@ -490,16 +490,16 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       disableLlmChainDetection: true,    });
     const ordersManifest = yaml.load(
       fs.readFileSync(
-        path.join(workRoot, '.truecourse/spec/modules/orders/module.yaml'),
+        path.join(workRoot, '.truecourse/specs/modules/orders/module.yaml'),
         'utf-8',
       ),
     ) as Record<string, unknown>;
     expect(ordersManifest.sourceDocs).toEqual(['docs/PRDs/orders_PRDv2.md']);
   });
 
-  it('produced canonical structurally matches the hand-written reference at .truecourse/spec/', async () => {
+  it('produced canonical structurally matches the hand-written reference at .truecourse/specs/', async () => {
     // Same pattern as the IL coverage check: we hand-write a canonical
-    // reference under FIXTURE_ROOT/.truecourse/spec/ describing what
+    // reference under FIXTURE_ROOT/.truecourse/specs/ describing what
     // `spec apply` *should* produce on this fixture. The materializer's
     // output is fuzzed by the LLM section runner (prose), but the
     // structural pieces — module dirs, manifest shape, file presence
@@ -512,8 +512,8 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       skipGit: true,
       disableLlmChainDetection: true,    });
 
-    const expectedRoot = path.join(FIXTURE_ROOT, '.truecourse/spec');
-    const actualRoot = path.join(workRoot, '.truecourse/spec');
+    const expectedRoot = path.join(FIXTURE_ROOT, '.truecourse/specs');
+    const actualRoot = path.join(workRoot, '.truecourse/specs');
 
     // The hand-written canonical represents a fully-extracted ideal
     // (every section the docs describe). The stub runner emits claims

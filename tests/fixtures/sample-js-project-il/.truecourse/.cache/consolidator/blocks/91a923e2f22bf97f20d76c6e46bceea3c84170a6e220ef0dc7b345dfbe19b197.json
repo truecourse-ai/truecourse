@@ -1,0 +1,34 @@
+{
+  "blockId": "91a923e2f22bf97f20d76c6e46bceea3c84170a6e220ef0dc7b345dfbe19b197",
+  "extraction": {
+    "topics": [
+      "endpoints"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/replace",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/replace"
+        },
+        "kind": "definition",
+        "status": "out-of-scope",
+        "line": 232
+      },
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/refund",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/refund"
+        },
+        "kind": "definition",
+        "status": "out-of-scope",
+        "line": 233
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.361Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

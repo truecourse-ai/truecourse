@@ -177,7 +177,7 @@ describe('discoverDocs — walker', () => {
     place('build/docs/leaked.md', '# leaked');
     place('.next/leaked.md', '# leaked');
     place('.turbo/leaked.md', '# leaked');
-    place('.truecourse/spec/modules/auth/endpoints.md', '# canonical — must not echo');
+    place('.truecourse/specs/modules/auth/endpoints.md', '# canonical — must not echo');
     place('.cache/leaked.md', '# leaked');
 
     const docs = discoverDocs(root, { skipGit: true });
@@ -189,7 +189,7 @@ describe('discoverDocs — walker', () => {
     expect(paths).not.toContain('build/docs/leaked.md');
     expect(paths).not.toContain('.next/leaked.md');
     expect(paths).not.toContain('.turbo/leaked.md');
-    expect(paths).not.toContain('.truecourse/spec/modules/auth/endpoints.md');
+    expect(paths).not.toContain('.truecourse/specs/modules/auth/endpoints.md');
     expect(paths).not.toContain('.cache/leaked.md');
   });
 
@@ -197,8 +197,8 @@ describe('discoverDocs — walker', () => {
     // Simulate a state where the consolidator already ran. If we
     // re-discovered its outputs, every run would compound on its own
     // previous output.
-    place('.truecourse/spec/overview.md', '# canonical overview\n');
-    place('.truecourse/spec/modules/auth/endpoints.md', '# auth\n');
+    place('.truecourse/specs/overview.md', '# canonical overview\n');
+    place('.truecourse/specs/modules/auth/endpoints.md', '# auth\n');
     place('docs/source.md', '# original');
 
     const docs = discoverDocs(root, { skipGit: true });

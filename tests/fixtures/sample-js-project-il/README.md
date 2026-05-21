@@ -3,7 +3,7 @@
 Two-resource HTTP service (Orders + Customers) used as the end-to-end
 fixture for the TrueCourse pipeline:
 
-  docs/  →  consolidator  →  .truecourse/spec/  →  extractor  →  .truecourse/contracts/  →  verifier  →  drifts
+  docs/  →  consolidator  →  .truecourse/specs/  →  extractor  →  .truecourse/contracts/  →  verifier  →  drifts
 
 The implementation under `code/` carries planted IL-DRIFT bugs (each
 marked with `// IL-DRIFT:`). The hand-written `.truecourse/contracts/`

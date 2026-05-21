@@ -1,0 +1,24 @@
+{
+  "blockId": "c6a6f8894b50f2c2679a6e304a5cadb74b916d332732e596425207176a8b5aef",
+  "extraction": {
+    "topics": [
+      "endpoints"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "global idempotency rule",
+        "content": {
+          "headers": {
+            "Idempotency-Key": "string"
+          },
+          "idempotency": true
+        },
+        "kind": "definition",
+        "line": 49
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.359Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

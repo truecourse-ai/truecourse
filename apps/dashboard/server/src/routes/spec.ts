@@ -301,7 +301,7 @@ router.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
-      const decisionsFile = path.join(repo.path, '.truecourse', 'spec', 'decisions.json');
+      const decisionsFile = path.join(repo.path, '.truecourse', 'specs', 'decisions.json');
       const decisionsMtime = mtimeIfExists(decisionsFile);
       const appliedMtime = mtimeIfExists(appliedMarkerPath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
@@ -345,7 +345,7 @@ function mtimeIfExists(file: string): number | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Enumerate the materialized canonical spec under `.truecourse/spec/`.
+ * Enumerate the materialized canonical spec under `.truecourse/specs/`.
  * Returns:
  *   - whether the tree exists
  *   - shared/* markdown files (cross-cutting concerns)
@@ -425,7 +425,7 @@ router.get(
 
 /**
  * Return the contents of a canonical spec file. The `path` query
- * parameter is a repo-relative path under `.truecourse/spec/` (e.g.
+ * parameter is a repo-relative path under `.truecourse/specs/` (e.g.
  * `modules/orders/endpoints.md`). Refuses anything that would escape
  * the spec root.
  */

@@ -125,11 +125,13 @@ function Section({
 }) {
   return (
     <div>
-      <div
-        className={`sticky top-0 z-10 flex items-center justify-between border-b border-border px-4 py-1.5 text-[10px] uppercase tracking-wider ${tone}`}
-      >
-        <span>{title}</span>
-        <span>{count}</span>
+      <div className="sticky top-0 z-10 bg-background">
+        <div
+          className={`flex items-center justify-between border-b border-border px-4 py-1.5 text-[10px] uppercase tracking-wider ${tone}`}
+        >
+          <span>{title}</span>
+          <span>{count}</span>
+        </div>
       </div>
       {children}
     </div>

@@ -70,12 +70,12 @@ describe.skipIf(!SHOULD_RUN)('contract extractor — live Claude Code smoke', ()
     async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-live-'));
       try {
-        // Stage a canonical spec under tmp/.truecourse/spec/ — the
+        // Stage a canonical spec under tmp/.truecourse/specs/ — the
         // contract extractor reads only the canonical now. We treat
         // the entire orders_PRDv2.md as one module's endpoints.md to
         // keep the test focused on extraction (one slice per operation
         // heading) without a second LLM-driven consolidation pass.
-        const moduleDir = path.join(tmp, '.truecourse', 'spec', 'modules', 'orders');
+        const moduleDir = path.join(tmp, '.truecourse', 'specs', 'modules', 'orders');
         fs.mkdirSync(moduleDir, { recursive: true });
         fs.copyFileSync(FIXTURE_SPEC, path.join(moduleDir, 'endpoints.md'));
         fs.writeFileSync(

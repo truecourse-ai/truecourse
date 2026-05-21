@@ -3,7 +3,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "dev": "turbo dev",
+    "dev": "turbo dev --concurrency=15",
     "build": "turbo build",
     "lint": "turbo lint",
     "clean": "turbo clean",

@@ -1,0 +1,72 @@
+{
+  "blockId": "c2227f94a463a4a1b0d6b194c5b752a3bf828d42078d6e31daac3030f186082d",
+  "extraction": {
+    "topics": [
+      "effects"
+    ],
+    "claims": [
+      {
+        "topic": "effects",
+        "subject": "order.placed",
+        "content": {
+          "name": "order.placed",
+          "trigger": "POST /api/orders 201",
+          "payload": {
+            "id": "uuid",
+            "status": "string",
+            "timestamp": "ISO timestamp"
+          }
+        },
+        "kind": "definition",
+        "line": 213
+      },
+      {
+        "topic": "effects",
+        "subject": "order.paid",
+        "content": {
+          "name": "order.paid",
+          "trigger": "POST /api/orders/:id/pay 200",
+          "payload": {
+            "id": "uuid",
+            "status": "string",
+            "timestamp": "ISO timestamp"
+          }
+        },
+        "kind": "definition",
+        "line": 214
+      },
+      {
+        "topic": "effects",
+        "subject": "order.shipped",
+        "content": {
+          "name": "order.shipped",
+          "trigger": "POST /api/orders/:id/ship 200",
+          "payload": {
+            "id": "uuid",
+            "status": "string",
+            "timestamp": "ISO timestamp"
+          }
+        },
+        "kind": "definition",
+        "line": 215
+      },
+      {
+        "topic": "effects",
+        "subject": "order.cancelled",
+        "content": {
+          "name": "order.cancelled",
+          "trigger": "POST /api/orders/:id/cancel 200",
+          "payload": {
+            "id": "uuid",
+            "status": "string",
+            "timestamp": "ISO timestamp"
+          }
+        },
+        "kind": "definition",
+        "line": 216
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.361Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

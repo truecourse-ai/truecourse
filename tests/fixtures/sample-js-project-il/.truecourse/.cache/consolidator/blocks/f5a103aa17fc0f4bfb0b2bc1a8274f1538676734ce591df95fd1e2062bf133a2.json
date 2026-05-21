@@ -1,0 +1,47 @@
+{
+  "blockId": "f5a103aa17fc0f4bfb0b2bc1a8274f1538676734ce591df95fd1e2062bf133a2",
+  "extraction": {
+    "topics": [
+      "endpoints",
+      "effects"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/ship",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/ship",
+          "responses": {
+            "409": {}
+          }
+        },
+        "kind": "definition",
+        "line": 140
+      },
+      {
+        "topic": "effects",
+        "subject": "order.shipped",
+        "content": {
+          "name": "order.shipped",
+          "trigger": "POST /api/orders/:id/ship"
+        },
+        "kind": "definition",
+        "line": 140
+      },
+      {
+        "topic": "data",
+        "subject": "Order / state machine",
+        "content": {
+          "validation": {
+            "status": "paid → shipped"
+          }
+        },
+        "kind": "constraint",
+        "line": 140
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.360Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

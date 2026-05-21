@@ -92,6 +92,8 @@ export interface ResolveError {
   line: number;
   col: number;
   message: string;
+  /** Defaults to 'hard' when absent. Soft errors are reported but don't block writes. */
+  severity?: 'hard' | 'soft';
 }
 
 export interface ResolveResult {
@@ -221,6 +223,7 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
           line: stmt.loc.line,
           col: stmt.loc.col,
           message: `operation declaration expects \`operation METHOD "path"\``,
+          severity: 'soft',
         },
       };
     }
@@ -418,16 +421,7 @@ function indexInnerEffects(
     const ref: ArtifactRef = { type: 'Effect', identity: head[1].value, quoted: false };
     const key = refKey(ref);
     if (index.has(key)) {
-      const existing = index.get(key)!;
-      errors.push({
-        filePath,
-        line: inner.loc.line,
-        col: inner.loc.col,
-        message:
-          `duplicate effect identity ${key} — also declared at ` +
-          `${existing.declarationLoc.filePath}:${existing.declarationLoc.lineStart}`,
-      });
-      continue;
+      continue; // silently deduplicate — same effect from multiple merged slices
     }
     index.set(key, {
       ref,

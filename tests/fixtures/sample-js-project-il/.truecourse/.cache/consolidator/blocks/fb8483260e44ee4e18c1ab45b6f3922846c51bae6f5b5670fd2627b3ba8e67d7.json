@@ -1,0 +1,46 @@
+{
+  "blockId": "fb8483260e44ee4e18c1ab45b6f3922846c51bae6f5b5670fd2627b3ba8e67d7",
+  "extraction": {
+    "topics": [
+      "overview",
+      "auth",
+      "data"
+    ],
+    "claims": [
+      {
+        "topic": "overview",
+        "subject": "Order Management Service",
+        "content": {
+          "summary": "A small HTTP service for managing orders and customers. V1 ships with a session-based auth model and a basic three-status lifecycle."
+        },
+        "kind": "definition",
+        "status": "shipped",
+        "line": 9
+      },
+      {
+        "topic": "auth",
+        "subject": "auth scheme",
+        "content": {
+          "scheme": "Session"
+        },
+        "kind": "definition",
+        "status": "shipped",
+        "line": 9
+      },
+      {
+        "topic": "data",
+        "subject": "Order / state machine",
+        "content": {
+          "validation": {
+            "status": "three-status lifecycle"
+          }
+        },
+        "kind": "constraint",
+        "status": "shipped",
+        "line": 9
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.358Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

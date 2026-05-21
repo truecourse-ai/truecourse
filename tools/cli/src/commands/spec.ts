@@ -4,7 +4,7 @@
  *   scan      docs → claims → conflicts; reports what's pending
  *   resolve   batch-apply default picks (CLI fast-path; the dashboard
  *             is the primary review surface per Q8)
- *   apply     write `.truecourse/spec/` from current decisions
+ *   apply     write `.truecourse/specs/` from current decisions
  *   status    summary: docs walked, claims, modules, pending vs decided
  *   diff      docs vs current canonical — what would change on apply
  *
@@ -268,5 +268,5 @@ function summarizeConflicts(label: string, conflicts: Conflict[]): void {
 }
 
 function decisionsRelPath(root: string): string {
-  return path.join(root, ".truecourse", "spec", "decisions.json");
+  return path.join(root, ".truecourse", "specs", "decisions.json");
 }

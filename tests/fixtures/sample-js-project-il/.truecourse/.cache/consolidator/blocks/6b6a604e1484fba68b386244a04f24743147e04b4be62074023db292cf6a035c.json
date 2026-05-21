@@ -1,0 +1,36 @@
+{
+  "blockId": "6b6a604e1484fba68b386244a04f24743147e04b4be62074023db292cf6a035c",
+  "extraction": {
+    "topics": [
+      "endpoints",
+      "effects"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/cancel",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/cancel",
+          "responses": {
+            "409": {}
+          }
+        },
+        "kind": "definition",
+        "line": 144
+      },
+      {
+        "topic": "effects",
+        "subject": "order.cancelled",
+        "content": {
+          "name": "order.cancelled",
+          "trigger": "POST /api/orders/:id/cancel"
+        },
+        "kind": "definition",
+        "line": 147
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.361Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

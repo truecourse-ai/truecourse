@@ -10,7 +10,7 @@ import {
 
 /**
  * The orchestrator end-to-end against the canonical spec at
- * `.truecourse/spec/`: section files → slicer → cache → runner stub →
+ * `.truecourse/specs/`: section files → slicer → cache → runner stub →
  * merger → validator → writer. The runner is stubbed so no Claude
  * Code subprocesses run during tests.
  */
@@ -39,7 +39,7 @@ describe('contract extractor — orchestrator', () => {
     const body =
       opts.body ??
       ['# Endpoints', '## Operations', '### Orders', 'Body.'].join('\n');
-    const moduleDir = path.join(tmpRoot, '.truecourse', 'spec', 'modules', moduleName);
+    const moduleDir = path.join(tmpRoot, '.truecourse', 'specs', 'modules', moduleName);
     fs.mkdirSync(moduleDir, { recursive: true });
     fs.writeFileSync(path.join(moduleDir, sectionName), body);
     fs.writeFileSync(
@@ -169,25 +169,25 @@ describe('contract extractor — orchestrator', () => {
     expect(result.write.written).toEqual([]);
   });
 
-  it('throws CanonicalSpecMissingError when .truecourse/spec/ is absent', async () => {
+  it('throws CanonicalSpecMissingError when .truecourse/specs/ is absent', async () => {
     await expect(
       generateContracts({ repoRoot: tmpRoot, runner: stubRunner() }),
     ).rejects.toThrow(CanonicalSpecMissingError);
   });
 
-  it('walks every module section file under .truecourse/spec/', async () => {
+  it('walks every module section file under .truecourse/specs/', async () => {
     writeCanonical({ moduleName: 'orders' });
     // Add a second module with a different section file.
     fs.mkdirSync(
-      path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'auth'),
+      path.join(tmpRoot, '.truecourse', 'specs', 'modules', 'auth'),
       { recursive: true },
     );
     fs.writeFileSync(
-      path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'auth', 'auth.md'),
+      path.join(tmpRoot, '.truecourse', 'specs', 'modules', 'auth', 'auth.md'),
       ['# Authentication', '## Bearer', 'Bearer JWT.'].join('\n'),
     );
     fs.writeFileSync(
-      path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'auth', 'module.yaml'),
+      path.join(tmpRoot, '.truecourse', 'specs', 'modules', 'auth', 'module.yaml'),
       `name: auth\nstatus: shipped\nsourceDocs: []\nscope:\n  paths:\n    - /api/auth/**\n`,
     );
 
@@ -198,14 +198,14 @@ describe('contract extractor — orchestrator', () => {
     };
 
     await generateContracts({ repoRoot: tmpRoot, runner: observingRunner });
-    expect(seen.some((p) => p.startsWith('.truecourse/spec/modules/orders/'))).toBe(true);
-    expect(seen.some((p) => p.startsWith('.truecourse/spec/modules/auth/'))).toBe(true);
+    expect(seen.some((p) => p.startsWith('.truecourse/specs/modules/orders/'))).toBe(true);
+    expect(seen.some((p) => p.startsWith('.truecourse/specs/modules/auth/'))).toBe(true);
   });
 
   it('skips modules whose manifest declares status: out-of-scope', async () => {
     writeCanonical({ moduleName: 'orders' });
     // Add a module marked out-of-scope. Its sections must not produce slices.
-    const oosDir = path.join(tmpRoot, '.truecourse', 'spec', 'modules', 'legacy');
+    const oosDir = path.join(tmpRoot, '.truecourse', 'specs', 'modules', 'legacy');
     fs.mkdirSync(oosDir, { recursive: true });
     fs.writeFileSync(
       path.join(oosDir, 'endpoints.md'),
@@ -227,7 +227,7 @@ describe('contract extractor — orchestrator', () => {
 
   it('also reads shared/ section files (cross-cutting)', async () => {
     writeCanonical();
-    const sharedDir = path.join(tmpRoot, '.truecourse', 'spec', 'shared');
+    const sharedDir = path.join(tmpRoot, '.truecourse', 'specs', 'shared');
     fs.mkdirSync(sharedDir, { recursive: true });
     fs.writeFileSync(
       path.join(sharedDir, 'auth.md'),
@@ -240,6 +240,6 @@ describe('contract extractor — orchestrator', () => {
       return stubRunner()(slices);
     };
     await generateContracts({ repoRoot: tmpRoot, runner: observingRunner });
-    expect(seen.some((p) => p.startsWith('.truecourse/spec/shared/'))).toBe(true);
+    expect(seen.some((p) => p.startsWith('.truecourse/specs/shared/'))).toBe(true);
   });
 });

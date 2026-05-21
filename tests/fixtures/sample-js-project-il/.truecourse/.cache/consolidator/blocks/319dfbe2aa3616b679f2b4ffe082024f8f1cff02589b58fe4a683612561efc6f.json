@@ -1,0 +1,22 @@
+{
+  "blockId": "319dfbe2aa3616b679f2b4ffe082024f8f1cff02589b58fe4a683612561efc6f",
+  "extraction": {
+    "topics": [
+      "auth"
+    ],
+    "claims": [
+      {
+        "topic": "auth",
+        "subject": "auth scheme",
+        "content": {
+          "scheme": "Bearer JWT",
+          "scope": "/api/*"
+        },
+        "kind": "definition",
+        "line": 16
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.362Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

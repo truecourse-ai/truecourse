@@ -101,7 +101,7 @@ describe('POST /api/repos/:id/spec/decisions', () => {
     const decisionsFile = path.join(
       fixture.repoPath,
       '.truecourse',
-      'spec',
+      'specs',
       'decisions.json',
     );
     expect(fs.existsSync(decisionsFile)).toBe(true);

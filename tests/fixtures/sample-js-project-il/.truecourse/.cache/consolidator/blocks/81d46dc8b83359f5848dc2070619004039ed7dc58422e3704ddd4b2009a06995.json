@@ -1,0 +1,26 @@
+{
+  "blockId": "81d46dc8b83359f5848dc2070619004039ed7dc58422e3704ddd4b2009a06995",
+  "extraction": {
+    "topics": [
+      "data"
+    ],
+    "claims": [
+      {
+        "topic": "data",
+        "subject": "Order / state machine",
+        "content": {
+          "fields": {
+            "status": "enum: placed | paid | shipped | delivered | cancelled"
+          },
+          "validation": {
+            "status": "initial state is 'placed'; terminal states 'delivered' and 'cancelled' are immutable; allowed transitions: placed→paid, placed→cancelled, paid→shipped, paid→cancelled, shipped→delivered; any other transition is illegal"
+          }
+        },
+        "kind": "definition",
+        "line": 83
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.360Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

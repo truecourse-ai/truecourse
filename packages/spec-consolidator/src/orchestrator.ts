@@ -11,7 +11,7 @@
  *     command, and the dashboard's initial "what's pending" view.
  *
  *   - **apply**  (`materialize: true`):  runs the full pipeline,
- *     writes `.truecourse/spec/`. The CLI's `spec apply`, and the
+ *     writes `.truecourse/specs/`. The CLI's `spec apply`, and the
  *     dashboard's "Apply resolved" button.
  *
  * Cache integration is via runner-wrappers, so the per-block and
@@ -56,7 +56,7 @@ import { discoverDocs, type DocCandidate } from './discovery.js';
 
 export interface ConsolidateOptions {
   /**
-   * When true, write `.truecourse/spec/` from the merge result.
+   * When true, write `.truecourse/specs/` from the merge result.
    * When false, return early after the merge with the conflict list.
    */
   materialize: boolean;
@@ -95,6 +95,8 @@ export interface ConsolidateOptions {
    * of the run.
    */
   onBlockDone?: () => void;
+  /** Fires just before the merge/conflict-detection phase begins. */
+  onMergeStart?: () => void;
 }
 
 export interface ConsolidateResult {
@@ -169,6 +171,7 @@ export async function consolidate(
   const enrichedChainConflicts = enrichChainConflictsWithStats(chainConflicts, extract.claims);
 
   // ---- Merge -----------------------------------------------------------
+  opts.onMergeStart?.();
   const merge = mergeClaims(filteredClaims, decisions);
 
   // ---- Stitch chain conflicts into the merge result --------------------
@@ -452,15 +455,15 @@ function stitchChainConflicts(
 const EMPTY_DECISIONS: DecisionsFile = { version: 1, decisions: [] };
 
 export function decisionsPath(repoRoot: string): string {
-  return path.join(repoRoot, '.truecourse', 'spec', 'decisions.json');
+  return path.join(repoRoot, '.truecourse', 'specs', 'decisions.json');
 }
 
 export function specRootPath(repoRoot: string): string {
-  return path.join(repoRoot, '.truecourse', 'spec');
+  return path.join(repoRoot, '.truecourse', 'specs');
 }
 
 /**
- * Read `decisions.json` from the repo's `.truecourse/spec/` dir.
+ * Read `decisions.json` from the repo's `.truecourse/specs/` dir.
  * Returns an empty decisions file if missing or unparseable —
  * stale/corrupt files shouldn't block a scan run.
  */

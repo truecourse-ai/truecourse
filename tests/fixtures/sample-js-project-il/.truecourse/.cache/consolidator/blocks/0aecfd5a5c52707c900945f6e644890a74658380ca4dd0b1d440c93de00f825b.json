@@ -1,0 +1,29 @@
+{
+  "blockId": "0aecfd5a5c52707c900945f6e644890a74658380ca4dd0b1d440c93de00f825b",
+  "extraction": {
+    "topics": [
+      "endpoints"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders",
+          "request": {
+            "totalCents": "integer",
+            "customerId": "UUID"
+          },
+          "responses": {
+            "200": "the created order"
+          }
+        },
+        "kind": "definition",
+        "line": 21
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.358Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

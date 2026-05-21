@@ -191,7 +191,7 @@ contractsCmd
     await runContractsValidate();
   });
 
-// Spec consolidation — docs → claims → conflicts → canonical .truecourse/spec/.
+// Spec consolidation — docs → claims → conflicts → canonical .truecourse/specs/.
 const specCmd = program
   .command("spec")
   .description("Consolidate scattered docs into a canonical spec");
@@ -213,7 +213,7 @@ specCmd
 
 specCmd
   .command("apply")
-  .description("Write .truecourse/spec/ from current decisions")
+  .description("Write .truecourse/specs/ from current decisions")
   .action(async () => {
     await runSpecApply();
   });

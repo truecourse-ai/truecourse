@@ -4,7 +4,8 @@ import type { AuthRequirementContract, SelectorExpr } from '../../types/index.js
 export function liftAuthRequirement(body: StatementNode[]): AuthRequirementContract {
   let scheme: AuthRequirementContract['scheme'] = 'Bearer';
   let requiredRole: string | undefined;
-  let selector: SelectorExpr = { kind: 'tag', tag: 'unspecified' };
+  let selector: SelectorExpr = { kind: 'path-glob', pattern: '/**' };
+  const except: SelectorExpr[] = [];
   let onViolation = { status: 401, errorCode: 'unauthenticated' };
 
   for (const stmt of body) {
@@ -24,6 +25,13 @@ export function liftAuthRequirement(body: StatementNode[]): AuthRequirementContr
       selector = parseSelector(h.slice(1)) ?? selector;
       continue;
     }
+    if (k === 'except' && stmt.block) {
+      for (const inner of stmt.block) {
+        const parsed = parseSelector(inner.head);
+        if (parsed) except.push(parsed);
+      }
+      continue;
+    }
     if (k === 'on-violation' && stmt.block) {
       for (const inner of stmt.block) {
         const ih = inner.head;
@@ -35,7 +43,7 @@ export function liftAuthRequirement(body: StatementNode[]): AuthRequirementContr
     }
   }
 
-  return { scheme, requiredRole, selector, onViolation };
+  return { scheme, requiredRole, selector, except: except.length > 0 ? except : undefined, onViolation };
 }
 
 /** Parse a `selector ...` head suffix into a SelectorExpr. */
@@ -46,6 +54,9 @@ function parseSelector(tokens: HeadToken[]): SelectorExpr | null {
 
   if (first.value === 'path-glob' && tokens[1]?.kind === 'string') {
     return { kind: 'path-glob', pattern: tokens[1].value };
+  }
+  if (first.value === 'path-exact' && tokens[1]?.kind === 'string') {
+    return { kind: 'path-exact', path: tokens[1].value };
   }
   if (first.value === 'path-regex' && tokens[1]?.kind === 'string') {
     return { kind: 'path-regex', pattern: tokens[1].value };

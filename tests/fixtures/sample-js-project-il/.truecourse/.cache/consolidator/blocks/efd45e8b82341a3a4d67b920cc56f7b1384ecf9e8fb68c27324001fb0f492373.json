@@ -1,0 +1,84 @@
+{
+  "blockId": "efd45e8b82341a3a4d67b920cc56f7b1384ecf9e8fb68c27324001fb0f492373",
+  "extraction": {
+    "topics": [
+      "endpoints"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "GET /api/orders/:id",
+        "content": {
+          "method": "GET",
+          "path": "/api/orders/:id",
+          "auth": "required",
+          "responses": {
+            "403": {
+              "error": {
+                "code": "forbidden"
+              }
+            }
+          }
+        },
+        "kind": "constraint",
+        "line": 175
+      },
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/pay",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/pay",
+          "auth": "required",
+          "responses": {
+            "403": {
+              "error": {
+                "code": "forbidden"
+              }
+            }
+          }
+        },
+        "kind": "constraint",
+        "line": 175
+      },
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/ship",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/ship",
+          "auth": "required",
+          "responses": {
+            "403": {
+              "error": {
+                "code": "forbidden"
+              }
+            }
+          }
+        },
+        "kind": "constraint",
+        "line": 175
+      },
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/cancel",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/cancel",
+          "auth": "required",
+          "responses": {
+            "403": {
+              "error": {
+                "code": "forbidden"
+              }
+            }
+          }
+        },
+        "kind": "constraint",
+        "line": 175
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.361Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

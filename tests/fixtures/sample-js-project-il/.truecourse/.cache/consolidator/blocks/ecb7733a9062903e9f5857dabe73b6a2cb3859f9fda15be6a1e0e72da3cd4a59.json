@@ -1,0 +1,39 @@
+{
+  "blockId": "ecb7733a9062903e9f5857dabe73b6a2cb3859f9fda15be6a1e0e72da3cd4a59",
+  "extraction": {
+    "topics": [
+      "data"
+    ],
+    "claims": [
+      {
+        "topic": "data",
+        "subject": "Order / pricing",
+        "content": {
+          "fields": {
+            "subtotalCents": "integer (client-supplied)",
+            "discountCents": "integer (server-computed)",
+            "taxCents": "integer (server-computed)",
+            "totalCents": "integer (server-computed)"
+          },
+          "immutable": [
+            "discountCents",
+            "taxCents",
+            "totalCents"
+          ],
+          "validation": {
+            "discountCents": "10% of subtotalCents when customer.loyaltyTier == 'gold' AND subtotalCents > 10000; otherwise 0",
+            "taxCents": "8% of (subtotalCents - discountCents), rounded to nearest integer cent",
+            "totalCents": "subtotalCents - discountCents + taxCents",
+            "discountCents_source": "server-computed at order creation; must not be client-supplied",
+            "taxCents_source": "server-computed at order creation; must not be client-supplied",
+            "totalCents_source": "server-computed at order creation; must not be client-supplied"
+          }
+        },
+        "kind": "definition",
+        "line": 192
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.361Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

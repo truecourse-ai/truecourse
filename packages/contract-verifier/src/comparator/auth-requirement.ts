@@ -39,6 +39,9 @@ export function compareAuthRequirement(input: AuthRequirementCompareInput): Cont
 
     if (input.protectedFiles.has(op.filePath)) continue; // satisfied
 
+    // `except` selectors — paths explicitly excluded from this requirement.
+    if (input.contract.except?.some((ex) => matchesOperation(ex, op, specOp))) continue;
+
     out.push({
       id: randomUUID(),
       type: 'contract-drift',
@@ -74,6 +77,8 @@ function matchesOperation(
   switch (sel.kind) {
     case 'path-glob':
       return minimatch(op.contract.path, sel.pattern);
+    case 'path-exact':
+      return op.contract.path === sel.path;
     case 'path-regex':
       try {
         return new RegExp(sel.pattern).test(op.contract.path);

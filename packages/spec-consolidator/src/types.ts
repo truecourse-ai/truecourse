@@ -4,7 +4,7 @@
  * The engine reads docs (PRDs, ADRs, RFCs, READMEs, design notes,
  * anything markdown), extracts structured `Claim`s about the system,
  * merges them, surfaces `Conflict`s for the user, and writes the
- * canonical spec under `.truecourse/spec/`.
+ * canonical spec under `.truecourse/specs/`.
  *
  * These types are the contracts each stage talks through. Locked
  * design choices (see docs/contracts/PLAN.md):

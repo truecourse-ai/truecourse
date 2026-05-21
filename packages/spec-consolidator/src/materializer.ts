@@ -1,8 +1,8 @@
 /**
  * Materializer. Takes the merge result + detected modules and writes
- * the canonical `.truecourse/spec/` tree:
+ * the canonical `.truecourse/specs/` tree:
  *
- *   .truecourse/spec/
+ *   .truecourse/specs/
  *   ├── modules/
  *   │   └── <name>/
  *   │       ├── module.yaml          ← deterministic
@@ -63,7 +63,7 @@ export interface MaterializeResult {
 /**
  * Run the materializer.
  *
- * @param specRoot   Absolute path to `.truecourse/spec/`. Created if missing.
+ * @param specRoot   Absolute path to `.truecourse/specs/`. Created if missing.
  * @param merge      Output of `mergeClaims()` — resolvedClaims + decided.
  * @param modules    Output of `detectModules()` — module groupings.
  * @param decisions  The decisions file to write into the spec tree (Q12).
@@ -194,7 +194,7 @@ function synthesizeCustomClaim(
     content: { _custom: content },
     kind: 'definition',
     provenance: {
-      file: '.truecourse/spec/decisions.json',
+      file: '.truecourse/specs/decisions.json',
       line: 0,
       quote: content,
     },

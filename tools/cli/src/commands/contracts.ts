@@ -26,11 +26,11 @@ export async function runContractsGenerate(
   p.intro(options.diff ? "Contracts (dry run)" : "Contracts");
 
   // Module 2 reads the canonical spec produced by Module 1. If
-  // `.truecourse/spec/` doesn't exist, the user hasn't run the
+  // `.truecourse/specs/` doesn't exist, the user hasn't run the
   // consolidator yet — tell them and bail.
   if (!hasCanonicalSpec(repoRoot)) {
     p.log.error(
-      "No .truecourse/spec/ found. Run `truecourse spec apply` first to produce the canonical spec.",
+      "No .truecourse/specs/ found. Run `truecourse spec apply` first to produce the canonical spec.",
     );
     p.outro("Aborted.");
     process.exit(1);

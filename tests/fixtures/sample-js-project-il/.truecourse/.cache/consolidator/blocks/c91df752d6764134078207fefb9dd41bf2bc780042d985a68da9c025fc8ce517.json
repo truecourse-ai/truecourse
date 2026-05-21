@@ -1,0 +1,36 @@
+{
+  "blockId": "c91df752d6764134078207fefb9dd41bf2bc780042d985a68da9c025fc8ce517",
+  "extraction": {
+    "topics": [
+      "data"
+    ],
+    "claims": [
+      {
+        "topic": "data",
+        "subject": "Customer entity",
+        "content": {
+          "fields": {
+            "id": "UUID",
+            "email": "string",
+            "name": "string",
+            "createdAt": "ISO timestamp"
+          },
+          "immutable": [
+            "id",
+            "createdAt"
+          ],
+          "validation": {
+            "id": "server-assigned",
+            "email": "valid email; lowercased on write; unique",
+            "name": "non-empty",
+            "createdAt": "server-assigned"
+          }
+        },
+        "kind": "definition",
+        "line": 74
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.360Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

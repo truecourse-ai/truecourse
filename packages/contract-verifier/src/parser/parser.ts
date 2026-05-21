@@ -107,6 +107,19 @@ function parseHeadToken(ctx: ParseContext): HeadToken {
   switch (t.kind) {
     case 'ident': {
       ctx.advance();
+      // Type-precision notation like `numeric(4,3)` or `decimal(15,2)` —
+      // consume the `(args)` group and fold it into the ident value.
+      if (ctx.peek().kind === 'lparen') {
+        let parenText = '(';
+        ctx.advance(); // consume '('
+        while (ctx.peek().kind !== 'rparen' && ctx.peek().kind !== 'eof') {
+          parenText += ctx.peek().text;
+          ctx.advance();
+        }
+        parenText += ')';
+        if (ctx.peek().kind === 'rparen') ctx.advance();
+        return { kind: 'ident', value: t.text + parenText, loc: ctx.loc(t) };
+      }
       return { kind: 'ident', value: t.text, loc: ctx.loc(t) };
     }
     case 'string': {

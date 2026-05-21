@@ -34,6 +34,8 @@ export interface LiftedOperation {
  * Lift an operation artifact's body block. The caller already knows the
  * method and path from the head; we only walk the body here.
  */
+const VALID_STATUSES = new Set(['shipped', 'planned', 'deferred', 'deprecated', 'out-of-scope']);
+
 export function liftOperation(
   method: string,
   pathStr: string,
@@ -42,6 +44,7 @@ export function liftOperation(
   const issues: LiftIssue[] = [];
   const tags: string[] = [];
   const responses: ResponseContract[] = [];
+  let status: OperationContract['status'];
 
   for (const stmt of body) {
     const head = stmt.head;
@@ -64,6 +67,10 @@ export function liftOperation(
       }
       continue;
     }
+    if (keyword === 'status' && head[1]?.kind === 'ident' && VALID_STATUSES.has(head[1].value)) {
+      status = head[1].value as OperationContract['status'];
+      continue;
+    }
     // origin / request / preconditions — skipped at this layer; later
     // sub-lifters fill them in. We keep them out of v1 to focus on the
     // bug catalog the comparator needs.
@@ -75,6 +82,7 @@ export function liftOperation(
     path: pathStr,
     responses,
     tags,
+    status,
   };
 
   return { contract, issues };

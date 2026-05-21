@@ -1,0 +1,44 @@
+{
+  "blockId": "921370ebfe57db8fc6b5ed10ee4c8fe0c348174b5a526747236c77ac2aea3734",
+  "extraction": {
+    "topics": [
+      "endpoints",
+      "effects"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/orders/:id/pay",
+        "content": {
+          "method": "POST",
+          "path": "/api/orders/:id/pay",
+          "headers": {
+            "Idempotency-Key": "string"
+          },
+          "responses": {
+            "409": {
+              "error": {
+                "code": "illegal_transition"
+              }
+            }
+          },
+          "idempotency": true
+        },
+        "kind": "definition",
+        "line": 135
+      },
+      {
+        "topic": "effects",
+        "subject": "order.paid",
+        "content": {
+          "name": "order.paid",
+          "trigger": "POST /api/orders/:id/pay"
+        },
+        "kind": "definition",
+        "line": 135
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.360Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

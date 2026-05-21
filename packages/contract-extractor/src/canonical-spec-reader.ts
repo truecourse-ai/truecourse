@@ -1,11 +1,11 @@
 /**
- * Canonical-spec reader. Module 2's input is now `.truecourse/spec/`,
+ * Canonical-spec reader. Module 2's input is now `.truecourse/specs/`,
  * the consolidator's output. Replaces the old `specs.yaml` + raw-doc
  * walk.
  *
  * Layout (from Module 1's materializer):
  *
- *   .truecourse/spec/
+ *   .truecourse/specs/
  *   ├── modules/<name>/module.yaml          (manifest — status, scope, outOfScope)
  *   ├── modules/<name>/<topic>.md           (LLM-rendered prose, free-form)
  *   ├── shared/<topic>.md                   (cross-cutting prose)
@@ -59,7 +59,7 @@ const SHARED_DIR = 'shared';
 const MODULES_DIR = 'modules';
 
 export function canonicalSpecPath(repoRoot: string): string {
-  return path.join(repoRoot, '.truecourse', 'spec');
+  return path.join(repoRoot, '.truecourse', 'specs');
 }
 
 export function hasCanonicalSpec(repoRoot: string): boolean {
@@ -74,7 +74,7 @@ export function hasCanonicalSpec(repoRoot: string): boolean {
 }
 
 /**
- * Walk `.truecourse/spec/` and return the slices the LLM extractor
+ * Walk `.truecourse/specs/` and return the slices the LLM extractor
  * should be called on. Modules with status `out-of-scope` at the
  * manifest level contribute zero slices — their content is negative
  * spec, not positive contract.

@@ -1384,6 +1384,13 @@ export default function RepoGraphPage() {
               isLoading={contractsLoading}
               error={contractsError}
               activePath={activeContractsPath}
+              validationIssues={
+                contractsGenerateResult &&
+                'il' in contractsGenerateResult &&
+                'validationIssues' in contractsGenerateResult.il
+                  ? contractsGenerateResult.il.validationIssues
+                  : undefined
+              }
               onOpen={handleOpenContracts}
             />
           )}

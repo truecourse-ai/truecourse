@@ -170,7 +170,7 @@ describe('consolidate — scan mode', () => {
 
     expect(result.merge.resolvedClaims.some((c) => c.subject === 'GET /health')).toBe(true);
     // No canonical spec written.
-    expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules'))).toBe(false);
+    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules'))).toBe(false);
   });
 });
 
@@ -210,34 +210,34 @@ describe('consolidate — apply mode', () => {
     expect(apply.materialize?.failures).toEqual([]);
 
     // Canonical spec landed.
-    expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules/orders/module.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules/orders/endpoints.md'))).toBe(true);
-    expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules/health/module.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(repo, '.truecourse/spec/modules/health/endpoints.md'))).toBe(true);
+    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/orders/module.yaml'))).toBe(true);
+    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/orders/endpoints.md'))).toBe(true);
+    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/health/module.yaml'))).toBe(true);
+    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/health/endpoints.md'))).toBe(true);
 
     // With the chain resolved (v2 wins), v1's claims are dropped
     // before merge. Both modules' manifests reflect v2 only.
     const ordersManifest = yaml.load(
-      fs.readFileSync(path.join(repo, '.truecourse/spec/modules/orders/module.yaml'), 'utf-8'),
+      fs.readFileSync(path.join(repo, '.truecourse/specs/modules/orders/module.yaml'), 'utf-8'),
     ) as Record<string, unknown>;
     expect(ordersManifest.name).toBe('orders');
     expect(ordersManifest.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
 
     const healthManifest = yaml.load(
-      fs.readFileSync(path.join(repo, '.truecourse/spec/modules/health/module.yaml'), 'utf-8'),
+      fs.readFileSync(path.join(repo, '.truecourse/specs/modules/health/module.yaml'), 'utf-8'),
     ) as Record<string, unknown>;
     expect(healthManifest.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
 
     // The orders endpoint section's content reflects what the section
     // runner was given — and the merger fed it the picked v2 claim.
     const md = fs.readFileSync(
-      path.join(repo, '.truecourse/spec/modules/orders/endpoints.md'),
+      path.join(repo, '.truecourse/specs/modules/orders/endpoints.md'),
       'utf-8',
     );
     expect(md).toContain('POST /api/v1/orders');
 
     // decisions.json mirrored into the spec tree.
-    expect(fs.existsSync(path.join(repo, '.truecourse/spec/decisions.json'))).toBe(true);
+    expect(fs.existsSync(path.join(repo, '.truecourse/specs/decisions.json'))).toBe(true);
   });
 });
 
@@ -357,7 +357,7 @@ describe('readDecisions / writeDecisions', () => {
   });
 
   it('returns empty default when decisions.json is corrupt (no crash on stale state)', () => {
-    const decFile = path.join(repo, '.truecourse/spec/decisions.json');
+    const decFile = path.join(repo, '.truecourse/specs/decisions.json');
     fs.mkdirSync(path.dirname(decFile), { recursive: true });
     fs.writeFileSync(decFile, '{ corrupt');
     expect(readDecisions(repo)).toEqual({ version: 1, decisions: [] });

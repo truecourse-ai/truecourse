@@ -219,7 +219,7 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
-    // Numbers (positive integers; sign handled by parser if ever needed).
+    // Numbers (positive integers or decimals; sign handled below).
     //
     // Special case: `4xx` / `5xx` — HTTP status classes — read as a
     // single ident token. Their use is in lists like `[4xx, 5xx]`; the
@@ -238,6 +238,15 @@ export function tokenize(source: string): Token[] {
         out.push({ kind: 'ident', text, line: sl, col: sc });
         continue;
       }
+      // Decimal: consume `.digits` only when not `..` (the range operator).
+      if (peek() === '.' && peek(1) >= '0' && peek(1) <= '9') {
+        text += '.';
+        advance();
+        while (i < source.length && peek() >= '0' && peek() <= '9') {
+          text += peek();
+          advance();
+        }
+      }
       out.push({ kind: 'number', text, line: sl, col: sc });
       continue;
     }
@@ -250,6 +259,14 @@ export function tokenize(source: string): Token[] {
       while (i < source.length && peek() >= '0' && peek() <= '9') {
         text += peek();
         advance();
+      }
+      if (peek() === '.' && peek(1) >= '0' && peek(1) <= '9') {
+        text += '.';
+        advance();
+        while (i < source.length && peek() >= '0' && peek() <= '9') {
+          text += peek();
+          advance();
+        }
       }
       out.push({ kind: 'number', text, line: sl, col: sc });
       continue;

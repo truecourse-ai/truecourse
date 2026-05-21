@@ -2,7 +2,7 @@
  * Contract extractor — top-level orchestrator.
  *
  * `generateContracts({ repoRoot, runner })` walks the canonical
- * spec under `.truecourse/spec/` (Module 1's output), slices each
+ * spec under `.truecourse/specs/` (Module 1's output), slices each
  * section file into heading-keyed chunks, runs cache-miss slices
  * through the supplied runner (Claude Code subprocess by default),
  * merges the extracted fragments by `(kind, identity)`, validates
@@ -39,13 +39,14 @@ import type { Manifest, SpecSlice } from './types.js';
 import fs from 'node:fs';
 
 export interface GenerateOptions {
-  /** Repo root — `.truecourse/spec/` and `.truecourse/contracts/` live here. */
+  /** Repo root — `.truecourse/specs/` and `.truecourse/contracts/` live here. */
   repoRoot: string;
   /** Override the runner; defaults to `spawnRunner()`. Tests pass a stub. */
   runner?: SliceRunner;
   /** When true, don't write `.tc` files — return what would change. */
   dryRun?: boolean;
   /** Hooks for the CLI to render progress. */
+  onSlicesReady?: (total: number) => void;
   onSliceCacheHit?: (slice: SpecSlice) => void;
   onSliceStart?: (slice: SpecSlice) => void;
   onSliceDone?: (slice: SpecSlice, ok: boolean) => void;
@@ -77,7 +78,7 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   const { repoRoot, dryRun = false } = opts;
   if (!hasCanonicalSpec(repoRoot)) {
     throw new CanonicalSpecMissingError(
-      `No .truecourse/spec/ found in ${repoRoot}. Run \`truecourse spec apply\` first.`,
+      `No .truecourse/specs/ found in ${repoRoot}. Run \`truecourse spec apply\` first.`,
     );
   }
 
@@ -85,16 +86,26 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   readManifest(repoRoot); // touch — kept for future incremental invalidation
   const canonical = readCanonicalSpec(repoRoot);
   const slices = canonical.slices;
-  const runner = opts.runner ?? spawnRunner();
+  opts.onSlicesReady?.(slices.length);
+  const runner = opts.runner ?? spawnRunner({
+    onSliceStart: opts.onSliceStart,
+    onSliceDone: opts.onSliceDone,
+  });
 
   // ---- Slice cache lookup --------------------------------------------------
   const outcomes: SliceOutcome[] = [];
   const misses: SpecSlice[] = [];
+  let hitsSinceYield = 0;
   for (const slice of slices) {
     const cached = readSliceEntry(repoRoot, slice.id);
     if (cached) {
       outcomes.push({ slice, cache: 'hit' });
       opts.onSliceCacheHit?.(slice);
+      // Yield every 10 hits so the event loop can flush socket frames and
+      // the progress counter visibly increments in the dashboard.
+      if (++hitsSinceYield % 10 === 0) {
+        await Promise.resolve();
+      }
     } else {
       outcomes.push({ slice, cache: 'miss' });
       misses.push(slice);

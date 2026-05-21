@@ -93,6 +93,7 @@ real artifacts; copy block-vs-inline form exactly. Comments use \`//\`.
 \`\`\`
 operation POST "/api/orders" {
   origin SPEC.md "POST /api/orders" 100..113
+  status shipped
   request {
     header content-type required value "application/json"
     body {
@@ -112,6 +113,17 @@ operation POST "/api/orders" {
   }
   response 401 inherits AuthRequirement:auth.bearer.api
   tags [idempotent]
+}
+
+// Planned operation — spec marks it as "planned", "(planned)", or "coming soon":
+operation GET "/api/orders/export" {
+  origin SPEC.md "GET /api/orders/export — *planned*" 120..125
+  status planned
+  request {
+    query {
+      format: string optional
+    }
+  }
 }
 
 entity Order {
@@ -153,6 +165,10 @@ auth-requirement auth.bearer.api {
   origin SPEC.md "Authentication" 11..16
   scheme Bearer
   selector path-glob "/api/**"
+  except {
+    path-glob "/health"
+    path-glob "/status"
+  }
   on-violation {
     status 401
     error-code unauthenticated
@@ -365,6 +381,87 @@ Output:
   ]
 }
 
+# Operation status — lifecycle marker
+
+Every \`operation\` artifact MAY carry a \`status\` field immediately after its
+\`origin\` line. Valid values:
+
+  status shipped       — default; live in production
+  status planned       — spec explicitly marks it as not yet built
+  status deferred      — postponed / on hold
+  status deprecated    — being removed
+  status out-of-scope  — belongs to a different service, not the one being verified
+
+**When to use each:**
+
+- \`status planned\`: use this whenever the spec heading, parenthetical, or body
+  text contains any of these markers: \`*planned*\`, \`(planned)\`, \`— planned\`,
+  \`planned feature\`, \`coming soon\`, \`not yet implemented\`, or equivalent phrasing.
+  Example heading: \`## GET /review/suspects — *planned*\` → add \`status planned\`.
+
+- \`status out-of-scope\`: use this when the spec section clearly describes an
+  endpoint that belongs to a *different* service or codebase — for example, a
+  section titled "Forms API" or "External attachment endpoint" that references a
+  separate system with its own base URL, auth, or data store. These operations
+  exist in the spec for documentation purposes but are not implemented in the
+  codebase under verification.
+
+- If the spec text gives no lifecycle signal, omit \`status\` entirely (defaults to
+  \`shipped\`).
+
+# Auth-requirement: except blocks
+
+When the spec says "all routes are protected … except X", or lists specific paths
+that do NOT require authentication (health checks, diagnostics, public endpoints),
+add an \`except\` block to the \`auth-requirement\`:
+
+  auth-requirement auth.bearer.api {
+    …
+    except {
+      path-glob "/health"
+    }
+    …
+  }
+
+Each inner line is a selector (the same forms that \`selector\` accepts):
+\`path-glob "…"\` or \`path-exact "…"\`.
+
+**Important**: only add \`except\` entries that the spec TEXT explicitly names as
+unauthenticated. Do not infer exceptions based on convention (e.g., don't
+auto-exempt \`/health\` just because it's a common pattern — only if the spec says so).
+
+# Auth-requirement: avoid duplicates from overview sections
+
+If a spec slice comes from a high-level **overview or summary section** (e.g., a
+"Stack" or "Architecture" section that briefly says "all routes use Bearer JWT"),
+and the same spec corpus has a dedicated authentication document with more detail
+(like a full \`auth.md\`), treat the overview mention as background context — emit a
+\`UnenforceableObligation\` rather than a second \`AuthRequirement\`. The dedicated auth
+document is the authoritative source and will produce the correct artifact with all
+exceptions captured.
+
+Concretely: if the slice heading path includes words like "overview", "stack",
+"architecture", "introduction", or "about", and its auth description is one or two
+sentences with no exceptions listed, prefer \`UnenforceableObligation\` for that
+statement rather than a duplicate \`auth-requirement\`.
+
+# Parameterized paths that are pattern descriptions, not real endpoints
+
+Sometimes a spec section uses a parameterized path (e.g., \`GET /api/v1/infractions/{slug}\`)
+as a documentation shorthand to describe the SHAPE of a family of routes, while
+elsewhere in the **same spec document** it explicitly enumerates all the individual
+static routes (e.g., a "Per-type routes" section listing \`GET /api/v1/infractions/customer-overcharged\`,
+\`GET /api/v1/infractions/discount-stacking\`, etc.).
+
+**When to skip the parameterized form**: if the spec document explicitly enumerates
+static routes that instantiate the pattern (under a heading like "Per-type routes",
+"All routes", or an explicit bullet list of specific paths), the parameterized form
+is a pattern description only — do NOT generate an \`Operation\` contract for it.
+Generate contracts only for the explicitly listed static routes.
+
+**When to keep the parameterized form**: if the spec does NOT enumerate static
+instances, the parameterized route IS a real endpoint — generate the contract.
+
 # Hard rules
 
 1. Output ONLY the JSON object. No prose, no markdown fences, no preamble.
@@ -373,6 +470,7 @@ Output:
 4. Don't invent artifacts that aren't supported by the slice text.
 5. Cross-references must point to artifacts that exist (or will exist) elsewhere in the corpus — match identity exactly.
 `;
+
 
 /**
  * Build the user prompt for one slice. Includes the slice's heading

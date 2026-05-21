@@ -1,0 +1,32 @@
+{
+  "blockId": "9bd6a7ea20dc544fa9a3ca9814f2247846d1376c093b7542949a2995f0645de0",
+  "extraction": {
+    "topics": [
+      "auth",
+      "overview"
+    ],
+    "claims": [
+      {
+        "topic": "overview",
+        "subject": "Order Management Service",
+        "content": {
+          "summary": "Two-resource HTTP service (Orders + Customers) used as the end-to-end fixture for the TrueCourse pipeline. Implementation under code/ carries planted IL-DRIFT bugs marked with // IL-DRIFT:. The hand-written .truecourse/contracts/ corpus is the ground truth the verifier compares the code against."
+        },
+        "kind": "definition",
+        "line": 1
+      },
+      {
+        "topic": "auth",
+        "subject": "auth scheme",
+        "content": {
+          "scheme": "Session cookie",
+          "scope": "/api/*"
+        },
+        "kind": "definition",
+        "line": 20
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.356Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}

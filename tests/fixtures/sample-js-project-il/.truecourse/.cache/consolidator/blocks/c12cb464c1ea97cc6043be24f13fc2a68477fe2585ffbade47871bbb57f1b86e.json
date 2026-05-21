@@ -1,0 +1,44 @@
+{
+  "blockId": "c12cb464c1ea97cc6043be24f13fc2a68477fe2585ffbade47871bbb57f1b86e",
+  "extraction": {
+    "topics": [
+      "endpoints"
+    ],
+    "claims": [
+      {
+        "topic": "endpoints",
+        "subject": "POST /api/customers",
+        "content": {
+          "method": "POST",
+          "path": "/api/customers",
+          "request": {
+            "email": "string",
+            "name": "string"
+          },
+          "responses": {
+            "201": {
+              "body": "Customer",
+              "headers": {
+                "Location": "/api/customers/{id}"
+              }
+            },
+            "409": {
+              "error": {
+                "code": "email_taken"
+              }
+            }
+          },
+          "auth": "Admin only",
+          "validation": {
+            "email": "syntactically valid; unique; stored lowercased",
+            "name": "non-empty"
+          }
+        },
+        "kind": "definition",
+        "line": 153
+      }
+    ]
+  },
+  "cachedAt": "2026-05-20T22:19:45.361Z",
+  "promptFingerprint": "d377e8e268ca1889"
+}
