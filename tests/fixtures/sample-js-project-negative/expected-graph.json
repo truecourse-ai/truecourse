@@ -613,6 +613,12 @@
       "layer": "service"
     },
     {
+      "name": "CounterBox",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "crypto",
       "service": "utils",
       "kind": "standalone",
@@ -644,6 +650,18 @@
     },
     {
       "name": "formatters",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "http-call-no-timeout-external",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "js-style-preference-var",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -764,6 +782,18 @@
     },
     {
       "name": "undefined-passed-as-optional",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unnecessary-condition-literal",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unnecessary-type-conversion-bool",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"

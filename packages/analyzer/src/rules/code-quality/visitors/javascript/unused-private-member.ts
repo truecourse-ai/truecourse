@@ -33,11 +33,20 @@ export const unusedPrivateMemberVisitor: CodeRuleVisitor = {
 
     const usedNames = new Set<string>()
 
+    // Static singleton members are accessed via the class name (e.g.
+    // `Foo._instance = new Foo()` inside `Foo.getInstance`), not via `this`.
+    // Resolve the enclosing class's identifier so those self-references count
+    // as uses.
+    const classNameNode = node.namedChildren.find(
+      (c) => c.type === 'type_identifier' || c.type === 'identifier',
+    )
+    const className = classNameNode?.text
+
     function walk(n: SyntaxNode) {
       if (n.type === 'member_expression') {
         const obj = n.childForFieldName('object')
         const prop = n.childForFieldName('property')
-        if (obj?.text === 'this' && prop) {
+        if (prop && (obj?.text === 'this' || (className && obj?.text === className))) {
           usedNames.add(prop.text.replace(/^#/, ''))
         }
       }

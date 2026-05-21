@@ -43,6 +43,16 @@ export const unnecessaryConditionVisitor: CodeRuleVisitor = {
     // Skip any/unknown
     if (typeStr === 'any' || typeStr === 'unknown') return null
 
+    // Boolean literal types on an identifier are unreliable: TypeScript only
+    // narrows `let` variables along the linear control flow inside the current
+    // function, so a `let isCancelled = false` mutated inside a sibling
+    // callback (a common React useEffect / async-watch idiom) still narrows to
+    // `false` at every read. Limit `'true'` / `'false'` reports to literal
+    // expressions and member accesses, where the literal type is intentional.
+    if ((typeStr === 'true' || typeStr === 'false') && expr.type === 'identifier') {
+      return null
+    }
+
     // Always truthy types
     const alwaysTruthy = new Set(['object', 'Function', 'symbol', 'RegExp'])
     if (typeStr === 'true' || alwaysTruthy.has(typeStr)) {
