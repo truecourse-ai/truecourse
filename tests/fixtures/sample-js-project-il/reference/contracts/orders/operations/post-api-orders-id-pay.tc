@@ -14,6 +14,11 @@ operation POST "/api/orders/{id}/pay" {
     body Entity:Order
     effect emits Effect:order.paid
   }
+  response 404 on not_found {
+    body envelope ErrorEnvelope:error.envelope.standard {
+      error-code order_not_found
+    }
+  }
   response 409 on illegal_transition {
     body envelope ErrorEnvelope:error.envelope.standard {
       error-code illegal_transition

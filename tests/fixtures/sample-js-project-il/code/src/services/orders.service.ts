@@ -7,10 +7,10 @@ import { pricingService } from './pricing.service.js';
 const ALLOWED: Record<OrderStatus, OrderStatus[]> = {
   placed: ['paid', 'cancelled'],
   paid: ['shipped', 'cancelled'],
-  // IL-DRIFT: StateMachine:Order.status / illegal-transition: shipped → cancelled
   // Spec says shipped only transitions to delivered. Allowing cancelled
   // here means a shipped order can be silently rolled back, which the
   // accounting and warehouse downstream consumers don't expect.
+  // IL-DRIFT: StateMachine:Order.status / transition.illegal.shipped-to-cancelled
   shipped: ['delivered', 'cancelled'],
   delivered: [],
   cancelled: [],
@@ -60,10 +60,10 @@ export const ordersService = {
     if (!ALLOWED[order.status].includes(target)) {
       return { ok: false, reason: 'illegal_transition', current: order.status };
     }
-    // IL-DRIFT: Entity:Order / field.placedAt.mutability
     // Spec marks placedAt immutable after creation. Refreshing it here on
     // every transition silently destroys the original placement timestamp,
     // breaking placedAt-desc sort + audit trails.
+    // IL-DRIFT: Entity:Order / field.placedAt.mutability
     order.placedAt = new Date().toISOString();
     order.status = target;
     order.updatedAt = new Date().toISOString();
@@ -79,10 +79,10 @@ export const ordersService = {
   async recoverExpired(orderId: string): Promise<void> {
     const order = await ordersRepo.findById(orderId);
     if (!order) return;
-    // IL-DRIFT: StateMachine:Order.status / unguarded-terminal-regression
     // No guard on current status. A delivered or cancelled order (both
     // terminal) gets dragged back into 'paid', re-running already-completed
     // work. Classic terminal-regression bug.
+    // IL-DRIFT: StateMachine:Order.status / transition.unguarded-terminal-regression.to-paid
     order.status = 'paid';
     order.updatedAt = new Date().toISOString();
     await ordersRepo.resetForRecovery(order);

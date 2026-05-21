@@ -11,11 +11,14 @@ ordersRouter.use(requireBearer);
 ordersRouter.use(ordersController);
 router.use('/api', ordersRouter);
 
-// IL-DRIFT: AuthRequirement:auth.bearer.api / unprotected: POST /api/customers
 // Spec: every endpoint under /api/* requires a Bearer token. The
 // customers router below mounts customersController WITHOUT the
 // requireBearer middleware, so POST /api/customers, GET /api/customers,
 // GET /api/customers/:id are all reachable anonymously.
+// IL-DRIFT: AuthRequirement:auth.bearer.api / POST /api/customers/unprotected
+// IL-DRIFT: AuthRequirement:auth.bearer.api / GET /api/customers/unprotected
+// IL-DRIFT: AuthRequirement:auth.bearer.api / GET /api/customers/{id}/unprotected
+// IL-DRIFT: AuthRequirement:auth.role.admin / POST /api/customers/unprotected
 const customersRouter = express.Router();
 // Note: requireRole('admin') without requireBearer is meaningless — req.auth
 // is never populated, so the role check trivially fails open or fails-closed

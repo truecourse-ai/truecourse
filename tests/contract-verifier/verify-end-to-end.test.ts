@@ -1,8 +1,42 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import { verify } from '../../packages/contract-verifier/src/verify.js';
 
 const FIXTURE_ROOT = path.resolve(__dirname, '../fixtures/sample-js-project-il');
+
+/**
+ * Parse `// IL-DRIFT: <drift-key>` markers from every TS/JS file under
+ * the fixture's code dir. Each marker is the exact drift key the
+ * verifier emits — `<ArtifactType>:<identity> / <obligationKey>`. The
+ * fixture's `// IL-DRIFT:` annotations are the canonical bug catalog;
+ * the test asserts the verifier's drift set matches them exactly.
+ */
+function parseIlDriftMarkers(rootDir: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
+      const source = fs.readFileSync(full, 'utf-8');
+      for (const line of source.split('\n')) {
+        const match = line.match(/\/\/\s*IL-DRIFT:\s*(.+)/);
+        if (match) out.push(match[1].trim());
+      }
+    }
+  };
+  walk(rootDir);
+  return out;
+}
+
+function driftKey(d: { artifactRef: { type: string; identity: string }; obligationKey: string }): string {
+  return `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`;
+}
 
 describe('Contract verifier — end-to-end on fixture (Operation slice only)', () => {
   it('runs without resolver errors', async () => {
@@ -15,94 +49,28 @@ describe('Contract verifier — end-to-end on fixture (Operation slice only)', (
     expect(result.extractedOperationCount).toBeGreaterThan(0);
   });
 
-  it('catches Operation drifts from the planted bug catalog', async () => {
+  it('drift set matches the `// IL-DRIFT:` markers in fixture code (both directions)', async () => {
+    // The canonical bug catalog lives in the fixture itself: every
+    // planted bug is annotated with a `// IL-DRIFT: <drift-key>`
+    // comment, where the key is the exact `<ArtifactType>:<identity> /
+    // <obligationKey>` the verifier emits. The test parses those
+    // markers and asserts the verifier's drift set equals the marker
+    // set — no missing, no extras. Adding or removing a planted bug
+    // requires only updating the marker; the test auto-tracks.
+    const expected = new Set(
+      parseIlDriftMarkers(path.join(FIXTURE_ROOT, 'code/src')),
+    );
     const result = await verify({
       contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
+    const actual = new Set(result.drifts.map(driftKey));
 
-    // Helper to pluck (operationIdentity, obligationKey) tuples for matching.
-    const driftKeys = result.drifts.map(
-      (d) => `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`,
-    );
+    const missing = [...expected].filter((k) => !actual.has(k)).sort();
+    const unexpected = [...actual].filter((k) => !expected.has(k)).sort();
 
-    // Bug #1 — POST /api/orders returns 200 instead of 201.
-    // The status declared as 201 is missing on the code side.
-    expect(driftKeys).toContain('Operation:POST /api/orders / response.201');
-
-    // Bug #2 — POST /api/orders missing Location header on 201.
-    // (Won't fire since 201 itself is missing on the code side — bug #1
-    //  hides it. Subsumed.)
-    // After bug #1 is fixed the 201 path materializes and the missing
-    // Location header drift becomes visible. Documented expectation:
-    // intentionally not asserted as a separate drift in this end-to-end
-    // pass; verified via a unit test on the comparator with a synthesized
-    // input below.
-
-    // Bug #3 — GET /api/orders returns bare array.
-    expect(driftKeys).toContain('Operation:GET /api/orders / response.200.body.shape');
-
-    // Bug #4 — GET /api/orders/{id} returns 200 + null body when missing.
-    // The 404 path is missing on the code side AND the spec's
-    // `forbid status 200 when resource-missing` clause fires because 200
-    // is emitted indiscriminately.
-    expect(driftKeys).toContain('Operation:GET /api/orders/{id} / response.404');
-    expect(driftKeys).toContain(
-      'Operation:GET /api/orders/{id} / response.404.forbid.status-200-when-resource-missing',
-    );
-
-    // Bug #18 — POST /api/orders is tagged `idempotent` in spec but the
-    // route registers no idempotency middleware and never reads the
-    // Idempotency-Key header. Repeat requests duplicate the order.
-    expect(driftKeys).toContain(
-      'IdempotencyContract:idempotency.key.standard / POST /api/orders/missing-idempotency-key-handling',
-    );
-  });
-
-  it('emits ZERO false-positive drifts beyond the planted bugs', async () => {
-    // Hard 0% FP gate. Every drift in the result must be one of the
-    // expected planted-bug keys. Anything else is a false positive and
-    // the test must fail until we make it true.
-    const result = await verify({
-      contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
-      codeDir: path.join(FIXTURE_ROOT, 'code'),
-    });
-    const expected = new Set([
-      // Operation drifts
-      'Operation:POST /api/orders / response.201',                                                  // bug #1
-      'Operation:GET /api/orders / response.200.body.shape',                                       // bug #3
-      'Operation:GET /api/orders/{id} / response.404',                                              // bug #4a
-      'Operation:GET /api/orders/{id} / response.404.forbid.status-200-when-resource-missing',     // bug #4b
-      // Cross-cutting (envelope + pagination + auth)
-      'ErrorEnvelope:error.envelope.standard / POST /api/orders/response.400.shape',                // bug #12
-      'PaginationContract:pagination.cursor.standard / GET /api/orders/forbid.query-param-offset', // bug #5a
-      'PaginationContract:pagination.cursor.standard / GET /api/orders/forbid.query-param-page',   // bug #5b
-      'PaginationContract:pagination.cursor.standard / GET /api/orders/limit.max-50-not-clamped',  // bug #6
-      // Bug #11 cascade — customers router has no auth middleware, so all
-      // three customer endpoints are unprotected, and the admin-role check
-      // targeting POST /api/customers also doesn't apply.
-      'AuthRequirement:auth.bearer.api / POST /api/customers/unprotected',                          // bug #11
-      'AuthRequirement:auth.bearer.api / GET /api/customers/unprotected',                          // #11 cascade
-      'AuthRequirement:auth.bearer.api / GET /api/customers/{id}/unprotected',                     // #11 cascade
-      'AuthRequirement:auth.role.admin / POST /api/customers/unprotected',                          // #11 cascade
-      // Entity + StateMachine
-      'Entity:Order / field.placedAt.mutability',                                                   // bug #9
-      'Entity:Customer / field.email.normalize',                                                    // bug #10
-      'StateMachine:Order.status / transition.illegal.shipped-to-cancelled',                        // bug #7
-      'StateMachine:Order.status / transition.unguarded-terminal-regression.to-paid',               // bug #8
-      // AuthorizationRule + EffectGroup + Formula
-      'AuthorizationRule:order.owner-only / GET /api/orders/{id} / missing-ownership-check',        // bug #15
-      'EffectGroup:order.lifecycle.events / Effect:order.cancelled / missing-emission',             // bug #13
-      'EffectGroup:order.lifecycle.events / Effect:order.placed / forbidden-emission-on-failure',   // bug #14
-      'Formula:order.discount-cents / expression.threshold-operator.10000',                         // bug #16
-      'Formula:order.tax-cents / inputs.discountCents.unused',                                       // bug #17
-      // IdempotencyContract
-      'IdempotencyContract:idempotency.key.standard / POST /api/orders/missing-idempotency-key-handling', // bug #18
-    ]);
-    const unexpected = result.drifts
-      .map((d) => `${d.artifactRef.type}:${d.artifactRef.identity} / ${d.obligationKey}`)
-      .filter((k) => !expected.has(k));
-    expect(unexpected, `unexpected drifts:\n  ${unexpected.join('\n  ')}`).toEqual([]);
+    expect(missing, `missing drifts (markers in fixture, but verifier didn't fire):\n  ${missing.join('\n  ')}`).toEqual([]);
+    expect(unexpected, `unexpected drifts (verifier fired, but no marker):\n  ${unexpected.join('\n  ')}`).toEqual([]);
   });
 
   it('traces single-file delegation handlers (no implementation.missing FPs)', async () => {

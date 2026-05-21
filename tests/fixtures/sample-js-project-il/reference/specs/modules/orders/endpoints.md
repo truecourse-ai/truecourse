@@ -2,7 +2,7 @@
 
 ## POST /api/orders
 
-Create a new order.
+Create a new order. Idempotent under `Idempotency-Key`.
 
 **Request body:** `{ subtotalCents: integer, customerId: UUID }`
 
@@ -41,19 +41,21 @@ order is never returned as a silent null or empty response.
 
 ## POST /api/orders/:id/pay
 
-Transition `placed → paid`.
+Transition `placed → paid`. Idempotent under `Idempotency-Key`.
 
 **On success (200):** the updated `Order`. Effect: `order.paid` emitted.
 
-**Illegal transition (409):** standard error envelope with code `illegal_transition`.
+**Not found (404):** standard error envelope with code `order_not_found`.
 
-Idempotent under `Idempotency-Key`.
+**Illegal transition (409):** standard error envelope with code `illegal_transition`.
 
 ## POST /api/orders/:id/ship
 
 Transition `paid → shipped`.
 
 **On success (200):** the updated `Order`. Effect: `order.shipped` emitted.
+
+**Not found (404):** standard error envelope with code `order_not_found`.
 
 **Illegal transition (409):** standard error envelope with code `illegal_transition`.
 
@@ -62,5 +64,7 @@ Transition `paid → shipped`.
 Transition `placed → cancelled` or `paid → cancelled`.
 
 **On success (200):** the updated `Order`. Effect: `order.cancelled` emitted.
+
+**Not found (404):** standard error envelope with code `order_not_found`.
 
 **Illegal transition (409):** standard error envelope with code `illegal_transition`.

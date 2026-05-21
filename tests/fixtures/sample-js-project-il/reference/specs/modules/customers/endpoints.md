@@ -15,6 +15,8 @@ Create a customer. **Admin only.**
 - Body: the created `Customer`. `email` stored lowercased.
 - Header: `Location: /api/customers/{id}`.
 
+**On validation failure (400):** standard error envelope with code `validation_failed`.
+
 ## GET /api/customers
 
 List customers (paginated). Same cursor pagination as orders.
@@ -24,6 +26,8 @@ List customers (paginated). Same cursor pagination as orders.
 ## GET /api/customers/:id
 
 Fetch one customer.
+
+**Path parameter:** `id` must be a valid UUID; otherwise `400` with `validation_failed`.
 
 **On success (200):** the `Customer`.
 

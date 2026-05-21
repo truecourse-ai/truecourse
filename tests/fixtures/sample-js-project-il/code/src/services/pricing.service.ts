@@ -7,10 +7,10 @@ import type { Customer } from '../types.js';
  */
 export const pricingService = {
   computeDiscountCents(subtotalCents: number, customer: Customer): number {
-    // IL-DRIFT: Formula:order.discount-cents / threshold off-by-one
     // Spec says discount applies when subtotalCents > 10000 (strict). Using
     // `>=` flips a $100.00 order from no-discount to 10%-off, silently
     // dropping revenue on the boundary.
+    // IL-DRIFT: Formula:order.discount-cents / expression.threshold-operator.10000
     if (customer.loyaltyTier === 'gold' && subtotalCents >= 10000) {
       return Math.round(subtotalCents * 0.1);
     }
@@ -18,10 +18,10 @@ export const pricingService = {
   },
 
   computeTaxCents(subtotalCents: number, _discountCents: number): number {
-    // IL-DRIFT: Formula:order.tax-cents / wrong-base
     // Spec says tax = 8% of (subtotalCents - discountCents). This computes
     // tax on the pre-discount subtotal, over-charging customers who got a
     // discount and quietly inflating reported tax revenue.
+    // IL-DRIFT: Formula:order.tax-cents / inputs.discountCents.unused
     return Math.round(subtotalCents * 0.08);
   },
 
