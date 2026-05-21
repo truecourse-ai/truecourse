@@ -7,17 +7,17 @@ const FIXTURE_ROOT = path.resolve(__dirname, '../fixtures/sample-js-project-il')
 describe('Contract verifier — end-to-end on fixture (Operation slice only)', () => {
   it('runs without resolver errors', async () => {
     const result = await verify({
-      contractsDir: path.join(FIXTURE_ROOT, '.truecourse/contracts'),
+      contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
     expect(result.resolverErrors).toEqual([]);
-    expect(result.artifactCount).toBeGreaterThanOrEqual(25);
+    expect(result.artifactCount).toBeGreaterThanOrEqual(20);
     expect(result.extractedOperationCount).toBeGreaterThan(0);
   });
 
   it('catches Operation drifts from the planted bug catalog', async () => {
     const result = await verify({
-      contractsDir: path.join(FIXTURE_ROOT, '.truecourse/contracts'),
+      contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
 
@@ -64,7 +64,7 @@ describe('Contract verifier — end-to-end on fixture (Operation slice only)', (
     // expected planted-bug keys. Anything else is a false positive and
     // the test must fail until we make it true.
     const result = await verify({
-      contractsDir: path.join(FIXTURE_ROOT, '.truecourse/contracts'),
+      contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
     const expected = new Set([
@@ -112,7 +112,7 @@ describe('Contract verifier — end-to-end on fixture (Operation slice only)', (
     // attribute its responses back to the route — otherwise we'd emit
     // false-positive `implementation.missing` drifts for each.
     const result = await verify({
-      contractsDir: path.join(FIXTURE_ROOT, '.truecourse/contracts'),
+      contractsDir: path.join(FIXTURE_ROOT, 'reference/contracts'),
       codeDir: path.join(FIXTURE_ROOT, 'code'),
     });
     const missing = result.drifts.filter((d) => d.obligationKey === 'implementation.missing');

@@ -1,7 +1,0 @@
-enum OrderStatus {
-  origin SPEC.md "Entities/OrderStatus" 69..71
-  representation string-literal
-  closed
-
-  values [placed, paid, shipped, delivered, cancelled]
-}

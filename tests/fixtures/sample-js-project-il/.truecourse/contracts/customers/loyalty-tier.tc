@@ -1,7 +1,0 @@
-enum LoyaltyTier {
-  origin SPEC.md "Entities/Customer" 73..79
-  representation string-literal
-  closed
-
-  values [standard, silver, gold]
-}

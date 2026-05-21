@@ -18,4 +18,5 @@ operation POST "/api/orders" {
     }
   }
   response 401 inherits AuthRequirement:auth.bearer.api
+  tags [idempotent]
 }
