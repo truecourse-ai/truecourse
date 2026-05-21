@@ -685,6 +685,12 @@
       "layer": "service"
     },
     {
+      "name": "function-in-loop-var-binding",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "http-call-no-timeout-external",
       "service": "utils",
       "kind": "standalone",
@@ -793,6 +799,12 @@
       "layer": "service"
     },
     {
+      "name": "redundant-template-expression-bare",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "regex-bugs",
       "service": "utils",
       "kind": "standalone",
@@ -805,7 +817,19 @@
       "layer": "service"
     },
     {
+      "name": "regex-empty-group-bare",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "remaining-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "required-type-annotations-bare-arrow",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -898,6 +922,12 @@
       "name": "UnreadAttribute",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "unsafe-json-parse-untrusted",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {

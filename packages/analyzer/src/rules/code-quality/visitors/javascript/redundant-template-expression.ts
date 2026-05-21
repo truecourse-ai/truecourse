@@ -6,6 +6,11 @@ export const redundantTemplateExpressionVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['template_string'],
   visit(node, filePath, sourceCode) {
+    // Tagged templates (`tag\`${x}\``) parse as call_expression > template_string
+    // in tree-sitter-typescript; the tag function controls the return value,
+    // so the template is not a redundant string wrapper.
+    if (node.parent?.type === 'call_expression') return null
+
     const children = node.children
     const namedChildren = node.namedChildren
     if (namedChildren.length !== 1) return null
