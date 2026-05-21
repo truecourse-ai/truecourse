@@ -409,6 +409,38 @@ Every \`operation\` artifact MAY carry a \`status\` field immediately after its
 - If the spec text gives no lifecycle signal, omit \`status\` entirely (defaults to
   \`shipped\`).
 
+# Auth-requirement: ALWAYS extract when spec asserts an auth scheme on a path scope
+
+Whenever the spec contains ANY statement of the form "all <path-scope> endpoints
+use/require <scheme>" — e.g., "All \`/api/*\` endpoints use Bearer JWT
+authentication", "Endpoints under /api/** require an Authorization: Bearer token",
+"This API uses session-cookie auth" — produce a complete \`auth-requirement\`
+artifact even if the spec is terse and omits the violation response details.
+
+Use sensible defaults when the spec doesn't spell them out:
+
+  auth-requirement auth.<scheme>.<scope> {
+    origin "<source>" "<section>" <lines>
+    scheme <Bearer|Cookie|ApiKey|…>
+    selector path-glob "<path-pattern>"
+    on-violation {
+      status 401
+      error-code unauthenticated
+      body ErrorEnvelope:error.envelope.standard
+    }
+  }
+
+Default \`on-violation\` is **always** status 401, error-code \`unauthenticated\`,
+body \`ErrorEnvelope:error.envelope.standard\` when the spec doesn't specify
+otherwise. Default selector is \`path-glob "/api/**"\` when the spec says "all
+/api/* endpoints" without naming a more specific pattern.
+
+When a spec describes role-based auth ("admin only", "moderators can …"), produce
+a SEPARATE \`auth-requirement\` with \`required-role <role>\`, identity
+\`auth.role.<role-name>\`, default \`on-violation\` status 403, error-code
+\`forbidden\`. The role requirement is in ADDITION to the standard bearer
+requirement — do not collapse them into one artifact.
+
 # Auth-requirement: except blocks
 
 When the spec says "all routes are protected … except X", or lists specific paths

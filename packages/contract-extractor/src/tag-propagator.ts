@@ -38,6 +38,19 @@ const TAG_RULES: TagRule[] = [
       /\bidempotency[-\s]?key\b/i,
     ],
   },
+  {
+    tag: 'paginated',
+    triggers: [
+      // The classic cursor-pagination response shape is the strongest
+      // signal — when the response body has both `items` and `nextCursor`
+      // we can confidently mark the operation paginated, even if the
+      // word "paginated" never appears in the slice prose.
+      /\bnextCursor\b/,
+      /\bcursor\b[\s\S]{0,200}\blimit\b/i,
+      /\bpaginated\b/i,
+      /cursor[-\s]based\s+pagination/i,
+    ],
+  },
 ];
 
 /**
