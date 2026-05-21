@@ -595,6 +595,12 @@
       "layer": "service"
     },
     {
+      "name": "computeDefaultTimeout",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Constants",
       "service": "utils",
       "kind": "class",
