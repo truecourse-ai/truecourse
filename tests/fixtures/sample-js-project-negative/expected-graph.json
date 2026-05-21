@@ -787,7 +787,19 @@
       "layer": "service"
     },
     {
+      "name": "redos-vulnerable-regex-nested-quantifiers",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "regex-bugs",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "regex-duplicate-char-class-unicode-escapes",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -847,6 +859,12 @@
       "layer": "service"
     },
     {
+      "name": "sumBytes",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "todoHandler",
       "service": "utils",
       "kind": "standalone",
@@ -880,6 +898,12 @@
       "name": "UnreadAttribute",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "unused-function-parameter-trailing-and-dollar",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -938,6 +962,12 @@
     },
     {
       "name": "IdenticalFunctionsBlockBody",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "LeafProviderEmpty",
       "service": "web",
       "kind": "standalone",
       "layer": "service"

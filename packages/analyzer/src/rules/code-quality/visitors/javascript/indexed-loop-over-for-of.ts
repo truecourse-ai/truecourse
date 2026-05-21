@@ -35,11 +35,15 @@ export const indexedLoopOverForOfVisitor: CodeRuleVisitor = {
     if (lengthArithmeticRe.test(condText)) return null
 
     let usedOutsideIndex = false
+    let usedAsArrayIndex = false
     function checkIndexUsage(n: SyntaxNode) {
       if (usedOutsideIndex) return
       if (n.type === 'identifier' && n.text === indexName) {
         const parent = n.parent
-        if (parent?.type === 'subscript_expression' && parent.childForFieldName('index')?.id === n.id) return
+        if (parent?.type === 'subscript_expression' && parent.childForFieldName('index')?.id === n.id) {
+          usedAsArrayIndex = true
+          return
+        }
         if (parent?.id === condition?.id || parent?.id === increment?.id) return
         let p: SyntaxNode | null = n.parent
         while (p) {
@@ -56,7 +60,11 @@ export const indexedLoopOverForOfVisitor: CodeRuleVisitor = {
 
     checkIndexUsage(body)
 
-    if (!usedOutsideIndex) {
+    // Only flag when the loop body actually uses the index for array access.
+    // A counted loop that never indexes any array (e.g. iterates a fixed
+    // numeric upper bound for retry/window logic) cannot be replaced with
+    // `for...of` — there's no array to iterate over.
+    if (!usedOutsideIndex && usedAsArrayIndex) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Indexed loop when index not needed',

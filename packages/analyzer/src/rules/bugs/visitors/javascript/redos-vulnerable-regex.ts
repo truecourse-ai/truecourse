@@ -2,11 +2,14 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_LANGUAGES } from './_helpers.js'
 
-// Detect obvious ReDoS patterns in regex literals:
-// Nested quantifiers: (a+)+ (a*)* (a+)* (a*)+ etc.
-// Overlapping alternation with quantifiers: (a|aa)+
-
-const NESTED_QUANTIFIER_RE = /\([^)]*[+*][^)]*\)[+*?{]/
+// Detect canonical ReDoS shapes: a group containing a SINGLE quantified atom
+// (`a+`, `\d+`, `[a-z]+`, `.+`, …) that is itself repeated with an unbounded
+// outer quantifier (`+`/`*`). Patterns with `?` outer quantifier (e.g.
+// `(P)?`) repeat at most once and are not vulnerable. Patterns with an
+// anchor character/class before the inner quantifier (e.g. `([-_][a-z]+)*`)
+// have bounded backtracking because adjacent iterations are separated by a
+// distinct atom.
+const NESTED_QUANTIFIER_RE = /\((?:\?:)?(?:\\[a-zA-Z]|\\[^a-zA-Z]|\.|\[[^\]]*\]|[a-zA-Z0-9_])[+*]\??\)[+*]\??/
 
 export const redosVulnerableRegexVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/redos-vulnerable-regex',
