@@ -710,7 +710,7 @@ function DocPreview({ source }: { source: string }) {
         Doc preview
       </div>
       <div
-        className={`overflow-auto rounded border border-border bg-muted/30 p-3 text-sm text-muted-foreground ${
+        className={`overflow-auto rounded border border-border bg-muted/30 p-3 text-sm leading-relaxed text-muted-foreground ${
           expanded ? 'max-h-[32rem]' : ''
         }`}
       >
