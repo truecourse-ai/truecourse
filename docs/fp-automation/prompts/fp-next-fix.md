@@ -210,13 +210,16 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
 - If `successes == 5` or `attempts == 10`: break out of the loop.
 - Otherwise: continue to next iteration.
 
-## After the loop: measure the FP-count delta on the target
+## After the loop: measure the FP-count delta on the target (REQUIRED)
 
-Skip this entire section if `successes == 0` — no fixes, nothing to
-measure.
+**This step is not optional.** Every batched PR's body MUST include
+the `## FP-count delta` section — either as a populated table (the
+happy path) or as `unavailable: <one-line reason>` if a sub-step
+fails. A PR opened without that section is a routine bug; the
+sanity check in "Open the batched PR" below will block it.
 
-Otherwise, prove the batch actually moved the needle on the target
-repo:
+Skip this section entirely only if `successes == 0`. In every other
+case, do the four steps below before touching the PR-opening section:
 
 1. **Rebuild dist with the new visitor fixes.**
    ```
@@ -238,12 +241,17 @@ repo:
    `delta = after_counts[rule_key] - before_counts[rule_key]`.
    Also compute the cross-rule subtotal (sum over fixed-issues rules)
    and the all-rules total (`after_total - before_total`).
-5. **Hold these numbers** for the PR body in the next section.
 
-If step 1 or 2 fails (build error, analyze crash), don't block the
-PR — open it with a `## FP-count delta` section that says
-`unavailable: <one-line reason>` instead of the table, so a reviewer
-knows the verification step didn't complete.
+Hold these numbers for the PR body — the "## FP-count delta"
+section below is constructed from them.
+
+**Failure modes — still write the section.** If step 1 or 2 throws,
+the section still appears in the PR body, just with
+`unavailable: <one-line reason>` (e.g. `unavailable: pnpm build:dist
+exited 1 — TypeScript error in packages/analyzer/src/rules/...`)
+instead of the table. The reviewer needs to know verification
+didn't complete; silent omission is the worst outcome. Capture the
+error output so the reason is concrete, not "unknown".
 
 ## Open the batched PR
 
@@ -261,6 +269,12 @@ After the loop:
     cherry-pick or move your in-progress commits onto it, then
     delete the wrong branch locally. Pushing from the wrong branch
     will not fire Trigger B and the chain will stall.
+  - **Verify the FP-count delta was measured.** If you don't have
+    `after_counts` populated (i.e. you didn't run the "After the
+    loop" section above), STOP and go run it now. The PR body MUST
+    contain a `## FP-count delta` section — either with the table
+    or with a concrete `unavailable: <reason>` line. Silent omission
+    is a routine bug.
   - Branch: `claude/fp-fix/batch-<YYYYMMDDHHMM>` (use the session start
     time in UTC; this is the branch you created in session setup).
   - Commit message: `fix(fp): resolve <N> FPs from <owner>/<repo>`
@@ -368,6 +382,10 @@ hit a true empty queue and run the close logic.
 
 - At most one **PR-opening** per session.
 - At most **5 successful fixes** and **10 total attempts** per session.
+- **Every PR body must contain a `## FP-count delta` section** —
+  either a populated `Before | After | Delta` table or an explicit
+  `unavailable: <one-line reason>`. The "After the loop" section is
+  not optional; skipping it silently is a routine bug.
 - Never push outside `claude/`-prefixed branches.
 - Never run `truecourse analyze` without `--no-llm`.
 - **Never use `npx truecourse`, `npx -y truecourse@<…>`, or
