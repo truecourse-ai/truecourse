@@ -31,6 +31,14 @@ export const missingEnvValidationVisitor: CodeRuleVisitor = {
         || t === 'logical_expression') {
         return null
       }
+      // `!process.env.X` / `!!process.env.X` (and the `Boolean()` cast form
+      // it expands to) coerce undefined to a boolean — that IS the
+      // validation the rule wants to see.
+      if (t === 'unary_expression') {
+        const op = ancestor.childForFieldName('operator')?.text
+          ?? ancestor.child(0)?.text
+        if (op === '!') return null
+      }
       ancestor = ancestor.parent
       depth++
     }

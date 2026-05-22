@@ -194,6 +194,22 @@ function buildSameFileCalls(fileAnalyses?: FileAnalysis[]): Map<string, Set<stri
 const GOD_MODULE_THRESHOLD = 15
 
 /**
+ * Modules that exist purely to support tests — Jest `__tests__/__mocks__`
+ * directories, `.test`/`.spec` files, and Playwright/Cypress e2e helper
+ * files — are expected to collect many helper methods (Page Object Model,
+ * shared fixtures, etc.). Flagging them as god-modules is a false positive.
+ */
+function isTestSupportModulePath(filePath: string): boolean {
+  const lower = filePath.toLowerCase()
+  return (
+    /[\\/]__tests__[\\/]/.test(lower) ||
+    /[\\/]__mocks__[\\/]/.test(lower) ||
+    /\.(?:test|spec)\.(?:[mc]?[jt]sx?)$/.test(lower) ||
+    /[\\/](?:e2e|playwright|cypress)[\\/]/.test(lower)
+  )
+}
+
+/**
  * Check deterministic module-level rules and return violations.
  */
 export function checkModuleRules(
@@ -337,6 +353,7 @@ export function checkModuleRules(
   // God module
   if (ruleKeys.has('architecture/deterministic/god-module')) {
     for (const mod of modules) {
+      if (isTestSupportModulePath(mod.filePath)) continue
       if (mod.methodCount > GOD_MODULE_THRESHOLD) {
         violations.push({
           ruleKey: 'architecture/deterministic/god-module',

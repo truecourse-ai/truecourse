@@ -26,6 +26,12 @@ export const noScriptUrlVisitor: CodeRuleVisitor = {
       // Skip in if conditions (comparison context)
       if (parent?.type === 'binary_expression') return null
 
+      // Skip when the string is a member of a literal denylist/allowlist —
+      // e.g. `const BLOCKED = ['javascript:', 'data:']` inside a sanitizer.
+      // The intent is the opposite of the rule: code is preventing the
+      // pattern, not introducing one.
+      if (parent?.type === 'array') return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Script URL',

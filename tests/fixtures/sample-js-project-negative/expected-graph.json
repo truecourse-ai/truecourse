@@ -55,6 +55,12 @@
       "layer": "api"
     },
     {
+      "name": "attachOpener",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "attachUserMiddleware",
       "service": "api-gateway",
       "kind": "standalone",
@@ -65,6 +71,12 @@
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "api"
+    },
+    {
+      "name": "buildAuthHeader",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "error-handler",
@@ -325,6 +337,12 @@
       "layer": "data"
     },
     {
+      "name": "applyConfig",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "array-bugs",
       "service": "user-service",
       "kind": "standalone",
@@ -503,6 +521,12 @@
       "service": "user-service",
       "kind": "class",
       "layer": "data"
+    },
+    {
+      "name": "TaskHandlers",
+      "service": "user-service",
+      "kind": "class",
+      "layer": "api"
     },
     {
       "name": "TokenService",

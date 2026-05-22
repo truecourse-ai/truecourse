@@ -3,6 +3,15 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_LANGUAGES } from './_helpers.js'
 
+function containsAwait(stmt: SyntaxNode): boolean {
+  if (stmt.type === 'await_expression') return true
+  for (let i = 0; i < stmt.namedChildCount; i++) {
+    const child = stmt.namedChild(i)
+    if (child && containsAwait(child)) return true
+  }
+  return false
+}
+
 export const elementOverwriteVisitor: CodeRuleVisitor = {
   ruleKey: 'bugs/deterministic/element-overwrite',
   languages: JS_LANGUAGES,
@@ -43,14 +52,23 @@ export const elementOverwriteVisitor: CodeRuleVisitor = {
         const prev = assigns.get(key)!
         // Check if the key was read between the two assignments
         let wasRead = false
+        let hasAwait = false
         for (let j = prev.idx + 1; j < i; j++) {
           const between = statements[j]
           if (between.text.includes(obj.text)) {
             wasRead = true
             break
           }
+          if (!hasAwait && containsAwait(between)) hasAwait = true
         }
-        if (!wasRead) {
+        // React useRef lock idiom: `xRef.current = true; await ...; xRef.current = false`.
+        // The await yields the event loop, so re-entrant callers can observe
+        // the first assignment via the ref's shared `.current`. Skip the
+        // violation when an intervening await crosses the two assignments and
+        // the property is the React `.current` accessor.
+        const isRefCurrent =
+          left.type === 'member_expression' && indexOrProp.text === 'current'
+        if (!wasRead && !(isRefCurrent && hasAwait)) {
           return makeViolation(
             this.ruleKey, expr, filePath, 'high',
             'Element overwritten before read',
