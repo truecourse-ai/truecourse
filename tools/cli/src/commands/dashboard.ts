@@ -30,11 +30,11 @@ function resolveServerEntry(): string | null {
   return candidates.find((p) => fs.existsSync(p)) ?? null;
 }
 
-async function waitForHealth(url: string, timeoutMs = 30_000): Promise<boolean> {
+async function waitForHealth(getUrl: () => string, timeoutMs = 30_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${url}/api/health`);
+      const res = await fetch(`${getUrl()}/api/health`);
       if (res.ok) return true;
     } catch {
       // keep polling
@@ -67,8 +67,6 @@ async function promptRunMode(): Promise<TrueCourseConfig["runMode"]> {
 }
 
 async function runConsoleMode(serverEntry: string): Promise<void> {
-  const url = getServerUrl();
-
   p.log.step("Starting dashboard server...");
   const serverProcess = spawn(process.execPath, [serverEntry], {
     stdio: "inherit",
@@ -90,13 +88,14 @@ async function runConsoleMode(serverEntry: string): Promise<void> {
     process.exit(code ?? 0);
   });
 
-  const healthy = await waitForHealth(url);
+  const healthy = await waitForHealth(getServerUrl);
   if (!healthy) {
     p.log.error("Server did not become healthy in time.");
     forward("SIGTERM");
     process.exit(1);
   }
 
+  const url = getServerUrl();
   const target = targetUrlFor(url);
   openInBrowser(target);
   p.log.success(`Dashboard open at ${target}`);
@@ -107,7 +106,6 @@ async function runServiceMode(serverEntry: string): Promise<void> {
   const platform = getPlatform();
   const logDir = getLogDir();
   const logPath = getLogPath();
-  const url = getServerUrl();
 
   rotateLogs(logDir);
 
@@ -123,7 +121,7 @@ async function runServiceMode(serverEntry: string): Promise<void> {
     }
   }
 
-  const healthy = await waitForHealth(url);
+  const healthy = await waitForHealth(getServerUrl);
   if (!healthy) {
     p.log.warn("Service started but server hasn't responded on the health endpoint.");
     p.log.info(`Log dir: ${logDir}`);
@@ -137,7 +135,7 @@ async function runServiceMode(serverEntry: string): Promise<void> {
     process.exit(1);
   }
 
-  const target = targetUrlFor(url);
+  const target = targetUrlFor(getServerUrl());
   openInBrowser(target);
   p.log.success(`Dashboard open at ${target}`);
   p.log.info("Stop the dashboard with: truecourse dashboard stop");

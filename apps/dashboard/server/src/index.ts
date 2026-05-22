@@ -1,13 +1,17 @@
 import { createServer } from 'http';
+import fs from 'node:fs';
 import path from 'node:path';
 import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { stopAllWatchers } from './services/watcher.service.js';
-import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
+import { wipeLegacyPostgresData, getLogDir, getServerPortFilePath } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
-const port = parseInt(process.env.PORT || '3001', 10);
+const DEFAULT_PORT = 3001;
+const MAX_PORT_ATTEMPTS = 10;
+const userSpecifiedPort = !!process.env.PORT;
+const startPort = parseInt(process.env.PORT || String(DEFAULT_PORT), 10);
 
 async function main() {
   // 0. Route all internal diagnostics to the dashboard log file. When running
@@ -33,41 +37,77 @@ async function main() {
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 3. Start listening
-  await new Promise<void>((resolve, reject) => {
-    httpServer.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        reject(new Error(
-          `Port ${port} is already in use. Is another TrueCourse instance running?\n` +
-          `Stop it first, or set PORT to use a different port.`
-        ));
-      } else {
-        reject(err);
-      }
+  // 3. Start listening — auto-selects the next free port if the default is
+  //    reserved (common when Docker or a hypervisor has claimed it). If the
+  //    user explicitly set PORT we respect that and fail immediately.
+  let actualPort = startPort;
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+    const candidate = startPort + attempt;
+    const bound = await new Promise<boolean>((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        httpServer.removeListener('error', onError);
+        httpServer.removeListener('listening', onListening);
+        if (err.code === 'EADDRINUSE') {
+          resolve(false);
+        } else {
+          reject(err);
+        }
+      };
+      const onListening = () => {
+        httpServer.removeListener('error', onError);
+        resolve(true);
+      };
+      httpServer.once('error', onError);
+      httpServer.once('listening', onListening);
+      httpServer.listen(candidate);
     });
-    httpServer.listen(port, () => {
-      log.banner([
-        '',
-        '         _|_',
-        '        /_|_\\',
-        '          |',
-        '         /|',
-        '        / |',
-        '       /  |',
-        '      /   |',
-        '     /    |',
-        '    /_____|_____\\',
-        '    \\__________|',
-        '     \\_________/',
-        '   ~~~~~~~~~~~~~~',
-        '',
-        '   Charting your course...',
-        '',
-      ]);
-      log.info(`[Server] Listening on port ${port}`);
-      resolve();
-    });
-  });
+
+    if (bound) {
+      actualPort = candidate;
+      break;
+    }
+
+    if (userSpecifiedPort) {
+      throw new Error(
+        `Port ${candidate} is already in use.\n` +
+        `Stop whatever is using it, or unset PORT to allow automatic port selection.`
+      );
+    }
+
+    if (attempt === MAX_PORT_ATTEMPTS - 1) {
+      throw new Error(
+        `No available port found in range ${startPort}–${startPort + MAX_PORT_ATTEMPTS - 1}.\n` +
+        `Set PORT to specify a different port.`
+      );
+    }
+
+    log.warn(`[Server] Port ${candidate} is in use (possibly reserved by Docker or a hypervisor), trying ${candidate + 1}...`);
+  }
+
+  log.banner([
+    '',
+    '         _|_',
+    '        /_|_\\',
+    '          |',
+    '         /|',
+    '        / |',
+    '       /  |',
+    '      /   |',
+    '     /    |',
+    '    /_____|_____\\',
+    '    \\__________|',
+    '     \\_________/',
+    '   ~~~~~~~~~~~~~~',
+    '',
+    '   Charting your course...',
+    '',
+  ]);
+  log.info(`[Server] Listening on port ${actualPort}`);
+
+  // Write the actual port so the CLI can discover it when auto-selection fired
+  const portFile = getServerPortFilePath();
+  fs.mkdirSync(path.dirname(portFile), { recursive: true });
+  fs.writeFileSync(portFile, String(actualPort), 'utf-8');
 
   // Graceful shutdown
   async function shutdown() {
@@ -75,6 +115,7 @@ async function main() {
     stopAllWatchers();
     httpServer.closeAllConnections();
     httpServer.close();
+    try { fs.unlinkSync(getServerPortFilePath()); } catch { /* already gone */ }
     log.info('[Server] Closed');
     await closeLogger();
     process.exit(0);

@@ -7,7 +7,7 @@ import path from "node:path";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { resolveRepoDir } from "@truecourse/core/config/paths";
+import { resolveRepoDir, getServerPortFilePath } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
 
 const DEFAULT_PORT = 3001;
@@ -44,6 +44,12 @@ export function writeConfig(partial: Partial<TrueCourseConfig>): void {
 }
 
 export function getServerUrl(): string {
+  const portFile = getServerPortFilePath();
+  if (fs.existsSync(portFile)) {
+    const raw = fs.readFileSync(portFile, 'utf-8').trim();
+    const port = parseInt(raw, 10);
+    if (!isNaN(port) && port > 0) return `http://localhost:${port}`;
+  }
   const port = process.env.PORT || DEFAULT_PORT;
   return `http://localhost:${port}`;
 }

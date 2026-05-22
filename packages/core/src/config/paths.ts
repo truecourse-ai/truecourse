@@ -30,6 +30,10 @@ export function getLogDir(): string {
   return path.join(getGlobalDir(), 'logs');
 }
 
+export function getServerPortFilePath(): string {
+  return path.join(getGlobalDir(), 'server.port');
+}
+
 // ---------------------------------------------------------------------------
 // Per-repo paths
 // ---------------------------------------------------------------------------
