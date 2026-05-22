@@ -18,6 +18,11 @@ on:
   issues:
     types: [opened]
 
+permissions:
+  issues: read
+  contents: read
+  pull-requests: read
+
 jobs:
   notify-pr:
     if: >
@@ -45,12 +50,74 @@ jobs:
             --data-urlencode "text=${MESSAGE}" \
             > /dev/null
 
-  notify-issue:
+  # Bursts of fp-fix issues (fp-discover initial filing, fp-next-fix
+  # re-discovery filing) used to produce one TG message per issue —
+  # 30+ messages in a row. Debounce with concurrency: each new fp-fix
+  # `issues.opened` event cancels the prior in-progress run, so only
+  # the last event's run survives. That run sleeps to let the burst
+  # settle, queries all fp-fix issues opened in the last 10 minutes,
+  # and sends ONE rollup message with the count.
+  notify-fp-fix-burst:
     if: >
       github.event_name == 'issues' &&
-      (contains(github.event.issue.labels.*.name, 'fp-fix') ||
-       contains(github.event.issue.labels.*.name, 'fp-blocked') ||
-       startsWith(github.event.issue.title, '[fp-campaign-close]'))
+      contains(github.event.issue.labels.*.name, 'fp-fix')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fp-fix-burst
+      cancel-in-progress: true
+    steps:
+      - name: Wait for burst to settle
+        run: sleep 60
+
+      - name: Send rollup Telegram message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
+            exit 0
+          fi
+
+          since=$(date -u -d '10 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')
+          issues_json=$(gh issue list \
+            --repo "$REPO" \
+            --label fp-fix \
+            --state open \
+            --search "created:>${since}" \
+            --json number,title \
+            --limit 200)
+
+          count=$(echo "$issues_json" | jq 'length')
+          if [ "$count" -eq 0 ]; then
+            echo "No fp-fix issues opened in window — nothing to roll up."
+            exit 0
+          fi
+
+          sample=$(echo "$issues_json" | jq -r '.[0:5][] | "• #\(.number) \(.title)"')
+          first_num=$(echo "$issues_json" | jq -r '.[0].number')
+          first_url="https://github.com/${REPO}/issues/${first_num}"
+
+          if [ "$count" -eq 1 ]; then
+            MESSAGE=$(printf "📋 1 new fp-fix issue filed\n\n%s\n\n%s" \
+              "$sample" "$first_url")
+          else
+            MESSAGE=$(printf "📋 %s new fp-fix issues filed\n\n%s\n\n%s" \
+              "$count" "$sample" "$first_url")
+          fi
+          curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            > /dev/null
+
+  # Campaign-close failure issues are filed individually and are rare —
+  # no rollup, fire per-issue.
+  notify-campaign-close-failure:
+    if: >
+      github.event_name == 'issues' &&
+      startsWith(github.event.issue.title, '[fp-campaign-close]')
     runs-on: ubuntu-latest
     steps:
       - name: Send Telegram message
@@ -65,7 +132,7 @@ jobs:
             echo "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID secret not set — skipping notification."
             exit 0
           fi
-          MESSAGE=$(printf "🔔 New routine issue #%s\n%s\n\n%s" \
+          MESSAGE=$(printf "⚠️ fp-campaign-close failure: #%s\n%s\n\n%s" \
             "$ISSUE_NUMBER" "$ISSUE_TITLE" "$ISSUE_URL")
           curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
