@@ -417,7 +417,7 @@ function VersionChainCandidate({
         ? 'current version'
         : 'middle version';
   return (
-    <div className="mx-auto max-w-4xl">
+    <div>
       <CandidateHeading
         file={file}
         role={role}
@@ -486,7 +486,7 @@ function ContentCandidate({
     })),
   );
   return (
-    <div className="mx-auto max-w-4xl">
+    <div>
       <CandidateHeading
         file={`${candidate.claim.provenance.file}:${candidate.claim.provenance.line}`}
         role={candidate.weight}
