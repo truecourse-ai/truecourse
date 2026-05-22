@@ -494,7 +494,7 @@ function ContentCandidate({
         isDefault={isDefault}
       />
       {isDefault && (
-        <div className="mt-2 rounded border border-primary/30 bg-primary/5 px-3 py-1.5 text-[11px] text-muted-foreground">
+        <div className="mt-2 rounded border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground">
           <span className="font-medium text-primary">Recommended by engine.</span>{' '}
           {recommendationReason(candidate, conflict)}
         </div>
@@ -504,7 +504,7 @@ function ContentCandidate({
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             What differs
           </div>
-          <div className="rounded border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground">
+          <div className="rounded border border-border bg-muted/30 p-3 text-sm leading-relaxed text-foreground">
             {conflict.explanation}
           </div>
         </div>
@@ -710,7 +710,7 @@ function DocPreview({ source }: { source: string }) {
         Doc preview
       </div>
       <div
-        className={`overflow-auto rounded border border-border bg-muted/30 p-3 text-xs text-muted-foreground ${
+        className={`overflow-auto rounded border border-border bg-muted/30 p-3 text-sm text-muted-foreground ${
           expanded ? 'max-h-[32rem]' : ''
         }`}
       >
