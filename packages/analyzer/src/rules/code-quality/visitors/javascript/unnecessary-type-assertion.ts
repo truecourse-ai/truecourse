@@ -37,6 +37,14 @@ export const unnecessaryTypeAssertionVisitor: CodeRuleVisitor = {
     // Skip when source type is `any` — narrowing from any is a meaningful assertion
     if (exprType === 'any') return null
 
+    // Skip the inner `X as unknown` step of a `X as unknown as Y` laundering
+    // chain. The intermediate cast to `unknown` is forced by TypeScript when
+    // the original and final types are not assignable to each other; removing
+    // it would make the outer cast illegal.
+    if (typeAnnotation.text === 'unknown' && node.parent?.type === 'as_expression') {
+      return null
+    }
+
     if (exprType && targetType && exprType === targetType) {
       // Skip narrowing via keyof — `key as keyof T` provides a useful type constraint
       // even when TS resolves both sides to the same type (e.g. string)

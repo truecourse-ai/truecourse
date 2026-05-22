@@ -9,6 +9,13 @@ export const regexComplexityVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['regex'],
   visit(node, filePath, sourceCode) {
+    // Skip build/runtime config files (vite.config.ts, vitest.config.ts,
+    // webpack.config.js, etc.) — regexes there typically match well-known
+    // build-tool conventions (query params, virtual-module specifiers,
+    // bundler internals) and are config, not application logic.
+    const lowerPath = filePath.toLowerCase()
+    if (/\.config\.[cm]?[jt]sx?$/.test(lowerPath)) return null
+
     const patternNode = node.namedChildren.find((c) => c.type === 'regex_pattern')
     if (!patternNode) return null
 

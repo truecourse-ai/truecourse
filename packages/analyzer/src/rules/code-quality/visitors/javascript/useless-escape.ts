@@ -10,6 +10,15 @@ export const uselessEscapeVisitor: CodeRuleVisitor = {
     const quoteChar = text[0]
     if (quoteChar !== '"' && quoteChar !== "'") return null
 
+    // Skip strings that are the value of a JSX `pattern` attribute on a
+    // form input. The HTML `pattern` attribute is a regex parsed by the
+    // browser, so `\d`, `\w`, `\s`, etc. are correct regex shorthand and
+    // the backslash is required.
+    if (node.parent?.type === 'jsx_attribute') {
+      const propId = node.parent.namedChildren.find((c) => c.type === 'property_identifier')
+      if (propId?.text === 'pattern') return null
+    }
+
     const validEscapes = new Set(['n', 'r', 't', 'b', 'f', 'v', '0', '\\', quoteChar, 'u', 'x', '\n'])
 
     let i = 1
