@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/components/ui/button';
+import { HoverPopover } from '@/components/ui/hover-popover';
 import {
   Tooltip,
   TooltipContent,
@@ -814,15 +815,25 @@ function ActionFooter({
           !customMode && (
             <>
               {supersedeEligible && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setPickingTarget((v) => !v)}
-                  disabled={busy}
-                  title={`Mark ${selectedFile} as an older version of one of the other docs — drops its claims from the corpus and clears every conflict caused by the same supersession.`}
+                <HoverPopover
+                  side="top"
+                  align="end"
+                  width="wide"
+                  content={
+                    <>
+                      Mark <span className="font-mono">{selectedFile}</span> as an older version of one of the other docs in this conflict. Claims from this doc are dropped from the corpus and every conflict caused by the same supersession clears in one action.
+                    </>
+                  }
                 >
-                  Mark superseded by →
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPickingTarget((v) => !v)}
+                    disabled={busy}
+                  >
+                    Mark superseded by →
+                  </Button>
+                </HoverPopover>
               )}
               <Button size="sm" variant="outline" onClick={onOpenCustom} disabled={busy}>
                 Write custom answer
