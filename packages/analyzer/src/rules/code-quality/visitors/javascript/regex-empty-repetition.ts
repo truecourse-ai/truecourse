@@ -10,7 +10,12 @@ export const regexEmptyRepetitionVisitor: CodeRuleVisitor = {
     const src = getRegexSource(node)
     if (!src) return null
 
-    if (/\([^)]*[*+][^)]*\)[*+]/.test(src)) {
+    // Catastrophic backtracking requires the inner group to be able to match
+    // the empty string. Two shapes count: an empty group `(?:)`/`()`, or a
+    // group whose trailing atom is itself a zero-or-more (`*`, `?`,
+    // `{0,…}`). A trailing `+` requires content, so `(?:[-_][a-z0-9]+)*`
+    // is safe even though `+` appears inside.
+    if (/\((?:\?[:!=]|\?<[!=])?(?:[^)]*(?:[*?]|\{0,\d*\}))?\)[*+]/.test(src)) {
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Empty string repetition in regex',
