@@ -9,6 +9,12 @@ export const uselessConstructorVisitor: CodeRuleVisitor = {
     const nameNode = node.childForFieldName('name')
     if (nameNode?.text !== 'constructor') return null
 
+    // `private`/`protected` constructors aren't useless — they restrict
+    // instantiation (e.g. singleton pattern). Removing them would expose
+    // the default public constructor and change observable behavior.
+    const modifier = node.namedChildren.find((c) => c.type === 'accessibility_modifier')
+    if (modifier && (modifier.text === 'private' || modifier.text === 'protected')) return null
+
     const body = node.namedChildren.find((c) => c.type === 'statement_block')
     if (!body) return null
 

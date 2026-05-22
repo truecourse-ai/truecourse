@@ -1,6 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
-import { isInsideAsyncFunctionOrHandler } from './_helpers.js'
+import { isInsideAsyncFunctionOrHandler, isScriptLikeJsFile } from './_helpers.js'
 
 export const syncRequireInHandlerVisitor: CodeRuleVisitor = {
   ruleKey: 'performance/deterministic/sync-require-in-handler',
@@ -9,6 +9,11 @@ export const syncRequireInHandlerVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode) {
     const fn = node.childForFieldName('function')
     if (!fn || fn.type !== 'identifier' || fn.text !== 'require') return null
+
+    // CLI / seed / build scripts run once and exit; the "in handler" perf
+    // concern doesn't apply, and dynamic `require(path)` is the standard
+    // way to iterate over a directory of script modules.
+    if (isScriptLikeJsFile(filePath)) return null
 
     if (!isInsideAsyncFunctionOrHandler(node)) return null
 
