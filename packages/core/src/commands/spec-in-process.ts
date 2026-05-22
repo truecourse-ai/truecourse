@@ -27,6 +27,8 @@ import {
   type ConsolidateResult,
   type Decision,
   type DecisionsFile,
+  type ManualChain,
+  type Resolution,
   type ScanState,
 } from '@truecourse/spec-consolidator';
 import {
@@ -229,6 +231,7 @@ function buildScanState(result: ConsolidateResult): ScanState {
       conflict: { ...d.conflict, candidateFingerprint: candidateFingerprint(d.conflict) },
       decision: d.decision,
     })),
+    skippedDocs: result.skippedDocs ?? [],
   };
 }
 
@@ -459,6 +462,8 @@ function appendDefaults(repoRoot: string, conflicts: ConsolidateResult['merge'][
   const next: DecisionsFile = {
     version: 1,
     decisions: [...existing.decisions, ...additions],
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: existing.manualIncludes ?? [],
   };
   writeDecisions(repoRoot, next);
   return additions.length;
@@ -813,4 +818,150 @@ function autodetectCodeDir(repoRoot: string): string {
     return codeSubdir;
   }
   return repoRoot;
+}
+
+// ---------------------------------------------------------------------------
+// Decisions-file mutations
+//
+// Pure read-modify-write helpers around decisions.json. The dashboard
+// server routes and the CLI both call these so the two surfaces agree
+// on update semantics. None of these refresh the scan-state — callers
+// who need a re-merge (CLI write commands) run scanInProcess afterwards.
+// ---------------------------------------------------------------------------
+
+/**
+ * Upsert a per-conflict decision. Replaces any previous decision for
+ * the same conflictId. `manualChains` and `manualIncludes` are
+ * preserved untouched.
+ */
+export function upsertDecision(
+  repoRoot: string,
+  input: {
+    conflictId: string;
+    resolution: Resolution;
+    candidateFingerprint: string;
+    note?: string;
+  },
+): DecisionsFile {
+  const existing = readDecisions(repoRoot);
+  const filtered = existing.decisions.filter((d) => d.conflictId !== input.conflictId);
+  const decision: Decision = {
+    conflictId: input.conflictId,
+    resolution: input.resolution,
+    resolvedAt: new Date().toISOString(),
+    candidateFingerprint: input.candidateFingerprint,
+    note: input.note,
+  };
+  const next: DecisionsFile = {
+    version: 1,
+    decisions: [...filtered, decision],
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: existing.manualIncludes ?? [],
+  };
+  writeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Revoke a per-conflict decision. Idempotent — when the decision is
+ * already absent, returns the current state unchanged.
+ */
+export function revokeDecision(repoRoot: string, conflictId: string): DecisionsFile {
+  const existing = readDecisions(repoRoot);
+  const filtered = existing.decisions.filter((d) => d.conflictId !== conflictId);
+  if (filtered.length === existing.decisions.length) return existing;
+  const next: DecisionsFile = {
+    version: 1,
+    decisions: filtered,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: existing.manualIncludes ?? [],
+  };
+  writeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Add or replace a manual version chain. When a chain with the same
+ * (older, newer) pair already exists, it's replaced (markedAt + note
+ * refreshed). Self-pairs (`older === newer`) are rejected.
+ */
+export function addManualChain(
+  repoRoot: string,
+  input: { older: string; newer: string; note?: string },
+): DecisionsFile {
+  if (input.older === input.newer) {
+    throw new Error('addManualChain: older and newer must be different docs');
+  }
+  const existing = readDecisions(repoRoot);
+  const dedup = (existing.manualChains ?? []).filter(
+    (c) => !(c.older === input.older && c.newer === input.newer),
+  );
+  const chain: ManualChain = {
+    older: input.older,
+    newer: input.newer,
+    markedAt: new Date().toISOString(),
+    note: input.note,
+  };
+  const next: DecisionsFile = {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: [...dedup, chain],
+    manualIncludes: existing.manualIncludes ?? [],
+  };
+  writeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Remove a manual chain by (older, newer). Idempotent.
+ */
+export function removeManualChain(
+  repoRoot: string,
+  input: { older: string; newer: string },
+): DecisionsFile {
+  const existing = readDecisions(repoRoot);
+  const filtered = (existing.manualChains ?? []).filter(
+    (c) => !(c.older === input.older && c.newer === input.newer),
+  );
+  const next: DecisionsFile = {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: filtered,
+    manualIncludes: existing.manualIncludes ?? [],
+  };
+  writeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Force-include a doc the relevance filter skipped. Idempotent.
+ */
+export function addManualInclude(repoRoot: string, docPath: string): DecisionsFile {
+  const existing = readDecisions(repoRoot);
+  const current = existing.manualIncludes ?? [];
+  if (current.includes(docPath)) return existing;
+  const next: DecisionsFile = {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: [...current, docPath],
+  };
+  writeDecisions(repoRoot, next);
+  return next;
+}
+
+/**
+ * Remove a force-include override. Idempotent.
+ */
+export function removeManualInclude(repoRoot: string, docPath: string): DecisionsFile {
+  const existing = readDecisions(repoRoot);
+  const filtered = (existing.manualIncludes ?? []).filter((p) => p !== docPath);
+  const next: DecisionsFile = {
+    version: 1,
+    decisions: existing.decisions,
+    manualChains: existing.manualChains ?? [],
+    manualIncludes: filtered,
+  };
+  writeDecisions(repoRoot, next);
+  return next;
 }

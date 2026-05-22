@@ -706,6 +706,12 @@ export type SpecScanResponse = {
   decided: number;
   openConflicts: SpecConflict[];
   decidedConflicts: Array<{ conflict: SpecConflict; decision: SpecDecision }>;
+  /**
+   * Docs the LLM relevance filter excluded from extraction. Each has a
+   * short reason. User can force-include via the include endpoint.
+   * Absent on older scan-state files; treat as [].
+   */
+  skippedDocs?: Array<{ path: string; reason: string }>;
 };
 
 export type IlValidationIssue = {
@@ -877,6 +883,26 @@ export function postSpecDecision(
 ): Promise<SpecDecisionsFile> {
   return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/decisions`, {
     method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function postSpecManualInclude(
+  repoId: string,
+  payload: { path: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSpecManualInclude(
+  repoId: string,
+  payload: { path: string },
+): Promise<SpecDecisionsFile> {
+  return fetchApi<SpecDecisionsFile>(`/api/repos/${repoId}/spec/docs/include`, {
+    method: 'DELETE',
     body: JSON.stringify(payload),
   });
 }

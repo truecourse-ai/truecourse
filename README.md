@@ -17,7 +17,12 @@
   <a href="https://discord.gg/8AYwf26A"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
-TrueCourse analyzes your codebase architecture and code to detect violations that traditional linters miss — circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, and more. It combines tree-sitter static analysis with LLM-powered review to surface findings with fix suggestions.
+TrueCourse catches two classes of defect:
+
+- **Code defects** — from the same categories linters cover (unused code, style, missing types) through to ones they don't reach: circular dependencies, layer violations, dead modules, race conditions, security anti-patterns, performance footguns. Tree-sitter analysis combined with LLM review.
+- **Business-logic drift** — when the implementation no longer matches what the docs say it should do. Wrong response codes, missing entity fields, illegal state transitions, bypassed auth, silently-dropped effects, formulas that have lost an input. TrueCourse extracts the contract from your PRDs/ADRs/READMEs and checks the code against it.
+
+Two commands, two concerns. `truecourse analyze` produces code findings. `truecourse verify` produces drift findings, once you've materialised the canonical spec and extracted contracts. Both kinds of output are structured — queryable as JSON for agent workflows, rendered in a dashboard for human review.
 
 <p align="center">
   <img src="assets/demo.gif" alt="TrueCourse Screenshot" width="100%" />
@@ -40,6 +45,8 @@ TrueCourse analyzes your codebase architecture and code to detect violations tha
 **Database** — Missing indexes, missing transactions, lazy loading in loops, raw SQL bypassing ORM, schema issues
 
 **Style** — Import ordering, naming conventions, docstring completeness, formatting preferences
+
+**Spec / BL drift** — Operations whose responses, status codes, or headers don't match the spec. Entities with missing or mistyped fields. Immutability and lifecycle violations on state machines. Missing or forbidden side-effect emissions. Auth requirements bypassed. Pagination, idempotency, and error-envelope contracts violated. Formulas producing wrong results from drifted inputs.
 
 ## Quick Start
 
@@ -99,6 +106,33 @@ truecourse dashboard stop             # Stop the dashboard
 truecourse dashboard status           # Show dashboard status
 truecourse dashboard logs             # Tail dashboard logs (service mode only)
 truecourse dashboard uninstall        # Remove the background service
+
+# Spec consolidation (docs → canonical spec)
+truecourse spec scan                              # Read docs, extract claims, surface conflicts
+truecourse spec resolve --all-defaults            # Accept the engine's recommended pick on every open conflict
+truecourse spec apply                              # Materialize .truecourse/specs/ from current decisions
+truecourse spec status                             # Summary: docs, claims, modules, pending decisions
+truecourse spec diff                               # Show what would change on the next apply
+
+# Agent-friendly conflict surface (all support --json)
+truecourse spec conflicts list                    # List open conflicts (add --decided / --all)
+truecourse spec conflicts show <id>               # Full detail for one conflict
+truecourse spec conflicts pick <id> <index>       # Resolve by picking a candidate
+truecourse spec conflicts custom <id> --text "…"  # Resolve with a custom answer
+truecourse spec conflicts revoke <id>             # Re-open a decided conflict
+truecourse spec chains add --older A --newer B    # Manually mark a version chain (escape hatch)
+truecourse spec chains list / remove …
+truecourse spec docs skipped                      # Docs the LLM relevance filter excluded
+truecourse spec docs include <path>               # Force-include a skipped doc
+truecourse spec docs uninclude <path>
+
+# Contract extraction (canonical spec → .tc artifacts)
+truecourse contracts generate                     # Extract / re-extract TC contract files
+truecourse contracts list                          # List generated contracts
+truecourse contracts validate                      # Parse + resolve TC files; report unresolved refs
+
+# Verification (code against contracts) — separate command, not part of `analyze`
+truecourse verify
 ```
 
 ### Rules
@@ -133,6 +167,68 @@ rule keys lives in `<repo>/.truecourse/config.json` under
 In the dashboard you can also toggle rules from the Rules panel
 (Shield icon in the top-right) or silence a noisy rule directly from
 any violation card via the **⋮** menu → **Disable rule for this repo**.
+
+### Spec → Contracts → Verify (BL drift detection)
+
+In addition to the rule-based static analysis, TrueCourse builds a
+machine-readable spec from your docs and verifies the code against it.
+Three stages run in order, each producing artifacts the next stage
+consumes:
+
+**1. Spec consolidation** — Walks every `.md` file in the repo (PRDs,
+ADRs, RFCs, READMEs, design notes; `.truecourse/`, `node_modules/`,
+`.git/` etc. are skipped). An LLM relevance filter drops obvious
+non-spec material (task lists, research logs, AI agent prompts). For
+the docs that remain, an LLM extracts structured claims per block and
+groups them by `(topic, subject)`. Agreements auto-merge; genuine
+disagreements surface as **conflicts** in the dashboard with a plain-
+English explanation of what differs. Output: `.truecourse/specs/`
+(modular, canonical markdown organised by topic) and
+`.truecourse/specs/decisions.json` (the user's resolutions, version
+chains, and overrides — committable).
+
+Auto-resolve rules cut the conflict count substantially: byte-
+identical content, status-tolerant duplicates, same-file consolidation,
+docKind-dominance pickups, and detected version chains.
+[Plan](docs/contracts/PLAN_CONFLICT_RESOLUTION.md).
+
+**2. Contract extraction** — Reads the canonical spec slice-by-slice
+and emits `.truecourse/contracts/*.tc` files in a hand-written DSL
+covering 13 artifact kinds: `operation`, `entity`, `enum`,
+`state-machine`, `auth-requirement`, `authorization-rule`,
+`error-envelope`, `pagination-contract`, `idempotency-contract`,
+`effect-group`, `formula`, plus `unenforceable-obligation` for prose
+the verifier can't structurally check. A post-extraction **repair
+pass** validates structural completeness and re-prompts the LLM to fix
+deficient artifacts (missing forbids clauses, broad role selectors,
+unresolved cross-references). On the bundled fixture this hits
+**22/22 planted bugs with 0 false positives**.
+
+**3. Verification** — Parses the contracts, walks the source tree, and runs per-kind comparators (operations, entities, state machines, etc.). Drifts surface in the dashboard alongside code violations and from the CLI as JSON. Verification is its own command — `truecourse verify` — not a stage of `truecourse analyze`, because the two pipelines answer different questions, have different prerequisites, and run on different time scales.
+
+**Storage layout** (per repo, under `.truecourse/`):
+
+```
+.truecourse/
+├── specs/                  ← canonical spec (committable)
+│   ├── modules/
+│   │   └── <name>/{module.yaml, endpoints.md, data.md, ...}
+│   ├── shared/
+│   └── decisions.json       ← user resolutions + version chains + manual includes
+├── contracts/               ← generated TC contract artifacts (gitignored by default)
+├── analyses/                ← analysis snapshots (gitignored)
+├── LATEST.json              ← current-state view (committable)
+└── .cache/                  ← LLM + slice cache (gitignored)
+```
+
+The dashboard's Spec tab walks you through resolving each conflict
+(pick / write custom / mark superseded / include skipped doc). The
+same actions are also available via the CLI subcommands shown above
+(every command supports `--json` for agent-driven workflows).
+
+**Prerequisite:** the contract extractor and the conflict resolver
+shell out to the Claude Code CLI (`claude -p`). Install Claude Code
+and sign in once before running `spec scan` or `contracts generate`.
 
 ### Git Hooks
 

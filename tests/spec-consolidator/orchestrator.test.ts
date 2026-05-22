@@ -158,7 +158,7 @@ describe('consolidate — scan mode', () => {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
 
     // Two conflicts now: the version chain (filename-detected
     // PRDv1 → PRDv2) and the orders content conflict (200 vs 201).
@@ -183,7 +183,7 @@ describe('consolidate — apply mode', () => {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     // Resolve every open conflict to its default pick. The chain
     // resolution (v2 supersedes v1) makes the content conflict
     // disappear because v1's claims are dropped before merging.
@@ -204,7 +204,7 @@ describe('consolidate — apply mode', () => {
       blockRunner: makeRunner(),
       sectionRunner: sectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
 
     expect(apply.merge.openConflicts).toEqual([]);
     expect(apply.materialize?.failures).toEqual([]);
@@ -255,7 +255,7 @@ describe('consolidate — caching', () => {
       materialize: false,
       blockRunner: countingRunner,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const firstRunCalls = calls;
     expect(firstRunCalls).toBeGreaterThan(0);
 
@@ -265,7 +265,7 @@ describe('consolidate — caching', () => {
       materialize: false,
       blockRunner: countingRunner,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     expect(calls).toBe(0);
   });
 
@@ -277,7 +277,7 @@ describe('consolidate — caching', () => {
       materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const conflict = scan.merge.openConflicts[0];
     writeDecisions(repo, {
       version: 1,
@@ -300,7 +300,7 @@ describe('consolidate — caching', () => {
       blockRunner: makeRunner(),
       sectionRunner: countingSection,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const firstApplyCalls = sectionCalls;
     expect(firstApplyCalls).toBeGreaterThan(0);
 
@@ -311,7 +311,7 @@ describe('consolidate — caching', () => {
       blockRunner: makeRunner(),
       sectionRunner: countingSection,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     expect(sectionCalls).toBe(0);
   });
 
@@ -339,7 +339,7 @@ describe('consolidate — caching', () => {
 
 describe('readDecisions / writeDecisions', () => {
   it('returns empty default when decisions.json is missing', () => {
-    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [] });
+    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
   });
 
   it('round-trips a written decisions file', () => {
@@ -352,6 +352,7 @@ describe('readDecisions / writeDecisions', () => {
         candidateFingerprint: 'fp',
       }],
       manualChains: [],
+      manualIncludes: [],
     };
     writeDecisions(repo, decisions);
     expect(readDecisions(repo)).toEqual(decisions);
@@ -361,6 +362,6 @@ describe('readDecisions / writeDecisions', () => {
     const decFile = path.join(repo, '.truecourse/specs/decisions.json');
     fs.mkdirSync(path.dirname(decFile), { recursive: true });
     fs.writeFileSync(decFile, '{ corrupt');
-    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [] });
+    expect(readDecisions(repo)).toEqual({ version: 1, decisions: [], manualChains: [], manualIncludes: [] });
   });
 });

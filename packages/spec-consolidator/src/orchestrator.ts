@@ -58,6 +58,7 @@ import {
   explainConflicts,
   type ConflictExplainerRunner,
 } from './conflict-explainer.js';
+import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import {
   detectVersionChainsViaLlm,
   type ChainRunner,
@@ -107,6 +108,15 @@ export interface ConsolidateOptions {
    */
   disableConflictExplanations?: boolean;
   /**
+   * Override the LLM relevance-filter runner. Tests pass a stub.
+   */
+  relevanceRunner?: RelevanceRunner;
+  /**
+   * When true, skip the LLM relevance filter — every discovered doc
+   * feeds claim extraction. The default is filter-enabled.
+   */
+  disableRelevanceFilter?: boolean;
+  /**
    * Skip the git-log mtime resolution. Useful for tests; the harness
    * also passes this when the working dir isn't a git repo.
    */
@@ -140,6 +150,13 @@ export interface ConsolidateResult {
   /** Materialization result — written paths + per-section failures. */
   materialize?: MaterializeResult;
   /**
+   * Docs the LLM relevance filter marked as non-spec material and
+   * excluded from extraction. Each carries a short reason for the
+   * dashboard, plus the doc's repo-relative path so the user can
+   * manually include it via decisions.json#manualIncludes.
+   */
+  skippedDocs?: Array<{ path: string; reason: string }>;
+  /**
    * The decisions file the orchestrator read from disk (or the empty
    * default if none existed). Echoed in the result so callers can
    * inspect what informed the merge.
@@ -156,10 +173,20 @@ export async function consolidate(
 ): Promise<ConsolidateResult> {
   const decisions = readDecisions(repoRoot);
 
-  // ---- Discover (twice — once here for chain detection, once inside
-  //              extractClaims). Discovery is cheap and deterministic
-  //              so the duplication is negligible.
-  const docs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
+  // ---- Discover -------------------------------------------------------
+  const allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
+
+  // ---- LLM relevance filter -------------------------------------------
+  // Drop docs the LLM tags as non-spec material (task lists, research
+  // logs, AI agent instructions). User overrides via
+  // decisions.json#manualIncludes always force-include.
+  const relevance = await filterByRelevance(repoRoot, allDocs, {
+    runner: opts.relevanceRunner,
+    enabled: opts.disableRelevanceFilter !== true,
+    manualIncludes: decisions.manualIncludes ?? [],
+  });
+  const docs = relevance.included;
+  const skippedDocs = relevance.skipped.map(({ doc, reason }) => ({ path: doc.path, reason }));
 
   // ---- Detect version chains (deterministic + LLM-augmented) ----------
   // Deterministic detector catches filename versioning (v1/v2) — cheap,
@@ -189,6 +216,7 @@ export async function consolidate(
     opts.onBlockDone,
   );
   const extract = await extractClaims(repoRoot, {
+    docs,
     runner: blockRunner,
     skipGit: opts.skipGit,
     onDocStart: opts.onDocStart,
@@ -265,7 +293,7 @@ export async function consolidate(
   });
 
   if (!opts.materialize) {
-    return { extract, merge: stitchedMerge, decisions };
+    return { extract, merge: stitchedMerge, decisions, skippedDocs };
   }
 
   // ---- Detect modules + materialize (cache-wrapped section runner) -----
@@ -287,7 +315,7 @@ export async function consolidate(
     },
   );
 
-  return { extract, merge: stitchedMerge, modules, materialize, decisions };
+  return { extract, merge: stitchedMerge, modules, materialize, decisions, skippedDocs };
 }
 
 // ---------------------------------------------------------------------------
@@ -575,7 +603,7 @@ function stitchChainConflicts(
 // Decisions file I/O
 // ---------------------------------------------------------------------------
 
-const EMPTY_DECISIONS: DecisionsFile = { version: 1, decisions: [], manualChains: [] };
+const EMPTY_DECISIONS: DecisionsFile = { version: 1, decisions: [], manualChains: [], manualIncludes: [] };
 
 export function decisionsPath(repoRoot: string): string {
   return path.join(repoRoot, '.truecourse', 'specs', 'decisions.json');

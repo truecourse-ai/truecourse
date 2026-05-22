@@ -47,13 +47,19 @@ import path from 'node:path';
 import yaml from 'js-yaml';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
+  addManualChain,
+  addManualInclude,
   APPLY_STEPS,
   applyInProcess,
   appliedMarkerPath,
   generatedMarkerPath,
+  removeManualChain,
+  removeManualInclude,
   resolveAllDefaultsInProcess,
+  revokeDecision as revokeDecisionInProcess,
   SCAN_STEPS,
   scanInProcess,
+  upsertDecision,
   verifyStatePath,
 } from '@truecourse/core/commands/spec-in-process';
 import {
@@ -146,23 +152,12 @@ router.post(
         });
         return;
       }
-      const existing = readDecisions(repo.path);
-      const filtered = existing.decisions.filter(
-        (d) => d.conflictId !== body.conflictId,
-      );
-      const decision: Decision = {
+      const next = upsertDecision(repo.path, {
         conflictId: body.conflictId,
         resolution: body.resolution,
-        resolvedAt: new Date().toISOString(),
         candidateFingerprint: body.candidateFingerprint,
         note: body.note,
-      };
-      const next: DecisionsFile = {
-        version: 1,
-        decisions: [...filtered, decision],
-        manualChains: existing.manualChains ?? [],
-      };
-      writeDecisions(repo.path, next);
+      });
       res.json(next);
     } catch (e) {
       next(e);
@@ -180,21 +175,7 @@ router.delete(
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
       const conflictId = req.params.conflictId as string;
-      const existing = readDecisions(repo.path);
-      const filtered = existing.decisions.filter(
-        (d) => d.conflictId !== conflictId,
-      );
-      if (filtered.length === existing.decisions.length) {
-        // Idempotent: no-op when the decision is already absent.
-        res.json(existing);
-        return;
-      }
-      const nextFile: DecisionsFile = {
-        version: 1,
-        decisions: filtered,
-        manualChains: existing.manualChains ?? [],
-      };
-      writeDecisions(repo.path, nextFile);
+      const nextFile = revokeDecisionInProcess(repo.path, conflictId);
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -221,24 +202,52 @@ router.post(
         res.status(400).json({ error: 'older and newer must be different docs.' });
         return;
       }
-      const existing = readDecisions(repo.path);
-      const dedup = (existing.manualChains ?? []).filter(
-        (c) => !(c.older === body.older && c.newer === body.newer),
-      );
-      const nextFile: DecisionsFile = {
-        version: 1,
-        decisions: existing.decisions,
-        manualChains: [
-          ...dedup,
-          {
-            older: body.older,
-            newer: body.newer,
-            markedAt: new Date().toISOString(),
-            note: body.note,
-          },
-        ],
-      };
-      writeDecisions(repo.path, nextFile);
+      const nextFile = addManualChain(repo.path, {
+        older: body.older,
+        newer: body.newer,
+        note: body.note,
+      });
+      res.json(nextFile);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// POST   /api/repos/:id/spec/docs/include  — force-include a skipped doc
+// DELETE /api/repos/:id/spec/docs/include  — remove a manual-include override
+// ---------------------------------------------------------------------------
+
+router.post(
+  '/:id/spec/docs/include',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { path?: string };
+      if (!body.path) {
+        res.status(400).json({ error: 'Missing doc path.' });
+        return;
+      }
+      const nextFile = addManualInclude(repo.path, body.path);
+      res.json(nextFile);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  '/:id/spec/docs/include',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const repo = resolveProjectForRequest(req.params.id as string);
+      const body = req.body as { path?: string };
+      if (!body.path) {
+        res.status(400).json({ error: 'Missing doc path.' });
+        return;
+      }
+      const nextFile = removeManualInclude(repo.path, body.path);
       res.json(nextFile);
     } catch (e) {
       next(e);
@@ -256,16 +265,7 @@ router.delete(
         res.status(400).json({ error: 'Missing older or newer doc path.' });
         return;
       }
-      const existing = readDecisions(repo.path);
-      const filtered = (existing.manualChains ?? []).filter(
-        (c) => !(c.older === body.older && c.newer === body.newer),
-      );
-      const nextFile: DecisionsFile = {
-        version: 1,
-        decisions: existing.decisions,
-        manualChains: filtered,
-      };
-      writeDecisions(repo.path, nextFile);
+      const nextFile = removeManualChain(repo.path, { older: body.older, newer: body.newer });
       res.json(nextFile);
     } catch (e) {
       next(e);

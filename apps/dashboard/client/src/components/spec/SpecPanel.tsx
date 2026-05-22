@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { useSpec } from './SpecContext';
 import { SpecCanonicalPanel } from './SpecCanonicalPanel';
 import { SpecStats } from './SpecStats';
+import { SpecSkippedDocs } from './SpecSkippedDocs';
 import type { CanonicalSpecTree, SpecConflict, SpecScanResponse } from '@/lib/api';
 
 /**
@@ -73,6 +74,7 @@ export function SpecPanel({
   return (
     <div className="flex h-full flex-col">
       <SpecStats />
+      <SpecSkippedDocs />
       {error && (
         <div className="border-b border-border px-4 py-2">
           <Alert variant="destructive">

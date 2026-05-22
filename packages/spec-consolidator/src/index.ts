@@ -18,6 +18,7 @@ export type {
   Resolution,
   Decision,
   DecisionsFile,
+  ManualChain,
   Scope,
   ModuleManifest,
 } from './types.js';
@@ -131,6 +132,18 @@ export type {
   ConflictExplainerOptions,
   ConflictExplainerRunner,
 } from './conflict-explainer.js';
+
+export {
+  filterByRelevance,
+  RELEVANCE_SYSTEM_PROMPT,
+} from './relevance-filter.js';
+export type {
+  RelevanceFilterOptions,
+  RelevanceFilterOutcome,
+  RelevanceRunner,
+  RelevanceRunnerInput,
+  RelevanceVerdict,
+} from './relevance-filter.js';
 
 export {
   detectVersionChainsViaLlm,

@@ -22,6 +22,13 @@ import type { Claim, Provenance, ClaimMetadata } from './types.js';
 export interface ExtractOptions extends DiscoveryOptions {
   /** Override the runner — tests pass a stub; production uses spawnRunner(). */
   runner?: BlockRunner;
+  /**
+   * Pre-filtered doc set to extract from. When provided, the extractor
+   * skips its own `discoverDocs` call and walks only these docs. Used
+   * by the orchestrator to apply the LLM relevance filter before
+   * extraction so skipped docs cost zero tokens.
+   */
+  docs?: DocCandidate[];
   /** Hooks for progress UIs / logging. */
   onDocStart?: (doc: DocCandidate) => void;
   onDocDone?: (doc: DocCandidate, blockCount: number, claimCount: number) => void;
@@ -60,7 +67,7 @@ export async function extractClaims(
   rootDir: string,
   opts: ExtractOptions = {},
 ): Promise<ExtractResult> {
-  const docs = discoverDocs(rootDir, opts);
+  const docs = opts.docs ?? discoverDocs(rootDir, opts);
 
   // Slice every doc and remember which doc each block came from so
   // metadata flows through correctly.

@@ -213,6 +213,12 @@ export interface ScanState {
   openConflicts: unknown[];
   /** Decided conflicts in the same shape the API exposes. */
   decidedConflicts: unknown[];
+  /**
+   * Docs the LLM relevance filter excluded from claim extraction.
+   * Each carries a short reason for the dashboard's review panel.
+   * Absent on older scan-state files; readers should default to [].
+   */
+  skippedDocs?: Array<{ path: string; reason: string }>;
 }
 
 const SCAN_STATE_FILE = 'scan-state.json';

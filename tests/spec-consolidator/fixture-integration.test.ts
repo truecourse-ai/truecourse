@@ -373,7 +373,7 @@ describe('fixture: sample-js-project-il — scan mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
 
     const subjects = result.merge.openConflicts.map((c) => c.subject).sort();
     // Expect: chain conflict (B.8) + 3 content conflicts.
@@ -388,7 +388,7 @@ describe('fixture: sample-js-project-il — scan mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const ordersConflict = result.merge.openConflicts.find(
       (c) => c.subject === 'POST /api/orders',
     )!;
@@ -403,7 +403,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const decisions: DecisionsFile = {
       version: 1,
       decisions: round1.merge.openConflicts.map((c) => ({
@@ -420,7 +420,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     if (round2.merge.openConflicts.length > 0) {
       writeDecisions(workRoot, {
         version: 1,
@@ -444,7 +444,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
 
     expect(apply.merge.openConflicts).toEqual([]);
     expect(apply.materialize?.failures).toEqual([]);
@@ -464,7 +464,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const ordersManifest = yaml.load(
       fs.readFileSync(
         path.join(workRoot, '.truecourse/specs/modules/orders/module.yaml'),
@@ -497,7 +497,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     const ordersManifest = yaml.load(
       fs.readFileSync(
         path.join(workRoot, '.truecourse/specs/modules/orders/module.yaml'),
@@ -520,7 +520,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: fixtureRunner(),
       sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
 
     const expectedRoot = path.join(FIXTURE_ROOT, '.truecourse/specs');
     const actualRoot = path.join(workRoot, '.truecourse/specs');
@@ -598,7 +598,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: countingBlock,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     expect(blockCalls).toBeGreaterThan(0);
 
     blockCalls = 0;
@@ -606,7 +606,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       materialize: false,
       blockRunner: countingBlock,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     expect(blockCalls).toBe(0);
 
     writeDecisions(workRoot, {
@@ -625,7 +625,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: countingBlock,
       sectionRunner: countingSection,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     expect(sectionCalls).toBeGreaterThan(0);
 
     sectionCalls = 0;
@@ -634,7 +634,7 @@ describe('fixture: sample-js-project-il — apply mode', () => {
       blockRunner: countingBlock,
       sectionRunner: countingSection,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true,    });
+      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
     expect(sectionCalls).toBe(0);
   });
 });

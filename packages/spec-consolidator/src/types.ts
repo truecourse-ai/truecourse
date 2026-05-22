@@ -287,6 +287,12 @@ export const DecisionsFileSchema = z.object({
   decisions: z.array(DecisionSchema),
   /** User-marked supersessions (workstream 2 of conflict-resolution plan). */
   manualChains: z.array(ManualChainSchema).default([]),
+  /**
+   * Doc paths the user has manually marked "always include" — these
+   * bypass the LLM relevance filter so the user can override a wrong
+   * SKIP verdict. Repo-relative paths.
+   */
+  manualIncludes: z.array(z.string()).default([]),
 });
 export type DecisionsFile = z.infer<typeof DecisionsFileSchema>;
 

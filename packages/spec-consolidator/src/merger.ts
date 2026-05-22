@@ -74,7 +74,7 @@ export interface DecidedConflict {
  */
 export function mergeClaims(
   claims: Claim[],
-  decisions: DecisionsFile = { version: 1, decisions: [], manualChains: [] },
+  decisions: DecisionsFile = { version: 1, decisions: [], manualChains: [], manualIncludes: [] },
 ): MergeResult {
   const groups = new Map<string, Claim[]>();
   for (const c of claims) {
@@ -129,6 +129,19 @@ export function mergeClaims(
     const sameFile = trySameFileConsolidation(list);
     if (sameFile) {
       resolvedClaims.push(sameFile);
+      continue;
+    }
+
+    // DocKind dominance — when one candidate's docKind authority is
+    // ≥3 ranks above every other AND the others' contents are subsets
+    // of the winner's, auto-pick the winner. Only fires on lopsided
+    // authority gaps (PRD vs unknown, ADR vs README) where the lower-
+    // authority candidates aren't adding new information. Gap < 3
+    // surfaces to the user — README vs research-log is too close to
+    // auto-decide because the README might be stale.
+    const dominantWinner = tryDocKindDominance(list);
+    if (dominantWinner) {
+      resolvedClaims.push(dominantWinner);
       continue;
     }
 
@@ -312,21 +325,34 @@ function trySameFileConsolidation(list: Claim[]): Claim | null {
   for (let i = 1; i < list.length; i++) {
     if (list[i].provenance.file !== firstFile) return null;
   }
-  // Pick merge strategy by topic. Entity claims (`topic === 'data'`) are
-  // typically partial field dictionaries — long docs describe an entity
-  // in pieces across sections, mentioning different field subsets and
-  // sometimes-conflicting validation rules each time. The union of all
-  // mentioned fields is the entity's full shape, and on validation-rule
-  // disagreement we last-write-wins (latest section in the doc usually
-  // reflects current understanding). Endpoint / auth / errors / effects
-  // claims use strict subset-merge: disjoint response codes or auth
-  // schemes are genuine alternatives even when stated in one file.
-  const isDataTopic = list[0].topic === 'data';
+  // Pick merge strategy by topic.
+  //
+  //   - data: entity claims are partial field dictionaries — long docs
+  //     describe entities in pieces, mentioning different field subsets
+  //     each time. Union with last-write-wins on overlapping leaves
+  //     (latest section reflects current understanding).
+  //
+  //   - overview: descriptive summaries; same-file duplicates are
+  //     almost always parallel descriptions of the same subject. Pick
+  //     the richest (most structurally complete) candidate and stitch
+  //     provenance from the others. Avoids forcing a deep-merge of
+  //     freeform narrative content.
+  //
+  //   - other topics (endpoints, auth, errors, effects): use strict
+  //     subset-merge. When two same-file candidates have genuinely
+  //     disjoint keys (one mentions response 200, another response
+  //     201) we still want the user to confirm — that's a real
+  //     internal disagreement, not partial-mention redundancy.
+  const topic = list[0].topic;
+  if (topic === 'overview') {
+    return pickRichestSameFile(list);
+  }
   let acc: unknown = list[0].content;
   for (let i = 1; i < list.length; i++) {
-    const merged = isDataTopic
-      ? lastWriteWinsDeepMerge(acc, list[i].content)
-      : trySubsetMerge(acc, list[i].content);
+    const merged =
+      topic === 'data'
+        ? lastWriteWinsDeepMerge(acc, list[i].content)
+        : trySubsetMerge(acc, list[i].content);
     if (!merged.ok) return null;
     acc = merged.value;
   }
@@ -341,6 +367,112 @@ function trySameFileConsolidation(list: Claim[]): Claim | null {
         .map((c) => `[line ${c.provenance.line}] ${c.provenance.quote}`)
         .join('\n---\n'),
       additionalSources: list.slice(1).map((c) => ({
+        file: c.provenance.file,
+        line: c.provenance.line,
+        quote: c.provenance.quote,
+      })),
+    },
+  };
+}
+
+/**
+ * Same-file collapse for `overview` topic — pick the richest (most
+ * structurally complete) candidate and stitch provenance from the
+ * others. Overview claims are descriptive summaries, not structural
+ * obligations; deep-merging two narrative descriptions of the same
+ * subject produces gibberish, so we just keep the best one.
+ */
+function pickRichestSameFile(list: Claim[]): Claim | null {
+  if (list.length < 2) return null;
+  let winnerIdx = 0;
+  let winnerRichness = contentRichnessForMerge(list[0].content);
+  for (let i = 1; i < list.length; i++) {
+    const r = contentRichnessForMerge(list[i].content);
+    if (r > winnerRichness) {
+      winnerIdx = i;
+      winnerRichness = r;
+    }
+  }
+  const winner = list[winnerIdx];
+  const others = list.filter((_, i) => i !== winnerIdx);
+  return {
+    ...winner,
+    provenance: {
+      file: winner.provenance.file,
+      line: winner.provenance.line,
+      quote: list
+        .map((c) => `[line ${c.provenance.line}] ${c.provenance.quote}`)
+        .join('\n---\n'),
+      additionalSources: others.map((c) => ({
+        file: c.provenance.file,
+        line: c.provenance.line,
+        quote: c.provenance.quote,
+      })),
+    },
+  };
+}
+
+function contentRichnessForMerge(content: unknown): number {
+  if (content === null || content === undefined) return 0;
+  if (typeof content !== 'object') return 1;
+  if (Array.isArray(content)) {
+    return (content as unknown[]).reduce<number>((acc, v) => acc + contentRichnessForMerge(v), 0);
+  }
+  let total = 0;
+  for (const v of Object.values(content as Record<string, unknown>)) {
+    total += contentRichnessForMerge(v);
+  }
+  return total;
+}
+
+/**
+ * When one candidate's docKind authority is dramatically higher than
+ * every other's (≥ 3 ranks) AND the lower-authority candidates' content
+ * is a subset of the winner's content (no information lost by dropping
+ * them), auto-pick the high-authority candidate.
+ *
+ * Conservative on purpose: gap=1 (README vs unknown) or gap=2 (PRD vs
+ * README) is NOT enough — README might be stale, and a non-PRD doc may
+ * carry legitimate detail the PRD doesn't. Gap≥3 means the high-rank
+ * candidate is structurally authoritative (PRD vs unknown, ADR vs
+ * README) and the others are clearly not in a position to contradict.
+ *
+ * Returns the winner claim with stitched provenance from all sources,
+ * or null when the gap rule doesn't apply or the subset check fails.
+ */
+function tryDocKindDominance(list: Claim[]): Claim | null {
+  if (list.length < 2) return null;
+  // Rank every candidate.
+  const ranked = list.map((c) => ({ claim: c, rank: docKindAuthority(c.metadata.docKind) }));
+  // Find highest rank + second highest.
+  ranked.sort((a, b) => b.rank - a.rank);
+  const top = ranked[0];
+  const second = ranked[1];
+  const gap = top.rank - second.rank;
+  if (gap < 3) return null;
+  // Only one candidate at the top rank (otherwise we'd have ties).
+  const topCandidates = ranked.filter((r) => r.rank === top.rank);
+  if (topCandidates.length !== 1) return null;
+  // Every other candidate's content must be a subset of the winner's
+  // (or identical). If a lower-rank candidate has unique keys/values,
+  // we'd lose information by auto-dropping it — surface to user.
+  const winnerContent = top.claim.content;
+  for (let i = 1; i < ranked.length; i++) {
+    const sub = trySubsetMerge(winnerContent, ranked[i].claim.content);
+    if (!sub.ok) return null;
+  }
+  // Stitch provenance from every contributing source so the writer can
+  // surface the lineage in module manifests.
+  const others = ranked.slice(1).map((r) => r.claim);
+  return {
+    ...top.claim,
+    provenance: {
+      file: top.claim.provenance.file,
+      line: top.claim.provenance.line,
+      quote: list
+        .map((c) => `[${c.provenance.file}:${c.provenance.line}] ${c.provenance.quote}`)
+        .join('\n---\n'),
+      additionalSources: others.map((c) => ({
         file: c.provenance.file,
         line: c.provenance.line,
         quote: c.provenance.quote,

@@ -55,6 +55,8 @@ export interface SpecContextValue {
   revokeDecision: (conflictId: string) => Promise<void>;
   /** Mark `older` as superseded by `newer` (manual version chain). */
   markSuperseded: (older: string, newer: string, note?: string) => Promise<void>;
+  /** Force-include a doc the LLM relevance filter marked as skipped. */
+  includeDoc: (docPath: string) => Promise<void>;
   /** Write the canonical spec + run IL extraction. */
   apply: () => Promise<void>;
 }
@@ -168,6 +170,21 @@ export function SpecProvider({
     [repoId, refresh],
   );
 
+  const includeDoc = useCallback(
+    async (docPath: string) => {
+      setLoading(true);
+      try {
+        await api.postSpecManualInclude(repoId, { path: docPath });
+        await refresh();
+      } catch (e) {
+        reportError('Including doc failed', e, setError);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [repoId, refresh],
+  );
+
   const apply = useCallback(async () => {
     setApplying(true);
     setError(null);
@@ -205,6 +222,7 @@ export function SpecProvider({
       acceptAllDefaults,
       revokeDecision,
       markSuperseded,
+      includeDoc,
       apply,
     }),
     [
@@ -221,6 +239,7 @@ export function SpecProvider({
       acceptAllDefaults,
       revokeDecision,
       markSuperseded,
+      includeDoc,
       apply,
     ],
   );
