@@ -47,6 +47,9 @@ Before the per-issue loop:
 - Track three counters in your head: `successes = 0`, `attempts = 0`,
   and a list `fixed_issues = []` of `(issue_number, rule_key,
   positive_fixture_path, negative_fixture_path, visitor_summary)`.
+  Also keep `before_counts` (a map `ruleKey → count`) and
+  `before_total` (sum across all rules) — both populated after the
+  initial analyze below.
 - Build truecourse once: `pnpm install && pnpm build:dist`. The dist
   artifact is what publish.yml ships to npm; always analyze against
   this, never `npx truecourse@…`. See "Hard constraints".
@@ -58,6 +61,12 @@ Before the per-issue loop:
   analyze --no-llm --no-stash --no-skills` once after the clone.
   Re-read `/tmp/target/.truecourse/LATEST.json` per issue to filter
   to that rule.
+- **Snapshot the before-state** immediately after that first analyze:
+  copy `/tmp/target/.truecourse/LATEST.json` to
+  `/tmp/target-before.json` so the file survives the re-analyze in
+  the after-loop step. Populate `before_counts` by grouping
+  `.violations[]` by `ruleKey` and counting; populate `before_total`
+  as the total length of `.violations[]`.
 
 ## Per-issue loop
 
@@ -201,6 +210,41 @@ or `tests/analyzer/python-positive.test.ts` is a false positive.
 - If `successes == 5` or `attempts == 10`: break out of the loop.
 - Otherwise: continue to next iteration.
 
+## After the loop: measure the FP-count delta on the target
+
+Skip this entire section if `successes == 0` — no fixes, nothing to
+measure.
+
+Otherwise, prove the batch actually moved the needle on the target
+repo:
+
+1. **Rebuild dist with the new visitor fixes.**
+   ```
+   cd $TRUECOURSE_DIR && pnpm build:dist
+   ```
+   The before-state was measured against the previous dist; the
+   after-state must use a dist that includes this batch's edits.
+2. **Re-analyze the same target ref.** The clone in `/tmp/target` is
+   already at `target_ref` — just wipe `.truecourse` and re-run:
+   ```
+   cd /tmp/target && rm -rf .truecourse && \
+     node $TRUECOURSE_DIR/dist/cli.mjs analyze --no-llm --no-stash --no-skills
+   ```
+3. **Compute after-state counts.** From the new
+   `/tmp/target/.truecourse/LATEST.json`, build `after_counts`
+   (`ruleKey → count`) and `after_total` the same way as
+   `before_counts` / `before_total`.
+4. **Compute deltas** for each rule in `fixed_issues`:
+   `delta = after_counts[rule_key] - before_counts[rule_key]`.
+   Also compute the cross-rule subtotal (sum over fixed-issues rules)
+   and the all-rules total (`after_total - before_total`).
+5. **Hold these numbers** for the PR body in the next section.
+
+If step 1 or 2 fails (build error, analyze crash), don't block the
+PR — open it with a `## FP-count delta` section that says
+`unavailable: <one-line reason>` instead of the table, so a reviewer
+knows the verification step didn't complete.
+
 ## Open the batched PR
 
 After the loop:
@@ -236,6 +280,24 @@ After the loop:
       skipped, with reason (malformed YAML / no-reproduces /
       broken-beyond-FP / refactor-required). One line each, link
       to the issue.
+    - A "## FP-count delta (vs `<target_ref>` on `<target_repo>`)"
+      section with a markdown table built from the after-loop
+      measurements:
+      ```
+      | Rule | Before | After | Delta |
+      |---|---:|---:|---:|
+      | <rule_key_1>                  | <b1> | <a1> | <d1> |
+      | ...                           | ...  | ...  | ...  |
+      | **Total (these N rules)**     | <Bn> | <An> | <Dn> |
+      | **All-rules total on target** | <BT> | <AT> | <DT> |
+      ```
+      One row per rule in `fixed_issues` (so N rows for the batch),
+      followed by the two totals. Use the raw integer counts; render
+      the delta with a sign (`-5`, `0`, `+2`). A negative delta is
+      progress.
+
+      If the after-loop measurement failed, replace the table with
+      a one-line note: `unavailable: <reason>`.
     - End the body with a line `cc @mushgev` so the reviewer gets a
       notification email on PR creation.
   - Labels: `fp-fix` (this label must be on the PR — it's what fires
