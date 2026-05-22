@@ -419,7 +419,7 @@ npx truecourse        # subsequent runs: just start
 
 - `npx truecourse add` — registers the current working directory as a repo
 - Detects cwd, calls `POST /api/repos` with the path
-- Prints the URL to open the repo graph (e.g., `http://localhost:3001/repos/<id>`)
+- Prints the URL to open the repo graph (e.g., `http://localhost:5555/repos/<id>`)
 - Requires the server to be running (shows helpful error if not)
 
 ### Verification (Phase 1)
@@ -988,7 +988,7 @@ When `runMode` is `service`, `truecourse start` installs and starts the service 
 1. `pnpm build:dist` → build completes successfully
 2. `truecourse setup` → select "Background service" → verify `~/.truecourse/config.json` has `"runMode": "service"`
 3. `truecourse start` → installs launchd plist and starts the service, prints URL
-4. Close terminal → `http://localhost:3001` still accessible
+4. Close terminal → `http://localhost:5555` still accessible
 5. `truecourse service status` → shows running with PID
 6. `truecourse service logs` → tails log output
 7. `truecourse service stop` → service stops, URL no longer accessible
@@ -2139,7 +2139,7 @@ An MCP server that wraps the TrueCourse REST API, giving Claude direct structure
 
 - Node.js MCP server using `@modelcontextprotocol/sdk`
 - Lives in `truecourse-plugin/mcp-server/`
-- Connects to TrueCourse server at `http://localhost:{PORT}` (reads PORT from `~/.truecourse/.env` or defaults to 3001)
+- Connects to TrueCourse server at `http://localhost:{PORT}` (reads PORT from `~/.truecourse/.env` or defaults to 5555)
 - Each tool maps directly to one REST endpoint — thin wrapper, no business logic
 - Returns raw JSON for Claude to reason over
 

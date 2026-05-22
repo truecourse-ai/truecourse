@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { resolveRepoDir } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
 
-const DEFAULT_PORT = 3001;
+const DEFAULT_PORT = 5555;
 
 // --- Config utilities ---
 

@@ -1,0 +1,56 @@
+
+> truecourse@ dev C:\Users\mefel\truecourse
+> turbo dev
+
+• turbo 2.8.16
+• Packages in scope: @truecourse/analyzer, @truecourse/core, @truecourse/dashboard-client, @truecourse/dashboard-server, @truecourse/landing, @truecourse/shared, truecourse
+• Running dev in 7 packages
+• Remote caching disabled
+@truecourse/shared:dev: cache bypass, force executing a49998ff0b206497
+@truecourse/analyzer:dev: cache bypass, force executing 65f2d414ed7e3c63
+@truecourse/dashboard-server:dev: cache bypass, force executing f496d7ac7a7e273e
+@truecourse/landing:dev: cache bypass, force executing c4e83d7ed8b70a36
+@truecourse/dashboard-client:dev: cache bypass, force executing ee33afcea0d41ad9
+truecourse:dev: cache bypass, force executing 9e004efe4cf53e71
+truecourse:dev: 
+truecourse:dev: > truecourse@0.5.12 dev C:\Users\mefel\truecourse\tools\cli
+truecourse:dev: > echo 'CLI is not used in dev mode'
+truecourse:dev: 
+@truecourse/dashboard-server:dev: 
+@truecourse/dashboard-server:dev: > @truecourse/dashboard-server@0.5.12 dev C:\Users\mefel\truecourse\apps\dashboard\server
+@truecourse/dashboard-server:dev: > TRUECOURSE_DEV=1 tsx watch src/index.ts
+@truecourse/dashboard-server:dev: 
+@truecourse/landing:dev: 
+@truecourse/landing:dev: > @truecourse/landing@0.1.0 dev C:\Users\mefel\truecourse\apps\landing
+@truecourse/landing:dev: > vite --port 3100
+@truecourse/landing:dev: 
+@truecourse/analyzer:dev: 
+@truecourse/dashboard-client:dev: 
+@truecourse/analyzer:dev: > @truecourse/analyzer@0.1.0 dev C:\Users\mefel\truecourse\packages\analyzer
+@truecourse/dashboard-client:dev: > @truecourse/dashboard-client@0.1.0 dev C:\Users\mefel\truecourse\apps\dashboard\client
+@truecourse/analyzer:dev: > tsc --watch
+@truecourse/dashboard-client:dev: > vite --port 3000
+@truecourse/analyzer:dev: 
+@truecourse/dashboard-client:dev: 
+@truecourse/shared:dev: 
+@truecourse/shared:dev: > @truecourse/shared@0.1.0 dev C:\Users\mefel\truecourse\packages\shared
+@truecourse/shared:dev: > tsc --watch
+@truecourse/shared:dev: 
+truecourse:dev: 'CLI is not used in dev mode'
+@truecourse/dashboard-server:dev: 'TRUECOURSE_DEV' is not recognized as an internal or external command,
+@truecourse/dashboard-server:dev: operable program or batch file.
+@truecourse/dashboard-server:dev:  ELIFECYCLE  Command failed with exit code 1.
+@truecourse/shared:dev: [2J[3J[H5:29:08 PM - Starting compilation in watch mode...
+@truecourse/shared:dev: 
+@truecourse/analyzer:dev: [2J[3J[H5:29:08 PM - Starting compilation in watch mode...
+@truecourse/analyzer:dev: 
+@truecourse/dashboard-server:dev: ERROR: command finished with error: command (C:\Users\mefel\truecourse\apps\dashboard\server) C:\Users\mefel\AppData\Local\pnpm\store\v11\links\@\pnpm\9.15.0\dabcd8222099706e9d5613e2bbde82a6ffe5e77c8ba18b78fcd77c3eac869433\bin\pnpm.CMD run dev exited (1)
+@truecourse/dashboard-server#dev: command (C:\Users\mefel\truecourse\apps\dashboard\server) C:\Users\mefel\AppData\Local\pnpm\store\v11\links\@\pnpm\9.15.0\dabcd8222099706e9d5613e2bbde82a6ffe5e77c8ba18b78fcd77c3eac869433\bin\pnpm.CMD run dev exited (1)
+
+ Tasks:    1 successful, 6 total
+Cached:    0 cached, 6 total
+  Time:    779ms 
+Failed:    @truecourse/dashboard-server#dev
+
+ ERROR  run failed: command  exited (1)
+ ELIFECYCLE  Command failed with exit code 1.

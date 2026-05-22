@@ -261,7 +261,7 @@ Patterns are anchored to the file's location, so `src/generated/` matches the to
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
+pnpm dev                # Start dashboard at http://localhost:3000 (server on :5555, Vite on :3000)
 pnpm test               # Run tests
 pnpm build              # Build all packages
 ```

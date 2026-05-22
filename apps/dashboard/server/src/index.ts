@@ -7,7 +7,7 @@ import { stopAllWatchers } from './services/watcher.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
-const port = parseInt(process.env.PORT || '3001', 10);
+const port = parseInt(process.env.PORT || '5555', 10);
 
 async function main() {
   // 0. Route all internal diagnostics to the dashboard log file. When running
