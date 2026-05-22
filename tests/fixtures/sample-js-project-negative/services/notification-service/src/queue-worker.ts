@@ -57,9 +57,12 @@ async function sendEmailJob(job: Job) {
 // VIOLATION: code-quality/deterministic/require-await
 // VIOLATION: code-quality/deterministic/missing-return-type
 async function sendSmsJob(job: Job) {
+  // `''` is a meaningful "not yet provided" state distinct from a
+  // delivered status, so `if (status)` collapses it together with the
+  // other states — the bug the rule should flag.
+  const status: '' | 'queued' | 'sent' = job.payload.status;
   // VIOLATION: bugs/deterministic/loose-boolean-expression
-  const recipient: string = job.payload.phone ?? '';
-  if (recipient) {
+  if (status) {
     return { jobId: job.id, sent: true };
   }
   return { jobId: job.id, sent: false };

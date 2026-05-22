@@ -767,6 +767,48 @@ export function checkModuleRules(
           }
         }
 
+        // Skip when the source file imports the target through a "deep
+        // bare specifier" — a package import with a sub-path beyond the
+        // package name (e.g. `@scope/pkg/primitives/dialog`). Sub-path
+        // imports only work because the target package exposed that path
+        // via its `files`/`exports` field (or imposed no restriction at
+        // all), so the path is part of the package's published API
+        // surface, not internal reach-through. Without this skip,
+        // monorepo packages with subpath exports
+        // (`@documenso/ui/primitives/*`, shadcn-style kits) flood with FPs.
+        if (dep.sourceFilePath && dep.targetFilePath) {
+          const importSources = fileImportSources.get(dep.sourceFilePath)
+          if (importSources) {
+            const tgtStem = dep.targetFilePath.replace(/\.(?:tsx?|jsx?|mjs|cjs|d\.ts)$/, '')
+            const importedViaPublicSubpath = [...importSources].some((src) => {
+              if (
+                src.startsWith('.') ||
+                src.startsWith('/') ||
+                src.startsWith('@/') ||
+                src.startsWith('~/')
+              ) return false
+              // Split package portion (scoped: `@scope/name`, unscoped:
+              // `name`) from the sub-path; require at least one sub-path
+              // segment.
+              let subPath: string | null = null
+              if (src.startsWith('@')) {
+                const segs = src.split('/')
+                if (segs.length >= 3) subPath = segs.slice(2).join('/')
+              } else {
+                const slash = src.indexOf('/')
+                if (slash > 0 && slash < src.length - 1) subPath = src.slice(slash + 1)
+              }
+              if (!subPath) return false
+              // Confirm this import is the one that resolved to this
+              // dep's target file (its stem ends with the sub-path, or
+              // with `<sub-path>/index` for directory imports).
+              return tgtStem.endsWith('/' + subPath) ||
+                     tgtStem.endsWith('/' + subPath + '/index')
+            })
+            if (importedViaPublicSubpath) continue
+          }
+        }
+
         violations.push({
           ruleKey: 'architecture/deterministic/cross-service-internal-import',
           title: `Cross-service internal import: \`${srcMod.name}\` → \`${tgtMod.name}\``,

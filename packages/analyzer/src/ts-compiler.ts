@@ -451,7 +451,22 @@ export function createTypeQueryService(
       // Check if the type has a 'then' method (implements PromiseLike interface)
       // This catches thenables like drizzle-orm's PgRelationalQuery
       const thenProp = type.getProperty('then')
-      return !!thenProp
+      if (thenProp) return true
+      // A "value-or-promise" union (`Promise<T> | T`, often hidden behind
+      // an alias like `CopyValue`) is a legitimate `await` target — the
+      // promise branch unwraps and the value branch is a no-op. The
+      // string-head check above misses it whenever the compiler
+      // serializes the union with the non-promise branch first or whenever
+      // the alias replaces the expansion entirely; recurse into the
+      // union's constituent types so any promise-shaped member counts.
+      if (type.isUnion()) {
+        for (const t of type.types) {
+          const s = typeToString(filePath, t)
+          if (s.startsWith('Promise<') || s.includes('PromiseLike<')) return true
+          if (t.getProperty('then')) return true
+        }
+      }
+      return false
     },
 
     getReturnType(filePath, line, column, endLine?, endColumn?) {
