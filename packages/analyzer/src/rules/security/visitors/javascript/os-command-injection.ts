@@ -1,8 +1,53 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 
 export const EXEC_METHODS = new Set(['exec', 'execSync'])
 const SPAWN_METHODS = new Set(['spawn', 'spawnSync'])
+
+const CHILD_PROCESS_SOURCES = new Set(['child_process', 'node:child_process'])
+
+/**
+ * For bare-identifier calls like `exec(...)`, confirm the identifier resolves
+ * to a `child_process` binding before flagging — otherwise we false-positive
+ * on locally-defined helpers that happen to be named `exec`/`execSync` (a
+ * common pattern: `const exec = async () => {...}; void exec();`).
+ */
+function isImportedFromChildProcess(callNode: SyntaxNode, name: string): boolean {
+  let root: SyntaxNode = callNode
+  while (root.parent) root = root.parent
+
+  for (const child of root.namedChildren) {
+    if (child.type === 'import_statement') {
+      const source = child.namedChildren.find((c) => c.type === 'string')
+      if (!source) continue
+      const raw = source.text.replace(/^['"`]|['"`]$/g, '')
+      if (!CHILD_PROCESS_SOURCES.has(raw)) continue
+      const importClause = child.namedChildren.find((c) => c.type === 'import_clause')
+      if (!importClause) continue
+      for (const sub of importClause.namedChildren) {
+        if (sub.type === 'named_imports') {
+          for (const spec of sub.namedChildren) {
+            if (spec.type !== 'import_specifier') continue
+            const alias = spec.childForFieldName('alias')
+            const local = (alias ?? spec.childForFieldName('name'))?.text
+            if (local === name) return true
+          }
+        }
+      }
+    } else if (child.type === 'lexical_declaration' || child.type === 'variable_declaration') {
+      // CommonJS: `const { exec } = require('child_process')` /
+      // `const { execSync: foo } = require('node:child_process')`.
+      const text = child.text
+      if (!/require\s*\(\s*['"](?:node:)?child_process['"]\s*\)/.test(text)) continue
+      const destructured = new RegExp(
+        `[{,]\\s*(?:[A-Za-z_$][\\w$]*\\s*:\\s*)?${name}\\b`,
+      )
+      if (destructured.test(text)) return true
+    }
+  }
+  return false
+}
 
 export const osCommandInjectionVisitor: CodeRuleVisitor = {
   ruleKey: 'security/deterministic/os-command-injection',
@@ -30,6 +75,12 @@ export const osCommandInjectionVisitor: CodeRuleVisitor = {
       if (fn.type === 'member_expression') {
         const CP_OBJECTS = new Set(['child_process', 'cp', 'childProcess', 'proc'])
         if (!CP_OBJECTS.has(objectName)) return null
+      } else if (fn.type === 'identifier' && methodName === 'exec') {
+        // Bare-identifier `exec(...)`: the name is commonly reused for local
+        // async helpers (`const exec = async () => {...}; exec();`), so require
+        // evidence it was actually imported from `child_process`. `execSync`
+        // is rarely shadowed, so we leave that case as-is.
+        if (!isImportedFromChildProcess(node, methodName)) return null
       }
       return makeViolation(
         this.ruleKey, node, filePath, 'critical',
