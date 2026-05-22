@@ -545,7 +545,7 @@ function CollapsibleDiffList({
         {expanded ? '▾' : '▸'} Raw diff · {diffs.length}
       </button>
       {expanded && (
-        <ul className="rounded border border-border bg-muted/10 px-3 py-2 text-[11px]">
+        <ul className="rounded border border-border bg-muted/10 px-3 py-2 text-xs">
           {diffs.slice(0, 12).map((d, i) => (
             <li key={i} className="border-b border-border/40 py-1 last:border-0">
               <span className="font-mono text-foreground">{d.path}</span>
