@@ -376,11 +376,18 @@ clone target repo and run analyze on first issue. Counters:
     `successes` AND `attempts`. Keep `fp-in-progress` label until the
     batch PR opens. If caps hit → exit loop.
 
+**After the loop — measure the FP-count delta** (only if
+`successes >= 1`): rebuild dist with the new fixes, re-run analyze
+against the same target ref, diff before/after violation counts per
+rule and total. Surfaces whether each fix actually reduced FPs on
+the target — a row with `Delta: 0` is a smell.
+
 **Open the batched PR**:
 - If `successes == 0` → end session, no PR.
 - Else → push `claude/fp-fix/batch-<YYYYMMDDHHMM>`, open one PR with
   one `Closes #N` per fixed issue, per-rule sections in body, optional
-  "## Skipped this batch" section, label `fp-fix`. Comment + unlock
+  "## Skipped this batch" section, a "## FP-count delta" table built
+  from the before/after measurements, label `fp-fix`. Comment + unlock
   each fixed issue. End.
 
 **Queue empty path** (no open `fp-fix` issues for the current campaign):
