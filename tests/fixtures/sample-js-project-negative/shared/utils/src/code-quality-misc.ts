@@ -53,6 +53,23 @@ export function noDefault(action: string) {
   }
 }
 
+// VIOLATION: code-quality/deterministic/default-case-in-switch
+// Open `string` parameter (not a discriminated union) with a non-terminating
+// case body — `count = 0` falls through to whatever follows the switch, and
+// any unexpected `kind` is silently ignored.
+export function tallyByKind(kind: string): number {
+  let count = 0;
+  switch (kind) {
+    case 'small':
+      count = 1;
+      break;
+    case 'large': {
+      count = 10;
+    }
+  }
+  return count;
+}
+
 // VIOLATION: code-quality/deterministic/dot-notation-enforcement
 export function bracketAccess(obj: Record<string, any>) {
   return obj['name'];

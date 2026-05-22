@@ -21,6 +21,11 @@ export const unsafeTypeAssertionVisitor: CodeRuleVisitor = {
     const typeAnnotation = node.namedChildren[1]
     if (!expr || !typeAnnotation) return null
 
+    // Skip: `[] as T[]` — widening an empty-array `never[]` initializer to its
+    // intended element type. This is a safe, idiomatic workaround for TS
+    // inferring `never[]` in object-literal accumulators, reduce seeds, etc.
+    if (expr.type === 'array' && expr.namedChildren.length === 0) return null
+
     const exprType = typeQuery.getTypeAtPosition(
       filePath,
       expr.startPosition.row,

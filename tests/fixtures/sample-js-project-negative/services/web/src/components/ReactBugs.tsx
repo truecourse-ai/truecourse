@@ -13,6 +13,14 @@ export function ConditionalHook({ show }: { show: boolean }) {
   return <div>Hidden</div>;
 }
 
+// VIOLATION: bugs/deterministic/conditional-hook
+// Hook sits in the consequence branch of a ternary — only called when the
+// condition is truthy, so the number of hook calls per render varies.
+export function TernaryBranchHook({ show }: { show: boolean }) {
+  const label = show ? useState('on')[0] : 'off';
+  return <span>{label}</span>;
+}
+
 // VIOLATION: bugs/deterministic/usestate-object-mutation
 export function StateMutation() {
   const [state, setState] = useState({ items: [] as string[], count: 0 });

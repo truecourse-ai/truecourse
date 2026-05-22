@@ -196,6 +196,14 @@ export function broadAssert(input: unknown) {
   return input as string;
 }
 
+// VIOLATION: bugs/deterministic/unsafe-type-assertion
+// Numeric-to-string cast where the source has a concrete incompatible type
+// (number is not assignable to string in either direction). Distinct from
+// the safe `[] as T[]` widening shape that the positive fixture covers.
+export function castNumberToString(n: number): string {
+  return n as string;
+}
+
 // VIOLATION: bugs/deterministic/unsafe-unary-minus
 export function negateNonNumber() {
   const x = '5';
