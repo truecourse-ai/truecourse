@@ -189,7 +189,7 @@ function DetailHeader({
     ? conflict.subject.replace(/^version chain:\s*/, '')
     : conflict.subject;
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-6 py-3">
+    <div className="flex items-center justify-between gap-3 border-b border-border bg-card px-5 py-3">
       <div className="flex min-w-0 items-center gap-2">
         {isVersionChain ? (
           <GitBranch className="h-5 w-5 shrink-0 text-amber-400" />
@@ -780,7 +780,7 @@ function ActionFooter({
   const supersedeEligible = !isVersionChain && !isDecided && targets.length > 0;
 
   return (
-    <div className="relative flex shrink-0 items-center gap-2 border-t border-border bg-card px-6 py-3">
+    <div className="relative flex shrink-0 items-center gap-2 border-t border-border bg-card px-5 py-3">
       {isDecided && (
         <Button
           size="sm"
