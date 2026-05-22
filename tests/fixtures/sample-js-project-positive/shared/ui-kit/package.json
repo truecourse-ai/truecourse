@@ -1,0 +1,12 @@
+{
+  "name": "@sample/ui-kit",
+  "version": "1.0.0",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "files": [
+    "primitives/"
+  ],
+  "dependencies": {
+    "react": "^18.2.0"
+  }
+}

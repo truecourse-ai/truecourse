@@ -63,6 +63,18 @@ export const looseBooleanExpressionVisitor: CodeRuleVisitor = {
       const baseType = typeStr.replace(/\s*\|.*/, '') // first type in union
       if (/^[A-Z]/.test(baseType) && !['Number', 'String', 'Boolean'].includes(baseType)) return null
 
+      // Only fire when a *falsy literal* sits inside the union — that's
+      // the case where the truthy check silently collapses a meaningful
+      // value (the empty string, `0`, `0n`) with the "missing" reading
+      // the rest of the union represents. `if (value)` on `string`,
+      // `number`, `boolean`, or any `T | null | undefined` of those is
+      // the idiomatic null-or-empty guard; the @typescript-eslint
+      // strict-boolean-expressions stricter reading floods FPs with no
+      // observed bug payoff.
+      const parts = typeStr.split('|').map(p => p.trim())
+      const FALSY_LITERAL = /^(?:""|''|0|0n)$/
+      if (!parts.some(p => FALSY_LITERAL.test(p))) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'medium',
         'Non-boolean in boolean context',

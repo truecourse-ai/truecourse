@@ -6,9 +6,18 @@ import { JS_LANGUAGES } from './_helpers.js'
 // Detect: useEffect(() => { uses variable X }, []) where X is not in deps array
 // Simple heuristic: useEffect with empty deps array but callback references identifiers
 
-function collectIdentifiers(node: SyntaxNode, skip: Set<string>): Set<string> {
+function collectIdentifiers(node: SyntaxNode, baseSkip: Set<string>): Set<string> {
   const ids = new Set<string>()
-  function walk(n: SyntaxNode) {
+
+  function collectParamNames(params: SyntaxNode, into: Set<string>): void {
+    if (params.type === 'identifier') into.add(params.text)
+    for (let i = 0; i < params.childCount; i++) {
+      const child = params.child(i)
+      if (child) collectParamNames(child, into)
+    }
+  }
+
+  function walk(n: SyntaxNode, skip: Set<string>) {
     if (n.type === 'identifier' && !skip.has(n.text)) {
       // Only include identifiers that are in a value position
       const parent = n.parent
@@ -22,13 +31,37 @@ function collectIdentifiers(node: SyntaxNode, skip: Set<string>): Set<string> {
       }
       ids.add(n.text)
     }
-    // Don't recurse into nested function scopes' parameter bindings
+    // Entering a nested function scope: extend the skip set with that
+    // function's parameter bindings before recursing. Without this, args
+    // of callbacks defined inside the effect (e.g. `setMessages((prev) =>
+    // …)`, `arr.map((item) => …)`) leak out as "missing closure deps".
+    let childSkip = skip
+    if (
+      n !== node &&
+      (n.type === 'arrow_function' ||
+        n.type === 'function_expression' ||
+        n.type === 'function' ||
+        n.type === 'function_declaration' ||
+        n.type === 'method_definition')
+    ) {
+      const params = n.childForFieldName('parameters') ?? n.childForFieldName('parameter')
+      if (params) {
+        const nested = new Set(skip)
+        collectParamNames(params, nested)
+        // Function-declaration own name is also bound in the nested scope.
+        if (n.type === 'function_declaration') {
+          const nameNode = n.childForFieldName('name')
+          if (nameNode?.type === 'identifier') nested.add(nameNode.text)
+        }
+        childSkip = nested
+      }
+    }
     for (let i = 0; i < n.childCount; i++) {
       const child = n.child(i)
-      if (child) walk(child)
+      if (child) walk(child, childSkip)
     }
   }
-  walk(node)
+  walk(node, baseSkip)
   return ids
 }
 

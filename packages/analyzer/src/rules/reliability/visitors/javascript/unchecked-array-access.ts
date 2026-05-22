@@ -20,8 +20,17 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     if (index.type === 'number') return null
     // Skip string indexes (object property access)
     if (index.type === 'string') return null
-    // Skip when index is cast to string (property key access, not array indexing)
-    if (index.type === 'as_expression' && /\bas\s+string\b/.test(index.text)) return null
+    // Skip when index is cast to a string-keyed type. `as string` is the
+    // generic case; `as <Enum>` / `as <UnionAlias>` is the same pattern for
+    // a Record/Map exhaustively keyed by that enum or string-union — the
+    // cast IS the author's assertion that the lookup is total. Casts to
+    // numeric (`as number` / `as Number`) don't carry that meaning for
+    // arrays, so still fire.
+    if (index.type === 'as_expression') {
+      const castType = index.childForFieldName('type')?.text.trim() ?? ''
+      const isNumericCast = /^(?:number|Number)$/.test(castType)
+      if (!isNumericCast) return null
+    }
     // Skip when object is a Record/Map type assertion (property access, not array)
     if (object.type === 'parenthesized_expression' && object.text.includes('Record<')) return null
     if (object.type === 'as_expression' && object.text.includes('Record<')) return null
@@ -99,8 +108,21 @@ export const uncheckedArrayAccessVisitor: CodeRuleVisitor = {
     while (parent) {
       if (parent.type === 'if_statement') {
         const condition = parent.childForFieldName('condition')
-        if (condition && condition.text.includes('.length')) return null
-        if (condition && condition.text.includes(' in ') && condition.text.includes(indexText)) return null
+        if (condition) {
+          const condText = condition.text
+          if (condText.includes('.length')) return null
+          if (condText.includes(' in ') && condText.includes(indexText)) return null
+          // `findIndex`/`indexOf` return -1 on miss, so `idx !== -1`,
+          // `idx >= 0`, and `idx > -1` are canonical sentinel/bounds
+          // guards. Honor them when the if's condition names the same
+          // index variable used in the subscript.
+          if (
+            condText.includes(indexText) &&
+            (/!==?\s*-\s*1\b/.test(condText) ||
+              />=\s*0\b/.test(condText) ||
+              />\s*-\s*1\b/.test(condText))
+          ) return null
+        }
       }
       if (parent.type === 'ternary_expression' || parent.type === 'binary_expression') {
         if (parent.text.includes('.length')) return null

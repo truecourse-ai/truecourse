@@ -133,6 +133,12 @@
       "layer": "api"
     },
     {
+      "name": "recordAuditEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "redis",
       "service": "api-gateway",
       "kind": "standalone",
@@ -865,6 +871,12 @@
       "layer": "service"
     },
     {
+      "name": "nameAt",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "namespace-usage-internal-module",
       "service": "utils",
       "kind": "standalone",
@@ -982,6 +994,12 @@
       "name": "SetterNoReturn",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "shoutLabel",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1105,6 +1123,12 @@
       "layer": "service"
     },
     {
+      "name": "Greeting",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "IdenticalFunctionsBlockBody",
       "service": "web",
       "kind": "standalone",
@@ -1162,8 +1186,8 @@
   "moduleDependencies": [
     {
       "source": "assertEverything",
-      "target": "HealthService",
       "sourceService": "api-gateway",
+      "target": "HealthService",
       "targetService": "api-gateway",
       "importedNames": [
         "HealthService"
@@ -1171,17 +1195,26 @@
     },
     {
       "source": "assertEverything",
-      "target": "UserController",
       "sourceService": "api-gateway",
+      "target": "UserController",
       "targetService": "api-gateway",
       "importedNames": [
         "UserController"
       ]
     },
     {
-      "source": "UserController",
-      "target": "UserService",
+      "source": "recordAuditEvent",
       "sourceService": "api-gateway",
+      "target": "AuditLogRepository",
+      "targetService": "user-service",
+      "importedNames": [
+        "AuditLogRepository"
+      ]
+    },
+    {
+      "source": "UserController",
+      "sourceService": "api-gateway",
+      "target": "UserService",
       "targetService": "api-gateway",
       "importedNames": [
         "UserService"
@@ -1189,8 +1222,8 @@
     },
     {
       "source": "UserService",
-      "target": "formatters",
       "sourceService": "api-gateway",
+      "target": "formatters",
       "targetService": "utils",
       "importedNames": [
         "formatUser"
@@ -1198,8 +1231,8 @@
     },
     {
       "source": "NotificationProcessor",
-      "target": "EmailTemplates",
       "sourceService": "notification-service",
+      "target": "EmailTemplates",
       "targetService": "notification-service",
       "importedNames": [
         "EmailTemplates"
@@ -1207,8 +1240,8 @@
     },
     {
       "source": "NotificationProcessor",
-      "target": "sender",
       "sourceService": "notification-service",
+      "target": "sender",
       "targetService": "notification-service",
       "importedNames": [
         "sendEmail"
@@ -1216,8 +1249,8 @@
     },
     {
       "source": "src",
-      "target": "EmailTemplates",
       "sourceService": "notification-service",
+      "target": "EmailTemplates",
       "targetService": "notification-service",
       "importedNames": [
         "EmailTemplates"
@@ -1225,8 +1258,8 @@
     },
     {
       "source": "src",
-      "target": "NotificationProcessor",
       "sourceService": "notification-service",
+      "target": "NotificationProcessor",
       "targetService": "notification-service",
       "importedNames": [
         "NotificationProcessor"
@@ -1234,8 +1267,8 @@
     },
     {
       "source": "AuditLogRepository",
-      "target": "AuditEventsClient",
       "sourceService": "user-service",
+      "target": "AuditEventsClient",
       "targetService": "user-service",
       "importedNames": [
         "AuditEventsClient"
@@ -1243,8 +1276,8 @@
     },
     {
       "source": "src",
-      "target": "connection",
       "sourceService": "user-service",
+      "target": "connection",
       "targetService": "user-service",
       "importedNames": [
         "connectDatabase"
@@ -1252,8 +1285,8 @@
     },
     {
       "source": "user.handler",
-      "target": "UserService",
       "sourceService": "user-service",
+      "target": "UserService",
       "targetService": "user-service",
       "importedNames": [
         "UserService"
@@ -1261,8 +1294,8 @@
     },
     {
       "source": "user.handler",
-      "target": "validators",
       "sourceService": "user-service",
+      "target": "validators",
       "targetService": "utils",
       "importedNames": [
         "validateEmail"
@@ -1270,8 +1303,8 @@
     },
     {
       "source": "UserRepository",
-      "target": "user.handler",
       "sourceService": "user-service",
+      "target": "user.handler",
       "targetService": "user-service",
       "importedNames": [
         "getUsers"
@@ -1279,8 +1312,8 @@
     },
     {
       "source": "UserService",
-      "target": "UserRepository",
       "sourceService": "user-service",
+      "target": "UserRepository",
       "targetService": "user-service",
       "importedNames": [
         "UserRepository"
@@ -1288,8 +1321,8 @@
     },
     {
       "source": "Dashboard",
-      "target": "NotificationList",
       "sourceService": "web",
+      "target": "NotificationList",
       "targetService": "web",
       "importedNames": [
         "NotificationList"
