@@ -13,13 +13,24 @@ function isHookCall(node: SyntaxNode): boolean {
   return HOOK_NAMES.test(fn.text)
 }
 
-// Check if the node is inside a conditional block (if/else/ternary/loop)
+// Check if `inner` lies inside `outer`'s subtree by byte range.
+function isWithin(outer: SyntaxNode, inner: SyntaxNode): boolean {
+  return inner.startIndex >= outer.startIndex && inner.endIndex <= outer.endIndex
+}
+
+// Check if the node is inside a conditional block (if/else/ternary/loop).
+// A hook that sits in the `condition` of an if/ternary is always evaluated
+// exactly once, so it does not violate Rules of Hooks; only hooks in the
+// consequence/alternative or any loop body are conditional.
 function getConditionalAncestor(node: SyntaxNode): SyntaxNode | null {
   let current: SyntaxNode | null = node.parent
   while (current) {
-    if (
-      current.type === 'if_statement' ||
-      current.type === 'ternary_expression' ||
+    if (current.type === 'if_statement' || current.type === 'ternary_expression') {
+      const cond = current.childForFieldName('condition')
+      if (!cond || !isWithin(cond, node)) {
+        return current
+      }
+    } else if (
       current.type === 'for_statement' ||
       current.type === 'for_in_statement' ||
       current.type === 'for_of_statement' ||

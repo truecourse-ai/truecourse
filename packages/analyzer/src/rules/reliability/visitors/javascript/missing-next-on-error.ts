@@ -23,9 +23,13 @@ export const missingNextOnErrorVisitor: CodeRuleVisitor = {
       return nameNode.text.replace(/:.+/, '').trim()
     })
 
-    // Must have a next-like param (usually 3rd or 4th param)
+    // Must have an Express-shaped signature: (req, res, next) or (err, req, res, next).
+    // Hono and Koa middleware are (ctx, next) with only two params and use
+    // exception propagation rather than next(error); they must not be flagged.
     const hasNext = paramNames.some((n) => n === 'next')
-    if (!hasNext) return null
+    const hasReq = paramNames.some((n) => n === 'req' || n === 'request')
+    const hasRes = paramNames.some((n) => n === 'res' || n === 'response')
+    if (!hasNext || !hasReq || !hasRes) return null
 
     // Check the catch body for next(
     const body = node.childForFieldName('body')

@@ -196,6 +196,26 @@ export function lotsOfBreaks(items: string[]) {
   return 'done';
 }
 
+// VIOLATION: code-quality/deterministic/too-many-breaks
+// Nested loop with six early-exit breaks — all of them target the inner
+// loop (not a switch), so the rule should still fire after the
+// switch-break exclusion.
+export function scanMatrix(rows: ReadonlyArray<ReadonlyArray<number>>): number {
+  let hits = 0;
+  for (const row of rows) {
+    for (const value of row) {
+      if (value === 1) break;
+      if (value === 2) break;
+      if (value === 3) break;
+      if (value === 4) break;
+      if (value === 5) break;
+      if (value === 6) break;
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
 // VIOLATION: code-quality/deterministic/too-many-return-statements
 export function manyReturns(x: number) {
   if (x === 1) return 'one';

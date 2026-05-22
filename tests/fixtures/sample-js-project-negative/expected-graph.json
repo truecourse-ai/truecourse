@@ -55,6 +55,12 @@
       "layer": "api"
     },
     {
+      "name": "attachUserMiddleware",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "authMiddleware",
       "service": "api-gateway",
       "kind": "standalone",
