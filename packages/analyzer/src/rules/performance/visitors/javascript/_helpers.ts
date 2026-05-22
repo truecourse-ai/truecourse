@@ -173,6 +173,34 @@ export function isLikelyServerComponent(filePath: string, sourceCode: string): b
   return true
 }
 
+/**
+ * Heuristic: is the file a one-off script (CLI, seed, build tool) rather
+ * than long-running server code? "In handler" performance rules don't
+ * apply to scripts that run once and exit.
+ *
+ * A file is considered script-like if:
+ *   1. The basename starts with `seed-` / `seed.` (e.g. `seed-database.ts`).
+ *   2. The basename has a `.cli.` / `.script.` infix (`run.cli.ts`).
+ *   3. Any ancestor directory is `scripts`, `bin`, `tools`, `cli`,
+ *      `cmd`, `seed`, or `seeds`.
+ */
+export function isScriptLikeJsFile(filePath: string): boolean {
+  const segments = filePath.split('/')
+  const fileName = (segments[segments.length - 1] ?? '').toLowerCase()
+
+  if (/^seed[-.]/.test(fileName)) return true
+  if (/\.(cli|script)\.[cm]?[tj]sx?$/.test(fileName)) return true
+
+  for (let i = 0; i < segments.length - 1; i++) {
+    const dir = segments[i]?.toLowerCase()
+    if (dir === 'scripts' || dir === 'bin' || dir === 'tools' ||
+        dir === 'cli' || dir === 'cmd' || dir === 'seed' || dir === 'seeds') {
+      return true
+    }
+  }
+  return false
+}
+
 export function findContainingStatement(node: SyntaxNode): SyntaxNode | null {
   let current: SyntaxNode | null = node
   while (current) {

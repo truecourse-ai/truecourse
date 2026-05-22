@@ -85,6 +85,12 @@
       "layer": "api"
     },
     {
+      "name": "handleParse",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "HealthService",
       "service": "api-gateway",
       "kind": "class",
@@ -583,6 +589,12 @@
       "layer": "service"
     },
     {
+      "name": "BaseHandler",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "Builder",
       "service": "utils",
       "kind": "class",
@@ -596,6 +608,12 @@
     },
     {
       "name": "CaseHelpers",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "ChildHandler",
       "service": "utils",
       "kind": "class",
       "layer": "service"
@@ -776,6 +794,12 @@
     },
     {
       "name": "http-call-no-timeout-external",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "isSelectedBuggy",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
