@@ -19,6 +19,7 @@ import {
   Check,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/components/ui/hover-popover';
 import {
@@ -905,6 +906,7 @@ function ActionFooter({
 function MarkdownPreview({ source }: { source: string }) {
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={{
         h1: ({ children }) => <div className="mb-1 text-sm font-semibold text-foreground">{children}</div>,
         h2: ({ children }) => <div className="mb-1 text-sm font-semibold text-foreground">{children}</div>,
@@ -930,6 +932,20 @@ function MarkdownPreview({ source }: { source: string }) {
         blockquote: ({ children }) => (
           <blockquote className="my-1 border-l-2 border-border pl-2 italic">{children}</blockquote>
         ),
+        // GFM tables — without these renderers the table still parses
+        // but inherits no styling and renders as a wall of plain rows.
+        table: ({ children }) => (
+          <div className="my-1.5 overflow-x-auto">
+            <table className="w-full border-collapse text-[11px]">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="border-b border-border bg-muted/40">{children}</thead>,
+        tbody: ({ children }) => <tbody>{children}</tbody>,
+        tr: ({ children }) => <tr className="border-b border-border/40 last:border-0">{children}</tr>,
+        th: ({ children }) => (
+          <th className="px-2 py-1 text-left font-semibold text-foreground">{children}</th>
+        ),
+        td: ({ children }) => <td className="px-2 py-1 align-top">{children}</td>,
       }}
     >
       {source}
