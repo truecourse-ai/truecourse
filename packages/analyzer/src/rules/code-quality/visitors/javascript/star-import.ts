@@ -10,6 +10,12 @@ export const jsStarImportVisitor: CodeRuleVisitor = {
       (c) => c.type === 'import_clause' && c.namedChildren.some((cc) => cc.type === 'namespace_import')
     )
     if (hasNamespaceImport) {
+      // Skip type-only namespace imports: `import type * as X from 'pkg'`.
+      // The `type` keyword causes the entire import to be erased at compile
+      // time, so tree-shaking / runtime-load concerns don't apply.
+      const isTypeOnly = node.children.some((c) => !c.isNamed && c.type === 'type')
+      if (isTypeOnly) return null
+
       // Skip well-known namespace imports that are idiomatic
       const source = node.namedChildren.find((c) => c.type === 'string')
       const sourceText = source?.text?.slice(1, -1) ?? ''

@@ -661,6 +661,12 @@
       "layer": "service"
     },
     {
+      "name": "consumeCounter",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Container",
       "service": "utils",
       "kind": "class",
@@ -727,6 +733,18 @@
       "layer": "service"
     },
     {
+      "name": "getParser",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "greetLength",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "http-call-no-timeout-external",
       "service": "utils",
       "kind": "standalone",
@@ -764,6 +782,12 @@
     },
     {
       "name": "logger",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "looksLikeRoute",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"

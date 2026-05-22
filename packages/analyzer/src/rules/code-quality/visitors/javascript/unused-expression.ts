@@ -24,6 +24,14 @@ export const unusedExpressionVisitor: CodeRuleVisitor = {
     }
     if (expr.type === 'template_string') return null
     if (expr.type === 'new_expression') return null
+    // Skip TypeScript namespace / module declarations. Tree-sitter wraps
+    // `namespace Foo { ... }` (and the older `module Foo { ... }` syntax)
+    // in an expression_statement, but these are type-level constructs —
+    // commonly used inside `declare global { ... }` or
+    // `declare module 'x' { ... }` to augment ambient types — and have no
+    // runtime side-effect concern of their own.
+    if (expr.type === 'internal_module') return null
+    if (expr.type === 'module') return null
 
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
