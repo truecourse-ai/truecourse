@@ -64,6 +64,10 @@
       "types": "./dist/lib/cli-binary.d.ts",
       "import": "./dist/lib/cli-binary.js"
     },
+    "./lib/port": {
+      "types": "./dist/lib/port.d.ts",
+      "import": "./dist/lib/port.js"
+    },
     "./services/analyzer": {
       "types": "./dist/services/analyzer.service.d.ts",
       "import": "./dist/services/analyzer.service.js"

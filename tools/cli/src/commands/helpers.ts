@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { resolveRepoDir } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
-
-const DEFAULT_PORT = 3001;
+import { DEFAULT_PORT_CANDIDATES } from "@truecourse/core/lib/port";
+import { parseEnvFile } from "./service/env.js";
 
 // --- Config utilities ---
 
@@ -44,8 +44,33 @@ export function writeConfig(partial: Partial<TrueCourseConfig>): void {
 }
 
 export function getServerUrl(): string {
-  const port = process.env.PORT || DEFAULT_PORT;
-  return `http://localhost:${port}`;
+  return `http://localhost:${resolveKnownPort()}`;
+}
+
+/**
+ * Resolve the dashboard port the CLI should talk to. Order:
+ *   1. `process.env.PORT` if the user pinned one for this shell.
+ *   2. `PORT=` from `~/.truecourse/.env` — written by service-mode installs.
+ *   3. First default candidate as a pre-install fallback.
+ *
+ * Note: this does NOT probe for a free port. Probing happens in the dashboard
+ * launcher before spawning the server; here we just report the port we
+ * expect the server is (or will be) bound to.
+ */
+export function resolveKnownPort(): number {
+  if (process.env.PORT) {
+    const parsed = Number(process.env.PORT);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  const envFile = path.join(os.homedir(), ".truecourse", ".env");
+  if (existsSync(envFile)) {
+    const parsed = parseEnvFile(envFile);
+    if (parsed.PORT) {
+      const n = Number(parsed.PORT);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return DEFAULT_PORT_CANDIDATES[0];
 }
 
 /**

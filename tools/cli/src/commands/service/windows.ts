@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import type { ServicePlatform } from "./platform.js";
+import { parseEnvFile } from "./env.js";
 
 // Display name shown in the Services UI.
 const SERVICE_DISPLAY_NAME = "TrueCourse";
@@ -32,6 +33,13 @@ export class WindowsService implements ServicePlatform {
     // `C:\Windows\System32\config\systemprofile`, so the server reads an
     // empty registry / config tree and the dashboard shows no projects.
     const truecourseHome = path.join(os.homedir(), ".truecourse");
+    const envFile = path.join(truecourseHome, ".env");
+
+    // Merge ~/.truecourse/.env into the service's environment block so
+    // service-mode installs honor PORT (and any future keys) the same way
+    // launchd/systemd do via their native env-file mechanisms.
+    const envFromFile = parseEnvFile(envFile);
+    const fileEntries = Object.entries(envFromFile).map(([name, value]) => ({ name, value }));
 
     return new Promise<void>((resolve, reject) => {
       const svc = new Service({
@@ -43,6 +51,7 @@ export class WindowsService implements ServicePlatform {
         // node-windows install dir, often inside an npx cache).
         logpath: logDir,
         env: [
+          ...fileEntries,
           { name: "TRUECOURSE_HOME", value: truecourseHome },
           { name: "TRUECOURSE_LOG_DIR", value: logDir },
         ],

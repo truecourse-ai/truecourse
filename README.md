@@ -228,7 +228,14 @@ CLAUDE_CODE_MODEL=                    # Claude Code --model flag (empty = defaul
 CLAUDE_CODE_TIMEOUT_MS=120000         # per-call timeout (ms)
 CLAUDE_CODE_MAX_RETRIES=2             # retry attempts on parse/validation failure
 CLAUDE_CODE_MAX_CONCURRENCY=10        # max concurrent `claude` processes per run
+PORT=47821                            # dashboard server port (auto-picked if unset)
 ```
+
+### Dashboard port
+
+By default `truecourse dashboard` probes for a free TCP port (starting at `47821`) before launching the server. Service-mode installs persist the chosen port to `~/.truecourse/.env` so subsequent starts use the same one. Set `PORT=` explicitly if you want to pin a specific port.
+
+**Windows users:** Hyper-V and Docker Desktop reserve dynamic port ranges via WinNAT, and these ranges shift between reboots. If you see `EACCES` / `EADDRINUSE` on launch, the auto-probe will fall through to the next candidate; you can inspect reserved ranges with `netsh interface ipv4 show excludedportrange protocol=tcp`.
 
 **`CLAUDE_CODE_MAX_CONCURRENCY`** caps how many Claude CLI processes TrueCourse spawns in parallel during a single analyze. Default `10`. Raise it on CI runners with spare headroom; lower it on resource-constrained machines (e.g. 8 GB laptops, shared VMs) to avoid OOM on large repos. Must be a positive integer.
 
@@ -261,7 +268,7 @@ Patterns are anchored to the file's location, so `src/generated/` matches the to
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
+pnpm dev                # Start dashboard at http://localhost:3000 (Vite on :3000, server on :$PORT or :47821 by default)
 pnpm test               # Run tests
 pnpm build              # Build all packages
 ```

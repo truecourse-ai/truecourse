@@ -1,10 +1,12 @@
 import * as p from "@clack/prompts";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRepoDir } from "@truecourse/core/config/paths";
 import { getProjectByPath, registerProject } from "@truecourse/core/config/registry";
+import { findFreePort, DEFAULT_PORT_CANDIDATES } from "@truecourse/core/lib/port";
 import {
   exitMissingNonInteractiveFlag,
   getConfigPath,
@@ -12,11 +14,13 @@ import {
   isInteractive,
   openInBrowser,
   readConfig,
+  resolveKnownPort,
   writeConfig,
   type TrueCourseConfig,
 } from "./helpers.js";
 import { getPlatform } from "./service/platform.js";
 import { rotateLogs, getLogDir, getLogPath, tailLogs, dumpLogTails } from "./service/logs.js";
+import { writeEnvVar } from "./service/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -66,13 +70,22 @@ async function promptRunMode(): Promise<TrueCourseConfig["runMode"]> {
   return choice;
 }
 
+async function resolveLaunchPort(): Promise<number> {
+  if (process.env.PORT) {
+    const parsed = Number(process.env.PORT);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return findFreePort(DEFAULT_PORT_CANDIDATES);
+}
+
 async function runConsoleMode(serverEntry: string): Promise<void> {
-  const url = getServerUrl();
+  const port = await resolveLaunchPort();
+  const url = `http://localhost:${port}`;
 
   p.log.step("Starting dashboard server...");
   const serverProcess = spawn(process.execPath, [serverEntry], {
     stdio: "inherit",
-    env: { ...process.env },
+    env: { ...process.env, PORT: String(port) },
   });
 
   const forward = (signal: NodeJS.Signals) => {
@@ -107,12 +120,17 @@ async function runServiceMode(serverEntry: string): Promise<void> {
   const platform = getPlatform();
   const logDir = getLogDir();
   const logPath = getLogPath();
-  const url = getServerUrl();
 
   rotateLogs(logDir);
 
   const installed = await platform.isInstalled();
   if (!installed) {
+    // Pick a free port BEFORE install so the chosen port is what the service
+    // wrapper sees on first start (and every subsequent start, via .env).
+    const port = await resolveLaunchPort();
+    const envFile = path.join(os.homedir(), ".truecourse", ".env");
+    writeEnvVar(envFile, "PORT", String(port));
+    p.log.info(`Service will listen on port ${port} (persisted to ${envFile}).`);
     p.log.step("Installing background service...");
     await platform.install(serverEntry, logPath);
   } else {
@@ -123,6 +141,7 @@ async function runServiceMode(serverEntry: string): Promise<void> {
     }
   }
 
+  const url = `http://localhost:${resolveKnownPort()}`;
   const healthy = await waitForHealth(url);
   if (!healthy) {
     p.log.warn("Service started but server hasn't responded on the health endpoint.");

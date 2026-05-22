@@ -6,8 +6,9 @@ import { createApp } from './app.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
+import { DEFAULT_PORT_CANDIDATES } from '@truecourse/core/lib/port';
 
-const port = parseInt(process.env.PORT || '3001', 10);
+const port = parseInt(process.env.PORT || String(DEFAULT_PORT_CANDIDATES[0]), 10);
 
 async function main() {
   // 0. Route all internal diagnostics to the dashboard log file. When running
@@ -36,10 +37,13 @@ async function main() {
   // 3. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
+      if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
         reject(new Error(
-          `Port ${port} is already in use. Is another TrueCourse instance running?\n` +
-          `Stop it first, or set PORT to use a different port.`
+          `Port ${port} is already in use or reserved by the OS.\n` +
+          `On Windows this often means Hyper-V / Docker Desktop has reserved this port range\n` +
+          `(check: netsh interface ipv4 show excludedportrange protocol=tcp).\n` +
+          `Re-run \`truecourse dashboard\` so the CLI auto-picks a free port,\n` +
+          `or set PORT=xxxx explicitly to pin a different port.`
         ));
       } else {
         reject(err);
