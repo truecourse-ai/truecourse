@@ -369,9 +369,20 @@ far in this session:
 6. **If `tp_rate < 0.90`** — campaign continues. File one new fp-fix
    issue per rule with FPs (same shape as discovery). Leave the
    campaign's `status` as `in_progress`. **Do not** open a
-   campaign-close PR; no release is cut. The next fp-fix PR merge
-   will refire fp-next-fix to keep working through the new issues.
-   End.
+   campaign-close PR; no release is cut.
+
+   **Then continue into the per-issue loop in this same session** —
+   the target clone, dist build, `before_counts`, and counters are
+   all still valid; only the issue list needs re-fetching. Process
+   the freshly-filed issues with the remaining `successes`/`attempts`
+   budget. If the budget allows at least one success, the session
+   will end with a normal batched PR (which carries the FP-count
+   delta and fires Trigger B on merge).
+
+   The rationale: this path used to end here and require a manual
+   "Run now" click to kick the loop. Continuing in-session removes
+   that hand-off — the session that filed the new issues immediately
+   starts processing them.
 
 If the queue empties during the per-issue loop **after** at least one
 success, go to "Open the batched PR" with what you have — don't run
