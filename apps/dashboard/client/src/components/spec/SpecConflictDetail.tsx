@@ -116,7 +116,7 @@ export function SpecConflictDetail({ conflictId, onClose }: SpecConflictDetailPr
           isVersionChain={isVersionChain}
         />
         <div className="flex flex-1 min-w-0 flex-col">
-          <div className="flex-1 overflow-auto px-6 py-4">
+          <div className="flex-1 overflow-auto px-5 py-3">
             <CandidateDetail
               candidate={selected}
               conflict={conflict}
@@ -500,11 +500,13 @@ function ContentCandidate({
         </div>
       )}
       {conflict.explanation && (
-        <div className="mt-3 rounded border border-border bg-card px-3 py-2">
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="mt-3">
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             What differs
           </div>
-          <p className="text-sm leading-relaxed text-foreground">{conflict.explanation}</p>
+          <div className="rounded border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground">
+            {conflict.explanation}
+          </div>
         </div>
       )}
       <DocPreview source={candidate.claim.provenance.quote} />
@@ -513,16 +515,6 @@ function ContentCandidate({
           diffs={diffs}
           defaultExpanded={!conflict.explanation}
         />
-      )}
-      {candidate.claim.content !== undefined && (
-        <div className="mt-3">
-          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Structured content
-          </div>
-          <pre className="max-h-60 overflow-auto rounded border border-border bg-muted/20 p-3 font-mono text-[11px] text-muted-foreground">
-            {JSON.stringify(candidate.claim.content, null, 2)}
-          </pre>
-        </div>
       )}
     </div>
   );
