@@ -23,6 +23,16 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     const prop = fn.childForFieldName('property')
     if (prop?.text !== 'find') return null
 
+    // Selector-style `.find(stringLiteral)` is never `Array.prototype.find`
+    // (whose only argument is a predicate callback). Konva, jQuery, Cheerio,
+    // Playwright locators etc. all use string selectors. Skip syntactically
+    // — works even without resolved type info (e.g. node_modules absent).
+    const args = node.childForFieldName('arguments')
+    const firstArg = args?.namedChild(0)
+    if (firstArg && (firstArg.type === 'string' || firstArg.type === 'template_string')) {
+      return null
+    }
+
     // Not every `.find()` is `Array.prototype.find`. Konva's `Node.find`,
     // jQuery's `$.find`, Cheerio's selector `.find` etc. all return arrays
     // — there's no possibility of `undefined`, so chained access is safe.
@@ -45,12 +55,14 @@ export const missingNullCheckAfterFindVisitor: CodeRuleVisitor = {
     // Skip if optional chaining is used: arr.find(...)?.property
     if (parent.type === 'optional_chain_expression') return null
 
-    // Skip when the parent is a member_expression using optional chaining (?.)
+    // Skip when the parent is a member_expression using optional chaining (?.).
+    // tree-sitter-typescript inserts an `optional_chain` child between the
+    // object and the property; that's whitespace-insensitive (handles wrapped
+    // chains like `arr.find(cb)\n  ?.prop`).
     if (parent.type === 'member_expression' && parent.childForFieldName('object')?.id === node.id) {
-      const parentText = parent.text
-      const findCallEnd = node.endIndex - parent.startIndex
-      const afterFind = parentText.slice(findCallEnd)
-      if (afterFind.startsWith('?.')) return null
+      for (let i = 0; i < parent.namedChildCount; i++) {
+        if (parent.namedChild(i)?.type === 'optional_chain') return null
+      }
     }
 
     // If result is used in member access immediately: arr.find(...).property

@@ -11,6 +11,28 @@ const CONVENTIONAL_DEFAULT_NAMES = new Set([
   'app', 'router', 'route', 'handler', 'server', 'config', 'default', 'middleware', 'plugin',
 ])
 
+/**
+ * Conventional role-suffixes appended to a filename-derived name to form
+ * the export. Stripped (case-insensitively, post-normalization) so that
+ * `document-rejected.tsx` exporting `DocumentRejectedEmail` matches,
+ * `user-card.tsx` exporting `UserCardComponent` matches, etc.
+ */
+const ROLE_SUFFIXES = [
+  // React-y / UI
+  'component', 'page', 'view', 'layout', 'form', 'dialog', 'modal', 'card',
+  'panel', 'sheet', 'drawer', 'toolbar', 'header', 'footer', 'sidebar',
+  'list', 'item', 'row', 'cell', 'menu', 'icon', 'button', 'badge',
+  'provider', 'context', 'wrapper', 'container', 'renderer',
+  // Backend / shared
+  'service', 'controller', 'resolver', 'handler', 'manager', 'factory',
+  'helper', 'helpers', 'util', 'utils', 'client', 'adapter', 'repository',
+  'store', 'model', 'schema', 'config', 'options', 'plugin', 'middleware',
+  // Email/template specific
+  'email', 'template', 'mail', 'message', 'notification',
+  // Hooks / functional
+  'hook', 'use',
+]
+
 export const filenameClassMismatchVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/filename-class-mismatch',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -66,6 +88,14 @@ export const filenameClassMismatchVisitor: CodeRuleVisitor = {
     const normalizeFileName = (s: string) => s.toLowerCase().replace(/[-_.]/g, '')
     const normFile = normalizeFileName(fileBase)
     const normClass = normalizeFileName(exportedName)
+
+    // Allow `<filename><RoleSuffix>` pattern (e.g. `document-rejected.tsx`
+    // exporting `DocumentRejectedEmail`). The file describes the topic, the
+    // suffix the role — a stable convention across many codebases.
+    if (normFile && normClass.startsWith(normFile)) {
+      const tail = normClass.slice(normFile.length)
+      if (tail === '' || ROLE_SUFFIXES.includes(tail)) return null
+    }
 
     if (normFile && normClass && normFile !== normClass) {
       return makeViolation(

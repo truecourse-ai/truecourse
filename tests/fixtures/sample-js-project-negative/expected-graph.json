@@ -607,6 +607,12 @@
       "layer": "service"
     },
     {
+      "name": "buildRecordLabel",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "Calculator",
       "service": "utils",
       "kind": "class",
@@ -704,6 +710,12 @@
     },
     {
       "name": "computeDefaultTimeout",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "confusing-void-expression-non-void-caller",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -919,9 +931,21 @@
       "layer": "service"
     },
     {
+      "name": "readGreeting",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "ReassignableClass",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "recipientNameFor",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {
@@ -1114,6 +1138,12 @@
       "name": "WrongNameClass",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "BillingDashboard",
+      "service": "web",
+      "kind": "class",
       "layer": "service"
     },
     {

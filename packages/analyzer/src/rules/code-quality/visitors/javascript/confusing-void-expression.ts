@@ -35,21 +35,44 @@ export const confusingVoidExpressionVisitor: CodeRuleVisitor = {
     if (!isVoid) return null
 
     // Check that the containing function doesn't have void return type itself
-    // (returning void from void function is fine, it's shorthand)
+    // (returning void from void function is fine, it's shorthand).
     let parent = node.parent
+    let containingFn: typeof node | null = null
     while (parent) {
       if (parent.type === 'arrow_function') {
         // Arrow functions with expression body: `() => voidFn()` — this is fine
         if (parent.childForFieldName('body')?.type !== 'statement_block') {
           return null
         }
+        containingFn = parent
         break
       }
       if (parent.type === 'function_declaration' || parent.type === 'function_expression' ||
           parent.type === 'method_definition') {
+        containingFn = parent
         break
       }
       parent = parent.parent
+    }
+
+    // Mirrors `@typescript-eslint/no-confusing-void-expression`'s
+    // `ignoreVoidReturningFunctions` option for the common framework-handler
+    // shape: an *arrow* whose return type resolves to `void` / `Promise<void>`
+    // / `undefined`. tRPC mutation handlers, Express middlewares etc. use
+    // `return await voidFn()` to forward the void result — not confusing
+    // when the outer signature is itself void. Restricting to arrows keeps
+    // the existing function-declaration coverage intact.
+    if (containingFn?.type === 'arrow_function') {
+      const fnReturnType = typeQuery.getReturnType(
+        filePath,
+        containingFn.startPosition.row,
+        containingFn.startPosition.column,
+        containingFn.endPosition.row,
+        containingFn.endPosition.column,
+      )
+      if (fnReturnType && /^(void|undefined|Promise<\s*(void|undefined)\s*>)$/.test(fnReturnType)) {
+        return null
+      }
     }
 
     return makeViolation(

@@ -1,5 +1,6 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { FRAMEWORK_ROUTE_EXPORT_NAMES, functionReturnsJsx, isDefaultExportedFunction } from './_helpers.js'
 
 export const missingReturnTypeVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-return-type',
@@ -18,6 +19,15 @@ export const missingReturnTypeVisitor: CodeRuleVisitor = {
 
     // Skip constructors
     if (name === 'constructor') return null
+
+    // Skip framework route conventions (Next.js route handlers, Remix route
+    // module exports, Next.js metadata helpers). The framework dictates the
+    // signature, so explicit return types are rarely added in practice.
+    if (FRAMEWORK_ROUTE_EXPORT_NAMES.has(name)) return null
+
+    // Skip default-exported React components (Remix / Next.js page modules):
+    // TS infers `JSX.Element` and codebases almost never annotate it.
+    if (isDefaultExportedFunction(node) && functionReturnsJsx(node)) return null
 
     return makeViolation(
       this.ruleKey, nameNode, filePath, 'low',
