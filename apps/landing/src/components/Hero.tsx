@@ -132,43 +132,37 @@ function HeroPreview() {
           {/* Terminal — matches the real clack-formatted CLI output */}
           <ClackTerminal />
 
-          {/* Top findings panel — what `truecourse list` would surface */}
+          {/* Drift report panel — what `truecourse list` surfaces after verify */}
           <div className="bg-background/40 p-5">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">Top findings &middot; sample-project</h3>
+              <h3 className="text-sm font-medium">Drift report &middot; sample-project</h3>
               <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium text-rose-300">
-                197 TOTAL
+                3 DRIFTS
               </span>
             </div>
             <ul className="mt-3 space-y-2.5">
               <Finding
                 severity="critical"
-                rule="business-logic-drift"
-                file="billing/refund.ts"
+                rule="SignatureDetection.score"
+                file="entity.field.type"
+                category="Drift"
+              />
+              <Finding
+                severity="critical"
+                rule="DetectionStatus"
+                file="state-machine.transition"
                 category="Drift"
               />
               <Finding
                 severity="high"
-                rule="hardcoded-secret"
-                file="auth/jwt.ts"
-                category="Security"
-              />
-              <Finding
-                severity="high"
-                rule="circular-dependency"
-                file="billing/usage.ts"
-                category="Architecture"
-              />
-              <Finding
-                severity="high"
-                rule="unhandled-promise"
-                file="workers/cron.ts"
-                category="Reliability"
+                rule="SignatureDetection.flaggedAt"
+                file="entity.field.mutability"
+                category="Drift"
               />
             </ul>
             <div className="mt-4 rounded-lg border border-border bg-card/60 px-3 py-2 text-[11px] text-muted-foreground">
               <span className="text-foreground">Tip:</span> install the pre-commit hook
-              so new high-severity findings never reach main.
+              so new drifts never reach main.
             </div>
           </div>
         </div>
@@ -178,9 +172,9 @@ function HeroPreview() {
 }
 
 /**
- * Condensed render of the real `truecourse verify` clack-formatted output.
- * Frame glyphs, strings, and indentation match the actual CLI; interactive
- * prompts are stripped so the preview stays scannable for visitors.
+ * Condensed render of the `truecourse verify` clack-formatted output.
+ * Loads contracts from .truecourse/, walks the codebase, checks each
+ * contract group, prints a drift summary.
  */
 function ClackTerminal() {
   return (
@@ -194,51 +188,42 @@ function ClackTerminal() {
       <div className="mt-1.5">
         {/* Intro */}
         <FrameLine glyph="┌">
-          <span className="text-foreground">Analyzing repository</span>
+          <span className="text-foreground">Verifying code against contracts</span>
         </FrameLine>
         <FrameLine glyph="│" />
 
-        {/* Repo */}
+        {/* Repo + contract source */}
         <FrameLine glyph="◇">
           <span className="text-muted-foreground">Repository:</span>{' '}
           <span className="text-foreground">sample-project</span>
         </FrameLine>
         <FrameLine glyph="│" />
 
-        {/* Inline progress: parse + scan */}
-        <ProgressLine label="Parsing repository" value="3 services, 20 files" />
-        <ProgressLine label="Scanning files" value="20 files" />
+        {/* Load + walk */}
+        <ProgressLine label="Loading contracts" value="47 contracts" tone="ok" />
+        <ProgressLine label="Reading codebase" value="3 services, 124 files" tone="ok" />
         <FrameLine glyph="│" />
 
-        {/* Category checks (incl. business-logic drift preview) */}
-        <ProgressLine label="Security checks" value="3 violations" tone="warn" />
-        <ProgressLine label="Bugs checks" value="2 violations" tone="warn" />
-        <ProgressLine label="Architecture checks" value="24 violations" tone="warn" />
-        <ProgressLine label="Performance checks" value="Clean" tone="ok" />
-        <ProgressLine label="Reliability checks" value="5 violations" tone="warn" />
-        <ProgressLine label="Code quality checks" value="156 violations" tone="warn" />
-        <ProgressLine label="Database checks" value="1 violation" tone="warn" />
-        <ProgressLine label="Style checks" value="2 violations" tone="warn" />
-        <ProgressLine label="Business-logic drift" value="4 violations" tone="warn" />
+        {/* Contract group checks */}
+        <ProgressLine label="Entity contracts" value="18 checked, 2 drifts" tone="warn" />
+        <ProgressLine label="State-machine contracts" value="6 checked, 1 drift" tone="warn" />
+        <ProgressLine label="Field policy contracts" value="12 checked, Clean" tone="ok" />
+        <ProgressLine label="Operation contracts" value="11 checked, Clean" tone="ok" />
         <ProgressLine label="Saving results" value="Done" tone="ok" />
 
         <FrameLine glyph="│" />
 
-        {/* Final success */}
+        {/* Final summary */}
         <FrameLine glyph="◆">
-          <span className="text-foreground">Analysis complete</span>
+          <span className="text-foreground">Verification complete</span>
         </FrameLine>
         <RawLine />
         <RawLine>
-          <span className="text-foreground">197 violations</span>{' '}
+          <span className="text-foreground">3 drifts detected</span>{' '}
           <span className="text-muted-foreground">(</span>
-          <span className="text-rose-500">1 critical</span>
+          <span className="text-rose-400">2 critical</span>
           <span className="text-muted-foreground">, </span>
-          <span className="text-rose-400">6 high</span>
-          <span className="text-muted-foreground">, </span>
-          <span className="text-amber-400">114 medium</span>
-          <span className="text-muted-foreground">, </span>
-          <span className="text-amber-300">76 low</span>
+          <span className="text-amber-300">1 high</span>
           <span className="text-muted-foreground">)</span>
         </RawLine>
         <RawLine />
@@ -247,12 +232,12 @@ function ClackTerminal() {
         <FrameLine glyph="●" glyphClass="text-sky-400">
           <span className="text-muted-foreground">Run</span>{' '}
           <span className="text-foreground">`truecourse list`</span>{' '}
-          <span className="text-muted-foreground">to see full details.</span>
+          <span className="text-muted-foreground">to see drift details.</span>
         </FrameLine>
         <FrameLine glyph="│" />
         <FrameLine glyph="└">
           <span className="text-muted-foreground">
-            Analysis complete — view results with:
+            View drift report with:
           </span>{' '}
           <span className="text-foreground">truecourse dashboard</span>
         </FrameLine>
