@@ -649,6 +649,12 @@
       "layer": "service"
     },
     {
+      "name": "classifyRequest",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "clear-text-protocol-hardcoded-host",
       "service": "utils",
       "kind": "standalone",
@@ -1021,6 +1027,12 @@
       "layer": "service"
     },
     {
+      "name": "summarize",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "todoHandler",
       "service": "utils",
       "kind": "standalone",
@@ -1147,6 +1159,12 @@
       "layer": "service"
     },
     {
+      "name": "MultiStageChain",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "NotificationList",
       "service": "web",
       "kind": "standalone",
@@ -1166,6 +1184,12 @@
     },
     {
       "name": "RemainingReact",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "SuspenseQueryView",
       "service": "web",
       "kind": "standalone",
       "layer": "service"

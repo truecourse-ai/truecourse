@@ -262,8 +262,11 @@ export interface TypeQueryService {
   getParameterTypes(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): Array<{ name: string; type: string }> | null
   /** Check if two positions have compatible types */
   areTypesCompatible(filePath: string, line1: number, col1: number, line2: number, col2: number): boolean
-  /** Check if the TS compiler reports a type error in a line range */
-  hasTypeErrorInRange(filePath: string, startLine: number, endLine: number): boolean
+  /** Check if the TS compiler reports a type error in a line range. If
+   * `errorCodes` is provided, only diagnostics whose `code` matches are
+   * considered — used to ignore unrelated diagnostics (unresolved modules,
+   * missing names) that aren't actual argument-type mismatches. */
+  hasTypeErrorInRange(filePath: string, startLine: number, endLine: number, errorCodes?: ReadonlySet<number>): boolean
 }
 
 /**
@@ -537,7 +540,7 @@ export function createTypeQueryService(
       return sp.checker.isTypeAssignableTo(type1, type2) || sp.checker.isTypeAssignableTo(type2, type1)
     },
 
-    hasTypeErrorInRange(filePath, startLine, endLine) {
+    hasTypeErrorInRange(filePath, startLine, endLine, errorCodes) {
       const sp = getProgramForFile(filePath)
       if (!sp) return false
       const sf = sp.program.getSourceFile(filePath)
@@ -546,6 +549,7 @@ export function createTypeQueryService(
         const diagnostics = sp.program.getSemanticDiagnostics(sf)
         for (const d of diagnostics) {
           if (d.start === undefined || d.file !== sf) continue
+          if (errorCodes && !errorCodes.has(d.code)) continue
           const diagLine = sf.getLineAndCharacterOfPosition(d.start).line
           if (diagLine >= startLine && diagLine <= endLine) return true
         }

@@ -16,8 +16,22 @@ export const missingUseMemoExpensiveVisitor: CodeRuleVisitor = {
     const prop = fn.childForFieldName('property')
     if (!prop || !EXPENSIVE_ARRAY_METHODS.has(prop.text)) return null
 
-    // Skip when chained on Object.entries/keys/values — these produce small arrays
     const obj = fn.childForFieldName('object')
+
+    // .filter() is O(n) and cheap on its own — only worth memoizing when it
+    // appears in a multi-stage chain (e.g. .filter().map().filter()) where
+    // the work compounds. Plain .filter(Boolean) at the tail of any chain is
+    // the standard null-removal idiom and never warrants useMemo.
+    if (prop.text === 'filter') {
+      const args = node.childForFieldName('arguments')
+      if (args && args.namedChildCount === 1) {
+        const arg = args.namedChild(0)
+        if (arg?.type === 'identifier' && arg.text === 'Boolean') return null
+      }
+      if (obj?.type !== 'call_expression') return null
+    }
+
+    // Skip when chained on Object.entries/keys/values — these produce small arrays
     if (obj?.type === 'call_expression') {
       const objFn = obj.childForFieldName('function')
       if (objFn?.type === 'member_expression') {

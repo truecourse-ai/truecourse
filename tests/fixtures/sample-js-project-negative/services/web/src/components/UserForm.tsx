@@ -27,7 +27,10 @@ export function UserForm({ initialUser, onSubmit, onCancel, roles }: UserFormPro
   const [submitting, setSubmitting] = useState(false);
 
   // VIOLATION: performance/deterministic/missing-usememo-expensive
-  const filteredRoles = roles.filter((r) => r !== 'superadmin');
+  const filteredRoles = roles
+    .filter((r) => r !== 'superadmin')
+    .map((r) => r.toUpperCase())
+    .filter((r) => r.length > 0);
 
   // VIOLATION: code-quality/deterministic/missing-return-type
   function validate() {
