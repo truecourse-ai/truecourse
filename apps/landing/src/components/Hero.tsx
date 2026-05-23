@@ -3,7 +3,7 @@ import { ArrowRight, Check, Copy, Sparkles, Terminal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 
-const INSTALL = 'npx truecourse analyze';
+const INSTALL = 'npx truecourse verify';
 
 export function Hero() {
   const [copied, setCopied] = useState(false);
@@ -123,7 +123,7 @@ function HeroPreview() {
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
           </div>
           <div className="font-mono text-xs text-muted-foreground">
-            ~/projects/sample-project · truecourse analyze
+            ~/projects/sample-project · truecourse verify
           </div>
           <div className="w-12" />
         </div>
@@ -178,7 +178,7 @@ function HeroPreview() {
 }
 
 /**
- * Condensed render of the real `truecourse analyze` clack-formatted output.
+ * Condensed render of the real `truecourse verify` clack-formatted output.
  * Frame glyphs, strings, and indentation match the actual CLI; interactive
  * prompts are stripped so the preview stays scannable for visitors.
  */
@@ -188,7 +188,7 @@ function ClackTerminal() {
       {/* Prompt */}
       <div className="flex">
         <span className="text-muted-foreground">$&nbsp;</span>
-        <span className="text-foreground">npx truecourse analyze</span>
+        <span className="text-foreground">npx truecourse verify</span>
       </div>
 
       <div className="mt-1.5">
