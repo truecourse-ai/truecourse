@@ -20,13 +20,18 @@ export const missingErrorBoundaryVisitor: CodeRuleVisitor = {
     // Only check files that look like React components
     if (!sourceCode.includes('React') && !sourceCode.includes('react') && !sourceCode.includes('jsx')) return null
 
-    // Check for data-fetching patterns
-    // Only flag patterns where ErrorBoundary can actually catch errors:
-    // useQuery/useSWR throw during render (catchable), Suspense uses error boundaries.
-    // useEffect+fetch is NOT flagged — errors in useEffect are async and cannot be caught by ErrorBoundary.
+    // Check for data-fetching patterns. Bare useQuery/useSWR may throw
+    // during render (depending on options) so they remain a signal — but
+    // we exclude member-expression calls like `trpc.x.useQuery(...)`,
+    // which delegate to TanStack Query under abstractions that surface
+    // errors via the returned `error`/`isError` state (no boundary
+    // required). Suspense and the suspense-* query variants always throw
+    // during render and need a boundary upstream.
     const hasAsyncData =
-      /\buseQuery\b/.test(sourceCode) ||
-      /\buseSWR\b/.test(sourceCode) ||
+      /(?<![.\w])useQuery\b/.test(sourceCode) ||
+      /(?<![.\w])useSWR\b/.test(sourceCode) ||
+      /\buseSuspenseQuery\b/.test(sourceCode) ||
+      /\buseSuspenseInfiniteQuery\b/.test(sourceCode) ||
       /\bSuspense\b/.test(sourceCode)
 
     if (!hasAsyncData) return null

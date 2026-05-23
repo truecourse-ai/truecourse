@@ -61,8 +61,11 @@ export function BatchUpdate({ items }: { items: string[] }) {
 
 // VIOLATION: performance/deterministic/missing-usememo-expensive
 export function ExpensiveFilter({ items }: { items: Array<{ active: boolean; name: string }> }) {
-  const activeItems = items.filter((item) => item.active);
-  return <ul>{activeItems.map((i) => <li key={i.name}>{i.name}</li>)}</ul>;
+  const activeItems = items
+    .filter((item) => item.active)
+    .map((i) => ({ key: i.name, on: true }))
+    .filter((i) => i.on);
+  return <ul>{activeItems.map((i) => <li key={i.key}>{i.key}</li>)}</ul>;
 }
 
 // VIOLATION: performance/deterministic/unnecessary-context-provider

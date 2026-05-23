@@ -34,6 +34,14 @@ export const expressAsyncNoWrapperVisitor: CodeRuleVisitor = {
 
     if (!isAsyncHandler) return null
 
+    // Hono handlers take a single Context argument — `async (c) => ...` — and
+    // Hono natively awaits the returned promise and routes errors through its
+    // own `onError`. Express handlers take `(req, res)` or `(req, res, next)`.
+    // Distinguish by arity so we only flag the Express-shaped signature this
+    // rule is actually about.
+    const params = lastArg.childForFieldName('parameters')
+    if (params && params.namedChildCount === 1) return null
+
     // Check if the async handler body has a try/catch wrapping its contents
     const body = lastArg.childForFieldName('body')
     if (body) {

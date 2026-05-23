@@ -2,6 +2,17 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { TS_LANGUAGES } from './_helpers.js'
 
+// Narrow the diagnostic gate to TS error codes that actually mean
+// "argument doesn't match the parameter type". Generic semantic errors —
+// unresolved modules, missing names, JSX intrinsic gaps — would otherwise
+// dominate the result set whenever a target's third-party types aren't
+// fully resolvable. Codes from the TS compiler diagnostic table:
+//   2345 — Argument of type X is not assignable to parameter of type Y
+//   2769 — No overload matches this call
+//   2554 — Expected N arguments, but got M (arity mismatch)
+//   2555 — Expected at least N arguments, but got M
+const ARGUMENT_MISMATCH_CODES = new Set<number>([2345, 2769, 2554, 2555])
+
 /**
  * Detect: Arguments to built-in functions that don't match documented types.
  * Corresponds to sonarjs S3782 (argument-type).
@@ -20,7 +31,7 @@ export const argumentTypeMismatchVisitor: CodeRuleVisitor = {
     // overloads, and complex type inference that TypeScript handles correctly.
     const startLine = node.startPosition.row
     const endLine = node.endPosition.row
-    const hasError = typeQuery.hasTypeErrorInRange(filePath, startLine, endLine)
+    const hasError = typeQuery.hasTypeErrorInRange(filePath, startLine, endLine, ARGUMENT_MISMATCH_CODES)
     if (!hasError) return null
 
     // There's a real TS type error at this call site — get details for the message
