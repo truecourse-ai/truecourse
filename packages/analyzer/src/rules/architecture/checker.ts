@@ -35,12 +35,14 @@ function isObjectLiteralMethod(filePath: string, methodName: string, startLine?:
   //   `<spaces><name>: function (args) {…}`      (function expression)
   //   `<spaces>async <name>(args) {…}`           (object-shorthand method)
   //   `<spaces><name>(args) {…}`                 (object-shorthand method)
+  //   `<spaces>get <name>() {…}`                 (object-literal getter)
+  //   `<spaces>set <name>(v) {…}`                (object-literal setter)
   // the value sits on the same line as the property key in normal code.
   const line = lines[startLine - 1]
   if (!line) return false
   const name = escapeRegex(methodName)
   const colonForm = new RegExp(`^\\s+${name}\\s*\\??\\s*:\\s*(?:async\\s+)?(?:function\\b|\\()`)
-  const shorthandForm = new RegExp(`^\\s+(?:async\\s+)?${name}\\s*\\(`)
+  const shorthandForm = new RegExp(`^\\s+(?:async\\s+|get\\s+|set\\s+)?${name}\\s*\\(`)
   if (!colonForm.test(line) && !shorthandForm.test(line)) return false
   // Reject top-level declarations that happen to share the indentation
   // pattern (`export function foo(`, `function foo(`, class methods inside
@@ -466,6 +468,10 @@ export function checkModuleRules(
         // e2e specs and CLI seed scripts which are excluded from analysis.
         if (SEED_PATH_PATTERN.test(method.filePath)) continue
 
+        // Skip Remix / React Router file-based route modules — consumed by
+        // the framework via filesystem convention, not source imports.
+        if (REMIX_ROUTE_PATH_PATTERN.test(method.filePath)) continue
+
         // Skip exports from shadcn/ui component library directories — these export all variants for consumer use
         if (/\/components\/ui\//.test(method.filePath)) continue
 
@@ -515,6 +521,9 @@ export function checkModuleRules(
     for (const mod of modules) {
       if (mod.kind === 'class' && mod.exportCount > 0 && !importedTargets.has(mod.name)) {
         if (entryPointFiles?.has(mod.filePath)) continue
+
+        if (SEED_PATH_PATTERN.test(mod.filePath)) continue
+        if (REMIX_ROUTE_PATH_PATTERN.test(mod.filePath)) continue
 
         // Skip classes used as type annotations (params, return types, superclasses)
         if (usedAsType.has(mod.name)) continue
@@ -844,8 +853,20 @@ const MIGRATION_PATH_PATTERN = /(?:alembic\/versions|\/migrations\/|\/seeds\/)\/
  * files are typically consumed by e2e specs (`*.spec.ts`, `*.test.ts`)
  * and CLI seed scripts — both excluded from analysis. Treating them as
  * unused-export produces a steady stream of FPs.
+ *
+ * Also matches Playwright / e2e fixture directories — those exports
+ * (custom fixtures, page-object helpers, `apiSignout`, etc.) are reached
+ * from `*.spec.ts` files that the analyzer doesn't traverse.
  */
-const SEED_PATH_PATTERN = /\/seed\//i
+const SEED_PATH_PATTERN = /\/(?:seed|e2e\/fixtures|app-tests\/[^/]+\/fixtures)\//i
+
+/**
+ * Matches Remix / React Router file-based route modules. The framework
+ * mounts these by filesystem convention (folder layout determines the
+ * URL); no source file imports the default export or named loaders/
+ * actions, so the static analyzer can't see the consumer.
+ */
+const REMIX_ROUTE_PATH_PATTERN = /\/app\/routes\//i
 
 /**
  * Check deterministic method-level rules and return violations.
@@ -1013,6 +1034,13 @@ export function checkMethodRules(
             classesWithImplements.add(cls.name)
             const modName = fa.filePath.split('/').pop()?.replace(/\.\w+$/, '')
             if (modName) classesWithImplements.add(modName)
+            // The parent class is an abstract / extensible base — its methods
+            // (including default `throw new Error('Not implemented')` stubs
+            // and `no-op` defaults) are reached polymorphically through the
+            // subclass's `super.method()` calls and through call sites typed
+            // as the parent. Without this, every override-by-design method
+            // on a base class shows up as dead-method.
+            classesWithImplements.add(cls.superClass)
           }
         }
         // Collect all exported names and imported names for cross-reference

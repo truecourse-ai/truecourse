@@ -14,6 +14,9 @@ export function forceNonNull(x: string | null) {
 // VIOLATION: code-quality/deterministic/redundant-type-alias
 type UserId = String;
 
+// VIOLATION: code-quality/deterministic/redundant-type-alias
+type SessionIdAlias = String;
+
 // VIOLATION: code-quality/deterministic/redundant-optional
 export interface OptionalUndef {
   name?: string | undefined;
@@ -94,6 +97,15 @@ export class Constants {
 // VIOLATION: code-quality/deterministic/reduce-type-cast
 export function reduceWithCast(arr: number[]) {
   return arr.reduce((acc, val) => [...acc, val], [] as number[]);
+}
+
+export function summarizeEntries(
+  // VIOLATION: code-quality/deterministic/readonly-parameter-types
+  entries: { key: string; value: number }[],
+): number {
+  let total = 0;
+  for (const entry of entries) total += entry.value;
+  return total;
 }
 
 // VIOLATION: code-quality/deterministic/redundant-overload
