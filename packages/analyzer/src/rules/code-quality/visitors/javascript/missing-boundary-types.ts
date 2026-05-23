@@ -1,5 +1,13 @@
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
+import { FRAMEWORK_ROUTE_EXPORT_NAMES, functionReturnsJsx } from './_helpers.js'
+
+function isDefaultExport(exportNode: import('web-tree-sitter').Node): boolean {
+  for (let i = 0; i < exportNode.childCount; i++) {
+    if (exportNode.child(i)?.type === 'default') return true
+  }
+  return false
+}
 
 export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/missing-boundary-types',
@@ -27,6 +35,17 @@ export const missingBoundaryTypesVisitor: CodeRuleVisitor = {
 
     const nameNode = funcNode.childForFieldName('name')
     const name = nameNode?.text ?? 'function'
+
+    // Skip framework route conventions (Next.js route handlers, Remix route
+    // module exports, Next.js metadata helpers). The framework defines the
+    // signature so explicit return types are rarely added and not helpful.
+    if (FRAMEWORK_ROUTE_EXPORT_NAMES.has(name)) return null
+
+    // Skip default-exported React components (Remix / Next.js page modules):
+    // TS infers `JSX.Element` and codebases almost never annotate it. Named
+    // JSX-returning exports still get flagged — they're part of a public API
+    // surface where stable return types matter.
+    if (isDefaultExport(node) && functionReturnsJsx(funcNode)) return null
 
     return makeViolation(
       this.ruleKey, funcNode, filePath, 'low',

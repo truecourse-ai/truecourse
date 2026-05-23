@@ -119,6 +119,30 @@ declare module 'sample-crypto-shim' {
   export function hashLegacy(input: string, rounds: number): string;
 }
 
+declare module 'zod' {
+  type ZodTypeAny = unknown;
+  interface ZodString { uuid(): ZodString; min(n: number): ZodString }
+  interface ZodNumber { int(): ZodNumber; nonnegative(): ZodNumber }
+  interface ZodObject<T> { parse(input: unknown): T }
+  export function string(): ZodString;
+  export function number(): ZodNumber;
+  export function object<T = unknown>(shape: Record<string, ZodTypeAny>): ZodObject<T>;
+  export type infer<T> = T extends ZodObject<infer U> ? U : never;
+}
+
+declare module '@react-email/render' {
+  export function render(node: unknown): Promise<string>;
+}
+
+declare module 'big-math-toolkit-fake' {
+  export function sum(values: ReadonlyArray<number>): number;
+  export function mean(values: ReadonlyArray<number>): number;
+  export function median(values: ReadonlyArray<number>): number;
+  export function stdev(values: ReadonlyArray<number>): number;
+  export function min(values: ReadonlyArray<number>): number;
+  export function max(values: ReadonlyArray<number>): number;
+}
+
 declare module '@sample/shared-utils' {
   export const logger: {
     info(message: string): void;

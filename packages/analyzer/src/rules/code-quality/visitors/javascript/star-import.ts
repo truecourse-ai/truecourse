@@ -28,6 +28,17 @@ export const jsStarImportVisitor: CodeRuleVisitor = {
       if (namespaceLibs.some((lib) => sourceText === lib || sourceText.startsWith(lib + '/') || sourceText.startsWith(lib + '-'))) {
         return null
       }
+      // Skip libraries whose API is designed around a namespace alias:
+      //   - `zod` is built for `import * as z from 'zod'` → `z.object(...)`.
+      //   - `@react-email/*` and `fumadocs-ui/components/*` expose many
+      //     individually-imported components that read more cleanly under
+      //     a single namespace alias.
+      if (sourceText === 'zod'
+        || sourceText.startsWith('@react-email/')
+        || sourceText.startsWith('fumadocs-ui/')
+        || sourceText.startsWith('fumadocs-core/')) {
+        return null
+      }
       // Relative imports (./foo, ../bar) — namespace imports for local modules are a valid pattern
       if (sourceText.startsWith('./') || sourceText.startsWith('../')) return null
 
@@ -39,6 +50,13 @@ export const jsStarImportVisitor: CodeRuleVisitor = {
         const root = node.tree.rootNode
         const jsxPattern = nsName + '.'
         if (root.text.includes('<' + jsxPattern)) return null
+
+        // Skip when the namespace is referenced many times — the alias is
+        // load-bearing and collapsing it into named imports would just
+        // produce a sprawling import list.
+        const escaped = nsName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        const matches = root.text.match(new RegExp(`\\b${escaped}\\.`, 'g'))
+        if (matches && matches.length >= 5) return null
       }
 
       return makeViolation(
