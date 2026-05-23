@@ -26,12 +26,12 @@ export function Hero() {
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="mx-auto max-w-3xl text-center">
           <Link
-            to="/#capabilities"
+            to="/#why-now"
             style={{ ['--delay' as string]: '0ms' }}
             className="animate-fade-up animate-pulse-ring mx-auto inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground backdrop-blur-md transition-colors hover:border-border-strong hover:text-foreground"
           >
             <Sparkles className="h-3 w-3 text-accent" />
-            New &middot; business-logic drift detection (preview)
+            New &middot; Verified knowledge for AI-assisted teams (preview)
             <ArrowRight className="h-3 w-3" />
           </Link>
 
@@ -39,21 +39,18 @@ export function Hero() {
             style={{ ['--delay' as string]: '80ms' }}
             className="animate-fade-up mt-6 text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl"
           >
-            <span className="text-gradient">AI writes the code.</span>
+            <span className="text-gradient">Code drifts. Decisions get forgotten.</span>
             <br />
-            <span className="text-gradient-accent">We catch what it gets wrong.</span>
+            <span className="text-gradient-accent">TrueCourse closes the gap.</span>
           </h1>
 
           <p
             style={{ ['--delay' as string]: '200ms' }}
             className="animate-fade-up mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl"
           >
-            Hallucinated APIs. Fabricated function calls. Plausible-looking logic that
-            quietly drifts from what you actually asked for. TrueCourse is the validation
-            layer for AI-generated code. It cross-checks every change against your
-            business logic and your codebase{' '}
-            <span className="text-foreground/80">before it ships</span>, not after the
-            on-call page.
+            The verified knowledge layer for engineering. We compile your team&apos;s
+            decisions into machine-readable contracts and check every commit against
+            them — deterministically.
           </p>
 
           {/* Install / CTA */}
@@ -89,7 +86,7 @@ export function Hero() {
               to="/request-access"
               className="group inline-flex h-12 items-center gap-2 rounded-xl border border-accent/40 bg-accent/15 px-5 text-sm font-medium text-foreground backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-accent/60 hover:bg-accent/25"
             >
-              Request access for teams
+              Request access
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
           </div>

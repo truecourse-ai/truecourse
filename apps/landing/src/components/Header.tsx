@@ -9,12 +9,10 @@ const DISCORD_URL = 'https://discord.gg/8AYwf26A';
 type NavItem = { href: string; label: string; external?: boolean };
 
 const NAV: NavItem[] = [
-  { href: '/#open-source', label: 'Open Source' },
-  // Hidden until we have real OSS analysis reports — see HomePage.tsx for the matching toggle.
-  // { href: '/#reports', label: 'Reports' },
-  { href: '/#capabilities', label: 'What it catches' },
-  { href: '/knowledge', label: 'Knowledge base' },
-  { href: '/teams', label: 'For teams' },
+  { href: '/#why-now', label: 'Why now' },
+  { href: '/#how-it-works', label: 'How it works' },
+  { href: '/#where-knowledge-lives', label: 'Where knowledge lives' },
+  { href: '/#enterprise', label: 'Enterprise' },
 ];
 
 export function Header() {
@@ -85,8 +83,6 @@ export function Header() {
             <Github className="h-4 w-4" />
             GitHub
           </a>
-          {/* Contextual CTA: on /teams it scrolls to the access form; on the
-              OSS-focused home page it routes to the teams page first. */}
           <Link
             to="/request-access"
             className="hidden h-9 items-center rounded-md bg-foreground px-3.5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:inline-flex"

@@ -16,8 +16,8 @@ export function Footer() {
               <span className="text-base font-semibold tracking-tight">TrueCourse</span>
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              The validation layer for AI-generated code. Open source, local-first, and
-              built for the speed your models code at.
+              The verified knowledge layer for engineering. Compile your team&apos;s
+              decisions into contracts and check every commit against them.
             </p>
             <div className="mt-5 flex items-center gap-2">
               <a
@@ -51,11 +51,11 @@ export function Footer() {
           <Column
             title="Product"
             links={[
-              { href: '/#open-source', label: 'Open source' },
-              { href: '/teams', label: 'For teams' },
-              { href: '/#capabilities', label: 'What it catches' },
-              // Hidden until we have real OSS analysis reports — see HomePage.tsx for the matching toggle.
-              // { href: '/#reports', label: 'Field reports' },
+              { href: '/#why-now', label: 'Why now' },
+              { href: '/#how-it-works', label: 'How it works' },
+              { href: '/#where-knowledge-lives', label: 'Where knowledge lives' },
+              { href: '/#enterprise', label: 'Enterprise' },
+              { href: '/request-access', label: 'Request access' },
             ]}
           />
           <Column
