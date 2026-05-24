@@ -152,6 +152,15 @@ export function indexLoop(arr: string[]) {
   return result;
 }
 
+// VIOLATION: code-quality/deterministic/indexed-loop-over-for-of
+export function bytesToString(buf: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < buf.length; i++) {
+    out += String.fromCharCode(buf[i]);
+  }
+  return out;
+}
+
 // VIOLATION: code-quality/deterministic/filter-first-over-find
 export function filterFirst(arr: number[]) {
   return arr.filter((x) => x > 10)[0];
