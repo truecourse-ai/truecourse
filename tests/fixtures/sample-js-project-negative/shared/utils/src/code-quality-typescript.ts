@@ -22,6 +22,11 @@ export interface OptionalUndef {
   name?: string | undefined;
 }
 
+export interface PresignedAttachment {
+  // VIOLATION: code-quality/deterministic/redundant-optional
+  presignToken?: string | undefined;
+}
+
 // VIOLATION: code-quality/deterministic/duplicate-type-constituent
 export type DuplicateUnion = string | number | string;
 
