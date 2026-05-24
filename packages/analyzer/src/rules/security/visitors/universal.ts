@@ -145,6 +145,13 @@ export const hardcodedIpVisitor: CodeRuleVisitor = {
     const after = matchEnd < stripped.length ? stripped[matchEnd] : ''
     if (before === '.' || after === '.') return null
 
+    // Skip SVG path data — strings beginning with a moveto/lineto/etc.
+    // path command followed by numeric data. SVG path syntax uses `.` as
+    // an implicit number separator (`2.7.6.5` parses as 2.7 0.6 0.5), so
+    // a 4-octet-shaped sequence can appear inside coordinate runs even
+    // when neither immediate neighbor is `.`.
+    if (/^\s*[MmLlCcSsQqHhVvAaZzTt][\s\d.\-,]/.test(stripped)) return null
+
     // Validate each octet is 0-255
     const octets = ip.split('.')
     if (octets.some((o) => parseInt(o, 10) > 255)) return null

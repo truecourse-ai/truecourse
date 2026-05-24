@@ -58,6 +58,10 @@ export const mutablePrivateMemberVisitor: CodeRuleVisitor = {
 
     // Collect private field declarations (not already readonly)
     const privateFields = new Map<string, SyntaxNode>()
+    // Tracks fields that have an inline initializer (e.g. `private x = []`).
+    // Those start the assignment count at 1 — otherwise a reassignment in
+    // a method gets read as "only assigned once" and incorrectly flagged.
+    const initializedFields = new Set<string>()
 
     for (const member of body.namedChildren) {
       if (member.type !== 'field_definition' && member.type !== 'public_field_definition') continue
@@ -93,16 +97,27 @@ export const mutablePrivateMemberVisitor: CodeRuleVisitor = {
         if (ctor && /^(Map|Set|WeakMap)$/.test(ctor.text)) continue
       }
 
+      const isStatic = member.children.some((c) => c.text === 'static')
+      const hasInitializerValue = member.childForFieldName('value') !== null
+
+      // Skip lazy singletons: a private static field with no inline
+      // initializer is the canonical "assigned later via `ClassName.field`
+      // in a static factory" pattern. Forcing `readonly` would break
+      // lazy initialization, so leave these alone.
+      if (isStatic && !hasInitializerValue) continue
+
+      if (hasInitializerValue) initializedFields.add(name)
       privateFields.set(name, nameNode)
     }
 
     if (privateFields.size === 0) return null
 
-    // Count assignments to each private field via `this.name = ...`
+    // Seed assignment counts. Initialized fields count their inline
+    // initializer as one mutation; a later `this.x = ...` then takes the
+    // total to 2, exceeding the readonly-eligibility threshold.
     const assignmentCounts = new Map<string, number>()
-
     for (const [name] of privateFields) {
-      assignmentCounts.set(name, 0)
+      assignmentCounts.set(name, initializedFields.has(name) ? 1 : 0)
     }
 
     walkClassBody(body, (n) => {

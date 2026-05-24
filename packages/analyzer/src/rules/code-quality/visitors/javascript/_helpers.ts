@@ -106,8 +106,28 @@ export function functionReturnsJsx(node: SyntaxNode): boolean {
   return found
 }
 
-// Magic numbers: exclude very common / obviously safe literals
-export const MAGIC_NUMBER_WHITELIST = new Set([0, 1, 2, -1, 100, 1000])
+// Magic numbers: exclude very common / obviously safe literals.
+// Includes:
+//   - 0, 1, 2, -1, 100, 1000: arithmetic basics and common bases.
+//   - Standard HTTP status codes: extracting `404` to a named constant
+//     adds noise without clarifying intent.
+//   - 1024: binary KB/MB byte-math idiom — universally recognized.
+//   - 500: doubles as HTTP 500 and the canonical debounce-ms value.
+export const MAGIC_NUMBER_WHITELIST = new Set([
+  0, 1, 2, -1, 100, 1000,
+  // Binary byte unit.
+  1024,
+  // 1xx informational.
+  100, 101,
+  // 2xx success.
+  200, 201, 202, 204, 206,
+  // 3xx redirection.
+  301, 302, 303, 304, 307, 308,
+  // 4xx client error.
+  400, 401, 402, 403, 404, 405, 406, 408, 409, 410, 412, 413, 415, 418, 422, 423, 425, 426, 428, 429, 431, 451,
+  // 5xx server error.
+  500, 501, 502, 503, 504, 505, 511,
+])
 
 // Common server/app port numbers that indicate hardcoding
 export const COMMON_PORTS = new Set([80, 443, 3000, 3001, 3002, 3003, 4000, 4200, 5000, 5173, 7000, 7001, 8000, 8080, 8081, 8443, 9000, 9090, 9200, 9300])

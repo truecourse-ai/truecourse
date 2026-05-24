@@ -859,7 +859,19 @@
       "layer": "service"
     },
     {
+      "name": "Greeter",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
       "name": "greetLength",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "hardcoded-ip-internal-host",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -914,6 +926,12 @@
     },
     {
       "name": "looksLikeRoute",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "magic-number-arbitrary-threshold",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -980,6 +998,12 @@
     },
     {
       "name": "PropertyStore",
+      "service": "utils",
+      "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "RateLimiter",
       "service": "utils",
       "kind": "class",
       "layer": "service"
@@ -1129,6 +1153,12 @@
       "layer": "service"
     },
     {
+      "name": "unbounded-array-growth-no-bound",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "undefined-passed-as-optional",
       "service": "utils",
       "kind": "standalone",
@@ -1154,6 +1184,12 @@
     },
     {
       "name": "unsafe-json-parse-untrusted",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "unsafe-type-assertion-runtime-string",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
