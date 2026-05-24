@@ -36,7 +36,7 @@ export function SpecSkippedDocs() {
         </span>
       </button>
       {expanded && (
-        <ul className="border-t border-border/40">
+        <ul className="max-h-[40vh] overflow-y-auto border-t border-border/40">
           {skipped.map((entry) => (
             <li
               key={entry.path}

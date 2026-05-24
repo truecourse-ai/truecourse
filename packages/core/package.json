@@ -48,6 +48,10 @@
       "types": "./dist/config/env.d.ts",
       "import": "./dist/config/env.js"
     },
+    "./config/llm-models": {
+      "types": "./dist/config/llm-models.d.ts",
+      "import": "./dist/config/llm-models.js"
+    },
     "./lib/logger": {
       "types": "./dist/lib/logger.d.ts",
       "import": "./dist/lib/logger.js"

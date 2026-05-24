@@ -26,6 +26,7 @@ import { z } from 'zod';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
+import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'chain-detection.json';
 
@@ -38,6 +39,10 @@ export interface ChainDetectionInput {
 
 export interface ChainRunnerOptions {
   bin?: string;
+  /** Model passed to `claude --model`. Resolved by CLI/dashboard via core. */
+  model?: string;
+  /** Fallback model passed to `claude --fallback-model`. */
+  fallbackModel?: string;
   timeoutMs?: number;
 }
 
@@ -54,6 +59,10 @@ export interface DetectChainsOptions {
   runner?: ChainRunner;
   /** When false, skip the LLM call entirely. Useful for tests. */
   enabled?: boolean;
+  /** Model name forwarded to the default spawn runner. */
+  model?: string;
+  /** Fallback model forwarded to the default spawn runner. */
+  fallbackModel?: string;
 }
 
 export interface DetectedChainOutput {
@@ -106,7 +115,8 @@ export async function detectVersionChainsViaLlm(
   const cached = readChainDetectionCache(repoRoot, cacheKey);
   if (cached) return materializeChains(cached, docs);
 
-  const runner = opts.runner ?? spawnChainRunner();
+  const runner =
+    opts.runner ?? spawnChainRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
   let result: DetectedChainOutput;
   try {
     result = await runner(inputs);
@@ -179,10 +189,12 @@ export function buildChainDetectionUserPrompt(inputs: ChainDetectionInput[]): st
 function spawnChainRunner(opts: ChainRunnerOptions = {}): ChainRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 120_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return async (inputs) => {
     const args = [
       '-p',
       buildChainDetectionUserPrompt(inputs),
+      ...modelArgs,
       '--output-format',
       'json',
       '--append-system-prompt',

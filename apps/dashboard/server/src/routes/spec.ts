@@ -7,9 +7,8 @@
  *           "Run scan" empty state. Cheap; no LLM calls.
  *
  *   GET   /api/repos/:id/spec/scan
- *           Run consolidate({ materialize: false }), persist the
- *           result to scan-state.json, and return it. This is the
- *           explicit "rescan now" path.
+ *           Run consolidate(), persist the result to scan-state.json,
+ *           and return it. This is the explicit "rescan now" path.
  *
  *   GET   /api/repos/:id/spec/decisions
  *           Read decisions.json. Returns the empty default if absent.
@@ -24,34 +23,22 @@
  *           Body: { mode: 'all-defaults' }
  *           Convenience: accept the engine's pre-pick on every
  *           currently-open conflict in one shot.
- *
-*   POST  /api/repos/:id/spec/apply
- *           Run consolidate({ materialize: true }) and persist the
- *           scan-state. Materialize-only — IL extraction is exposed
- *           as a separate `POST /api/repos/:id/contracts/generate`
- *           so the dashboard can drive the two phases independently.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import {
-  readDecisions,
-  readScanState,
-  specRootPath,
-  writeDecisions,
-  type Decision,
-  type DecisionsFile,
-  type Resolution,
-} from '@truecourse/spec-consolidator';
 import fs from 'node:fs';
 import path from 'node:path';
-import yaml from 'js-yaml';
+import {
+  claimsFilePath,
+  readClaims,
+  readDecisions,
+  readScanState,
+  type Resolution,
+} from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   addManualChain,
   addManualInclude,
-  APPLY_STEPS,
-  applyInProcess,
-  appliedMarkerPath,
   generatedMarkerPath,
   removeManualChain,
   removeManualInclude,
@@ -299,106 +286,40 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// POST /api/repos/:id/spec/apply — materialize the canonical spec
-// ---------------------------------------------------------------------------
-
-router.post(
-  '/:id/spec/apply',
-  async (req: Request, res: Response, next: NextFunction) => {
-    let repoIdForCleanup: string | null = null;
-    try {
-      const repo = resolveProjectForRequest(req.params.id as string);
-      repoIdForCleanup = req.params.id as string;
-      const tracker = createSocketSpecTracker(repoIdForCleanup, APPLY_STEPS.map((s) => ({ ...s })));
-      const outcome = await applyInProcess(repo.path, { tracker });
-
-      const response = {
-        merge: {
-          resolved: outcome.consolidate.merge.resolvedClaims.length,
-          decided: outcome.consolidate.merge.decidedConflicts.length,
-          open: outcome.consolidate.merge.openConflicts.length,
-        },
-        materialize: outcome.consolidate.materialize
-          ? {
-              written: outcome.consolidate.materialize.written.length,
-              failures: outcome.consolidate.materialize.failures.map((f) => ({
-                module: f.section.module,
-                fileName: f.section.fileName,
-                error: f.error,
-              })),
-            }
-          : null,
-        // Apply already produced a fresh scan-state; ship it back so
-        // the client can update its view without a follow-up
-        // `GET /spec/scan` (which would re-emit progress events and
-        // surface a second popup right after the toast).
-        scanState: outcome.scanState,
-      };
-
-      emitSpecComplete(repoIdForCleanup, 'apply');
-      res.json(response);
-    } catch (e) {
-      if (repoIdForCleanup) {
-        emitSpecProgress(repoIdForCleanup, {
-          step: 'error',
-          percent: 100,
-          detail: (e as Error).message,
-        });
-      }
-      next(e);
-    }
-  },
-);
-
-// ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/staleness
+//
+// Cheap mtime probe powering the amber dots on Generate / Verify.
+//
+//   contractsStale  claims.json is newer than the last generate marker
+//                   (or the marker is missing → never generated against
+//                   the current claim set)
+//   verifyStale     last generate marker is newer than verify-state.json
+//                   (or verify-state.json is missing → never verified
+//                   against current contracts). verify-state.json is its
+//                   own marker; `verifyInProcess` rewrites it on every
+//                   successful run.
 // ---------------------------------------------------------------------------
 
-/**
- * Cheap mtime probe that drives the "unapplied / ungenerated /
- * unverified changes" dots on the Apply, Generate, and Verify buttons.
- *
- *   specStale       decisions.json is newer than the last Apply marker
- *                   (or the marker is missing → never applied)
- *   contractsStale  last Apply marker is newer than the last Generate
- *                   marker (or the Generate marker is missing → never
- *                   generated against the current canonical)
- *   verifyStale     last Generate marker is newer than verify-state.json
- *                   (or verify-state.json is missing → never verified
- *                   against current contracts). We use verify-state.json
- *                   itself as the marker; `verifyInProcess` rewrites it
- *                   on every successful run.
- *
- * Markers are stamped by `applyInProcess` / `generateContractsInProcess`
- * / `verifyInProcess` so CLI and dashboard both feed the same signal.
- */
 router.get(
   '/:id/spec/staleness',
   (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
-      const decisionsFile = path.join(repo.path, '.truecourse', 'specs', 'decisions.json');
-      const decisionsMtime = mtimeIfExists(decisionsFile);
-      const appliedMtime = mtimeIfExists(appliedMarkerPath(repo.path));
+      const claimsMtime = mtimeIfExists(claimsFilePath(repo.path));
       const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
       const verifiedMtime = mtimeIfExists(verifyStatePath(repo.path));
 
-      const specStale =
-        decisionsMtime !== null &&
-        (appliedMtime === null || decisionsMtime > appliedMtime);
       const contractsStale =
-        appliedMtime !== null &&
-        (generatedMtime === null || appliedMtime > generatedMtime);
+        claimsMtime !== null &&
+        (generatedMtime === null || claimsMtime > generatedMtime);
       const verifyStale =
         generatedMtime !== null &&
         (verifiedMtime === null || generatedMtime > verifiedMtime);
 
       res.json({
-        specStale,
         contractsStale,
         verifyStale,
-        hasDecisions: decisionsMtime !== null,
-        hasApplied: appliedMtime !== null,
+        hasClaims: claimsMtime !== null,
         hasGenerated: generatedMtime !== null,
         hasVerified: verifiedMtime !== null,
       });
@@ -418,15 +339,15 @@ function mtimeIfExists(file: string): number | null {
 
 // ---------------------------------------------------------------------------
 // GET /api/repos/:id/spec/canonical/tree
+// GET /api/repos/:id/spec/canonical/section?module=…&topic=…
 // ---------------------------------------------------------------------------
 
 /**
- * Enumerate the materialized canonical spec under `.truecourse/specs/`.
+ * Enumerate the canonical claim set under `.truecourse/specs/claims.json`.
  * Returns:
- *   - whether the tree exists
- *   - shared/* markdown files (cross-cutting concerns)
- *   - modules/*: each with its parsed module.yaml manifest + list of
- *     topic markdown files (`endpoints.md`, `auth.md`, etc.)
+ *   - whether the file exists
+ *   - per-module manifests, each carrying the list of `(topic, claimCount)`
+ *     pairs the user can drill into
  *
  * Pure file-system read, no LLM, no consolidation.
  */
@@ -435,99 +356,66 @@ router.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
-      const root = specRootPath(repo.path);
-      if (!fs.existsSync(root)) {
-        res.json({ hasCanonical: false, shared: [], modules: [] });
+      const claims = readClaims(repo.path);
+      if (!claims) {
+        res.json({ hasCanonical: false, modules: [] });
         return;
       }
-
-      const shared: Array<{ name: string; path: string }> = [];
-      const sharedDir = path.join(root, 'shared');
-      if (fs.existsSync(sharedDir)) {
-        for (const entry of fs.readdirSync(sharedDir, { withFileTypes: true })) {
-          if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
-          shared.push({
-            name: entry.name,
-            path: path.posix.join('shared', entry.name),
-          });
-        }
-        shared.sort((a, b) => a.name.localeCompare(b.name));
+      const claimsByModuleTopic = new Map<string, Map<string, number>>();
+      for (const c of claims.claims) {
+        const byTopic = claimsByModuleTopic.get(c.module) ?? new Map<string, number>();
+        byTopic.set(c.topic, (byTopic.get(c.topic) ?? 0) + 1);
+        claimsByModuleTopic.set(c.module, byTopic);
       }
-
-      const modules: Array<{
-        name: string;
-        manifest: Record<string, unknown> | null;
-        files: Array<{ name: string; path: string }>;
-      }> = [];
-      const modulesDir = path.join(root, 'modules');
-      if (fs.existsSync(modulesDir)) {
-        for (const moduleEntry of fs.readdirSync(modulesDir, { withFileTypes: true })) {
-          if (!moduleEntry.isDirectory()) continue;
-          const moduleName = moduleEntry.name;
-          const moduleDir = path.join(modulesDir, moduleName);
-          let manifest: Record<string, unknown> | null = null;
-          const manifestPath = path.join(moduleDir, 'module.yaml');
-          if (fs.existsSync(manifestPath)) {
-            try {
-              manifest = yaml.load(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>;
-            } catch {
-              manifest = null;
-            }
-          }
-          const files: Array<{ name: string; path: string }> = [];
-          for (const fileEntry of fs.readdirSync(moduleDir, { withFileTypes: true })) {
-            if (!fileEntry.isFile() || !fileEntry.name.endsWith('.md')) continue;
-            files.push({
-              name: fileEntry.name,
-              path: path.posix.join('modules', moduleName, fileEntry.name),
-            });
-          }
-          files.sort((a, b) => a.name.localeCompare(b.name));
-          modules.push({ name: moduleName, manifest, files });
-        }
-        modules.sort((a, b) => a.name.localeCompare(b.name));
-      }
-
-      res.json({ hasCanonical: shared.length > 0 || modules.length > 0, shared, modules });
+      const modules = claims.modules
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((manifest) => {
+          const topics = claimsByModuleTopic.get(manifest.name) ?? new Map<string, number>();
+          return {
+            name: manifest.name,
+            manifest,
+            topics: [...topics.entries()]
+              .map(([topic, count]) => ({ topic, claimCount: count }))
+              .sort((a, b) => a.topic.localeCompare(b.topic)),
+          };
+        });
+      res.json({
+        hasCanonical: true,
+        generatedAt: claims.generatedAt,
+        modules,
+      });
     } catch (e) {
       next(e);
     }
   },
 );
 
-// ---------------------------------------------------------------------------
-// GET /api/repos/:id/spec/canonical/file?path=...
-// ---------------------------------------------------------------------------
-
-/**
- * Return the contents of a canonical spec file. The `path` query
- * parameter is a repo-relative path under `.truecourse/specs/` (e.g.
- * `modules/orders/endpoints.md`). Refuses anything that would escape
- * the spec root.
- */
 router.get(
-  '/:id/spec/canonical/file',
+  '/:id/spec/canonical/section',
   (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = resolveProjectForRequest(req.params.id as string);
-      const root = specRootPath(repo.path);
-      const requested = String(req.query.path ?? '');
-      if (!requested) {
-        res.status(400).json({ error: 'Missing `path` query parameter.' });
+      const moduleName = String(req.query.module ?? '');
+      const topic = String(req.query.topic ?? '');
+      if (!moduleName || !topic) {
+        res.status(400).json({ error: 'Missing `module` or `topic` query parameter.' });
         return;
       }
-      const resolved = path.resolve(root, requested);
-      // Refuse path traversal: resolved must live under spec root.
-      if (!resolved.startsWith(root + path.sep) && resolved !== root) {
-        res.status(400).json({ error: 'Path outside canonical spec.' });
+      const claims = readClaims(repo.path);
+      if (!claims) {
+        res.status(404).json({ error: 'No canonical spec yet — run scan first.' });
         return;
       }
-      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
-        res.status(404).json({ error: 'File not found.' });
+      const manifest = claims.modules.find((m) => m.name === moduleName);
+      if (!manifest) {
+        res.status(404).json({ error: `Module ${moduleName} not found.` });
         return;
       }
-      const content = fs.readFileSync(resolved, 'utf-8');
-      res.json({ path: requested, content });
+      const items = claims.claims
+        .filter((c) => c.module === moduleName && c.topic === topic)
+        .sort((a, b) => a.subject.localeCompare(b.subject));
+      res.json({ module: moduleName, topic, manifest, claims: items });
     } catch (e) {
       next(e);
     }

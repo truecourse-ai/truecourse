@@ -10,7 +10,6 @@ import {
   type LeftTab,
 } from '@/components/layout/LeftSidebar';
 import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
-import { SpecApplyResultToaster } from '@/components/spec/SpecApplyResultToaster';
 import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
 import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
 import { ContractsPanel } from '@/components/drift/ContractsPanel';
@@ -370,6 +369,19 @@ export default function RepoGraphPage() {
       return [...prev, { path, pinned: false }];
     });
     setActiveCanonicalPath(path);
+    // Right pane is single-slot: opening a canonical section deselects
+    // any active conflict so the new selection wins display priority.
+    setActiveSpecConflictId(null);
+  }, []);
+
+  // Conflict selection — mutually exclusive with the canonical pane.
+  // Clearing activeCanonicalPath lets `showingSpecConflict` win the
+  // right-pane gate in the render block below.
+  const handleSelectSpecConflict = useCallback((id: string | null) => {
+    setActiveSpecConflictId(id);
+    if (id !== null) {
+      setActiveCanonicalPath(null);
+    }
   }, []);
 
   const handleCloseCanonical = useCallback(
@@ -650,7 +662,6 @@ export default function RepoGraphPage() {
     run: runContractsGenerate,
   } = useContractsGenerate(repoId);
   const {
-    specStale,
     contractsStale,
     verifyStale,
     refetch: refetchStaleness,
@@ -761,30 +772,29 @@ export default function RepoGraphPage() {
     return () => { unsub1(); unsub2(); };
   }, [onEvent, refetchGraph, refetchAnalyses, refetchCodeViolationSummary, refetchFlows, repoId]);
 
-  // Refresh BL Drift trees after a successful Apply / Generate /
-  // Verify. The server emits `spec:complete` with one of four kinds —
+  // Refresh BL Drift trees after a successful Scan / Generate /
+  // Verify. The server emits `spec:complete` with one of three kinds —
   // we fan out to the relevant hook's refetch so each tree stays in
-  // sync without polling. Apply writes the canonical (refetchCanonical),
+  // sync without polling. Scan rewrites claims.json (refetchCanonical),
   // Generate writes contracts (refetchContracts), Verify writes the
   // drift state (refetchVerify).
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
-        | { kind?: 'scan' | 'apply' | 'generate' | 'verify' }
+        | { kind?: 'scan' | 'generate' | 'verify' }
         | undefined;
-      if (payload?.kind === 'apply') {
+      if (payload?.kind === 'scan') {
         refetchCanonical();
       } else if (payload?.kind === 'generate') {
         refetchContracts();
       } else if (payload?.kind === 'verify') {
         refetchVerify();
       }
-      // Any spec lifecycle event can shift staleness — a scan refresh
-      // surfaces decision changes, an apply clears specStale, a
-      // generate clears contractsStale, a verify clears verifyStale.
+      // Every lifecycle event can flip a staleness dot — a scan
+      // rewrites claims.json (contractsStale on), a generate clears it,
+      // a verify clears verifyStale.
       if (
         payload?.kind === 'scan' ||
-        payload?.kind === 'apply' ||
         payload?.kind === 'generate' ||
         payload?.kind === 'verify'
       ) {
@@ -1224,7 +1234,7 @@ export default function RepoGraphPage() {
         onDashboardSectionChange={setDashboardSection}
         sectionActions={
           leftTab === 'spec' ? (
-            <SpecHeaderActions stale={specStale} />
+            <SpecHeaderActions />
           ) : leftTab === 'contracts' ? (
             <ContractsHeaderActions
               isGenerating={contractsGenerating}
@@ -1278,11 +1288,9 @@ export default function RepoGraphPage() {
         </div>
       )}
 
-      {/* Apply / Generate results surface as toasts (sonner's
-          <Toaster /> lives at the app root). These components are
-          render-less side effects — they listen for new results and
-          emit toasts, no layout impact. */}
-      <SpecApplyResultToaster />
+      {/* Generate result surfaces as a toast (sonner's <Toaster />
+          lives at the app root). Render-less side effect — listens
+          for new results and emits toasts, no layout impact. */}
       <ContractsGenerateResultToaster result={contractsGenerateResult} />
 
       <div className="flex flex-1 overflow-hidden">
@@ -1372,10 +1380,9 @@ export default function RepoGraphPage() {
               canonicalLoading={canonicalLoading}
               canonicalError={canonicalError}
               activeConflictId={activeSpecConflictId}
-              onSelectConflict={setActiveSpecConflictId}
+              onSelectConflict={handleSelectSpecConflict}
               activeCanonicalPath={activeCanonicalPath}
               onOpenCanonicalFile={handleOpenCanonical}
-              onSelectCanonicalFile={setActiveCanonicalPath}
             />
           )}
           {leftTab === 'contracts' && (
@@ -1406,7 +1413,7 @@ export default function RepoGraphPage() {
           {leftTab === 'decisions' && (
             <DecisionsPanel
               activeConflictId={activeSpecConflictId}
-              onSelectConflict={setActiveSpecConflictId}
+              onSelectConflict={handleSelectSpecConflict}
             />
           )}
         </LeftSidebar>

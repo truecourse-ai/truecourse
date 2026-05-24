@@ -675,6 +675,16 @@ export type SpecConflict = {
   defaultPick: number;
   /** Plain-English LLM-generated explanation of how candidates differ. */
   explanation?: string;
+  /**
+   * Opus (LLM resolver) verdict for this open conflict — present only
+   * when the resolver returned medium/low confidence. High-confidence
+   * verdicts auto-applied and the conflict is in decidedConflicts.
+   */
+  resolverVerdict?: {
+    confidence: 'high' | 'medium' | 'low';
+    reasoning: string;
+    pick: number;
+  };
   /** Server-computed sha256 fingerprint of the candidate set; echo on POST. */
   candidateFingerprint: string;
 };
@@ -721,18 +731,6 @@ export type IlValidationIssue = {
   tcSource?: string;
 };
 
-export type SpecApplyResponse = {
-  merge: { resolved: number; decided: number; open: number };
-  materialize: {
-    written: number;
-    failures: Array<{ module: string; fileName: string; error: string }>;
-  } | null;
-  /** Fresh scan-state produced by the apply pipeline. Clients should
-   *  setScan() from this instead of issuing a follow-up GET /spec/scan,
-   *  which would re-run a full scan and emit a second progress popup. */
-  scanState: SpecScanResponse;
-};
-
 export type ContractsGenerateResponse = {
   il:
     | {
@@ -748,28 +746,42 @@ export function getSpecScan(repoId: string): Promise<SpecScanResponse> {
   return fetchApi<SpecScanResponse>(`/api/repos/${repoId}/spec/scan`);
 }
 
-export type CanonicalSpecTree = {
-  hasCanonical: boolean;
-  shared: Array<{ name: string; path: string }>;
-  modules: Array<{
-    name: string;
-    manifest: Record<string, unknown> | null;
-    files: Array<{ name: string; path: string }>;
-  }>;
+export type CanonicalSpecTopic = {
+  topic: string;
+  claimCount: number;
 };
 
-export type CanonicalSpecFile = {
-  path: string;
-  content: string;
+export type CanonicalSpecModule = {
+  name: string;
+  manifest: Record<string, unknown>;
+  topics: CanonicalSpecTopic[];
+};
+
+export type CanonicalSpecTree = {
+  hasCanonical: boolean;
+  generatedAt?: string;
+  modules: CanonicalSpecModule[];
+};
+
+export type CanonicalSpecSection = {
+  module: string;
+  topic: string;
+  manifest: Record<string, unknown>;
+  claims: SpecClaim[];
 };
 
 export function getSpecCanonicalTree(repoId: string): Promise<CanonicalSpecTree> {
   return fetchApi<CanonicalSpecTree>(`/api/repos/${repoId}/spec/canonical/tree`);
 }
 
-export function getSpecCanonicalFile(repoId: string, filePath: string): Promise<CanonicalSpecFile> {
-  return fetchApi<CanonicalSpecFile>(
-    `/api/repos/${repoId}/spec/canonical/file?path=${encodeURIComponent(filePath)}`,
+export function getSpecCanonicalSection(
+  repoId: string,
+  moduleName: string,
+  topic: string,
+): Promise<CanonicalSpecSection> {
+  const params = new URLSearchParams({ module: moduleName, topic });
+  return fetchApi<CanonicalSpecSection>(
+    `/api/repos/${repoId}/spec/canonical/section?${params.toString()}`,
   );
 }
 
@@ -937,12 +949,6 @@ export function postSpecDecisionsBatch(
   });
 }
 
-export function postSpecApply(repoId: string): Promise<SpecApplyResponse> {
-  return fetchApi<SpecApplyResponse>(`/api/repos/${repoId}/spec/apply`, {
-    method: 'POST',
-  });
-}
-
 export function postContractsGenerate(
   repoId: string,
 ): Promise<ContractsGenerateResponse> {
@@ -953,11 +959,9 @@ export function postContractsGenerate(
 }
 
 export type SpecStalenessResponse = {
-  specStale: boolean;
   contractsStale: boolean;
   verifyStale: boolean;
-  hasDecisions: boolean;
-  hasApplied: boolean;
+  hasClaims: boolean;
   hasGenerated: boolean;
   hasVerified: boolean;
 };

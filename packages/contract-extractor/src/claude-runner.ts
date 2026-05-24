@@ -15,10 +15,15 @@ import pLimit from 'p-limit';
 import type { ExtractionResult, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
 import { buildUserPrompt, SYSTEM_PROMPT } from './prompt.js';
+import { buildModelArgs } from './model-args.js';
 
 export interface ClaudeRunnerOptions {
   /** Override the binary; defaults to `claude` (resolved via PATH). */
   bin?: string;
+  /** Model name passed to `claude --model`. Resolved per-stage by the caller. */
+  model?: string;
+  /** Fallback model passed to `claude --fallback-model`. */
+  fallbackModel?: string;
   /** Hard cap on concurrent subprocesses. */
   concurrency?: number;
   /** Per-call timeout in milliseconds. */
@@ -59,6 +64,7 @@ export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 240_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const limit = pLimit(concurrency);
 
   return async (slices: SpecSlice[]): Promise<SliceRunResult[]> => {
@@ -68,7 +74,7 @@ export function spawnRunner(opts: ClaudeRunnerOptions = {}): SliceRunner {
           opts.onSliceStart?.(slice);
           const t0 = Date.now();
           try {
-            const result = await runOne(bin, slice, timeoutMs);
+            const result = await runOne(bin, slice, timeoutMs, modelArgs);
             opts.onSliceDone?.(slice, true);
             return { slice, result, durationMs: Date.now() - t0 };
           } catch (e) {
@@ -86,11 +92,13 @@ async function runOne(
   bin: string,
   slice: SpecSlice,
   timeoutMs: number,
+  modelArgs: string[],
 ): Promise<ExtractionResult> {
   const userPrompt = buildUserPrompt(slice);
   const args = [
     '-p',
     userPrompt,
+    ...modelArgs,
     '--output-format',
     'json',
     '--append-system-prompt',

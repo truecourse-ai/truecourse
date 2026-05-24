@@ -28,6 +28,7 @@ import type { Conflict, DocKind } from './types.js';
 import type { DocCandidate } from './discovery.js';
 import type { VersionChain } from './version-chain.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
+import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'chain-recheck.json';
 
@@ -92,6 +93,10 @@ export interface ChainRecheckOptions {
   enabled?: boolean;
   /** Cap on concurrent LLM calls (default: 2). */
   concurrency?: number;
+  /** Model name forwarded to the default spawn runner. */
+  model?: string;
+  /** Fallback model forwarded to the default spawn runner. */
+  fallbackModel?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +193,9 @@ export async function runChainRecheck(
   if (opts.enabled === false) return [];
   if (pairs.length === 0) return [];
 
-  const runner = opts.runner ?? spawnChainRecheckRunner();
+  const runner =
+    opts.runner ??
+    spawnChainRecheckRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
   const confirmedChains: VersionChain[] = [];
 
   for (const pair of pairs) {
@@ -306,13 +313,17 @@ const ChainRecheckResultSchema = z.object({
   reason: z.string().default(''),
 });
 
-function spawnChainRecheckRunner(opts: { bin?: string; timeoutMs?: number } = {}): ChainRecheckRunner {
+function spawnChainRecheckRunner(
+  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+): ChainRecheckRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 180_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return (input: ChainRecheckRunnerInput): Promise<ChainRecheckResult> => {
     const args = [
       '-p',
       buildChainRecheckUserPrompt(input),
+      ...modelArgs,
       '--output-format',
       'json',
       '--append-system-prompt',

@@ -23,6 +23,8 @@ import { spawn } from 'node:child_process';
 import type { MergedArtifact } from './merger.js';
 import type { Fragment, SpecSlice } from './types.js';
 import { ExtractionResultSchema } from './types.js';
+import { buildModelArgs } from './model-args.js';
+import { SYSTEM_PROMPT } from './prompt.js';
 
 export interface RepairIssue {
   artifactKey: string;
@@ -32,6 +34,10 @@ export interface RepairIssue {
 
 export interface RepairOptions {
   bin?: string;
+  /** Model passed to `claude --model`. */
+  model?: string;
+  /** Fallback model passed to `claude --fallback-model`. */
+  fallbackModel?: string;
   timeoutMs?: number;
 }
 
@@ -144,12 +150,28 @@ function rulesFor(a: MergedArtifact): string[] {
     if (!/\bon-violation\s*\{/.test(src)) {
       out.push('missing `on-violation { status ... error-code ... body ErrorEnvelope:... }`.');
     }
-    if (/\brequired-role\b/.test(src) && /selector\s+path-glob\s+"\/api\/(\*\*|\*)"/.test(src)) {
-      out.push(
-        'role-based auth-requirement uses a broad `path-glob "/api/**"` selector. ' +
-          'Rewrite as `selector operations [Operation:"..."]` enumerating only the routes that require the role — ' +
-          'broad globs cascade false-positive drifts to every matched operation.',
-      );
+    if (/\brequired-role\b/.test(src)) {
+      const hasBroadGlob = /selector\s+path-glob\s+"\/api\/(\*\*|\*)"/.test(src);
+      const hasAnySelector = /\bselector\s+(operations|path-glob|path-exact|tag)\b/.test(src);
+      if (hasBroadGlob) {
+        out.push(
+          'role-based auth-requirement uses a broad `path-glob "/api/**"` selector. ' +
+            'Rewrite as `selector operations [Operation:"..."]` enumerating only the routes that require the role — ' +
+            'broad globs cascade false-positive drifts to every matched operation.',
+        );
+      } else if (!hasAnySelector) {
+        // Without a selector, the verifier matches the role requirement
+        // against every operation in the corpus and fires
+        // "missing-auth" on routes that legitimately don't require this
+        // role. Repair must add an enumerated operations selector.
+        out.push(
+          'role-based auth-requirement is missing a `selector`. ' +
+            'Without one the verifier matches it against every operation, ' +
+            'cascading false-positive drifts onto routes that do not require this role. ' +
+            'Add `selector operations [Operation:"METHOD /path", ...]` enumerating only the routes that require it; ' +
+            'consult the rest of the corpus for the operations whose spec text marks them as admin/role-gated.',
+        );
+      }
     }
   }
 
@@ -192,14 +214,34 @@ function rulesFor(a: MergedArtifact): string[] {
 
 function sliceForArtifact(artifact: MergedArtifact, slices: SpecSlice[]): SpecSlice | null {
   const origin = artifact.winning.origin;
-  return (
-    slices.find(
-      (s) =>
-        s.specPath === origin.source &&
-        s.lineRange[0] <= origin.lines[0] &&
-        s.lineRange[1] >= origin.lines[0],
-    ) ?? null
+  // Direct specPath match — works when slices are keyed by real spec
+  // file paths (legacy markdown-tree layout).
+  const direct = slices.find(
+    (s) =>
+      s.specPath === origin.source &&
+      s.lineRange[0] <= origin.lines[0] &&
+      s.lineRange[1] >= origin.lines[0],
   );
+  if (direct) return direct;
+
+  // Claims-driven slices: specPath is synthetic
+  // (`.truecourse/specs/claims.json#<module>/<topic>`) and never
+  // matches the artifact origin's source file. Fall back to text-based
+  // matching — every claims-rendered slice embeds the source file path
+  // and the claim subject, so a slice that mentions both is the one
+  // the LLM saw when emitting this artifact.
+  const sourceFile = origin.source.split(/[\\/]/).pop() ?? origin.source;
+  const section = origin.section;
+  let best: { slice: SpecSlice; score: number } | null = null;
+  for (const slice of slices) {
+    let score = 0;
+    if (slice.text.includes(origin.source)) score += 3;
+    else if (slice.text.includes(sourceFile)) score += 2;
+    if (section && slice.text.includes(section)) score += 2;
+    if (slice.text.includes(artifact.identity)) score += 1;
+    if (score > 0 && (!best || score > best.score)) best = { slice, score };
+  }
+  return best?.slice ?? null;
 }
 
 const SLICE_HINT_KEYWORDS: Record<string, string[]> = {
@@ -256,15 +298,27 @@ interface FixRequest {
   issues: string[];
 }
 
-async function runFixOne(req: FixRequest, bin: string, timeoutMs: number): Promise<Fragment[] | null> {
+async function runFixOne(
+  req: FixRequest,
+  bin: string,
+  timeoutMs: number,
+  modelArgs: string[],
+): Promise<Fragment[] | null> {
   const userPrompt = buildFixUserPrompt(req);
+  // Prepend the main extraction system prompt so the repair pass has
+  // the full TC grammar in context. Without it, the LLM produces
+  // valid-looking JSON but the `tcSource` bodies use markdown
+  // headings, wrong casing (`AuthRequirement` vs `auth-requirement`),
+  // or comment characters, all of which fail downstream parsing.
+  const repairSystemPrompt = `${SYSTEM_PROMPT}\n\n${FIX_SYSTEM_PROMPT}`;
   const args = [
     '-p',
     userPrompt,
+    ...modelArgs,
     '--output-format',
     'json',
     '--append-system-prompt',
-    FIX_SYSTEM_PROMPT,
+    repairSystemPrompt,
     '--setting-sources',
     'project',
   ];
@@ -333,6 +387,7 @@ export async function repair(
 ): Promise<RepairOutcome> {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 240_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const log: string[] = [];
   const allIssues: RepairIssue[] = [];
 
@@ -350,12 +405,29 @@ export async function repair(
       { previousArtifact: null, missingKey: issue.artifactKey, slice, issues: [issue.detail] },
       bin,
       timeoutMs,
+      modelArgs,
     );
     if (!fragments) {
       log.push(`repair: re-prompt failed for ${issue.artifactKey}.`);
       continue;
     }
+    // The repair LLM now sees the full extraction system prompt, so a
+    // single fix request can return fragments unrelated to the missing
+    // artifact (entities the slice mentions, peer effect-groups, etc.).
+    // Only add fragments that match the missing key OR an
+    // UnenforceableObligation explaining the gap — extras would either
+    // duplicate existing artifacts (validator: duplicate-identity) or
+    // pollute the corpus with overlapping declarations (extra
+    // effect-groups for the same events, etc.).
+    const targetKey = issue.artifactKey;
+    let addedForMissing = false;
     for (const fragment of fragments) {
+      const fragmentKey = key(fragment.kind, fragment.identity);
+      const isTarget = fragmentKey === targetKey;
+      const isFallback =
+        fragment.kind === 'UnenforceableObligation' && !addedForMissing && !isTarget;
+      if (!isTarget && !isFallback) continue;
+      if (artifacts.some((a) => key(a.kind, a.identity) === fragmentKey)) continue;
       artifacts.push({
         kind: fragment.kind,
         identity: fragment.identity,
@@ -364,6 +436,7 @@ export async function repair(
         overridden: [],
         sameRankConflicts: [],
       });
+      if (isTarget) addedForMissing = true;
     }
   }
 
@@ -390,6 +463,7 @@ export async function repair(
       { previousArtifact: artifact, slice, issues: issues.map((i) => i.detail) },
       bin,
       timeoutMs,
+      modelArgs,
     );
     if (!fragments || fragments.length === 0) {
       log.push(`repair: re-prompt failed for ${k}.`);

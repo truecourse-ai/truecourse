@@ -2,16 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import yaml from 'js-yaml';
 import {
   consolidate,
   candidateFingerprint,
   discoverDocs,
+  readClaims,
   writeDecisions,
   type Block,
   type BlockRunner,
   type LlmExtraction,
-  type SectionRunner,
   type DecisionsFile,
 } from '../../packages/spec-consolidator/src/index.js';
 
@@ -34,7 +33,11 @@ import {
  *                          merger auto-merges, manifest sourceDocs
  *                          lists both files.
  *   - NEGATIVE SPEC      PRDv2's "Out of Scope" replace + refund
- *                        flow into module.yaml.outOfScope[].
+ *                        flow into module manifest.outOfScope[].
+ *   - CLAIMS.JSON        after all decisions are recorded, the
+ *                        consolidator writes a deterministic
+ *                        structured snapshot the contract extractor
+ *                        consumes directly (no markdown materialize).
  */
 
 const FIXTURE_ROOT = path.resolve(
@@ -70,9 +73,9 @@ function pinMtime(rel: string, iso: string): void {
 
 /**
  * Recursive directory copy. Skips `.truecourse/` (the hand-written
- * canonical reference would otherwise be overwritten by the
- * materializer when the test runs `apply`), `code/` (planted-bug
- * tree, irrelevant to doc pipeline), and the usual build dirs.
+ * canonical reference would otherwise be overwritten when the
+ * consolidator writes claims.json), `code/` (planted-bug tree,
+ * irrelevant to the doc pipeline), and the usual build dirs.
  */
 function copyDir(src: string, dst: string): void {
   fs.mkdirSync(dst, { recursive: true });
@@ -96,19 +99,6 @@ function copyDir(src: string, dst: string): void {
 // Realistic stub runner — heading-pattern-driven extractions
 // ---------------------------------------------------------------------------
 
-/**
- * Match the docs' actual headings and emit canned LlmExtractions
- * matching what a faithful LLM would return. The pattern:
- *
- *   - Headings of the form "<METHOD> /path" → endpoints claims.
- *   - "Authentication" headings → auth claims; content varies by
- *     source file (README + PRDv1 say session-cookie; PRDv2 says
- *     bearer-jwt).
- *   - "Out of Scope" → endpoints claims tagged out-of-scope.
- *   - ADR headings → claim per ADR's topic.
- *   - Everything else (Overview, Order lifecycle, narrative) emits
- *     no claims.
- */
 function fixtureRunner(): BlockRunner {
   const reply = (block: Block): LlmExtraction => {
     const file = path.basename(block.filePath);
@@ -309,32 +299,13 @@ function fixtureRunner(): BlockRunner {
     }));
 }
 
-function listSubdirs(dir: string): string[] {
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name);
-}
-
-function listFiles(dir: string): string[] {
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile())
-    .map((e) => e.name);
-}
-
-function fixtureSectionRunner(): SectionRunner {
-  return async (sections) =>
-    sections.map((s) => ({
-      module: s.module,
-      topic: s.topic,
-      fileName: s.fileName,
-      markdown: `# ${s.topic} (${s.module})\n\n${s.claims.map((c) => `- ${c.subject}`).join('\n')}\n`,
-      durationMs: 1,
-    }));
-}
+const PIPELINE_OFF = {
+  disableLlmChainDetection: true,
+  disableChainRecheck: true,
+  disableConflictExplanations: true,
+  disableConflictResolution: true,
+  disableRelevanceFilter: true,
+} as const;
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -353,10 +324,6 @@ describe('fixture: sample-js-project-il — discovery', () => {
 
   it('finds the docs/ + README + reference/ markdown set (code/ has no .md)', () => {
     const docs = discoverDocs(workRoot, { skipGit: true });
-    // The fixture has docs/ (4 PRDs+ADRs), README.md (1), and
-    // reference/ (the hand-written ground truth + skill/eval docs).
-    // Discovery picks everything up; the consolidator's downstream
-    // weighting decides what's authoritative.
     expect(docs.length).toBeGreaterThanOrEqual(5);
     const paths = docs.map((d) => d.path);
     expect(paths).toContain('README.md');
@@ -367,13 +334,13 @@ describe('fixture: sample-js-project-il — discovery', () => {
   });
 });
 
-describe('fixture: sample-js-project-il — scan mode', () => {
+describe('fixture: sample-js-project-il — scan', () => {
   it('surfaces planted conflicts (version chain + per-claim) and auto-merges agreements', async () => {
     const result = await consolidate(workRoot, {
-      materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
 
     const subjects = result.merge.openConflicts.map((c) => c.subject).sort();
     // Expect: chain conflict (B.8) + 3 content conflicts.
@@ -385,10 +352,10 @@ describe('fixture: sample-js-project-il — scan mode', () => {
 
   it('default-picks the newest source for content conflicts (Q10)', async () => {
     const result = await consolidate(workRoot, {
-      materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
     const ordersConflict = result.merge.openConflicts.find(
       (c) => c.subject === 'POST /api/orders',
     )!;
@@ -397,13 +364,13 @@ describe('fixture: sample-js-project-il — scan mode', () => {
   });
 });
 
-describe('fixture: sample-js-project-il — apply mode', () => {
+describe('fixture: sample-js-project-il — claims.json', () => {
   async function resolveAllOpen(): Promise<void> {
     const round1 = await consolidate(workRoot, {
-      materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
     const decisions: DecisionsFile = {
       version: 1,
       decisions: round1.merge.openConflicts.map((c) => ({
@@ -412,15 +379,17 @@ describe('fixture: sample-js-project-il — apply mode', () => {
         resolvedAt: '2026-05-09T00:00:00Z',
         candidateFingerprint: candidateFingerprint(c),
       })),
+      manualChains: [],
+      manualIncludes: [],
     };
     writeDecisions(workRoot, decisions);
     // Re-scan: the chain decision drops PRDv1's claims, so the
     // 4-candidate auth-scheme conflict shrinks to 3 → new id (Q13).
     const round2 = await consolidate(workRoot, {
-      materialize: false,
       blockRunner: fixtureRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
     if (round2.merge.openConflicts.length > 0) {
       writeDecisions(workRoot, {
         version: 1,
@@ -433,208 +402,91 @@ describe('fixture: sample-js-project-il — apply mode', () => {
             candidateFingerprint: candidateFingerprint(c),
           })),
         ],
+        manualChains: [],
+        manualIncludes: [],
       });
     }
   }
 
-  it('writes a canonical spec tree honoring resolved decisions', async () => {
+  it('writes claims.json carrying resolved claims grouped by module', async () => {
     await resolveAllOpen();
-    const apply = await consolidate(workRoot, {
-      materialize: true,
+    const final = await consolidate(workRoot, {
       blockRunner: fixtureRunner(),
-      sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
 
-    expect(apply.merge.openConflicts).toEqual([]);
-    expect(apply.materialize?.failures).toEqual([]);
+    expect(final.merge.openConflicts).toEqual([]);
 
-    const specRoot = path.join(workRoot, '.truecourse/specs');
-    expect(fs.existsSync(path.join(specRoot, 'modules/orders/module.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(specRoot, 'modules/orders/endpoints.md'))).toBe(true);
-    expect(fs.existsSync(path.join(specRoot, 'shared/auth.md'))).toBe(true);
-    expect(fs.existsSync(path.join(specRoot, 'shared/errors.md'))).toBe(true);
-    expect(fs.existsSync(path.join(specRoot, 'decisions.json'))).toBe(true);
+    const claimsFile = path.join(workRoot, '.truecourse/specs/claims.json');
+    expect(fs.existsSync(claimsFile)).toBe(true);
+    const claims = readClaims(workRoot);
+    expect(claims).not.toBeNull();
+    // Orders module owns the POST/GET endpoints.
+    const ordersClaims = claims!.claims.filter((c) => c.module === 'orders');
+    expect(ordersClaims.some((c) => c.subject === 'POST /api/orders')).toBe(true);
+    expect(ordersClaims.some((c) => c.subject === 'GET /api/orders')).toBe(true);
+    // Out-of-scope claims are filtered from claims[] but preserved on
+    // the module manifest's outOfScope[].
+    expect(ordersClaims.some((c) => c.subject === 'POST /api/orders/:id/replace')).toBe(false);
+    // _shared module owns auth + errors.
+    const sharedClaims = claims!.claims.filter((c) => c.module === '_shared');
+    expect(sharedClaims.some((c) => c.subject === 'auth scheme')).toBe(true);
+    expect(sharedClaims.some((c) => c.subject === 'global error envelope')).toBe(true);
   });
 
   it('orders manifest carries outOfScope entries (B.9 negative spec)', async () => {
     await resolveAllOpen();
     await consolidate(workRoot, {
-      materialize: true,
       blockRunner: fixtureRunner(),
-      sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    const ordersManifest = yaml.load(
-      fs.readFileSync(
-        path.join(workRoot, '.truecourse/specs/modules/orders/module.yaml'),
-        'utf-8',
-      ),
-    ) as Record<string, unknown>;
-    const oos = ordersManifest.outOfScope as Array<{ id: string; source: string }> | undefined;
-    expect(oos).toBeDefined();
-    // Slug-ifier replaces `:` with `-` (it's not allowed in the
-    // [a-z0-9-/{}] charset); `:id` → `-id`.
-    expect(oos!.map((e) => e.id).sort()).toEqual([
+      ...PIPELINE_OFF,
+    });
+    const claims = readClaims(workRoot);
+    const ordersModule = claims!.modules.find((m) => m.name === 'orders');
+    expect(ordersModule).toBeDefined();
+    const oos = ordersModule!.outOfScope ?? [];
+    expect(oos.map((e) => e.id).sort()).toEqual([
       '/api/orders/-id/refund',
       '/api/orders/-id/replace',
     ]);
-    for (const e of oos!) {
+    for (const e of oos) {
       expect(e.source).toMatch(/^docs\/PRDs\/orders_PRDv2\.md:\d+$/);
     }
-    const endpointsMd = fs.readFileSync(
-      path.join(workRoot, '.truecourse/specs/modules/orders/endpoints.md'),
-      'utf-8',
-    );
-    expect(endpointsMd).not.toContain('refund');
-    expect(endpointsMd).not.toContain('replace');
   });
 
   it('orders manifest sourceDocs reflects the picked source after chain resolution', async () => {
     await resolveAllOpen();
     await consolidate(workRoot, {
-      materialize: true,
       blockRunner: fixtureRunner(),
-      sectionRunner: fixtureSectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    const ordersManifest = yaml.load(
-      fs.readFileSync(
-        path.join(workRoot, '.truecourse/specs/modules/orders/module.yaml'),
-        'utf-8',
-      ),
-    ) as Record<string, unknown>;
-    expect(ordersManifest.sourceDocs).toEqual(['docs/PRDs/orders_PRDv2.md']);
+      ...PIPELINE_OFF,
+    });
+    const claims = readClaims(workRoot);
+    const ordersModule = claims!.modules.find((m) => m.name === 'orders');
+    expect(ordersModule?.sourceDocs).toEqual(['docs/PRDs/orders_PRDv2.md']);
   });
 
-  it('produced canonical structurally matches the hand-written reference at .truecourse/specs/', async () => {
-    // Same pattern as the IL coverage check: we hand-write a canonical
-    // reference under FIXTURE_ROOT/.truecourse/specs/ describing what
-    // `spec apply` *should* produce on this fixture. The materializer's
-    // output is fuzzed by the LLM section runner (prose), but the
-    // structural pieces — module dirs, manifest shape, file presence
-    // — are deterministic. Compare those.
-    await resolveAllOpen();
-    await consolidate(workRoot, {
-      materialize: true,
-      blockRunner: fixtureRunner(),
-      sectionRunner: fixtureSectionRunner(),
-      skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-
-    const expectedRoot = path.join(FIXTURE_ROOT, '.truecourse/specs');
-    const actualRoot = path.join(workRoot, '.truecourse/specs');
-
-    // The hand-written canonical represents a fully-extracted ideal
-    // (every section the docs describe). The stub runner emits claims
-    // for a subset (orders only — not customers/entities/etc.) to
-    // keep tests fast. So we assert a SUBSET relationship: every
-    // module the consolidator produced must exist in the hand-written
-    // reference and match structurally.
-    const expectedModules = listSubdirs(path.join(expectedRoot, 'modules'));
-    const actualModules = listSubdirs(path.join(actualRoot, 'modules'));
-    for (const m of actualModules) {
-      expect(
-        expectedModules.includes(m),
-        `module "${m}" produced by consolidator is missing from hand-written reference`,
-      ).toBe(true);
-    }
-
-    // Each produced module's manifest matches the reference structurally
-    // — same name, status, scope.paths set, and outOfScope id set.
-    // sourceDocs is intentionally not compared because it depends on
-    // which decisions were resolved and the consolidator's mtime sort
-    // can produce a different (but equivalent) doc set than the
-    // hand-written intent.
-    for (const moduleName of actualModules) {
-      const expectedYaml = yaml.load(
-        fs.readFileSync(path.join(expectedRoot, 'modules', moduleName, 'module.yaml'), 'utf-8'),
-      ) as Record<string, unknown>;
-      const actualYaml = yaml.load(
-        fs.readFileSync(path.join(actualRoot, 'modules', moduleName, 'module.yaml'), 'utf-8'),
-      ) as Record<string, unknown>;
-      expect(actualYaml.name, `module ${moduleName} name`).toBe(expectedYaml.name);
-      expect(actualYaml.status, `module ${moduleName} status`).toBe(expectedYaml.status);
-      const expectedPaths = ((expectedYaml.scope as { paths?: string[] }).paths ?? []).sort();
-      const actualPaths = ((actualYaml.scope as { paths?: string[] }).paths ?? []).sort();
-      expect(actualPaths, `module ${moduleName} scope.paths`).toEqual(expectedPaths);
-      const expectedOos = ((expectedYaml.outOfScope as Array<{ id: string }> | undefined) ?? [])
-        .map((e) => e.id)
-        .sort();
-      const actualOos = ((actualYaml.outOfScope as Array<{ id: string }> | undefined) ?? [])
-        .map((e) => e.id)
-        .sort();
-      expect(actualOos, `module ${moduleName} outOfScope ids`).toEqual(expectedOos);
-    }
-
-    // shared/ files: the hand-written reference has more topic files
-    // (auth, errors, endpoints) than the stub runner produces, since
-    // our stub only emits auth + errors claims. Assert the materializer
-    // wrote at least the topics our stub produced — full LLM coverage
-    // is out of scope for the structural check.
-    const expectedSharedFiles = listFiles(path.join(expectedRoot, 'shared'));
-    const actualSharedFiles = listFiles(path.join(actualRoot, 'shared'));
-    for (const f of actualSharedFiles) {
-      expect(
-        expectedSharedFiles.includes(f),
-        `shared/${f} produced but not in hand-written reference`,
-      ).toBe(true);
-    }
-  });
-
-  it('caches stay warm: re-running the same step makes zero LLM calls', async () => {
+  it('caches stay warm: re-running scan after a fresh write makes zero LLM calls', async () => {
     let blockCalls = 0;
-    let sectionCalls = 0;
     const countingBlock: BlockRunner = async (blocks) => {
       blockCalls += blocks.length;
       return fixtureRunner()(blocks);
     };
-    const countingSection: SectionRunner = async (sections) => {
-      sectionCalls += sections.length;
-      return fixtureSectionRunner()(sections);
-    };
 
-    const firstScan = await consolidate(workRoot, {
-      materialize: false,
+    await consolidate(workRoot, {
       blockRunner: countingBlock,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
     expect(blockCalls).toBeGreaterThan(0);
 
     blockCalls = 0;
     await consolidate(workRoot, {
-      materialize: false,
       blockRunner: countingBlock,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    expect(blockCalls).toBe(0);
-
-    writeDecisions(workRoot, {
-      version: 1,
-      decisions: firstScan.merge.openConflicts.map((c) => ({
-        conflictId: c.id,
-        resolution: { kind: 'pick' as const, candidateIndex: c.defaultPick },
-        resolvedAt: '2026-05-09T00:00:00Z',
-        candidateFingerprint: candidateFingerprint(c),
-      })),
+      ...PIPELINE_OFF,
     });
-
-    sectionCalls = 0;
-    await consolidate(workRoot, {
-      materialize: true,
-      blockRunner: countingBlock,
-      sectionRunner: countingSection,
-      skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    expect(sectionCalls).toBeGreaterThan(0);
-
-    sectionCalls = 0;
-    await consolidate(workRoot, {
-      materialize: true,
-      blockRunner: countingBlock,
-      sectionRunner: countingSection,
-      skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    expect(sectionCalls).toBe(0);
+    expect(blockCalls).toBe(0);
   });
 });

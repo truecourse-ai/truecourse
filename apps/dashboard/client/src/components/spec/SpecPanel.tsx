@@ -1,17 +1,17 @@
 /**
- * SpecPanel — the sidebar list of conflicts for the Spec tab. The
- * conflict detail (candidates, pick/custom UI) lives in
- * SpecConflictDetail, rendered in the main content slot by
- * RepoGraphPage. State is shared via SpecProvider.
+ * SpecPanel — the sidebar for the Spec tab.
  *
  * Layout:
- *   Header      counts (docs, claims, resolved, open) + Apply
- *   Toolbar     filter + accept-all-defaults + refresh + "Scanned ago"
- *   List        flat selectable rows, grouped by topic; chain
- *               conflicts pulled into a "Resolve first" section
+ *   Header              counts (docs, claims, resolved, open)
+ *   Skipped docs (opt)  collapsible LLM-skipped doc list
+ *   Open conflicts      click to resolve in the right pane
+ *   Canonical spec      always visible — drill into (module, topic)
+ *
+ * Both sections render at once now (no mode switch): the user can
+ * resolve conflicts in the top half and browse the canonical claim
+ * set in the bottom half without leaving the tab.
  */
 
-import { useEffect } from 'react';
 import { Loader2, AlertCircle, GitBranch, Play } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -20,18 +20,6 @@ import { SpecCanonicalPanel } from './SpecCanonicalPanel';
 import { SpecStats } from './SpecStats';
 import { SpecSkippedDocs } from './SpecSkippedDocs';
 import type { CanonicalSpecTree, SpecConflict, SpecScanResponse } from '@/lib/api';
-
-/**
- * View mode for the Spec tab — driven entirely by scan state. The
- * sidebar shows the conflict list while there's anything open, and
- * flips to the canonical browser once everything is resolved. No
- * manual toggle: conflict resolution comes first, browsing later.
- */
-export type SpecView = 'conflicts' | 'canonical';
-
-export function deriveSpecView(scan: SpecScanResponse | null): SpecView {
-  return scan && scan.openConflicts.length === 0 ? 'canonical' : 'conflicts';
-}
 
 export interface SpecPanelProps {
   /** Canonical tree owned by `useCanonicalSpecTree` at page level. */
@@ -43,8 +31,6 @@ export interface SpecPanelProps {
   activeCanonicalPath: string | null;
   /** Single-click (transient) / double-click (pinned). Opens a tab. */
   onOpenCanonicalFile: (filePath: string, pinned: boolean) => void;
-  /** Used to clear the canonical selection when the view flips. */
-  onSelectCanonicalFile: (filePath: string | null) => void;
 }
 
 export function SpecPanel({
@@ -55,21 +41,8 @@ export function SpecPanel({
   onSelectConflict,
   activeCanonicalPath,
   onOpenCanonicalFile,
-  onSelectCanonicalFile,
 }: SpecPanelProps) {
-  const { scan, hydrating, loading, error } = useSpec();
-  const view = deriveSpecView(scan);
-
-  // When the view flips (because a scan resolved or surfaced
-  // conflicts), drop the other view's selection so the right pane
-  // never tries to render something the sidebar is no longer showing.
-  useEffect(() => {
-    if (view === 'canonical') {
-      if (activeConflictId !== null) onSelectConflict(null);
-    } else {
-      if (activeCanonicalPath !== null) onSelectCanonicalFile(null);
-    }
-  }, [view, activeConflictId, activeCanonicalPath, onSelectConflict, onSelectCanonicalFile]);
+  const { scan, hydrating, error } = useSpec();
 
   return (
     <div className="flex h-full flex-col">
@@ -88,20 +61,35 @@ export function SpecPanel({
           <CenteredSpinner />
         ) : !scan ? (
           <NoScanYet />
-        ) : view === 'canonical' ? (
-          <SpecCanonicalPanel
-            tree={canonicalTree}
-            isLoading={canonicalLoading}
-            error={canonicalError}
-            activePath={activeCanonicalPath}
-            onOpen={onOpenCanonicalFile}
-          />
         ) : (
-          <ConflictList
-            scan={scan!}
-            activeConflictId={activeConflictId}
-            onSelect={onSelectConflict}
-          />
+          <>
+            <div
+              className={`border-b border-border px-4 py-2 text-xs font-semibold uppercase tracking-wider ${
+                scan.openConflicts.length === 0
+                  ? 'bg-card/80 text-muted-foreground'
+                  : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+              }`}
+            >
+              Open conflicts · {scan.openConflicts.length}
+            </div>
+            <ConflictsSection
+              scan={scan}
+              activeConflictId={activeConflictId}
+              onSelectConflict={onSelectConflict}
+            />
+            <div className="border-t border-border">
+              <div className="border-b border-border bg-card/80 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Canonical spec · {canonicalTree?.modules.length ?? 0}
+              </div>
+              <SpecCanonicalPanel
+                tree={canonicalTree}
+                isLoading={canonicalLoading}
+                error={canonicalError}
+                activePath={activeCanonicalPath}
+                onOpen={onOpenCanonicalFile}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -109,8 +97,29 @@ export function SpecPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Conflict list — grouped, selectable rows
+// Open-conflicts section
 // ---------------------------------------------------------------------------
+
+function ConflictsSection({
+  scan,
+  activeConflictId,
+  onSelectConflict,
+}: {
+  scan: SpecScanResponse;
+  activeConflictId: string | null;
+  onSelectConflict: (id: string | null) => void;
+}) {
+  if (scan.openConflicts.length === 0) {
+    return (
+      <div className="border-b border-border px-4 py-3 text-xs text-muted-foreground">
+        No open conflicts — every claim is resolved or auto-merged.
+      </div>
+    );
+  }
+  return (
+    <ConflictList scan={scan} activeConflictId={activeConflictId} onSelect={onSelectConflict} />
+  );
+}
 
 /**
  * Topic display order. Follows the natural reading flow for someone
@@ -227,7 +236,7 @@ function Section({
     <div className={dimmed ? 'opacity-50' : undefined}>
       <div
         className={`sticky top-0 z-10 flex items-center justify-between border-b border-border px-4 py-1.5 text-[10px] uppercase tracking-wider ${
-          tone === 'amber' ? 'bg-amber-500/10 text-amber-300' : 'bg-card/80 text-muted-foreground'
+          tone === 'amber' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-card/80 text-muted-foreground'
         }`}
       >
         <span>{title}</span>
@@ -309,4 +318,3 @@ function NoScanYet() {
     />
   );
 }
-

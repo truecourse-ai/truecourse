@@ -199,7 +199,7 @@ function DetailHeader({
         <div className="flex items-center gap-1">
           <span
             className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
-              isVersionChain ? 'bg-amber-500/15 text-amber-300' : 'bg-muted text-muted-foreground'
+              isVersionChain ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'
             }`}
           >
             {isVersionChain ? 'version chain' : conflict.topic}
@@ -212,7 +212,7 @@ function DetailHeader({
         </span>
         {decision && (
           <span
-            className="ml-2 shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300"
+            className="ml-2 shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
             title={`Decided ${new Date(decision.resolvedAt).toLocaleString()}`}
           >
             decided
@@ -240,7 +240,7 @@ function VersionChainInfoButton({ conflict }: { conflict: SpecConflict }) {
     <TooltipProvider delay={150}>
       <Tooltip>
         <TooltipTrigger
-          className="inline-flex items-center justify-center rounded p-0.5 text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10 transition-colors"
+          className="inline-flex items-center justify-center rounded p-0.5 text-amber-700/80 hover:text-amber-900 dark:text-amber-300/80 dark:hover:text-amber-200 hover:bg-amber-500/10 transition-colors"
           aria-label="About version chain conflicts"
         >
           <Info className="h-3.5 w-3.5" />
@@ -343,7 +343,7 @@ function CandidateSidebar({
                     claimStatus === 'deferred' ||
                     claimStatus === 'out-of-scope' ||
                     claimStatus === 'deprecated'
-                      ? 'bg-amber-500/15 text-amber-300'
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
                       : 'bg-muted text-muted-foreground'
                   }`}
                   title={`Lifecycle status: ${claimStatus}`}
@@ -353,7 +353,7 @@ function CandidateSidebar({
               )}
               {claimKind === 'constraint' && (
                 <span
-                  className="rounded bg-sky-500/15 px-1 py-0.5 uppercase tracking-wider text-sky-300"
+                  className="rounded bg-sky-500/15 px-1 py-0.5 uppercase tracking-wider text-sky-700 dark:text-sky-300"
                   title="This claim narrows the subject (e.g. adding 403 responses to existing endpoints) rather than defining it from scratch."
                 >
                   constraint
@@ -402,12 +402,10 @@ function VersionChainCandidate({
     file?: string;
     claimCount?: number;
     topics?: Record<string, number>;
-    subjects?: string[];
   } | undefined;
   const file = content?.file ?? candidate.claim.provenance.file;
   const claimCount = content?.claimCount ?? 0;
   const topics = content?.topics ?? {};
-  const subjects = content?.subjects ?? [];
   const lastTouched = candidate.claim.metadata.lastTouched;
   const docKind = candidate.claim.metadata.docKind;
   const role =
@@ -445,18 +443,15 @@ function VersionChainCandidate({
             ))}
         </div>
       )}
-      {subjects.length > 0 && (
+      <ResolverSuggestion candidate={candidate} conflict={conflict} />
+      {conflict.explanation && (
         <div className="mt-3">
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Subjects this doc covers · {subjects.length}
+            What differs
           </div>
-          <ul className="grid grid-cols-2 gap-x-4 gap-y-0.5 rounded border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-            {subjects.map((s) => (
-              <li key={s} className="font-mono">
-                {s}
-              </li>
-            ))}
-          </ul>
+          <div className="rounded border border-border bg-muted/30 p-3 text-sm leading-relaxed text-foreground">
+            {conflict.explanation}
+          </div>
         </div>
       )}
       <DocPreview source={candidate.claim.provenance.quote} />
@@ -473,18 +468,6 @@ function ContentCandidate({
   conflict: SpecConflict;
   isDefault: boolean;
 }) {
-  // Differences against the other candidates — actionable summary the
-  // user can read in seconds without diffing two raw JSON blobs by eye.
-  const others = conflict.candidates.filter((c) => c.index !== candidate.index);
-  const diffs = others.flatMap((other) =>
-    diffPaths(candidate.claim.content, other.claim.content).map((path) => ({
-      path,
-      otherIndex: other.index,
-      otherFile: other.claim.provenance.file,
-      thisValue: getPath(candidate.claim.content, path),
-      otherValue: getPath(other.claim.content, path),
-    })),
-  );
   return (
     <div>
       <CandidateHeading
@@ -499,6 +482,7 @@ function ContentCandidate({
           {recommendationReason(candidate, conflict)}
         </div>
       )}
+      <ResolverSuggestion candidate={candidate} conflict={conflict} />
       {conflict.explanation && (
         <div className="mt-3">
           <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -510,57 +494,6 @@ function ContentCandidate({
         </div>
       )}
       <DocPreview source={candidate.claim.provenance.quote} />
-      {diffs.length > 0 && (
-        <CollapsibleDiffList
-          diffs={diffs}
-          defaultExpanded={!conflict.explanation}
-        />
-      )}
-    </div>
-  );
-}
-
-interface DiffEntry {
-  path: string;
-  otherFile: string;
-  thisValue: unknown;
-  otherValue: unknown;
-}
-
-function CollapsibleDiffList({
-  diffs,
-  defaultExpanded,
-}: {
-  diffs: DiffEntry[];
-  defaultExpanded: boolean;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-  return (
-    <div className="mt-3">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
-      >
-        {expanded ? '▾' : '▸'} Raw diff · {diffs.length}
-      </button>
-      {expanded && (
-        <ul className="rounded border border-border bg-muted/10 px-3 py-2 text-xs">
-          {diffs.slice(0, 12).map((d, i) => (
-            <li key={i} className="border-b border-border/40 py-1 last:border-0">
-              <span className="font-mono text-foreground">{d.path}</span>
-              <span className="ml-2 text-muted-foreground">
-                here: <span className="font-mono text-foreground">{stringifyShort(d.thisValue)}</span>
-                {' '}· vs <span className="font-mono">{d.otherFile.split('/').pop()}</span>:{' '}
-                <span className="font-mono text-foreground">{stringifyShort(d.otherValue)}</span>
-              </span>
-            </li>
-          ))}
-          {diffs.length > 12 && (
-            <li className="py-1 text-muted-foreground">… and {diffs.length - 12} more</li>
-          )}
-        </ul>
-      )}
     </div>
   );
 }
@@ -620,41 +553,31 @@ function contentRichness(value: unknown): number {
 }
 
 /**
- * Return all leaf paths (dot-joined) where `a` and `b` disagree.
- * Treats missing keys as a difference (this side has it, other doesn't).
+ * Violet callout shown on the candidate the LLM resolver suggested.
+ * Only renders when this candidate's index matches
+ * `conflict.resolverVerdict.pick`. High-confidence verdicts auto-apply
+ * and never reach an open conflict, so this only ever shows medium/low.
  */
-function diffPaths(a: unknown, b: unknown, prefix = ''): string[] {
-  const out: string[] = [];
-  const aIsObj = a !== null && typeof a === 'object' && !Array.isArray(a);
-  const bIsObj = b !== null && typeof b === 'object' && !Array.isArray(b);
-  if (aIsObj && bIsObj) {
-    const keys = new Set([...Object.keys(a as object), ...Object.keys(b as object)]);
-    for (const k of keys) {
-      const childPath = prefix ? `${prefix}.${k}` : k;
-      out.push(...diffPaths((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], childPath));
-    }
-    return out;
-  }
-  if (JSON.stringify(a) !== JSON.stringify(b)) {
-    out.push(prefix || '(root)');
-  }
-  return out;
-}
-
-function getPath(value: unknown, path: string): unknown {
-  if (path === '(root)' || !path) return value;
-  let cur: unknown = value;
-  for (const part of path.split('.')) {
-    if (cur === null || typeof cur !== 'object') return undefined;
-    cur = (cur as Record<string, unknown>)[part];
-  }
-  return cur;
-}
-
-function stringifyShort(value: unknown): string {
-  if (value === undefined) return '∅';
-  const s = JSON.stringify(value);
-  return s.length > 60 ? s.slice(0, 60) + '…' : s;
+function ResolverSuggestion({
+  candidate,
+  conflict,
+}: {
+  candidate: SpecConflict['candidates'][number];
+  conflict: SpecConflict;
+}) {
+  const verdict = conflict.resolverVerdict;
+  if (!verdict || verdict.pick !== candidate.index) return null;
+  return (
+    <div className="mt-2 rounded border border-violet-500/30 bg-violet-500/5 px-3 py-1.5 text-xs text-muted-foreground">
+      <span className="font-medium text-violet-700 dark:text-violet-300">
+        Resolver suggests
+      </span>
+      <span className="ml-1.5 rounded bg-violet-500/15 px-1 py-0.5 text-[10px] uppercase tracking-wider text-violet-700 dark:text-violet-300">
+        {verdict.confidence}
+      </span>
+      <span className="ml-1.5">— {verdict.reasoning}</span>
+    </div>
+  );
 }
 
 function CandidateHeading({
@@ -697,34 +620,15 @@ function CandidateHeading({
   );
 }
 
-const DOC_PREVIEW_COLLAPSED_LINES = 10;
-
 function DocPreview({ source }: { source: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const lines = (source ?? '').split('\n');
-  const hasMore = lines.length > DOC_PREVIEW_COLLAPSED_LINES;
-  const displayed = expanded ? source : lines.slice(0, DOC_PREVIEW_COLLAPSED_LINES).join('\n');
   return (
     <div className="mt-3">
       <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
         Doc preview
       </div>
-      <div
-        className={`overflow-auto rounded border border-border bg-muted/30 p-3 text-sm leading-relaxed text-muted-foreground ${
-          expanded ? 'max-h-[32rem]' : ''
-        }`}
-      >
-        <MarkdownPreview source={displayed} />
+      <div className="rounded border border-border bg-muted/30 p-3 text-sm leading-relaxed text-muted-foreground">
+        <MarkdownPreview source={source} />
       </div>
-      {hasMore && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1.5 text-[11px] text-primary hover:underline"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
     </div>
   );
 }

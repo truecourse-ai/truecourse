@@ -1,52 +1,40 @@
 /**
  * Top-level orchestrator. Wires every stage of the consolidator
  * together: discovery → slice → extract (cached) → merge → detect
- * modules → materialize (cached). Plus the side-channel reads/writes
- * for `decisions.json` (Q12 batch apply) and the cache layer.
+ * modules → write claims.json. Plus the side-channel reads/writes for
+ * `decisions.json` (Q12 batch apply) and the cache layer.
  *
- * Two operating modes:
+ * One operating mode: `consolidate()` runs the full pipeline and writes
+ * `.truecourse/specs/claims.json` — the structured snapshot every
+ * downstream stage consumes. No per-section LLM render, no markdown
+ * materialization. The Sonnet `section-render` round-trip is gone.
  *
- *   - **scan**   (`materialize: false`): runs through extraction +
- *     merge, returns the conflict list. The CLI's `spec scan`
- *     command, and the dashboard's initial "what's pending" view.
- *
- *   - **apply**  (`materialize: true`):  runs the full pipeline,
- *     writes `.truecourse/specs/`. The CLI's `spec apply`, and the
- *     dashboard's "Apply resolved" button.
- *
- * Cache integration is via runner-wrappers, so the per-block and
- * per-section LLM calls only fire on cache misses. Same hash inputs
- * → same outputs → no LLM cost for unchanged docs.
+ * Cache integration is via runner-wrappers, so the per-block LLM calls
+ * only fire on cache misses. Same hash inputs → same outputs → no LLM
+ * cost for unchanged docs.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  readBlockCache,
-  writeBlockCache,
-  readSectionCache,
-  writeSectionCache,
-  sectionId,
-} from './cache.js';
-import { detectModules, type DetectedModule } from './module-detector.js';
+import { readBlockCache, writeBlockCache } from './cache.js';
+import { detectModules, SHARED_MODULE, type DetectedModule } from './module-detector.js';
 import { extractClaims, type ExtractResult } from './extractor.js';
-import { materializeSpec, type MaterializeResult } from './materializer.js';
 import { mergeClaims, type DecidedConflict, type MergeResult } from './merger.js';
 import { spawnRunner, type BlockRunner, type BlockRunResult } from './runner.js';
 import type { Block } from './slicer.js';
-import {
-  spawnSectionRunner,
-  type PendingSection,
-  type RenderedSection,
-  type SectionRunner,
-} from './section-runner.js';
 import {
   DecisionsFileSchema,
   type Claim,
   type Conflict,
   type ConflictCandidate,
   type DecisionsFile,
+  type Topic,
 } from './types.js';
+import {
+  ClaimsFileEntry,
+  entryFromClaim,
+  writeClaims,
+} from './claims-store.js';
 import { detectVersionChains, materializeManualChains, type VersionChain } from './version-chain.js';
 import {
   existingChainPairKeys,
@@ -58,6 +46,10 @@ import {
   explainConflicts,
   type ConflictExplainerRunner,
 } from './conflict-explainer.js';
+import {
+  resolveConflicts,
+  type ConflictResolverRunner,
+} from './conflict-resolver.js';
 import { filterByRelevance, type RelevanceRunner } from './relevance-filter.js';
 import {
   detectVersionChainsViaLlm,
@@ -65,16 +57,46 @@ import {
 } from './version-chain-llm.js';
 import { discoverDocs, type DocCandidate } from './discovery.js';
 
+// Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1. Writes to
+// stderr so it doesn't collide with --json stdout payloads.
+function perfNow(): number {
+  return Number(process.hrtime.bigint() / 1_000_000n);
+}
+function debugLog(msg: string): void {
+  if (process.env.TRUECOURSE_DEBUG_TIMING) {
+    process.stderr.write(`[tc-timing] ${msg}\n`);
+  }
+}
+
+/**
+ * Per-stage model overrides for the consolidator. Each field is the
+ * model string (`haiku` / `sonnet` / `opus` or a fully-qualified ID)
+ * that the corresponding stage's spawn runner should pass to
+ * `claude --model`. Undefined fields fall back to the runner's own
+ * defaults — the CLI/dashboard layer resolves these via
+ * `@truecourse/core/config/llm-models`.
+ */
+export interface ConsolidateModels {
+  chainDetect?: string;
+  claimExtract?: string;
+  chainRecheck?: string;
+  conflictExplain?: string;
+  conflictResolve?: string;
+  relevance?: string;
+  /** Forwarded as `--fallback-model` to every stage. */
+  fallback?: string;
+}
+
 export interface ConsolidateOptions {
   /**
-   * When true, write `.truecourse/specs/` from the merge result.
-   * When false, return early after the merge with the conflict list.
+   * Per-stage model overrides. CLI and dashboard server resolve these
+   * via core's `resolveModel('spec.xxx')` and pass the result in. Only
+   * applied to spawn runners we create here — explicit `*Runner`
+   * overrides take precedence (tests inject stubs that way).
    */
-  materialize: boolean;
+  models?: ConsolidateModels;
   /** Override block-extraction runner. Tests pass a stub. */
   blockRunner?: BlockRunner;
-  /** Override section-rendering runner. Tests pass a stub. */
-  sectionRunner?: SectionRunner;
   /**
    * Override the LLM chain-detection runner. Tests pass a stub.
    * When omitted, an LLM-backed runner is spawned automatically. Set
@@ -108,6 +130,15 @@ export interface ConsolidateOptions {
    */
   disableConflictExplanations?: boolean;
   /**
+   * Override the per-conflict LLM resolver. Tests pass a stub.
+   */
+  conflictResolverRunner?: ConflictResolverRunner;
+  /**
+   * When true, skip the LLM auto-resolve pass. All open conflicts stay
+   * open for the user to decide. Default is enabled.
+   */
+  disableConflictResolution?: boolean;
+  /**
    * Override the LLM relevance-filter runner. Tests pass a stub.
    */
   relevanceRunner?: RelevanceRunner;
@@ -121,11 +152,17 @@ export interface ConsolidateOptions {
    * also passes this when the working dir isn't a git repo.
    */
   skipGit?: boolean;
+  /**
+   * Skip writing `.truecourse/specs/claims.json`. The orchestrator
+   * still detects modules and assembles the renderable claim set;
+   * callers that drive their own persistence (tests, dry runs) get the
+   * data on `result.modules` / `result.claimEntries` without a write.
+   */
+  skipClaimsWrite?: boolean;
   /** Hooks for progress UIs / logging. */
   onDocStart?: (doc: import('./discovery.js').DocCandidate) => void;
   onDocDone?: (doc: import('./discovery.js').DocCandidate, blockCount: number, claimCount: number) => void;
   onBlockFailure?: (block: Block, error: string) => void;
-  onSectionDone?: (section: RenderedSection) => void;
   /** Total block count, fired once after slicing. */
   onBlocksReady?: (total: number) => void;
   /**
@@ -138,6 +175,14 @@ export interface ConsolidateOptions {
   onBlockDone?: () => void;
   /** Fires just before the merge/conflict-detection phase begins. */
   onMergeStart?: () => void;
+  /** Fires once before the explainer pass begins, with the total to process. */
+  onExplainStart?: (total: number) => void;
+  /** Fires once per conflict after the explainer completes (success or cache hit). */
+  onExplainDone?: () => void;
+  /** Fires once before the resolver pass begins, with the total to process. */
+  onResolveStart?: (total: number) => void;
+  /** Fires once per conflict after the resolver completes (success or fallback). */
+  onResolveDone?: () => void;
 }
 
 export interface ConsolidateResult {
@@ -145,10 +190,10 @@ export interface ConsolidateResult {
   extract: ExtractResult;
   /** Merge result — resolved + decided + open conflicts. */
   merge: MergeResult;
-  /** Modules detected from the merged claim set; absent in scan mode. */
-  modules?: DetectedModule[];
-  /** Materialization result — written paths + per-section failures. */
-  materialize?: MaterializeResult;
+  /** Modules detected from the merged claim set. */
+  modules: DetectedModule[];
+  /** Entries written to (or that would be written to) `claims.json`. */
+  claimEntries: ClaimsFileEntry[];
   /**
    * Docs the LLM relevance filter marked as non-spec material and
    * excluded from extraction. Each carries a short reason for the
@@ -169,9 +214,11 @@ export interface ConsolidateResult {
  */
 export async function consolidate(
   repoRoot: string,
-  opts: ConsolidateOptions,
+  opts: ConsolidateOptions = {},
 ): Promise<ConsolidateResult> {
   const decisions = readDecisions(repoRoot);
+  const models = opts.models ?? {};
+  const fallbackModel = models.fallback;
 
   // ---- Discover -------------------------------------------------------
   const allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit });
@@ -184,6 +231,8 @@ export async function consolidate(
     runner: opts.relevanceRunner,
     enabled: opts.disableRelevanceFilter !== true,
     manualIncludes: decisions.manualIncludes ?? [],
+    model: models.relevance,
+    fallbackModel,
   });
   const docs = relevance.included;
   const skippedDocs = relevance.skipped.map(({ doc, reason }) => ({ path: doc.path, reason }));
@@ -198,6 +247,8 @@ export async function consolidate(
   const llmChains = await detectVersionChainsViaLlm(repoRoot, docs, {
     runner: opts.chainRunner,
     enabled: opts.disableLlmChainDetection !== true,
+    model: models.chainDetect,
+    fallbackModel,
   });
   // User-marked supersessions from decisions.json#manualChains are a
   // third chain source. They merge in alongside auto-detected chains;
@@ -212,7 +263,12 @@ export async function consolidate(
   // ---- Extract (cache-wrapped) -----------------------------------------
   const blockRunner = wrapBlockRunner(
     repoRoot,
-    opts.blockRunner ?? spawnRunner({ onBlockDone: () => opts.onBlockDone?.() }),
+    opts.blockRunner ??
+      spawnRunner({
+        onBlockDone: () => opts.onBlockDone?.(),
+        model: models.claimExtract,
+        fallbackModel,
+      }),
     opts.onBlockDone,
   );
   const extract = await extractClaims(repoRoot, {
@@ -251,6 +307,8 @@ export async function consolidate(
   const recheckChains = await runChainRecheck(repoRoot, recheckPairs, {
     runner: opts.chainRecheckRunner,
     enabled: opts.disableChainRecheck !== true,
+    model: models.chainRecheck,
+    fallbackModel,
   });
   let chainsForStitch = chains;
   let mergedChainConflicts = enrichedChainConflicts;
@@ -287,35 +345,113 @@ export async function consolidate(
   // Best-effort: failures degrade silently. Cached per-conflict by
   // candidate fingerprint, so re-runs with unchanged candidates skip
   // the LLM call entirely.
+  const tExplainStart = perfNow();
   await explainConflicts(repoRoot, stitchedMerge.openConflicts, {
     runner: opts.conflictExplainerRunner,
     enabled: opts.disableConflictExplanations !== true,
+    model: models.conflictExplain,
+    fallbackModel,
+    onStart: opts.onExplainStart,
+    onDone: opts.onExplainDone,
   });
+  debugLog(`explain phase totalMs=${(perfNow() - tExplainStart).toFixed(0)}`);
 
-  if (!opts.materialize) {
-    return { extract, merge: stitchedMerge, decisions, skippedDocs };
+  // ---- LLM per-conflict auto-resolve (Opus) ----------------------------
+  // Opus reads each open conflict and proposes a pick + self-reported
+  // confidence. Only `high` confidence auto-applies — synthesized into
+  // decidedConflicts with autoResolution metadata so the dashboard can
+  // surface "auto-resolved" affordances. Medium / low leave the conflict
+  // open with the reasoning attached so the human sees the model's
+  // thinking next to the explanation. User picks always win — anything
+  // already in decisions.json never reaches the resolver (it's already
+  // in decidedConflicts at this point).
+  const tResolveStart = perfNow();
+  const autoResolved = await resolveConflicts(repoRoot, stitchedMerge.openConflicts, {
+    runner: opts.conflictResolverRunner,
+    enabled: opts.disableConflictResolution !== true,
+    model: models.conflictResolve,
+    fallbackModel,
+    onStart: opts.onResolveStart,
+    onDone: opts.onResolveDone,
+  });
+  debugLog(`resolve phase (incl. cache I/O) totalMs=${(perfNow() - tResolveStart).toFixed(0)}`);
+  let finalMerge = applyAutoResolutions(stitchedMerge, autoResolved);
+
+  // ---- Late chain-filter refresh ---------------------------------------
+  // The LLM resolver above can promote a version-chain conflict to
+  // `decided` at high confidence. But `filterByChainWinners` already
+  // ran (in two earlier passes), reading only the user's pre-existing
+  // decisions.json — it had no way to see chains the resolver was
+  // about to auto-decide. The result: the loser's claims survive into
+  // `claims.json` and leak into the contract corpus.
+  //
+  // Detect chains that became decided here (and weren't already in
+  // decisions.json), augment the decisions set with the synthesized
+  // chain picks, and re-run filter → merge → stitch with those. Then
+  // re-apply the resolver verdicts on the new merge result so
+  // already-auto-resolved content conflicts stay decided.
+  const preDecidedConflictIds = new Set(decisions.decisions.map((d) => d.conflictId));
+  const chainIdSet = new Set(chainsForStitch.map((c) => c.id));
+  const lateChainDecisions = finalMerge.decidedConflicts
+    .filter((d) => chainIdSet.has(d.conflict.id) && !preDecidedConflictIds.has(d.conflict.id))
+    .map((d) => d.decision);
+  if (lateChainDecisions.length > 0) {
+    const augmentedDecisions: DecisionsFile = {
+      ...decisions,
+      decisions: [...decisions.decisions, ...lateChainDecisions],
+    };
+    const reWinners = resolveChainWinners(
+      chainsForStitch.map(synthesizeChainConflict),
+      chainsForStitch,
+      augmentedDecisions,
+    );
+    const reFiltered = filterByChainWinners(extract.claims, chainsForStitch, reWinners);
+    const reMerged = mergeClaims(reFiltered, augmentedDecisions);
+    const reEnriched = enrichChainConflictsWithStats(
+      chainsForStitch.map(synthesizeChainConflict),
+      reFiltered,
+    );
+    const reStitched = stitchChainConflicts(
+      reMerged,
+      reEnriched,
+      chainsForStitch,
+      augmentedDecisions,
+    );
+    finalMerge = applyAutoResolutions(reStitched, autoResolved);
   }
 
-  // ---- Detect modules + materialize (cache-wrapped section runner) -----
-  const renderable = collectRenderableClaims(stitchedMerge);
-  const modules = detectModules(renderable).modules;
-  const sectionRunner = wrapSectionRunner(
-    repoRoot,
-    opts.sectionRunner ?? spawnSectionRunner(),
-  );
-  const specRoot = specRootPath(repoRoot);
-  const materialize = await materializeSpec(
-    specRoot,
-    stitchedMerge,
-    modules,
-    decisions,
-    {
-      runner: sectionRunner,
-      onSectionDone: opts.onSectionDone,
-    },
-  );
+  // ---- Module detection + claims.json write ----------------------------
+  // Build the renderable claim set (resolved + decided picks + synthesized
+  // custom resolutions), attribute each to a module, and write the
+  // structured snapshot downstream stages consume.
+  const renderable = collectRenderableClaims(finalMerge);
+  const detection = detectModules(renderable);
+  const modules = detection.modules;
+  const moduleByClaimId = new Map<string, string>();
+  for (const m of modules) {
+    for (const c of m.claims) moduleByClaimId.set(c.id, m.name);
+  }
+  const claimEntries: ClaimsFileEntry[] = renderable
+    // Out-of-scope claims contribute nothing to contract generation —
+    // they live on `modules[].outOfScope` as anti-spec. Strip them from
+    // the positive claim set so the extractor doesn't waste cycles.
+    .filter((c) => c.metadata.status !== 'out-of-scope')
+    .map((c) =>
+      entryFromClaim(
+        c,
+        moduleByClaimId.get(c.id) ?? SHARED_MODULE,
+        c.id.startsWith('custom-') ? 'custom' : 'extracted',
+      ),
+    );
 
-  return { extract, merge: stitchedMerge, modules, materialize, decisions, skippedDocs };
+  if (!opts.skipClaimsWrite) {
+    writeClaims(repoRoot, {
+      modules: modules.map((m) => m.manifest),
+      claims: claimEntries,
+    });
+  }
+
+  return { extract, merge: finalMerge, modules, claimEntries, decisions, skippedDocs };
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +726,29 @@ function stitchChainConflicts(
       });
       continue;
     }
+    // Zero-claim chains: when every non-newest candidate contributed 0
+    // extractable claims, there's literally nothing at stake — picking
+    // the newer drops zero, keeping the older keeps zero. Auto-resolve
+    // in favor of the newest so the chain stops blocking the user.
+    // Still surfaced under decidedConflicts so it's inspectable.
+    const newestIdx = conflict.candidates.length - 1;
+    const olderClaimCounts = conflict.candidates
+      .slice(0, newestIdx)
+      .map((c) => ((c.claim.content as { claimCount?: number } | null)?.claimCount ?? 0));
+    if (olderClaimCounts.length > 0 && olderClaimCounts.every((n) => n === 0)) {
+      decided.push({
+        conflict,
+        decision: {
+          conflictId: conflict.id,
+          resolution: { kind: 'pick', candidateIndex: newestIdx },
+          resolvedAt: new Date().toISOString(),
+          candidateFingerprint: 'auto-zero-claim-chain',
+          note: 'Auto-resolved: older candidate(s) contributed no extractable claims.',
+        },
+        resolvedClaim: conflict.candidates[newestIdx]?.claim,
+      });
+      continue;
+    }
     pending.push(conflict);
   }
   return {
@@ -673,65 +832,147 @@ function wrapBlockRunner(
   };
 }
 
-function wrapSectionRunner(repoRoot: string, inner: SectionRunner): SectionRunner {
-  return async (sections) => {
-    const out: RenderedSection[] = [];
-    const misses: PendingSection[] = [];
-    for (const section of sections) {
-      const id = sectionId(section);
-      const cached = readSectionCache(repoRoot, id);
-      if (cached) {
-        out.push({
-          module: section.module,
-          topic: section.topic,
-          fileName: section.fileName,
-          markdown: cached,
-          durationMs: 0,
-        });
-      } else {
-        misses.push(section);
-      }
+// ---------------------------------------------------------------------------
+// Renderable claim assembly
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply the LLM resolver's verdicts to a merge result.
+ *
+ * For each `high`-confidence resolution we synthesize a `pick`
+ * decision and move the conflict from `openConflicts` to
+ * `decidedConflicts`, tagging it with `autoResolution` so the
+ * dashboard / CLI can label it clearly and let the user revoke.
+ *
+ * Medium / low confidence keeps the conflict open but attaches the
+ * resolver's reasoning to `conflict.explanation` (as a suffix when an
+ * explanation already exists, or as the explanation itself otherwise)
+ * so the human sees the model's thinking next to the structural
+ * differences.
+ */
+function applyAutoResolutions(
+  merge: MergeResult,
+  resolved: import('./conflict-resolver.js').ResolvedConflict[],
+): MergeResult {
+  if (resolved.length === 0) return merge;
+  const byId = new Map(resolved.map((r) => [r.conflict.id, r]));
+  const newDecided: DecidedConflict[] = [...merge.decidedConflicts];
+  const newOpen: Conflict[] = [];
+
+  for (const conflict of merge.openConflicts) {
+    const resolution = byId.get(conflict.id)?.resolution;
+    if (!resolution) {
+      newOpen.push(conflict);
+      continue;
     }
-    if (misses.length === 0) return out;
-    const innerResults = await inner(misses);
-    for (const r of innerResults) {
-      if (r.markdown) {
-        const id = sectionId({
-          module: r.module,
-          topic: r.topic,
-          fileName: r.fileName,
-          claims: misses.find((s) => s.module === r.module && s.fileName === r.fileName)?.claims ?? [],
-        });
-        writeSectionCache(repoRoot, id, {
-          module: r.module,
-          topic: r.topic,
-          fileName: r.fileName,
-          markdown: r.markdown,
-        });
-      }
-      out.push(r);
+    if (resolution.confidence !== 'high') {
+      // Replace the explainer's text with Opus's reasoning — it's
+      // conflict-specific and names the recommendation directly, which
+      // is more useful than the Haiku-generated baseline. The structured
+      // verdict goes on `resolverVerdict` so the dashboard can render a
+      // confidence affordance separately.
+      //
+      // Also overwrite `defaultPick` with the resolver's pick. Without
+      // this, the conflict carried two competing "recommended" signals:
+      // the violet badge on resolverVerdict.pick (LLM's analysis) and
+      // defaultPick (the engine's newest-mtime guess) — and Accept-all
+      // followed the latter, overriding the LLM's actual recommendation.
+      // Falling back to the original defaultPick when the verdict's pick
+      // is somehow out-of-bounds preserves the engine's earlier guess.
+      const verdictPick =
+        resolution.pick >= 0 && resolution.pick < conflict.candidates.length
+          ? resolution.pick
+          : conflict.defaultPick;
+      newOpen.push({
+        ...conflict,
+        defaultPick: verdictPick,
+        explanation: resolution.reasoning,
+        resolverVerdict: {
+          confidence: resolution.confidence,
+          reasoning: resolution.reasoning,
+          pick: resolution.pick,
+        },
+      });
+      continue;
     }
-    return out;
+    const winnerClaim = conflict.candidates[resolution.pick]?.claim;
+    newDecided.push({
+      conflict,
+      decision: {
+        conflictId: conflict.id,
+        resolution: { kind: 'pick', candidateIndex: resolution.pick },
+        resolvedAt: new Date().toISOString(),
+        candidateFingerprint: 'auto-llm-resolve',
+        note: `Auto-resolved by LLM (high confidence): ${resolution.reasoning}`,
+      },
+      resolvedClaim: winnerClaim,
+      autoResolution: {
+        by: 'llm',
+        confidence: resolution.confidence,
+        reasoning: resolution.reasoning,
+      },
+    });
+  }
+  return {
+    resolvedClaims: merge.resolvedClaims,
+    decidedConflicts: newDecided,
+    openConflicts: newOpen,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Internal: which claims feed materialization?
-// ---------------------------------------------------------------------------
-
+/**
+ * Build the flat list of claims that should land in `claims.json`.
+ * Sources:
+ *   - merge.resolvedClaims (singletons + auto-merged)
+ *   - merge.decidedConflicts[].resolvedClaim for `pick` decisions
+ *   - synthesized claims for `custom` decisions — the user wrote
+ *     free-text content, we wrap it in a Claim so downstream stages
+ *     see one uniform shape
+ *
+ * Version-chain synthetic claims (`id` prefix `version-chain:`) are
+ * metadata about the user's supersession decision, not real spec
+ * content — filtered out so they never reach claims.json.
+ */
 function collectRenderableClaims(merge: MergeResult): Claim[] {
   const out: Claim[] = [...merge.resolvedClaims];
   for (const decided of merge.decidedConflicts) {
-    if (!decided.resolvedClaim) continue;
-    // Version-chain synthetic claims are metadata about the user's
-    // supersede decision — not real spec content. Filter them out so
-    // they don't end up rendered as a "version chain: …" overview
-    // file in the canonical.
-    if (decided.resolvedClaim.id.startsWith('version-chain:')) continue;
-    out.push(decided.resolvedClaim);
-    // Custom-resolution claims are synthesized inside the
-    // materializer itself (it has the resolution payload). Avoid
-    // double-counting here.
+    if (decided.resolvedClaim) {
+      if (decided.resolvedClaim.id.startsWith('version-chain:')) continue;
+      out.push(decided.resolvedClaim);
+      continue;
+    }
+    if (decided.decision.resolution.kind === 'custom') {
+      out.push(
+        synthesizeCustomClaim(
+          decided.conflict,
+          decided.decision.resolution.content,
+          decided.decision.resolvedAt,
+        ),
+      );
+    }
   }
   return out;
+}
+
+function synthesizeCustomClaim(
+  conflict: { topic: Topic; subject: string },
+  content: string,
+  resolvedAt: string,
+): Claim {
+  return {
+    id: `custom-${conflict.topic}-${conflict.subject}`,
+    topic: conflict.topic,
+    subject: conflict.subject,
+    content: { _custom: content },
+    kind: 'definition',
+    provenance: {
+      file: '.truecourse/specs/decisions.json',
+      line: 0,
+      quote: content,
+    },
+    metadata: {
+      docKind: 'unknown',
+      lastTouched: resolvedAt,
+    },
+  };
 }

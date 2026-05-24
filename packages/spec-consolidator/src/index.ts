@@ -65,25 +65,11 @@ export type { MergeResult, DecidedConflict } from './merger.js';
 export { detectModules, topicsInModule, SHARED_MODULE } from './module-detector.js';
 export type { DetectedModule, ModuleDetectionResult } from './module-detector.js';
 
-export { spawnSectionRunner } from './section-runner.js';
-export type {
-  SectionRunner,
-  PendingSection,
-  RenderedSection,
-  SpawnSectionRunnerOptions,
-} from './section-runner.js';
-
-export { materializeSpec } from './materializer.js';
-export type { MaterializeOptions, MaterializeResult } from './materializer.js';
-
 export {
   cachePaths,
   ensureCacheDirs,
   readBlockCache,
   writeBlockCache,
-  sectionId,
-  readSectionCache,
-  writeSectionCache,
   readScanState,
   writeScanState,
   clearScanState,
@@ -92,10 +78,23 @@ export {
 export type {
   CachePaths,
   BlockCacheEntry,
-  SectionCacheEntry,
-  SectionCacheKey,
   ScanState,
 } from './cache.js';
+
+export {
+  claimsFilePath,
+  hasClaims,
+  readClaims,
+  writeClaims,
+  entryFromClaim,
+  ClaimsFileEntrySchema,
+  ClaimsFileSchema,
+} from './claims-store.js';
+export type {
+  ClaimsFile,
+  ClaimsFileEntry,
+  ClaimsFileModule,
+} from './claims-store.js';
 
 export {
   consolidate,
@@ -104,7 +103,11 @@ export {
   decisionsPath,
   specRootPath,
 } from './orchestrator.js';
-export type { ConsolidateOptions, ConsolidateResult } from './orchestrator.js';
+export type {
+  ConsolidateModels,
+  ConsolidateOptions,
+  ConsolidateResult,
+} from './orchestrator.js';
 
 export { detectVersionChains, materializeManualChains } from './version-chain.js';
 export type { VersionChain } from './version-chain.js';
@@ -125,8 +128,22 @@ export type {
 
 export {
   explainConflicts,
+  isChainConflict,
   CONFLICT_EXPLAINER_SYSTEM_PROMPT,
+  CHAIN_EXPLAINER_SYSTEM_PROMPT,
 } from './conflict-explainer.js';
+
+export {
+  resolveConflicts,
+  CONFLICT_RESOLVER_SYSTEM_PROMPT,
+} from './conflict-resolver.js';
+export type {
+  ConflictResolution,
+  ConflictResolverInput,
+  ConflictResolverOptions,
+  ConflictResolverRunner,
+  ResolvedConflict,
+} from './conflict-resolver.js';
 export type {
   ConflictExplainerInput,
   ConflictExplainerOptions,

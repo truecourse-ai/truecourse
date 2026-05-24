@@ -108,11 +108,9 @@ truecourse dashboard logs             # Tail dashboard logs (service mode only)
 truecourse dashboard uninstall        # Remove the background service
 
 # Spec consolidation (docs → canonical spec)
-truecourse spec scan                              # Read docs, extract claims, surface conflicts
+truecourse spec scan                              # Read docs, extract claims, surface conflicts, write claims.json
 truecourse spec resolve --all-defaults            # Accept the engine's recommended pick on every open conflict
-truecourse spec apply                              # Materialize .truecourse/specs/ from current decisions
 truecourse spec status                             # Summary: docs, claims, modules, pending decisions
-truecourse spec diff                               # Show what would change on the next apply
 
 # Agent-friendly conflict surface (all support --json)
 truecourse spec conflicts list                    # List open conflicts (add --decided / --all)
@@ -182,9 +180,10 @@ non-spec material (task lists, research logs, AI agent prompts). For
 the docs that remain, an LLM extracts structured claims per block and
 groups them by `(topic, subject)`. Agreements auto-merge; genuine
 disagreements surface as **conflicts** in the dashboard with a plain-
-English explanation of what differs. Output: `.truecourse/specs/`
-(modular, canonical markdown organised by topic) and
-`.truecourse/specs/decisions.json` (the user's resolutions, version
+English explanation of what differs. Output:
+`.truecourse/specs/claims.json` (the structured snapshot every
+downstream stage consumes — modules + per-claim content + provenance)
+and `.truecourse/specs/decisions.json` (the user's resolutions, version
 chains, and overrides — committable).
 
 Auto-resolve rules cut the conflict count substantially: byte-
@@ -192,8 +191,8 @@ identical content, status-tolerant duplicates, same-file consolidation,
 docKind-dominance pickups, and detected version chains.
 [Plan](docs/contracts/PLAN_CONFLICT_RESOLUTION.md).
 
-**2. Contract extraction** — Reads the canonical spec slice-by-slice
-and emits `.truecourse/contracts/*.tc` files in a hand-written DSL
+**2. Contract extraction** — Reads `claims.json` and emits
+`.truecourse/contracts/*.tc` files in a hand-written DSL
 covering 13 artifact kinds: `operation`, `entity`, `enum`,
 `state-machine`, `auth-requirement`, `authorization-rule`,
 `error-envelope`, `pagination-contract`, `idempotency-contract`,
@@ -211,9 +210,7 @@ unresolved cross-references). On the bundled fixture this hits
 ```
 .truecourse/
 ├── specs/                  ← canonical spec (committable)
-│   ├── modules/
-│   │   └── <name>/{module.yaml, endpoints.md, data.md, ...}
-│   ├── shared/
+│   ├── claims.json          ← structured snapshot: modules + claims + provenance
 │   └── decisions.json       ← user resolutions + version chains + manual includes
 ├── contracts/               ← generated TC contract artifacts (gitignored by default)
 ├── analyses/                ← analysis snapshots (gitignored)

@@ -26,6 +26,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { DocCandidate } from './discovery.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
+import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'relevance.json';
 
@@ -57,6 +58,10 @@ export interface RelevanceFilterOptions {
   manualIncludes?: string[];
   /** Cap on concurrent LLM calls. Default 4. */
   concurrency?: number;
+  /** Model forwarded to the default spawn runner. */
+  model?: string;
+  /** Fallback model forwarded to the default spawn runner. */
+  fallbackModel?: string;
 }
 
 export interface RelevanceFilterOutcome {
@@ -79,7 +84,9 @@ export async function filterByRelevance(
     return { included: docs, skipped: [] };
   }
   const manualSet = new Set(opts.manualIncludes ?? []);
-  const runner = opts.runner ?? spawnRelevanceRunner();
+  const runner =
+    opts.runner ??
+    spawnRelevanceRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? 4;
 
   const verdicts = new Map<string, RelevanceVerdict>();
@@ -196,13 +203,17 @@ const RelevanceVerdictSchema = z.object({
   reason: z.string().default(''),
 });
 
-function spawnRelevanceRunner(opts: { bin?: string; timeoutMs?: number } = {}): RelevanceRunner {
+function spawnRelevanceRunner(
+  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
+): RelevanceRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 60_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return (input: RelevanceRunnerInput): Promise<RelevanceVerdict> => {
     const args = [
       '-p',
       buildRelevanceUserPrompt(input.doc),
+      ...modelArgs,
       '--output-format',
       'json',
       '--append-system-prompt',

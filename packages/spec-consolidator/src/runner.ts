@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import pLimit from 'p-limit';
 import type { Block } from './slicer.js';
+import { buildModelArgs } from './model-args.js';
 import {
   LlmExtractionSchema,
   SYSTEM_PROMPT,
@@ -33,6 +34,14 @@ export type BlockRunner = (blocks: Block[]) => Promise<BlockRunResult[]>;
 export interface SpawnRunnerOptions {
   /** Path to the claude binary. Defaults to `CLAUDE_CODE_BIN` env or 'claude'. */
   bin?: string;
+  /**
+   * Model name passed to `claude --model`. When unset, the CLI default
+   * applies. CLI and dashboard server resolve this per-stage via
+   * `@truecourse/core/config/llm-models`.
+   */
+  model?: string;
+  /** Optional fallback model passed to `claude --fallback-model`. */
+  fallbackModel?: string;
   /** Concurrent subprocesses. Defaults to min(cpus, 4). */
   concurrency?: number;
   /** Per-call timeout. Defaults to 240000ms (matches contract-extractor's bumped timeout). */
@@ -60,6 +69,7 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const concurrency = opts.concurrency ?? defaultConcurrency();
   const timeoutMs = opts.timeoutMs ?? 240_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const limit = pLimit(concurrency);
 
   return async (blocks: Block[]): Promise<BlockRunResult[]> => {
@@ -69,7 +79,7 @@ export function spawnRunner(opts: SpawnRunnerOptions = {}): BlockRunner {
           opts.onBlockStart?.(block);
           const t0 = Date.now();
           try {
-            const extraction = await runOne(bin, block, timeoutMs);
+            const extraction = await runOne(bin, block, timeoutMs, modelArgs);
             opts.onBlockDone?.(block, true);
             return { block, extraction, durationMs: Date.now() - t0 };
           } catch (e) {
@@ -87,6 +97,7 @@ async function runOne(
   bin: string,
   block: Block,
   timeoutMs: number,
+  modelArgs: string[],
 ): Promise<LlmExtraction> {
   const userPrompt = buildUserPrompt({
     filePath: block.filePath,
@@ -97,6 +108,7 @@ async function runOne(
   const args = [
     '-p',
     userPrompt,
+    ...modelArgs,
     '--output-format',
     'json',
     '--append-system-prompt',
@@ -151,3 +163,4 @@ function stripCodeFences(text: string): string {
   const fenceMatch = /^```(?:json|JSON)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
   return fenceMatch ? fenceMatch[1] : trimmed;
 }
+

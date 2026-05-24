@@ -448,6 +448,18 @@ the spec says "POST /api/customers requires admin", the role requirement's
 role requirements cause cascading false-positive drifts on every operation
 matched by the glob that isn't supposed to require the role.
 
+**Do NOT emit a role-based \`auth-requirement\` from a slice that does not
+enumerate the role-gated operations.** If the slice you are looking at
+describes a role concept ("admin role exists", "Bearer JWT with scope role:admin")
+but does NOT explicitly list which routes require the role, emit an
+\`UnenforceableObligation\` fragment instead — the role will be picked up later
+from the slice(s) that define the actual operations requiring it (where you
+will see "POST /api/x requires admin" or similar). Emitting a role
+\`auth-requirement\` without a selector — or with a fallback broad
+\`path-glob\` — causes the verifier to match it against every route in the
+corpus and fires false positives on every non-gated operation. UnenforceableObligation
+is the correct fallback when the slice lacks operation context.
+
   auth-requirement auth.role.admin {
     origin "<source>" "<section>" <lines>
     scheme Bearer

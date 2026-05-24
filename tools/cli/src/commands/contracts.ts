@@ -9,6 +9,7 @@ import {
   spawnRunner,
 } from "@truecourse/contract-extractor";
 import { stampGeneratedMarker } from "@truecourse/core/commands/spec-in-process";
+import { resolveFallbackModel, resolveModel } from "@truecourse/core/config/llm-models";
 import { syncShippedTcSyntax } from "./helpers.js";
 
 export interface RunContractsGenerateOptions {
@@ -30,7 +31,7 @@ export async function runContractsGenerate(
   // consolidator yet — tell them and bail.
   if (!hasCanonicalSpec(repoRoot)) {
     p.log.error(
-      "No .truecourse/specs/ found. Run `truecourse spec apply` first to produce the canonical spec.",
+      "No .truecourse/specs/claims.json found. Run `truecourse spec scan` first to build the canonical claim set.",
     );
     p.outro("Aborted.");
     process.exit(1);
@@ -38,8 +39,13 @@ export async function runContractsGenerate(
 
   // Run the extraction pipeline against the canonical spec.
   const concurrency = defaultConcurrency();
+  const extractModel = resolveModel("contract.extract", undefined, repoRoot);
+  const repairModel = resolveModel("contract.repair", undefined, repoRoot);
+  const fallbackModel = resolveFallbackModel(repoRoot) ?? undefined;
   const runner = spawnRunner({
     concurrency,
+    model: extractModel,
+    fallbackModel,
     onSliceStart: (s) => {
       p.log.step(`extracting  ${s.specPath} :: ${s.headingPath.join(" → ")}`);
     },
@@ -50,6 +56,7 @@ export async function runContractsGenerate(
     result = await generateContracts({
       repoRoot,
       runner,
+      models: { extract: extractModel, repair: repairModel, fallback: fallbackModel },
       dryRun: !!options.diff,
       onSliceCacheHit: (s) => {
         p.log.message(`  cache hit  ${s.specPath} :: ${s.headingPath.join(" → ")}`, { symbol: "·" });
@@ -105,9 +112,9 @@ export async function runContractsGenerate(
   }
 
   // Stamp the generate marker on every successful run (including the
-  // "nothing to write" case — we still confirmed contracts match the
-  // canonical). Keeps the dashboard's `contractsStale` signal honest
-  // when generation is driven from the terminal.
+  // "nothing to write" case — we confirmed contracts match the claim
+  // set). Keeps the dashboard's `contractsStale` dot honest when
+  // generation is driven from the terminal.
   stampGeneratedMarker(repoRoot);
 
   if (result.write.written.length === 0) {

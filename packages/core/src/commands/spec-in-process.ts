@@ -7,9 +7,8 @@
  * Same shape as `analyze-in-process.ts` — the caller passes a
  * `StepTracker` and we drive it through the high-level phases:
  *
- *   scan           discover → extract → merge
+ *   scan           discover → extract → merge → claims.json
  *   resolveAllDefaults  scan → write decisions → re-scan
- *   apply          discover → extract → merge → materialize → IL
  *
  * Step keys + labels are stable across CLI/dashboard so the progress
  * UI is identical on both surfaces. Implementations of the actual
@@ -24,6 +23,7 @@ import {
   readDecisions,
   writeDecisions,
   writeScanState,
+  type ConsolidateModels,
   type ConsolidateResult,
   type Decision,
   type DecisionsFile,
@@ -36,8 +36,20 @@ import {
   generateContracts,
   hasCanonicalSpec,
   spawnRunner as spawnExtractorRunner,
+  type ExtractModels,
   type GenerateResult,
 } from '@truecourse/contract-extractor';
+import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
+
+// Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1.
+function perfNow(): number {
+  return Number(process.hrtime.bigint() / 1_000_000n);
+}
+function debugLog(msg: string): void {
+  if (process.env.TRUECOURSE_DEBUG_TIMING) {
+    process.stderr.write(`[tc-timing] ${msg}\n`);
+  }
+}
 import {
   verify,
   type ContractDrift,
@@ -54,7 +66,9 @@ import type { StepTracker } from '../progress.js';
 export const SCAN_STEPS = [
   { key: 'discover', label: 'Discovering docs' },
   { key: 'extract', label: 'Extracting claims' },
-  { key: 'merge', label: 'Merging + detecting conflicts' },
+  { key: 'merge', label: 'Merging claims' },
+  { key: 'explain', label: 'Explaining conflicts' },
+  { key: 'resolve', label: 'Auto-resolving conflicts' },
 ] as const;
 
 export const RESOLVE_STEPS = [
@@ -62,13 +76,6 @@ export const RESOLVE_STEPS = [
   { key: 'resolve-chains', label: 'Resolving version chains' },
   { key: 'resolve-content', label: 'Resolving content conflicts' },
   { key: 'finalize', label: 'Refreshing scan state' },
-] as const;
-
-export const APPLY_STEPS = [
-  { key: 'discover', label: 'Discovering docs' },
-  { key: 'extract', label: 'Extracting claims' },
-  { key: 'merge', label: 'Merging + detecting conflicts' },
-  { key: 'materialize', label: 'Rendering canonical spec' },
 ] as const;
 
 export const GENERATE_STEPS = [
@@ -88,11 +95,6 @@ export const VERIFY_STEPS = [
 export interface SpecScanInProcessResult {
   consolidate: ConsolidateResult;
   /** What was written to scan-state.json. */
-  scanState: ScanState;
-}
-
-export interface SpecApplyInProcessResult {
-  consolidate: ConsolidateResult;
   scanState: ScanState;
 }
 
@@ -148,11 +150,17 @@ export interface SpecInProcessOptions {
   /** Required for progress emission. Build via `new StepTracker(...)`. */
   tracker?: StepTracker;
   /** Override block extraction runner; tests inject a stub. */
-  blockRunner?: Parameters<typeof consolidate>[1]['blockRunner'];
-  /** Override section-rendering runner; tests inject a stub. */
-  sectionRunner?: Parameters<typeof consolidate>[1]['sectionRunner'];
+  blockRunner?: Parameters<typeof consolidate>[1] extends infer T
+    ? T extends { blockRunner?: infer R }
+      ? R
+      : never
+    : never;
   /** Override LLM chain-detection runner; tests inject a stub. */
-  chainRunner?: Parameters<typeof consolidate>[1]['chainRunner'];
+  chainRunner?: Parameters<typeof consolidate>[1] extends infer T
+    ? T extends { chainRunner?: infer R }
+      ? R
+      : never
+    : never;
   /** When true, skip the LLM chain-detection step entirely. */
   disableLlmChainDetection?: boolean;
   /** When true, skip git mtime resolution. */
@@ -164,50 +172,56 @@ export interface SpecInProcessOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Marker files stamped after a successful Apply / Generate run. The
- * dashboard's `/spec/staleness` endpoint reads their mtimes (against
- * `decisions.json` and the canonical spec) to tell the user whether
- * Apply or Generate has unfinished work. Both CLI and dashboard run
- * through the in-process functions below, so a CLI run keeps the
- * dashboard's staleness indicators honest.
+ * Marker file stamped after a successful `contracts generate` run. The
+ * dashboard's `/spec/staleness` endpoint reads its mtime against
+ * `claims.json` (was the scan run after the last generate?) and against
+ * `verify-state.json` (has verify run since the last generate?). Both
+ * CLI and dashboard drive the same in-process helper, so a terminal
+ * `truecourse contracts generate` keeps the dashboard's dots honest.
  */
-const APPLIED_MARKER_REL = path.join('.truecourse', '.cache', '.last-applied.json');
 const GENERATED_MARKER_REL = path.join('.truecourse', '.cache', '.last-generated.json');
-
-export function appliedMarkerPath(repoRoot: string): string {
-  return path.join(repoRoot, APPLIED_MARKER_REL);
-}
 
 export function generatedMarkerPath(repoRoot: string): string {
   return path.join(repoRoot, GENERATED_MARKER_REL);
 }
 
-function writeStampMarker(file: string, payload: Record<string, unknown>): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n');
-}
-
-/**
- * Stamp the apply marker. Exposed for callers that run their own
- * apply path (e.g. the CLI's `truecourse spec apply` does today, but
- * external integrations may bypass `applyInProcess` in the future).
- */
-export function stampAppliedMarker(repoRoot: string): void {
-  writeStampMarker(appliedMarkerPath(repoRoot), {
-    appliedAt: new Date().toISOString(),
-  });
-}
-
-/**
- * Stamp the generate marker. Exposed so `truecourse contracts generate`
- * — which drives the extractor directly rather than via
- * `generateContractsInProcess` — can keep the dashboard's
- * `contractsStale` signal honest.
- */
 export function stampGeneratedMarker(repoRoot: string): void {
-  writeStampMarker(generatedMarkerPath(repoRoot), {
-    generatedAt: new Date().toISOString(),
-  });
+  const file = generatedMarkerPath(repoRoot);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ generatedAt: new Date().toISOString() }, null, 2) + '\n',
+  );
+}
+
+/**
+ * Build the per-stage `ConsolidateModels` map by resolving each
+ * spec-pipeline stage against env vars + `.truecourse/config.json` +
+ * the in-code defaults. Called once at the top of every consolidate
+ * driver so a single run uses the same model per stage across all
+ * iterations (default-resolve loops re-scan multiple times).
+ */
+function resolveConsolidateModels(repoRoot: string): ConsolidateModels {
+  return {
+    chainDetect: resolveModel('spec.chainDetect', undefined, repoRoot),
+    claimExtract: resolveModel('spec.claimExtract', undefined, repoRoot),
+    chainRecheck: resolveModel('spec.chainRecheck', undefined, repoRoot),
+    conflictExplain: resolveModel('spec.conflictExplain', undefined, repoRoot),
+    conflictResolve: resolveModel('spec.conflictResolve', undefined, repoRoot),
+    relevance: resolveModel('spec.relevance', undefined, repoRoot),
+    fallback: resolveFallbackModel(repoRoot) ?? undefined,
+  };
+}
+
+/**
+ * Same idea for the contract-extractor's two LLM stages.
+ */
+function resolveExtractModels(repoRoot: string): ExtractModels {
+  return {
+    extract: resolveModel('contract.extract', undefined, repoRoot),
+    repair: resolveModel('contract.repair', undefined, repoRoot),
+    fallback: resolveFallbackModel(repoRoot) ?? undefined,
+  };
 }
 
 function buildScanState(result: ConsolidateResult): ScanState {
@@ -240,9 +254,11 @@ function buildScanState(result: ConsolidateResult): ScanState {
 // ---------------------------------------------------------------------------
 
 /**
- * Run `consolidate({ materialize: false })`, persist the result to
- * `.truecourse/.cache/consolidator/scan-state.json`, and drive the
- * provided tracker through the SCAN_STEPS lifecycle.
+ * Run `consolidate()`, persist the result to
+ * `.truecourse/.cache/consolidator/scan-state.json` (and write the
+ * structured `claims.json` snapshot for the downstream contract
+ * extractor), and drive the provided tracker through the SCAN_STEPS
+ * lifecycle.
  *
  * Idempotent: re-runs against unchanged docs hit the block cache and
  * cost nothing.
@@ -265,15 +281,23 @@ export async function scanInProcess(
     return `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
   };
 
+  let explainTotal = 0;
+  let explainDone = 0;
+  let explainStarted = false;
+  let resolveTotal = 0;
+  let resolveDone = 0;
+  let resolveStarted = false;
+
   tracker?.start('discover');
+  const tConsolidateStart = perfNow();
   let result: ConsolidateResult;
   try {
     result = await consolidate(repoRoot, {
-      materialize: false,
       blockRunner: options.blockRunner,
       chainRunner: options.chainRunner,
       disableLlmChainDetection: options.disableLlmChainDetection,
       skipGit: options.skipGit,
+      models: resolveConsolidateModels(repoRoot),
       onDocStart: () => {
         if (!extractStarted) {
           tracker?.done('discover');
@@ -302,9 +326,49 @@ export async function scanInProcess(
           mergeStarted = true;
         }
       },
+      onExplainStart: (total) => {
+        // Merge itself is fast — close it as soon as the explainer
+        // takes over (whether it has work or not).
+        if (mergeStarted) {
+          tracker?.done('merge');
+        }
+        explainTotal = total;
+        explainStarted = true;
+        tracker?.start('explain');
+        tracker?.detail('explain', total === 0 ? 'no open conflicts' : `0/${total}`);
+      },
+      onExplainDone: () => {
+        explainDone++;
+        tracker?.detail('explain', `${explainDone}/${explainTotal}`);
+      },
+      onResolveStart: (total) => {
+        if (explainStarted) {
+          tracker?.done(
+            'explain',
+            explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`,
+          );
+        }
+        resolveTotal = total;
+        resolveStarted = true;
+        tracker?.start('resolve');
+        tracker?.detail('resolve', total === 0 ? 'no open conflicts' : `0/${total}`);
+      },
+      onResolveDone: () => {
+        resolveDone++;
+        tracker?.detail('resolve', `${resolveDone}/${resolveTotal}`);
+      },
     });
   } catch (e) {
-    tracker?.error(mergeStarted ? 'merge' : extractStarted ? 'extract' : 'discover', (e as Error).message);
+    const activeKey = resolveStarted
+      ? 'resolve'
+      : explainStarted
+        ? 'explain'
+        : mergeStarted
+          ? 'merge'
+          : extractStarted
+            ? 'extract'
+            : 'discover';
+    tracker?.error(activeKey, (e as Error).message);
     throw e;
   }
 
@@ -319,13 +383,31 @@ export async function scanInProcess(
     tracker?.done('extract', `${result.extract.claims.length} claims`);
     tracker?.start('merge');
   }
+  if (!explainStarted) {
+    tracker?.done('merge', `${result.merge.openConflicts.length} open`);
+    tracker?.start('explain');
+  }
+  if (!resolveStarted) {
+    tracker?.done(
+      'explain',
+      explainTotal === 0 ? 'skipped' : `${explainDone}/${explainTotal}`,
+    );
+    tracker?.start('resolve');
+  }
+  const tBeforeDone = perfNow();
+  debugLog(`scan: consolidate→tracker.done('resolve') gap=${(tBeforeDone - tConsolidateStart).toFixed(0)}ms (includes consolidate total)`);
   tracker?.done(
-    'merge',
+    'resolve',
     `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
   );
 
+  const tBuildStart = perfNow();
   const scanState = buildScanState(result);
+  const tWriteStart = perfNow();
   writeScanState(repoRoot, scanState);
+  debugLog(
+    `scan: buildScanState=${(tWriteStart - tBuildStart).toFixed(0)}ms writeScanState=${(perfNow() - tWriteStart).toFixed(0)}ms`,
+  );
   return { consolidate: result, scanState };
 }
 
@@ -359,11 +441,11 @@ export async function resolveAllDefaultsInProcess(
   const { tracker } = options;
   const MAX_ITERATIONS = 5;
   const consolidateOpts = {
-    materialize: false as const,
     blockRunner: options.blockRunner,
     chainRunner: options.chainRunner,
     disableLlmChainDetection: options.disableLlmChainDetection,
     skipGit: options.skipGit,
+    models: resolveConsolidateModels(repoRoot),
   };
 
   tracker?.start('scan');
@@ -474,155 +556,17 @@ function isChainConflict(c: ConsolidateResult['merge']['openConflicts'][number])
 }
 
 // ---------------------------------------------------------------------------
-// applyInProcess
-// ---------------------------------------------------------------------------
-
-/**
- * Materialize the canonical spec: `consolidate({ materialize: true })`,
- * then persist scan-state. Step transitions: discover → extract →
- * merge → materialize. IL extraction (Module 2) is now a separate
- * `generateContractsInProcess` call so the two phases can be driven
- * independently from CLI + dashboard.
- */
-export async function applyInProcess(
-  repoRoot: string,
-  options: SpecInProcessOptions = {},
-): Promise<SpecApplyInProcessResult> {
-  const { tracker } = options;
-  let docsSeen = 0;
-  let blocksTotal = 0;
-  let blocksDone = 0;
-  let sectionsDone = 0;
-  let extractStarted = false;
-  let mergeStarted = false;
-  let materializeStarted = false;
-
-  const renderExtractDetail = (): string => {
-    if (blocksTotal === 0) {
-      return `${docsSeen} docs`;
-    }
-    return `${docsSeen} docs · ${blocksDone}/${blocksTotal} blocks`;
-  };
-
-  tracker?.start('discover');
-  let result: ConsolidateResult;
-  try {
-    result = await consolidate(repoRoot, {
-      materialize: true,
-      blockRunner: options.blockRunner,
-      sectionRunner: options.sectionRunner,
-      chainRunner: options.chainRunner,
-      disableLlmChainDetection: options.disableLlmChainDetection,
-      skipGit: options.skipGit,
-      onDocStart: () => {
-        if (!extractStarted) {
-          tracker?.done('discover');
-          tracker?.start('extract');
-          extractStarted = true;
-        }
-        docsSeen++;
-        tracker?.detail('extract', renderExtractDetail());
-      },
-      onBlocksReady: (total) => {
-        blocksTotal = total;
-        tracker?.detail('extract', renderExtractDetail());
-      },
-      onBlockDone: () => {
-        blocksDone++;
-        tracker?.detail('extract', renderExtractDetail());
-      },
-      onMergeStart: () => {
-        if (!mergeStarted) {
-          if (!extractStarted) {
-            tracker?.done('discover');
-            tracker?.start('extract');
-          }
-          tracker?.done('extract', `${blocksDone} blocks`);
-          tracker?.start('merge');
-          mergeStarted = true;
-        }
-      },
-      onSectionDone: () => {
-        if (!materializeStarted) {
-          tracker?.done('merge');
-          tracker?.start('materialize');
-          materializeStarted = true;
-        }
-        sectionsDone++;
-        tracker?.detail('materialize', `${sectionsDone} sections rendered`);
-      },
-    });
-  } catch (e) {
-    const activeKey = materializeStarted
-      ? 'materialize'
-      : mergeStarted
-        ? 'merge'
-        : extractStarted
-          ? 'extract'
-          : 'discover';
-    tracker?.error(activeKey, (e as Error).message);
-    throw e;
-  }
-
-  // Stamp final detail on discover now that we have the full doc count.
-  tracker?.detail('discover', `${result.extract.docsScanned} docs`);
-  // Close any steps that didn't get a callback (e.g. empty repo, no docs).
-  if (!extractStarted) {
-    tracker?.done('discover', `${result.extract.docsScanned} docs`);
-    tracker?.start('extract');
-  }
-  if (!mergeStarted) {
-    tracker?.done('extract', `${result.extract.claims.length} claims`);
-    tracker?.start('merge');
-  }
-  if (!materializeStarted) {
-    tracker?.done(
-      'merge',
-      `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
-    );
-    tracker?.start('materialize');
-  } else {
-    tracker?.detail(
-      'merge',
-      `${result.merge.openConflicts.length} open · ${result.merge.resolvedClaims.length + result.merge.decidedConflicts.length} resolved`,
-    );
-  }
-  tracker?.done(
-    'materialize',
-    result.materialize
-      ? `${result.materialize.written.length} files written`
-      : 'skipped',
-  );
-
-  const scanState = buildScanState(result);
-  writeScanState(repoRoot, scanState);
-
-  // Stamp the apply marker so the dashboard's staleness endpoint can
-  // tell when decisions.json drifts past the last materialize. Only
-  // stamp on a clean run (no open conflicts and no materialize
-  // failures) — a partial Apply shouldn't claim "fresh."
-  const clean =
-    result.merge.openConflicts.length === 0 &&
-    (result.materialize?.failures.length ?? 0) === 0;
-  if (clean) {
-    stampAppliedMarker(repoRoot);
-  }
-
-  return { consolidate: result, scanState };
-}
-
-// ---------------------------------------------------------------------------
 // generateContractsInProcess — Module 2 IL extraction, decoupled from
-// the spec-apply pipeline. Same in-process pattern (shared between CLI
+// the spec-scan pipeline. Same in-process pattern (shared between CLI
 // and dashboard, driven by a tracker).
 // ---------------------------------------------------------------------------
 
 /**
- * Run Module 2's `generateContracts()` against the canonical spec on
- * disk. Returns a `kind: 'skipped'` result when the canonical isn't
- * there yet (caller should run `applyInProcess` first), `'extracted'`
- * on success (even when validation surfaced issues), and `'failed'`
- * when extraction threw.
+ * Run Module 2's `generateContracts()` against the canonical
+ * `claims.json` on disk. Returns a `kind: 'skipped'` result when the
+ * canonical isn't there yet (caller should run `scanInProcess` first),
+ * `'extracted'` on success (even when validation surfaced issues), and
+ * `'failed'` when extraction threw.
  */
 export async function generateContractsInProcess(
   repoRoot: string,
@@ -646,15 +590,19 @@ export async function generateContractsInProcess(
   };
 
   try {
+    const extractModels = resolveExtractModels(repoRoot);
     const il = await generateContracts({
       repoRoot,
       runner: spawnExtractorRunner({
         concurrency: defaultExtractorConcurrency(),
+        model: extractModels.extract,
+        fallbackModel: extractModels.fallback,
         onSliceDone: () => {
           slicesDone++;
           tracker?.detail('il', renderIlDetail());
         },
       }),
+      models: extractModels,
       onSlicesReady: (total) => {
         slicesTotal = total;
         tracker?.detail('il', renderIlDetail());
@@ -679,8 +627,8 @@ export async function generateContractsInProcess(
           : `${slicesSuffix}${wrote} files`
         : `${slicesSuffix}${wrote} files · ${issueCount} issue${issueCount === 1 ? '' : 's'}`,
     );
-    // Stamp the generate marker only when validation passed — issues
-    // mean the .tc corpus didn't fully land, so "fresh" would lie.
+    // Stamp only when validation passed; otherwise "fresh" would lie —
+    // the .tc corpus didn't fully land.
     if (issueCount === 0) {
       stampGeneratedMarker(repoRoot);
     }
@@ -739,9 +687,9 @@ export interface VerifyInProcessOptions {
 /**
  * Compare the canonical IL contracts against the code in `codeDir`
  * and persist the result to `.truecourse/.cache/verifier/`. Same
- * pattern as scanInProcess/applyInProcess: shared between CLI and
- * dashboard, drives a tracker through three phases (load contracts,
- * extract code-side operations, compare).
+ * pattern as scanInProcess: shared between CLI and dashboard, drives a
+ * tracker through three phases (load contracts, extract code-side
+ * operations, compare).
  */
 export async function verifyInProcess(
   repoRoot: string,
@@ -754,7 +702,7 @@ export async function verifyInProcess(
 
   if (!fs.existsSync(contractsDir)) {
     const err = new Error(
-      `Contracts directory not found at ${contractsDir}. Run \`truecourse spec apply\` first.`,
+      `Contracts directory not found at ${contractsDir}. Run \`truecourse contracts generate\` first.`,
     );
     tracker?.error('load', err.message);
     throw err;

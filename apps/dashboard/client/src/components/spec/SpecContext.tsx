@@ -1,7 +1,7 @@
 /**
  * Shared state for the Spec tab. The list (sidebar) and the detail
  * (main content) live in different parts of the React tree, so we
- * hoist scan/decision/apply state into context so both can read and
+ * hoist scan + decision state into context so both can read and
  * mutate it.
  *
  * On mount: hydrate from the persisted `scan-state.json` via
@@ -21,7 +21,6 @@ import {
 import { toast } from 'sonner';
 import * as api from '@/lib/api';
 import type {
-  SpecApplyResponse,
   SpecConflict,
   SpecResolution,
   SpecScanResponse,
@@ -31,14 +30,12 @@ export interface SpecContextValue {
   scan: SpecScanResponse | null;
   hydrating: boolean;
   loading: boolean;
-  applying: boolean;
   error: string | null;
-  applyResult: SpecApplyResponse | null;
   busyConflictId: string | null;
   /**
-   * Bumped every time the canonical spec is rewritten (after Apply).
-   * Components that fetch the canonical tree treat this as a cache
-   * key in their useEffect deps so they re-fetch automatically.
+   * Bumped every time the scan completes. Components that fetch the
+   * canonical tree treat this as a cache key in their useEffect deps
+   * so they re-fetch automatically.
    */
   canonicalVersion: number;
   /** Run a fresh scan. */
@@ -57,8 +54,6 @@ export interface SpecContextValue {
   markSuperseded: (older: string, newer: string, note?: string) => Promise<void>;
   /** Force-include a doc the LLM relevance filter marked as skipped. */
   includeDoc: (docPath: string) => Promise<void>;
-  /** Write the canonical spec + run IL extraction. */
-  apply: () => Promise<void>;
 }
 
 const SpecContext = createContext<SpecContextValue | null>(null);
@@ -73,9 +68,7 @@ export function SpecProvider({
   const [scan, setScan] = useState<SpecScanResponse | null>(null);
   const [hydrating, setHydrating] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [applyResult, setApplyResult] = useState<SpecApplyResponse | null>(null);
   const [busyConflictId, setBusyConflictId] = useState<string | null>(null);
   const [canonicalVersion, setCanonicalVersion] = useState(0);
 
@@ -102,6 +95,9 @@ export function SpecProvider({
     try {
       const r = await api.getSpecScan(repoId);
       setScan(r);
+      // Scan rewrites claims.json — bump the version so any consumer
+      // of the canonical tree re-fetches.
+      setCanonicalVersion((v) => v + 1);
     } catch (e) {
       reportError('Spec scan failed', e, setError);
     } finally {
@@ -185,36 +181,12 @@ export function SpecProvider({
     [repoId, refresh],
   );
 
-  const apply = useCallback(async () => {
-    setApplying(true);
-    setError(null);
-    try {
-      const r = await api.postSpecApply(repoId);
-      setApplyResult(r);
-      // The apply route returns a fresh scan-state — adopt it
-      // directly instead of calling `refresh()`, which would fire a
-      // second `GET /spec/scan` and surface a second progress popup
-      // right after the result toast.
-      setScan(r.scanState);
-      // Canonical files were just rewritten — bump the version so
-      // SpecCanonicalPanel re-fetches the tree on its next mount /
-      // effect run.
-      setCanonicalVersion((v) => v + 1);
-    } catch (e) {
-      reportError('Apply failed', e, setError);
-    } finally {
-      setApplying(false);
-    }
-  }, [repoId]);
-
   const value = useMemo<SpecContextValue>(
     () => ({
       scan,
       hydrating,
       loading,
-      applying,
       error,
-      applyResult,
       busyConflictId,
       canonicalVersion,
       refresh,
@@ -223,15 +195,12 @@ export function SpecProvider({
       revokeDecision,
       markSuperseded,
       includeDoc,
-      apply,
     }),
     [
       scan,
       hydrating,
       loading,
-      applying,
       error,
-      applyResult,
       busyConflictId,
       canonicalVersion,
       refresh,
@@ -240,7 +209,6 @@ export function SpecProvider({
       revokeDecision,
       markSuperseded,
       includeDoc,
-      apply,
     ],
   );
 

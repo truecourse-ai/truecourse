@@ -28,7 +28,6 @@ import {
 import {
   runSpecScan,
   runSpecResolve,
-  runSpecApply,
   runSpecStatus,
   runVerify,
 } from "./commands/spec.js";
@@ -49,6 +48,7 @@ import {
   runSpecDocsInclude,
   runSpecDocsUninclude,
 } from "./commands/spec-docs.js";
+import { runConfigLlmShow } from "./commands/config.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
 import {
   runHooksInstall,
@@ -229,13 +229,6 @@ specCmd
   });
 
 specCmd
-  .command("apply")
-  .description("Write .truecourse/specs/ from current decisions")
-  .action(async () => {
-    await runSpecApply();
-  });
-
-specCmd
   .command("status")
   .description("Summary of docs, claims, modules, and pending decisions")
   .action(async () => {
@@ -261,8 +254,12 @@ conflictsCmd
   .command("show <id>")
   .description("Show full detail for one conflict")
   .option("--json", "Emit a JSON document on stdout for agent consumption")
+  .option(
+    "--diff",
+    "Include precomputed field-level diffs (paths + values) between candidates",
+  )
   .action(async (id, opts) => {
-    await runSpecConflictsShow(id, { json: !!opts.json });
+    await runSpecConflictsShow(id, { json: !!opts.json, diff: !!opts.diff });
   });
 
 conflictsCmd
@@ -430,6 +427,25 @@ rulesCmd
   .description("Clear per-rule overrides (one rule, or all if no key given)")
   .action(async (ruleKey?: string) => {
     await runRulesReset({ ruleKey });
+  });
+
+// Per-repo configuration — today the only surface is the LLM model
+// resolution view. Writes happen via env vars or by hand-editing
+// `.truecourse/config.json#llm`.
+const configCmd = program
+  .command("config")
+  .description("Inspect per-repo TrueCourse configuration");
+
+const configLlmCmd = configCmd
+  .command("llm")
+  .description("LLM model configuration for the current repo");
+
+configLlmCmd
+  .command("show")
+  .description("Print the effective model resolution for every pipeline stage")
+  .option("--json", "Emit a single JSON document")
+  .action(async (options: { json?: boolean }) => {
+    await runConfigLlmShow({ json: !!options.json });
   });
 
 // Telemetry management

@@ -10,10 +10,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./slicer": {
-      "types": "./dist/slicer.d.ts",
-      "import": "./dist/slicer.js"
-    },
     "./cache": {
       "types": "./dist/cache.d.ts",
       "import": "./dist/cache.js"
@@ -54,6 +50,7 @@
   },
   "dependencies": {
     "@truecourse/contract-verifier": "workspace:*",
+    "@truecourse/spec-consolidator": "workspace:*",
     "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
     "zod": "^3.23.8"

@@ -1,36 +1,51 @@
 /**
- * Right-pane viewer for a single canonical spec file.
- * `.md` files render as markdown; `.yaml` (and anything else) renders
- * as a syntax-flat code block.
+ * Right-pane viewer for a single canonical section. A "section" is a
+ * `(module, topic)` slice of `claims.json` — endpoints, auth, errors,
+ * etc. The viewer fetches the structured claims for that section and
+ * renders them as a deterministic markdown view on the client.
+ *
+ * The "path" string is `<module>/<topic>` for tab plumbing parity with
+ * the old file-based canonical viewer. Each claim is rendered with its
+ * subject + structured content + provenance.
  */
 
 import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import * as api from '@/lib/api';
+import type { CanonicalSpecSection, SpecClaim } from '@/lib/api';
 import { FileBreadcrumb } from '@/components/code/FileBreadcrumb';
 import { useSpec } from './SpecContext';
 
 interface SpecCanonicalFileProps {
   repoId: string;
+  /** `<module>/<topic>` identifier. */
   filePath: string;
 }
 
 export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) {
-  const [content, setContent] = useState<string | null>(null);
+  const [section, setSection] = useState<CanonicalSpecSection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { canonicalVersion } = useSpec();
+
+  const [moduleName, topic] = splitPath(filePath);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setContent(null);
+    setSection(null);
+    if (!moduleName || !topic) {
+      setError('Invalid section path.');
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
     api
-      .getSpecCanonicalFile(repoId, filePath)
-      .then((f) => {
-        if (!cancelled) setContent(f.content);
+      .getSpecCanonicalSection(repoId, moduleName, topic)
+      .then((s) => {
+        if (!cancelled) setSection(s);
       })
       .catch((e) => {
         if (!cancelled) setError((e as Error).message);
@@ -41,9 +56,7 @@ export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) 
     return () => {
       cancelled = true;
     };
-  }, [repoId, filePath, canonicalVersion]);
-
-  const isMarkdown = filePath.endsWith('.md');
+  }, [repoId, moduleName, topic, canonicalVersion]);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -58,62 +71,65 @@ export function SpecCanonicalFile({ repoId, filePath }: SpecCanonicalFileProps) 
             <AlertCircle className="h-5 w-5 text-destructive" />
             <span>{error}</span>
           </div>
-        ) : content == null ? null : isMarkdown ? (
-          <div className="mx-auto max-w-4xl text-sm text-foreground">
-            <FileMarkdown source={content} />
-          </div>
-        ) : (
-          <pre className="mx-auto max-w-4xl overflow-auto rounded border border-border bg-muted/30 p-3 font-mono text-xs text-muted-foreground">
-            {content}
-          </pre>
-        )}
+        ) : section ? (
+          <SectionView section={section} />
+        ) : null}
       </div>
     </div>
   );
 }
 
-function FileMarkdown({ source }: { source: string }) {
+function SectionView({ section }: { section: CanonicalSpecSection }) {
+  const manifest = section.manifest;
+  const status = typeof manifest.status === 'string' ? (manifest.status as string) : null;
+  const description = typeof manifest.description === 'string' ? (manifest.description as string) : null;
   return (
-    <ReactMarkdown
-      components={{
-        h1: ({ children }) => <h1 className="mb-3 mt-2 text-xl font-bold">{children}</h1>,
-        h2: ({ children }) => <h2 className="mb-2 mt-4 text-lg font-semibold">{children}</h2>,
-        h3: ({ children }) => <h3 className="mb-2 mt-3 text-base font-semibold">{children}</h3>,
-        h4: ({ children }) => <h4 className="mb-1 mt-2 text-sm font-semibold">{children}</h4>,
-        p: ({ children }) => <p className="mb-3 leading-relaxed">{children}</p>,
-        ul: ({ children }) => <ul className="mb-3 list-disc pl-5">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-3 list-decimal pl-5">{children}</ol>,
-        li: ({ children }) => <li className="mb-1">{children}</li>,
-        code: ({ children }) => (
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">{children}</code>
-        ),
-        pre: ({ children }) => (
-          <pre className="my-3 overflow-auto rounded border border-border bg-muted/40 p-3 font-mono text-xs">{children}</pre>
-        ),
-        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-        em: ({ children }) => <em className="italic">{children}</em>,
-        a: ({ children, href }) => (
-          <a href={href} target="_blank" rel="noreferrer" className="text-primary underline">
-            {children}
-          </a>
-        ),
-        blockquote: ({ children }) => (
-          <blockquote className="my-3 border-l-2 border-border pl-3 italic text-muted-foreground">
-            {children}
-          </blockquote>
-        ),
-        table: ({ children }) => (
-          <div className="my-3 overflow-auto rounded border border-border">
-            <table className="w-full border-collapse text-xs">{children}</table>
-          </div>
-        ),
-        th: ({ children }) => (
-          <th className="border-b border-border bg-muted/40 px-2 py-1 text-left font-semibold">{children}</th>
-        ),
-        td: ({ children }) => <td className="border-b border-border/60 px-2 py-1">{children}</td>,
-      }}
-    >
-      {source}
-    </ReactMarkdown>
+    <div className="text-sm text-foreground">
+      <h1 className="mb-2 text-xl font-bold">
+        {section.module} — {section.topic}
+      </h1>
+      <div className="mb-4 text-xs text-muted-foreground">
+        {status && <span className="mr-3">status: {status}</span>}
+        <span>{section.claims.length} claim{section.claims.length === 1 ? '' : 's'}</span>
+      </div>
+      {description && <p className="mb-4 text-sm text-muted-foreground">{description}</p>}
+      {section.claims.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No claims in this section.</p>
+      ) : (
+        section.claims.map((c) => <ClaimCard key={c.id} claim={c} />)
+      )}
+    </div>
   );
+}
+
+function ClaimCard({ claim }: { claim: SpecClaim }) {
+  return (
+    <div className="mb-4 rounded border border-border bg-card/40 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="font-mono text-sm font-semibold">{claim.subject}</span>
+        {claim.metadata.status && (
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            {claim.metadata.status}
+          </span>
+        )}
+        {claim.kind === 'constraint' && (
+          <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-sky-600 dark:text-sky-300">
+            constraint
+          </span>
+        )}
+      </div>
+      <pre className="my-2 overflow-auto rounded border border-border/60 bg-muted/30 p-2 font-mono text-[11px] text-foreground">
+        {JSON.stringify(claim.content, null, 2)}
+      </pre>
+      <div className="text-[11px] text-muted-foreground">
+        Source: <span className="font-mono">{claim.provenance.file}:{claim.provenance.line}</span>
+      </div>
+    </div>
+  );
+}
+
+function splitPath(p: string): [string, string] {
+  const idx = p.indexOf('/');
+  if (idx === -1) return [p, ''];
+  return [p.slice(0, idx), p.slice(idx + 1)];
 }

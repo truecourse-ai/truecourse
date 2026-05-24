@@ -2,20 +2,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import yaml from 'js-yaml';
 import {
+  ClaimsFileSchema,
   consolidate,
+  readClaims,
   readDecisions,
   writeDecisions,
   candidateFingerprint,
   type BlockRunner,
-  type SectionRunner,
   type DecisionsFile,
   type LlmExtraction,
 } from '../../packages/spec-consolidator/src/index.js';
 
 /**
- * End-to-end orchestrator tests. Both runners are stubbed so the
+ * End-to-end orchestrator tests. The block runner is stubbed so the
  * suite is deterministic and free of LLM cost. The fixture is a
  * mini multi-doc layout that exercises:
  *
@@ -23,9 +23,9 @@ import {
  *   - per-block extraction populating Claims
  *   - merge collapsing duplicates
  *   - merge surfacing a real conflict (two PRDs disagreeing)
- *   - decisions.json gating which content lands in canonical
+ *   - decisions.json gating which content lands in claims.json
  *   - module detection grouping endpoints under a name
- *   - materialization writing the expected file tree
+ *   - claims.json write at the end of consolidate()
  *   - cache hits on a second run
  */
 
@@ -51,18 +51,6 @@ function blockRunner(reply: (block: import('../../packages/spec-consolidator/src
     blocks.map((block) => ({
       block,
       extraction: reply(block),
-      durationMs: 1,
-    }));
-}
-
-/** Echo-style section runner — produces deterministic markdown the test asserts on. */
-function sectionRunner(): SectionRunner {
-  return async (sections) =>
-    sections.map((s) => ({
-      module: s.module,
-      topic: s.topic,
-      fileName: s.fileName,
-      markdown: `# ${s.topic} (${s.module})\n\n${s.claims.map((c) => `- ${c.subject}`).join('\n')}\n`,
       durationMs: 1,
     }));
 }
@@ -147,18 +135,26 @@ function makeRunner(): BlockRunner {
   });
 }
 
+const PIPELINE_OFF = {
+  disableLlmChainDetection: true,
+  disableChainRecheck: true,
+  disableConflictExplanations: true,
+  disableConflictResolution: true,
+  disableRelevanceFilter: true,
+} as const;
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('consolidate — scan mode', () => {
-  it('returns conflicts but does not write the canonical spec', async () => {
+describe('consolidate — scan', () => {
+  it('returns conflicts and writes a claims.json snapshot', async () => {
     buildMiniRepo();
     const result = await consolidate(repo, {
-      materialize: false,
       blockRunner: makeRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
 
     // Two conflicts now: the version chain (filename-detected
     // PRDv1 → PRDv2) and the orders content conflict (200 vs 201).
@@ -169,21 +165,162 @@ describe('consolidate — scan mode', () => {
     expect(subjects.some((s) => s.startsWith('version chain:'))).toBe(true);
 
     expect(result.merge.resolvedClaims.some((c) => c.subject === 'GET /health')).toBe(true);
-    // No canonical spec written.
-    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules'))).toBe(false);
+
+    // claims.json was written at the canonical path.
+    const claimsFile = path.join(repo, '.truecourse/specs/claims.json');
+    expect(fs.existsSync(claimsFile)).toBe(true);
+    const parsed = ClaimsFileSchema.parse(JSON.parse(fs.readFileSync(claimsFile, 'utf-8')));
+    expect(parsed.claims.some((c) => c.subject === 'GET /health')).toBe(true);
+    // The pre-resolution snapshot only carries singletons + auto-merged
+    // claims; the unresolved POST conflict has no entry yet.
+    expect(parsed.claims.some((c) => c.subject === 'POST /api/v1/orders')).toBe(false);
+  });
+
+  it('auto-resolves chains where every older candidate has 0 extractable claims', async () => {
+    // Two PRDs: v1 is prose that yields NO claims, v2 yields one.
+    // Filename versioning makes them a chain. With no claims at stake
+    // on v1, the chain shouldn't block the user.
+    place(
+      'docs/PRDs/backend_PRDv1.md',
+      ['# Backend PRD v1', '', 'Discussion-only — no extractable claims here yet.'].join('\n'),
+    );
+    place(
+      'docs/PRDs/backend_PRDv2.md',
+      [
+        '# Backend PRD v2',
+        '## API Endpoints',
+        '',
+        '### POST /api/v1/orders',
+        'Create an order. Returns 201 Created.',
+      ].join('\n'),
+    );
+    fs.utimesSync(path.join(repo, 'docs/PRDs/backend_PRDv1.md'), new Date(OLDER), new Date(OLDER));
+    fs.utimesSync(path.join(repo, 'docs/PRDs/backend_PRDv2.md'), new Date(NEWER), new Date(NEWER));
+
+    // Runner: v1 returns nothing; v2 returns the orders claim.
+    const runner: BlockRunner = blockRunner((block) => {
+      if (block.filePath.includes('PRDv1.md')) return { topics: [], claims: [] };
+      if (block.headingPath.at(-1) === 'POST /api/v1/orders') {
+        return {
+          topics: ['endpoints'],
+          claims: [
+            {
+              topic: 'endpoints',
+              subject: 'POST /api/v1/orders',
+              content: { method: 'POST', path: '/api/v1/orders', responses: { '201': {} } },
+              kind: 'definition',
+            },
+          ],
+        };
+      }
+      return { topics: [], claims: [] };
+    });
+
+    const result = await consolidate(repo, {
+      blockRunner: runner,
+      skipGit: true,
+      ...PIPELINE_OFF,
+    });
+
+    // The chain ends up DECIDED, not open. Picking the newest is the
+    // implicit decision and the note explains why.
+    expect(result.merge.openConflicts.some((c) => c.subject.startsWith('version chain:'))).toBe(false);
+    const decidedChain = result.merge.decidedConflicts.find((d) =>
+      d.conflict.subject.startsWith('version chain:'),
+    );
+    expect(decidedChain).toBeDefined();
+    expect(decidedChain?.decision.resolution).toEqual({
+      kind: 'pick',
+      candidateIndex: decidedChain!.conflict.candidates.length - 1,
+    });
+    expect(decidedChain?.decision.candidateFingerprint).toBe('auto-zero-claim-chain');
+    expect(decidedChain?.decision.note).toMatch(/no extractable claims/i);
   });
 });
 
-describe('consolidate — apply mode', () => {
-  it('writes the canonical spec file tree honoring decisions.json', async () => {
+describe('consolidate — LLM conflict resolver', () => {
+  it('auto-applies high-confidence resolutions and leaves low-confidence open', async () => {
     buildMiniRepo();
+    // Custom resolver: returns 'high' on the orders conflict, 'low' on
+    // the version-chain (so the chain stays open with reasoning).
+    const resolverRunner: import('../../packages/spec-consolidator/src/index.js').ConflictResolverRunner = async ({ conflict }) => {
+      if (conflict.subject.startsWith('version chain:')) {
+        return { pick: conflict.defaultPick, confidence: 'low', reasoning: 'true trade-off; needs human' };
+      }
+      return { pick: 1, confidence: 'high', reasoning: 'PRDv2 reflects the shipped 201 response' };
+    };
 
-    // First run: scan to discover the conflict ids.
-    const scan = await consolidate(repo, {
-      materialize: false,
+    const result = await consolidate(repo, {
       blockRunner: makeRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      disableLlmChainDetection: true,
+      disableChainRecheck: true,
+      disableConflictExplanations: true,
+      disableRelevanceFilter: true,
+      conflictResolverRunner: resolverRunner,
+    });
+
+    // The orders content conflict got auto-resolved → moved to decided.
+    const ordersDecided = result.merge.decidedConflicts.find(
+      (d) => d.conflict.subject === 'POST /api/v1/orders',
+    );
+    expect(ordersDecided).toBeDefined();
+    expect(ordersDecided?.decision.candidateFingerprint).toBe('auto-llm-resolve');
+    expect(ordersDecided?.decision.resolution).toEqual({ kind: 'pick', candidateIndex: 1 });
+    expect(ordersDecided?.autoResolution).toEqual({
+      by: 'llm',
+      confidence: 'high',
+      reasoning: 'PRDv2 reflects the shipped 201 response',
+    });
+
+    // The chain conflict stayed open, with the resolver's reasoning
+    // REPLACING the explainer text (medium/low confidence path).
+    const chainOpen = result.merge.openConflicts.find((c) => c.subject.startsWith('version chain:'));
+    expect(chainOpen).toBeDefined();
+    expect(chainOpen?.explanation).toBe('true trade-off; needs human');
+    expect(chainOpen?.resolverVerdict).toEqual({
+      confidence: 'low',
+      reasoning: 'true trade-off; needs human',
+      pick: chainOpen!.defaultPick,
+    });
+  });
+
+  it('falls back to defaultPick + low confidence when the resolver returns an out-of-range pick', async () => {
+    buildMiniRepo();
+    const resolverRunner: import('../../packages/spec-consolidator/src/index.js').ConflictResolverRunner = async () => ({
+      pick: 99,
+      confidence: 'high',
+      reasoning: 'invalid',
+    });
+    const result = await consolidate(repo, {
+      blockRunner: makeRunner(),
+      skipGit: true,
+      disableLlmChainDetection: true,
+      disableChainRecheck: true,
+      disableConflictExplanations: true,
+      disableRelevanceFilter: true,
+      conflictResolverRunner: resolverRunner,
+    });
+    // Out-of-range pick is sanitized to defaultPick + low confidence
+    // → stays open (low never auto-applies), reasoning surfaces in the
+    // replaced explanation and on the structured verdict.
+    const orders = result.merge.openConflicts.find((c) => c.subject === 'POST /api/v1/orders');
+    expect(orders).toBeDefined();
+    expect(orders?.explanation ?? '').toMatch(/out-of-range/);
+    expect(orders?.resolverVerdict?.confidence).toBe('low');
+  });
+});
+
+describe('consolidate — claims.json after decisions', () => {
+  it('embeds resolved + decided picks (and drops superseded sources)', async () => {
+    buildMiniRepo();
+
+    // First scan to discover the conflict ids.
+    const scan = await consolidate(repo, {
+      blockRunner: makeRunner(),
+      skipGit: true,
+      ...PIPELINE_OFF,
+    });
     // Resolve every open conflict to its default pick. The chain
     // resolution (v2 supersedes v1) makes the content conflict
     // disappear because v1's claims are dropped before merging.
@@ -195,49 +332,39 @@ describe('consolidate — apply mode', () => {
         resolvedAt: '2026-05-01T00:00:00Z',
         candidateFingerprint: candidateFingerprint(c),
       })),
+      manualChains: [],
+      manualIncludes: [],
     };
     writeDecisions(repo, decisions);
 
-    // Second run: apply mode.
-    const apply = await consolidate(repo, {
-      materialize: true,
+    // Second run: same orchestrator, now with decisions on disk.
+    const second = await consolidate(repo, {
       blockRunner: makeRunner(),
-      sectionRunner: sectionRunner(),
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
 
-    expect(apply.merge.openConflicts).toEqual([]);
-    expect(apply.materialize?.failures).toEqual([]);
+    expect(second.merge.openConflicts).toEqual([]);
 
-    // Canonical spec landed.
-    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/orders/module.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/orders/endpoints.md'))).toBe(true);
-    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/health/module.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(repo, '.truecourse/specs/modules/health/endpoints.md'))).toBe(true);
+    // claims.json now contains the picked Order endpoint claim, and
+    // every claim is sourced from PRDv2 (PRDv1 was superseded).
+    const claims = readClaims(repo);
+    expect(claims).not.toBeNull();
+    const ordersClaim = claims!.claims.find((c) => c.subject === 'POST /api/v1/orders');
+    expect(ordersClaim).toBeDefined();
+    expect(ordersClaim?.module).toBe('orders');
+    expect(ordersClaim?.provenance.file).toBe('docs/PRDs/backend_PRDv2.md');
 
-    // With the chain resolved (v2 wins), v1's claims are dropped
-    // before merge. Both modules' manifests reflect v2 only.
-    const ordersManifest = yaml.load(
-      fs.readFileSync(path.join(repo, '.truecourse/specs/modules/orders/module.yaml'), 'utf-8'),
-    ) as Record<string, unknown>;
-    expect(ordersManifest.name).toBe('orders');
-    expect(ordersManifest.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
+    // health endpoint moved to its own module via the path-based
+    // module detector.
+    const healthClaim = claims!.claims.find((c) => c.subject === 'GET /health');
+    expect(healthClaim?.module).toBe('health');
 
-    const healthManifest = yaml.load(
-      fs.readFileSync(path.join(repo, '.truecourse/specs/modules/health/module.yaml'), 'utf-8'),
-    ) as Record<string, unknown>;
-    expect(healthManifest.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
-
-    // The orders endpoint section's content reflects what the section
-    // runner was given — and the merger fed it the picked v2 claim.
-    const md = fs.readFileSync(
-      path.join(repo, '.truecourse/specs/modules/orders/endpoints.md'),
-      'utf-8',
-    );
-    expect(md).toContain('POST /api/v1/orders');
-
-    // decisions.json mirrored into the spec tree.
-    expect(fs.existsSync(path.join(repo, '.truecourse/specs/decisions.json'))).toBe(true);
+    // Module manifests survive: each module shows up exactly once
+    // with the picked source on its sourceDocs.
+    const modulesByName = new Map(claims!.modules.map((m) => [m.name, m]));
+    expect(modulesByName.get('orders')?.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
+    expect(modulesByName.get('health')?.sourceDocs).toEqual(['docs/PRDs/backend_PRDv2.md']);
   });
 });
 
@@ -252,77 +379,35 @@ describe('consolidate — caching', () => {
     };
 
     await consolidate(repo, {
-      materialize: false,
       blockRunner: countingRunner,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
     const firstRunCalls = calls;
     expect(firstRunCalls).toBeGreaterThan(0);
 
     // Second run hits the cache for every block.
     calls = 0;
     await consolidate(repo, {
-      materialize: false,
       blockRunner: countingRunner,
       skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
+      ...PIPELINE_OFF,
+    });
     expect(calls).toBe(0);
   });
 
-  it('on a second apply, every section is a cache hit', async () => {
-    buildMiniRepo();
-
-    // First scan to surface the conflict and resolve it.
-    const scan = await consolidate(repo, {
-      materialize: false,
-      blockRunner: makeRunner(),
-      skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    const conflict = scan.merge.openConflicts[0];
-    writeDecisions(repo, {
-      version: 1,
-      decisions: [{
-        conflictId: conflict.id,
-        resolution: { kind: 'pick', candidateIndex: conflict.defaultPick },
-        resolvedAt: '2026-05-01T00:00:00Z',
-        candidateFingerprint: candidateFingerprint(conflict),
-      }],
-    });
-
-    let sectionCalls = 0;
-    const countingSection: SectionRunner = async (sections) => {
-      sectionCalls += sections.length;
-      return sectionRunner()(sections);
-    };
-
-    await consolidate(repo, {
-      materialize: true,
-      blockRunner: makeRunner(),
-      sectionRunner: countingSection,
-      skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    const firstApplyCalls = sectionCalls;
-    expect(firstApplyCalls).toBeGreaterThan(0);
-
-    // Second apply with the same inputs — section cache hits everywhere.
-    sectionCalls = 0;
-    await consolidate(repo, {
-      materialize: true,
-      blockRunner: makeRunner(),
-      sectionRunner: countingSection,
-      skipGit: true,
-      disableLlmChainDetection: true, disableChainRecheck: true, disableConflictExplanations: true, disableRelevanceFilter: true,    });
-    expect(sectionCalls).toBe(0);
-  });
-
-  it('editing a doc invalidates only that doc\'s blocks', async () => {
+  it("editing a doc invalidates only that doc's blocks", async () => {
     buildMiniRepo();
     let calls = 0;
     const counting: BlockRunner = async (blocks) => {
       calls += blocks.length;
       return makeRunner()(blocks);
     };
-    await consolidate(repo, { materialize: false, blockRunner: counting, skipGit: true });
+    await consolidate(repo, {
+      blockRunner: counting,
+      skipGit: true,
+      ...PIPELINE_OFF,
+    });
     const baseline = calls;
 
     // Edit only PRDv2 — PRDv1 blocks should still be cached.
@@ -330,7 +415,11 @@ describe('consolidate — caching', () => {
     fs.writeFileSync(v2, fs.readFileSync(v2, 'utf-8') + '\n\n## Appendix\nNew note.\n');
 
     calls = 0;
-    await consolidate(repo, { materialize: false, blockRunner: counting, skipGit: true });
+    await consolidate(repo, {
+      blockRunner: counting,
+      skipGit: true,
+      ...PIPELINE_OFF,
+    });
     // Some calls (the changed blocks) but strictly fewer than baseline.
     expect(calls).toBeGreaterThan(0);
     expect(calls).toBeLessThan(baseline);

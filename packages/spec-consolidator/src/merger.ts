@@ -62,6 +62,17 @@ export interface DecidedConflict {
   decision: Decision;
   /** Set when decision.kind === 'pick'. Absent when 'custom'. */
   resolvedClaim?: Claim;
+  /**
+   * Populated when the decision was synthesized by the LLM resolver.
+   * Carries the model's self-reported confidence + rationale so the
+   * dashboard can show "auto-resolved" affordances and let the user
+   * revoke / override.
+   */
+  autoResolution?: {
+    by: 'llm';
+    confidence: 'high' | 'medium' | 'low';
+    reasoning: string;
+  };
 }
 
 /**

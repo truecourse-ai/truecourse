@@ -20,6 +20,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { Conflict } from './types.js';
 import { cachePaths, ensureCacheDirs } from './cache.js';
+import { buildModelArgs } from './model-args.js';
 
 const CACHE_FILE = 'conflict-explanations.json';
 
@@ -38,6 +39,14 @@ export interface ConflictExplainerOptions {
   enabled?: boolean;
   /** Cap on concurrent LLM calls (default: 4). */
   concurrency?: number;
+  /** Model name forwarded to the default spawn runner. */
+  model?: string;
+  /** Fallback model forwarded to the default spawn runner. */
+  fallbackModel?: string;
+  /** Fires once before any explanation work begins. */
+  onStart?: (total: number) => void;
+  /** Fires once per conflict after the explanation completes (or is reused from cache / errors). */
+  onDone?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,8 +69,11 @@ export async function explainConflicts(
 ): Promise<void> {
   if (opts.enabled === false) return;
   if (conflicts.length === 0) return;
-  const runner = opts.runner ?? spawnConflictExplainerRunner();
+  const runner =
+    opts.runner ??
+    spawnConflictExplainerRunner({ model: opts.model, fallbackModel: opts.fallbackModel });
   const concurrency = opts.concurrency ?? 4;
+  opts.onStart?.(conflicts.length);
 
   // Hand-rolled limit (no need for an extra dep just for this).
   let active = 0;
@@ -71,6 +83,7 @@ export async function explainConflicts(
       while (active < concurrency && cursor < conflicts.length) {
         const conflict = conflicts[cursor++];
         if (conflict.explanation) {
+          opts.onDone?.();
           if (cursor >= conflicts.length && active === 0) resolve();
           continue;
         }
@@ -78,6 +91,7 @@ export async function explainConflicts(
         explainOne(repoRoot, conflict, runner)
           .catch(() => undefined)
           .finally(() => {
+            opts.onDone?.();
             active--;
             if (cursor >= conflicts.length && active === 0) resolve();
             else launch();
@@ -148,6 +162,59 @@ Rules:
   3. Stay specific to THIS conflict's substance. Don't add general advice.
   4. Mention what's lost if the user picks one candidate over another, when that information is in the content.`;
 
+/**
+ * Chain-conflict explainer: candidates aren't structured claim values
+ * — each candidate is an entire doc the model thinks supersedes the
+ * next. The reader already sees a "VERSION CHAIN" badge; the
+ * explanation's job is to say WHAT EACH DOC IS ABOUT and what changes
+ * between them, so the reader can decide whether the newer really
+ * replaces the older.
+ */
+export const CHAIN_EXPLAINER_SYSTEM_PROMPT = `You explain version-chain decisions in PLAIN ENGLISH.
+
+The user is looking at two (or more) whole documents that the system thinks form a version chain — one is a candidate successor of the other. They already know it's a chain (shown with a "VERSION CHAIN" badge). Your job is to help them decide which doc is canonical by summarizing what each doc covers and what materially changes between them.
+
+INPUT: a conflict with N candidates ordered oldest → newest. Each candidate is a whole doc with:
+  - source file path + base name
+  - doc kind (PRD, ADR, README, runbook, design-note, …)
+  - last touched timestamp
+  - how many claims that doc contributed to the corpus
+  - which topics those claims cover (auth / endpoints / data / errors / effects / overview)
+  - up to 8 representative claim subjects from that doc
+  - a free-text preview of the doc's opening
+
+OUTPUT: 2–4 short sentences in plain English, structured as:
+
+  1. What the older doc is about (one sentence — its scope or intent).
+  2. What the newer doc adds, removes, or changes (one or two sentences — be concrete).
+  3. The practical implication of picking the newer (or merging) — what specifically gets dropped if the older is superseded.
+
+Examples of good output:
+
+  "PRD_DATA_COMPLIANCE_V1.md is a prototype spec — a CSV-backed dashboard with no auth and a frontend-only stack. backend_PRDv2.md, dated 5 days later, replaces it with a real RDS backend, Auth0 JWTs across /api/*, and three new endpoints (/api/v1/infractions, /api/v1/signatures, /api/v1/jobs). Picking V2 drops V1's 12 'no-auth' and 'CSV-only' claims; merging keeps both definitions in tension."
+
+  "auth.md is the design-note Q&A on session storage; auth_v2.md is the ADR adopting Auth0. The ADR adds the JWT scheme, /health bypass, and 401-on-missing-token contract; the design-note is a discussion thread without binding decisions. Picking auth_v2 drops the older Q&A's 4 deliberation claims; the ADR's 9 claims become canonical."
+
+Rules:
+
+  1. Output ONLY the prose. No prefix like "Explanation:". No code blocks. No lists. No headings.
+  2. 2–4 sentences total.
+  3. Always name doc filenames (e.g. "PRD_DATA_COMPLIANCE_V1.md") so the reader can find them.
+  4. When claimCount or topic stats are 0 / missing for one side, say so plainly ("V1 contributed no extractable claims — only narrative prose").
+  5. If the reason both docs were chained isn't obvious from the previews (no explicit "supersedes" wording, no filename versioning), acknowledge that ("the link is inferred from topic overlap, not stated explicitly").
+  6. Never speculate about content that isn't in the input. If the preview is too short to tell, say "preview is too brief to compare in detail."`;
+
+/**
+ * Chain conflicts are synthesized in the orchestrator with a
+ * `subject` that always starts with "version chain:" and candidates
+ * whose claim.id starts with "version-chain:". Either signal works;
+ * the subject is what humans see, so we use that.
+ */
+export function isChainConflict(conflict: Conflict): boolean {
+  if (conflict.subject.startsWith('version chain:')) return true;
+  return conflict.candidates[0]?.claim.id.startsWith('version-chain:') ?? false;
+}
+
 function buildExplainerUserPrompt(conflict: Conflict): string {
   const parts: string[] = [];
   parts.push(`Conflict subject: ${conflict.subject}`);
@@ -171,6 +238,51 @@ function buildExplainerUserPrompt(conflict: Conflict): string {
   return parts.join('\n');
 }
 
+interface ChainCandidateContent {
+  file?: string;
+  detectedFrom?: 'filename' | 'llm' | 'manual';
+  preview?: string;
+  claimCount?: number;
+  topics?: Record<string, number>;
+  subjects?: string[];
+}
+
+function buildChainExplainerUserPrompt(conflict: Conflict): string {
+  const parts: string[] = [];
+  parts.push(`Version-chain decision: ${conflict.subject}`);
+  parts.push(`Candidates: ${conflict.candidates.length} (ordered oldest → newest)`);
+  parts.push('');
+  for (let i = 0; i < conflict.candidates.length; i++) {
+    const c = conflict.candidates[i];
+    const claim = c.claim;
+    const content = (claim.content ?? {}) as ChainCandidateContent;
+    const filePath = content.file ?? claim.provenance.file;
+    const basename = filePath.split('/').pop() ?? filePath;
+    parts.push(`--- candidate ${i + 1} (${c.weight}) ---`);
+    parts.push(`source: ${filePath} (${basename})`);
+    parts.push(`docKind: ${claim.metadata.docKind}`);
+    parts.push(`lastTouched: ${claim.metadata.lastTouched}`);
+    parts.push(`chain detected from: ${content.detectedFrom ?? 'unknown'}`);
+    parts.push(`claimCount: ${content.claimCount ?? 0}`);
+    if (content.topics && Object.keys(content.topics).length > 0) {
+      parts.push(`topic breakdown: ${JSON.stringify(content.topics)}`);
+    }
+    if (content.subjects && content.subjects.length > 0) {
+      parts.push(`sample subjects: ${content.subjects.join(' / ')}`);
+    }
+    if (content.preview) {
+      const trimmed = content.preview.split('\n').slice(0, 30).join('\n');
+      parts.push('preview:');
+      parts.push(trimmed);
+    }
+    parts.push('');
+  }
+  parts.push(
+    'Write the 2–4 sentence plain-English explanation now. Cover what each doc is about, what changes between them, and what gets dropped if the newer supersedes the older.',
+  );
+  return parts.join('\n');
+}
+
 function truncateJson(value: unknown, max = 1500): string {
   const s = JSON.stringify(value);
   if (s === undefined) return '(none)';
@@ -178,18 +290,23 @@ function truncateJson(value: unknown, max = 1500): string {
 }
 
 function spawnConflictExplainerRunner(
-  opts: { bin?: string; timeoutMs?: number } = {},
+  opts: { bin?: string; timeoutMs?: number; model?: string; fallbackModel?: string } = {},
 ): ConflictExplainerRunner {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
   const timeoutMs = opts.timeoutMs ?? 90_000;
+  const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   return (input: ConflictExplainerInput): Promise<string> => {
+    const chain = isChainConflict(input.conflict);
     const args = [
       '-p',
-      buildExplainerUserPrompt(input.conflict),
+      chain
+        ? buildChainExplainerUserPrompt(input.conflict)
+        : buildExplainerUserPrompt(input.conflict),
+      ...modelArgs,
       '--output-format',
       'json',
       '--append-system-prompt',
-      CONFLICT_EXPLAINER_SYSTEM_PROMPT,
+      chain ? CHAIN_EXPLAINER_SYSTEM_PROMPT : CONFLICT_EXPLAINER_SYSTEM_PROMPT,
       '--setting-sources',
       'project',
     ];
@@ -249,16 +366,22 @@ const ExplanationCacheFileSchema = z.object({
   ),
 });
 
-const PROMPT_FINGERPRINT = createHash('sha256')
+const CONTENT_PROMPT_FINGERPRINT = createHash('sha256')
   .update(CONFLICT_EXPLAINER_SYSTEM_PROMPT)
   .digest('hex')
   .slice(0, 16);
 
+const CHAIN_PROMPT_FINGERPRINT = createHash('sha256')
+  .update(CHAIN_EXPLAINER_SYSTEM_PROMPT)
+  .digest('hex')
+  .slice(0, 16);
+
 function computeCacheKey(conflict: Conflict): string {
+  const fp = isChainConflict(conflict)
+    ? CHAIN_PROMPT_FINGERPRINT
+    : CONTENT_PROMPT_FINGERPRINT;
   const ids = conflict.candidates.map((c) => c.claim.id).sort().join(',');
-  return createHash('sha256')
-    .update(`${PROMPT_FINGERPRINT}::${conflict.id}::${ids}`)
-    .digest('hex');
+  return createHash('sha256').update(`${fp}::${conflict.id}::${ids}`).digest('hex');
 }
 
 function cacheFile(repoRoot: string): string {

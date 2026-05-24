@@ -4,7 +4,7 @@
  * generate` run so unchanged slices avoid LLM calls; written when a
  * slice's content hash isn't already on disk.
  *
- * The cache is content-addressed via slice id (see `slicer.sliceHash`),
+ * The cache is content-addressed via slice id (see `claims-reader.sliceHash`),
  * so cache hits tolerate spec moves and repo renames as long as the
  * heading path + text are unchanged.
  *

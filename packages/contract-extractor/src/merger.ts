@@ -72,8 +72,20 @@ export function mergeRankedFragments(input: RankedFragment[]): MergeResult {
   const diagnostics: MergeDiagnostic[] = [];
 
   for (const [key, group] of groups) {
-    // Sort by rank descending; preserve insertion order on ties.
-    const sorted = [...group].sort((a, b) => b.rank - a.rank);
+    // Sort by rank descending. Within ties, break by structural
+    // specificity (see specificityScore) so an authoritative narrower
+    // fragment beats a fallback broader one when both came in at the
+    // same rank. Insertion order is the final tiebreaker.
+    const sorted = [...group]
+      .map((rf, originalIndex) => ({ rf, originalIndex }))
+      .sort((a, b) => {
+        if (b.rf.rank !== a.rf.rank) return b.rf.rank - a.rf.rank;
+        const scoreDiff =
+          specificityScore(b.rf.fragment) - specificityScore(a.rf.fragment);
+        if (scoreDiff !== 0) return scoreDiff;
+        return a.originalIndex - b.originalIndex;
+      })
+      .map((entry) => entry.rf);
     const top = sorted[0];
 
     // Same-rank conflicts: any other fragment at the top rank whose
@@ -131,4 +143,45 @@ export function mergeFragments(fragments: Fragment[]): MergeResult {
 
 function sourceLabel(f: Fragment): string {
   return `${f.origin.source}#${f.origin.lines.join('-')}`;
+}
+
+/**
+ * Rough structural-specificity score for tiebreaking when two
+ * fragments share `(kind, identity)` and rank. Higher = more specific.
+ *
+ * The signals are deliberately conservative — we want to prefer
+ * fragments that the verifier can actually act on (enumerated
+ * operations, concrete responses, explicit error codes) over fragments
+ * that fall back to broad wildcards. Real-world example: the same
+ * `auth.role.admin` requirement extracted from two slices, one with
+ * `selector operations [Operation:"POST /api/customers"]` (precise),
+ * the other with `selector path-glob "/api/**"` (broad fallback). The
+ * verifier matches the broad one against every operation in the
+ * corpus, cascading false-positive drifts; the precise one fires only
+ * on the actually-gated route. Specificity wins.
+ *
+ * This is a fallback, not the primary signal — rank still dominates.
+ */
+function specificityScore(f: Fragment): number {
+  const src = f.tcSource;
+  let score = 0;
+  // Enumerated operation selectors are the most specific form a
+  // verifier can dispatch on.
+  if (/\bselector\s+operations\s*\[/.test(src)) score += 10;
+  // Exact-path selectors are next-most specific.
+  if (/\bselector\s+path-exact\s+"/.test(src)) score += 6;
+  // Narrow path globs beat universal ones.
+  if (/\bselector\s+path-glob\s+"/.test(src)) {
+    score += /\bselector\s+path-glob\s+"\/api\/(\*\*|\*)"/.test(src) ? 1 : 4;
+  }
+  // Specific HTTP status codes are more precise than status classes.
+  for (const m of src.matchAll(/\bresponse\s+(\d{3})\b/g)) score += 2;
+  for (const m of src.matchAll(/\bresponse\s+\dxx\b/g)) score += 1;
+  // Forbids clauses encode anti-spec — the verifier needs them to fire.
+  for (const m of src.matchAll(/\bforbid\b/g)) score += 1;
+  // `except` blocks narrow auth/authz selectors — concrete refinement.
+  if (/\bexcept\s*\{/.test(src)) score += 2;
+  // Cross-references signal connected, well-typed contracts.
+  for (const m of src.matchAll(/[A-Z][a-zA-Z]+:[A-Za-z0-9.\-]+/g)) score += 1;
+  return score;
 }

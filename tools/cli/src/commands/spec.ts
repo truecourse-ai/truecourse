@@ -1,12 +1,10 @@
 /**
  * `truecourse spec <subcommand>` — Spec Consolidation Module surface.
  *
- *   scan      docs → claims → conflicts; reports what's pending
+ *   scan      docs → claims → conflicts → claims.json
  *   resolve   batch-apply default picks (CLI fast-path; the dashboard
  *             is the primary review surface per Q8)
- *   apply     write `.truecourse/specs/` from current decisions
  *   status    summary: docs walked, claims, modules, pending vs decided
- *   diff      docs vs current canonical — what would change on apply
  *
  * Every command delegates the heavy lifting to
  * `@truecourse/core/commands/spec-in-process` so the CLI and the
@@ -18,14 +16,9 @@
 
 import * as p from "@clack/prompts";
 import path from "node:path";
-import {
-  specRootPath,
-  type Conflict,
-} from "@truecourse/spec-consolidator";
+import { type Conflict } from "@truecourse/spec-consolidator";
 import { StepTracker } from "@truecourse/core/progress";
 import {
-  applyInProcess,
-  APPLY_STEPS,
   RESOLVE_STEPS,
   resolveAllDefaultsInProcess,
   scanInProcess,
@@ -114,53 +107,8 @@ export async function runSpecResolve(opts: RunSpecResolveOptions = {}): Promise<
     p.outro(
       additions === 0
         ? "Nothing to resolve."
-        : "Done. Run `truecourse spec apply` to write the canonical spec.",
+        : "Done. Run `truecourse contracts generate` to produce TC contracts.",
     );
-  } catch (e) {
-    renderer.dispose();
-    p.cancel(`Failed: ${(e as Error).message}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// apply
-// ---------------------------------------------------------------------------
-
-export async function runSpecApply(opts: RunSpecOptions = {}): Promise<void> {
-  const root = repoRoot(opts);
-  p.intro("Spec apply");
-  const { renderer, tracker } = withTracker(APPLY_STEPS);
-  try {
-    const { consolidate } = await applyInProcess(root, { tracker });
-    renderer.dispose();
-
-    if (consolidate.merge.openConflicts.length > 0) {
-      p.log.warn(
-        `${consolidate.merge.openConflicts.length} open conflicts remain — partial canonical written.`,
-      );
-      p.log.message("Resolve them in the dashboard or via `spec resolve --all-defaults`, then re-apply.");
-    }
-
-    if (consolidate.materialize) {
-      p.log.step(
-        `written     ${consolidate.materialize.written.length} files under ${path.relative(root, specRootPath(root))}`,
-      );
-      if (consolidate.materialize.failures.length > 0) {
-        p.log.warn(`failures    ${consolidate.materialize.failures.length}`);
-        for (const f of consolidate.materialize.failures.slice(0, 5)) {
-          p.log.message(`  • ${f.section.module}/${f.section.fileName}: ${f.error}`);
-        }
-      }
-    }
-
-    if (
-      consolidate.merge.openConflicts.length === 0 &&
-      (consolidate.materialize?.failures.length ?? 0) === 0
-    ) {
-      p.outro("Canonical spec up to date. Run `truecourse contracts generate` to extract TC contracts.");
-    } else {
-      p.outro("Partial — resolve remaining conflicts.");
-    }
   } catch (e) {
     renderer.dispose();
     p.cancel(`Failed: ${(e as Error).message}`);
@@ -178,13 +126,14 @@ export async function runSpecStatus(opts: RunSpecOptions = {}): Promise<void> {
   try {
     const { consolidate } = await scanInProcess(root, { tracker });
     renderer.dispose();
-    const { extract, merge } = consolidate;
+    const { extract, merge, skippedDocs } = consolidate;
     const rows: Array<[string, string]> = [
       ["Docs scanned", String(extract.docsScanned)],
       ["Claims extracted", String(extract.claims.length)],
       ["Resolved (singletons + auto-merged)", String(merge.resolvedClaims.length)],
       ["Decided (user-resolved)", String(merge.decidedConflicts.length)],
       ["Open (pending decision)", String(merge.openConflicts.length)],
+      ["Skipped docs", String(skippedDocs?.length ?? 0)],
     ];
     for (const [k, v] of rows) p.log.step(`${k.padEnd(38)} ${v}`);
 
