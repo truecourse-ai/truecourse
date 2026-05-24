@@ -154,3 +154,13 @@ export function adjustPriority(a: number, b: number) {
   // VIOLATION: bugs/deterministic/confusing-increment-decrement
   return a + b++;
 }
+
+// Single-key error object with no description sibling — the receiver gets no
+// actionable detail beyond the generic phrase.
+// VIOLATION: code-quality/deterministic/missing-return-type
+// VIOLATION: code-quality/deterministic/missing-boundary-types
+function buildFailureResponse() {
+  // VIOLATION: bugs/deterministic/generic-error-message
+  return { error: 'Internal Server Error' };
+}
+void buildFailureResponse;
