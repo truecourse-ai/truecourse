@@ -33,6 +33,24 @@ export const magicStringVisitor: CodeRuleVisitor = {
           // framework API tokens, typeof return values, or status/kind discriminants —
           // not magic strings worth extracting to a constant.
           if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(inner)) return
+          // Short kebab-case identifier-like tokens used as call/new arguments
+          // (e.g. `.toString('utf-8')`, `useState('method-selection')`) are
+          // framework / API tokens, not domain strings worth extracting.
+          // Restrict to ≤2 hyphens so longer kebab-spelled phrases still fire,
+          // and to the call-argument position so kebab strings stored in
+          // variables still fire.
+          if (n.parent?.type === 'arguments'
+            && (n.parent.parent?.type === 'call_expression' || n.parent.parent?.type === 'new_expression')
+            && /^[A-Za-z_$][A-Za-z0-9_$-]*$/.test(inner)
+            && (inner.match(/-/g)?.length ?? 0) <= 2) return
+          // Skip strings used as object literal property keys
+          // (e.g. `{ 'Content-Type': 'application/json' }`) — the key
+          // names the slot, it is not a magic string worth extracting.
+          if (n.parent?.type === 'pair' && n.parent.childForFieldName('key')?.id === n.id) return
+          // Skip dotted-identifier strings (e.g. `'Envelope.id'`,
+          // `'User.email'`) — these are schema column / namespaced
+          // identifier references, not magic strings.
+          if (/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/.test(inner)) return
           // Only flag non-trivial strings
           if (inner.length >= MIN_LENGTH && /^[a-zA-Z]/.test(inner) && !inner.includes('${')) {
             const existing = counts.get(text) ?? []

@@ -14,6 +14,15 @@ export const asyncVoidFunctionVisitor: CodeRuleVisitor = {
     const parent = node.parent
     if (!parent || parent.type !== 'expression_statement') return null
 
+    // Honor an explicit `// eslint-disable-next-line …no-floating-promises`
+    // on the line above the statement. The author has acknowledged the
+    // floating promise (e.g. application entrypoints that fire-and-forget).
+    const startRow = parent.startPosition.row
+    if (startRow > 0) {
+      const prevLine = sourceCode.split('\n')[startRow - 1] ?? ''
+      if (/eslint-disable-next-line[^\n]*no-floating-promises/.test(prevLine)) return null
+    }
+
     // Skip when the unhandled async call is inside a useEffect/useLayoutEffect callback.
     // Pattern: useEffect(() => { asyncFn(); }) — this is the standard React pattern.
     const grandparent = parent.parent // statement_block (callback body)
