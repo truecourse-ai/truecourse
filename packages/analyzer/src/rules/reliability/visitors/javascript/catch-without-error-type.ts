@@ -1,4 +1,5 @@
 import type { CodeRuleVisitor } from '../../../types.js'
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import { makeViolation } from '../../../types.js'
 
 export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
@@ -34,6 +35,14 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
     )
     if (stmts.length <= 1) return null
 
+    // Skip uniform handlers: multi-statement bodies that contain no `if`
+    // / `switch` / ternary branching. UI error handlers in particular
+    // (`console.error(err); toast(...); throw err;`) handle every error
+    // the same way — log, surface a generic user message, optionally
+    // rethrow. No type discrimination would change behaviour, so flagging
+    // them is noise.
+    if (!hasBranchingConstruct(body)) return null
+
     return makeViolation(
       this.ruleKey, node, filePath, 'medium',
       'Catch without error type discrimination',
@@ -42,4 +51,23 @@ export const catchWithoutErrorTypeVisitor: CodeRuleVisitor = {
       'Use instanceof checks or type guards in the catch block to handle specific error types.',
     )
   },
+}
+
+function hasBranchingConstruct(node: SyntaxNode): boolean {
+  if (
+    node.type === 'if_statement' ||
+    node.type === 'switch_statement' ||
+    node.type === 'ternary_expression'
+  ) return true
+  if (
+    node.type === 'function_declaration' ||
+    node.type === 'function_expression' ||
+    node.type === 'arrow_function' ||
+    node.type === 'method_definition'
+  ) return false
+  for (let i = 0; i < node.childCount; i++) {
+    const ch = node.child(i)
+    if (ch && hasBranchingConstruct(ch)) return true
+  }
+  return false
 }

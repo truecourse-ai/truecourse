@@ -685,6 +685,12 @@
       "layer": "service"
     },
     {
+      "name": "classify",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "classifyRequest",
       "service": "utils",
       "kind": "standalone",
@@ -803,6 +809,12 @@
       "service": "utils",
       "kind": "standalone",
       "layer": "api"
+    },
+    {
+      "name": "dumpKeys",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "duplicate-string-error-message",
@@ -1045,6 +1057,12 @@
       "layer": "service"
     },
     {
+      "name": "readWithFallback",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "ReassignableClass",
       "service": "utils",
       "kind": "class",
@@ -1129,6 +1147,12 @@
       "layer": "service"
     },
     {
+      "name": "setEntry",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "SetterNoReturn",
       "service": "utils",
       "kind": "class",
@@ -1166,6 +1190,12 @@
     },
     {
       "name": "todoHandler",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "totalSummaryBytes",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
