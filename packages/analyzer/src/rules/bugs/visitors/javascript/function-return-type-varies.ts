@@ -20,6 +20,25 @@ function normalizeType(typeStr: string): string {
   return typeStr
 }
 
+/**
+ * Peel `expr as const`, `expr satisfies T`, `<T>expr`, and `(expr)` wrappers
+ * so callers can inspect the underlying expression (e.g. an object literal).
+ */
+function unwrapTypeAssertions(node: SyntaxNode): SyntaxNode {
+  let cur: SyntaxNode = node
+  while (
+    cur.type === 'as_expression' ||
+    cur.type === 'satisfies_expression' ||
+    cur.type === 'type_assertion' ||
+    cur.type === 'parenthesized_expression'
+  ) {
+    const inner = cur.namedChildren[0]
+    if (!inner) break
+    cur = inner
+  }
+  return cur
+}
+
 function collectReturnStatements(node: SyntaxNode): SyntaxNode[] {
   const returns: SyntaxNode[] = []
   function walk(n: SyntaxNode) {
@@ -106,15 +125,20 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
     }
     if (allReturnsAreCallsToSameFunction && returnCallNames.size === 1) return null
 
-    // Skip when all return expressions are object literals with the same set of keys
-    // (discriminated unions like {isNew: true} vs {isNew: false} are consistent shapes)
-    const allObjectLiterals = returnStmts.every(ret => {
-      const value = ret.namedChildren[0]
-      return value && value.type === 'object'
+    // Skip when all return expressions are object literals (possibly wrapped in
+    // `as const` / `satisfies T` / a type assertion / parens) with either:
+    //   - the same set of keys (e.g. `{isNew: true}` vs `{isNew: false}`)
+    //   - a shared discriminator key whose value is a literal in every return
+    //     (e.g. `{state: 'A', x}` vs `{state: 'B', y}` — TypeScript-style
+    //     discriminated union, by design has different payload keys per arm)
+    const objectLiterals = returnStmts.map(ret => {
+      const raw = ret.namedChildren[0]
+      return raw ? unwrapTypeAssertions(raw) : null
     })
+    const allObjectLiterals = objectLiterals.every(v => v !== null && v.type === 'object')
     if (allObjectLiterals && returnStmts.length >= 2) {
-      const keySets = returnStmts.map(ret => {
-        const value = ret.namedChildren[0]!
+      const objects = objectLiterals as SyntaxNode[]
+      const keySets = objects.map(value => {
         const keys: string[] = []
         for (let i = 0; i < value.namedChildCount; i++) {
           const prop = value.namedChild(i)
@@ -131,6 +155,32 @@ export const functionReturnTypeVariesVisitor: CodeRuleVisitor = {
       })
       const allSameKeys = keySets.every(k => k === keySets[0])
       if (allSameKeys) return null
+
+      // Discriminated-union check: collect property keys whose value is a primitive
+      // literal (string/number/boolean) in each return. If at least one such key
+      // is present in every return, that's the discriminator and the union is
+      // narrowable at call sites.
+      const literalKeysPerReturn = objects.map(value => {
+        const keys = new Set<string>()
+        for (let i = 0; i < value.namedChildCount; i++) {
+          const prop = value.namedChild(i)
+          if (prop?.type !== 'pair') continue
+          const key = prop.childForFieldName('key')
+          const val = prop.childForFieldName('value')
+          if (!key || !val) continue
+          if (val.type === 'string' || val.type === 'number' ||
+              val.type === 'true' || val.type === 'false') {
+            keys.add(key.text)
+          }
+        }
+        return keys
+      })
+      if (literalKeysPerReturn.every(s => s.size > 0)) {
+        const common = [...literalKeysPerReturn[0]].filter(k =>
+          literalKeysPerReturn.every(s => s.has(k)),
+        )
+        if (common.length > 0) return null
+      }
     }
 
     // Normalize void-like return types: void, Promise<void>, and undefined are semantically equivalent

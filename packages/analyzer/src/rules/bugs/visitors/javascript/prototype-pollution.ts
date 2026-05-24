@@ -28,9 +28,23 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
       if (objProp?.text === 'current') return null
     }
 
+    // Resolve `const typedKey = key (as T)?` chains so checks downstream see
+    // the underlying iteration / counter / param name. Example:
+    //   for (const key in obj) {
+    //     const typedKey = key as keyof Foo
+    //     out[typedKey] = ...        // ← `typedKey` resolves to `key`
+    //   }
+    const originalKeyName = index.text
+    const keyName = resolveKeyAliasChain(node, originalKeyName)
+
+    // Skip when the key is a module-level (or any scope) const declared with a
+    // primitive string-literal initializer — those values can never be
+    // `"__proto__"` etc. unless the developer literally wrote that string.
+    if (isKeyStringLiteralConst(node, keyName)) return null
+    if (originalKeyName !== keyName && isKeyStringLiteralConst(node, originalKeyName)) return null
+
     // Skip when the key comes from Object.entries(), Object.keys(), or for...in over a local object.
     // These iterate controlled mapping objects, not user input.
-    const keyName = index.text
     if (isKeyFromControlledIteration(node, keyName)) return null
 
     // Skip when the key was computed from a local helper call in the same
@@ -82,6 +96,109 @@ export const prototypePollutionVisitor: CodeRuleVisitor = {
       `Validate that \`${index.text}\` is not "__proto__", "constructor", or "prototype" before assignment, or use Map instead.`,
     )
   },
+}
+
+/**
+ * Walk `const newName = oldName (as T)?` chains and return the deepest
+ * underlying identifier. So `const typedKey = key as keyof Foo` resolves
+ * `typedKey` back to `key`, letting the rest of the visitor's heuristics
+ * recognise that the alias is bound to a controlled iteration variable.
+ */
+function resolveKeyAliasChain(assignmentNode: SyntaxNode, keyName: string): string {
+  let scope: SyntaxNode | null = assignmentNode.parent
+  while (scope) {
+    if (
+      scope.type === 'function_declaration' ||
+      scope.type === 'function_expression' ||
+      scope.type === 'arrow_function' ||
+      scope.type === 'method_definition' ||
+      scope.type === 'program'
+    ) break
+    scope = scope.parent
+  }
+  if (!scope) return keyName
+
+  const visited = new Set<string>()
+  let current = keyName
+  while (!visited.has(current)) {
+    visited.add(current)
+    const next = findAliasTarget(scope, current)
+    if (!next || next === current) break
+    current = next
+  }
+  return current
+}
+
+function findAliasTarget(scope: SyntaxNode, keyName: string): string | null {
+  let target: string | null = null
+  function walk(n: SyntaxNode): void {
+    if (target !== null) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'identifier' && name.text === keyName && value) {
+        let inner: SyntaxNode | null = value
+        while (
+          inner &&
+          (inner.type === 'as_expression' ||
+            inner.type === 'type_assertion' ||
+            inner.type === 'parenthesized_expression' ||
+            inner.type === 'satisfies_expression' ||
+            inner.type === 'non_null_expression')
+        ) {
+          inner = inner.namedChildren[0] ?? null
+        }
+        if (inner?.type === 'identifier') {
+          target = inner.text
+          return
+        }
+      }
+    }
+    if (
+      n !== scope &&
+      (n.type === 'function_declaration' ||
+        n.type === 'function_expression' ||
+        n.type === 'arrow_function' ||
+        n.type === 'method_definition')
+    ) return
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(scope)
+  return target
+}
+
+/**
+ * True if `keyName` is declared anywhere in the file as a `const` (or
+ * `let`/`var`) initialised directly from a primitive string literal. The
+ * value cannot become `"__proto__"`/`"constructor"`/`"prototype"` unless the
+ * developer literally wrote that string in the declarator, which is not the
+ * shape this rule is intended to catch.
+ */
+function isKeyStringLiteralConst(assignmentNode: SyntaxNode, keyName: string): boolean {
+  let root: SyntaxNode = assignmentNode
+  while (root.parent) root = root.parent
+
+  let found = false
+  function walk(n: SyntaxNode): void {
+    if (found) return
+    if (n.type === 'variable_declarator') {
+      const name = n.childForFieldName('name')
+      const value = n.childForFieldName('value')
+      if (name?.type === 'identifier' && name.text === keyName && value?.type === 'string') {
+        found = true
+        return
+      }
+    }
+    for (let i = 0; i < n.childCount; i++) {
+      const ch = n.child(i)
+      if (ch) walk(ch)
+    }
+  }
+  walk(root)
+  return found
 }
 
 /**
