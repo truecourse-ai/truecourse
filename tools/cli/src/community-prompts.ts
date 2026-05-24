@@ -15,7 +15,7 @@ import path from "node:path";
 import { getGlobalDir } from "@truecourse/core/config/paths";
 import { isInteractive } from "./commands/helpers.js";
 
-const DISCORD_URL = "https://discord.gg/8AYwf26A";
+const DISCORD_URL = "https://discord.gg/TanxB63arz";
 const GITHUB_URL = "https://github.com/truecourse-ai/truecourse";
 
 // OSC 8 hyperlinks would be ideal but width measurement counts the escape
