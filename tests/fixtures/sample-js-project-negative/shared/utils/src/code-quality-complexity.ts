@@ -336,3 +336,18 @@ export class Container {
     return 0;
   }
 }
+
+// Genuinely nested helper functions (not inline callbacks) — these should be
+// pulled out to module scope.
+function deepNestArrows() {
+  const outer = () => {
+    const middle = () => {
+      // VIOLATION: code-quality/deterministic/deeply-nested-functions
+      const inner = () => 'too deep';
+      return inner();
+    };
+    return middle();
+  };
+  return outer();
+}
+void deepNestArrows;
