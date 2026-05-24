@@ -13,6 +13,12 @@ import { makeViolation } from '../../../types.js'
 //       type ClaimFlags = TClaimFlags;       // ← required, not redundant
 //     }
 //   }
+const SEMANTIC_ALIAS_SUFFIX = /(?:Props|State|Settings|Options|Config|Context|Value|Data|Result|Response|Request|Action|Event|Handler|Provider)$/
+
+function hasSemanticSuffix(name: string): boolean {
+  return SEMANTIC_ALIAS_SUFFIX.test(name)
+}
+
 function isInsideNamespaceOrAmbient(node: SyntaxNode): boolean {
   let current: SyntaxNode | null = node.parent
   while (current) {
@@ -38,6 +44,20 @@ export const redundantTypeAliasVisitor: CodeRuleVisitor = {
 
     if (typeNode.type === 'type_identifier') {
       if (typeNode.text === nameNode.text) return null
+
+      // Exported aliases are semantic re-exports — the alias name is the
+      // public API of this module and exists to give consumers a stable
+      // import (e.g. `export type DocumentEmailSettings = TDocumentEmailSettings`).
+      // Collapsing to the source name would force every consumer to import
+      // through a deeper path, so the rename is meaningful, not redundant.
+      if (node.parent?.type === 'export_statement') return null
+
+      // React / TS structural-role suffixes (Props, State, Settings, ...)
+      // signal that the alias gives a domain-specific role to a generic
+      // type. The rename adds meaning even if the alias is local; flagging
+      // it adds noise without surfacing real cleanup wins.
+      if (hasSemanticSuffix(nameNode.text)) return null
+
       return makeViolation(
         this.ruleKey, node, filePath, 'low',
         'Redundant type alias',

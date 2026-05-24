@@ -21,6 +21,17 @@ export const readonlyParameterTypesVisitor: CodeRuleVisitor = {
   visit(node, filePath, sourceCode, _dataFlow, typeQuery?: TypeQueryService) {
     if (!typeQuery) return null
 
+    // Rest parameters bind a fresh local array per call, so the caller
+    // cannot observe any mutation through them — readonly adds no safety.
+    if (isRestParameter(node)) return null
+
+    // Function-type signatures (e.g. `onChange: (xs: T[]) => void` on an
+    // interface or type-alias member) describe a callback contract. The
+    // parameter list is a type position, not an actual function being
+    // defined, so the readonly convention belongs on the implementation,
+    // not on the contract.
+    if (node.parent?.parent?.type === 'function_type') return null
+
     const typeAnnotation = node.childForFieldName('type')
     if (!typeAnnotation) return null
 
@@ -48,6 +59,11 @@ export const readonlyParameterTypesVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+function isRestParameter(node: SyntaxNode): boolean {
+  // `...args: T[]` parses as required_parameter wrapping a rest_pattern.
+  return node.namedChildren.some((c) => c.type === 'rest_pattern')
 }
 
 function isMutableArrayType(node: SyntaxNode): boolean {

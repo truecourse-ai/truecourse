@@ -31,6 +31,9 @@ import { type SideEffectType } from './side-effect-module';
 // VIOLATION: code-quality/deterministic/redundant-type-argument
 export const typedSet = new Set<any>();
 
+// VIOLATION: code-quality/deterministic/redundant-type-argument
+export const typedArray = new Array<any>();
+
 // VIOLATION: code-quality/deterministic/unnecessary-condition
 export function alwaysTruthySymbol(sym: symbol) {
   return sym ? 'has symbol' : 'no symbol';

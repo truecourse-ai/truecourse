@@ -55,8 +55,18 @@ export const redundantTypeArgumentVisitor: CodeRuleVisitor = {
         lastArg.startPosition.row,
         lastArg.startPosition.column,
       )
-      // If the type argument is `any` on generic utilities, it's often redundant
-      if (argType === 'any' && target.text && ['Array', 'Set', 'WeakSet', 'WeakMap'].includes(target.text)) {
+      // Only flag when the user actually wrote `any` literally. If the type
+      // text is something richer (`Field & { signature: ... }`,
+      // `InngestFunction<…, Handler.Any, Handler.Any>`) but `typeQuery`
+      // collapses it to `any` because an inner identifier didn't resolve,
+      // the argument is meaningful to the reader and removing it would
+      // erase intent.
+      if (
+        argType === 'any'
+        && lastArg.text.trim() === 'any'
+        && target.text
+        && ['Array', 'Set', 'WeakSet', 'WeakMap'].includes(target.text)
+      ) {
         return makeViolation(
           this.ruleKey, node, filePath, 'low',
           'Redundant type argument',
