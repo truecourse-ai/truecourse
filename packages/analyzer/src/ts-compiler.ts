@@ -252,6 +252,21 @@ export interface TypeQueryService {
   getTypeString(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): string | null
   /** Check if type is 'any' */
   isAnyType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
+  /**
+   * Check if the `any` at this position originates from an unresolved or
+   * external import (i.e. a third-party library whose types aren't in our
+   * program). Returns true when the symbol traces back to an `import`
+   * declaration or to a value whose initializer chain crosses an import,
+   * and false when the any-ness is anchored by an explicit `: any`
+   * annotation or `as any` cast in user code. Use this to filter
+   * isAnyType-driven rules so they don't fire on every external-lib call
+   * when the analyzed target hasn't installed its node_modules.
+   *
+   * Returns false if the position isn't an any-typed expression (callers
+   * are expected to check `isAnyType` first; this method only decides the
+   * source of an existing `any`).
+   */
+  isAnyFromExternalSource(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
   /** Check if type is void/undefined */
   isVoidType(filePath: string, line: number, column: number, endLine?: number, endColumn?: number): boolean
   /** Check if type is boolean */
@@ -497,6 +512,12 @@ export function createTypeQueryService(
       return (type.flags & ts.TypeFlags.Any) !== 0
     },
 
+    isAnyFromExternalSource(filePath, line, column, endLine?, endColumn?) {
+      const result = getNodeForFile(filePath, line, column, endLine, endColumn)
+      if (!result) return false
+      return tracesAnyToExternalSource(result.checker, result.node, new Set())
+    },
+
     isVoidType(filePath, line, column, endLine?, endColumn?) {
       const type = getTypeAtNode(filePath, line, column, endLine, endColumn)
       if (!type) return false
@@ -558,6 +579,152 @@ export function createTypeQueryService(
       }
       return false
     },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Any-source tracing
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk the symbol/initializer chain at `node` to determine whether the `any`
+ * type at that position originates from an unresolved or external import.
+ *
+ * Returns true when the chain crosses an `import` declaration, a file in
+ * `node_modules`, a `.d.ts` declaration file, or terminates at an unresolved
+ * symbol. Returns false when an explicit `: any` annotation or `as any` cast
+ * in user code is reached first — that's a real, intentional any and the
+ * caller should still fire.
+ *
+ * Used by `unsafe-any-usage` (and other isAnyType-gated rules can opt in) to
+ * suppress the FP storm produced when analyzing a target whose node_modules
+ * isn't installed: `import { z } from 'zod'` makes every downstream
+ * `SomeSchema.parse(...).foo` look any-typed, but the developer's code is
+ * well-typed once the lib's `.d.ts` is present.
+ */
+function tracesAnyToExternalSource(
+  checker: ts.TypeChecker,
+  node: ts.Node,
+  visited: Set<ts.Node>,
+): boolean {
+  if (visited.has(node)) return false
+  visited.add(node)
+
+  if (ts.isPropertyAccessExpression(node)) {
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+  if (ts.isElementAccessExpression(node)) {
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+  if (ts.isCallExpression(node)) {
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+  if (ts.isAsExpression(node)) {
+    // `x as any` is an explicit cast — the any is intentional, not external.
+    if (node.type.kind === ts.SyntaxKind.AnyKeyword) return false
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+  if (ts.isNonNullExpression(node) || ts.isParenthesizedExpression(node)) {
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+  if (ts.isAwaitExpression(node)) {
+    return tracesAnyToExternalSource(checker, node.expression, visited)
+  }
+
+  if (!ts.isIdentifier(node)) {
+    return false
+  }
+
+  const symbol = checker.getSymbolAtLocation(node)
+  if (!symbol) return true
+
+  const target = (symbol.flags & ts.SymbolFlags.Alias)
+    ? safeGetAliasedSymbol(checker, symbol)
+    : symbol
+  if (!target || !target.declarations || target.declarations.length === 0) return true
+
+  for (const decl of target.declarations) {
+    const sf = decl.getSourceFile()
+    if (sf.fileName.includes('/node_modules/')) return true
+    if (sf.isDeclarationFile) return true
+
+    // Declaration sits inside an import (specifier / clause / namespace) →
+    // the originating value comes from another module.
+    let ancestor: ts.Node | undefined = decl
+    while (ancestor) {
+      if (ts.isImportDeclaration(ancestor) || ts.isImportEqualsDeclaration(ancestor)) {
+        return true
+      }
+      ancestor = ancestor.parent
+    }
+
+    if (ts.isBindingElement(decl)) {
+      // `const [a, b] = expr` / `const { x } = expr` — find the enclosing
+      // VariableDeclaration and recurse into its initializer.
+      let walker: ts.Node = decl
+      while (walker.parent && !ts.isVariableDeclaration(walker.parent)) {
+        walker = walker.parent
+      }
+      const varDecl = walker.parent
+      if (varDecl && ts.isVariableDeclaration(varDecl) && varDecl.initializer) {
+        if (tracesAnyToExternalSource(checker, varDecl.initializer, visited)) {
+          return true
+        }
+      }
+      continue
+    }
+
+    if (ts.isVariableDeclaration(decl) || ts.isPropertyDeclaration(decl)) {
+      if (decl.type && decl.type.kind === ts.SyntaxKind.AnyKeyword) return false
+      if (decl.initializer) {
+        if (
+          ts.isAsExpression(decl.initializer) &&
+          decl.initializer.type.kind === ts.SyntaxKind.AnyKeyword
+        ) {
+          return false
+        }
+        if (tracesAnyToExternalSource(checker, decl.initializer, visited)) {
+          return true
+        }
+      }
+      // No annotation, no `as any`, initializer didn't trace external →
+      // probably a locally-inferred any (e.g. `let x; x = whatever()`). Leave
+      // it to the caller; default to false here.
+      continue
+    }
+
+    if (ts.isParameter(decl)) {
+      // Explicit `(x: any)` is the intentional pattern the rule exists for.
+      if (decl.type && decl.type.kind === ts.SyntaxKind.AnyKeyword) return false
+      // Implicit-any parameters (no annotation, type inferred as `any`) are
+      // overwhelmingly noise — JS files, contextual callbacks of unresolved
+      // libraries, `noImplicitAny: false` configs. Treat as external so the
+      // caller can suppress.
+      return true
+    }
+
+    if (
+      ts.isFunctionDeclaration(decl) ||
+      ts.isMethodDeclaration(decl) ||
+      ts.isArrowFunction(decl) ||
+      ts.isFunctionExpression(decl)
+    ) {
+      // The identifier refers to a function whose return type is any. Without
+      // an explicit `: any` return annotation, the any came from inference
+      // (and most often from an external library).
+      if (decl.type && decl.type.kind === ts.SyntaxKind.AnyKeyword) return false
+      return true
+    }
+  }
+
+  return false
+}
+
+function safeGetAliasedSymbol(checker: ts.TypeChecker, symbol: ts.Symbol): ts.Symbol | undefined {
+  try {
+    return checker.getAliasedSymbol(symbol)
+  } catch {
+    return undefined
   }
 }
 
