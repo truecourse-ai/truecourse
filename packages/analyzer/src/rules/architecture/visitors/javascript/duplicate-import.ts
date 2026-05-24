@@ -23,6 +23,14 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
         const currentIsTypeOnly = imp.text.includes('import type')
         if (prevIsTypeOnly !== currentIsTypeOnly) continue
 
+        // Skip when one import is a side-effect-only import (`import 'x'`)
+        // and the other pulls bindings. The bare form is intentional — it
+        // documents that the module is loaded for its side effects — and
+        // mechanically merging into the named import erases that intent.
+        const prevIsSideEffectOnly = isSideEffectOnly(prevImp)
+        const currentIsSideEffectOnly = isSideEffectOnly(imp)
+        if (prevIsSideEffectOnly !== currentIsSideEffectOnly) continue
+
         return makeViolation(
           this.ruleKey, imp, filePath, 'low',
           'Duplicate import',
@@ -37,3 +45,14 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
     return null
   },
 }
+
+// `import 'foo'` — no import_clause, just the source string. Used to trigger
+// a module's top-level side effects (polyfills, CSS bundling, registration
+// calls). Distinct intent from `import { x } from 'foo'`.
+function isSideEffectOnly(imp: SyntaxNode): boolean {
+  for (const child of imp.namedChildren) {
+    if (child.type === 'import_clause') return false
+  }
+  return true
+}
+
