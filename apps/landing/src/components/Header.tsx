@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { DiscordIcon } from './DiscordIcon';
 
-const DISCORD_URL = 'https://discord.gg/8AYwf26A';
+const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 
 type NavItem = { href: string; label: string; external?: boolean };
 

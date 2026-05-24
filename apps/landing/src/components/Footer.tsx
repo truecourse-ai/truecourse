@@ -2,7 +2,7 @@ import { Github, Mail } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { DiscordIcon } from './DiscordIcon';
 
-const DISCORD_URL = 'https://discord.gg/8AYwf26A';
+const DISCORD_URL = 'https://discord.gg/TanxB63arz';
 
 export function Footer() {
   return (
