@@ -3,13 +3,30 @@ import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { getMethodName, ORM_WRITE_METHODS, getEnclosingFunctionBody, bodyHasTransactionCall, isInsideTransactionCallback } from './_helpers.js'
 
+// `destroy()` and `save()` are common method names on non-ORM objects
+// (Konva nodes, pdf-lib documents, signature pads, DOM cleanup, etc.).
+// Real ORM `destroy(...)` / `save(...)` calls almost always carry an
+// options object (`{ where }`, `{ data }`, …); the bare zero-argument
+// shape is the dead giveaway of a UI/PDF library cleanup and a frequent
+// FP source for this rule.
+const ZERO_ARG_AMBIGUOUS_WRITE_METHODS = new Set(['destroy', 'save'])
+
+function looksLikeOrmWriteCall(call: SyntaxNode, methodName: string): boolean {
+  if (!ORM_WRITE_METHODS.has(methodName)) return false
+  if (ZERO_ARG_AMBIGUOUS_WRITE_METHODS.has(methodName)) {
+    const args = call.childForFieldName('arguments')
+    if (!args || args.namedChildCount === 0) return false
+  }
+  return true
+}
+
 export const missingTransactionVisitor: CodeRuleVisitor = {
   ruleKey: 'database/deterministic/missing-transaction',
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['call_expression'],
   visit(node, filePath, sourceCode) {
     const methodName = getMethodName(node)
-    if (!ORM_WRITE_METHODS.has(methodName)) return null
+    if (!looksLikeOrmWriteCall(node, methodName)) return null
 
     const body = getEnclosingFunctionBody(node)
     if (!body) return null
@@ -39,7 +56,7 @@ export const missingTransactionVisitor: CodeRuleVisitor = {
         } else if (fn?.type === 'identifier') {
           mName = fn.text
         }
-        if (ORM_WRITE_METHODS.has(mName)) {
+        if (looksLikeOrmWriteCall(n, mName)) {
           writeCount++
           if (tableName) tableNames.add(tableName)
           if (n.id === node.id) {
