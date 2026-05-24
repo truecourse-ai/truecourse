@@ -85,6 +85,18 @@
       "layer": "api"
     },
     {
+      "name": "EventHandler",
+      "service": "api-gateway",
+      "kind": "class",
+      "layer": "api"
+    },
+    {
+      "name": "handleEvent",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "handleParse",
       "service": "api-gateway",
       "kind": "standalone",
@@ -109,6 +121,12 @@
       "layer": "service"
     },
     {
+      "name": "loadUserPyramid",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "logger",
       "service": "api-gateway",
       "kind": "standalone",
@@ -122,6 +140,12 @@
     },
     {
       "name": "performance",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "promise-all-no-error-handling",
       "service": "api-gateway",
       "kind": "standalone",
       "layer": "service"
@@ -575,6 +599,12 @@
       "service": "user-service",
       "kind": "standalone",
       "layer": "data"
+    },
+    {
+      "name": "verifyWebhook",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "service"
     },
     {
       "name": "Aliaser",
@@ -1150,6 +1180,12 @@
       "name": "CompletelyUnrelatedWidget",
       "service": "web",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "DangerouslyUserContent",
+      "service": "web",
+      "kind": "standalone",
       "layer": "service"
     },
     {

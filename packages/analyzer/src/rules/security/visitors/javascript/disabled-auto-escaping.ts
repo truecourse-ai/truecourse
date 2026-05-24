@@ -10,6 +10,15 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
     if (node.type === 'jsx_attribute') {
       const name = node.namedChildren[0]
       if (name && name.text === 'dangerouslySetInnerHTML') {
+        // Reach into `{{ __html: <expr> }}` and reuse the same safety
+        // analysis we use for `el.innerHTML = …`. Static strings and
+        // values produced by recognized escape/sanitize helpers are
+        // not XSS sinks.
+        const htmlValue = extractDangerouslyHtmlValue(node)
+        if (htmlValue) {
+          if (isStaticStringLiteral(htmlValue)) return null
+          if (isFullyEscapedRhs(htmlValue)) return null
+        }
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Disabled auto-escaping',
@@ -53,6 +62,31 @@ export const disabledAutoEscapingVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+/**
+ * Given a `dangerouslySetInnerHTML={{ __html: <expr> }}` attribute node,
+ * return the `<expr>` node — or null if the attribute doesn't follow the
+ * canonical inline-object shape (which is the only shape this visitor
+ * understands; references to a precomputed object are conservatively
+ * left as violations).
+ */
+function extractDangerouslyHtmlValue(
+  attr: import('web-tree-sitter').Node,
+): import('web-tree-sitter').Node | null {
+  // jsx_attribute > (property_identifier, jsx_expression)
+  const jsxExpr = attr.namedChildren.find((c) => c?.type === 'jsx_expression')
+  if (!jsxExpr) return null
+  const obj = jsxExpr.namedChildren.find((c) => c?.type === 'object')
+  if (!obj) return null
+  for (let i = 0; i < obj.namedChildCount; i++) {
+    const pair = obj.namedChild(i)
+    if (pair?.type !== 'pair') continue
+    const key = pair.childForFieldName('key')
+    if (key?.text !== '__html') continue
+    return pair.childForFieldName('value')
+  }
+  return null
 }
 
 function isStaticStringLiteral(node: import('web-tree-sitter').Node): boolean {

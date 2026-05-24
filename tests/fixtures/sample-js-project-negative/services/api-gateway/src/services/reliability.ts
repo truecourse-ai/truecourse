@@ -54,9 +54,11 @@ export async function commitWithoutAwait() {
 }
 
 // VIOLATION: reliability/deterministic/promise-all-no-error-handling
-export async function fetchAll(urls: string[]) {
-  const results = await Promise.all(urls.map((url) => fetch(url)));
-  return results;
+// True bug: not awaited, no .catch — a rejecting item produces an
+// unhandled rejection. `await Promise.all(...)` is fine because the
+// rejection propagates to the caller; this is the fire-and-forget shape.
+export function refreshAll(urls: string[]) {
+  Promise.all(urls.map((url) => fetch(url)));
 }
 
 // VIOLATION: reliability/deterministic/missing-error-event-handler
