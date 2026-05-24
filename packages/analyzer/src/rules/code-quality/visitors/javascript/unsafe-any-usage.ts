@@ -6,6 +6,15 @@ import { TS_LANGUAGES } from './_helpers.js'
  * Detect: Using a value typed as `any` in assignments, calls, returns, or member access.
  * Corresponds to @typescript-eslint no-unsafe-argument, no-unsafe-assignment,
  * no-unsafe-call, no-unsafe-member-access, no-unsafe-return.
+ *
+ * When the analyzed target is a third-party repo whose node_modules isn't
+ * installed (the routine case), every `import { z } from 'zod'` makes
+ * everything downstream look any-typed even though the developer's code is
+ * well-typed against the real library. To avoid that FP storm we additionally
+ * gate every fire on `isAnyFromExternalSource` — if the any traces to an
+ * import or to a function inferred from an external chain, we skip. Explicit
+ * `: any` annotations and `as any` casts still fire (those are the cases the
+ * rule exists for).
  */
 export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/unsafe-any-usage',
@@ -20,7 +29,7 @@ export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
       const fn = node.childForFieldName('function')
       if (fn && fn.type === 'identifier') {
         const isAny = typeQuery.isAnyType(filePath, fn.startPosition.row, fn.startPosition.column, fn.endPosition.row, fn.endPosition.column)
-        if (isAny) {
+        if (isAny && !typeQuery.isAnyFromExternalSource(filePath, fn.startPosition.row, fn.startPosition.column, fn.endPosition.row, fn.endPosition.column)) {
           return makeViolation(
             this.ruleKey, node, filePath, 'medium',
             'Calling an `any` typed value',
@@ -37,7 +46,7 @@ export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
       const obj = node.childForFieldName('object')
       if (obj && obj.type === 'identifier') {
         const isAny = typeQuery.isAnyType(filePath, obj.startPosition.row, obj.startPosition.column, obj.endPosition.row, obj.endPosition.column)
-        if (isAny) {
+        if (isAny && !typeQuery.isAnyFromExternalSource(filePath, obj.startPosition.row, obj.startPosition.column, obj.endPosition.row, obj.endPosition.column)) {
           const prop = node.childForFieldName('property')
           return makeViolation(
             this.ruleKey, node, filePath, 'medium',
@@ -58,6 +67,9 @@ export const unsafeAnyUsageVisitor: CodeRuleVisitor = {
       if (isAny && value.type !== 'identifier') {
         // Only flag non-trivial any assignments (e.g., function calls returning any)
         if (value.type === 'call_expression') {
+          if (typeQuery.isAnyFromExternalSource(filePath, value.startPosition.row, value.startPosition.column, value.endPosition.row, value.endPosition.column)) {
+            return null
+          }
           const nameNode = node.childForFieldName('name')
           return makeViolation(
             this.ruleKey, node, filePath, 'medium',
