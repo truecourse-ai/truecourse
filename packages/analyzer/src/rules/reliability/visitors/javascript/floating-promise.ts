@@ -12,6 +12,15 @@ export const floatingPromiseVisitor: CodeRuleVisitor = {
     const expr = node.namedChildren[0]
     if (!expr) return null
 
+    // Honor an explicit `// eslint-disable-next-line …no-floating-promises`
+    // on the line above. The author has acknowledged the floating promise
+    // (e.g. application entrypoints that intentionally fire-and-forget).
+    const startRow = node.startPosition.row
+    if (startRow > 0) {
+      const prevLine = sourceCode.split('\n')[startRow - 1] ?? ''
+      if (/eslint-disable-next-line[^\n]*no-floating-promises/.test(prevLine)) return null
+    }
+
     // If the expression is already an await, it's fine
     if (expr.type === 'await_expression') return null
 

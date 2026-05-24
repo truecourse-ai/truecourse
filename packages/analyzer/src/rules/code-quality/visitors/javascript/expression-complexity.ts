@@ -17,6 +17,30 @@ export const expressionComplexityVisitor: CodeRuleVisitor = {
     }
     if (!expr) return null
 
+    // Unwrap parentheses for the function / JSX shape checks below.
+    let target = expr
+    while (target.type === 'parenthesized_expression' && target.namedChildren[0]) {
+      target = target.namedChildren[0]
+    }
+
+    // Skip declarators / returns whose value is itself a function. The
+    // function body is visited as its own statements, so counting
+    // operators in the body at the outer declarator double-counts and
+    // inflates the score past the threshold for reasons unrelated to
+    // the declarator itself (e.g. `export const handler = (...) => {…}`).
+    if (target.type === 'arrow_function'
+      || target.type === 'function_expression'
+      || target.type === 'function_declaration'
+      || target.type === 'generator_function'
+      || target.type === 'generator_function_declaration') return null
+
+    // Skip JSX render returns. JSX naturally uses `&&` for conditional
+    // composition; counting those as boolean-expression operators reads
+    // declarative markup as tangled logic.
+    if (target.type === 'jsx_element'
+      || target.type === 'jsx_fragment'
+      || target.type === 'jsx_self_closing_element') return null
+
     let operatorCount = 0
     const BINARY_TYPES = new Set(['binary_expression', 'logical_expression'])
     // Don't recurse into nested function bodies. Each nested function's

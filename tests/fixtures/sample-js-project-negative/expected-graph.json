@@ -799,6 +799,12 @@
       "layer": "service"
     },
     {
+      "name": "duplicate-string-sql-fragment",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "EarlyThis",
       "service": "utils",
       "kind": "class",
@@ -811,7 +817,19 @@
       "layer": "service"
     },
     {
+      "name": "evaluateGate",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "fetchAllRecords",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "fireAndForget",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -943,6 +961,12 @@
       "layer": "service"
     },
     {
+      "name": "pickStatusLabel",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "processAbandonedQueue",
       "service": "utils",
       "kind": "standalone",
@@ -962,6 +986,12 @@
     },
     {
       "name": "readGreeting",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "readOnce",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
