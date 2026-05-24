@@ -1,8 +1,6 @@
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
-import { EngineDiagram } from './illustrations/EngineDiagram';
-import { ContractsCompile } from './illustrations/ContractsCompile';
-import { DeterministicVerifier } from './illustrations/DeterministicVerifier';
+import { Illustration } from './Illustration';
 
 export function HowItWorks() {
   return (
@@ -20,14 +18,26 @@ export function HowItWorks() {
             number="1"
             title="Decisions compile into contracts"
             body="Every decision compiles into a machine-readable contract. Versioned, reviewable, lives alongside your code."
-            illustration={<ContractsCompile className="w-full" />}
+            illustration={
+              <Illustration
+                src="/illustrations/slide5-contracts.png"
+                alt="Verified knowledge base compiling into machine-readable contracts"
+                className="w-full"
+              />
+            }
             delayMs={0}
           />
           <StepCard
             number="2"
             title="A deterministic model checks the code"
             body="Our verifier walks the codebase and checks every contract. No LLM in the loop. Same input, same result, every time."
-            illustration={<DeterministicVerifier className="w-full" />}
+            illustration={
+              <Illustration
+                src="/illustrations/slide5-verifier.png"
+                alt="Deterministic verifier checking code against contracts and producing a drift report"
+                className="w-full"
+              />
+            }
             delayMs={120}
           />
         </div>
@@ -65,7 +75,11 @@ function TopHalf() {
       </h2>
 
       <div className="mt-12 flex justify-center">
-        <EngineDiagram className="w-full max-w-4xl" />
+        <Illustration
+          src="/illustrations/slide4-verify.png"
+          alt="TrueCourse verification engine: knowledge base and codebase feeding into the verifier, producing drift report, AI guardrails, and audit log"
+          className="w-full max-w-4xl"
+        />
       </div>
     </div>
   );

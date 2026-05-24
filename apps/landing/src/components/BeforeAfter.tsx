@@ -1,7 +1,6 @@
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
-import { ChaosScatter } from './illustrations/ChaosScatter';
-import { VerifiedFlow } from './illustrations/VerifiedFlow';
+import { Illustration } from './Illustration';
 
 const BEFORE = [
   'Decisions live in 5+ tools, none authoritative',
@@ -36,7 +35,14 @@ export function BeforeAfter() {
           <Column
             label="BEFORE"
             labelClassName="text-muted-foreground"
-            illustration={<ChaosScatter className="w-full" />}
+            illustration={
+              <Illustration
+                src="/illustrations/slide9-before.png"
+                alt="Engineering knowledge scattered across Notion, Confluence, GitHub, Slack and other tools, with tangled connections and a confused engineer and AI agent"
+                className="w-full"
+                halo={false}
+              />
+            }
             bullets={BEFORE}
             bulletTone="muted"
             delayMs={0}
@@ -44,7 +50,13 @@ export function BeforeAfter() {
           <Column
             label="AFTER"
             labelClassName="text-accent"
-            illustration={<VerifiedFlow className="w-full" />}
+            illustration={
+              <Illustration
+                src="/illustrations/slide9-after.png"
+                alt="Documentation sources and code feeding into the Verified Knowledge Base, then through the TrueCourse Engine to AI agents and engineers"
+                className="w-full"
+              />
+            }
             bullets={AFTER}
             bulletTone="accent"
             delayMs={120}

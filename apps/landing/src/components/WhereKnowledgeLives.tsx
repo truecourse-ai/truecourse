@@ -1,7 +1,6 @@
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
-import { SlackThread } from './illustrations/SlackThread';
-import { InferredCards } from './illustrations/InferredCards';
+import { Illustration } from './Illustration';
 
 const DOC_TOOLS = [
   { name: 'Notion', subtitle: 'product specs · OKRs' },
@@ -99,7 +98,10 @@ function SlackBlock() {
       </p>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[1.4fr_1fr] lg:items-start">
-        <SlackThread />
+        <Illustration
+          src="/illustrations/slide7-slack.png"
+          alt="A Slack thread where the Knowledge Bot proposes a PR after detecting a decision"
+        />
 
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
@@ -135,7 +137,10 @@ function CodeBlock() {
       </p>
 
       <div className="mt-8">
-        <InferredCards />
+        <Illustration
+          src="/illustrations/slide8-discover.png"
+          alt="Code on the left feeds an extraction engine that surfaces inferred decisions as cards which can be promoted to the verified knowledge base"
+        />
       </div>
 
       <p className="mt-8 text-base text-foreground/80 sm:text-lg">
