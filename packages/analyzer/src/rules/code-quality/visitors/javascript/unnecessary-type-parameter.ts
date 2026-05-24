@@ -69,6 +69,17 @@ export const unnecessaryTypeParameterVisitor: CodeRuleVisitor = {
       const count = matches ? matches.length : 0
 
       if (count <= 1) {
+        // Skip when the type parameter is also referenced inside the function
+        // body (e.g. `useRef<T | null>`, callback params `(data: T) => ...`,
+        // type assertions `as T`, intermediate `const x: T = ...`). These body
+        // references make the parameter meaningful even when it appears only
+        // once in the surface signature.
+        const fnBody = node.childForFieldName('body')
+        if (fnBody) {
+          const bodyRegex = new RegExp(`\\b${paramName}\\b`)
+          if (bodyRegex.test(fnBody.text)) continue
+        }
+
         // Skip when the type parameter appears in both the return type AND
         // a type assertion (`as T`) in the function body — common pattern for
         // typed HTTP request methods like `request<T>(): Promise<T>`
