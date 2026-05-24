@@ -40,6 +40,15 @@ export const envInLibraryCodeVisitor: CodeRuleVisitor = {
     // Allow in API route / entry point directories (Next.js, Express, etc.)
     if (lowerPath.includes('/app/api/') || lowerPath.includes('/pages/api/') || lowerPath.includes('/routes/')) return null
 
+    // Allow in infrastructure packages whose declared role IS to read env vars
+    // and hand back a configured client (DB client, rate limiter, telemetry
+    // sink). These are the env-bootstrap surface for the rest of the codebase
+    // — flagging them just relocates the access without removing it.
+    const bootstrapDirs = ['/prisma/', '/rate-limit/', '/telemetry/']
+    for (const dir of bootstrapDirs) {
+      if (lowerPath.includes(dir)) return null
+    }
+
     // Allow in logger config files
     const fileName = filePath.split('/').pop()?.toLowerCase() || ''
     if (fileName === 'logger.ts' || fileName === 'logger.js') return null
