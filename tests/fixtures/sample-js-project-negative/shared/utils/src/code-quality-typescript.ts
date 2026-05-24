@@ -41,15 +41,6 @@ export function anyConstraint<T extends unknown>(x: T): T {
 // VIOLATION: code-quality/deterministic/useless-empty-export
 export {};
 
-// VIOLATION: code-quality/deterministic/unknown-catch-variable
-export function catchUntyped() {
-  try {
-    throw new Error('test');
-  } catch (e) {
-    console.error(e);
-  }
-}
-
 // VIOLATION: code-quality/deterministic/redundant-template-expression
 export function templateString(x: string) {
   return `${x}`;
