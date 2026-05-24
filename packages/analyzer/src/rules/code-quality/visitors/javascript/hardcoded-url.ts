@@ -39,6 +39,10 @@ export const hardcodedUrlVisitor: CodeRuleVisitor = {
     // Skip well-known stable third-party API domains — these are fixed endpoints, not environment-specific
     if (/googleapis\.com|maps\.google|api\.stripe\.com|api\.twilio\.com|api\.sendgrid\.com|api\.github\.com|cdn\.|fonts\.googleapis|cloudflare|unpkg\.com|cdnjs\.cloudflare|jsdelivr\.net/.test(text)) return null
 
+    // Skip OAuth/OIDC provider discovery endpoints — these `.well-known/*`
+    // paths are owned by the identity provider and have no env-specific form.
+    if (/\.well-known\/(openid-configuration|oauth-authorization-server|jwks(?:\.json)?)/.test(text)) return null
+
     // Skip URLs assigned to variables whose names suggest placeholder/example/default values
     if (parent?.type === 'variable_declarator' || parent?.type === 'assignment_expression' || parent?.type === 'pair') {
       const nameNode2 = parent.type === 'pair'

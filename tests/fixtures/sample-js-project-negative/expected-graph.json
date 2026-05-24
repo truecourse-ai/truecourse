@@ -793,6 +793,18 @@
       "layer": "service"
     },
     {
+      "name": "describeUserRow",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "dispatchRoute",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "duplicate-string-error-message",
       "service": "utils",
       "kind": "standalone",
@@ -827,6 +839,12 @@
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
+    },
+    {
+      "name": "fetchInvoiceReport",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "api"
     },
     {
       "name": "fireAndForget",
@@ -914,6 +932,12 @@
     },
     {
       "name": "loadRelated",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "logFirstField",
       "service": "utils",
       "kind": "standalone",
       "layer": "service"
@@ -1334,6 +1358,12 @@
     },
     {
       "name": "UserForm",
+      "service": "web",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "WindowSizeWatcher",
       "service": "web",
       "kind": "standalone",
       "layer": "service"

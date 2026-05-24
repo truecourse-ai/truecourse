@@ -6,9 +6,16 @@ import { containsMethodCall } from './_helpers.js'
 const NEEDS_CLEANUP_METHODS = new Set(['addEventListener', 'setInterval', 'setTimeout'])
 
 function hasReturnStatement(body: SyntaxNode): boolean {
-  // Direct children of the statement_block that are return_statement
+  // Walk the callback body for any return_statement that belongs to it —
+  // skip into nested function/arrow bodies so their returns don't count
+  // as the useEffect cleanup. Returns inside `if` / `switch` / `try` are
+  // still legitimate cleanup paths and DO count.
   for (const child of body.namedChildren) {
     if (child.type === 'return_statement') return true
+    if (child.type === 'function' || child.type === 'arrow_function' || child.type === 'function_declaration' || child.type === 'method_definition' || child.type === 'generator_function' || child.type === 'generator_function_declaration') {
+      continue
+    }
+    if (hasReturnStatement(child)) return true
   }
   return false
 }

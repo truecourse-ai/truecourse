@@ -7,6 +7,18 @@ export const nestedTemplateLiteralVisitor: CodeRuleVisitor = {
   languages: ['typescript', 'tsx', 'javascript'],
   nodeTypes: ['template_string'],
   visit(node, filePath, sourceCode) {
+    // Skip tagged templates whose tag is a known i18n / DSL identifier.
+    // For `msg`...``, `t`...``, `gql`...``, etc. the nested literal inside
+    // a substitution is a convention (formatting a value before it joins
+    // the translated/queried message), not a readability hazard.
+    const parent = node.parent
+    if (parent?.type === 'call_expression') {
+      const fn = parent.childForFieldName('function')
+      const tagName = fn?.type === 'identifier' ? fn.text : null
+      if (tagName && /^(msg|t|jt|defineMessage|plural|select|selectOrdinal|gql|css|html|sql|graphql)$/.test(tagName)) {
+        return null
+      }
+    }
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i)
       if (child?.type === 'template_substitution') {
