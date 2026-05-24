@@ -34,9 +34,9 @@ export function ChaosScatter({ className }: Props) {
 
   return (
     <svg
-      viewBox="0 0 500 300"
+      viewBox="0 0 500 360"
       role="img"
-      aria-label="Scattered docs from Notion, Confluence, GitHub, Google Docs and wikis with tangled dashed connections"
+      aria-label="Scattered docs from Notion, Confluence, GitHub, Google Docs and wikis with tangled connections, a confused engineer, and an AI agent asking a question"
       className={className}
       xmlns="http://www.w3.org/2000/svg"
       style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
@@ -68,7 +68,7 @@ export function ChaosScatter({ className }: Props) {
       </defs>
 
       {/* dark backdrop */}
-      <rect x="0" y="0" width="500" height="300" fill="url(#cs-bg)" rx="12" />
+      <rect x="0" y="0" width="500" height="360" fill="url(#cs-bg)" rx="12" />
 
       {/* faint glyphs (question marks, x's) */}
       <g
@@ -128,6 +128,122 @@ export function ChaosScatter({ className }: Props) {
       {docs.map((d, i) => (
         <DocTile key={i} {...d} />
       ))}
+
+      {/* Confused engineer (left) */}
+      <g transform="translate(96 268)">
+        {/* speech ? bubble */}
+        <text
+          x="78"
+          y="4"
+          fontSize="22"
+          fontWeight="700"
+          fill="#9CA3AF"
+          opacity="0.9"
+        >
+          ?
+        </text>
+        {/* head */}
+        <circle
+          cx="28"
+          cy="18"
+          r="14"
+          fill="#1B2230"
+          stroke="#6B7689"
+          strokeWidth="1.4"
+        />
+        {/* eyes */}
+        <circle cx="23" cy="17" r="1.6" fill="#6B7689" />
+        <circle cx="33" cy="17" r="1.6" fill="#6B7689" />
+        {/* confused mouth — squiggle */}
+        <path
+          d="M22,24 Q25,22 28,24 T34,24"
+          fill="none"
+          stroke="#6B7689"
+          strokeWidth="1.1"
+          strokeLinecap="round"
+        />
+        {/* shoulders / body */}
+        <path
+          d="M4,58 C4,42 52,42 52,58 L52,72 L4,72 Z"
+          fill="#1B2230"
+          stroke="#6B7689"
+          strokeWidth="1.4"
+          strokeLinejoin="round"
+        />
+        <text
+          x="28"
+          y="86"
+          textAnchor="middle"
+          fontSize="9"
+          fill="#6B7689"
+          letterSpacing="0.6"
+          fontWeight="600"
+        >
+          ENGINEER
+        </text>
+      </g>
+
+      {/* AI bot with question (right) */}
+      <g transform="translate(372 268)">
+        {/* speech ? bubble */}
+        <text
+          x="-12"
+          y="4"
+          fontSize="22"
+          fontWeight="700"
+          fill="#9CA3AF"
+          opacity="0.9"
+          textAnchor="end"
+        >
+          ?
+        </text>
+        {/* antenna */}
+        <line
+          x1="28"
+          y1="2"
+          x2="28"
+          y2="12"
+          stroke="#6B7689"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+        />
+        <circle cx="28" cy="2" r="2.2" fill="#6B7689" />
+        {/* body */}
+        <rect
+          x="4"
+          y="12"
+          width="48"
+          height="44"
+          rx="8"
+          fill="#1B2230"
+          stroke="#6B7689"
+          strokeWidth="1.4"
+        />
+        {/* eyes */}
+        <circle cx="18" cy="30" r="3" fill="#6B7689" />
+        <circle cx="38" cy="30" r="3" fill="#6B7689" />
+        {/* mouth — flat line, confused */}
+        <line
+          x1="20"
+          y1="44"
+          x2="36"
+          y2="44"
+          stroke="#6B7689"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+        />
+        <text
+          x="28"
+          y="74"
+          textAnchor="middle"
+          fontSize="9"
+          fill="#6B7689"
+          letterSpacing="0.6"
+          fontWeight="600"
+        >
+          AI AGENT
+        </text>
+      </g>
     </svg>
   );
 }
