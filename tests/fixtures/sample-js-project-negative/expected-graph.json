@@ -457,6 +457,12 @@
       "layer": "data"
     },
     {
+      "name": "createSessionWithAudit",
+      "service": "user-service",
+      "kind": "standalone",
+      "layer": "data"
+    },
+    {
       "name": "createWidgetWithAudit",
       "service": "user-service",
       "kind": "standalone",
@@ -799,6 +805,12 @@
       "layer": "service"
     },
     {
+      "name": "describeShape",
+      "service": "utils",
+      "kind": "standalone",
+      "layer": "service"
+    },
+    {
       "name": "describeUserRow",
       "service": "utils",
       "kind": "standalone",
@@ -880,6 +892,12 @@
       "name": "function-in-loop-var-binding",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "GeometryHelpers",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1000,6 +1018,12 @@
       "name": "namespace-usage-internal-module",
       "service": "utils",
       "kind": "standalone",
+      "layer": "service"
+    },
+    {
+      "name": "OffscreenRenderer",
+      "service": "utils",
+      "kind": "class",
       "layer": "service"
     },
     {
@@ -1156,6 +1180,12 @@
       "name": "SetterNoReturn",
       "service": "utils",
       "kind": "class",
+      "layer": "service"
+    },
+    {
+      "name": "shouldDispatchAsApiCall",
+      "service": "utils",
+      "kind": "standalone",
       "layer": "service"
     },
     {

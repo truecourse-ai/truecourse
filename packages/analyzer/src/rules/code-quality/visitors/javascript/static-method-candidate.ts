@@ -93,11 +93,14 @@ export const staticMethodCandidateVisitor: CodeRuleVisitor = {
 function usesThisOrSuper(node: SyntaxNode): boolean {
   if (node.type === 'this' || node.type === 'super') return true
 
-  // Don't recurse into nested functions/classes
+  // Don't recurse into nested functions/classes that rebind `this` —
+  // a `this` inside them refers to a different binding. Arrow functions
+  // are intentionally NOT in this list: arrows inherit `this` lexically,
+  // so a `this` inside an arrow callback still refers to the enclosing
+  // method's `this`.
   if (
     node.type === 'function_declaration' ||
     node.type === 'function_expression' ||
-    node.type === 'arrow_function' ||
     node.type === 'class_declaration' ||
     node.type === 'class'
   ) return false

@@ -59,6 +59,25 @@ export const unreadPrivateAttributeVisitor: CodeRuleVisitor = {
           } else {
             readNames.add(fieldName)
           }
+        } else if (prop) {
+          // Singleton / static-instance pattern: `SomeClass.instance.field`
+          // or `instance.field` accesses a private field via a non-`this`
+          // reference. Without type info we can't be sure the receiver is
+          // the same class, but a property-name match against a known
+          // private field is a strong signal of an internal read — strong
+          // enough that we'd rather false-negative than false-positive
+          // "unread".
+          const fieldName = prop.text.replace(/^#/, '')
+          if (privateFields.has(fieldName)) {
+            const parent = n.parent
+            const isWriteLeft =
+              parent &&
+              (parent.type === 'assignment_expression' || parent.type === 'augmented_assignment_expression') &&
+              parent.childForFieldName('left')?.id === n.id
+            if (!isWriteLeft) {
+              readNames.add(fieldName)
+            }
+          }
         }
       }
       // Handle #field style
