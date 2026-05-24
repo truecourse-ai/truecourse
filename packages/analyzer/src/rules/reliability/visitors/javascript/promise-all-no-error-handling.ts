@@ -20,9 +20,12 @@ export const promiseAllNoErrorHandlingVisitor: CodeRuleVisitor = {
     if (isInsideTryCatch(node)) return null
     if (hasCatchChain(node)) return null
 
-    // Check if result is awaited inside try/catch
+    // Skip if the result is awaited: a rejection becomes a thrown exception
+    // that propagates to the caller (framework boundary, transaction wrapper,
+    // …) where error handling lives. The bug pattern this rule catches is
+    // strictly fire-and-forget: `Promise.all(...)` whose rejection vanishes.
     const parent = node.parent
-    if (parent?.type === 'await_expression' && isInsideTryCatch(parent)) return null
+    if (parent?.type === 'await_expression') return null
 
     // Skip Next.js page/layout files — errors are handled by error.tsx boundary
     if (/\/app\/.*(?:page|layout)\.[tj]sx?$/.test(filePath)) return null

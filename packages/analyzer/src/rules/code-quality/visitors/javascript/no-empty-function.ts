@@ -41,6 +41,25 @@ export const jsNoEmptyFunctionVisitor: CodeRuleVisitor = {
       if (op?.text === '||' || op?.text === '??') return null
     }
 
+    // Skip private/protected empty constructors — the singleton and
+    // abstract-base patterns rely on `private constructor() {}` or
+    // `protected constructor() {}` to block instantiation. The empty
+    // body is the whole point.
+    if (node.type === 'method_definition') {
+      let isConstructor = false
+      let hasRestrictedAccess = false
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i)
+        if (!child) continue
+        if (child.type === 'property_identifier' && child.text === 'constructor') isConstructor = true
+        if (child.type === 'accessibility_modifier') {
+          const txt = child.text.trim()
+          if (txt === 'private' || txt === 'protected') hasRestrictedAccess = true
+        }
+      }
+      if (isConstructor && hasRestrictedAccess) return null
+    }
+
     const nameNode = node.childForFieldName('name')
     const name = nameNode?.text || 'anonymous'
 

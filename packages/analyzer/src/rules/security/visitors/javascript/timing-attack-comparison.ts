@@ -24,6 +24,32 @@ function isLengthAccess(node: SyntaxNode): boolean {
   return prop?.text === 'length'
 }
 
+const ENUM_CONSTANT_PATTERN = /^[A-Z][A-Z0-9_]*$/
+
+/**
+ * Return true if the node is a clearly non-secret constant: a boolean
+ * literal, null/undefined, an UPPER_SNAKE_CASE identifier (typical enum
+ * value), or a member access whose final property is UPPER_SNAKE_CASE
+ * (e.g. `FieldType.SIGNATURE`). Timing attacks require both sides to be
+ * unknown to the attacker; when one side is a publicly-known constant,
+ * the compare leaks nothing.
+ */
+function isClearConstantValue(node: SyntaxNode): boolean {
+  if (node.type === 'true' || node.type === 'false') return true
+  if (node.type === 'null') return true
+  if (node.type === 'undefined') return true
+  if (node.type === 'identifier') {
+    if (node.text === 'undefined') return true
+    if (ENUM_CONSTANT_PATTERN.test(node.text)) return true
+    return false
+  }
+  if (node.type === 'member_expression') {
+    const prop = node.childForFieldName('property')
+    if (prop?.text && ENUM_CONSTANT_PATTERN.test(prop.text)) return true
+  }
+  return false
+}
+
 /**
  * Return the most specific identifier on this side of a comparison — the
  * variable name for a plain identifier, the final property segment for a
@@ -66,6 +92,11 @@ export const timingAttackComparisonVisitor: CodeRuleVisitor = {
 
     // Skip comparisons against numeric literals (length / count checks).
     if (left.type === 'number' || right.type === 'number') return null
+
+    // Skip when one side is a clear public constant — boolean literal,
+    // null/undefined, or an UPPER_SNAKE_CASE enum value. A timing attack
+    // requires both sides to be secret to the attacker.
+    if (isClearConstantValue(left) || isClearConstantValue(right)) return null
 
     // Apply the sensitive-name check against the leaf identifier so that
     // member access paths like `decodedToken.scope` are recognized by
