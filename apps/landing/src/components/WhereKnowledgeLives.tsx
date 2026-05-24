@@ -58,7 +58,7 @@ function DocsBlock() {
         Some lives in docs.
       </h3>
       <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-        Your team&apos;s decisions are written down — across 5+ different tools that
+        Your team&apos;s decisions are written down, across 5+ different tools that
         don&apos;t talk to each other.
       </p>
 
@@ -92,8 +92,8 @@ function SlackBlock() {
         Some lives in Slack.
       </h3>
       <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-        The fastest decisions in your org happen in Slack — and never get written down.
-        Our Slack agent monitors decision channels, drafts spec updates, and opens PRs
+        The fastest decisions in your org happen in Slack, and never get written down.
+        Our Slack agent watches decision channels, drafts spec updates, and opens PRs
         to your docs.
       </p>
 
@@ -132,7 +132,7 @@ function CodeBlock() {
       </h3>
       <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground sm:text-lg">
         Some decisions were made in code, never in a doc. TrueCourse scans your
-        codebase for patterns with no spec entry — and surfaces them for your team to
+        codebase for patterns with no spec entry, then surfaces them for your team to
         review and promote.
       </p>
 
@@ -145,9 +145,11 @@ function CodeBlock() {
 
       <p className="mt-8 text-base text-foreground/80 sm:text-lg">
         <span className="text-foreground">
-          Every implicit decision becomes explicit
+          Every implicit decision becomes explicit.
         </span>{' '}
-        <span className="text-muted-foreground">— and from then on, verified.</span>
+        <span className="text-muted-foreground">
+          And from then on, it&apos;s verified.
+        </span>
       </p>
     </div>
   );

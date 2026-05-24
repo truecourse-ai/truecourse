@@ -3,7 +3,7 @@ import { ArrowRight, Check, Copy, Sparkles, Terminal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 
-const INSTALL = 'npx truecourse verify';
+const INSTALL = 'npx truecourse spec scan';
 
 export function Hero() {
   const [copied, setCopied] = useState(false);
@@ -31,7 +31,7 @@ export function Hero() {
             className="animate-fade-up animate-pulse-ring mx-auto inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground backdrop-blur-md transition-colors hover:border-border-strong hover:text-foreground"
           >
             <Sparkles className="h-3 w-3 text-accent" />
-            New &middot; Verified knowledge for AI-assisted teams (preview)
+            New &middot; Verified knowledge for AI-native engineering teams (preview)
             <ArrowRight className="h-3 w-3" />
           </Link>
 
@@ -39,18 +39,21 @@ export function Hero() {
             style={{ ['--delay' as string]: '80ms' }}
             className="animate-fade-up mt-6 text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl md:text-7xl"
           >
-            <span className="text-gradient">Code drifts. Decisions get forgotten.</span>
+            <span className="text-gradient">AI ships your code.</span>
             <br />
-            <span className="text-gradient-accent">TrueCourse closes the gap.</span>
+            <span className="text-gradient-accent">
+              We make sure it ships what your team decided.
+            </span>
           </h1>
 
           <p
             style={{ ['--delay' as string]: '200ms' }}
             className="animate-fade-up mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl"
           >
-            The verified knowledge layer for engineering. We compile your team&apos;s
-            decisions into machine-readable contracts and check every commit against
-            them — deterministically.
+            The verified knowledge layer for AI-native engineering teams. We scan your
+            docs, compile your team&apos;s decisions into machine-readable contracts,
+            then check every commit against them, including every AI-generated one.
+            Deterministically, with no LLM in the verification loop.
           </p>
 
           {/* Install / CTA */}
@@ -123,23 +126,28 @@ function HeroPreview() {
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500/70" />
           </div>
           <div className="font-mono text-xs text-muted-foreground">
-            ~/projects/sample-project · truecourse verify
+            ~/projects/sample-project · truecourse spec scan
           </div>
           <div className="w-12" />
         </div>
 
         <div className="grid gap-0 md:grid-cols-[1.1fr_1fr]">
-          {/* Terminal — matches the real clack-formatted CLI output */}
+          {/* Terminal: the real spec-scan flow from il-framework */}
           <ClackTerminal />
 
-          {/* Drift report panel — what `truecourse list` surfaces after verify */}
+          {/* Drift report panel: what truecourse verify produces after setup */}
           <div className="bg-background/40 p-5">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">Drift report &middot; sample-project</h3>
+              <h3 className="text-sm font-medium">
+                Drift report &middot; <span className="text-muted-foreground">truecourse verify</span>
+              </h3>
               <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium text-rose-300">
                 3 DRIFTS
               </span>
             </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Runs on every commit once the spec is applied.
+            </p>
             <ul className="mt-3 space-y-2.5">
               <Finding
                 severity="critical"
@@ -172,9 +180,10 @@ function HeroPreview() {
 }
 
 /**
- * Condensed render of the `truecourse verify` clack-formatted output.
- * Loads contracts from .truecourse/, walks the codebase, checks each
- * contract group, prints a drift summary.
+ * Condensed render of the real `truecourse spec scan` clack-formatted
+ * output. Mirrors SCAN_STEPS in packages/core/src/commands/spec-in-process.ts
+ * (Discovering docs, Extracting claims, Merging + detecting conflicts) and
+ * the summary printed by tools/cli/src/commands/spec.ts#runSpecScan.
  */
 function ClackTerminal() {
   return (
@@ -182,65 +191,66 @@ function ClackTerminal() {
       {/* Prompt */}
       <div className="flex">
         <span className="text-muted-foreground">$&nbsp;</span>
-        <span className="text-foreground">npx truecourse verify</span>
+        <span className="text-foreground">npx truecourse spec scan</span>
       </div>
 
       <div className="mt-1.5">
         {/* Intro */}
         <FrameLine glyph="┌">
-          <span className="text-foreground">Verifying code against contracts</span>
+          <span className="text-foreground">Spec scan</span>
         </FrameLine>
         <FrameLine glyph="│" />
 
-        {/* Repo + contract source */}
+        {/* The 3 SCAN_STEPS */}
+        <ProgressLine label="Discovering docs" value="34 docs" tone="ok" />
+        <ProgressLine label="Extracting claims" value="287 claims" tone="ok" />
+        <ProgressLine
+          label="Merging + detecting conflicts"
+          value="42 open"
+          tone="warn"
+        />
+        <FrameLine glyph="│" />
+
+        {/* Summary rows from runSpecScan */}
         <FrameLine glyph="◇">
-          <span className="text-muted-foreground">Repository:</span>{' '}
-          <span className="text-foreground">sample-project</span>
+          <span className="text-muted-foreground">docs&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+          <span className="text-foreground">34</span>
+        </FrameLine>
+        <FrameLine glyph="◇">
+          <span className="text-muted-foreground">claims&nbsp;&nbsp;&nbsp;&nbsp;</span>
+          <span className="text-foreground">287</span>
+        </FrameLine>
+        <FrameLine glyph="◇">
+          <span className="text-muted-foreground">resolved&nbsp;&nbsp;</span>
+          <span className="text-foreground">245</span>
+        </FrameLine>
+        <FrameLine glyph="◇">
+          <span className="text-muted-foreground">open&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
+          <span className="text-amber-300">42</span>
         </FrameLine>
         <FrameLine glyph="│" />
 
-        {/* Load + walk */}
-        <ProgressLine label="Loading contracts" value="47 contracts" tone="ok" />
-        <ProgressLine label="Reading codebase" value="3 services, 124 files" tone="ok" />
-        <FrameLine glyph="│" />
-
-        {/* Contract group checks */}
-        <ProgressLine label="Entity contracts" value="18 checked, 2 drifts" tone="warn" />
-        <ProgressLine label="State-machine contracts" value="6 checked, 1 drift" tone="warn" />
-        <ProgressLine label="Field policy contracts" value="12 checked, Clean" tone="ok" />
-        <ProgressLine label="Operation contracts" value="11 checked, Clean" tone="ok" />
-        <ProgressLine label="Saving results" value="Done" tone="ok" />
-
-        <FrameLine glyph="│" />
-
-        {/* Final summary */}
-        <FrameLine glyph="◆">
-          <span className="text-foreground">Verification complete</span>
-        </FrameLine>
-        <RawLine />
-        <RawLine>
-          <span className="text-foreground">3 drifts detected</span>{' '}
-          <span className="text-muted-foreground">(</span>
-          <span className="text-rose-400">2 critical</span>
-          <span className="text-muted-foreground">, </span>
-          <span className="text-amber-300">1 high</span>
-          <span className="text-muted-foreground">)</span>
-        </RawLine>
-        <RawLine />
-
-        <FrameLine glyph="│" />
         <FrameLine glyph="●" glyphClass="text-sky-400">
-          <span className="text-muted-foreground">Run</span>{' '}
-          <span className="text-foreground">`truecourse list`</span>{' '}
-          <span className="text-muted-foreground">to see drift details.</span>
+          <span className="text-muted-foreground">
+            Resolve in the dashboard, or run
+          </span>{' '}
+          <span className="text-foreground">truecourse spec resolve --all-defaults</span>
         </FrameLine>
         <FrameLine glyph="│" />
         <FrameLine glyph="└">
-          <span className="text-muted-foreground">
-            View drift report with:
-          </span>{' '}
-          <span className="text-foreground">truecourse dashboard</span>
+          <span className="text-foreground">42 open.</span>
         </FrameLine>
+
+        <RawLine />
+        <RawLine>
+          <span className="text-muted-foreground">
+            Apply the spec, then verify runs on every commit:
+          </span>
+        </RawLine>
+        <RawLine>
+          <span className="text-foreground">$ truecourse spec apply</span>
+          <span className="text-muted-foreground"> &amp;&amp; truecourse verify</span>
+        </RawLine>
       </div>
 
       {/* Blinking prompt */}
@@ -296,7 +306,6 @@ function ProgressLine({
       <span className="w-5 shrink-0 pl-2 text-muted-foreground/70">●</span>
       <span className="min-w-0 flex-1 truncate">
         <span className="text-foreground">{label}</span>{' '}
-        <span className="text-muted-foreground">—</span>{' '}
         <span className={tone === 'warn' ? 'text-amber-200' : 'text-emerald-300'}>
           {value}
         </span>
