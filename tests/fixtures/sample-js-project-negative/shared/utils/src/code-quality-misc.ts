@@ -118,6 +118,16 @@ export function identicalB(x: number) {
   return result;
 }
 
+// VIOLATION: code-quality/deterministic/identical-functions
+export function computeShippingFee(weight: number) {
+  const total = weight * 1.5 + 4;
+  return total;
+}
+export function computeHandlingFee(weight: number) {
+  const total = weight * 1.5 + 4;
+  return total;
+}
+
 // VIOLATION: code-quality/deterministic/inconsistent-function-call
 class Widget {}
 export function inconsistentNew() {
@@ -257,6 +267,14 @@ export function flagParam(isVerbose: boolean) {
     return 'detailed output';
   }
   return 'short output';
+}
+
+// VIOLATION: code-quality/deterministic/selector-parameter
+export function renderHeading(text: string, isCondensed: boolean) {
+  if (isCondensed) {
+    return text.slice(0, 24);
+  }
+  return text;
 }
 
 // VIOLATION: code-quality/deterministic/require-unicode-regexp

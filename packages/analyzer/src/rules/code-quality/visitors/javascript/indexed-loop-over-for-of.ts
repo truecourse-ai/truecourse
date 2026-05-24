@@ -34,6 +34,28 @@ export const indexedLoopOverForOfVisitor: CodeRuleVisitor = {
     const lengthArithmeticRe = /\.length\s*[-+*/]/
     if (lengthArithmeticRe.test(condText)) return null
 
+    // Only flag when the upper bound is `<expr>.length`. A loop whose upper
+    // bound is a plain count or externally-tracked cursor (e.g.
+    // `i < currentRecipientIndex`) does a partial pass; replacing it with
+    // `for...of` would iterate the whole array and change the loop's range.
+    function isLengthBound(expr: SyntaxNode | null): boolean {
+      if (!expr) return false
+      if (expr.type === 'parenthesized_expression') {
+        return isLengthBound(expr.namedChild(0))
+      }
+      if (expr.type === 'member_expression') {
+        return expr.childForFieldName('property')?.text === 'length'
+      }
+      return false
+    }
+    const cmp = condition.type === 'binary_expression' ? condition : null
+    if (!cmp) return null
+    const left = cmp.childForFieldName('left')
+    const right = cmp.childForFieldName('right')
+    const indexIsLeft = left?.type === 'identifier' && left.text === indexName
+    const boundExpr = indexIsLeft ? right : left
+    if (!isLengthBound(boundExpr ?? null)) return null
+
     let usedOutsideIndex = false
     let usedAsArrayIndex = false
     function checkIndexUsage(n: SyntaxNode) {
