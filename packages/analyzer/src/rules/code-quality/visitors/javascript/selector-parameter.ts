@@ -3,6 +3,22 @@ import { makeViolation } from '../../../types.js'
 import { JS_FUNCTION_TYPES, getFunctionBody } from './_helpers.js'
 import type { Node as SyntaxNode } from 'web-tree-sitter'
 
+function typeContainsBoolean(n: SyntaxNode): boolean {
+  if (n.type === 'parenthesized_type') {
+    const inner = n.namedChild(0)
+    return inner ? typeContainsBoolean(inner) : false
+  }
+  if (n.type === 'predefined_type' && n.text === 'boolean') return true
+  if (n.type === 'literal_type' && (n.text === 'true' || n.text === 'false')) return true
+  if (n.type === 'union_type') {
+    for (let i = 0; i < n.namedChildCount; i++) {
+      const child = n.namedChild(i)
+      if (child && typeContainsBoolean(child)) return true
+    }
+  }
+  return false
+}
+
 export const selectorParameterVisitor: CodeRuleVisitor = {
   ruleKey: 'code-quality/deterministic/selector-parameter',
   languages: ['typescript', 'tsx', 'javascript'],
@@ -19,15 +35,26 @@ export const selectorParameterVisitor: CodeRuleVisitor = {
 
     for (const param of paramList) {
       let paramName: string | null = null
+      let typeAnnotation: SyntaxNode | null = null
 
       if (param.type === 'identifier') {
         paramName = param.text
       } else if (param.type === 'required_parameter' || param.type === 'optional_parameter') {
         const p = param.childForFieldName('pattern') ?? param.namedChildren[0]
         if (p?.type === 'identifier') paramName = p.text
+        typeAnnotation = param.namedChildren.find((c) => c.type === 'type_annotation') ?? null
       }
 
       if (!paramName) continue
+
+      // Only flag boolean-typed parameters. A name like `allowed` or `included`
+      // matches the selector-word heuristic, but holding `string | string[]`
+      // (or any non-boolean type) means the parameter is data, not a behavior
+      // switch — splitting the function in two would not make sense.
+      if (typeAnnotation) {
+        const typeNode = typeAnnotation.namedChild(0)
+        if (typeNode && !typeContainsBoolean(typeNode)) continue
+      }
 
       function isUsedAsSelector(n: SyntaxNode): boolean {
         if (JS_FUNCTION_TYPES.includes(n.type) && n.id !== node.id) return false

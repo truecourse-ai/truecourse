@@ -269,6 +269,14 @@ export function flagParam(isVerbose: boolean) {
   return 'short output';
 }
 
+// VIOLATION: code-quality/deterministic/selector-parameter
+export function renderHeading(text: string, isCondensed: boolean) {
+  if (isCondensed) {
+    return text.slice(0, 24);
+  }
+  return text;
+}
+
 // VIOLATION: code-quality/deterministic/require-unicode-regexp
 export const noUnicode = /hello/;
 
