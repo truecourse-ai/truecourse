@@ -1,0 +1,1571 @@
+{
+  "generatedAt": "2026-05-24",
+  "targetRepo": "/Users/musheghgevorgyan/repos/signal7/Compliance",
+  "auditSummary": "<Compliance>/drift-audit-summary-2026-05-24.md",
+  "buckets": {
+    "named-constant": [
+      {
+        "severity": "critical",
+        "kind": "computation",
+        "title": "Critical tier weight is 16, spec says 3",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 70,
+          "quote": "| Critical | 1 (worst) | 3 |"
+        },
+        "code": {
+          "file": "app/data-compliance/src/utils/scoring.js",
+          "line": 5,
+          "snippet": "  Critical: 16,\n  Significant: 8,\n  Noticeable: 4,\n  Moderate: 2,\n  Minor: 1,"
+        },
+        "description": "The spec defines hardcoded tier weights as 3 / 2 / 1 / 1 / 1 / 0.5. The implementation uses 16 / 8 / 4 / 2 / 1 / 0 \u2014 a completely different scale. Every weighted-score number displayed in the UI (market tiles, job rows, leaderboards, region rollups) is wrong relative to the spec, and the ranking changes too because Critical no longer outweighs Significant by 1.5x; it outweighs it by 2x, and Moderate outweighs Minor by 2x where the spec says they tie.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "computation",
+        "title": "LLM_MODEL constant uses Gemini, spec mandates claude-sonnet-4-6",
+        "src_doc": "ap_automation_review",
+        "spec": {
+          "file": "docs/sig_pipeline/ap_automation_review.md",
+          "line": 334,
+          "quote": "LLM_MODEL = \"claude-sonnet-4-6\"   # Locked; no CLI override"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/config.py",
+          "line": 82,
+          "snippet": "LLM_MODEL: str = \"google/gemini-3-flash-preview\""
+        },
+        "description": "The spec decision section locks LLM_MODEL to the string \"claude-sonnet-4-6\" (the AP Gemini default is explicitly discarded on lines 151, 154, 159, 171, 354). The implementation hardcodes the AP Gemini model identifier instead, so every signature classification is being routed to the wrong vendor/model. This contradicts the headline 'LLM Provider Decision' of the spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "computation",
+        "title": "LLM model drift: spec specifies claude-sonnet-4-6, code uses google/gemini-3-flash-preview",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 10,
+          "quote": "The Signature Detection Pipeline classifies signatures on A1 Garage customer invoices using Claude Vision (claude-sonnet-4-6)."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/config.py",
+          "line": 82,
+          "snippet": "LLM_MODEL: str = \"google/gemini-3-flash-preview\""
+        },
+        "description": "The spec mandates that classifications run on Anthropic's claude-sonnet-4-6 vision model. The locked PIPELINE_VERSION='sig-v1' constant in config.py instead points at Gemini Flash via OpenRouter. Any audit, calibration data, or accuracy figures cited in the spec (e.g., the v1 blind-test results) no longer apply because the underlying model is different.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "entity-field-semantics",
+        "title": "LLM provider drift: spec uses Anthropic API key, code uses OpenRouter",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 58,
+          "quote": "| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Vision calls |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 263,
+          "snippet": "client = openai.OpenAI(\n        base_url=\"https://openrouter.ai/api/v1\",\n        api_key=config.OPENROUTER_API_KEY,\n    )"
+        },
+        "description": "The spec specifies ANTHROPIC_API_KEY as a required environment variable, calling Anthropic directly. The implementation instantiates an OpenAI SDK client pointed at OpenRouter using OPENROUTER_API_KEY. Operators provisioning a deployment based on the guide will fail startup because the required key the code actually checks for is different from what the guide tells them to set.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "computation",
+        "title": "TIER_WEIGHTS values diverge from spec",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 43,
+          "quote": "TIER_WEIGHTS = { Critical:3, Significant:2, Noticeable:1, Moderate:1, Minor:1, OTC:0.5 }"
+        },
+        "code": {
+          "file": "app/data-compliance/src/utils/scoring.js",
+          "line": 4,
+          "snippet": "const TIER_WEIGHTS = {\n  Critical: 16,\n  Significant: 8,\n  Noticeable: 4,\n  Moderate: 2,\n  Minor: 1,\n  'Out of Tech Control': 0,\n}"
+        },
+        "description": "Spec defines the tier multipliers as 3/2/1/1/1/0.5. Code uses 16/8/4/2/1/0. Every market score, technician score, and job score returned by `calculateWeightedScore` / `calculateTechScore` is therefore on a completely different scale than what the spec describes, and OTC infractions contribute zero rather than the spec's 0.5.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "computation",
+        "title": "Out of Tech Control tier weight is 0, spec says 0.5",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 75,
+          "quote": "| Out of Tech Control | 6 | 0.5 |"
+        },
+        "code": {
+          "file": "app/data-compliance/src/utils/scoring.js",
+          "line": 10,
+          "snippet": "  'Out of Tech Control': 0,\n}"
+        },
+        "description": "Spec assigns Out of Tech Control a non-zero weight of 0.5, meaning OTC infractions still count toward market and job scores (just at half weight). The code sets OTC weight to 0, so OTC infractions never affect market heat-map coloring or job weighted scores. This conflates the rule 'OTC excluded from technician scores only' with 'OTC excluded from everything', dropping data from the page-1 grid and page-3 job ordering.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "computation",
+        "title": "Signature pipeline uses Gemini Flash via OpenRouter, not Claude Vision (claude-sonnet-4-6)",
+        "src_doc": "README",
+        "spec": {
+          "file": "/Users/musheghgevorgyan/repos/signal7/Compliance/README.md",
+          "line": 342,
+          "quote": "sends each crop to Claude Vision (claude-sonnet-4-6) for classification."
+        },
+        "code": {
+          "file": "/Users/musheghgevorgyan/repos/signal7/Compliance/pipeline/signature_detection/config.py",
+          "line": 82,
+          "snippet": "LLM_MODEL: str = \"google/gemini-3-flash-preview\""
+        },
+        "description": "README states the signature pipeline calls Claude Vision (claude-sonnet-4-6), but the locked pipeline constant points at google/gemini-3-flash-preview through OpenRouter. The classifier module reads OPENROUTER_API_KEY (not ANTHROPIC_API_KEY), instantiates an openai.OpenAI client targeting https://openrouter.ai/api/v1, and submits the model id above. The classification results, billing, and compliance posture in production differ from what the spec claims.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "computation",
+        "title": "Signature crop vertical window differs from both spec sections",
+        "src_doc": "invoice_template_mapping",
+        "spec": {
+          "file": "docs/sig_pipeline/invoice_template_mapping.md",
+          "line": 502,
+          "quote": "Signature crop: x=[90, 260] pt, y=[Y-18, Y+12] pt"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/region_extractor.py",
+          "line": 48,
+          "snippet": "_CROP_Y_ABOVE = 80.0  # pt above 'top' of \"Sign\" word \u2014 signatures often written above the baseline\n_CROP_Y_BELOW = 30.0  # pt below 'top' of \"Sign\" word (captures handwriting)"
+        },
+        "description": "The spec defines the y crop window as [Y-18, Y+12] (a 30-pt tall strip, mostly below Y), but code uses [Y-80, Y+30] (a 110-pt tall strip extending 80 pt above the anchor). The code's chosen window is ~4x wider in y and will capture material from the line above the signature, including the previous section's text or signature. This directly contradicts the \u00a711 numeric contract.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "entity-field-semantics",
+        "title": "Required env var drift: spec requires ANTHROPIC_API_KEY, config requires OPENROUTER_API_KEY",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 58,
+          "quote": "| `ANTHROPIC_API_KEY` | Anthropic API key for Claude Vision calls |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/config.py",
+          "line": 41,
+          "snippet": "OPENROUTER_API_KEY: str = _require_env(\"OPENROUTER_API_KEY\")"
+        },
+        "description": "The spec's Configuration table lists ANTHROPIC_API_KEY as a required env var. config.py raises RuntimeError on startup if OPENROUTER_API_KEY (not ANTHROPIC_API_KEY) is missing. A fresh operator following the spec verbatim will hit `Missing required environment variable: OPENROUTER_API_KEY` despite setting the variable the doc demands.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "computation",
+        "title": "_CROP_Y_ABOVE constant is 80 pt in code but spec asserts 12 pt",
+        "src_doc": "prompt_testing_log",
+        "spec": {
+          "file": "docs/sig_pipeline/prompt_testing_log.md",
+          "line": 187,
+          "quote": "**Crop change:** `_CROP_Y_ABOVE` 8 pt \u2192 12 pt (fixed cc_auth top-clip on 3139225732)  "
+        },
+        "code": {
+          "file": "pipeline/signature_detection/region_extractor.py",
+          "line": 48,
+          "snippet": "_CROP_Y_ABOVE = 80.0  # pt above 'top' of \"Sign\" word \u2014 signatures often written above the baseline"
+        },
+        "description": "The spec specifies a Gemini Flash migration crop tuning that sets _CROP_Y_ABOVE to 12 pt above the 'Sign' anchor top. The implementation uses 80.0 pt, an order of magnitude larger crop window, which changes the cropped region included in every signature image sent to the LLM and may pull in unrelated form content above the signature line.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "computation",
+        "title": "LLM provider/model does not match the locked tech-stack decision",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 677,
+          "quote": "| LLM vision | Anthropic SDK (Claude Vision) | Best-in-class vision, structured JSON output |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/config.py",
+          "line": 82,
+          "snippet": "LLM_MODEL: str = \"google/gemini-3-flash-preview\""
+        },
+        "description": "The PRD's locked tech stack mandates the Anthropic SDK with Claude Vision (model claude-sonnet-4-6). The code calls OpenRouter with google/gemini-3-flash-preview using the openai SDK. The model choice, vendor, and SDK all diverge from the decided stack, which has implications for cost, accuracy, latency, and the structured-output guarantees the PRD relied on.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "sql-where-filter": [
+      {
+        "severity": "critical",
+        "kind": "business-rule",
+        "title": "noPaymentCollected excludes warranty jobs that spec requires to be flagged",
+        "src_doc": "a1_questions",
+        "spec": {
+          "file": "docs/a1garage/a1_questions.md",
+          "line": 37,
+          "quote": "**Yes.** Warranty jobs with a non-zero balance are flagged."
+        },
+        "code": {
+          "file": "backend/src/data/noPaymentCollected.ts",
+          "line": 31,
+          "snippet": "WHERE j.completedon >= ?::date\n    AND j.completedon <  (?::date + INTERVAL '1 day')\n    AND j.nocharge = false\n    AND j.warranty_id IS NULL"
+        },
+        "description": "The spec explicitly states that warranty jobs with a non-zero invoice balance must be flagged as 'No Payment Collected' infractions. The code does the opposite: it filters out every job whose warranty_id is non-null in the completed_jobs CTE, so warranty jobs are never considered, regardless of balance. This systematically suppresses a category of infractions the spec mandates.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "no-payment-collected date anchor: spec i.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 73,
+          "quote": "| `/infractions/no-payment-collected` | CRITICAL | 8/Good | core.invoices, core.jobs | `i.createdon` | invoice_id, total, balance, paidon, job_type, nocharge, payment_status |"
+        },
+        "code": {
+          "file": "backend/src/data/noPaymentCollected.ts",
+          "line": 28,
+          "snippet": "  WHERE j.completedon >= ?::date\n    AND j.completedon <  (?::date + INTERVAL '1 day')"
+        },
+        "description": "Spec declares the date anchor for /no-payment-collected as `i.createdon` (invoice creation). Implementation filters by `j.completedon` (job completion). Same date range will return different rows: any unpaid invoice created in-range but whose job completed outside, or vice versa, is mis-bucketed.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "customer-overcharged date anchor: spec i.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 74,
+          "quote": "| `/infractions/customer-overcharged` | SIGNIFICANT | 7/Good | core.invoiceitems, core.invoices, core.technicians | `i.createdon` | invoice_id, customer_id, trip_charge_count, total_trip_charges, trip_charge_skus |"
+        },
+        "code": {
+          "file": "backend/src/data/customerOvercharged.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date)."
+        },
+        "description": "Spec date anchor is invoice createdon; the data layer filters on job completedon instead. Date-window membership is therefore decided by a different timestamp than the spec specifies.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "excluded-required-material date anchor: spec j.completedon, code ii.createdon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 71,
+          "quote": "| `/infractions/excluded-required-material` | CRITICAL | 7/Good | core.invoiceitems, core.services, core.materials, core.technicians | `j.completedon` | invoice_id, service_name, expected_material_skuid, expected_material_name, technician_name |"
+        },
+        "code": {
+          "file": "backend/src/data/excludedRequiredMaterial.ts",
+          "line": 6,
+          "snippet": "// Date anchor: ii.createdon (BRIN index on invoiceitems)."
+        },
+        "description": "Spec uses job completion as the date anchor; code uses invoiceitem createdon. Reverses direction of drift vs other endpoints \u2014 here the date window now selects by when the line items were created, not by when the job was completed.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "failed-parent-task-bundle date anchor: spec i.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 75,
+          "quote": "| `/infractions/failed-parent-task-bundle` | SIGNIFICANT | 8/Good | core.invoiceitems, core.services, core.invoices, core.technicians | `i.createdon` | invoice_id, job_id, material_items, service_items, invoice_total |"
+        },
+        "code": {
+          "file": "backend/src/data/failedParentTaskBundle.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date)."
+        },
+        "description": "Spec specifies invoice createdon as the date anchor; implementation uses job completedon. Membership in the result set diverges whenever invoice creation and job completion fall in different ranges.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "incorrect-parent-task-bundle date anchor: spec i.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 76,
+          "quote": "| `/infractions/incorrect-parent-task-bundle` | SIGNIFICANT | 8/Good | core.invoiceitems, core.services, core.invoices, core.appointmentassignments, core.technicians | `i.createdon` | invoice_id, parent_task_name, has_cables, has_drums, flagged_materials, recommended_correction |"
+        },
+        "code": {
+          "file": "backend/src/data/incorrectParentTaskBundle.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date)."
+        },
+        "description": "Spec anchors on invoice createdon; code anchors on job completedon. Different result set for the same supplied date range.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "no-shop-supply-fee date anchor: spec i.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 77,
+          "quote": "| `/infractions/no-shop-supply-fee` | NOTICEABLE | 8/Good | core.invoices, core.jobs, core.invoiceitems, core.technicians | `i.createdon` | invoice_id, total, job_type_name, sold_by_name |"
+        },
+        "code": {
+          "file": "backend/src/data/noShopSupplyFee.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for user-supplied date range.\n// Additional filter: i.createdon >= '2023-01-01' to scope to post-SSF-policy era."
+        },
+        "description": "Spec date anchor is invoice createdon; code uses job completedon for the user-supplied window and applies a hard-coded i.createdon >= 2023-01-01 floor on top. Even if intent matches, the dimension being filtered by the supplied date range differs from spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "no-lm-serial date anchor: spec ie.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 78,
+          "quote": "| `/infractions/no-lm-serial` | NOTICEABLE | 5/Medium | core.installedequipment, core.invoiceitems, core.invoices | `ie.createdon` | installedequipment_id, equipmenttype_name, serialnumber, invoice_id, sn_issue |"
+        },
+        "code": {
+          "file": "backend/src/data/noLmSerial.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for the supplied date range."
+        },
+        "description": "Spec anchors on installedequipment createdon; code anchors on job completedon. Different rows returned for the same range.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "no-motor-serial date anchor: spec ie.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 79,
+          "quote": "| `/infractions/no-motor-serial` | NOTICEABLE | 6/Medium | core.installedequipment, core.invoiceitems, core.invoices | `ie.createdon` | installedequipment_id, equipmenttype_name, serialnumber, invoice_id |"
+        },
+        "code": {
+          "file": "backend/src/data/noMotorSerial.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for the supplied date range."
+        },
+        "description": "Spec anchors on installedequipment createdon; code anchors on job completedon. Membership in result set diverges from spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "invalid-discount date anchor: spec ii.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 81,
+          "quote": "| `/infractions/invalid-discount` | NOTICEABLE | 5/Medium | core.invoiceitems, core.technicians, core.employees, core.invoices, core.memberships | `ii.createdon` | invoice_id, discount_name, applied_by_name, applied_by_role, mismatch_reason |"
+        },
+        "code": {
+          "file": "backend/src/data/invalidDiscount.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for the supplied date range."
+        },
+        "description": "Spec anchors on invoiceitem createdon; code anchors on job completedon. Discount line items created before/after the job's completion will be classified into a different time window than spec dictates.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "discount-stacking date anchor: spec ii.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 84,
+          "quote": "| `/infractions/discount-stacking` | MODERATE | 8/Good | core.invoiceitems, core.invoices, core.jobs, core.appointmentassignments, core.technicians | `ii.createdon` | invoice_id, stacking_count, discount_names, total_discount_value, tech_name |"
+        },
+        "code": {
+          "file": "backend/src/data/discountStacking.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for the supplied date range."
+        },
+        "description": "Spec uses invoiceitem createdon; code uses job completedon. In addition, code applies an undocumented hard-coded floor `inv.createdon >= '2023-01-01'` not mentioned in the spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "free-material-with-discounts date anchor: spec ii.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 85,
+          "quote": "| `/infractions/free-material-with-discounts` | MODERATE | 8/Good | core.invoices, core.jobs, core.invoiceitems, core.appointmentassignments, core.technicians | `ii.createdon` | invoice_id, free_materials, discounts_applied, total_discount_value, technician_name |"
+        },
+        "code": {
+          "file": "backend/src/data/freeMaterialWithDiscounts.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for the supplied date range."
+        },
+        "description": "Spec date anchor is invoiceitem createdon; code uses job completedon and additionally pins inv.createdon >= 2023-01-01. Different membership for the same user date range.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "unauthorized-waiver date anchor: spec ii.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 87,
+          "quote": "| `/infractions/unauthorized-waiver` | MODERATE | 7/Good | core.invoiceitems, core.invoices, core.technicians, core.employees | `ii.createdon` | invoice_id, waiver_name, waiver_skuid, applied_by_name, applied_by_role |"
+        },
+        "code": {
+          "file": "backend/src/data/unauthorizedWaiver.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon (job completion date) for the supplied date range."
+        },
+        "description": "Spec specifies invoiceitem createdon; code filters on job completedon. Waivers applied in one window for a job completed in another are classified to the wrong period.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "duplicate-discount date anchor: spec ii.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 89,
+          "quote": "| `/infractions/duplicate-discount` | MINOR | 9/High | core.invoiceitems | `ii.createdon` | invoice_id, skuid, skuname, duplicate_count, total_discount_applied |"
+        },
+        "code": {
+          "file": "backend/src/data/duplicateDiscount.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon for the supplied date range."
+        },
+        "description": "Spec anchors on invoiceitem createdon; code anchors on job completedon. Same divergence pattern as the rest of the discount/waiver endpoints.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "duplicate-ssf date anchor: spec ii.createdon, code j.completedon",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 90,
+          "quote": "| `/infractions/duplicate-ssf` | MINOR | 9/High | core.invoiceitems | `ii.createdon` | invoice_id, skuname, duplicate_count, total_ssf_applied |"
+        },
+        "code": {
+          "file": "backend/src/data/duplicateSsf.ts",
+          "line": 6,
+          "snippet": "// Date anchor: j.completedon for the supplied date range."
+        },
+        "description": "Spec date anchor is invoiceitem createdon; code uses job completedon. Code also applies an undocumented hard-coded floor `inv.createdon >= '2023-01-01'`.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "tc-waive-deleted endpoint exists despite spec marking it pending pricebook input",
+        "src_doc": "DISCOVERY",
+        "spec": {
+          "file": "docs/DISCOVERY.md",
+          "line": 91,
+          "quote": "| `/infractions/tc-waive-deleted` | MINOR | 5/Medium | core.invoiceitems | `ii.createdon` | invoice_id, waiver_sku, waiver_amount, deleted_tc_sku, tc_deleted_on |"
+        },
+        "code": {
+          "file": "backend/src/data/tcWaiveDeleted.ts",
+          "line": 6,
+          "snippet": "(file present; route registered at backend/src/routes/infractions/index.ts:70)"
+        },
+        "description": "Spec section 2.2 lists `tc-waive-deleted` as pending: 'Complete trip charge SKU list'. Backend ships the route at /api/v1/infractions/tc-waive-deleted anyway. If the trip charge SKU list is incomplete, the endpoint returns under-counted results without surfacing that the input data was incomplete.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "po-not-received excludes 'Exported' but spec excludes 'Pending'",
+        "src_doc": "INDEX_STRATEGY",
+        "spec": {
+          "file": "docs/INDEX_STRATEGY.md",
+          "line": 42,
+          "quote": "po.status NOT IN ('Received','Canceled','Pending')"
+        },
+        "code": {
+          "file": "backend/src/data/poNotReceived.ts",
+          "line": 27,
+          "snippet": "    AND po.status NOT IN ('Received', 'Exported', 'Canceled')"
+        },
+        "description": "INDEX_STRATEGY.md describes po-not-received as filtering by status NOT IN ('Received','Canceled','Pending'). The actual SQL excludes 'Exported' and includes 'Pending' as a flagged status. The code is the more recently updated logic (its inline comment notes Exported is terminal per a 2026-03-24 confirmation), but the index-strategy doc has not been updated to reflect this change. A 'Pending' PO will be flagged by code but the spec says it should not be.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "entity-field-semantics",
+        "title": "excluded-required-material date anchor is ii.createdon, not j.completedon",
+        "src_doc": "INDEX_STRATEGY",
+        "spec": {
+          "file": "docs/INDEX_STRATEGY.md",
+          "line": 17,
+          "quote": "excluded-required-material | CRITICAL | `j.completedon` | type='Service', active=true, JSON LEFT JOIN IS NULL"
+        },
+        "code": {
+          "file": "backend/src/data/excludedRequiredMaterial.ts",
+          "line": 30,
+          "snippet": "  WHERE ii.createdon >= ?::date\n    AND ii.createdon <  (?::date + INTERVAL '1 day')\n    AND ii.type IN ('Service', 'Material')"
+        },
+        "description": "INDEX_STRATEGY.md lists the date anchor for excluded-required-material as j.completedon. The actual query anchors on ii.createdon (BRIN scan on invoiceitems) \u2014 see the in-code comment 'Date anchor: ii.createdon (BRIN index on invoiceitems)'. As a consequence the recommended index 'core.invoiceitems(invoice_id, skuid)' (APPLIED as idx_invoiceitems_invoice_skuid) is not the hot path; the actual hot path is idx_invoiceitems_createdon_brin. Spec drift on date anchor changes which jobs are included in a range scan.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "techDeletedMaterial attributes to assigned tech without enforcing arrival-departure window",
+        "src_doc": "a1_questions",
+        "spec": {
+          "file": "docs/a1garage/a1_questions.md",
+          "line": 13,
+          "quote": "**Yes, timing-based inference is acceptable.** If `modifiedon` falls within the arrival\u2013departure window, the tech is considered responsible."
+        },
+        "code": {
+          "file": "backend/src/data/techDeletedMaterial.ts",
+          "line": 83,
+          "snippet": "LEFT JOIN core.technicians t ON wc.technician_id = t.technician_id"
+        },
+        "description": "The spec defines the attribution rule as: a tech is only considered responsible when the deletion timestamp `modifiedon` falls within that tech's arrival\u2013departure window for the job. The query never consults core.jobtimesheets (or any arrival/departure timestamp) and never compares `ii.modifiedon` against an on-site interval. It simply joins to whatever technician is recorded on the line item and reports it. Deletions made before the tech arrived or after they departed are still reported against that tech.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "incorrectParentTaskBundle Case A restricts spring-replacement detection to legacy SKUs",
+        "src_doc": "a1_questions",
+        "spec": {
+          "file": "docs/a1garage/a1_questions.md",
+          "line": 27,
+          "quote": "**No additional categories.** The List of Parent Tasks doc confirms 6 categories: Full Door Hinge Kit, Structural Integrity Package, Replace Trim on Door, Torsion Conversion Packages (12 variants: 1C2Y/5Y/Life and 2C2Y/5Y/Life \u00d7 standard + NR no-roller versions), Torsion Overhaul Packages (12 variants, same naming), and Spring Tasks (many: Single/Double \u00d7 2-Year/5-Year/Max Life; Wood Overlay 2S/3S/4S \u00d7 5Y/ML; RV \u00d7 5Y/ML; plus Extension Spring Rebuild Package). All variants within a category share the same bundle rules."
+        },
+        "code": {
+          "file": "backend/src/data/incorrectParentTaskBundle.ts",
+          "line": 76,
+          "snippet": "AND ii.skuid IN (\n      '1744155',  -- 5Y2C Spring (legacy)\n      '1744282',  -- 2Y2C Spring (legacy)\n      '1743899',  -- 5Y1C Spring (legacy)\n      '1752346'   -- 2Y1C Spring (legacy)\n    )"
+        },
+        "description": "The spec says all Spring Task variants within the Spring Replacement category share the same bundle rules. Case A (Spring Replacement with cables/drums/bearings/torsion-tube children should have been Torsion Overhaul or Conversion) is gated on four legacy spring SKU IDs only \u2014 the PT-1A, Wood Overlay, RV, and Extension Spring Rebuild variants are intentionally excluded. As a result, the same misuse on a current PT-1A invoice is never flagged, despite the spec asserting uniform rules across all variants.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "noPaymentCollected unconditionally excludes warranty jobs; spec flags warranty with non-zero balance",
+        "src_doc": "infractions",
+        "spec": {
+          "file": "docs/a1garage/infractions.md",
+          "line": 1040,
+          "quote": "Should warranty jobs with non-zero balance be flagged? \u2192 **Yes.** Warranty jobs with a non-zero balance are still flagged. Only warranty jobs with a zero balance are excluded."
+        },
+        "code": {
+          "file": "backend/src/data/noPaymentCollected.ts",
+          "line": 31,
+          "snippet": "AND j.nocharge = false\n    AND j.warranty_id IS NULL"
+        },
+        "description": "The completed_jobs CTE filters out ALL warranty jobs via j.warranty_id IS NULL, but the spec's answered question explicitly states warranty jobs WITH a non-zero balance must be flagged \u2014 only zero-balance warranty jobs are exempt. Code under-reports warranty-related no-payment infractions.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "duplicateTripCharge checks only one SKU name; spec query covers all trip-charge variants",
+        "src_doc": "infractions",
+        "spec": {
+          "file": "docs/a1garage/infractions.md",
+          "line": 1238,
+          "quote": "AND ii.skuname ILIKE '%trip charge%'\n  AND ii.skuname NOT ILIKE '%waiv%'\n  AND ii.skuname NOT ILIKE '%refund%'"
+        },
+        "code": {
+          "file": "backend/src/data/duplicateTripCharge.ts",
+          "line": 44,
+          "snippet": "WHERE ii.active = true\n    AND ii.skuname = 'Standard Trip Charge-1A'\n    AND ii.price > 0"
+        },
+        "description": "Spec defines duplicate trip charge detection across ALL trip charge SKUs (4 known SKUs in spec \u00a7 'Known Trip Charge SKUs', covering ~543K rows). Code only matches the single skuname literal 'Standard Trip Charge-1A', missing duplicates of 'Mandatory Trip Charge' (65203218), 'Trip Charge (Inst Item Only)' (1416843), 'ARC-Mandatory Trip Charge' (652601791), and other variants used in the customerOvercharged endpoint of the same codebase.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "excludedRequiredService implements unrelated detection (torsion-conversion missing parts + WFC-only); spec defines servicematerials-based generic check",
+        "src_doc": "infractions",
+        "spec": {
+          "file": "docs/a1garage/infractions.md",
+          "line": 186,
+          "quote": "1. Find all active invoice items of `type = 'Service'` and join to `core.services` on `skuid = service_id`\n2. Parse `servicematerials` JSON to get the list of expected material SKU IDs per service\n3. For each expected material, check whether a `type = 'Material'` invoice item with that `skuid` exists on the same invoice\n4. Flag cases where the material invoice item is completely absent"
+        },
+        "code": {
+          "file": "backend/src/data/excludedRequiredServiceSQL.ts",
+          "line": 31,
+          "snippet": "export const EXCLUDED_REQUIRED_SERVICE_SQL = (marketClause: string) => `\nWITH date_filtered_jobs AS (\n..."
+        },
+        "description": "The spec's 'Deliberately Excluded Required Service or Material From Invoice' is a generic detection based on core.services.servicematerials JSON. The excludedRequiredService SQL implements a totally different rule set: Torsion Conversion missing Torsion Tube / Center Bearing / Center Plate hard-coded services, plus 'WFC-only invoice with substantive materials'. These specific rules do not appear anywhere in the spec doc under this infraction.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "incorrectParentTaskBundle missing Spring Type Mismatch detection (STL/STH/STM warranty tier check)",
+        "src_doc": "infractions",
+        "spec": {
+          "file": "docs/a1garage/infractions.md",
+          "line": 1683,
+          "quote": "### Detection Query: Spring Type Mismatch (SKU Code vs. Parent Task Warranty Tier)\n\nDetects invoices where the spring material SKU prefix (STL/STH/STM) doesn't match the warranty tier implied by the parent task name."
+        },
+        "code": {
+          "file": "backend/src/data/incorrectParentTaskBundle.ts",
+          "line": 311,
+          "snippet": "all_infractions AS (\n  SELECT * FROM spring_wrong_bundle\n  UNION\n  SELECT * FROM overhaul_wrong_bundle\n  UNION\n  SELECT * FROM hinge_kit_wrong_contents\n  UNION\n  SELECT * FROM si_missing_orb\n  UNION\n  SELECT * FROM si_insufficient_struts\n  UNION\n  SELECT * FROM spring_count_wrong_bundle\n),"
+        },
+        "description": "Spec defines an explicit Spring Type Mismatch detection: when a parent task implies a warranty tier (2-Year=STL, 5-Year=STH, Max Life=STM) but the spring material SKU starts with a different prefix. The code's incorrectParentTaskBundle pipeline assembles six other cases but never implements the STL/STH/STM prefix comparison against parent-task tier.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "incorrectParentTaskBundle Case A restricted to legacy spring SKUs only; spec covers all spring-replacement variants",
+        "src_doc": "infractions",
+        "spec": {
+          "file": "docs/a1garage/infractions.md",
+          "line": 1504,
+          "quote": "| Cables, drums, or bearings alongside a Spring Replacement | Spring Replacement (any variant) | Torsion Overhaul | Cables, drums, bearings (no torsion tube) |"
+        },
+        "code": {
+          "file": "backend/src/data/incorrectParentTaskBundle.ts",
+          "line": 76,
+          "snippet": "AND ii.skuid IN (\n      '1744155',  -- 5Y2C Spring (legacy)\n      '1744282',  -- 2Y2C Spring (legacy)\n      '1743899',  -- 5Y1C Spring (legacy)\n      '1752346'   -- 2Y1C Spring (legacy)\n    )"
+        },
+        "description": "Spec says 'Spring Replacement (any variant)' triggers the cables/drums/bearings check. Code's spring_parent_tasks CTE limits the check to four LEGACY spring SKU IDs and intentionally excludes the PT-1A variants (986122141/43/39/45, plus Wood Overlay, RV, Extension Spring variants \u2014 14 variants per unnecessaryServicesSQL.ts). This is a deliberate scoping decision but it contradicts the spec's 'any variant' clause.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Spec defines 'Job Type \u2192 Required Service Rules' (Trip Charge / SSF / Warranty Call) but implementation has no app.jobtype_service_rules table",
+        "src_doc": "infractions",
+        "spec": {
+          "file": "docs/a1garage/infractions.md",
+          "line": 432,
+          "quote": "| # | Rule | Required Count | Exception | Source |\n|---|------|---------------|-----------|--------|\n| 1 | Every invoice must have exactly 1 **Trip Charge** | 1 | Afterhours Emergency Call jobs use a different trip charge task | Audit Checklist \u00a72 |\n| 2 | Every invoice must have exactly 1 **Shop Supply Fee** | 1 | Invoice consists of only a Trip Charge, or only a $29 tune-up coupon | Acceptable Discounts policy |\n| 3 | Warranty work must include a **Warranty Call** service task | 1 | None | FAQs: \"if NOT present it would be Deliberately Excluded Required Service\" |"
+        },
+        "code": {
+          "file": "backend/src/data/excludedRequiredService.ts",
+          "line": 1,
+          "snippet": "import type { Knex } from 'knex';\nimport type { DateRangeQuery, ExcludedRequiredServiceRow } from '../schema/infractions.js';\nimport { EXCLUDED_REQUIRED_SERVICE_SQL } from './excludedRequiredServiceSQL.js';"
+        },
+        "description": "Spec defines a `app.jobtype_service_rules` schema + seed data covering: every invoice requires Trip Charge, every invoice requires SSF, warranty work requires Warranty Call. Implementation has no such schema (verified absent in backend/src/data and migrations) and no detection of rule #3 (Warranty Call on warranty jobs). Rule #1 (one Trip Charge) is only partially covered via duplicateTripCharge.ts (which only catches >1, not 0).",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "cc_auth_2 classification does not check y-gap from previous sign line",
+        "src_doc": "invoice_template_mapping",
+        "spec": {
+          "file": "docs/sig_pipeline/invoice_template_mapping.md",
+          "line": 498,
+          "quote": "If \"credit card\" sentence appears within 60 pts above and gap from previous sign < 60 pts \u2192 `cc_auth_2` (dual signatory)"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/region_extractor.py",
+          "line": 256,
+          "snippet": "        else:\n            cc_count += 1\n            anchor.box_type = BOX_CC if cc_count == 1 else BOX_CC2"
+        },
+        "description": "\u00a711 step 4 requires two structural conditions for the `cc_auth_2` label: a \"credit card\" sentence within 60 pts above AND a y-gap < 60 pts from the previous sign line. Code uses neither: it labels the second CC anchor as `cc_auth_2` purely by sequential count, regardless of distance from the first CC line or surrounding text. A page with three consecutive non-section-headed anchors at any spacing would silently be tagged cc_auth + cc_auth_2 with no dual-signatory verification.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "cc_auth_2 y-gap threshold also absent from \u00a77-style classifier",
+        "src_doc": "invoice_template_mapping",
+        "spec": {
+          "file": "docs/sig_pipeline/invoice_template_mapping.md",
+          "line": 229,
+          "quote": "Second consecutive CC line (y-gap < 60 pts from previous CC line) \u2192 box type = `cc_auth_2`"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/region_extractor.py",
+          "line": 256,
+          "snippet": "        else:\n            cc_count += 1\n            anchor.box_type = BOX_CC if cc_count == 1 else BOX_CC2"
+        },
+        "description": "\u00a77 step 3 also makes the y-gap < 60 pts the defining feature of cc_auth_2. Code ignores anchor spacing entirely and relies on a running counter. This means a third unrelated anchor far below cc_auth (e.g., a stray \"Sign here\" on a different section) would be mislabelled cc_auth_2, and a true second-signatory line that happens to be more than 60 pts away would still be tagged cc_auth_2.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Stage 4 outcome drift: spec says single OUTLIER class, code emits INVALID or SUSPECT depending on complexity",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 16,
+          "quote": "4. **Stage 4 \u2014 Effort disparity:** One box far simpler than others on same invoice \u2192 OUTLIER"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 89,
+          "snippet": "If effort disparity is detected:\n  - complexity_score of the outlier < 0.4  \u2192 classification: INVALID (outlier + clearly low effort)\n  - complexity_score of the outlier \u2265 0.4  \u2192 classification: SUSPECT (outlier + ambiguous effort level)"
+        },
+        "description": "The spec maps Stage 4 effort disparity to a single OUTLIER classification. The prompt instead branches on complexity_score and emits INVALID or SUSPECT \u2014 OUTLIER is in the enum but is never produced by the documented decision rule. This means real OUTLIER infractions land under SUSPECT/INVALID labels in the DB, breaking the v1 blind-test category counts the spec publishes (OUTLIER=7 boxes).",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Fix 4 WFC-material spring signal omits ARC- prefix",
+        "src_doc": "service_infraction_detection_analysis",
+        "spec": {
+          "file": "docs/a1garage/service_infraction_detection_analysis.md",
+          "line": 214,
+          "quote": "- Springs: skuname matching `STL-%`, `STH-%`, `STM-%`, `ARC-%`"
+        },
+        "code": {
+          "file": "backend/src/data/excludedRequiredServiceSQL.ts",
+          "line": 142,
+          "snippet": "      OR ii.skuname LIKE 'STL-%'\n      OR ii.skuname LIKE 'STH-%'\n      OR ii.skuname LIKE 'STM-%'\n      OR ii.skuname ILIKE '%Roller%'"
+        },
+        "description": "Spec Fix 4 enumerates four spring naming prefixes (STL-, STH-, STM-, ARC-) as material signals when WFC is the only service. The SQL implements three of the four \u2014 the `ARC-%` pattern is missing. As a result, jobs where WFC is the only service item and ARC-series springs (the ARC variants referenced elsewhere in the spec, e.g. line 194's ARC torsion tube context) are present will not be flagged by Block 4, undercounting WFC + materials infractions.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Stage 4 'outlier + low effort' returns INVALID; spec says MISSING",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 544,
+          "quote": "**Sub-check if yes \u2014 Low complexity score?**\n- **Yes:** `MISSING` \u2014 Outlier + low effort (the mark barely qualifies as a signature)"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 90,
+          "snippet": "  - complexity_score of the outlier < 0.4  \u2192 classification: INVALID (outlier + clearly low effort)"
+        },
+        "description": "PRD Section 11 (and Section 7.3) explicitly resolves Stage 4 'outlier + low effort' to MISSING; the implementation resolves the same case to INVALID. The same code prompt then states 'MISSING is reserved strictly for Stage 1', directly inverting the spec's classification rule for this branch. Downstream tier/severity logic keyed on MISSING vs INVALID will be wrong for every outlier-with-low-effort box.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "$0 jobs and non-service business units silently dropped \u2014 not in spec",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 60,
+          "quote": "V1 processes a sample set of 20 invoices stored locally (uploaded to S3 as part of setup). There is no live connection to ServiceTitan for invoice download. The pipeline simulates the end-to-end flow as if these invoices arrived from the most recent 20-minute cron window."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/orchestrator.py",
+          "line": 249,
+          "snippet": "    if _job_row:\n        _nocharge, _bu_name, _bu_class = _job_row\n        if _nocharge:\n            logger.info(\"SKIP %s \u2014 no-charge job (businessunit=%s)\", s3_key, _bu_name)\n            _move_invoice_s3(s3_client, s3_key, is_flagged=False)"
+        },
+        "description": "process_invoice consults core.jobs.nocharge and compliance.business_unit_classification to skip any no-charge job and any job whose business unit is classified door_sales or other. Neither filter is described in PRD v1, which says the pipeline processes all unprocessed invoices in the bucket. The exclusion shapes which invoices ever reach the LLM and which are persisted, so this is a substantive detection-pipeline business rule the spec never describes or authorises.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Stage 2 semantics flipped from 'minimal ink/pen failure' to 'clear non-signature including printed text'",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 526,
+          "quote": "**Question:** Is there ink but very minimal coverage \u2014 tiny mark, dot, or pen failure artifact?\n**Signal:** Ink is present but covers an abnormally small area or has a tiny bounding box.\n**Result if yes:** `PARTIAL` \u2014 Pen failure or accidental mark."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 65,
+          "snippet": "STAGE 2 \u2014 CLEAR NON-SIGNATURE CHECK (only if Stage 1 finds ink present)\nIs this mark clearly not a legitimate signature? This includes:\n- Minimal ink: a single dot, tiny smudge, or artifact that resembles a pen test or accidental mark.\n- Simple strokes: a single line, an X, a checkmark, a single slash or tick mark.\n- Printed text written in place of a signature: \"N/A\", \"NA\", \"none\", \"refused\", \"no\", a hand-printed name, or any other block-letter word."
+        },
+        "description": "PRD Stage 2 is narrowly about minimal-coverage ink and resolves to PARTIAL. The implemented Stage 2 broadens the bucket to include simple strokes (which spec assigns to Stage 3/SUSPECT), printed words ('N/A', 'refused', etc.) \u2014 wholly unspecified \u2014 and re-labels the outcome INVALID. The cascade order, the inputs, the boundary with Stage 3, and the output label all diverge from the spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Stage 3 semantics narrowed: spec sends 'line/X/checkmark' to SUSPECT, code now treats them at Stage 2",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 533,
+          "quote": "**Question:** Is the mark a line, X, checkmark, or other low-effort non-signature mark?\n**Signal:** The ink pattern lacks the complexity of a genuine handwritten signature.\n**Result if yes:** `SUSPECT` \u2014 Likely fake/forged."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 72,
+          "snippet": "STAGE 3 \u2014 COMPLEXITY SCORE (only if Stage 2 confirms the mark is not clearly invalid)\nIs this mark genuinely ambiguous \u2014 it has signature-like characteristics but you cannot confidently determine if it is a legitimate signature?\nSUSPECT is reserved for true borderline cases"
+        },
+        "description": "PRD Stage 3 explicitly fires SUSPECT for simple line/X/checkmark marks. The implementation moves those cases up into Stage 2 (returning INVALID) and redefines Stage 3 as a 'genuinely ambiguous' bucket. A line/X mark will now exit with INVALID rather than SUSPECT, again changing the visible enum a row carries for the same input.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "/signature-detection list endpoint filters by completedon, hiding rows the PRD says should be visible",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 488,
+          "quote": "| processed_at | Timestamp | When the pipeline processed this invoice |"
+        },
+        "code": {
+          "file": "backend/src/data/signatureDetection.ts",
+          "line": 23,
+          "snippet": "  WHERE j.completedon::date >= ?::date\n    AND j.completedon::date <  (?::date + INTERVAL '1 day')\n    AND j.nocharge = false\n    AND (buc.classification = 'service' OR buc.classification IS NULL)"
+        },
+        "description": "PRD describes processed_at as the pipeline-processing timestamp on the signature_detections row and uses it as the per-invoice clock. The list query anchors instead on core.jobs.completedon and additionally hard-filters by nocharge=false and buc.classification='service' (or NULL). Any flagged detection whose job is no-charge, door-sales, or whose completedon falls outside the range is omitted from the dashboard even though it lives in compliance.signature_detections. This is an effective scope/visibility filter the PRD never authorises.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Spec uses MISSING for boxes with ink, but LLM prompt forbids MISSING when ink is present",
+        "src_doc": "signature_test_results",
+        "spec": {
+          "file": "docs/sig_pipeline/signature_test_results.md",
+          "line": 92,
+          "quote": "| auth | **MISSING** | 0.82 | A single nearly horizontal line with minimal variation in stroke direction and no loops, lifts, or personal style. Compared to the more complex cc_auth signature, this mark shows significantly lower effort and its complexity score falls below 0.4. |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 94,
+          "snippet": "IMPORTANT \u2014 MISSING is reserved strictly for Stage 1 (no ink at all). Do NOT use MISSING for a box that has ink, even if the ink is a simple mark."
+        },
+        "description": "Invoice 3152769119's auth and ack are recorded as MISSING with reasons that explicitly describe ink being present ('a single nearly horizontal line', 'a single curved sweeping stroke'). The current system prompt forbids that exact labeling and routes ink-present low-effort marks to INVALID via Stage 4 (complexity < 0.4 \u2192 INVALID). Either the recorded outputs come from an older prompt version or the prompt and the documented behavior have drifted apart.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "forbidden-presence": [
+      {
+        "severity": "critical",
+        "kind": "forbids",
+        "title": "Authentication required on every API request \u2014 spec says no auth",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 270,
+          "quote": "- **No authentication** \u2014 prototype is open access."
+        },
+        "code": {
+          "file": "backend/src/app.ts",
+          "line": 52,
+          "snippet": "  app.use('/api/v1', buildAuthMiddleware());"
+        },
+        "description": "PRD explicitly says the prototype has no authentication and is open access. The backend mounts Auth0 JWT validation (express-oauth2-jwt-bearer) on every /api/v1 route, and the frontend wraps the app in Auth0Provider with a forced loginWithRedirect AuthGate. Stakeholders cannot demo without an Auth0 tenant, audience and credentials, which contradicts the 'open access' constraint.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "forbids",
+        "title": "Frontend forces Auth0 login redirect \u2014 spec says no auth",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 336,
+          "quote": "- Authentication / OAuth"
+        },
+        "code": {
+          "file": "app/data-compliance/src/App.jsx",
+          "line": 60,
+          "snippet": "    if (!isLoading && !isAuthenticated) {\n      loginWithRedirect()\n    }"
+        },
+        "description": "PRD lists 'Authentication / OAuth' as out of scope for V1. The React app's AuthGate redirects unauthenticated users to Auth0's login page, and the bypass requires setting VITE_AUTH_BYPASS=true (a non-default dev-only flag). This directly implements an out-of-scope feature.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "forbids",
+        "title": "Full Postgres backend and live ETL \u2014 spec says CSV-only, no backend",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 271,
+          "quote": "- **No backend infrastructure** \u2014 no database, no AWS, no API connections. CSVs only."
+        },
+        "code": {
+          "file": "backend/src/app.ts",
+          "line": 53,
+          "snippet": "  const db = initDb(config);\n  startRefreshLoop(db);\n  startHistoryLoop(db);"
+        },
+        "description": "Spec mandates a CSV-only prototype with no database, AWS, or API. The implementation has an Express backend that connects to the A1 Garage production Postgres (compliance.* schema), runs a 20-minute refresh loop materializing 90 days of infractions, uses AWS SSM Parameter Store for DB credentials, and serves 35+ infraction sub-routes plus an S3 presigning route for signature crops. None of this exists in the spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "forbids",
+        "title": "Production database is written, not read-only as spec mandates",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 56,
+          "quote": "**READ-ONLY access only \u2014 never execute write operations against the production database.**"
+        },
+        "code": {
+          "file": "backend/src/tasks/refreshSummary.ts",
+          "line": 1,
+          "snippet": "// refreshSummary.ts \u2014 20-min loop that rebuilds compliance.infraction_summary"
+        },
+        "description": "Spec is explicit that production database access must be read-only \u2014 CSVs must be generated from queries but the prototype must never write. The backend continuously writes to compliance.infraction_summary, compliance.infraction_summary_meta, and compliance.infraction_history via refresh loops, and signature_detections has an active boolean and crop image references that are read but exist in writable schema. Even if the writes target a separate compliance.* schema, this is in the same Postgres cluster the spec calls out as read-only.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "forbids",
+        "title": "Pipeline calls OpenRouter, spec mandates direct Anthropic SDK",
+        "src_doc": "ap_automation_review",
+        "spec": {
+          "file": "docs/sig_pipeline/ap_automation_review.md",
+          "line": 171,
+          "quote": "**Verdict:** Use `anthropic` SDK with `claude-sonnet-4-6`. Direct relationship with the model provider; no aggregator markup; prompt caching available for future cost reduction; vision quality proven on document tasks."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 263,
+          "snippet": "    client = openai.OpenAI(\n        base_url=\"https://openrouter.ai/api/v1\",\n        api_key=config.OPENROUTER_API_KEY,\n    )"
+        },
+        "description": "The spec explicitly discards 'OpenRouter aggregator' (line 150) and mandates the Anthropic SDK directly. The classifier instead constructs an openai.OpenAI client pointed at https://openrouter.ai/api/v1 using OPENROUTER_API_KEY, which is precisely the architecture the spec rejected. This re-introduces the 'two vendor hops' the decision table (lines 161-169) ruled out.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "forbids",
+        "title": "Frontend reads from HTTP API, not static CSVs",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 53,
+          "quote": "All data is loaded from static CSVs included in the repo."
+        },
+        "code": {
+          "file": "app/data-compliance/src/data/dataLayer.js",
+          "line": 4,
+          "snippet": "import { fetchInfractions, fetchMarketStats } from '../api/api.js'\nimport { calculateWeightedScore, calculateTechScore } from '../utils/scoring.js'"
+        },
+        "description": "Spec says CSV files committed in the repo are the data source. The data layer imports fetchInfractions/fetchMarketStats from api.js, which calls /api/v1/infractions/* HTTP endpoints with bearer tokens. There is no PapaParse, no fs read, and no CSV in app/data-compliance/public. The 'isolate the data layer so swapping CSVs for an API later requires minimal refactoring' principle is inverted \u2014 the API is the source of truth, and CSVs are absent.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "out-of-scope",
+        "title": "Date range filter exists in UI \u2014 spec lists it as out of scope",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 338,
+          "quote": "- Date range filtering / trend-over-time charts (data is single-day; planned for future)"
+        },
+        "code": {
+          "file": "app/data-compliance/src/App.jsx",
+          "line": 75,
+          "snippet": "        <DateRangeProvider>\n          <JobTypeFilterProvider>\n            <HeaderFilterProvider>"
+        },
+        "description": "PRD explicitly excludes date-range filtering and trend-over-time charts from V1; the dataset is described as scoped to a single date (2026-03-24). The app ships a DateRangeFilter component, a DateRangeContext, preset ranges (Today / Yesterday / Last 7 / This Month / Last Month / Custom), and a Compliance Score Trend line chart on the overview page \u2014 all of which the spec defers to post-V1.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "implicit-obligation",
+        "title": "CSV-generation script and committed CSV files are absent",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 56,
+          "quote": "Claude Code: connect to the A1 Garage production database via Postgres MCP. Use the SQL queries defined in `docs/a1garage/infractions.md` for each SQL-observable infraction type, filtered to `job_completed_date = '2026-03-24'`. Generate the CSV and commit it to the repo as a static file."
+        },
+        "code": {
+          "file": "app/data-compliance/src/data/dataLayer.js",
+          "line": 1,
+          "snippet": "// dataLayer.js \u2014 single data access point for infractions backend API\n// All HTTP calls go through api.js. No CSV or PapaParse in this module."
+        },
+        "description": "Spec explicitly requires CSV files generated from production SQL to be committed to the repo as static files scoped to job_completed_date='2026-03-24'. find . -name '*.csv' across the repo returns no CSV deliverable, and the data layer documents 'No CSV or PapaParse in this module' as a design intent. The static demo dataset the PRD insists on does not exist.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "forbids",
+        "title": "AUTH_BYPASS env var allows disabling JWT validation outside production",
+        "src_doc": "backend_PRDv2",
+        "spec": {
+          "file": "docs/PRDs/backend_PRDv2.md",
+          "line": 164,
+          "quote": "Every protected route returns `401` when called without a JWT"
+        },
+        "code": {
+          "file": "backend/src/middleware/auth.ts",
+          "line": 8,
+          "snippet": "if (process.env.AUTH_BYPASS === 'true') {\n  if (process.env.NODE_ENV === 'production') {\n    throw new Error('AUTH_BYPASS must never be enabled in production');\n  }\n  return (_req, _res, next) => { (_req as any).auth = { ... }; next(); };"
+        },
+        "description": "The PRD's success criteria require every protected route to return 401 without a JWT, with no exception carved out for dev. The code introduces an AUTH_BYPASS short-circuit that returns 200 with a synthetic auth payload whenever AUTH_BYPASS=true and NODE_ENV!=='production'. This silently violates the success-criteria assertion in any dev/test environment.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "out-of-scope",
+        "title": "V2 features (ServiceTitan download, automated trigger) implemented despite being out of scope for V1",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 269,
+          "quote": "**V2 is explicitly out of scope for V1.** The pipeline architecture is designed for V2 extension with no structural changes to `config.py`, `pdf_converter.py`, `region_extractor.py`, or `llm_classifier.py`."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/st_downloader.py",
+          "line": 1,
+          "snippet": "\"\"\"\nServiceTitan invoice download module \u2014 V2 Signature Detection Pipeline.\n\nDownloads invoice PDFs from ServiceTitan and stages them in the unprocessed\nS3 bucket for processing by the existing signature detection pipeline.\n\"\"\""
+        },
+        "description": "The spec marks V2 (ServiceTitan API download, automated trigger) as explicitly out of scope for V1, and says st_downloader.py is a future module. The repository already ships pipeline/signature_detection/st_downloader.py and pipeline/run_download.py implementing browser-based ServiceTitan download, audit-trail scraping, and a batch/--recent scheduler. Additionally, config.py grew SERVICETITAN_* env vars \u2014 a structural change to config.py the spec said V2 would not require.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "out-of-scope",
+        "title": "ServiceTitan invoice download is implemented despite being explicitly out of scope",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 595,
+          "quote": "| ServiceTitan invoice download | Requires live API connection to A1 account | V2 |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/st_downloader.py",
+          "line": 311,
+          "snippet": "async def fetch_invoice_pdf(invoice_id: str, session_path: Path) -> bytes:"
+        },
+        "description": "PRD Section 13 puts ServiceTitan invoice download in V2 and Section 1 states 'There is no live connection to ServiceTitan for invoice download.' The repository ships a full Playwright-based downloader (st_downloader.py, run_download.py) and a sibling browser_agent/ package that automates login/TOTP capture for ServiceTitan. This was explicitly deferred and should not have been built for V1.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "out-of-scope",
+        "title": "Late Signature infraction added beyond PRD scope",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 56,
+          "quote": "7. The existing Compliance Dashboard picks up signature infractions as a new infraction type"
+        },
+        "code": {
+          "file": "backend/src/data/lateSignature.ts",
+          "line": 4,
+          "snippet": "// Flags jobs where the authorization or acknowledgment signature was captured\n// more than THRESHOLD minutes after the credit card payment signature."
+        },
+        "description": "PRD v1 introduces exactly one new infraction type ('signature infractions') based on the cropped-signature classification cascade. The code adds a second infraction type \u2014 'Late Signature' \u2014 driven by audit-trail timestamps (auth_signature_at vs cc_signature_at). This is a distinct detection rule with its own threshold and is not described anywhere in PRD v1.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "frontend-ui-tree": [
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Page architecture replaced with 5 top-tab navigation, not 3-page drill-down",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 103,
+          "quote": "The application consists of three pages connected by a progressive drill-down flow."
+        },
+        "code": {
+          "file": "app/data-compliance/src/App.jsx",
+          "line": 17,
+          "snippet": "const ROUTES = ['/', '/market', '/technicians', '/jobs', '/accounting']\nconst PAGES  = [MarketOverview, MarketPage, TechBreakdown, JobDetail, Accounting]"
+        },
+        "description": "Spec describes three pages \u2014 Market Overview (heat map + tier cards) \u2192 Tech Breakdown \u2192 Job Detail \u2014 connected by an 'Explore Details' button that carries filter state forward. The app implements five top-level tabs (Overview, Market, Technicians, Signatures, Accounting) navigated via persistent nav links, no 'Explore Details' button anywhere, and a separate Accounting page the spec does not mention. The drill-down flow described in the spec does not exist in the UI.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "api-shape",
+        "title": "'Explore Details' button missing on Page 1 and Page 2",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 110,
+          "quote": "- **\"Explore Details\" button** \u2014 single button per page that carries all current filter selections forward to the next page."
+        },
+        "code": {
+          "file": "app/data-compliance/src/pages/MarketOverview.jsx",
+          "line": 415,
+          "snippet": "  return (\n    <div className=\"flex flex-col gap-4\" style={{ color: 'var(--gc-text-primary)' }}>"
+        },
+        "description": "Spec requires a single 'Explore Details' button per page that carries current filter selections (markets + tiers, then + technicians) to the next page. Grep for 'Explore Details' across app/data-compliance/src returns no matches. Filter state propagates via global context and tab navigation instead, so the spec's explicit forward-carrying interaction is absent.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "api-shape",
+        "title": "Page 1 layout omits the Six Infraction Tier Cards panel",
+        "src_doc": "PRD_DATA_COMPLIANCE_V1",
+        "spec": {
+          "file": "docs/PRDs/PRD_DATA_COMPLIANCE_V1.md",
+          "line": 118,
+          "quote": "- **Left side:** Market grid (heat map)\n- **Right side:** Six infraction tier cards\n- **Bottom of right side:** Single \"Explore Details\" button"
+        },
+        "code": {
+          "file": "app/data-compliance/src/pages/MarketOverview.jsx",
+          "line": 1,
+          "snippet": "// MarketOverview.jsx \u2014 Executive Summary dashboard\n// Layout: 5 stat cards (sparklines) \u2192 Tier Mix + Critical Infractions \u2192 Trend Line \u2192 Regions + Tech Leaderboard"
+        },
+        "description": "Spec's Page 1 layout is left=market grid, right=six tier cards, bottom-right='Explore Details' button. MarketOverview.jsx instead renders five summary stat cards (Compliance Score, Total Infractions, Inf/Job, Critical Rate, Significant Rate), a Tier Mix donut, a Critical Infractions chart, a Compliance Score Trend line, a regions table, and a Tech Risk Leaderboard. There is no market grid and no tier cards on this page (the market grid is on /market instead).",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "enum-value-set": [
+      {
+        "severity": "critical",
+        "kind": "enum-values",
+        "title": "Required env var is OPENROUTER_API_KEY, spec mandates ANTHROPIC_API_KEY",
+        "src_doc": "ap_automation_review",
+        "spec": {
+          "file": "docs/sig_pipeline/ap_automation_review.md",
+          "line": 301,
+          "quote": "1. **`OPENROUTER_API_KEY`** \u2014 Replaced by `ANTHROPIC_API_KEY`."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/config.py",
+          "line": 41,
+          "snippet": "OPENROUTER_API_KEY: str = _require_env(\"OPENROUTER_API_KEY\")"
+        },
+        "description": "The spec's 'Required env vars' list (line 312) names ANTHROPIC_API_KEY and the 'What We Discard' section explicitly states OPENROUTER_API_KEY is replaced by ANTHROPIC_API_KEY. The implementation still _require_env's OPENROUTER_API_KEY and never reads ANTHROPIC_API_KEY, so a correctly configured operator (per spec) cannot even start the pipeline.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "enum-values",
+        "title": "Classification enum drift: PARTIAL replaced with INVALID",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 197,
+          "quote": "**Classification values:** `PASS`, `MISSING`, `PARTIAL`, `SUSPECT`, `OUTLIER`"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 48,
+          "snippet": "VALID_CLASSIFICATIONS = frozenset({\"PASS\", \"MISSING\", \"INVALID\", \"SUSPECT\", \"OUTLIER\"})"
+        },
+        "description": "The spec enumerates allowed classification values as PASS, MISSING, PARTIAL, SUSPECT, OUTLIER. The code accepts PASS, MISSING, INVALID, SUSPECT, OUTLIER \u2014 it has dropped PARTIAL entirely and added INVALID, which the spec never mentions. Any downstream consumer (dashboard, SQL filters in the Verifying Results section) that expects PARTIAL will silently miss rows, and rows with `INVALID` are an out-of-spec enum value.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "business-rule",
+        "title": "is_flagged semantics drop OUTLIER from the non-PASS set",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 19,
+          "quote": "Flagged invoices (any non-PASS box) are written to `compliance.signature_detections` with `is_flagged = true` and moved to the `flagged` S3 bucket."
+        },
+        "code": {
+          "file": "pipeline/signature_detection/orchestrator.py",
+          "line": 50,
+          "snippet": "# Classifications that mark an invoice as an infraction (OUTLIER is tracked but not flagged)\n_NON_PASS = frozenset({\"MISSING\", \"INVALID\", \"SUSPECT\"})"
+        },
+        "description": "The spec defines is_flagged as 'any non-PASS box'. The orchestrator's _NON_PASS set excludes OUTLIER (and adds the unspecified INVALID). The accompanying code comment is explicit: 'OUTLIER is tracked but not flagged.' An invoice whose only defect is an OUTLIER box will therefore be written with is_flagged=false and routed to the processed/ bucket instead of flagged/, directly contradicting the spec.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "critical",
+        "kind": "business-rule",
+        "title": "OUTLIER classification does not set is_flagged, but spec shows OUTLIER invoices are flagged",
+        "src_doc": "signature_test_results",
+        "spec": {
+          "file": "docs/sig_pipeline/signature_test_results.md",
+          "line": 29,
+          "quote": "| Invoice 3162820982 | 3-box | PASS | **OUTLIER** | PASS | \u2014 | **Yes** |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/orchestrator.py",
+          "line": 50,
+          "snippet": "# Classifications that mark an invoice as an infraction (OUTLIER is tracked but not flagged)\n_NON_PASS = frozenset({\"MISSING\", \"INVALID\", \"SUSPECT\"})"
+        },
+        "description": "The spec's summary table marks every invoice whose only non-PASS classification is OUTLIER as Flagged=Yes (3162820982 ack OUTLIER, 3173232185 auth OUTLIER, 3173983753 cc_auth OUTLIER, 3175266439 ack OUTLIER). The orchestrator's _NON_PASS set explicitly excludes OUTLIER and the inline comment confirms 'OUTLIER is tracked but not flagged'. With this code, those four invoices would persist with is_flagged=false and stay in the processed bucket, contradicting the recorded test outcome.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "NON_SQL_OBSERVABLE set in code excludes a 4th type ('Missing Google Review Photo') not marked as such in README",
+        "src_doc": "README",
+        "spec": {
+          "file": "/Users/musheghgevorgyan/repos/signal7/Compliance/README.md",
+          "line": 146,
+          "quote": "**NON_SQL_OBSERVABLE** types cannot be detected via SQL queries on `core.*`/`sync.*`. They are excluded from the aggregate `infraction_summary` refresh and from certain market-level metrics. They require special handling in the registration steps below."
+        },
+        "code": {
+          "file": "/Users/musheghgevorgyan/repos/signal7/Compliance/backend/src/data/allInfractions.ts",
+          "line": 45,
+          "snippet": "const NON_SQL_OBSERVABLE = new Set([\n  'Invalid Cust. Ack. Signature on Invoice',\n  '$59 Waived; Not Authorized',\n  'Missing Google Review Photo',\n  'TC Authorized to Waive but TC Task Deleted',\n]);"
+        },
+        "description": "The README infraction table tags exactly three rows as NON_SQL_OBSERVABLE: row 14 (Invalid Cust. Ack. Signature on Invoice), row 19 ($59 Waived; Not Authorized) and row 23 (TC Authorized to Waive but TC Task Deleted). Row 11 (Missing Google Review Photo) has '\u2014' in the Tier column with no NON_SQL_OBSERVABLE marker. The aggregate fallback path and the refresh task and the market-stats SQL all silently exclude 'Missing Google Review Photo' from results, contradicting the spec's enumeration. The dashboard and aggregate counts will not include this type even though the spec says it is SQL-observable and registered.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "Signature classification enum drift: spec lists PARTIAL, code returns INVALID",
+        "src_doc": "README",
+        "spec": {
+          "file": "/Users/musheghgevorgyan/repos/signal7/Compliance/README.md",
+          "line": 342,
+          "quote": "sends each crop to Claude Vision (claude-sonnet-4-6) for classification. Classifications: PASS, MISSING, PARTIAL, SUSPECT, OUTLIER."
+        },
+        "code": {
+          "file": "/Users/musheghgevorgyan/repos/signal7/Compliance/pipeline/signature_detection/llm_classifier.py",
+          "line": 48,
+          "snippet": "VALID_CLASSIFICATIONS = frozenset({\"PASS\", \"MISSING\", \"INVALID\", \"SUSPECT\", \"OUTLIER\"})"
+        },
+        "description": "README declares the five allowed classification values as PASS, MISSING, PARTIAL, SUSPECT, OUTLIER. The pipeline's classifier (and the SignatureDetectionRowSchema Zod enum in backend/src/schema/infractions.ts) enumerate PASS, MISSING, INVALID, SUSPECT, OUTLIER instead \u2014 'INVALID' replaces 'PARTIAL'. The downstream Zod schema will reject any row tagged 'PARTIAL', and any consumer coded to the spec's enum will reject 'INVALID' values that actually flow through. A dedicated migration (010_backfill_partial_to_invalid) even renames historical PARTIAL \u2192 INVALID, confirming the rename happened without the spec being updated.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "Stage 2 semantic drift: spec says minimal ink \u2192 PARTIAL, code emits INVALID for printed text/simple strokes",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 14,
+          "quote": "2. **Stage 2 \u2014 Minimal ink:** Very few pen marks \u2192 PARTIAL"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 65,
+          "snippet": "STAGE 2 \u2014 CLEAR NON-SIGNATURE CHECK (only if Stage 1 finds ink present)\nIs this mark clearly not a legitimate signature? This includes:\n- Minimal ink: a single dot, tiny smudge, or artifact that resembles a pen test or accidental mark.\n... These are unambiguous non-signatures. If any of the above apply \u2192 classification: INVALID"
+        },
+        "description": "The spec defines Stage 2 as 'minimal ink \u2192 PARTIAL'. The implementation redefines Stage 2 as a 'clear non-signature' bucket that emits INVALID, and folds in additional cases the spec never mentions (printed words like 'N/A', single slashes, hand-printed names). The classifier therefore returns a different value than the spec promises for the same input image, and broadens the criteria for the stage.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "Stage 4 threshold mapping: spec maps <0.4 to SUSPECT and >=0.4 to OUTLIER; code maps <0.4 to INVALID and >=0.4 to SUSPECT",
+        "src_doc": "prompt_testing_log",
+        "spec": {
+          "file": "docs/sig_pipeline/prompt_testing_log.md",
+          "line": 137,
+          "quote": "  - complexity_score < 0.4  \u2192 SUSPECT (outlier + barely qualifies)"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 90,
+          "snippet": "  - complexity_score of the outlier < 0.4  \u2192 classification: INVALID (outlier + clearly low effort)\n  - complexity_score of the outlier \u2265 0.4  \u2192 classification: SUSPECT (outlier + ambiguous effort level)"
+        },
+        "description": "The CURRENT spec version (V4 carried into V5) defines the Stage 4 classification bands as SUSPECT below 0.4 and OUTLIER at/above 0.4. The actual system prompt shipped in llm_classifier.py uses INVALID and SUSPECT for the same bands respectively. Same complexity inputs will produce different categorical outcomes than the spec asserts, and OUTLIER (the spec's high-effort-disparity label) is effectively never emitted from Stage 4 by the code.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "Stage 4 introduces undocumented INVALID classification not present in spec",
+        "src_doc": "prompt_testing_log",
+        "spec": {
+          "file": "docs/sig_pipeline/prompt_testing_log.md",
+          "line": 137,
+          "quote": "  - complexity_score < 0.4  \u2192 SUSPECT (outlier + barely qualifies)\n  - complexity_score \u2265 0.4  \u2192 OUTLIER (low effort relative to others)"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 48,
+          "snippet": "VALID_CLASSIFICATIONS = frozenset({\"PASS\", \"MISSING\", \"INVALID\", \"SUSPECT\", \"OUTLIER\"})"
+        },
+        "description": "The spec's enumerated classifications across all documented variants are PASS, MISSING, SUSPECT, OUTLIER (and PARTIAL appears in result tables as a separate Stage 2 outcome). The code adds INVALID as a new categorical outcome accepted by VALID_CLASSIFICATIONS and emitted by both Stage 2 and Stage 4 of the prompt. The spec is silent on INVALID as a category, so downstream consumers expecting only the documented labels can mis-handle this value.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "business-rule",
+        "title": "OUTLIER classification is not treated as a flagging outcome in orchestrator",
+        "src_doc": "prompt_testing_log",
+        "spec": {
+          "file": "docs/sig_pipeline/prompt_testing_log.md",
+          "line": 154,
+          "quote": "| 3160552135 | PASS | PASS | OUTLIER | \u2717 False positive (known) |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/orchestrator.py",
+          "line": 50,
+          "snippet": "# Classifications that mark an invoice as an infraction (OUTLIER is tracked but not flagged)\n_NON_PASS = frozenset({\"MISSING\", \"INVALID\", \"SUSPECT\"})"
+        },
+        "description": "The spec's V4 'CURRENT' results table classifies an OUTLIER result on box CC as a false-positive flag (i.e. OUTLIER is described as a flagging outcome). The orchestrator excludes OUTLIER from the _NON_PASS set used to decide is_flagged, so any OUTLIER result is treated as non-flagging in practice. This directly contradicts the spec's recorded semantics where OUTLIER is operationally a flag.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "signature box status enum uses INVALID, spec lists PARTIAL",
+        "src_doc": "schema_discovery",
+        "spec": {
+          "file": "docs/sig_pipeline/schema_discovery.md",
+          "line": 166,
+          "quote": "**Classification status values (varchar(50)):** PASS, MISSING, PARTIAL, SUSPECT, OUTLIER"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 48,
+          "snippet": "VALID_CLASSIFICATIONS = frozenset({\"PASS\", \"MISSING\", \"INVALID\", \"SUSPECT\", \"OUTLIER\"})"
+        },
+        "description": "The spec authoritatively lists the five allowed values for auth_box_status / approval_box_status / payment_box_status as PASS, MISSING, PARTIAL, SUSPECT, OUTLIER. The classifier and DB rows now use INVALID instead of PARTIAL \u2014 migration 010 explicitly renames stored PARTIAL \u2192 INVALID and migration 011 reclassifies SUSPECT \u2192 INVALID. Any consumer relying on the spec's enum will mis-handle real rows. The spec needs to be updated or the code reverted.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "Zod schema for signature_detections rejects spec-allowed PARTIAL",
+        "src_doc": "schema_discovery",
+        "spec": {
+          "file": "docs/sig_pipeline/schema_discovery.md",
+          "line": 144,
+          "quote": "| `auth_box_status` | `varchar(50)` | NO | \u2014 | One of: PASS, MISSING, PARTIAL, SUSPECT, OUTLIER |"
+        },
+        "code": {
+          "file": "backend/src/schema/infractions.ts",
+          "line": 378,
+          "snippet": "auth_box_status: z.enum(['PASS', 'MISSING', 'INVALID', 'SUSPECT', 'OUTLIER']),"
+        },
+        "description": "The runtime row schema for the SignatureDetection API row uses INVALID where the spec's column specification says PARTIAL. The same drift is duplicated on approval_box_status and payment_box_status. An upstream client that conforms to the spec's enum will fail row validation, and any value the spec describes (PARTIAL) is rejected by code.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "Classifier returns INVALID, spec enumerates PARTIAL",
+        "src_doc": "signature_detection_prd_v1",
+        "spec": {
+          "file": "docs/PRDs/signature_detection_prd_v1.md",
+          "line": 91,
+          "quote": "Classify: PASS | MISSING | PARTIAL | SUSPECT | OUTLIER"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 48,
+          "snippet": "VALID_CLASSIFICATIONS = frozenset({\"PASS\", \"MISSING\", \"INVALID\", \"SUSPECT\", \"OUTLIER\"})"
+        },
+        "description": "PRD v1 lists the five allowed classifications as PASS | MISSING | PARTIAL | SUSPECT | OUTLIER (repeated in Sections 3, 7.3, 9 and 11). The implementation replaced PARTIAL with INVALID across the LLM prompt, the schema enum, and a backfill migration (010_backfill_partial_to_invalid.ts). Any downstream consumer that filters on the spec-defined PARTIAL value will see nothing; any consumer expecting INVALID is relying on an undocumented enum.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "PARTIAL classification recorded in spec results is not a valid classifier output",
+        "src_doc": "signature_test_results",
+        "spec": {
+          "file": "docs/sig_pipeline/signature_test_results.md",
+          "line": 275,
+          "quote": "| ack | **PARTIAL** | 0.97 | A very minimal mark is present \u2014 ink visible but the mark is so low-effort it barely qualifies as a signature attempt. |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 48,
+          "snippet": "VALID_CLASSIFICATIONS = frozenset({\"PASS\", \"MISSING\", \"INVALID\", \"SUSPECT\", \"OUTLIER\"})"
+        },
+        "description": "Invoice 3175253506's ack box is recorded as PARTIAL in the spec results and the spec's Classification distribution table counts PARTIAL=1. PARTIAL is not in VALID_CLASSIFICATIONS, so _parse_llm_response would log a warning and rewrite any 'PARTIAL' answer from the model to 'MISSING'. The recorded output therefore cannot have come from this code path as written, or the spec table is stale relative to the current enum.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "enum-values",
+        "title": "LLM prompt does not list PARTIAL as a permitted classification, yet spec counts PARTIAL outputs",
+        "src_doc": "signature_test_results",
+        "spec": {
+          "file": "docs/sig_pipeline/signature_test_results.md",
+          "line": 334,
+          "quote": "| PARTIAL | 1 |"
+        },
+        "code": {
+          "file": "pipeline/signature_detection/llm_classifier.py",
+          "line": 113,
+          "snippet": "      \"classification\": \"PASS\"|\"MISSING\"|\"INVALID\"|\"SUSPECT\"|\"OUTLIER\","
+        },
+        "description": "The Classification distribution table in the spec asserts the pipeline produced 1 PARTIAL result, but the system prompt enumerates the allowed classification values and PARTIAL is absent from that union. The model is instructed to choose from PASS/MISSING/INVALID/SUSPECT/OUTLIER only, so a 'PARTIAL' label should never be emitted, let alone counted.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "jwt-claim-scope": [
+      {
+        "severity": "high",
+        "kind": "implicit-obligation",
+        "title": "Backend does not read expected claims from verified JWT",
+        "src_doc": "auth0_infrastructure_overview",
+        "spec": {
+          "file": "docs/auth0/auth0_infrastructure_overview.md",
+          "line": 153,
+          "quote": "- read the expected claims"
+        },
+        "code": {
+          "file": "backend/src/middleware/auth.ts",
+          "line": 21,
+          "snippet": "  return auth({\n    audience: AUTH0_AUDIENCE,\n    issuerBaseURL: `https://${AUTH0_DOMAIN}`,\n    tokenSigningAlg: 'RS256',\n  });"
+        },
+        "description": "The spec's Backend Pattern enumerates the required steps: fetch JWKS, verify signature, verify issuer/audience, read the expected claims, and enforce authorization server-side. The middleware in backend/src/middleware/auth.ts only performs the first three (delegated to express-oauth2-jwt-bearer); no module anywhere under backend/src/ reads the namespaced claims listed in the spec (e.g. `https://signal7.com/tenant`, `https://signal7.com/ap_tenant`, `https://signal7.com/permissions`). Routes are mounted with no per-route authorization layer.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "auth-scope",
+        "title": "Backend does not enforce authorization server-side beyond bare token validity",
+        "src_doc": "auth0_infrastructure_overview",
+        "spec": {
+          "file": "docs/auth0/auth0_infrastructure_overview.md",
+          "line": 154,
+          "quote": "- enforce authorization server-side"
+        },
+        "code": {
+          "file": "backend/src/routes/infractions/index.ts",
+          "line": 45,
+          "snippet": "infractionsRouter.use('/market-stats', marketStatsRouter);\ninfractionsRouter.use('/', allInfractionsRouter);\ninfractionsRouter.use('/tech-deleted-material', techDeletedMaterialRouter);"
+        },
+        "description": "The spec's Backend Pattern requires server-side authorization enforcement (claims-driven). All /api/v1/infractions/* routes are mounted under a single `buildAuthMiddleware()` that only validates a JWT's signature, issuer, and audience; there is no role/permission/tenant gate applied to any sub-route. Any holder of a valid `https://api.signal7.ai` token reaches every infraction endpoint regardless of `app_metadata.permissions`, `ap_tenant`, `accessible_tenants`, or any other access-intent metadata the spec describes.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "auth-scope",
+        "title": "ap_tenant access gate not enforced by backend",
+        "src_doc": "auth0_infrastructure_overview",
+        "spec": {
+          "file": "docs/auth0/auth0_infrastructure_overview.md",
+          "line": 174,
+          "quote": "- an app-specific Action that gates access through `ap_tenant`"
+        },
+        "code": {
+          "file": "backend/src/middleware/auth.ts",
+          "line": 5,
+          "snippet": "export function buildAuthMiddleware() {\n  // Dev-only bypass: skip JWT validation when AUTH_BYPASS=true.\n  // Hard-blocked in production \u2014 throws at startup if someone sets it there."
+        },
+        "description": "The spec states the Signal7-AP application has an app-specific Action gating access through `ap_tenant` and that the Backend Pattern requires server-side enforcement (rather than relying only on the frontend's view of access). The backend's auth middleware never inspects the `https://signal7.com/ap_tenant` claim, so the Auth0 Action's gating is only enforced at token-issuance time; once any caller obtains a token for the `https://api.signal7.ai` audience, backend routes do not re-check `ap_tenant`.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      },
+      {
+        "severity": "high",
+        "kind": "required-filter",
+        "title": "`accessible_tenants` claim is not used to scope queries",
+        "src_doc": "auth0_infrastructure_overview",
+        "spec": {
+          "file": "docs/auth0/auth0_infrastructure_overview.md",
+          "line": 117,
+          "quote": "- `app_metadata.accessible_tenants`"
+        },
+        "code": {
+          "file": "backend/src/routes/infractions/allInfractions.ts",
+          "line": 14,
+          "snippet": "allInfractionsRouter.get('/', async (req, res, next) => {\n    const parsed = DateRangeQuerySchema.safeParse(req.query);\n    ...\n    const params = { ...parsed.data, limit: parsed.data.limit === 50 ? 500 : parsed.data.limit };\n    const { page, limit, start_date, end_date } = params;"
+        },
+        "description": "The spec describes `app_metadata.accessible_tenants` (and the `set-accessible-tenants` Action) as part of the access model the backend is supposed to enforce. The all-infractions handler accepts an arbitrary `market` query parameter and never narrows results to the tenants the caller is allowed to see; there is no per-request tenant scoping anywhere in the data layer. This is a cross-tenant exposure shape if multiple tenants ever share the audience.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "test-coverage": [
+      {
+        "severity": "high",
+        "kind": "implicit-obligation",
+        "title": "Spec requires happy-path + error-case test per route; only 1 of 39 routes has any tests",
+        "src_doc": "backend_PRDv2",
+        "spec": {
+          "file": "docs/PRDs/backend_PRDv2.md",
+          "line": 222,
+          "quote": "Every route has at minimum one happy-path test and one error-case test before the task is marked complete"
+        },
+        "code": {
+          "file": "backend/test/routes/health.test.ts",
+          "line": 1,
+          "snippet": "(directory listing \u2014 only health.test.ts plus 27 infraction tests; market-stats, signature-detection, discount-service-mismatch, invalid-wfc-discount, unauthorized-manager-discount, return-job-trip-charge, invalid-tech-lead, invalid-tech-split, tc-waiver-required, duplicate-trip-charge, excluded-required-service have no test file)"
+        },
+        "description": "The PRD requires every route to have both a happy-path and an error-case test. Eleven registered infraction routes have no corresponding `test/routes/infractions/*.test.ts` file at all (market-stats, signature-detection, discount-service-mismatch, invalid-wfc-discount, unauthorized-manager-discount, return-job-trip-charge, invalid-tech-lead, invalid-tech-split, tc-waiver-required, duplicate-trip-charge, excluded-required-service). This is structural evidence the per-route testing obligation is unmet.",
+        "engine_coverage_hypothesis": "partial"
+      }
+    ],
+    "spec-contradiction": [
+      {
+        "severity": "high",
+        "kind": "spec-internal-contradiction",
+        "title": "Signature crop x-range contradiction between spec sections 7 and 11",
+        "src_doc": "invoice_template_mapping",
+        "spec": {
+          "file": "docs/sig_pipeline/invoice_template_mapping.md",
+          "line": 232,
+          "quote": "Region = x: [90, 420] pt, y: [Y-20, Y+15] pt (converts to \u2248 x: [188, 875] px, y: [Y-42, Y+31] px at 150 DPI)"
+        },
+        "code": {
+          "file": "docs/sig_pipeline/invoice_template_mapping.md",
+          "line": 502,
+          "snippet": "Signature crop: x=[90, 260] pt, y=[Y-18, Y+12] pt"
+        },
+        "description": "Section 7 (the design decision) states the signature crop region is x:[90,420] pt with y window [Y-20, Y+15]. Section 11 (the implementation checklist) restates it as x:[90,260] pt with y window [Y-18, Y+12]. Both x-end (420 vs 260) and the y window differ, so an implementer cannot rely on either as authoritative. Code follows the \u00a711 x-range and neither y window.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ],
+    "manifest-dep": [
+      {
+        "severity": "high",
+        "kind": "entity-field-semantics",
+        "title": "Required dependency drift: spec lists `anthropic`, requirements.txt lists `openai`",
+        "src_doc": "pipeline_guide",
+        "spec": {
+          "file": "docs/sig_pipeline/pipeline_guide.md",
+          "line": 40,
+          "quote": "Dependencies: `pypdfium2`, `pdfplumber`, `anthropic`, `boto3`, `psycopg2-binary`, `Pillow`, `python-dotenv`, `pytest`"
+        },
+        "code": {
+          "file": "pipeline/requirements.txt",
+          "line": 2,
+          "snippet": "openai"
+        },
+        "description": "The Installation section enumerates exactly which Python packages `pip install -r pipeline/requirements.txt` will pull in, naming `anthropic`. The actual requirements file installs `openai` instead (along with extras `playwright`, `pyotp` not mentioned in the spec). Following the spec sentence verbatim creates a false expectation of which SDK is in use.",
+        "engine_coverage_hypothesis": "no-needs-new-rule"
+      }
+    ]
+  },
+  "caughtByEngine": [
+    {
+      "severity": "high",
+      "kind": "api-shape",
+      "title": "Sample endpoint response uses 'meta' key, spec says 'pagination'",
+      "src_doc": "DEPLOYMENT",
+      "spec": {
+        "file": "docs/DEPLOYMENT.md",
+        "line": 223,
+        "quote": "# Expected: { data: [...], pagination: { ... } }"
+      },
+      "code": {
+        "file": "backend/src/routes/infractions/noNotes.ts",
+        "line": 29,
+        "snippet": "    res.json({\n      data: rows,\n      meta: {\n        total,\n        page,"
+      }
+    },
+    {
+      "severity": "critical",
+      "kind": "auth-scope",
+      "title": "Auth middleware is registered AFTER the API router and never enforces JWTs on /api/v1",
+      "src_doc": "backend_PRDv2",
+      "spec": {
+        "file": "docs/PRDs/backend_PRDv2.md",
+        "line": 128,
+        "quote": "All routes except `/health` are protected"
+      },
+      "code": {
+        "file": "backend/src/app.ts",
+        "line": 39,
+        "snippet": "app.use('/health', healthRouter);\napp.use('/api/v1', apiRouter);\n...\n// in start(): app.use('/api/v1', buildAuthMiddleware());"
+      }
+    }
+  ]
+}

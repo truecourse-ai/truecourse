@@ -198,10 +198,29 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   }
   const validation = validateMerged(merged.artifacts);
 
-  // Don't write when validation fails — the caller surfaces issues to the
-  // user. Caching of slice results is preserved so re-running after the
-  // user fixes the spec doesn't burn tokens on the unchanged slices.
-  if (!validation.ok) {
+  // Drop artifacts with HARD validation issues and write the rest.
+  // A single bad artifact (a tcSource the LLM mangled, an identifier
+  // starting with a digit, etc.) should NOT block every other contract
+  // from reaching disk. The dropped artifacts' diagnostics surface to
+  // the user so the spec can be fixed.
+  const badKeys = new Set(
+    validation.issues
+      .filter((i) => i.severity === 'hard' && i.artifactKey !== 'resolver')
+      .map((i) => i.artifactKey),
+  );
+  let artifactsToWrite = merged.artifacts;
+  if (badKeys.size > 0) {
+    artifactsToWrite = merged.artifacts.filter(
+      (a) => !badKeys.has(`${a.kind}:${a.identity}`),
+    );
+  }
+
+  // Resolver-level hard errors (duplicate identities) are still
+  // blocking — those indicate genuine corpus corruption.
+  const resolverHard = validation.issues.some(
+    (i) => i.severity === 'hard' && i.artifactKey === 'resolver',
+  );
+  if (resolverHard) {
     return {
       ran: misses.length > 0,
       write: { written: [], proposed: [] },
@@ -213,13 +232,15 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
   }
 
   // ---- Write -------------------------------------------------------------
-  const write = writeContracts(repoRoot, merged.artifacts, { dryRun, prune: !dryRun });
+  const write = writeContracts(repoRoot, artifactsToWrite, { dryRun, prune: !dryRun });
 
   return {
     ran: misses.length > 0,
     write,
     slices: outcomes,
-    validationIssues: [],
+    // Surface the diagnostics even on a successful write — users still
+    // want to know which artifacts were skipped because of LLM errors.
+    validationIssues: validation.issues,
     mergeDiagnostics: merged.diagnostics,
     manifest,
   };

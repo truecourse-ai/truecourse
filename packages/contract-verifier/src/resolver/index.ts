@@ -23,6 +23,7 @@ import type {
   IdempotencyContractC,
   OperationContract,
   PaginationContractC,
+  QueryRuleContract,
   SourceLocation,
   SpecOrigin,
   StateMachineContract,
@@ -38,6 +39,7 @@ import { liftAuthorizationRule } from './lifters/authorization-rule.js';
 import { liftEffectGroup } from './lifters/effect-group.js';
 import { liftFormula } from './lifters/formula.js';
 import { liftIdempotencyContract } from './lifters/idempotency-contract.js';
+import { liftQueryRule } from './lifters/query-rule.js';
 
 // ---------------------------------------------------------------------------
 // Artifact-keyword → ArtifactKind map. Closed enum; lookup-only.
@@ -55,6 +57,7 @@ const KEYWORD_TO_KIND: Record<string, ArtifactKind> = {
   'idempotency-contract': 'IdempotencyContract',
   'effect-group': 'EffectGroup',
   'formula': 'Formula',
+  'query-rule': 'QueryRule',
   'unenforceable-obligation': 'UnenforceableObligation',
 };
 
@@ -84,7 +87,8 @@ export interface ResolvedArtifact {
     | EntityContract
     | StateMachineContract
     | EffectGroupContract
-    | FormulaContract;
+    | FormulaContract
+    | QueryRuleContract;
 }
 
 export interface ResolveError {
@@ -281,6 +285,7 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     | StateMachineContract
     | EffectGroupContract
     | FormulaContract
+    | QueryRuleContract
     | undefined;
   if (kind === 'Operation' && head[1].kind === 'ident' && head[2].kind === 'string') {
     // Pass the normalized path so OperationContract.path matches the
@@ -307,6 +312,8 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     contract = liftEffectGroup(stmt.block);
   } else if (kind === 'Formula') {
     contract = liftFormula(stmt.block);
+  } else if (kind === 'QueryRule') {
+    contract = liftQueryRule(stmt.block);
   }
 
   return {

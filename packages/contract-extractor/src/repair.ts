@@ -386,7 +386,7 @@ export async function repair(
   opts: RepairOptions = {},
 ): Promise<RepairOutcome> {
   const bin = opts.bin ?? process.env.CLAUDE_CODE_BIN ?? 'claude';
-  const timeoutMs = opts.timeoutMs ?? 240_000;
+  const timeoutMs = opts.timeoutMs ?? 600_000;
   const modelArgs = buildModelArgs(opts.model, opts.fallbackModel);
   const log: string[] = [];
   const allIssues: RepairIssue[] = [];

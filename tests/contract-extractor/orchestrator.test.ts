@@ -115,7 +115,11 @@ describe('contract extractor — orchestrator', () => {
 
     const result = await generateContracts({ repoRoot: tmpRoot, runner: stubRunner(), disableRepair: true });
 
-    expect(result.validationIssues).toEqual([]);
+    // Successful runs may surface SOFT validation issues (unresolved
+    // cross-references between disjoint slices); those don't block
+    // the write. Only HARD issues are a failure signal.
+    const hardIssues = result.validationIssues.filter((i) => i.severity === 'hard');
+    expect(hardIssues).toEqual([]);
     expect(result.write.written.length).toBeGreaterThan(0);
     const opFile = result.write.written.find((f) => f.includes('operations'));
     expect(opFile).toBeDefined();

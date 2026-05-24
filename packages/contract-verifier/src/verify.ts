@@ -13,7 +13,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFile } from './parser/index.js';
 import { resolve, type ResolvedArtifact, refKey } from './resolver/index.js';
-import { extractOperationsFromDir, detectAuthPresence, detectIdempotencyPresence } from './extractor/index.js';
+import {
+  extractOperationsFromDir,
+  detectAuthPresence,
+  detectIdempotencyPresence,
+  extractQueriesFromDir,
+} from './extractor/index.js';
 import {
   compareOperation,
   compareErrorEnvelope,
@@ -25,6 +30,7 @@ import {
   compareStateMachine,
   compareEffectGroup,
   compareFormula,
+  compareQueryRule,
 } from './comparator/index.js';
 import type {
   ContractDrift,
@@ -37,6 +43,7 @@ import type {
   EffectGroupContract,
   EntityContract,
   FormulaContract,
+  QueryRuleContract,
   StateMachineContract,
 } from './types/index.js';
 
@@ -268,6 +275,50 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         codeDir: opts.codeDir,
       })),
     );
+  }
+
+  // ---- Query rules: predicate-shape diffs on data-fetching queries ----
+  //
+  // Every QueryRule sees every extracted query; the comparator does
+  // column-level matching to decide which queries are subject to which
+  // predicates. Doing the entity-level filtering at the orchestrator
+  // would silently miss real drifts when the LLM extractor picks an
+  // entity that's JOIN'd (not the primary FROM table) — a common case
+  // for spec rules of the form "<column> on <joined-table> must be
+  // <predicate>" where the FROM table is a sibling.
+  //
+  // The trade-off: a rule constraining a generic column name (e.g.
+  // `id`) would now fire against any query that touches that column,
+  // which is too broad. In practice audit-derived rules constrain
+  // distinctive columns (warranty_id, completedon, skuname) where the
+  // false-positive risk is small. If this changes, the rule's `entity`
+  // field becomes the right place to re-introduce filtering.
+  const extractedQueries = await extractQueriesFromDir(opts.codeDir);
+  const queryDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'QueryRule') continue;
+    if (!artifact.contract) continue;
+    const contract = artifact.contract as QueryRuleContract;
+    queryDriftCollector.push(
+      ...compareQueryRule({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract,
+        codeQueries: extractedQueries,
+      }),
+    );
+  }
+  // Cross-rule dedupe: when multiple QueryRules share an obligation
+  // (e.g. several "warranty-must-flag" rules with different identities
+  // all flag the same `warranty_id IS NULL` clause), keep the first.
+  // Within-rule dedupe is already done by compareQueryRule; this
+  // second pass handles cross-rule overlap.
+  const seenQueryDrift = new Set<string>();
+  for (const d of queryDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}|${d.codeSide ?? ''}`;
+    if (seenQueryDrift.has(key)) continue;
+    seenQueryDrift.add(key);
+    drifts.push(d);
   }
 
   return {

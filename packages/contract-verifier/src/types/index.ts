@@ -66,6 +66,7 @@ export type ArtifactKind =
   | 'EffectGroup'
   | 'Effect'
   | 'Formula'
+  | 'QueryRule'
   | 'UnenforceableObligation'
   // Forward references that resolve to artifacts we don't yet implement
   // (e.g. `PerformanceSLA`); kept open so unresolved references type-check.
@@ -310,6 +311,77 @@ export interface UnenforceableObligationContract {
 }
 
 // ---------------------------------------------------------------------------
+// QueryRule — predicates a data-fetching query MUST / MUST NOT include
+// ---------------------------------------------------------------------------
+//
+// Models specs like "scope by tenant_id", "exclude warranty jobs",
+// "date range applies to invoice.createdon" without baking in any ORM
+// or SQL dialect. The comparator diffs `required` / `forbidden` against
+// the `Predicate[]` an `ExtractedQuery` produces (see extractor side).
+//
+// `QualifiedColumn.table` is the canonical entity table when resolvable;
+// `alias` preserves the source-side alias for best-effort match when no
+// schema is available (lenient resolution — see PLAN_GAP_1_QUERY_RULE.md).
+
+export interface QueryRuleContract {
+  /** Optional: bind this rule to a specific Operation by identity. If
+   *  unbound, applies to any query against `entity`. */
+  boundToOperation?: ArtifactRef;
+  /** The logical entity (table) being queried. */
+  entity: ArtifactRef;
+  /** Predicates the query MUST include. */
+  required: Predicate[];
+  /** Predicates the query MUST NOT include. */
+  forbidden: Predicate[];
+  /** Optional: which column the date-range filter is anchored on. */
+  dateRangeBinding?: { column: QualifiedColumn };
+}
+
+export type Predicate =
+  | { kind: 'eq';          column: QualifiedColumn; value: LiteralValue }
+  | { kind: 'neq';         column: QualifiedColumn; value: LiteralValue }
+  | { kind: 'in';          column: QualifiedColumn; values: LiteralValue[] }
+  | { kind: 'not-in';      column: QualifiedColumn; values: LiteralValue[] }
+  | { kind: 'is-null';     column: QualifiedColumn }
+  | { kind: 'is-not-null'; column: QualifiedColumn }
+  | { kind: 'gt';          column: QualifiedColumn; value: LiteralValue }
+  | { kind: 'gte';         column: QualifiedColumn; value: LiteralValue }
+  | { kind: 'lt';          column: QualifiedColumn; value: LiteralValue }
+  | { kind: 'lte';         column: QualifiedColumn; value: LiteralValue }
+  | { kind: 'between';     column: QualifiedColumn; low: LiteralValue; high: LiteralValue }
+  | { kind: 'like';        column: QualifiedColumn; pattern: string }
+  | { kind: 'ilike';       column: QualifiedColumn; pattern: string }
+  /** Cross-column comparison (`t1.a > t2.b`). Covers the case where a
+   *  predicate constrains one column relative to another column, not a
+   *  literal — e.g. "the tech-deletion timestamp must fall between the
+   *  technician's arrival and departure times" (two such predicates,
+   *  one `gte`, one `lte`). */
+  | { kind: 'column-compare'; left: QualifiedColumn; op: 'eq'|'neq'|'gt'|'gte'|'lt'|'lte'; right: QualifiedColumn }
+  /** Opaque escape hatch for sub-queries, custom functions, anything the
+   *  parser can't normalize. Preserved verbatim; flagged by comparator
+   *  but never silently dropped. */
+  | { kind: 'raw';         sql: string };
+
+export interface QualifiedColumn {
+  /** Canonical table name if resolvable (lenient: may be undefined when
+   *  only an alias is available). */
+  table?: string;
+  /** SQL alias used at the source site (e.g. `'j'` for `'jobs'`). */
+  alias?: string;
+  column: string;
+}
+
+export type LiteralValue =
+  | { kind: 'string';     value: string }
+  | { kind: 'number';     value: number }
+  | { kind: 'boolean';    value: boolean }
+  | { kind: 'null' }
+  /** Function call or bare identifier — `NOW()`, `CURRENT_DATE`, an
+   *  unparameterized column reference. Preserved as raw source. */
+  | { kind: 'identifier'; ref: string }
+  | { kind: 'parameter';  index?: number; name?: string };
+
+// ---------------------------------------------------------------------------
 // Selector expressions (for cross-cutting `applies-to` / selectors)
 // ---------------------------------------------------------------------------
 
@@ -349,6 +421,7 @@ export type Artifact =
   | (ArtifactBase & { kind: 'IdempotencyContract';      contract: IdempotencyContractC })
   | (ArtifactBase & { kind: 'EffectGroup';              contract: EffectGroupContract })
   | (ArtifactBase & { kind: 'Formula';                  contract: FormulaContract })
+  | (ArtifactBase & { kind: 'QueryRule';                contract: QueryRuleContract })
   | (ArtifactBase & { kind: 'UnenforceableObligation';  contract: UnenforceableObligationContract });
 
 // ---------------------------------------------------------------------------

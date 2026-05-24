@@ -20,6 +20,8 @@ export type { AuthPresenceResult } from './auth-presence.js';
 export { detectIdempotencyPresence } from './idempotency-presence.js';
 export type { IdempotencyPresenceResult } from './idempotency-presence.js';
 export { extractFileBasedRoutesFromDir } from './file-based-routes.js';
+export { extractQueriesFromDir } from './query/index.js';
+export type { ExtractedQuery, QueryAdapterName } from './query/index.js';
 
 export type { ExtractedOperation } from './operation.js';
 

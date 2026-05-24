@@ -83,6 +83,9 @@ Return ONE JSON object matching this shape — no prose, no code fences:
                         declaration. A slice with one event becomes a one-effect
                         effect-group; never emit a bare \`Effect:name { ... }\` block.
 - Formula:              business-logic calculation
+- QueryRule:            predicates a data-fetching query MUST / MUST NOT include
+                        (date anchors, tenant scoping, row-exclusion business
+                        rules, e.g. "warranty jobs must be flagged")
 - UnenforceableObligation: spec sentence with no structural encoding
 
 # .tc grammar (essentials)
@@ -290,6 +293,40 @@ formula order.discount-cents {
   expression "subtotalCents >= 10000 ? round(subtotalCents * 0.1) : 0"
   computed-at order-creation
   immutable-after-creation
+}
+
+query-rule noPaymentCollected.warranty-must-flag {
+  origin SPEC.md "Q4: warranty handling" 35..40
+  // Bind to a specific endpoint OR leave unbound to apply to any query
+  // against the entity. The verifier matches by entity identity.
+  bound-to Operation:"GET /api/v1/infractions/no-payment-collected"
+  entity Entity:core.jobs
+  // Date-range filter MUST be anchored on this column. Catches the
+  // "spec says createdon, code uses completedon" drift class.
+  date-range-binding column invoices.createdon
+  required {
+    // Predicate forms (column reference is \`table.column\`, split on
+    // the LAST dot so \`schema.table.column\` works too):
+    is-null      jobs.archived_at
+    is-not-null  invoices.balance
+    eq           jobs.status        "Completed"
+    neq          jobs.archived      true
+    gt           invoices.total     0
+    gte          invoices.total     100
+    in           jobs.market_id     [1, 2, 3]
+    not-in       jobs.business_unit ["door_sales", "other"]
+    between      invoices.created   2020   2026
+    like         jobs.skuname       "ARC-%"
+    ilike        jobs.skuname       "%spring%"
+    // Sub-queries / custom predicates the parser can't normalize
+    // → \`raw\` keeps the original SQL fragment for review:
+    raw          "EXISTS (SELECT 1 FROM core.appointmentassignments aa WHERE …)"
+  }
+  forbidden {
+    // Spec says warranty jobs MUST be flagged; code excluding them
+    // via \`IS NULL\` is a drift. Same predicate vocabulary as above.
+    is-null      jobs.warranty_id
+  }
 }
 
 unenforceable-obligation encryption.at-rest {
@@ -648,6 +685,135 @@ The \`forbids\` block is a first-class part of the contract — do not skip it j
 because the spec phrases the rule in prose rather than a structured list. If the
 spec says "missing orders never return a silent null", that is exactly
 \`forbid status 200 when resource-missing\`.
+
+# QueryRule — extract whenever the spec asserts predicates on a data query
+
+A \`query-rule\` is the right artifact whenever a spec sentence constrains WHAT
+ROWS a query returns — i.e. dictates which predicates the SQL / ORM call must
+include or must NOT include. Common phrasings that trigger a \`query-rule\`
+fragment:
+
+- "the date range applies to <table>.<column>" / "scope by <field>"
+- "<exclude|include|filter> jobs where <condition>"
+- "warranty jobs are <flagged|excluded>"
+- "only count rows where <status> = '<value>'"
+- "rows with <field> IS NULL are <excluded|included>"
+- "the query must scope by <tenant|market|user>"
+- "<column> must be one of <enum values>"
+- "filter on <table>.<column> >= ?"
+
+Mapping prose → predicate algebra (use the exact predicate keywords listed
+in the \`query-rule\` grammar block above):
+
+  "must be non-null"  / "where X is not null"  → \`is-not-null table.col\`
+  "must be null"      / "where X is null"      → \`is-null table.col\`
+  "where X = Y" / "must equal Y"               → \`eq table.col Y\`
+  "where X is not Y"                           → \`neq table.col Y\`
+  "X in (a, b, c)" / "one of [a, b]"           → \`in table.col [a, b, c]\`
+  "X not in (...)"                             → \`not-in table.col [...]\`
+  "X > N" / "greater than N"                   → \`gt table.col N\`
+  "X >= N"                                     → \`gte table.col N\`
+  "X < N"                                      → \`lt table.col N\`
+  "X <= N"                                     → \`lte table.col N\`
+  "X between A and B"                          → \`between table.col A B\`
+  "X matches pattern 'foo%'"                   → \`like table.col "foo%"\`
+  "X case-insensitively matches 'foo'"         → \`ilike table.col "%foo%"\`
+
+**Required vs forbidden** — the most error-prone distinction. Read the spec
+sentence carefully:
+
+- "warranty jobs MUST be flagged" → the predicate that EXCLUDES warranty
+  jobs (e.g. \`is-null jobs.warranty_id\`) is **forbidden**, not required.
+  The spec is asserting "include them"; the forbidden block names what
+  the code must NOT do.
+- "exclude jobs with status = 'Cancelled'" → \`forbidden { eq jobs.status "Cancelled" }\`
+  is WRONG. The spec wants the exclusion; the predicate \`neq status "Cancelled"\`
+  (or \`not-in status [...]\`) belongs in **required**.
+- When in doubt: ask "does this predicate produce the row set the spec
+  describes?" If yes, it's required; if it excludes rows the spec wants,
+  it's forbidden.
+
+**Date-range binding** is its own first-class slot, NOT a predicate. When
+the spec says "the date filter applies to invoice.createdon", emit
+\`date-range-binding column invoices.createdon\`, do NOT add a \`gte/lt\`
+predicate (those reflect concrete bound values, not the binding rule).
+
+**bound-to** is OPTIONAL. When the spec rule applies to ONE endpoint, set
+\`bound-to Operation:"<METHOD path>"\`. When it applies to any query against
+the entity (e.g. "all queries against core.jobs must exclude soft-deleted
+rows"), omit \`bound-to\`.
+
+**Unparseable predicates** — sub-queries, custom SQL functions, anything you
+can't express in the predicate algebra → use \`raw "<verbatim SQL>"\`. The
+verifier surfaces these as coverage gaps but never silently drops them.
+
+# QueryRule — endpoint-map TABLES (HIGHEST priority)
+
+When the spec has a markdown table mapping endpoints to data attributes —
+columns like "Date Anchor", "Key Tables", "Scope", "Filter" — emit ONE
+\`query-rule\` per row. Trigger headings: "V1 Endpoint Map", "SQL Observable
+Inventory", "Detection Inventory", "Query Map", "Scoping Inventory".
+
+Row → query-rule:
+
+  | \`/infractions/no-payment-collected\` | core.invoices, core.jobs | \`i.createdon\` |
+
+  query-rule no-payment-collected.date-anchor {
+    origin "<source>" "<heading>" <lines>
+    bound-to Operation:"GET /api/v1/infractions/no-payment-collected"
+    entity Entity:core.invoices
+    date-range-binding column invoices.createdon
+  }
+
+Rules:
+- One query-rule per row. A 26-row table → 26 query-rules.
+- Identity = \`<endpoint-slug>.date-anchor\` (kebab-case).
+- \`entity\` = first table in "Key Tables".
+- \`date-range-binding column\` = the cell value, resolve alias from Key Tables
+  if possible (\`i.createdon\` + Key Tables \`core.invoices\` → \`invoices.createdon\`);
+  otherwise keep alias-form.
+- \`bound-to\` uses \`GET /api/v1<endpoint-path>\` unless the spec says otherwise.
+
+# QueryRule — column-vs-column predicates
+
+When a spec rule compares one column to ANOTHER column (not a literal),
+emit a \`column-compare\` predicate. Common phrasings:
+
+- "the deletion timestamp must fall between arrival and departure" →
+    \`required {\`
+    \`  gte-col invoiceitems.modifiedon appointmentassignments.arrived_at\`
+    \`  lte-col invoiceitems.modifiedon appointmentassignments.departed_at\`
+    \`}\`
+- "warranty tier must equal spring type" →
+    \`required { eq-col jobs.warranty_tier jobs.spring_type }\`
+- "actual price > pricebook price" →
+    \`required { gt-col invoiceitems.price pricebook.list_price }\`
+
+Shorthand keywords: \`eq-col\`, \`neq-col\`, \`gt-col\`, \`gte-col\`,
+\`lt-col\`, \`lte-col\`. Both sides are fully-qualified columns.
+
+# QueryRule — value-set & SQL-block drifts
+
+When the spec enumerates flaggable values OR contains a \`\`\`sql block,
+emit a query-rule. These are the highest-yield sources after endpoint-map
+tables, and the easiest to miss.
+
+Examples:
+- "flag PO in [Sent, PartiallyReceived, Pending]" →
+    \`required { in purchaseorders.status ["Sent", "PartiallyReceived", "Pending"] }\`
+- "Exported = perfect, do not flag" →
+    \`forbidden { eq purchaseorders.status "Exported" }\`
+- SQL block \`WHERE ii.skuname ILIKE '%trip charge%' AND ii.skuname NOT ILIKE '%waiv%'\` →
+    \`required { ilike invoiceitems.skuname "%trip charge%" }\`
+    \`forbidden { ilike invoiceitems.skuname "%waiv%" }\`
+- "spring SKU prefix ARC-" → \`required { like invoiceitems.skuname "ARC-%" }\`
+
+Every WHERE predicate in an SQL code block becomes a \`required\` or
+\`forbidden\` entry. Identity: \`<endpoint-slug>.<purpose>\` (e.g.
+\`duplicate-trip-charge.skuname-pattern\`).
+
+**Identity** — kebab-case, ideally \`<feature>.<purpose>\` (e.g.
+\`noPaymentCollected.warranty-must-flag\`, \`infractions.date-anchor-binding\`).
 
 # Authorization-rule: bypass/exception subsections become \`except\` clauses
 
