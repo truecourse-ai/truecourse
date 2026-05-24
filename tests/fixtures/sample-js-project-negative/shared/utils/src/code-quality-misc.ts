@@ -118,6 +118,16 @@ export function identicalB(x: number) {
   return result;
 }
 
+// VIOLATION: code-quality/deterministic/identical-functions
+export function computeShippingFee(weight: number) {
+  const total = weight * 1.5 + 4;
+  return total;
+}
+export function computeHandlingFee(weight: number) {
+  const total = weight * 1.5 + 4;
+  return total;
+}
+
 // VIOLATION: code-quality/deterministic/inconsistent-function-call
 class Widget {}
 export function inconsistentNew() {

@@ -12,8 +12,17 @@ export const identicalFunctionsVisitor: CodeRuleVisitor = {
 
     function walk(n: SyntaxNode) {
       if (JS_FUNCTION_TYPES.includes(n.type)) {
-        // Skip functions that are arguments to calls (e.g., Drizzle column defs)
-        if (n.parent?.type === 'arguments') { return }
+        // Skip functions used as inline call-site values — argument to a call
+        // (e.g. Drizzle column defs), value in an object-literal property bag
+        // (mutation/option-bag callbacks like `onSuccess: () => {...}`), or a
+        // JSX attribute expression. Identical bodies at distinct call sites
+        // are glue, not duplicated logic worth extracting.
+        const parentType = n.parent?.type
+        if (
+          parentType === 'arguments' ||
+          parentType === 'pair' ||
+          parentType === 'jsx_expression'
+        ) { return }
         const body = getFunctionBody(n)
         // Skip concise-body arrows (`(x) => expr`): these are by definition
         // single-expression lambdas — typically trivial event handlers or
