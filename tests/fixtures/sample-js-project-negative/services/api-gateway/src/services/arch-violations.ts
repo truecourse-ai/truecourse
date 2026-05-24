@@ -12,6 +12,9 @@ const apiVersion = 'v1';
 
 // VIOLATION: architecture/deterministic/duplicate-import
 import { Request as Req } from 'express';
+// Two named imports from the same source — the classic mistake.
+// VIOLATION: architecture/deterministic/duplicate-import
+import { z as zod } from 'zod';
 
 const router = Router();
 

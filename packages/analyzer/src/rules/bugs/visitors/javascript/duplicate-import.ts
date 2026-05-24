@@ -1,3 +1,4 @@
+import type { Node as SyntaxNode } from 'web-tree-sitter'
 import type { CodeRuleVisitor } from '../../../types.js'
 import { makeViolation } from '../../../types.js'
 import { JS_LANGUAGES } from './_helpers.js'
@@ -7,7 +8,7 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
   languages: JS_LANGUAGES,
   nodeTypes: ['program'],
   visit(node, filePath, sourceCode) {
-    const seenSources = new Map<string, import('web-tree-sitter').Node>()
+    const seenSources = new Map<string, SyntaxNode>()
 
     for (const child of node.namedChildren) {
       if (child.type === 'import_statement') {
@@ -21,6 +22,11 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
             const prevIsType = prev.text.startsWith('import type ')
             const currIsType = child.text.startsWith('import type ')
             if (prevIsType !== currIsType) continue
+
+            // Side-effect-only (`import 'x'`) paired with a bindings import
+            // is intentional — the bare form documents that the module is
+            // loaded for its top-level effects. Merging them erases intent.
+            if (isSideEffectOnly(prev) !== isSideEffectOnly(child)) continue
 
             return makeViolation(
               this.ruleKey, child, filePath, 'medium',
@@ -37,4 +43,11 @@ export const duplicateImportVisitor: CodeRuleVisitor = {
 
     return null
   },
+}
+
+function isSideEffectOnly(imp: SyntaxNode): boolean {
+  for (const child of imp.namedChildren) {
+    if (child.type === 'import_clause') return false
+  }
+  return true
 }
