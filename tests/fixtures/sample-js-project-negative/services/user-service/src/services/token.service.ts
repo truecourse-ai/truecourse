@@ -35,7 +35,7 @@ export class TokenService {
 // VIOLATION: code-quality/deterministic/mutable-private-member
 export class Config {
   private threshold = 100;
-  update(val: number) { this.threshold = val; }
+  getThreshold(): number { return this.threshold; }
 }
 
 /** Factory function */

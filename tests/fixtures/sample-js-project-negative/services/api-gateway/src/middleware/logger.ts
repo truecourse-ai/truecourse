@@ -30,14 +30,13 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     };
 
     // VIOLATION: performance/deterministic/unbounded-array-growth
-    let idx = 0;
-    while (idx < 1) {
+    while (req.path !== '/health') {
       logs.push(log);
-      idx++;
+      break;
     }
 
     // VIOLATION: code-quality/deterministic/magic-number
-    if (duration > 500) {
+    if (duration > 1500) {
       // VIOLATION: code-quality/deterministic/console-log
       console.log(`Slow request: ${req.method} ${req.path} took ${duration}ms`);
     }

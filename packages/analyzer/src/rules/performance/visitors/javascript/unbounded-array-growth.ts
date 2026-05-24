@@ -29,6 +29,34 @@ export const unboundedArrayGrowthVisitor: CodeRuleVisitor = {
     if (loopNode.type === 'while_statement') {
       const condition = loopNode.childForFieldName('condition')
       if (condition && /\.exec\s*\(/.test(condition.text)) return null
+
+      // Advancing-iterator pattern: `while (advancing OP threshold)` where
+      // the body reassigns the advancing variable. Typical shapes:
+      //   while (date.toDate() <= now) { …; date = expr.next() }
+      //   while (cursor < end) { …; cursor++ }
+      // The strict ordering operators (`<`, `<=`, `>`, `>=`) signal a
+      // threshold-bounded loop; equality / negation / Iterator-protocol
+      // checks (`!done`, `=== null`) are intentionally not skipped — those
+      // are unbounded unless the iterator itself promises termination.
+      if (condition) {
+        const condText = condition.text
+        const hasOrdering = /(?:^|[^<>=!])(?:<=?|>=?)(?!=)/.test(condText)
+        const body = loopNode.childForFieldName('body')
+        if (hasOrdering && body) {
+          const bodyText = body.text
+          const ignoreIds = new Set([
+            'true', 'false', 'null', 'undefined', 'this', 'new', 'typeof',
+            'instanceof', 'in', 'of', 'Date', 'now', 'length', 'size',
+            'count', 'Math', 'Number', 'String', 'Array',
+          ])
+          for (const m of condText.matchAll(/\b([a-zA-Z_$][\w$]*)\b/g)) {
+            const id = m[1]
+            if (ignoreIds.has(id)) continue
+            const reassignRe = new RegExp(`\\b${id}\\s*(?:=(?!=)|\\+\\+|--)`)
+            if (reassignRe.test(bodyText)) return null
+          }
+        }
+      }
     }
 
     const loopText = loopNode.text
