@@ -19,7 +19,7 @@ const CARDS: Card[] = [
   {
     Icon: Server,
     title: 'Self-hosted',
-    body: 'Deploy in your VPC or on-premises. Your code and specs never leave your infrastructure.',
+    body: 'Deploy in your VPC or on-premises. Code and specs stay between your infrastructure and the LLM provider your team already uses. They never touch TrueCourse.',
   },
   {
     Icon: KeyRound,
@@ -38,8 +38,8 @@ const CARDS: Card[] = [
   },
   {
     Icon: WifiOff,
-    title: 'Zero external calls',
-    body: 'Verification runs entirely in your CI pipeline. No telemetry, no external API calls required.',
+    title: 'Verify stays local',
+    body: 'The verifier is deterministic and runs entirely in your CI with no LLM calls. Optional anonymous telemetry helps us improve the engine, off with one flag.',
   },
   {
     Icon: ClipboardCheck,

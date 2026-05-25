@@ -11,6 +11,11 @@ export function CTASection() {
           <span className="text-gradient-accent">AI speed.</span>
         </h2>
 
+        <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted-foreground sm:text-xl">
+          AI made writing code fast. Review is the bottleneck. We check every
+          change against what your team decided. Deterministically.
+        </p>
+
         <div className="mt-10 flex justify-center">
           <Link
             to="/request-access"
