@@ -16,8 +16,8 @@ export function Footer() {
               <span className="text-base font-semibold tracking-tight">TrueCourse</span>
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              The validation layer for AI-generated code. Open source, local-first, and
-              built for the speed your models code at.
+              The verified knowledge layer for engineering. Compile your team&apos;s
+              decisions into contracts and check every commit against them.
             </p>
             <div className="mt-5 flex items-center gap-2">
               <a
@@ -51,11 +51,12 @@ export function Footer() {
           <Column
             title="Product"
             links={[
-              { href: '/#open-source', label: 'Open source' },
-              { href: '/teams', label: 'For teams' },
-              { href: '/#capabilities', label: 'What it catches' },
-              // Hidden until we have real OSS analysis reports — see HomePage.tsx for the matching toggle.
-              // { href: '/#reports', label: 'Field reports' },
+              { href: '/#why-now', label: 'Why now' },
+              { href: '/#our-approach', label: 'Approach' },
+              { href: '/#integrations', label: 'Integrations' },
+              { href: '/#why-tests-cant-catch', label: 'Why us' },
+              { href: '/#enterprise', label: 'Enterprise' },
+              { href: '/request-access', label: 'Request access' },
             ]}
           />
           <Column
@@ -88,15 +89,14 @@ export function Footer() {
 
         <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-border pt-6 sm:flex-row sm:items-center">
           <div className="text-xs text-muted-foreground">
-            <p>
-              © {new Date().getFullYear()} TrueCourse AI, Inc. &middot; MIT licensed.
-            </p>
+            <p>© {new Date().getFullYear()} TrueCourse AI, Inc.</p>
             <p className="mt-1">
               2261 Market Street STE 88087, San Francisco, CA 94114 US
             </p>
           </div>
           <p className="text-xs text-muted-foreground sm:text-right">
-            Built with TypeScript and tree-sitter.
+            Built with <span className="text-accent" aria-hidden>♥</span>
+            <span className="sr-only">love</span> for engineers shipping with AI.
           </p>
         </div>
       </div>
