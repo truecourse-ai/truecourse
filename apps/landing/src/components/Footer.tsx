@@ -52,6 +52,7 @@ export function Footer() {
             title="Product"
             links={[
               { href: '/#why-now', label: 'Why now' },
+              { href: '/#our-approach', label: 'Approach' },
               { href: '/#why-tests-cant-catch', label: 'Why us' },
               { href: '/#enterprise', label: 'Enterprise' },
               { href: '/request-access', label: 'Request access' },

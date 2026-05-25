@@ -10,6 +10,7 @@ type NavItem = { href: string; label: string; external?: boolean };
 
 const NAV: NavItem[] = [
   { href: '/#why-now', label: 'Why now' },
+  { href: '/#our-approach', label: 'Approach' },
   { href: '/#why-tests-cant-catch', label: 'Why us' },
   { href: '/#enterprise', label: 'Enterprise' },
 ];
