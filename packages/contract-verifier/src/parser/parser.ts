@@ -139,7 +139,9 @@ function parseHeadToken(ctx: ParseContext): HeadToken {
           loc: ctx.loc(t),
         };
       }
-      return { kind: 'number', value: parseInt(t.text, 10), loc: ctx.loc(t) };
+      // Use parseFloat so decimal literals (`0.5`, `1.25`) survive the
+      // parse. Integers (`42`) round-trip identically through parseFloat.
+      return { kind: 'number', value: parseFloat(t.text), loc: ctx.loc(t) };
     }
     case 'reference': {
       ctx.advance();

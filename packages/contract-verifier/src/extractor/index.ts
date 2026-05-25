@@ -31,6 +31,8 @@ export {
   detectForbiddenFeatureFlag,
 } from './forbidden/index.js';
 export type { ForbiddenMatch } from './forbidden/index.js';
+export { extractConstantsFromDir } from './constant/index.js';
+export type { ExtractedConstant, ConstantShape } from './constant/index.js';
 
 export type { ExtractedOperation } from './operation.js';
 

@@ -84,10 +84,12 @@ Return ONE JSON object matching this shape — no prose, no code fences:
                         effect-group; never emit a bare \`Effect:name { ... }\` block.
 - Formula:              business-logic calculation
 - QueryRule:            predicates a data-fetching query MUST / MUST NOT include
-                        (date anchors, tenant scoping, row-exclusion business
-                        rules, e.g. "warranty jobs must be flagged")
+                        (date anchors, tenant scoping, row-class inclusion
+                        rules)
 - ForbiddenArtifact:    something the spec says MUST NOT exist in code —
                         a file, a dependency, an env-var read, a feature flag
+- NamedConstant:        a literal value the spec asserts — identifier,
+                        weights/coefficients, threshold constants, default values
 - UnenforceableObligation: spec sentence with no structural encoding
 
 # .tc grammar (essentials)
@@ -297,58 +299,80 @@ formula order.discount-cents {
   immutable-after-creation
 }
 
-forbidden-artifact st-downloader.out-of-scope {
+constant ApiVersion {
+  origin SPEC.md "Versioning" 40..45
+  type string
+  expected-value "v2"
+}
+
+constant DiscountTiers {
+  origin SPEC.md "Pricing" 100..120
+  type object
+  expected-value {
+    bronze: 5
+    silver: 10
+    gold: 20
+  }
+}
+
+constant MAX_RETRY {
+  origin SPEC.md "Retry policy" 200..210
+  type number
+  expected-value 3
+}
+
+forbidden-artifact legacy-downloader {
   origin SPEC.md "Out of Scope" 590..600
   category file-glob
-  pattern "pipeline/**/st_downloader.py"
-  reason "ServiceTitan invoice download is explicitly out of scope for V1"
+  pattern "modules/**/legacy_downloader.*"
+  reason "Legacy downloader module is explicitly out of scope for v1"
 }
 
-forbidden-artifact auth-bypass {
-  origin SPEC.md "Auth" 160..170
+forbidden-artifact prod-debug-flag {
+  origin SPEC.md "Config" 160..170
   category env-var
-  pattern "AUTH_BYPASS"
-  reason "Spec forbids any code path that disables JWT validation"
+  pattern "PROD_DEBUG"
+  reason "Spec forbids any code path that enables debug output in production"
 }
 
-forbidden-artifact openai-dep {
+forbidden-artifact deprecated-http-client {
   origin SPEC.md "Tech Stack" 290..310
   category dependency
-  pattern "openai"
-  reason "Spec mandates the Anthropic SDK; openai must not appear in package.json"
+  pattern "request"
+  reason "Spec mandates the native fetch API; the deprecated request package must not appear in package.json"
 }
 
-query-rule noPaymentCollected.warranty-must-flag {
-  origin SPEC.md "Q4: warranty handling" 35..40
+query-rule active-customers.tenant-scoped {
+  origin SPEC.md "Tenant scoping" 35..40
   // Bind to a specific endpoint OR leave unbound to apply to any query
   // against the entity. The verifier matches by entity identity.
-  bound-to Operation:"GET /api/v1/infractions/no-payment-collected"
-  entity Entity:core.jobs
+  bound-to Operation:"GET /api/v1/customers/active"
+  entity Entity:core.customers
   // Date-range filter MUST be anchored on this column. Catches the
-  // "spec says createdon, code uses completedon" drift class.
-  date-range-binding column invoices.createdon
+  // "spec says createdAt, code uses updatedAt" drift class.
+  date-range-binding column customers.createdAt
   required {
     // Predicate forms (column reference is \`table.column\`, split on
     // the LAST dot so \`schema.table.column\` works too):
-    is-null      jobs.archived_at
-    is-not-null  invoices.balance
-    eq           jobs.status        "Completed"
-    neq          jobs.archived      true
-    gt           invoices.total     0
-    gte          invoices.total     100
-    in           jobs.market_id     [1, 2, 3]
-    not-in       jobs.business_unit ["door_sales", "other"]
-    between      invoices.created   2020   2026
-    like         jobs.skuname       "ARC-%"
-    ilike        jobs.skuname       "%spring%"
+    is-null      customers.deletedAt
+    is-not-null  customers.email
+    eq           customers.status    "active"
+    neq          customers.archived  true
+    gt           customers.balance   0
+    gte          customers.balance   100
+    in           customers.region    [1, 2, 3]
+    not-in       customers.segment   ["internal", "test"]
+    between      customers.signupYear 2020 2026
+    like         customers.email     "%@example.com"
+    ilike        customers.name      "%inc%"
     // Sub-queries / custom predicates the parser can't normalize
     // → \`raw\` keeps the original SQL fragment for review:
-    raw          "EXISTS (SELECT 1 FROM core.appointmentassignments aa WHERE …)"
+    raw          "EXISTS (SELECT 1 FROM core.subscriptions s WHERE …)"
   }
   forbidden {
-    // Spec says warranty jobs MUST be flagged; code excluding them
-    // via \`IS NULL\` is a drift. Same predicate vocabulary as above.
-    is-null      jobs.warranty_id
+    // Spec says soft-deleted rows MUST stay included for this report;
+    // code that filters them out is the drift. Same predicate vocabulary.
+    is-not-null  customers.deletedAt
   }
 }
 
@@ -570,11 +594,11 @@ statement rather than a duplicate \`auth-requirement\`.
 
 # Parameterized paths that are pattern descriptions, not real endpoints
 
-Sometimes a spec section uses a parameterized path (e.g., \`GET /api/v1/infractions/{slug}\`)
+Sometimes a spec section uses a parameterized path (e.g., \`GET /api/v1/reports/{slug}\`)
 as a documentation shorthand to describe the SHAPE of a family of routes, while
 elsewhere in the **same spec document** it explicitly enumerates all the individual
-static routes (e.g., a "Per-type routes" section listing \`GET /api/v1/infractions/customer-overcharged\`,
-\`GET /api/v1/infractions/discount-stacking\`, etc.).
+static routes (e.g., a "Per-type routes" section listing \`GET /api/v1/reports/daily\`,
+\`GET /api/v1/reports/weekly\`, etc.).
 
 **When to skip the parameterized form**: if the spec document explicitly enumerates
 static routes that instantiate the pattern (under a heading like "Per-type routes",
@@ -643,30 +667,30 @@ it; only assume this when the enum is named in another spec document).
 # Enum — trigger subsets (catch flagging-set drift)
 
 When the spec asserts that a SUBSET of an enum's values triggers downstream
-behaviour ("any non-PASS box → is_flagged", "OUTLIER and SUSPECT are
-flagged", "STATUS values \`Sent\`, \`Pending\`, \`PartiallyReceived\` are
-flaggable"), add a \`trigger-subset\` line to the enum:
+behaviour ("any non-OK value triggers retry", "PENDING and RETRYING count
+as in-flight", "order STATUS values \`Submitted\`, \`Processing\`,
+\`OnHold\` are flaggable"), add a \`trigger-subset\` line to the enum:
 
-  enum SignatureClassification {
+  enum OrderStatus {
     origin "<source>" "<section>" <lines>
-    values [PASS, MISSING, INVALID, SUSPECT, OUTLIER]
-    trigger-subset flagging [MISSING, INVALID, SUSPECT, OUTLIER]
-    trigger-subset non-pass [MISSING, INVALID, SUSPECT, OUTLIER]
+    values [Submitted, Processing, OnHold, Delivered, Cancelled]
+    trigger-subset flaggable [Submitted, Processing, OnHold]
+    trigger-subset non-terminal [Submitted, Processing, OnHold]
   }
 
-Subset name should describe the downstream effect (\`flagging\`,
-\`non-pass\`, \`flaggable\`, \`requires-review\`). One enum can declare
+Subset name should describe the downstream effect (\`flaggable\`,
+\`non-terminal\`, \`retry-set\`, \`requires-review\`). One enum can declare
 multiple subsets — emit one \`trigger-subset\` line each. The verifier
-matches each subset to a code-side set/array (e.g. \`NON_PASS_SET\`,
-\`FLAGGING_VALUES\`) and diffs them, so this is what catches the
-"OUTLIER dropped from is_flagged" family of drifts.
+matches each subset to a code-side set/array (e.g. \`FLAGGABLE_SET\`,
+\`NON_TERMINAL_VALUES\`) and diffs them, so this is what catches the
+"a value silently dropped from the trigger set" family of drifts.
 
 Trigger-subset prose markers — emit when you see any of:
 
 - "any non-X value …" → subset name \`non-x\`
 - "X, Y, Z are flagged / count as / trigger …" → subset name from the effect
-- "X is excluded from the flagging set"
-- "any value other than PASS …"
+- "X is excluded from the <action> set"
+- "any value other than <terminal-value> …"
 
 # Forbids clauses — REQUIRED whenever spec uses "forbidden" / "must not" / "no X on Y"
 
@@ -745,9 +769,9 @@ include or must NOT include. Common phrasings that trigger a \`query-rule\`
 fragment:
 
 - "the date range applies to <table>.<column>" / "scope by <field>"
-- "<exclude|include|filter> jobs where <condition>"
-- "warranty jobs are <flagged|excluded>"
-- "only count rows where <status> = '<value>'"
+- "<exclude|include|filter> rows where <condition>"
+- "<row-class> rows are <flagged|excluded>"
+- "only count rows where <column> = '<value>'"
 - "rows with <field> IS NULL are <excluded|included>"
 - "the query must scope by <tenant|market|user>"
 - "<column> must be one of <enum values>"
@@ -773,25 +797,25 @@ in the \`query-rule\` grammar block above):
 **Required vs forbidden** — the most error-prone distinction. Read the spec
 sentence carefully:
 
-- "warranty jobs MUST be flagged" → the predicate that EXCLUDES warranty
-  jobs (e.g. \`is-null jobs.warranty_id\`) is **forbidden**, not required.
-  The spec is asserting "include them"; the forbidden block names what
-  the code must NOT do.
-- "exclude jobs with status = 'Cancelled'" → \`forbidden { eq jobs.status "Cancelled" }\`
-  is WRONG. The spec wants the exclusion; the predicate \`neq status "Cancelled"\`
+- "<row-class> rows MUST be included/flagged" → the predicate that
+  EXCLUDES that row-class (e.g. \`is-null t.some_id\`) is **forbidden**,
+  not required. The spec is asserting "include them"; the forbidden
+  block names what the code must NOT do.
+- "exclude rows with status = 'X'" → \`forbidden { eq t.status "X" }\` is
+  WRONG. The spec wants the exclusion; the predicate \`neq status "X"\`
   (or \`not-in status [...]\`) belongs in **required**.
 - When in doubt: ask "does this predicate produce the row set the spec
   describes?" If yes, it's required; if it excludes rows the spec wants,
   it's forbidden.
 
 **Date-range binding** is its own first-class slot, NOT a predicate. When
-the spec says "the date filter applies to invoice.createdon", emit
-\`date-range-binding column invoices.createdon\`, do NOT add a \`gte/lt\`
+the spec says "the date filter applies to <table>.<column>", emit
+\`date-range-binding column <table>.<column>\`, do NOT add a \`gte/lt\`
 predicate (those reflect concrete bound values, not the binding rule).
 
 **bound-to** is OPTIONAL. When the spec rule applies to ONE endpoint, set
 \`bound-to Operation:"<METHOD path>"\`. When it applies to any query against
-the entity (e.g. "all queries against core.jobs must exclude soft-deleted
+the entity (e.g. "all queries against this entity must exclude soft-deleted
 rows"), omit \`bound-to\`.
 
 **Unparseable predicates** — sub-queries, custom SQL functions, anything you
@@ -802,43 +826,43 @@ verifier surfaces these as coverage gaps but never silently drops them.
 
 When the spec has a markdown table mapping endpoints to data attributes —
 columns like "Date Anchor", "Key Tables", "Scope", "Filter" — emit ONE
-\`query-rule\` per row. Trigger headings: "V1 Endpoint Map", "SQL Observable
-Inventory", "Detection Inventory", "Query Map", "Scoping Inventory".
+\`query-rule\` per row. Trigger headings: "Endpoint Map", "Query Map",
+"Detection Inventory", "Scoping Inventory", "Date Anchor Table".
 
 Row → query-rule:
 
-  | \`/infractions/no-payment-collected\` | core.invoices, core.jobs | \`i.createdon\` |
+  | \`/orders/recent\` | core.orders, core.customers | \`o.placedAt\` |
 
-  query-rule no-payment-collected.date-anchor {
+  query-rule orders-recent.date-anchor {
     origin "<source>" "<heading>" <lines>
-    bound-to Operation:"GET /api/v1/infractions/no-payment-collected"
-    entity Entity:core.invoices
-    date-range-binding column invoices.createdon
+    bound-to Operation:"GET /api/v1/orders/recent"
+    entity Entity:core.orders
+    date-range-binding column orders.placedAt
   }
 
 Rules:
-- One query-rule per row. A 26-row table → 26 query-rules.
+- One query-rule per row. An N-row table → N query-rules.
 - Identity = \`<endpoint-slug>.date-anchor\` (kebab-case).
 - \`entity\` = first table in "Key Tables".
 - \`date-range-binding column\` = the cell value, resolve alias from Key Tables
-  if possible (\`i.createdon\` + Key Tables \`core.invoices\` → \`invoices.createdon\`);
+  if possible (\`o.placedAt\` + Key Tables \`core.orders\` → \`orders.placedAt\`);
   otherwise keep alias-form.
-- \`bound-to\` uses \`GET /api/v1<endpoint-path>\` unless the spec says otherwise.
+- \`bound-to\` uses \`GET <api-prefix><endpoint-path>\` with whatever prefix the spec defines.
 
 # QueryRule — column-vs-column predicates
 
 When a spec rule compares one column to ANOTHER column (not a literal),
 emit a \`column-compare\` predicate. Common phrasings:
 
-- "the deletion timestamp must fall between arrival and departure" →
+- "the event timestamp must fall between session start and end" →
     \`required {\`
-    \`  gte-col invoiceitems.modifiedon appointmentassignments.arrived_at\`
-    \`  lte-col invoiceitems.modifiedon appointmentassignments.departed_at\`
+    \`  gte-col events.occurredAt sessions.startedAt\`
+    \`  lte-col events.occurredAt sessions.endedAt\`
     \`}\`
-- "warranty tier must equal spring type" →
-    \`required { eq-col jobs.warranty_tier jobs.spring_type }\`
-- "actual price > pricebook price" →
-    \`required { gt-col invoiceitems.price pricebook.list_price }\`
+- "discount tier must equal customer tier" →
+    \`required { eq-col orders.discountTier customers.tier }\`
+- "actual price > list price" →
+    \`required { gt-col orderItems.price products.listPrice }\`
 
 Shorthand keywords: \`eq-col\`, \`neq-col\`, \`gt-col\`, \`gte-col\`,
 \`lt-col\`, \`lte-col\`. Both sides are fully-qualified columns.
@@ -850,21 +874,21 @@ emit a query-rule. These are the highest-yield sources after endpoint-map
 tables, and the easiest to miss.
 
 Examples:
-- "flag PO in [Sent, PartiallyReceived, Pending]" →
-    \`required { in purchaseorders.status ["Sent", "PartiallyReceived", "Pending"] }\`
-- "Exported = perfect, do not flag" →
-    \`forbidden { eq purchaseorders.status "Exported" }\`
-- SQL block \`WHERE ii.skuname ILIKE '%trip charge%' AND ii.skuname NOT ILIKE '%waiv%'\` →
-    \`required { ilike invoiceitems.skuname "%trip charge%" }\`
-    \`forbidden { ilike invoiceitems.skuname "%waiv%" }\`
-- "spring SKU prefix ARC-" → \`required { like invoiceitems.skuname "ARC-%" }\`
+- "flag orders in [Submitted, Processing, OnHold]" →
+    \`required { in orders.status ["Submitted", "Processing", "OnHold"] }\`
+- "Delivered = complete, do not flag" →
+    \`forbidden { eq orders.status "Delivered" }\`
+- SQL block \`WHERE p.sku ILIKE '%-promo' AND p.sku NOT ILIKE '%-bundle'\` →
+    \`required { ilike products.sku "%-promo" }\`
+    \`forbidden { ilike products.sku "%-bundle" }\`
+- "SKUs with prefix \`SKU-\`" → \`required { like products.sku "SKU-%" }\`
 
 Every WHERE predicate in an SQL code block becomes a \`required\` or
 \`forbidden\` entry. Identity: \`<endpoint-slug>.<purpose>\` (e.g.
-\`duplicate-trip-charge.skuname-pattern\`).
+\`orders-recent.status-allowlist\`).
 
 **Identity** — kebab-case, ideally \`<feature>.<purpose>\` (e.g.
-\`noPaymentCollected.warranty-must-flag\`, \`infractions.date-anchor-binding\`).
+\`orders-recent.tenant-scope\`, \`subscriptions.date-anchor-binding\`).
 
 # ForbiddenArtifact — extract whenever the spec says "must not" / "deferred" / "out of scope"
 
@@ -872,23 +896,23 @@ When the spec asserts that something physical MUST NOT exist in the code, emit
 a \`forbidden-artifact\` fragment. Pick the right \`category\`:
 
 - **\`file-glob\`** — files/modules the spec marks out-of-scope or deferred
-  ("ServiceTitan downloader is deferred", "no Stripe integration in V1")
-  Pattern: a minimatch glob like \`pipeline/**/st_downloader.py\`.
+  ("the legacy uploader is deferred", "no Stripe integration in V1")
+  Pattern: a minimatch glob like \`modules/**/legacy_uploader.*\`.
 
 - **\`env-var\`** — env vars the spec forbids reading
-  ("no AUTH_BYPASS flag", "production must not read DEBUG_MODE")
-  Pattern: the env var identifier verbatim (\`AUTH_BYPASS\`).
+  ("no PROD_DEBUG flag in production", "the bypass-auth env var must not
+  be read"). Pattern: the env var identifier verbatim.
 
-- **\`dependency\`** — npm packages the spec mandates against
-  ("use Anthropic SDK only — openai is forbidden", "no axios; use fetch")
-  Pattern: the package name (\`openai\`, \`@deprecated/lib\`).
+- **\`dependency\`** — packages the spec mandates against
+  ("use the native fetch API; the request package is forbidden",
+  "no lodash; use built-ins"). Pattern: the package name.
 
 - **\`feature-flag\`** — feature flags that must be off / not present
-  ("FEATURE_NEW_FLOW must not appear in config", "all temporary flags removed by GA")
-  Pattern: the flag name.
+  ("FEATURE_NEW_FLOW must not appear in config", "all temporary flags
+  removed by GA"). Pattern: the flag name.
 
-Identity: \`<area>.<purpose>\` (e.g. \`st-downloader.out-of-scope\`,
-\`auth-bypass\`, \`openai-dep\`). One artifact per (category, pattern) pair.
+Identity: \`<area>.<purpose>\` (e.g. \`legacy-uploader.out-of-scope\`,
+\`prod-debug-flag\`, \`request-dep\`). One artifact per (category, pattern) pair.
 
 When the spec uses words like "must not", "is forbidden", "is out of scope",
 "deferred", "deprecated, do not use", "removed in vX", you should be emitting
@@ -923,15 +947,46 @@ exactly the listed forbidden-artifact. Don't classify as
     when it names a library, env-var when it names a config var.
 
 - "Bypass" / "skip auth" / "disable auth" env-var phrasings (e.g.
-  "tests may set AUTH_BYPASS=true; never in production") →
+  "tests may set <FLAG>=true; never in production") →
     \`forbidden-artifact <name> {\`
     \`  category env-var\`
-    \`  pattern "AUTH_BYPASS"  // or whatever name the spec uses\`
+    \`  pattern "<FLAG>"  // whatever name the spec uses\`
     \`  reason "spec forbids any code path that disables JWT validation"\`
     \`}\`
 
 Identity for these: kebab-case slug derived from what's forbidden
-(\`no-auth-middleware\`, \`no-backend\`, \`date-range-filter\`, \`auth-bypass\`).
+(\`no-auth-middleware\`, \`no-backend\`, \`<feature>-out-of-scope\`).
+
+# NamedConstant — extract when spec names a literal value
+
+When the spec asserts a specific named value (an identifier, a weights
+table, a threshold, a default), emit a \`constant\` artifact. Identity
+is the constant's name AS THE SPEC NAMES IT (or as it would appear in
+code if the spec doesn't name it directly).
+
+Common phrasings that trigger a constant:
+
+- "the X is \`<value>\`" / "X defaults to <value>" / "X is set to <value>"
+    → \`constant X { type <type> expected-value <value> }\`
+- A markdown table mapping <name> → <value> →
+    \`constant <name> { type object expected-value { key1: v1, key2: v2, ... } }\`
+- "the <metric> threshold is <number>" →
+    \`constant <THRESHOLD_NAME> { type number expected-value <number> }\`
+- An ALL_CAPS or camelCase identifier paired with a value in spec body
+    or config block → one constant per identifier.
+
+Identity uses the constant name as it would appear in code (uppercase
+snake-case for top-level consts, lower-camel for object properties, the
+parameter name for default args). The comparator does case-normalized
+matching, so a spec name like \`MY_CONST\` matches code \`myConst\` /
+\`my-const\` / \`my_const\` equally.
+
+When the spec gives a value table, emit it as an \`object\`-typed
+constant whose \`expected-value\` block has one line per row.
+
+Don't emit constants whose value is a function call, expression, or
+external reference — only literal values (strings, numbers, booleans,
+arrays of literals, flat object literals of literals).
 
 # Authorization-rule: bypass/exception subsections become \`except\` clauses
 

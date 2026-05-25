@@ -68,6 +68,7 @@ export type ArtifactKind =
   | 'Formula'
   | 'QueryRule'
   | 'ForbiddenArtifact'
+  | 'NamedConstant'
   | 'UnenforceableObligation'
   // Forward references that resolve to artifacts we don't yet implement
   // (e.g. `PerformanceSLA`); kept open so unresolved references type-check.
@@ -325,6 +326,26 @@ export interface FormulaContract {
 // `status: 'out-of-scope'` and are handled by the Operation
 // comparator. See PLAN_GAP_3_FORBIDDEN_PRESENCE.md.
 
+// ---------------------------------------------------------------------------
+// NamedConstant — a literal value the spec asserts must exist in code
+// ---------------------------------------------------------------------------
+//
+// Models facts like "TIER_WEIGHTS = {Critical:3, Significant:2, ...}" or
+// "LLM_MODEL = 'claude-sonnet-4-6'". Catches drift where the named
+// constant is in code under the same identifier but with a different
+// value. Identifier match is case-normalized.
+
+export interface NamedConstantContract {
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
+  /**
+   * For primitives: the literal value.
+   * For object: a Record<string, unknown> with nested values.
+   * For array: an array of unknown.
+   * Deep-equality compared against the code-side extracted value.
+   */
+  expectedValue: unknown;
+}
+
 export interface ForbiddenArtifactContract {
   category: 'file-glob' | 'env-var' | 'dependency' | 'feature-flag';
   /**
@@ -459,6 +480,7 @@ export type Artifact =
   | (ArtifactBase & { kind: 'Formula';                  contract: FormulaContract })
   | (ArtifactBase & { kind: 'QueryRule';                contract: QueryRuleContract })
   | (ArtifactBase & { kind: 'ForbiddenArtifact';        contract: ForbiddenArtifactContract })
+  | (ArtifactBase & { kind: 'NamedConstant';            contract: NamedConstantContract })
   | (ArtifactBase & { kind: 'UnenforceableObligation';  contract: UnenforceableObligationContract });
 
 // ---------------------------------------------------------------------------

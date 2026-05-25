@@ -19,6 +19,7 @@ import {
   detectIdempotencyPresence,
   extractQueriesFromDir,
   extractEnumsFromDir,
+  extractConstantsFromDir,
 } from './extractor/index.js';
 import {
   compareOperation,
@@ -34,6 +35,7 @@ import {
   compareQueryRule,
   compareEnum,
   compareForbiddenArtifact,
+  compareNamedConstant,
 } from './comparator/index.js';
 import type {
   ContractDrift,
@@ -41,6 +43,7 @@ import type {
   ErrorEnvelopeContract,
   EnumContract,
   ForbiddenArtifactContract,
+  NamedConstantContract,
   PaginationContractC,
   IdempotencyContractC,
   AuthRequirementContract,
@@ -398,6 +401,31 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
     if (seenForbiddenDrift.has(key)) continue;
     seenForbiddenDrift.add(key);
+    drifts.push(d);
+  }
+
+  // ---- Named constants: value-set drift on top-level constants /
+  // object properties / default args. Same orchestrator pattern.
+  const extractedConstants = await extractConstantsFromDir(opts.codeDir);
+  const constantDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'NamedConstant') continue;
+    if (!artifact.contract) continue;
+    const contract = artifact.contract as NamedConstantContract;
+    constantDriftCollector.push(
+      ...compareNamedConstant({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract,
+        codeConstants: extractedConstants,
+      }),
+    );
+  }
+  const seenConstantDrift = new Set<string>();
+  for (const d of constantDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
+    if (seenConstantDrift.has(key)) continue;
+    seenConstantDrift.add(key);
     drifts.push(d);
   }
 
