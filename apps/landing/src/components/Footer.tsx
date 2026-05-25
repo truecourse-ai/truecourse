@@ -95,7 +95,7 @@ export function Footer() {
           </div>
           <p className="text-xs text-muted-foreground sm:text-right">
             Built with <span className="text-accent" aria-hidden>♥</span>
-            <span className="sr-only">love</span> in Berkeley.
+            <span className="sr-only">love</span> in San Francisco.
           </p>
         </div>
       </div>
