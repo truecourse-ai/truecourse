@@ -18,6 +18,7 @@ import type {
   AuthorizationRuleContract,
   EffectGroupContract,
   EntityContract,
+  EnumContract,
   ErrorEnvelopeContract,
   FormulaContract,
   IdempotencyContractC,
@@ -34,6 +35,7 @@ import { liftErrorEnvelope } from './lifters/error-envelope.js';
 import { liftPagination } from './lifters/pagination.js';
 import { liftAuthRequirement } from './lifters/auth-requirement.js';
 import { liftEntity } from './lifters/entity.js';
+import { liftEnum } from './lifters/enum.js';
 import { liftStateMachine } from './lifters/state-machine.js';
 import { liftAuthorizationRule } from './lifters/authorization-rule.js';
 import { liftEffectGroup } from './lifters/effect-group.js';
@@ -85,6 +87,7 @@ export interface ResolvedArtifact {
     | AuthRequirementContract
     | AuthorizationRuleContract
     | EntityContract
+    | EnumContract
     | StateMachineContract
     | EffectGroupContract
     | FormulaContract
@@ -282,6 +285,7 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     | AuthRequirementContract
     | AuthorizationRuleContract
     | EntityContract
+    | EnumContract
     | StateMachineContract
     | EffectGroupContract
     | FormulaContract
@@ -306,6 +310,8 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     contract = liftAuthorizationRule(stmt.block);
   } else if (kind === 'Entity') {
     contract = liftEntity(stmt.block);
+  } else if (kind === 'Enum') {
+    contract = liftEnum(stmt.block);
   } else if (kind === 'StateMachine') {
     contract = liftStateMachine(identity, stmt.block);
   } else if (kind === 'EffectGroup') {

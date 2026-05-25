@@ -617,6 +617,34 @@ emit (in \`field: Enum:X\` or \`states Enum:X\`) MUST have a matching \`enum X {
 artifact somewhere in the same slice (or you must assume another slice provides
 it; only assume this when the enum is named in another spec document).
 
+# Enum — trigger subsets (catch flagging-set drift)
+
+When the spec asserts that a SUBSET of an enum's values triggers downstream
+behaviour ("any non-PASS box → is_flagged", "OUTLIER and SUSPECT are
+flagged", "STATUS values \`Sent\`, \`Pending\`, \`PartiallyReceived\` are
+flaggable"), add a \`trigger-subset\` line to the enum:
+
+  enum SignatureClassification {
+    origin "<source>" "<section>" <lines>
+    values [PASS, MISSING, INVALID, SUSPECT, OUTLIER]
+    trigger-subset flagging [MISSING, INVALID, SUSPECT, OUTLIER]
+    trigger-subset non-pass [MISSING, INVALID, SUSPECT, OUTLIER]
+  }
+
+Subset name should describe the downstream effect (\`flagging\`,
+\`non-pass\`, \`flaggable\`, \`requires-review\`). One enum can declare
+multiple subsets — emit one \`trigger-subset\` line each. The verifier
+matches each subset to a code-side set/array (e.g. \`NON_PASS_SET\`,
+\`FLAGGING_VALUES\`) and diffs them, so this is what catches the
+"OUTLIER dropped from is_flagged" family of drifts.
+
+Trigger-subset prose markers — emit when you see any of:
+
+- "any non-X value …" → subset name \`non-x\`
+- "X, Y, Z are flagged / count as / trigger …" → subset name from the effect
+- "X is excluded from the flagging set"
+- "any value other than PASS …"
+
 # Forbids clauses — REQUIRED whenever spec uses "forbidden" / "must not" / "no X on Y"
 
 **This is a hard rule, not a suggestion.** If the spec contains ANY of these

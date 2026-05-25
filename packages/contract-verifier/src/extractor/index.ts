@@ -22,6 +22,8 @@ export type { IdempotencyPresenceResult } from './idempotency-presence.js';
 export { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 export { extractQueriesFromDir } from './query/index.js';
 export type { ExtractedQuery, QueryAdapterName } from './query/index.js';
+export { extractEnumsFromDir } from './enum/index.js';
+export type { ExtractedEnum, EnumShape } from './enum/index.js';
 
 export type { ExtractedOperation } from './operation.js';
 

@@ -224,6 +224,16 @@ export interface EnumContract {
   representation: 'string-literal' | 'integer';
   closed: boolean;
   values: string[];
+  /**
+   * Named subsets of `values` that trigger downstream behaviour. For a
+   * signature-classification enum a `flagging` subset might be
+   * `["MISSING","INVALID","SUSPECT","OUTLIER"]` — anything in this
+   * subset causes `is_flagged = true`. The verifier matches each
+   * subset to a code-side set/array constant and diffs its value list,
+   * so drifts of the "OUTLIER no longer triggers flagging" shape get
+   * caught.
+   */
+  triggerSubsets?: { name: string; values: string[] }[];
 }
 
 export interface StateMachineContract {

@@ -18,6 +18,7 @@ import {
   detectAuthPresence,
   detectIdempotencyPresence,
   extractQueriesFromDir,
+  extractEnumsFromDir,
 } from './extractor/index.js';
 import {
   compareOperation,
@@ -31,11 +32,13 @@ import {
   compareEffectGroup,
   compareFormula,
   compareQueryRule,
+  compareEnum,
 } from './comparator/index.js';
 import type {
   ContractDrift,
   OperationContract,
   ErrorEnvelopeContract,
+  EnumContract,
   PaginationContractC,
   IdempotencyContractC,
   AuthRequirementContract,
@@ -318,6 +321,33 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}|${d.codeSide ?? ''}`;
     if (seenQueryDrift.has(key)) continue;
     seenQueryDrift.add(key);
+    drifts.push(d);
+  }
+
+  // ---- Enum value-set + trigger-subset diffs ----
+  // Same orchestrator shape as queries: extract all code-side enums
+  // once, dispatch each spec Enum artifact's comparator with the full
+  // set, and dedupe cross-rule emissions.
+  const extractedEnums = await extractEnumsFromDir(opts.codeDir);
+  const enumDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'Enum') continue;
+    if (!artifact.contract) continue;
+    const contract = artifact.contract as EnumContract;
+    enumDriftCollector.push(
+      ...compareEnum({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract,
+        codeEnums: extractedEnums,
+      }),
+    );
+  }
+  const seenEnumDrift = new Set<string>();
+  for (const d of enumDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
+    if (seenEnumDrift.has(key)) continue;
+    seenEnumDrift.add(key);
     drifts.push(d);
   }
 
