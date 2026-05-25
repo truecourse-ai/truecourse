@@ -24,6 +24,13 @@ export { extractQueriesFromDir } from './query/index.js';
 export type { ExtractedQuery, QueryAdapterName } from './query/index.js';
 export { extractEnumsFromDir } from './enum/index.js';
 export type { ExtractedEnum, EnumShape } from './enum/index.js';
+export {
+  detectForbiddenFiles,
+  detectForbiddenEnvVar,
+  detectForbiddenDependency,
+  detectForbiddenFeatureFlag,
+} from './forbidden/index.js';
+export type { ForbiddenMatch } from './forbidden/index.js';
 
 export type { ExtractedOperation } from './operation.js';
 

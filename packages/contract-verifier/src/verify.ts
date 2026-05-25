@@ -33,12 +33,14 @@ import {
   compareFormula,
   compareQueryRule,
   compareEnum,
+  compareForbiddenArtifact,
 } from './comparator/index.js';
 import type {
   ContractDrift,
   OperationContract,
   ErrorEnvelopeContract,
   EnumContract,
+  ForbiddenArtifactContract,
   PaginationContractC,
   IdempotencyContractC,
   AuthRequirementContract,
@@ -99,10 +101,10 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     if (!artifact.contract) continue; // Phase-1 lifter produces these
     const specContract = artifact.contract as OperationContract;
     const code = codeByIdentity.get(artifact.ref.identity);
+    const st = specContract.status;
     if (!code) {
       // Planned/deferred/out-of-scope operations are not expected to have
       // a code-side implementation yet — suppress the drift.
-      const st = specContract.status;
       if (st === 'planned' || st === 'deferred' || st === 'out-of-scope') continue;
 
       drifts.push({
@@ -117,6 +119,28 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
         message:
           `Operation ${refKey(artifact.ref)} declared in spec but no route ` +
           `with this method+path was found in the code under verification.`,
+      });
+      continue;
+    }
+    // Inverse: spec marked out-of-scope / deprecated, but code has a
+    // matching route. That IS the forbidden-presence drift this gap
+    // (#3) is meant to catch — the implementation shipped something
+    // the spec said not to ship.
+    if (st === 'out-of-scope' || st === 'deprecated') {
+      drifts.push({
+        id: cryptoRandomId(),
+        type: 'contract-drift',
+        artifactRef: artifact.ref,
+        obligationKey: `forbidden.operation.${artifact.ref.identity}.present`,
+        severity: 'critical',
+        filePath: code.filePath,
+        lineStart: code.declarationLine,
+        lineEnd: code.declarationLine,
+        message:
+          `Operation ${refKey(artifact.ref)} is marked \`status ${st}\` in the spec, ` +
+          `but the code has a matching route. The implementation should not ship.`,
+        specSide: `status ${st}`,
+        codeSide: `${code.filePath}:${code.declarationLine}`,
       });
       continue;
     }
@@ -348,6 +372,32 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
     if (seenEnumDrift.has(key)) continue;
     seenEnumDrift.add(key);
+    drifts.push(d);
+  }
+
+  // ---- Forbidden-artifact presence ----
+  // Per-category presence detectors run against the code dir. Each
+  // spec ForbiddenArtifact produces zero-or-more drifts depending on
+  // how many code-side matches are found.
+  const forbiddenDriftCollector: ContractDrift[] = [];
+  for (const artifact of resolution.index.values()) {
+    if (artifact.ref.type !== 'ForbiddenArtifact') continue;
+    if (!artifact.contract) continue;
+    const contract = artifact.contract as ForbiddenArtifactContract;
+    forbiddenDriftCollector.push(
+      ...(await compareForbiddenArtifact({
+        ref: artifact.ref,
+        origin: artifact.origin,
+        contract,
+        codeDir: opts.codeDir,
+      })),
+    );
+  }
+  const seenForbiddenDrift = new Set<string>();
+  for (const d of forbiddenDriftCollector) {
+    const key = `${d.obligationKey}|${d.filePath}|${d.lineStart}`;
+    if (seenForbiddenDrift.has(key)) continue;
+    seenForbiddenDrift.add(key);
     drifts.push(d);
   }
 

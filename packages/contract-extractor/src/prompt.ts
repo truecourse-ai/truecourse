@@ -86,6 +86,8 @@ Return ONE JSON object matching this shape — no prose, no code fences:
 - QueryRule:            predicates a data-fetching query MUST / MUST NOT include
                         (date anchors, tenant scoping, row-exclusion business
                         rules, e.g. "warranty jobs must be flagged")
+- ForbiddenArtifact:    something the spec says MUST NOT exist in code —
+                        a file, a dependency, an env-var read, a feature flag
 - UnenforceableObligation: spec sentence with no structural encoding
 
 # .tc grammar (essentials)
@@ -293,6 +295,27 @@ formula order.discount-cents {
   expression "subtotalCents >= 10000 ? round(subtotalCents * 0.1) : 0"
   computed-at order-creation
   immutable-after-creation
+}
+
+forbidden-artifact st-downloader.out-of-scope {
+  origin SPEC.md "Out of Scope" 590..600
+  category file-glob
+  pattern "pipeline/**/st_downloader.py"
+  reason "ServiceTitan invoice download is explicitly out of scope for V1"
+}
+
+forbidden-artifact auth-bypass {
+  origin SPEC.md "Auth" 160..170
+  category env-var
+  pattern "AUTH_BYPASS"
+  reason "Spec forbids any code path that disables JWT validation"
+}
+
+forbidden-artifact openai-dep {
+  origin SPEC.md "Tech Stack" 290..310
+  category dependency
+  pattern "openai"
+  reason "Spec mandates the Anthropic SDK; openai must not appear in package.json"
 }
 
 query-rule noPaymentCollected.warranty-must-flag {
@@ -842,6 +865,73 @@ Every WHERE predicate in an SQL code block becomes a \`required\` or
 
 **Identity** — kebab-case, ideally \`<feature>.<purpose>\` (e.g.
 \`noPaymentCollected.warranty-must-flag\`, \`infractions.date-anchor-binding\`).
+
+# ForbiddenArtifact — extract whenever the spec says "must not" / "deferred" / "out of scope"
+
+When the spec asserts that something physical MUST NOT exist in the code, emit
+a \`forbidden-artifact\` fragment. Pick the right \`category\`:
+
+- **\`file-glob\`** — files/modules the spec marks out-of-scope or deferred
+  ("ServiceTitan downloader is deferred", "no Stripe integration in V1")
+  Pattern: a minimatch glob like \`pipeline/**/st_downloader.py\`.
+
+- **\`env-var\`** — env vars the spec forbids reading
+  ("no AUTH_BYPASS flag", "production must not read DEBUG_MODE")
+  Pattern: the env var identifier verbatim (\`AUTH_BYPASS\`).
+
+- **\`dependency\`** — npm packages the spec mandates against
+  ("use Anthropic SDK only — openai is forbidden", "no axios; use fetch")
+  Pattern: the package name (\`openai\`, \`@deprecated/lib\`).
+
+- **\`feature-flag\`** — feature flags that must be off / not present
+  ("FEATURE_NEW_FLOW must not appear in config", "all temporary flags removed by GA")
+  Pattern: the flag name.
+
+Identity: \`<area>.<purpose>\` (e.g. \`st-downloader.out-of-scope\`,
+\`auth-bypass\`, \`openai-dep\`). One artifact per (category, pattern) pair.
+
+When the spec uses words like "must not", "is forbidden", "is out of scope",
+"deferred", "deprecated, do not use", "removed in vX", you should be emitting
+a forbidden-artifact OR (for HTTP endpoints) an \`operation\` with
+\`status out-of-scope\`/\`status deprecated\`. Don't ignore these — they're
+exactly what the verifier's forbidden-presence check looks for.
+
+# ForbiddenArtifact — common spec-prose → emission patterns
+
+These are concrete patterns. When you see one of these phrasings, emit
+exactly the listed forbidden-artifact. Don't classify as
+\`unenforceable-obligation\` — there's a structural encoding for it.
+
+- "no authentication" / "prototype is open access" →
+    \`forbidden-artifact no-auth-middleware {\`
+    \`  category file-glob\`
+    \`  pattern "**/middleware/auth.*"\`
+    \`  reason "<verbatim spec text>"\`
+    \`}\`
+
+- "no backend infrastructure" / "no database, no API connections" →
+    \`forbidden-artifact no-backend {\`
+    \`  category file-glob\`
+    \`  pattern "backend/**"\`
+    \`  reason "<verbatim spec text>"\`
+    \`}\`
+
+- Bullet list under "Out of Scope" / "Not in V1" / "Future Enhancements" →
+    one forbidden-artifact PER bullet. Translate to file-glob when the
+    bullet names a UI feature or module ("Date range filtering" →
+    file-glob \`**/DateRange*\` plus \`**/date-range*\`), or to dependency
+    when it names a library, env-var when it names a config var.
+
+- "Bypass" / "skip auth" / "disable auth" env-var phrasings (e.g.
+  "tests may set AUTH_BYPASS=true; never in production") →
+    \`forbidden-artifact <name> {\`
+    \`  category env-var\`
+    \`  pattern "AUTH_BYPASS"  // or whatever name the spec uses\`
+    \`  reason "spec forbids any code path that disables JWT validation"\`
+    \`}\`
+
+Identity for these: kebab-case slug derived from what's forbidden
+(\`no-auth-middleware\`, \`no-backend\`, \`date-range-filter\`, \`auth-bypass\`).
 
 # Authorization-rule: bypass/exception subsections become \`except\` clauses
 

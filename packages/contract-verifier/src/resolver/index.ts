@@ -20,6 +20,7 @@ import type {
   EntityContract,
   EnumContract,
   ErrorEnvelopeContract,
+  ForbiddenArtifactContract,
   FormulaContract,
   IdempotencyContractC,
   OperationContract,
@@ -42,6 +43,7 @@ import { liftEffectGroup } from './lifters/effect-group.js';
 import { liftFormula } from './lifters/formula.js';
 import { liftIdempotencyContract } from './lifters/idempotency-contract.js';
 import { liftQueryRule } from './lifters/query-rule.js';
+import { liftForbiddenArtifact } from './lifters/forbidden-artifact.js';
 
 // ---------------------------------------------------------------------------
 // Artifact-keyword → ArtifactKind map. Closed enum; lookup-only.
@@ -60,6 +62,7 @@ const KEYWORD_TO_KIND: Record<string, ArtifactKind> = {
   'effect-group': 'EffectGroup',
   'formula': 'Formula',
   'query-rule': 'QueryRule',
+  'forbidden-artifact': 'ForbiddenArtifact',
   'unenforceable-obligation': 'UnenforceableObligation',
 };
 
@@ -91,7 +94,8 @@ export interface ResolvedArtifact {
     | StateMachineContract
     | EffectGroupContract
     | FormulaContract
-    | QueryRuleContract;
+    | QueryRuleContract
+    | ForbiddenArtifactContract;
 }
 
 export interface ResolveError {
@@ -290,6 +294,7 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     | EffectGroupContract
     | FormulaContract
     | QueryRuleContract
+    | ForbiddenArtifactContract
     | undefined;
   if (kind === 'Operation' && head[1].kind === 'ident' && head[2].kind === 'string') {
     // Pass the normalized path so OperationContract.path matches the
@@ -320,6 +325,8 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     contract = liftFormula(stmt.block);
   } else if (kind === 'QueryRule') {
     contract = liftQueryRule(stmt.block);
+  } else if (kind === 'ForbiddenArtifact') {
+    contract = liftForbiddenArtifact(stmt.block);
   }
 
   return {

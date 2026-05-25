@@ -67,6 +67,7 @@ export type ArtifactKind =
   | 'Effect'
   | 'Formula'
   | 'QueryRule'
+  | 'ForbiddenArtifact'
   | 'UnenforceableObligation'
   // Forward references that resolve to artifacts we don't yet implement
   // (e.g. `PerformanceSLA`); kept open so unresolved references type-check.
@@ -313,6 +314,31 @@ export interface FormulaContract {
   dependsOn: ArtifactRef[];
 }
 
+// ---------------------------------------------------------------------------
+// ForbiddenArtifact — code presence the spec says MUST NOT exist
+// ---------------------------------------------------------------------------
+//
+// Models "must not / forbidden / out-of-scope but shipped" assertions
+// where the offending entity is a file, a dependency, an env-var
+// read, or a feature flag. Operations-marked-out-of-scope are NOT
+// modeled here — they live on the existing Operation artifact via
+// `status: 'out-of-scope'` and are handled by the Operation
+// comparator. See PLAN_GAP_3_FORBIDDEN_PRESENCE.md.
+
+export interface ForbiddenArtifactContract {
+  category: 'file-glob' | 'env-var' | 'dependency' | 'feature-flag';
+  /**
+   * Category-specific pattern:
+   *   - file-glob:    minimatch pattern matched against repo-relative paths
+   *   - env-var:      identifier of the env var (e.g. `AUTH_BYPASS`)
+   *   - dependency:   npm package name (e.g. `openai`, `@openai/sdk`)
+   *   - feature-flag: flag name OR env var name
+   */
+  pattern: string;
+  /** Why the spec forbids this — surfaced verbatim in drift messages. */
+  reason: string;
+}
+
 export interface UnenforceableObligationContract {
   specText: string;
   category: string;
@@ -432,6 +458,7 @@ export type Artifact =
   | (ArtifactBase & { kind: 'EffectGroup';              contract: EffectGroupContract })
   | (ArtifactBase & { kind: 'Formula';                  contract: FormulaContract })
   | (ArtifactBase & { kind: 'QueryRule';                contract: QueryRuleContract })
+  | (ArtifactBase & { kind: 'ForbiddenArtifact';        contract: ForbiddenArtifactContract })
   | (ArtifactBase & { kind: 'UnenforceableObligation';  contract: UnenforceableObligationContract });
 
 // ---------------------------------------------------------------------------
