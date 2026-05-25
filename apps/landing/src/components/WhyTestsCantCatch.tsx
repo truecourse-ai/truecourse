@@ -12,7 +12,7 @@ const CARDS: Array<{
   {
     num: '1',
     title: 'Tests verify what was written, not whether it was right',
-    body: 'A test is written by the same engineer who wrote the code, from the same understanding of the spec. If they misread it, the test passes against the wrong implementation.',
+    body: 'Whether the code is written by an engineer or an AI agent, the test inherits the same understanding of the spec. If that understanding is wrong, the test passes against the wrong implementation.',
     tone: 'muted',
   },
   {
