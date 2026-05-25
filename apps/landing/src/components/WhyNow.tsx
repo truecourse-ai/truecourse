@@ -2,10 +2,10 @@ import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
 
 const BULLETS = [
-  'AI coding agents are shipping a growing share of production code',
-  'Every agent reads your codebase. None reads your decisions.',
-  'The bottleneck moved from writing code to knowing what to write',
-  'Without a verified knowledge base, AI accelerates the wrong direction',
+  'AI coding agents now ship a growing share of production code',
+  'PR volume is climbing faster than reviewers can keep up',
+  'Senior engineers spend their day reviewing AI output instead of building',
+  "Slowing AI down isn't the answer. Faster verification is.",
 ];
 
 export function WhyNow() {
@@ -17,9 +17,9 @@ export function WhyNow() {
             Why now
           </p>
           <h2 className="mt-3 text-balance text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-            <span className="text-gradient">AI is writing your code.</span>{' '}
+            <span className="text-gradient">AI made writing code fast.</span>{' '}
             <span className="text-gradient-accent">
-              It has no idea what your team decided.
+              Review is the new bottleneck.
             </span>
           </h2>
         </div>
@@ -69,8 +69,7 @@ function Callout() {
       )}
     >
       <p className="text-balance text-lg leading-relaxed text-foreground sm:text-xl">
-        The next 10x in engineering comes from giving AI access to your team&apos;s
-        decisions.
+        The next 10x in engineering comes from verifying code at AI speed.
       </p>
     </div>
   );
