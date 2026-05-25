@@ -1,29 +1,53 @@
 import type { IconType } from 'react-icons';
 import {
+  SiAsana,
+  SiBitbucket,
+  SiClickup,
   SiConfluence,
+  SiDiscord,
+  SiDropbox,
+  SiGitea,
   SiGithub,
+  SiGitlab,
   SiGoogledocs,
+  SiJira,
   SiLinear,
   SiNotion,
   SiSlack,
+  SiTrello,
 } from 'react-icons/si';
-import { Plus } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
 
 type Tool = {
   Icon: IconType;
   name: string;
-  hint: string;
+  hint?: string;
 };
 
-const TOOLS: Tool[] = [
-  { Icon: SiNotion, name: 'Notion', hint: 'product specs, OKRs' },
+const KB_TOOLS: Tool[] = [
+  { Icon: SiNotion, name: 'Notion', hint: 'specs, OKRs' },
   { Icon: SiConfluence, name: 'Confluence', hint: 'engineering wikis' },
   { Icon: SiSlack, name: 'Slack', hint: 'decision threads' },
   { Icon: SiGithub, name: 'GitHub', hint: 'READMEs, ADRs' },
   { Icon: SiGoogledocs, name: 'Google Docs', hint: 'design reviews' },
   { Icon: SiLinear, name: 'Linear', hint: 'tickets' },
+  { Icon: SiJira, name: 'Jira', hint: 'tickets' },
+  { Icon: SiAsana, name: 'Asana', hint: 'projects' },
+];
+
+const KB_MORE: IconType[] = [
+  SiClickup,
+  SiTrello,
+  SiDropbox,
+  SiDiscord,
+];
+
+const PR_GATES: Tool[] = [
+  { Icon: SiGithub, name: 'GitHub', hint: 'cloud + Enterprise Server' },
+  { Icon: SiGitlab, name: 'GitLab', hint: 'cloud + self-managed' },
+  { Icon: SiBitbucket, name: 'Bitbucket', hint: 'cloud + Data Center' },
+  { Icon: SiGitea, name: 'Gitea', hint: 'self-hosted' },
 ];
 
 export function Integrations() {
@@ -38,25 +62,71 @@ export function Integrations() {
             Integrations
           </p>
           <h2 className="mt-3 text-balance text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-            <span className="text-gradient">We scan where your team</span>{' '}
-            <span className="text-gradient-accent">
-              already writes things down.
-            </span>
+            <span className="text-gradient">We plug into the tools</span>{' '}
+            <span className="text-gradient-accent">your team already uses.</span>
           </h2>
           <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-            TrueCourse plugs into the tools your team already uses. No new
-            workflow to adopt. We meet decisions where they happen.
+            No new workflow to adopt. We capture decisions from where your team
+            writes them and gate every PR on the platform you already host code
+            on.
           </p>
         </div>
 
-        <div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {TOOLS.map((t, i) => (
+        <SubsectionHeading
+          eyebrow="Knowledge sources"
+          title="Where decisions live"
+          subtitle="Capture from the sources your team already uses."
+        />
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {KB_TOOLS.map((t, i) => (
+            <ToolCard key={t.name} tool={t} delayMs={i * 50} />
+          ))}
+          <MoreCard icons={KB_MORE} delayMs={KB_TOOLS.length * 50} />
+        </div>
+
+        <SubsectionHeading
+          eyebrow="PR gates"
+          title="Where we gate PRs"
+          subtitle="Verify every change on the platform you already host code on."
+          className="mt-20"
+        />
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {PR_GATES.map((t, i) => (
             <ToolCard key={t.name} tool={t} delayMs={i * 60} />
           ))}
-          <MoreCard delayMs={TOOLS.length * 60} />
         </div>
+
+        <p className="mt-6 text-xs text-muted-foreground">
+          Azure DevOps and other platforms on request.
+        </p>
       </div>
     </section>
+  );
+}
+
+function SubsectionHeading({
+  eyebrow,
+  title,
+  subtitle,
+  className,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn('mt-14', className)}>
+      <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        {eyebrow}
+      </p>
+      <h3 className="mt-2 text-balance text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+        {title}
+      </h3>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+        {subtitle}
+      </p>
+    </div>
   );
 }
 
@@ -82,13 +152,15 @@ function ToolCard({ tool, delayMs }: { tool: Tool; delayMs: number }) {
         <div className="truncate text-sm font-semibold text-foreground">
           {tool.name}
         </div>
-        <div className="truncate text-xs text-muted-foreground">{tool.hint}</div>
+        {tool.hint ? (
+          <div className="truncate text-xs text-muted-foreground">{tool.hint}</div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function MoreCard({ delayMs }: { delayMs: number }) {
+function MoreCard({ icons, delayMs }: { icons: IconType[]; delayMs: number }) {
   const { ref, visible } = useReveal<HTMLDivElement>();
   return (
     <div
@@ -99,17 +171,24 @@ function MoreCard({ delayMs }: { delayMs: number }) {
         visible && 'visible',
       )}
     >
-      <span
-        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-accent/40 bg-accent/10 text-accent"
+      <div
+        className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-background/60 px-2.5 py-2"
         aria-hidden
       >
-        <Plus className="h-5 w-5" />
-      </span>
+        {icons.slice(0, 4).map((Icon, i) => (
+          <Icon
+            key={i}
+            className="h-4 w-4 text-muted-foreground/80"
+          />
+        ))}
+      </div>
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-foreground">
           and more
         </div>
-        <div className="truncate text-xs text-muted-foreground">Jira, Glean, ADRs</div>
+        <div className="truncate text-xs text-muted-foreground">
+          on request
+        </div>
       </div>
     </div>
   );
