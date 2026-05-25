@@ -88,15 +88,14 @@ export function Footer() {
 
         <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-border pt-6 sm:flex-row sm:items-center">
           <div className="text-xs text-muted-foreground">
-            <p>
-              © {new Date().getFullYear()} TrueCourse AI, Inc. &middot; MIT licensed.
-            </p>
+            <p>© {new Date().getFullYear()} TrueCourse AI, Inc.</p>
             <p className="mt-1">
               2261 Market Street STE 88087, San Francisco, CA 94114 US
             </p>
           </div>
           <p className="text-xs text-muted-foreground sm:text-right">
-            Built with TypeScript and tree-sitter.
+            Built with <span className="text-accent" aria-hidden>♥</span>
+            <span className="sr-only">love</span> in Berkeley.
           </p>
         </div>
       </div>
