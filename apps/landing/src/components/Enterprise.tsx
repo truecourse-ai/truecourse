@@ -1,33 +1,48 @@
+import {
+  ClipboardCheck,
+  FileClock,
+  KeyRound,
+  Server,
+  Users,
+  WifiOff,
+} from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useReveal } from '@/lib/useReveal';
 
 type Card = {
+  Icon: typeof Server;
   title: string;
   body: string;
 };
 
 const CARDS: Card[] = [
   {
+    Icon: Server,
     title: 'Self-hosted',
     body: 'Deploy in your VPC or on-premises. Your code and specs never leave your infrastructure.',
   },
   {
+    Icon: KeyRound,
     title: 'SSO',
     body: 'Integrates with Okta, Azure AD, and Google Workspace. No separate credentials to manage or rotate.',
   },
   {
+    Icon: Users,
     title: 'RBAC',
     body: 'Viewer, Contributor, Admin, and Auditor roles. Granular control over who resolves and promotes contracts.',
   },
   {
+    Icon: FileClock,
     title: 'Full audit trail',
     body: 'Every contract change, conflict resolution, and drift event is timestamped and attributed.',
   },
   {
+    Icon: WifiOff,
     title: 'Zero external calls',
     body: 'Verification runs entirely in your CI pipeline. No telemetry, no external API calls required.',
   },
   {
+    Icon: ClipboardCheck,
     title: 'Compliance-ready',
     body: 'Designed for regulated industries: fintech, healthtech, defense. Documentation that satisfies auditors.',
   },
@@ -61,6 +76,7 @@ export function Enterprise() {
 
 function EnterpriseCard({ card, delayMs }: { card: Card; delayMs: number }) {
   const { ref, visible } = useReveal<HTMLDivElement>();
+  const { Icon } = card;
   return (
     <div
       ref={ref}
@@ -70,7 +86,13 @@ function EnterpriseCard({ card, delayMs }: { card: Card; delayMs: number }) {
         visible && 'visible',
       )}
     >
-      <h3 className="text-base font-semibold text-accent">{card.title}</h3>
+      <span
+        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-accent/40 bg-accent/15 text-accent shadow-[0_0_20px_-6px] shadow-accent/30"
+        aria-hidden
+      >
+        <Icon className="h-5 w-5" />
+      </span>
+      <h3 className="mt-5 text-base font-semibold text-accent">{card.title}</h3>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{card.body}</p>
     </div>
   );
