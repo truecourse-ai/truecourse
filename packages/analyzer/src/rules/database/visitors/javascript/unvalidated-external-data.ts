@@ -55,7 +55,14 @@ export const unvalidatedExternalDataVisitor: CodeRuleVisitor = {
     // codebases that use those names for non-request data (cache reads,
     // computed values, internal events).
     for (const arg of args.namedChildren) {
-      if (findUserInputAccess(arg, dataFlow)) {
+      // A value written to the DB is "unvalidated external data" only when it
+      // IS the raw request payload — not when it's a server-derived value
+      // returned from a helper that merely *received* request data (e.g. an
+      // authenticated entity from `resolveAccount({ token: req.headers... })`).
+      // `stopTaintAtCallReturns` keeps direct request reads and `req.json()`
+      // destructures flagged while dropping taint carried only through a
+      // helper's arguments.
+      if (findUserInputAccess(arg, dataFlow, { stopTaintAtCallReturns: true })) {
         return makeViolation(
           this.ruleKey, node, filePath, 'high',
           'Unvalidated external data used in database write',

@@ -198,6 +198,21 @@ function findVariableInitializerValue(variable: Variable): SyntaxNode | null {
 }
 
 /**
+ * Unwrap `await`/parenthesized wrappers to reach the underlying expression
+ * (e.g. `await (req.json())` → the `req.json()` call_expression). Used to tell
+ * whether a variable's initializer is ultimately a function-call return.
+ */
+function unwrapToExpression(node: SyntaxNode): SyntaxNode {
+  let current = node
+  while (current.type === 'await_expression' || current.type === 'parenthesized_expression') {
+    const inner = current.namedChildren[0]
+    if (!inner) break
+    current = inner
+  }
+  return current
+}
+
+/**
  * Returns the first UserInputSource found anywhere in `node`'s subtree, or null.
  *
  * Detects three patterns:
@@ -214,10 +229,20 @@ function findVariableInitializerValue(variable: Variable): SyntaxNode | null {
  * Use this instead of `arg.text.includes('req.')`, which leaks across
  * substrings (`bodyParser`, `subQuery`, `everyBody`) and misses destructured
  * aliases entirely.
+ *
+ * `options.stopTaintAtCallReturns` (default off): when a tracked alias (pattern
+ * 3) is initialized from a function-call return value, follow only the
+ * callee/receiver, not the call's arguments. A function's return value is a
+ * fresh value determined by the function — `const x = build(req.body)` is not
+ * itself `req.body` — whereas a method on the request (`req.json()`,
+ * `req.body()`) still carries user input via its receiver. Callers that want
+ * raw-payload semantics (e.g. unvalidated-data-to-DB writes) opt in; the
+ * default preserves transitive taint for sink rules that need it.
  */
 export function findUserInputAccess(
   node: SyntaxNode,
   dataFlow?: DataFlowContext,
+  options?: { stopTaintAtCallReturns?: boolean },
 ): UserInputSource | null {
   const visited = new Set<number>()
 
@@ -253,7 +278,19 @@ export function findUserInputAccess(
         ) {
           const value = findVariableInitializerValue(variable)
           if (value) {
-            const source = walk(value)
+            // When the initializer is a function-call return value, the result
+            // is a fresh value, not the call's arguments. Following only the
+            // callee/receiver keeps request-method taint (`req.json()`) while
+            // dropping spurious taint from a helper's inputs
+            // (`const x = build(req.body)`).
+            let toWalk: SyntaxNode | null = value
+            if (options?.stopTaintAtCallReturns) {
+              const unwrapped = unwrapToExpression(value)
+              if (unwrapped?.type === 'call_expression') {
+                toWalk = unwrapped.childForFieldName('function')
+              }
+            }
+            const source = toWalk ? walk(toWalk) : null
             if (source) {
               return { kind: 'aliased-identifier', accessor: n.text }
             }

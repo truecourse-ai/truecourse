@@ -45,6 +45,20 @@ function isUrlCredentialAuthedPath(path: string): boolean {
 }
 
 /**
+ * OpenAPI / Swagger spec and documentation endpoints (`/openapi.json`,
+ * `/api/v2/openapi.json`, `/swagger.json`, `/api-docs`, `/swagger-ui`,
+ * `/redoc`) are public documentation surfaces by convention — doc viewers and
+ * client-SDK generators fetch the schema without credentials. Unlike the
+ * `PUBLIC_PATH_PATTERNS` prefixes these conventionally appear as a path
+ * *segment* (often under a versioned `/api/...` prefix), so match anywhere.
+ */
+const API_DOCS_PATH = /(?:^|\/)(?:openapi|swagger|api-docs|swagger-ui|redoc)(?:[-.][\w.-]*)?(?:\/|$)/i
+
+function isApiDocsPath(path: string): boolean {
+  return API_DOCS_PATH.test(path)
+}
+
+/**
  * Extract identifier names from the middleware arguments to a route definition.
  * Express/Koa/Hono pattern: `app.get('/path', mw1, mw2, handler)`
  * — middleware are args[1..n-2], handler is args[n-1].
@@ -173,6 +187,7 @@ export const routeWithoutAuthMiddlewareVisitor: CodeRuleVisitor = {
       const path = firstArg.text.replace(/^['"`]|['"`]$/g, '')
       if (isPublicPath(path)) return null
       if (isUrlCredentialAuthedPath(path)) return null
+      if (isApiDocsPath(path)) return null
     }
 
     // Check this specific route's middleware chain

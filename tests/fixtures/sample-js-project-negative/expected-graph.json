@@ -169,6 +169,12 @@
       "layer": "data"
     },
     {
+      "name": "registerAdminRoutes",
+      "service": "api-gateway",
+      "kind": "standalone",
+      "layer": "api"
+    },
+    {
       "name": "reliability",
       "service": "api-gateway",
       "kind": "standalone",
@@ -562,6 +568,12 @@
       "name": "Subject",
       "service": "user-service",
       "kind": "class",
+      "layer": "data"
+    },
+    {
+      "name": "subscribeWebhook",
+      "service": "user-service",
+      "kind": "standalone",
       "layer": "data"
     },
     {
