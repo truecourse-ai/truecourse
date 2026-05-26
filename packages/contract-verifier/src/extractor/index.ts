@@ -33,6 +33,8 @@ export {
 export type { ForbiddenMatch } from './forbidden/index.js';
 export { extractConstantsFromDir } from './constant/index.js';
 export type { ExtractedConstant, ConstantShape } from './constant/index.js';
+export { buildCodebaseScan, getArchitectureDetector } from './architecture/index.js';
+export type { CodebaseScan, DetectedArchitectureChoice, ArchitectureDetector } from './architecture/index.js';
 
 export type { ExtractedOperation } from './operation.js';
 

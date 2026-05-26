@@ -99,7 +99,7 @@ function ModuleGroup({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`sticky top-0 z-10 flex w-full items-center justify-between gap-2 border-b border-border bg-card/80 px-4 py-1.5 text-left text-[10px] uppercase tracking-wider hover:text-foreground ${
+        className={`sticky top-0 z-10 flex w-full items-center justify-between gap-2 border-b border-border bg-card px-4 py-1.5 text-left text-[10px] uppercase tracking-wider hover:text-foreground ${
           childActive ? 'text-foreground' : 'text-muted-foreground'
         }`}
         aria-expanded={open}
@@ -128,7 +128,7 @@ function ModuleGroup({
               type="button"
               onClick={() => onOpen(f.path, false)}
               onDoubleClick={() => onOpen(f.path, true)}
-              className={`flex w-full items-center gap-2 border-b border-border/60 px-4 py-2 pl-9 text-left text-xs transition-colors ${
+              className={`flex w-full items-center gap-2 border-b border-border/60 px-4 py-2 pl-9 text-left text-[13px] transition-colors ${
                 isActive
                   ? 'bg-primary/10 text-foreground'
                   : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
@@ -190,16 +190,16 @@ function IssueRow({ issue }: { issue: IlValidationIssue }) {
   const [open, setOpen] = useState(false);
   const tone =
     issue.severity === 'hard'
-      ? 'border-red-500/30 bg-red-500/5 text-red-300'
-      : 'border-amber-500/30 bg-amber-500/5 text-amber-200';
+      ? 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-300'
+      : 'border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200';
   return (
     <li className={`mt-1.5 rounded border ${tone} px-2 py-1.5`}>
       <div className="flex items-start gap-2">
         <span
           className={`mt-0.5 shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider ${
             issue.severity === 'hard'
-              ? 'bg-red-500/20 text-red-300'
-              : 'bg-amber-500/20 text-amber-200'
+              ? 'bg-red-500/20 text-red-700 dark:text-red-300'
+              : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
           }`}
         >
           {issue.severity}

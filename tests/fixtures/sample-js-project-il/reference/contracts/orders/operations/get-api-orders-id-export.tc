@@ -1,0 +1,9 @@
+operation GET "/api/orders/{id}/export" {
+  origin "reference/specs/modules/orders/endpoints.md" "GET /api/orders/{id}/export" 60..63
+  status out-of-scope
+  response 200 on success {
+    body {
+      exportedAt: string
+    }
+  }
+}

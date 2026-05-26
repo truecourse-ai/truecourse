@@ -1,0 +1,19 @@
+// Prisma schema for the customers store. Postgres is the system of
+// record (see docs/adr/ADR-001-data-store.md).
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Customer {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  name        String
+  loyaltyTier String   @default("standard")
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+}

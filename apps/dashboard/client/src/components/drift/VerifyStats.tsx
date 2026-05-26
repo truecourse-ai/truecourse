@@ -38,7 +38,7 @@ function Stat({
 }) {
   return (
     <span>
-      <span className={`font-semibold ${highlight ? 'text-amber-300' : 'text-foreground'}`}>
+      <span className={`font-semibold ${highlight ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'}`}>
         {value}
       </span>{' '}
       <span className="uppercase tracking-wider">{label}</span>

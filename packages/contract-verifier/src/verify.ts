@@ -20,6 +20,9 @@ import {
   extractQueriesFromDir,
   extractEnumsFromDir,
   extractConstantsFromDir,
+  buildCodebaseScan,
+  getArchitectureDetector,
+  type DetectedArchitectureChoice,
 } from './extractor/index.js';
 import {
   compareOperation,
@@ -36,6 +39,7 @@ import {
   compareEnum,
   compareForbiddenArtifact,
   compareNamedConstant,
+  compareArchitectureDecision,
 } from './comparator/index.js';
 import type {
   ContractDrift,
@@ -44,6 +48,7 @@ import type {
   EnumContract,
   ForbiddenArtifactContract,
   NamedConstantContract,
+  ArchitectureDecisionContract,
   PaginationContractC,
   IdempotencyContractC,
   AuthRequirementContract,
@@ -427,6 +432,38 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     if (seenConstantDrift.has(key)) continue;
     seenConstantDrift.add(key);
     drifts.push(d);
+  }
+
+  // ---- Architecture decisions: system-wide platform/framework/data
+  // choices (data-store, messaging, build-system, …). Detectors are
+  // category-scoped and run only for the categories the spec asserts;
+  // the codebase scan + per-(category,scope) detection are built once.
+  const archArtifacts = [...resolution.index.values()].filter(
+    (a) => a.ref.type === 'ArchitectureDecision' && a.contract,
+  );
+  if (archArtifacts.length > 0) {
+    const scan = await buildCodebaseScan(opts.codeDir);
+    const detectCache = new Map<string, DetectedArchitectureChoice>();
+    for (const artifact of archArtifacts) {
+      const contract = artifact.contract as ArchitectureDecisionContract;
+      const detector = getArchitectureDetector(contract.category);
+      if (!detector) continue;
+      const cacheKey = `${contract.category}|${contract.scope?.pathGlob ?? ''}`;
+      let detected = detectCache.get(cacheKey);
+      if (!detected) {
+        detected = detector.detect(scan, contract.scope);
+        detectCache.set(cacheKey, detected);
+      }
+      drifts.push(
+        ...compareArchitectureDecision({
+          ref: artifact.ref,
+          origin: artifact.origin,
+          contract,
+          detected,
+          codeDir: opts.codeDir,
+        }),
+      );
+    }
   }
 
   return {

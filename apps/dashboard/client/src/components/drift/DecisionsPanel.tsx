@@ -183,7 +183,7 @@ function DecisionRow({
           <span
             className={`rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${
               isCustom
-                ? 'bg-blue-500/15 text-blue-300'
+                ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300'
                 : 'bg-muted/60 text-muted-foreground'
             }`}
           >

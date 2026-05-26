@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ErrorEnvelope } from '../types.js';
 import { customersService } from '../services/customers.service.js';
 import { customersRepo } from '../repos/customers.repo.js';
+import { loyaltyRepo } from '../repos/loyalty.repo.js';
 
 const router = express.Router();
 
@@ -44,6 +45,15 @@ router.get('/customers', async (req: Request, res: Response, next: NextFunction)
     const limit = Math.min(Number(req.query.limit ?? 20) || 20, 50);
     const page = await customersRepo.list({ cursor, limit });
     return res.status(200).json(page);
+  } catch (e) {
+    return next(e);
+  }
+});
+
+router.get('/loyalty-tiers', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const tiers = await loyaltyRepo.listEligibleTiers('is_active = true');
+    return res.status(200).json(tiers);
   } catch (e) {
     return next(e);
   }

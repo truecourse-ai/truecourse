@@ -167,7 +167,7 @@ If validation fails on cross-refs, the repair pass tries to re-prompt the LLM fo
 
 ## 6. The IL (intermediate language)
 
-The IL is the typed shape of a contract. It's defined in `packages/contract-verifier/src/types/index.ts`. There are ~14 artifact kinds today; each has its own typed Contract shape.
+The IL is the typed shape of a contract. It's defined in `packages/contract-verifier/src/types/index.ts`. There are ~16 artifact kinds today; each has its own typed Contract shape.
 
 | Kind | What it models | Where the bulk of behavior lives |
 |---|---|---|
@@ -184,6 +184,8 @@ The IL is the typed shape of a contract. It's defined in `packages/contract-veri
 | Formula | A business-logic calculation (formula + threshold) | comparator/formula.ts |
 | QueryRule | Predicates a data-fetching query must / must not include | comparator/query-rule.ts |
 | ForbiddenArtifact | A file / env-var / dep / flag that must not exist | comparator/forbidden-artifact.ts |
+| NamedConstant | A literal value the spec asserts (identifier → expected value) | comparator/named-constant.ts |
+| ArchitectureDecision | A system-wide platform/framework/data choice (Postgres, REST, Kafka) | comparator/architecture-decision.ts + extractor/architecture/ |
 | UnenforceableObligation | A spec sentence with no structural encoding | (not compared) |
 
 Adding a kind = (1) extend `ArtifactKind` union in types/index.ts, (2) add a lifter in resolver/lifters/, (3) add a prompt section, (4) add a comparator. Done in 4 PR-sized chunks.
@@ -222,6 +224,8 @@ Code-side extractors live in `packages/contract-verifier/src/extractor/`. Each e
 | `query/raw-sql.ts` | SQL strings passed to `.raw()`, sql\`...\`, top-level SQL consts | regex over extracted strings |
 | `enum/ts-enums.ts` | TS unions, ts enums, Zod enums, `as const` objects, named sets/arrays | AST walk |
 | `forbidden/index.ts` | File presence (glob), env-var reads, package.json deps, feature flags | mix of fs walk + AST + JSON read |
+| `constant/ts-constants.ts` | Top-level const literals, object properties, default args | AST walk |
+| `architecture/` | The platform/framework/data choices the code actually makes | per-category detectors (see §7.6) |
 
 Each extractor scans the whole `codeDir` once at the start of `verify` and produces a list of typed artifacts. The orchestrator then dispatches each spec contract to the right comparator.
 
@@ -264,6 +268,37 @@ Two dedup passes happen during verification:
 2. **Cross-rule dedup.** In the orchestrator: when multiple rules of the same kind share an obligation key + file + line, keep the first.
 
 Without dedup the verify-state.json would have ~10,000 entries on a real repo; with it, ~150.
+
+### 7.6 ArchitectureDecision — a different shape of detector
+
+Most artifacts diff one spec contract against one code-side counterpart of the same shape (two `OperationContract`s, two `EnumContract`s). `ArchitectureDecision` is different: there's no single code object to extract. The claim is **system-wide** — "we use Postgres", "REST not GraphQL", "Kafka for messaging" — so the code side is *evidence gathered across the whole repo*, not one declaration.
+
+Implementation lives in `packages/contract-verifier/src/extractor/architecture/`.
+
+**Categories.** Each decision has a `category` from a closed enum (`data-store`, `communication-pattern`, `messaging`, `architecture-style`, `auth-strategy`, `frontend-framework`, `runtime`, `deployment-platform`, `package-manager`, `build-system`) and a `chosen` value from that category's known set (`data-store → postgres | mysql | mongodb | …`). There's one **detector** per category (`data-store.ts`, `messaging.ts`, …).
+
+**Three signal layers.** Detectors don't parse one file — they compose three shared signal collectors over the whole `codeDir`, built once per verify run into a `CodebaseScan`:
+
+1. `shared/package-json.ts` — declared dependencies across every `package.json` (`pg`, `mongoose`, `kafkajs`, …).
+2. `shared/characteristic-imports.ts` — module specifiers in TS/JS (`import { Pool } from 'pg'`, `from '@trpc/server'`).
+3. `shared/config-files.ts` — presence and content of named config files (`vite.config.ts`, `prisma/schema.prisma` with `provider = "postgresql"`, `serverless.yml`, lockfiles, …).
+
+Each detector declares, per choice, which of these signals prove it (see `shared/detect.ts`, which turns a list of `ChoiceSpec`s into a `DetectedArchitectureChoice`). The dispatcher runs **only** the detectors the spec's `ArchitectureDecision` artifacts actually ask for, and caches the result per `(category, scope)` so two `data-store` rules don't double-scan.
+
+**The drift trichotomy** (`comparator/architecture-decision.ts`):
+
+| Drift | When | Severity |
+|---|---|---|
+| `architecture.${category}.unmet-choice` | the `chosen` value isn't among the observed choices | critical |
+| `architecture.${category}.forbidden-alternative` | a *different*, signal-backed choice is in use (e.g. spec says postgres, but `mongoose` is also present) | critical |
+| `architecture.${category}.inconclusive` | no signal from any alternative was found — the claim isn't testable from current signals | info |
+
+**The absence sentinel.** The tricky part is telling "we looked and there's definitely none of it" apart from "we can't tell." A detector can record an **absence observation** — a choice with *empty signals* — for categories where absence is itself an answer (messaging `none`, runtime `node`). The comparator treats an empty-signal observation as evidence for `unmet-choice` but **never** as a forbidden alternative. So:
+
+- messaging with no broker client ⇒ observes `none` (determinate) ⇒ a spec asserting Kafka is `unmet-choice`.
+- build-system with no `vite.config`/`webpack.config`/`tsconfig` at all ⇒ *no* observation ⇒ `inconclusive` (we genuinely can't tell), not a false `unmet-choice`.
+
+This is exercised end-to-end in `tests/fixtures/sample-js-project-il/` (ADRs in `docs/adr/`, contracts in `reference/contracts/_shared/architecture.tc`): one fixture each for `unmet-choice`, `forbidden-alternative`, and `inconclusive`, plus a satisfied `communication.rest` positive control that fires no drift.
 
 ---
 
@@ -379,6 +414,6 @@ For honesty:
 - **Cross-language references.** A Python infraction-detection script that produces results consumed by a TS API can't be tracked end-to-end.
 - **Behavioral predicates.** "The handler must call `audit.log()` somewhere" works for emits/effects (via EffectGroup); "the database must be read-only" doesn't (no model for "write-operation absent").
 - **Drift history.** verify-state.json is overwritten every run; no time series, no diff-vs-baseline. See `PLAN_VERIFIER_DRIFT_HISTORY.md`.
-- **Required-presence inverse.** ForbiddenArtifact catches "X exists but shouldn't." There's no symmetric "X should exist but doesn't" for non-Operation artifacts (Operations get `implementation.missing` already).
+- **Required-presence inverse.** ForbiddenArtifact catches "X exists but shouldn't"; ArchitectureDecision adds the symmetric "the codebase must use X" for system-wide platform/framework/data choices (`unmet-choice`), and Operations get `implementation.missing`. But there's still no general "this specific file/dependency/symbol must exist" for arbitrary non-Operation artifacts.
 
 These are all known and tracked in the gap analysis (`GAP_ANALYSIS_VERIFIER_COVERAGE.md`).

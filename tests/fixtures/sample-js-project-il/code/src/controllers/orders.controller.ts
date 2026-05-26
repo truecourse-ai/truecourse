@@ -170,6 +170,18 @@ async function transitionEndpoint(
   }
 }
 
+// Spec marks GET /api/orders/{id}/export as out-of-scope (ADR-003), but
+// the route still ships, exposing an unsupported export surface.
+// IL-DRIFT: Operation:GET /api/orders/{id}/export / forbidden.operation.GET /api/orders/{id}/export.present
+router.get('/orders/:id/export', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const order = await ordersRepo.findById(req.params.id);
+    return res.status(200).json({ exportedAt: new Date().toISOString(), order });
+  } catch (e) {
+    return next(e);
+  }
+});
+
 router.post('/orders/:id/pay', idempotency, (req, res, next) =>
   transitionEndpoint(req, res, next, 'paid', 'order.paid'),
 );

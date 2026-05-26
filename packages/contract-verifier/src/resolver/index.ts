@@ -12,6 +12,7 @@
  */
 
 import type {
+  ArchitectureDecisionContract,
   ArtifactKind,
   ArtifactRef,
   AuthRequirementContract,
@@ -46,6 +47,7 @@ import { liftIdempotencyContract } from './lifters/idempotency-contract.js';
 import { liftQueryRule } from './lifters/query-rule.js';
 import { liftForbiddenArtifact } from './lifters/forbidden-artifact.js';
 import { liftNamedConstant } from './lifters/named-constant.js';
+import { liftArchitectureDecision } from './lifters/architecture-decision.js';
 
 // ---------------------------------------------------------------------------
 // Artifact-keyword → ArtifactKind map. Closed enum; lookup-only.
@@ -66,6 +68,7 @@ const KEYWORD_TO_KIND: Record<string, ArtifactKind> = {
   'query-rule': 'QueryRule',
   'forbidden-artifact': 'ForbiddenArtifact',
   'constant': 'NamedConstant',
+  'architecture-decision': 'ArchitectureDecision',
   'unenforceable-obligation': 'UnenforceableObligation',
 };
 
@@ -99,7 +102,8 @@ export interface ResolvedArtifact {
     | FormulaContract
     | QueryRuleContract
     | ForbiddenArtifactContract
-    | NamedConstantContract;
+    | NamedConstantContract
+    | ArchitectureDecisionContract;
 }
 
 export interface ResolveError {
@@ -300,6 +304,7 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     | QueryRuleContract
     | ForbiddenArtifactContract
     | NamedConstantContract
+    | ArchitectureDecisionContract
     | undefined;
   if (kind === 'Operation' && head[1].kind === 'ident' && head[2].kind === 'string') {
     // Pass the normalized path so OperationContract.path matches the
@@ -334,6 +339,8 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     contract = liftForbiddenArtifact(stmt.block);
   } else if (kind === 'NamedConstant') {
     contract = liftNamedConstant(stmt.block);
+  } else if (kind === 'ArchitectureDecision') {
+    contract = liftArchitectureDecision(stmt.block);
   }
 
   return {

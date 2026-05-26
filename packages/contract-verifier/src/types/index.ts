@@ -69,6 +69,7 @@ export type ArtifactKind =
   | 'QueryRule'
   | 'ForbiddenArtifact'
   | 'NamedConstant'
+  | 'ArchitectureDecision'
   | 'UnenforceableObligation'
   // Forward references that resolve to artifacts we don't yet implement
   // (e.g. `PerformanceSLA`); kept open so unresolved references type-check.
@@ -346,6 +347,45 @@ export interface NamedConstantContract {
   expectedValue: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// ArchitectureDecision — a system-wide platform/framework/data choice the
+// spec (usually an ADR) asserts the codebase MUST make.
+// ---------------------------------------------------------------------------
+//
+// Models claims like "we use Postgres", "REST not GraphQL", "Kafka for
+// inter-service messaging". The comparator runs a per-category detector
+// over the code dir and flags drift on either side: the chosen value not
+// detected (`unmet-choice`), or a rejected alternative detected
+// (`forbidden-alternative`). When no signals exist either way the
+// detector is `inconclusive` and the comparator emits an info drift
+// rather than a false positive. See PLAN_GAP_5_ARCHITECTURE_DECISION.md.
+
+export type ArchitectureCategory =
+  | 'data-store'
+  | 'communication-pattern'
+  | 'messaging'
+  | 'architecture-style'
+  | 'auth-strategy'
+  | 'frontend-framework'
+  | 'runtime'
+  | 'deployment-platform'
+  | 'package-manager'
+  | 'build-system';
+
+export interface ArchitectureDecisionContract {
+  category: ArchitectureCategory;
+  /** The positive choice the spec asserts (a member of the category's
+   *  closed value enum — see the per-category detector). */
+  chosen: string;
+  /** Free-form rationale from the ADR/spec, surfaced in drift messages. */
+  reason: string;
+  /** Alternatives the spec explicitly rejected. Compounded with the
+   *  detector's auto-derived alternative set. */
+  rejectedAlternatives?: string[];
+  /** Narrows where the detector runs when the claim is repo-partial. */
+  scope?: { pathGlob: string };
+}
+
 export interface ForbiddenArtifactContract {
   category: 'file-glob' | 'env-var' | 'dependency' | 'feature-flag';
   /**
@@ -481,6 +521,7 @@ export type Artifact =
   | (ArtifactBase & { kind: 'QueryRule';                contract: QueryRuleContract })
   | (ArtifactBase & { kind: 'ForbiddenArtifact';        contract: ForbiddenArtifactContract })
   | (ArtifactBase & { kind: 'NamedConstant';            contract: NamedConstantContract })
+  | (ArtifactBase & { kind: 'ArchitectureDecision';     contract: ArchitectureDecisionContract })
   | (ArtifactBase & { kind: 'UnenforceableObligation';  contract: UnenforceableObligationContract });
 
 // ---------------------------------------------------------------------------

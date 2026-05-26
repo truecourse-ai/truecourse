@@ -15,11 +15,11 @@ interface VerifyDriftDetailProps {
 }
 
 const SEVERITY_TONE: Record<DriftSeverity, string> = {
-  critical: 'bg-red-500/20 text-red-300 border-red-500/40',
-  high: 'bg-red-500/15 text-red-300 border-red-500/30',
-  medium: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  low: 'bg-amber-500/10 text-amber-200 border-amber-500/20',
-  info: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
+  critical: 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-500/40',
+  high: 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30',
+  medium: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30',
+  low: 'bg-amber-500/10 text-amber-800 dark:text-amber-200 border-amber-500/20',
+  info: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30',
 };
 
 export function VerifyDriftDetail({ drift, onClose, onOpenFile }: VerifyDriftDetailProps) {
@@ -73,7 +73,7 @@ export function VerifyDriftDetail({ drift, onClose, onOpenFile }: VerifyDriftDet
                 type="button"
                 onClick={() => drift.filePath && onOpenFile?.(drift.filePath, drift.lineStart ?? undefined)}
                 disabled={!onOpenFile}
-                className="font-mono text-sm text-primary hover:underline disabled:cursor-default disabled:no-underline disabled:text-foreground"
+                className="block w-full break-all text-left font-mono text-xs text-primary hover:underline disabled:cursor-default disabled:no-underline disabled:text-foreground"
               >
                 {drift.filePath}
                 {drift.lineStart != null && `:${drift.lineStart}`}
@@ -83,25 +83,25 @@ export function VerifyDriftDetail({ drift, onClose, onOpenFile }: VerifyDriftDet
           )}
 
           {drift.specSide !== undefined && drift.specSide !== null && (
-            <details className="rounded border border-border bg-muted/20 p-3" open>
-              <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
+            <div>
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 Spec expectation
-              </summary>
-              <pre className="mt-2 max-h-60 overflow-auto font-mono text-[11px] text-foreground">
+              </div>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-3 font-mono text-[11px] text-foreground">
                 {JSON.stringify(drift.specSide, null, 2)}
               </pre>
-            </details>
+            </div>
           )}
 
           {drift.codeSide !== undefined && drift.codeSide !== null && (
-            <details className="rounded border border-border bg-muted/20 p-3" open>
-              <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
+            <div>
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 Code observation
-              </summary>
-              <pre className="mt-2 max-h-60 overflow-auto font-mono text-[11px] text-foreground">
+              </div>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-muted/20 p-3 font-mono text-[11px] text-foreground">
                 {JSON.stringify(drift.codeSide, null, 2)}
               </pre>
-            </details>
+            </div>
           )}
         </div>
       </div>

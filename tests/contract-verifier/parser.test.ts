@@ -51,6 +51,10 @@ describe('Contract parser — fixture corpus', () => {
         'effect-group',
         'unenforceable-obligation',
         'formula',
+        'query-rule',
+        'forbidden-artifact',
+        'constant',
+        'architecture-decision',
       ]);
       const first = fileNode.statements[0];
       expect(first.head.length).toBeGreaterThan(0);

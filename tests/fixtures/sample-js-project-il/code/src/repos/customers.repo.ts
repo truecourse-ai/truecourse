@@ -1,28 +1,36 @@
 import type { Customer, PageOf } from '../types.js';
+import { prisma } from '../db.js';
 
-const store = new Map<string, Customer>();
-const byEmail = new Map<string, string>(); // email → id
-
+/**
+ * Customers persistence — Prisma client over the Postgres `Customer`
+ * model (see prisma/schema.prisma).
+ */
+// ADR-001 fixes Postgres as the system of record, but `mongoose` is also
+// declared in package.json from a half-finished migration — a forbidden
+// data-store alternative.
+// IL-DRIFT: ArchitectureDecision:data-store.postgres / architecture.data-store.forbidden-alternative
 export const customersRepo = {
   async insert(c: Customer): Promise<void> {
-    store.set(c.id, c);
-    byEmail.set(c.email, c.id);
+    await prisma.customer.create({ data: c });
   },
   async findById(id: string): Promise<Customer | null> {
-    return store.get(id) ?? null;
+    const row = await prisma.customer.findUnique({ where: { id } });
+    return (row as Customer) ?? null;
   },
   async findByEmail(email: string): Promise<Customer | null> {
-    const id = byEmail.get(email);
-    return id ? store.get(id) ?? null : null;
+    const row = await prisma.customer.findFirst({ where: { email } });
+    return (row as Customer) ?? null;
   },
   async list(opts: { cursor?: string; limit: number }): Promise<PageOf<Customer>> {
-    const all = [...store.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const startIdx = opts.cursor ? Number(Buffer.from(opts.cursor, 'base64').toString('utf-8')) : 0;
-    const slice = all.slice(startIdx, startIdx + opts.limit);
-    const next =
-      startIdx + slice.length < all.length
-        ? Buffer.from(String(startIdx + slice.length)).toString('base64')
-        : null;
-    return { items: slice, nextCursor: next };
+    // Spec allows listing customers in the `active` OR `pending` states.
+    // This filter only admits `active`, silently hiding every pending
+    // signup from the list view.
+    // IL-DRIFT: QueryRule:customers-list.status-allowlist / query.predicate.value-mismatch.status.in
+    const items = (await prisma.customer.findMany({
+      where: { status: { in: ['active'] } },
+      orderBy: { createdAt: 'desc' },
+      take: opts.limit,
+    })) as Customer[];
+    return { items, nextCursor: null };
   },
 };

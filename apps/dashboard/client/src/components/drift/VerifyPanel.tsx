@@ -24,11 +24,11 @@ interface VerifyPanelProps {
 const SEVERITY_ORDER: DriftSeverity[] = ['critical', 'high', 'medium', 'low', 'info'];
 
 const SEVERITY_TONE: Record<DriftSeverity, string> = {
-  critical: 'bg-red-500/20 text-red-300',
-  high: 'bg-red-500/15 text-red-300',
-  medium: 'bg-amber-500/15 text-amber-300',
-  low: 'bg-amber-500/10 text-amber-200',
-  info: 'bg-blue-500/10 text-blue-300',
+  critical: 'bg-red-500/20 text-red-700 dark:text-red-300',
+  high: 'bg-red-500/15 text-red-700 dark:text-red-300',
+  medium: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+  low: 'bg-amber-500/10 text-amber-800 dark:text-amber-200',
+  info: 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
 };
 
 export function VerifyPanel({

@@ -2,3 +2,12 @@ enum LoyaltyTier {
   origin "reference/specs/modules/customers/data.md" "LoyaltyTier" 12..12
   values [standard, silver, gold]
 }
+
+// The loyalty_tiers lookup table (queried in loyalty.repo.ts). Plain
+// fields — no immutability/normalization obligations to verify.
+entity LoyaltyTier {
+  origin "reference/specs/modules/customers/data.md" "Loyalty tiers" 20..25
+  field code: string
+  field name: string
+  field threshold: integer >= 0
+}

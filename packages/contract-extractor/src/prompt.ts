@@ -90,6 +90,9 @@ Return ONE JSON object matching this shape — no prose, no code fences:
                         a file, a dependency, an env-var read, a feature flag
 - NamedConstant:        a literal value the spec asserts — identifier,
                         weights/coefficients, threshold constants, default values
+- ArchitectureDecision: a system-wide platform/framework/data choice the spec
+                        asserts (Postgres, REST-not-GraphQL, Kafka) — usually
+                        from an ADR or a "Tech Stack" section
 - UnenforceableObligation: spec sentence with no structural encoding
 
 # .tc grammar (essentials)
@@ -340,6 +343,21 @@ forbidden-artifact deprecated-http-client {
   category dependency
   pattern "request"
   reason "Spec mandates the native fetch API; the deprecated request package must not appear in package.json"
+}
+
+architecture-decision data-store.postgres {
+  origin "docs/adr/ADR-001.md" "Decision" 10..15
+  category data-store
+  chosen postgres
+  reason "Full-text search via tsvector relied on across all queries"
+  rejected-alternatives [mongodb, mysql]
+}
+
+architecture-decision messaging.kafka {
+  origin "docs/adr/ADR-007.md" "Inter-service messaging" 1..20
+  category messaging
+  chosen kafka
+  reason "Strict ordering per partition + replay required for audit"
 }
 
 query-rule active-customers.tenant-scoped {
@@ -987,6 +1005,35 @@ constant whose \`expected-value\` block has one line per row.
 Don't emit constants whose value is a function call, expression, or
 external reference — only literal values (strings, numbers, booleans,
 arrays of literals, flat object literals of literals).
+
+# ArchitectureDecision — extract when the spec/ADR fixes a platform choice
+
+A spec or ADR that records a system-wide technology choice — "we use
+Postgres", "REST API (not GraphQL)", "Kafka for inter-service messaging",
+"Tech Stack: …", "Data Store: …" — becomes one \`architecture-decision\`
+per recorded decision.
+
+- \`category\` is one of: data-store, communication-pattern, messaging,
+  architecture-style, auth-strategy, frontend-framework, runtime,
+  deployment-platform, package-manager, build-system.
+- \`chosen\` is the positive choice, mapped to the category's known value
+  set (data-store → postgres | mysql | mongodb | sqlite | dynamodb |
+  redis-primary | bigquery | cassandra | cockroachdb; messaging → kafka |
+  rabbitmq | sqs | nats | eventbridge | gcp-pubsub | azure-servicebus |
+  redis-pubsub | none; communication-pattern → rest | grpc | graphql |
+  trpc; build-system → vite | webpack | turbopack | esbuild | rollup |
+  parcel | tsc-only).
+- \`reason\` captures the WHY verbatim from the ADR's context /
+  consequences. The verifier surfaces it in drift messages.
+- \`rejected-alternatives\` (optional) lists alternatives the spec
+  explicitly rejected; they compound with the alternative set the
+  detector already derives from the category.
+- Trigger headings: ADR files, "Decision", "Tech Stack", "Stack",
+  "Architecture", "Data Store". Recognise "we chose X", "decision: use
+  Y", "rejected: Z because".
+- If the prose names a choice OUTSIDE the category's known value set,
+  emit an \`unenforceable-obligation\` instead — the detector can only
+  verify known values.
 
 # Authorization-rule: bypass/exception subsections become \`except\` clauses
 

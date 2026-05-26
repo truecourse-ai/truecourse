@@ -54,7 +54,7 @@ export function SpecCanonicalPanel({ tree, isLoading, error, activePath, onOpen 
   }
 
   return (
-    <div className="flex flex-col gap-1 overflow-auto py-1">
+    <div className="flex flex-col gap-1 py-1">
       {tree.modules.map((m) => (
         <ModuleGroup key={m.name} module={m} activePath={activePath} onOpen={onOpen} />
       ))}
@@ -79,7 +79,7 @@ function ModuleGroup({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+        className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-border bg-card px-3 py-1.5 text-left text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
         aria-expanded={open}
       >
         {open ? (
@@ -104,14 +104,14 @@ function ModuleGroup({
                 type="button"
                 onClick={() => onOpen(path, false)}
                 onDoubleClick={() => onOpen(path, true)}
-                className={`flex w-full items-center gap-1.5 px-3 py-1.5 pl-9 text-left text-xs transition-colors ${
+                className={`flex w-full items-center gap-1.5 px-3 py-1.5 pl-9 text-left text-[13px] transition-colors ${
                   isActive ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
                 }`}
                 title={`${module.name} / ${t.topic} — ${t.claimCount} claim${t.claimCount === 1 ? '' : 's'}`}
               >
                 <FileText className="h-3 w-3 shrink-0" />
                 <span className="flex-1 truncate">{t.topic}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">{t.claimCount}</span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">{t.claimCount}</span>
               </button>
             );
           })}
