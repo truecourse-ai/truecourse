@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { initParsers, parseFile } from '@truecourse/analyzer';
 import { extractOperationsFromFile, type ExtractedOperation } from './operation.js';
+import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
+import { eachParsedSource } from './source-walker.js';
 import { extractFileBasedRoutesFromDir } from './file-based-routes.js';
 import {
   analyzeRouterFile,
@@ -97,5 +99,18 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
       seen.add(op.identity);
     }
   }
+
+  // Python (FastAPI) routes. The router prefix is resolved in-file
+  // (`APIRouter(prefix=…)`), so no cross-file mount graph is needed.
+  await eachParsedSource(rootDir, (s) => {
+    if (s.lang !== 'python') return;
+    for (const op of extractFastApiOperationsFromFile(s.filePath, s.source, s.tree)) {
+      if (!seen.has(op.identity)) {
+        expressOps.push(op);
+        seen.add(op.identity);
+      }
+    }
+  });
+
   return expressOps;
 }

@@ -1,50 +1,30 @@
 /**
- * Enum extractor dispatcher. Walks a directory, parses each JS/TS
- * file, runs the enum-shape adapter, and returns deduped
- * `ExtractedEnum` records.
+ * Enum extractor dispatcher. Runs the per-language enum-shape matcher
+ * over every parsed source file and returns deduped `ExtractedEnum`
+ * records.
  *
  * Dedup key: `(name, sorted-values)` — the same enum often appears as
  * both a type alias AND a Zod schema validating it; collapse them.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { initParsers, parseFile } from '@truecourse/analyzer';
+import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-walker.js';
 import type { ExtractedEnum } from './types.js';
 import { extractEnumsFromFile } from './ts-enums.js';
+import { extractPyEnumsFromFile } from './py-enums.js';
 
 export type { ExtractedEnum, EnumShape } from './types.js';
 
-const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
+const MATCHERS: LanguageMatchers<ExtractedEnum> = {
+  ...jsMatchers((s) => extractEnumsFromFile(s.filePath, s.source, s.tree)),
+  python: (s) => extractPyEnumsFromFile(s.filePath, s.source, s.tree),
+};
 
 export async function extractEnumsFromDir(rootDir: string): Promise<ExtractedEnum[]> {
-  await initParsers();
   const raw: ExtractedEnum[] = [];
-
-  const visit = (dir: string): void => {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === 'node_modules' || entry.name === '.git') continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(full);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const ext = path.extname(entry.name);
-      if (!TS_EXT.has(ext)) continue;
-      const source = fs.readFileSync(full, 'utf-8');
-      const lang =
-        ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      try {
-        const tree = parseFile(full, source, lang);
-        raw.push(...extractEnumsFromFile(full, source, tree));
-      } catch {
-        // Parse failure on one file is non-fatal.
-      }
-    }
-  };
-  visit(rootDir);
+  await eachParsedSource(rootDir, (s) => {
+    const matcher = MATCHERS[s.lang];
+    if (matcher) raw.push(...matcher(s));
+  });
 
   // Dedup by (name, value-set).
   const seen = new Map<string, ExtractedEnum>();

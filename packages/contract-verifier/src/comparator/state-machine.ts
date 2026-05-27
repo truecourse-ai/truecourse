@@ -1,52 +1,37 @@
 /**
- * StateMachine comparator. Two checks:
+ * StateMachine comparator. Two checks, across JS/TS and Python:
  *
- *   1. Transition-map drift: locate object literals in the codebase
- *      that look like `Record<State, State[]>` (keys are state values,
- *      values are arrays of state values). For each such map, compare
- *      its entries against the spec's declared transitions. Any map
- *      entry that's NOT in the spec's transition set is an illegal
- *      transition the code allows.
+ *   1. Transition-map drift: object/dict literals shaped like
+ *      `Record<State, State[]>` (keys are state values, values are arrays
+ *      of state values). Any entry NOT in the spec's transition set is an
+ *      illegal transition the code allows.
+ *   2. Unguarded terminal regression: `<receiver>.<field> = '<state>'`
+ *      writes to a non-terminal that could run from a terminal state with
+ *      no `if (x.field == 'literal')` guard ruling the terminal out.
  *
- *   2. Unguarded terminal regression: walk all `<receiver>.<field> = '<state>'`
- *      assignments. If the write target is non-terminal AND it could
- *      run from a terminal state (no enclosing `if (x.field === 'literal')`
- *      guard rules out the terminal), it's a bug-class regression.
+ * Per-language AST matching is dispatched on the parsed source's `lang`.
  */
 
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
-import { initParsers, parseFile } from '@truecourse/analyzer';
+import type { Node as SyntaxNode } from 'web-tree-sitter';
+import { eachParsedSource, type ParsedSource, type SupportedLanguage } from '../extractor/source-walker.js';
 import type {
   ContractDrift,
   ArtifactRef,
   StateMachineContract,
 } from '../types/index.js';
 
-const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
-
 export interface StateMachineCompareInput {
   machineRef: ArtifactRef;
   contract: StateMachineContract;
-  /** Root dir of the code under verification. */
   codeDir: string;
 }
 
-export async function compareStateMachine(
-  input: StateMachineCompareInput,
-): Promise<ContractDrift[]> {
-  await initParsers();
+export async function compareStateMachine(input: StateMachineCompareInput): Promise<ContractDrift[]> {
   const out: ContractDrift[] = [];
-
   const { contract, machineRef } = input;
+
   const stateValues = new Set<string>();
-  // We need the actual state values to recognize the ALLOWED-style map.
-  // The state-machine spec references an Enum; for v1 the comparator
-  // pulls them from the spec's transitions + initial + terminal sets.
-  // (A richer comparator could resolve `statesRef` via the resolver
-  // index — but this is enough to catch the planted bug.)
   for (const t of contract.transitions) { stateValues.add(t.from); stateValues.add(t.to); }
   for (const s of contract.initial) stateValues.add(s);
   for (const s of contract.terminal) stateValues.add(s);
@@ -55,22 +40,13 @@ export async function compareStateMachine(
   const fieldName = contract.scope.field;
   const lowerEntity = contract.scope.entityRef.identity.toLowerCase();
 
-  // Walk all source files.
-  const files: { filePath: string; source: string; tree: Tree }[] = [];
-  walkSourceFiles(input.codeDir, (filePath, source) => {
-    const ext = path.extname(filePath);
-    const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-    try {
-      const tree = parseFile(filePath, source, lang);
-      files.push({ filePath, source, tree });
-    } catch { /* skip */ }
-  });
+  const files: ParsedSource[] = [];
+  await eachParsedSource(input.codeDir, (s) => files.push(s));
 
   // ---- Check 1: transition-map drift ----
-  for (const { filePath, source, tree } of files) {
-    visitAll(tree.rootNode, (node) => {
-      if (node.type !== 'object') return;
-      const entries = readTransitionMap(node, source, stateValues);
+  for (const s of files) {
+    visitAll(s.tree.rootNode, (node) => {
+      const entries = readTransitionMap(node, s, stateValues);
       if (!entries) return;
       for (const [from, tos] of entries) {
         for (const to of tos) {
@@ -81,7 +57,7 @@ export async function compareStateMachine(
               artifactRef: machineRef,
               obligationKey: `transition.illegal.${from}-to-${to}`,
               severity: 'critical',
-              filePath,
+              filePath: s.filePath,
               lineStart: node.startPosition.row + 1,
               lineEnd: node.endPosition.row + 1,
               message:
@@ -99,40 +75,24 @@ export async function compareStateMachine(
 
   // ---- Check 2: unguarded terminal regression ----
   if (contract.terminal.length > 0) {
-    for (const { filePath, source, tree } of files) {
-      visitAll(tree.rootNode, (node) => {
-        if (node.type !== 'assignment_expression') return;
-        const lhs = node.childForFieldName('left');
-        const rhs = node.childForFieldName('right');
-        if (lhs?.type !== 'member_expression' || !rhs) return;
-        const obj = lhs.childForFieldName('object');
-        const prop = lhs.childForFieldName('property');
-        if (obj?.type !== 'identifier' || prop?.type !== 'property_identifier') return;
-        const objName = source.slice(obj.startIndex, obj.endIndex);
-        const propName = source.slice(prop.startIndex, prop.endIndex);
-        if (propName !== fieldName) return;
-        if (!objName.toLowerCase().includes(lowerEntity)) return;
-
-        // Read the literal target value, if any.
-        const target = readStringLiteralValue(rhs, source);
-        if (target === null) return;
+    for (const s of files) {
+      visitAll(s.tree.rootNode, (node) => {
+        const assign = readFieldAssignment(node, s, fieldName, lowerEntity);
+        if (!assign) return;
+        const target = assign.value;
         if (!stateValues.has(target)) return;
         if (contract.terminal.includes(target)) return; // writing TO a terminal is fine
 
-        // Walk up to find a guarding `if (<receiver>.<field> === '<literal>')`.
-        const priors = inferPriorStates(node, source, objName, fieldName);
+        const priors = inferPriorStates(node, s, assign.receiver, fieldName);
         if (priors !== null) {
-          // Guarded: only flag if the union includes a terminal state with no transition.
           const terminalsHittable = priors.filter((p) => contract.terminal.includes(p) && !allowedSet.has(`${p}|${target}`));
           if (terminalsHittable.length === 0) return;
-          out.push(makeUnguardedDrift(machineRef, fieldName, target, terminalsHittable, filePath, node, source, /* unguarded */ false));
+          out.push(makeUnguardedDrift(machineRef, fieldName, target, terminalsHittable, s.filePath, node, false));
           return;
         }
-
-        // Unguarded — would the assignment regress out of a terminal?
         const offending = contract.terminal.filter((t) => !allowedSet.has(`${t}|${target}`));
         if (offending.length === 0) return;
-        out.push(makeUnguardedDrift(machineRef, fieldName, target, offending, filePath, node, source, /* unguarded */ true));
+        out.push(makeUnguardedDrift(machineRef, fieldName, target, offending, s.filePath, node, true));
       });
     }
   }
@@ -141,46 +101,38 @@ export async function compareStateMachine(
 }
 
 // ---------------------------------------------------------------------------
-// Transition map detection
+// Transition map detection (per-language)
 // ---------------------------------------------------------------------------
 
-/**
- * Heuristically detect a transition map. An object literal qualifies iff
- *   - It has at least 2 entries
- *   - Every key is a state value (from `stateValues`)
- *   - Every value is an array literal whose elements are state-value strings
- * Returns a Map<fromState, toStates> when matched, null otherwise.
- */
-function readTransitionMap(
-  obj: SyntaxNode,
-  source: string,
-  stateValues: Set<string>,
-): Map<string, string[]> | null {
+function readTransitionMap(node: SyntaxNode, s: ParsedSource, stateValues: Set<string>): Map<string, string[]> | null {
+  const isObj = s.lang === 'python' ? node.type === 'dictionary' : node.type === 'object';
+  if (!isObj) return null;
   const out = new Map<string, string[]>();
   let entryCount = 0;
-  for (const child of obj.namedChildren) {
-    if (child.type === 'comment') continue; // tolerate comments interleaved in the map
+  for (const child of node.namedChildren) {
+    if (child.type === 'comment') continue;
     if (child.type !== 'pair') return null;
     const k = child.childForFieldName('key');
     const v = child.childForFieldName('value');
     if (!k || !v) return null;
-    const keyName = source.slice(k.startIndex, k.endIndex).replace(/^['"]|['"]$/g, '');
+    const keyName = stripQuotes(s.source.slice(k.startIndex, k.endIndex));
     if (!stateValues.has(keyName)) return null;
-    if (v.type !== 'array') return null;
+    if (!isArrayLike(v, s.lang)) return null;
     const tos: string[] = [];
     for (const elem of v.namedChildren) {
       if (elem.type !== 'string') return null;
-      const fragment = elem.namedChildren.find((c) => c.type === 'string_fragment');
-      if (!fragment) return null;
-      const text = source.slice(fragment.startIndex, fragment.endIndex);
-      if (!stateValues.has(text)) return null;
+      const text = stringValue(elem, s);
+      if (text === null || !stateValues.has(text)) return null;
       tos.push(text);
     }
     out.set(keyName, tos);
     entryCount++;
   }
-  if (entryCount < 2) return null;
-  return out;
+  return entryCount < 2 ? null : out;
+}
+
+function isArrayLike(node: SyntaxNode, lang: SupportedLanguage): boolean {
+  return lang === 'python' ? (node.type === 'list' || node.type === 'tuple') : node.type === 'array';
 }
 
 function listAllowedFromState(c: StateMachineContract, from: string): string[] {
@@ -188,20 +140,32 @@ function listAllowedFromState(c: StateMachineContract, from: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Guard inference (single-clause and OR-chain)
+// Field assignment + guard inference (per-language)
 // ---------------------------------------------------------------------------
 
-/**
- * If the assignment is enclosed by an `if (<receiver>.<field> === '<literal>')`
- * guard (or OR chain), return the list of allowed prior states. Otherwise
- * return null (treat as unguarded).
- */
-function inferPriorStates(
-  assignmentNode: SyntaxNode,
-  source: string,
-  receiver: string,
-  field: string,
-): string[] | null {
+interface FieldAssign { receiver: string; value: string }
+
+function readFieldAssignment(node: SyntaxNode, s: ParsedSource, field: string, lowerEntity: string): FieldAssign | null {
+  const assignType = s.lang === 'python' ? 'assignment' : 'assignment_expression';
+  if (node.type !== assignType) return null;
+  const lhs = node.childForFieldName('left');
+  const rhs = node.childForFieldName('right');
+  if (!lhs || !rhs) return null;
+  const memberType = s.lang === 'python' ? 'attribute' : 'member_expression';
+  if (lhs.type !== memberType) return null;
+  const obj = lhs.childForFieldName('object');
+  const prop = s.lang === 'python' ? lhs.childForFieldName('attribute') : lhs.childForFieldName('property');
+  if (obj?.type !== 'identifier' || !prop) return null;
+  if (s.source.slice(prop.startIndex, prop.endIndex) !== field) return null;
+  const objName = s.source.slice(obj.startIndex, obj.endIndex);
+  if (!objName.toLowerCase().includes(lowerEntity)) return null;
+  if (rhs.type !== 'string') return null;
+  const value = stringValue(rhs, s);
+  if (value === null) return null;
+  return { receiver: objName, value };
+}
+
+function inferPriorStates(assignmentNode: SyntaxNode, s: ParsedSource, receiver: string, field: string): string[] | null {
   let cur: SyntaxNode | null = assignmentNode;
   while (cur) {
     const parent: SyntaxNode | null = cur.parent;
@@ -211,7 +175,7 @@ function inferPriorStates(
       if (consequent && nodeContains(consequent, cur)) {
         const condition = parent.childForFieldName('condition');
         if (condition) {
-          const priors = readGuardCondition(condition, source, receiver, field);
+          const priors = collectOrChain(unwrap(condition), s, receiver, field);
           if (priors !== null) return priors;
         }
       }
@@ -225,16 +189,7 @@ function nodeContains(parent: SyntaxNode, child: SyntaxNode): boolean {
   return child.startIndex >= parent.startIndex && child.endIndex <= parent.endIndex;
 }
 
-function readGuardCondition(
-  condition: SyntaxNode,
-  source: string,
-  receiver: string,
-  field: string,
-): string[] | null {
-  return collectOrChain(unwrapParens(condition), source, receiver, field);
-}
-
-function unwrapParens(node: SyntaxNode): SyntaxNode {
+function unwrap(node: SyntaxNode): SyntaxNode {
   let cur = node;
   while (cur.type === 'parenthesized_expression') {
     const child = cur.namedChildren[0];
@@ -244,68 +199,86 @@ function unwrapParens(node: SyntaxNode): SyntaxNode {
   return cur;
 }
 
-function collectOrChain(
-  node: SyntaxNode,
-  source: string,
-  receiver: string,
-  field: string,
-): string[] | null {
-  const u = unwrapParens(node);
-  if (u.type !== 'binary_expression') return null;
-  const opNode = u.childForFieldName('operator');
-  const op = opNode ? source.slice(opNode.startIndex, opNode.endIndex) : '';
-  if (op === '||') {
-    const left = u.childForFieldName('left');
-    const right = u.childForFieldName('right');
-    if (!left || !right) return null;
-    const ls = collectOrChain(left, source, receiver, field);
-    const rs = collectOrChain(right, source, receiver, field);
-    if (ls === null || rs === null) return null;
-    return [...ls, ...rs];
+function collectOrChain(node: SyntaxNode, s: ParsedSource, receiver: string, field: string): string[] | null {
+  const u = unwrap(node);
+  // Python OR chain: `a or b` (boolean_operator with `or`)
+  if (s.lang === 'python') {
+    if (u.type === 'boolean_operator') {
+      const opNode = u.childForFieldName('operator');
+      if (opNode && s.source.slice(opNode.startIndex, opNode.endIndex) === 'or') {
+        const left = u.childForFieldName('left');
+        const right = u.childForFieldName('right');
+        if (!left || !right) return null;
+        const ls = collectOrChain(left, s, receiver, field);
+        const rs = collectOrChain(right, s, receiver, field);
+        return ls && rs ? [...ls, ...rs] : null;
+      }
+      return null;
+    }
+    if (u.type === 'comparison_operator') return readEqualityClause(u, s, receiver, field);
+    return null;
   }
-  if (op === '===' || op === '==') {
-    return readEqualityClause(u, source, receiver, field);
+  // JS OR chain: `a || b` (binary_expression with `||`)
+  if (u.type === 'binary_expression') {
+    const opNode = u.childForFieldName('operator');
+    const op = opNode ? s.source.slice(opNode.startIndex, opNode.endIndex) : '';
+    if (op === '||') {
+      const left = u.childForFieldName('left');
+      const right = u.childForFieldName('right');
+      if (!left || !right) return null;
+      const ls = collectOrChain(left, s, receiver, field);
+      const rs = collectOrChain(right, s, receiver, field);
+      return ls && rs ? [...ls, ...rs] : null;
+    }
+    if (op === '===' || op === '==') return readEqualityClause(u, s, receiver, field);
   }
   return null;
 }
 
-function readEqualityClause(
-  expr: SyntaxNode,
-  source: string,
-  receiver: string,
-  field: string,
-): string[] | null {
+function readEqualityClause(expr: SyntaxNode, s: ParsedSource, receiver: string, field: string): string[] | null {
+  if (s.lang === 'python') {
+    const a = expr.namedChild(0);
+    const b = expr.namedChild(1);
+    if (!a || !b) return null;
+    const opText = s.source.slice(a.endIndex, b.startIndex).trim();
+    if (opText !== '==') return null;
+    return matchPair(a, b, s, receiver, field) ?? matchPair(b, a, s, receiver, field);
+  }
   const left = expr.childForFieldName('left');
   const right = expr.childForFieldName('right');
   if (!left || !right) return null;
-  return matchPair(left, right, source, receiver, field) ?? matchPair(right, left, source, receiver, field);
+  return matchPair(left, right, s, receiver, field) ?? matchPair(right, left, s, receiver, field);
 }
 
-function matchPair(
-  member: SyntaxNode,
-  literal: SyntaxNode,
-  source: string,
-  receiver: string,
-  field: string,
-): string[] | null {
-  if (member.type !== 'member_expression') return null;
+function matchPair(member: SyntaxNode, literal: SyntaxNode, s: ParsedSource, receiver: string, field: string): string[] | null {
+  const memberType = s.lang === 'python' ? 'attribute' : 'member_expression';
+  if (member.type !== memberType) return null;
   const obj = member.childForFieldName('object');
-  const prop = member.childForFieldName('property');
+  const prop = s.lang === 'python' ? member.childForFieldName('attribute') : member.childForFieldName('property');
   if (obj?.type !== 'identifier' || !prop) return null;
-  const objName = source.slice(obj.startIndex, obj.endIndex);
-  const propName = source.slice(prop.startIndex, prop.endIndex);
-  if (objName !== receiver || propName !== field) return null;
+  if (s.source.slice(obj.startIndex, obj.endIndex) !== receiver) return null;
+  if (s.source.slice(prop.startIndex, prop.endIndex) !== field) return null;
   if (literal.type !== 'string') return null;
-  const fragment = literal.namedChildren.find((c) => c.type === 'string_fragment');
-  if (!fragment) return null;
-  return [source.slice(fragment.startIndex, fragment.endIndex)];
+  return [stringValue(literal, s) ?? ''];
 }
 
-function readStringLiteralValue(node: SyntaxNode, source: string): string | null {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function stripQuotes(str: string): string {
+  return str.replace(/^['"]|['"]$/g, '');
+}
+
+/** Read a string literal's value across JS (`string_fragment`) and Python (`string_content`). */
+function stringValue(node: SyntaxNode, s: ParsedSource): string | null {
   if (node.type !== 'string') return null;
-  const fragment = node.namedChildren.find((c) => c.type === 'string_fragment');
-  if (!fragment) return null;
-  return source.slice(fragment.startIndex, fragment.endIndex);
+  const childType = s.lang === 'python' ? 'string_content' : 'string_fragment';
+  const frag = node.namedChildren.find((c) => c.type === childType);
+  if (frag) return s.source.slice(frag.startIndex, frag.endIndex);
+  const raw = s.source.slice(node.startIndex, node.endIndex);
+  const m = raw.match(/^[a-zA-Z]*('''|"""|'|")([\s\S]*)\1$/);
+  return m ? m[2] : '';
 }
 
 function visitAll(root: SyntaxNode, fn: (n: SyntaxNode) => void): void {
@@ -313,26 +286,7 @@ function visitAll(root: SyntaxNode, fn: (n: SyntaxNode) => void): void {
   while (stack.length > 0) {
     const node = stack.pop()!;
     fn(node);
-    for (let i = node.namedChildren.length - 1; i >= 0; i--) {
-      stack.push(node.namedChildren[i]);
-    }
-  }
-}
-
-function walkSourceFiles(rootDir: string, visit: (filePath: string, source: string) => void): void {
-  const queue: string[] = [rootDir];
-  while (queue.length > 0) {
-    const dir = queue.shift()!;
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries) {
-      if (e.name === 'node_modules' || e.name === '.git') continue;
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) queue.push(full);
-      else if (e.isFile() && TS_EXT.has(path.extname(e.name))) {
-        try { visit(full, fs.readFileSync(full, 'utf-8')); } catch { /* skip */ }
-      }
-    }
+    for (let i = node.namedChildren.length - 1; i >= 0; i--) stack.push(node.namedChildren[i]);
   }
 }
 
@@ -343,7 +297,6 @@ function makeUnguardedDrift(
   terminalsHittable: string[],
   filePath: string,
   assignmentNode: SyntaxNode,
-  _source: string,
   unguarded: boolean,
 ): ContractDrift {
   return {
@@ -364,8 +317,6 @@ function makeUnguardedDrift(
         `[${terminalsHittable.join(', ')}] under the surrounding guard, but the spec ` +
         `has no transition out of those terminals.`,
     specSide: `terminal: [${terminalsHittable.join(', ')}], no transition to '${target}'`,
-    codeSide: unguarded
-      ? `unguarded \`<x>.${field} = '${target}'\``
-      : `guard does not exclude terminal states`,
+    codeSide: unguarded ? `unguarded \`<x>.${field} = '${target}'\`` : `guard does not exclude terminal states`,
   };
 }

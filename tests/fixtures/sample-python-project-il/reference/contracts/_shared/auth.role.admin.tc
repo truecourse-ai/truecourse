@@ -1,0 +1,10 @@
+auth-requirement auth.role.admin {
+  origin "reference/specs/shared/auth.md" "Authentication" 6..8
+  scheme Bearer
+  required-role admin
+  selector operations [Operation:"POST /api/customers"]
+  on-violation {
+    status 403
+    error-code forbidden
+  }
+}

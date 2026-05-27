@@ -189,10 +189,26 @@ function extractFromSqlSource(
   source: string,
 ): ExtractedQuery[] {
   const { text, hasInterpolation } = getSqlText(sqlNode, source);
-  if (!text || !/\bSELECT\b/i.test(text)) return [];
+  return buildQueriesFromSqlText(text, hasInterpolation, {
+    filePath,
+    lineStart: sqlNode.startPosition.row + 1,
+    lineEnd: sqlNode.endPosition.row + 1,
+  });
+}
 
-  const lineStart = sqlNode.startPosition.row + 1;
-  const lineEnd = sqlNode.endPosition.row + 1;
+/**
+ * Language-agnostic core: turn a SQL string (already extracted from
+ * whatever host AST — a JS template literal, a Python f-string, a raw
+ * const) into `ExtractedQuery` records. Shared by the JS raw-SQL matcher
+ * and the Python raw-SQL matcher so the SQL dialect parsing lives in one
+ * place. `hasInterpolation` surfaces a coverage-gap unparseable entry.
+ */
+export function buildQueriesFromSqlText(
+  text: string,
+  hasInterpolation: boolean,
+  loc: { filePath: string; lineStart: number; lineEnd: number },
+): ExtractedQuery[] {
+  if (!text || !/\bSELECT\b/i.test(text)) return [];
 
   const blocks = splitSelectBlocks(text);
   const out: ExtractedQuery[] = [];
@@ -209,21 +225,16 @@ function extractFromSqlSource(
       else unparseable.push({ reason: 'unrecognised SQL predicate', raw: piece });
     }
     if (hasInterpolation) {
-      unparseable.push({
-        reason: 'template-literal substitution skipped',
-        raw: '${...}',
-      });
+      unparseable.push({ reason: 'string-interpolation substitution skipped', raw: '${...}' });
     }
-
-    const dateRangeBinding = detectDateRangeBinding(predicates);
 
     out.push({
       entity: from,
       predicates,
       unparseable,
-      source: { filePath, lineStart, lineEnd },
+      source: { filePath: loc.filePath, lineStart: loc.lineStart, lineEnd: loc.lineEnd },
       adapter: 'raw-sql',
-      dateRangeBinding,
+      dateRangeBinding: detectDateRangeBinding(predicates),
     });
   }
   return out;
@@ -557,4 +568,97 @@ function walk(node: SyntaxNode, visit: (n: SyntaxNode) => boolean | void): void 
     const c = node.namedChild(i);
     if (c) walk(c, visit);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Python raw-SQL host detection
+// ---------------------------------------------------------------------------
+//
+// SQL strings passed to `<conn>.execute(...)` / `text("...")`. Reuses the
+// language-agnostic `buildQueriesFromSqlText` core; only the host AST
+// shape (Python `call` + f-strings) differs from the JS adapter above.
+
+const PY_SQL_EXEC_METHODS = new Set(['execute', 'exec_driver_sql']);
+
+export function extractPythonRawSqlQueriesFromFile(
+  filePath: string,
+  source: string,
+  tree: Tree,
+): ExtractedQuery[] {
+  const out: ExtractedQuery[] = [];
+  walk(tree.rootNode, (node) => {
+    if (node.type === 'call') out.push(...rawSqlFromPyCall(node, filePath, source));
+  });
+  return out;
+}
+
+function rawSqlFromPyCall(node: SyntaxNode, filePath: string, source: string): ExtractedQuery[] {
+  const fn = node.childForFieldName('function');
+  let isSqlHost = false;
+  if (fn?.type === 'attribute' && PY_SQL_EXEC_METHODS.has(fn.childForFieldName('attribute')?.text ?? '')) isSqlHost = true;
+  if (fn?.type === 'identifier' && (fn.text === 'text' || fn.text === 'execute')) isSqlHost = true;
+  if (!isSqlHost) return [];
+
+  const args = node.childForFieldName('arguments');
+  if (!args) return [];
+  const out: ExtractedQuery[] = [];
+  for (let i = 0; i < args.namedChildCount; i++) {
+    const arg = args.namedChild(i);
+    if (!arg) continue;
+    const sql = pySqlText(arg, source);
+    if (!sql) continue;
+    out.push(...buildQueriesFromSqlText(sql.text, sql.hasInterpolation, {
+      filePath,
+      lineStart: arg.startPosition.row + 1,
+      lineEnd: arg.endPosition.row + 1,
+    }));
+  }
+  return out;
+}
+
+/** A Python string / f-string / adjacent-concatenated string node →
+ *  its text + whether it contains `{...}` interpolation. `text(...)`
+ *  wrappers are unwrapped. Returns null unless the result is a SELECT. */
+function pySqlText(node: SyntaxNode, source: string): { text: string; hasInterpolation: boolean } | null {
+  if (node.type === 'call') {
+    const fn = node.childForFieldName('function');
+    if (fn?.type === 'identifier' && fn.text === 'text') {
+      const inner = node.childForFieldName('arguments')?.namedChild(0);
+      return inner ? pySqlText(inner, source) : null;
+    }
+    return null;
+  }
+  const read = readPyStringNode(node, source);
+  if (!read) return null;
+  return /\bSELECT\b/i.test(read.text) ? read : null;
+}
+
+function readPyStringNode(node: SyntaxNode, source: string): { text: string; hasInterpolation: boolean } | null {
+  if (node.type === 'concatenated_string') {
+    let text = '';
+    let hasInterpolation = false;
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const c = node.namedChild(i);
+      if (!c) continue;
+      const part = readPyStringNode(c, source);
+      if (part) {
+        text += part.text;
+        hasInterpolation = hasInterpolation || part.hasInterpolation;
+      }
+    }
+    return { text, hasInterpolation };
+  }
+  if (node.type !== 'string') return null;
+  let text = '';
+  let hasInterpolation = false;
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const c = node.namedChild(i);
+    if (!c) continue;
+    if (c.type === 'string_content') text += source.slice(c.startIndex, c.endIndex);
+    else if (c.type === 'interpolation') {
+      text += ' /*INTERP*/ ';
+      hasInterpolation = true;
+    }
+  }
+  return { text, hasInterpolation };
 }

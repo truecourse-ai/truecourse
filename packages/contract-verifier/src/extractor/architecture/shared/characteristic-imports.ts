@@ -10,49 +10,68 @@
  * include `from 'pg'`, `from '@trpc/server'`, etc.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
-import { parseFile } from '@truecourse/analyzer';
+import { eachParsedSource, jsMatchers, type LanguageMatchers, type ParsedSource } from '../../source-walker.js';
 import type { CodebaseScan, DetectionSignal, ImportRef } from '../types.js';
 
-const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache', '.truecourse']);
+const IMPORT_MATCHERS: LanguageMatchers<ImportRef> = {
+  ...jsMatchers(jsImportRefs),
+  python: pythonImportRefs,
+};
 
-export function collectImports(rootDir: string): ImportRef[] {
+export async function collectImports(rootDir: string): Promise<ImportRef[]> {
   const out: ImportRef[] = [];
-  const visit = (dir: string): void => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
+  await eachParsedSource(rootDir, (s) => {
+    const matcher = IMPORT_MATCHERS[s.lang];
+    if (matcher) out.push(...matcher(s));
+  });
+  return out;
+}
+
+function jsImportRefs(s: ParsedSource): ImportRef[] {
+  return findImportSpecifiers(s.tree, s.source).map((m) => ({
+    module: m.module,
+    source: { filePath: s.filePath, lineStart: m.line, lineEnd: m.line },
+  }));
+}
+
+/**
+ * Python imports: `import x`, `import x.y as z`, `from pkg import a, b`,
+ * `from pkg.sub import c`. The "module" recorded is the top-level
+ * package (`sqlalchemy`, `fastapi`) so dependency-style matching works.
+ */
+function pythonImportRefs(s: ParsedSource): ImportRef[] {
+  const out: ImportRef[] = [];
+  const push = (mod: string, node: SyntaxNode): void => {
+    if (mod) out.push({ module: mod, source: { filePath: s.filePath, lineStart: node.startPosition.row + 1, lineEnd: node.startPosition.row + 1 } });
+  };
+  const walk = (node: SyntaxNode): void => {
+    if (node.type === 'import_from_statement') {
+      const moduleName = node.childForFieldName('module_name');
+      if (moduleName) push(dottedHead(s.source.slice(moduleName.startIndex, moduleName.endIndex)), node);
+    } else if (node.type === 'import_statement') {
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const c = node.namedChild(i);
+        if (!c) continue;
+        if (c.type === 'dotted_name') push(dottedHead(s.source.slice(c.startIndex, c.endIndex)), node);
+        else if (c.type === 'aliased_import') {
+          const name = c.childForFieldName('name');
+          if (name) push(dottedHead(s.source.slice(name.startIndex, name.endIndex)), node);
+        }
+      }
     }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(full);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const ext = path.extname(entry.name);
-      if (!TS_EXT.has(ext)) continue;
-      const source = fs.readFileSync(full, 'utf-8');
-      const lang = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      let tree: Tree;
-      try {
-        tree = parseFile(full, source, lang);
-      } catch {
-        continue;
-      }
-      for (const m of findImportSpecifiers(tree, source)) {
-        out.push({ module: m.module, source: { filePath: full, lineStart: m.line, lineEnd: m.line } });
-      }
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const c = node.namedChild(i);
+      if (c) walk(c);
     }
   };
-  visit(rootDir);
+  walk(s.tree.rootNode);
   return out;
+}
+
+/** `sqlalchemy.orm` → `sqlalchemy` (top-level distribution name). */
+function dottedHead(dotted: string): string {
+  return dotted.trim().split('.')[0] ?? '';
 }
 
 function findImportSpecifiers(tree: Tree, source: string): { module: string; line: number }[] {

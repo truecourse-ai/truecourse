@@ -91,24 +91,28 @@ function parseResourceField(predicate: string): string | null {
 
 function handlerHasOwnershipCheck(body: SyntaxNode, source: string, fieldName: string): boolean {
   let found = false;
+  const check = (left: SyntaxNode, right: SyntaxNode): boolean =>
+    (matchesAuthSide(left, source) || matchesAuthSide(right, source)) &&
+    (matchesResourceField(left, source, fieldName) || matchesResourceField(right, source, fieldName));
   const visit = (node: SyntaxNode): void => {
     if (found) return;
+    // JS equality: binary_expression with ===/==/!==/!=
     if (node.type === 'binary_expression') {
       const opNode = node.childForFieldName('operator');
-      if (opNode) {
-        const op = source.slice(opNode.startIndex, opNode.endIndex);
-        if (op === '===' || op === '==' || op === '!==' || op === '!=') {
-          const left = node.childForFieldName('left');
-          const right = node.childForFieldName('right');
-          if (
-            left && right &&
-            (matchesAuthSide(left, source) || matchesAuthSide(right, source)) &&
-            (matchesResourceField(left, source, fieldName) || matchesResourceField(right, source, fieldName))
-          ) {
-            found = true;
-            return;
-          }
-        }
+      const op = opNode ? source.slice(opNode.startIndex, opNode.endIndex) : '';
+      if (op === '===' || op === '==' || op === '!==' || op === '!=') {
+        const left = node.childForFieldName('left');
+        const right = node.childForFieldName('right');
+        if (left && right && check(left, right)) { found = true; return; }
+      }
+    }
+    // Python equality: comparison_operator with ==/!=
+    if (node.type === 'comparison_operator') {
+      const a = node.namedChild(0);
+      const b = node.namedChild(1);
+      if (a && b) {
+        const op = source.slice(a.endIndex, b.startIndex).trim();
+        if ((op === '==' || op === '!=') && check(a, b)) { found = true; return; }
       }
     }
     for (const child of node.namedChildren) {
@@ -120,8 +124,13 @@ function handlerHasOwnershipCheck(body: SyntaxNode, source: string, fieldName: s
   return found;
 }
 
-/** True if the expression touches `req.auth.*` (including optional chaining). */
+/** True if the expression touches `req.auth.*` / `request.user.*` /
+ *  `current_user` (JS member chains + Python attribute chains). */
 function matchesAuthSide(node: SyntaxNode, source: string): boolean {
+  // Python attribute chain: `request.user.id`, `request.auth.user_id`, `current_user.id`.
+  if (node.type === 'attribute') {
+    return /\b(req|request)\.(auth|user)\b|\bcurrent_user\b/.test(source.slice(node.startIndex, node.endIndex));
+  }
   // Walk up the member chain looking for `req` / `request` then `.auth`.
   let cur: SyntaxNode | null = node;
   while (cur) {
@@ -146,10 +155,11 @@ function matchesAuthSide(node: SyntaxNode, source: string): boolean {
   return false;
 }
 
-/** True if the expression terminates in `.<fieldName>` (member access). */
+/** True if the expression terminates in `.<fieldName>` (JS member access
+ *  or Python attribute access). */
 function matchesResourceField(node: SyntaxNode, source: string, fieldName: string): boolean {
-  if (node.type !== 'member_expression') return false;
-  const prop = node.childForFieldName('property');
+  if (node.type !== 'member_expression' && node.type !== 'attribute') return false;
+  const prop = node.childForFieldName('property') ?? node.childForFieldName('attribute');
   if (!prop) return false;
   return source.slice(prop.startIndex, prop.endIndex) === fieldName;
 }

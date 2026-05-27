@@ -2,10 +2,10 @@ import type { ArchitectureDetector } from './types.js';
 import { detectByChoiceSpecs, type ChoiceSpec } from './shared/detect.js';
 
 const SPECS: ChoiceSpec[] = [
-  { value: 'kafka', packages: ['kafkajs', '@kafkajs/confluent-schema-registry'] },
-  { value: 'rabbitmq', packages: ['amqplib', 'amqp-connection-manager'] },
+  { value: 'kafka', packages: ['kafkajs', '@kafkajs/confluent-schema-registry', 'kafka-python', 'confluent-kafka', 'aiokafka'] },
+  { value: 'rabbitmq', packages: ['amqplib', 'amqp-connection-manager', 'pika', 'aio-pika', 'kombu'] },
   { value: 'sqs', packages: ['@aws-sdk/client-sqs'] },
-  { value: 'nats', packages: ['nats'] },
+  { value: 'nats', packages: ['nats', 'nats-py'] },
   { value: 'eventbridge', packages: ['@aws-sdk/client-eventbridge'] },
   { value: 'gcp-pubsub', packages: ['@google-cloud/pubsub'] },
   { value: 'azure-servicebus', packages: ['@azure/service-bus'] },

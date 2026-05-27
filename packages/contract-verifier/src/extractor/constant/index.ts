@@ -1,51 +1,30 @@
 /**
- * Constant extractor dispatcher. Walks a directory, parses each
- * JS/TS file, runs the constant-shape adapter, and returns deduped
+ * Constant extractor dispatcher. Runs the per-language constant-shape
+ * matcher over every parsed source file and returns deduped
  * `ExtractedConstant` records.
  *
  * Dedup key: `(name, stringified value)` — same constant in multiple
  * files collapses to one record. The first source location wins.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { initParsers, parseFile } from '@truecourse/analyzer';
+import { eachParsedSource, jsMatchers, type LanguageMatchers } from '../source-walker.js';
 import type { ExtractedConstant } from './types.js';
 import { extractConstantsFromFile } from './ts-constants.js';
+import { extractPyConstantsFromFile } from './py-constants.js';
 
 export type { ExtractedConstant, ConstantShape } from './types.js';
 
-const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache', '.truecourse']);
+const MATCHERS: LanguageMatchers<ExtractedConstant> = {
+  ...jsMatchers((s) => extractConstantsFromFile(s.filePath, s.source, s.tree)),
+  python: (s) => extractPyConstantsFromFile(s.filePath, s.source, s.tree),
+};
 
 export async function extractConstantsFromDir(rootDir: string): Promise<ExtractedConstant[]> {
-  await initParsers();
   const raw: ExtractedConstant[] = [];
-
-  const visit = (dir: string): void => {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(full);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const ext = path.extname(entry.name);
-      if (!TS_EXT.has(ext)) continue;
-      const source = fs.readFileSync(full, 'utf-8');
-      const lang =
-        ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      try {
-        const tree = parseFile(full, source, lang);
-        raw.push(...extractConstantsFromFile(full, source, tree));
-      } catch {
-        // Parse failures non-fatal.
-      }
-    }
-  };
-  visit(rootDir);
+  await eachParsedSource(rootDir, (s) => {
+    const matcher = MATCHERS[s.lang];
+    if (matcher) raw.push(...matcher(s));
+  });
 
   // Dedup by (name, serialized-value). Keep first occurrence.
   const seen = new Map<string, ExtractedConstant>();

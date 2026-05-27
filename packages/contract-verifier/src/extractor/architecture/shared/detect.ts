@@ -22,7 +22,7 @@ import type {
   DetectionSignal,
   ObservedChoice,
 } from '../types.js';
-import { packagesMatching } from './package-json.js';
+import { packagesMatching } from './dependencies.js';
 import { importsMatching } from './characteristic-imports.js';
 import { filesMatching, fileContentMatching } from './config-files.js';
 

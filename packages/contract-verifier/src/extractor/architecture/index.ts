@@ -9,7 +9,7 @@
 import { initParsers } from '@truecourse/analyzer';
 import type { ArchitectureCategory } from '../../types/index.js';
 import type { ArchitectureDetector, CodebaseScan } from './types.js';
-import { collectDeclaredPackages } from './shared/package-json.js';
+import { collectDeclaredPackages } from './shared/dependencies.js';
 import { collectImports } from './shared/characteristic-imports.js';
 import { collectFileIndex } from './shared/config-files.js';
 import { dataStoreDetector } from './data-store.js';
@@ -51,7 +51,7 @@ export function getArchitectureDetector(category: ArchitectureCategory): Archite
 export async function buildCodebaseScan(codeDir: string): Promise<CodebaseScan> {
   await initParsers();
   const packages = collectDeclaredPackages(codeDir);
-  const imports = collectImports(codeDir);
+  const imports = await collectImports(codeDir);
   const { files, readFile } = collectFileIndex(codeDir);
   return { codeDir, packages, imports, files, readFile };
 }

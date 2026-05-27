@@ -1,22 +1,23 @@
 /**
- * Code-side presence detectors for ForbiddenArtifact comparator.
+ * Code-side presence detectors for the ForbiddenArtifact comparator.
  *
- * One function per category — each scans the code dir and returns a
- * list of matches. The comparator uses the matches to emit
- * `forbidden.${category}.${pattern}.present` drifts.
+ * One function per category; each scans the code dir and returns matches
+ * the comparator turns into `forbidden.${category}.${pattern}.present`
+ * drifts.
  *
- * Coverage is JS/TS only:
- *   - file-glob:    fs walk + minimatch
- *   - env-var:      tree-sitter scan of process.env.X / Deno.env.get / import.meta.env.X
- *   - dependency:   parse package.json deps trees
- *   - feature-flag: union of env-var detection + grep in JSON/YAML config files
+ *   - file-glob:    fs walk + minimatch (language-agnostic)
+ *   - env-var:      per-language AST scan (process.env / import.meta.env /
+ *                   Deno.env.get on JS-family; os.environ / os.getenv on Python)
+ *   - dependency:   cross-ecosystem manifest read (npm + Python — see manifests.ts)
+ *   - feature-flag: env-var detection, then a textual scan of config files
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
-import { initParsers, parseFile } from '@truecourse/analyzer';
+import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { minimatch } from '../../comparator/minimatch.js';
+import { eachParsedSource, type ParsedSource } from '../source-walker.js';
+import { collectDependencies } from '../manifests.js';
 
 export interface ForbiddenMatch {
   filePath: string;
@@ -26,17 +27,12 @@ export interface ForbiddenMatch {
   snippet?: string;
 }
 
-const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache', '.truecourse']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache', '.truecourse', '__pycache__', '.venv', 'venv']);
 
 // ---------------------------------------------------------------------------
 // file-glob detector
 // ---------------------------------------------------------------------------
 
-/**
- * Find all files in `rootDir` whose repo-relative path matches the
- * minimatch pattern. Returns one ForbiddenMatch per matching file.
- */
 export function detectForbiddenFiles(rootDir: string, pattern: string): ForbiddenMatch[] {
   const out: ForbiddenMatch[] = [];
   const visit = (dir: string): void => {
@@ -65,61 +61,29 @@ export function detectForbiddenFiles(rootDir: string, pattern: string): Forbidde
 }
 
 // ---------------------------------------------------------------------------
-// env-var detector
+// env-var detector (multi-language)
 // ---------------------------------------------------------------------------
 
-/**
- * Find every read of `process.env.<NAME>`, `Deno.env.get('<NAME>')`,
- * or `import.meta.env.<NAME>` matching `name`. Returns matches with
- * file + line for drift display.
- */
 export async function detectForbiddenEnvVar(rootDir: string, name: string): Promise<ForbiddenMatch[]> {
-  await initParsers();
   const out: ForbiddenMatch[] = [];
-  const visit = (dir: string): void => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
+  await eachParsedSource(rootDir, (s) => {
+    if (!s.source.includes(name)) return; // cheap pre-filter
+    const reads = s.lang === 'python' ? findPyEnvVarReads(s, name) : findJsEnvVarReads(s, name);
+    for (const node of reads) {
+      out.push({
+        filePath: s.filePath,
+        lineStart: node.startPosition.row + 1,
+        lineEnd: node.endPosition.row + 1,
+        snippet: s.source.slice(node.startIndex, Math.min(node.endIndex, node.startIndex + 80)),
+      });
     }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(full);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const ext = path.extname(entry.name);
-      if (!TS_EXT.has(ext)) continue;
-      const source = fs.readFileSync(full, 'utf-8');
-      // Cheap pre-filter — skip parse if name not in source.
-      if (!source.includes(name)) continue;
-      const lang =
-        ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'typescript' : 'javascript';
-      try {
-        const tree = parseFile(full, source, lang);
-        for (const match of findEnvVarReads(tree, name)) {
-          out.push({
-            filePath: full,
-            lineStart: match.startPosition.row + 1,
-            lineEnd: match.endPosition.row + 1,
-            snippet: source.slice(match.startIndex, Math.min(match.endIndex, match.startIndex + 80)),
-          });
-        }
-      } catch {
-        // Parse failure non-fatal.
-      }
-    }
-  };
-  visit(rootDir);
+  });
   return out;
 }
 
-function findEnvVarReads(tree: Tree, name: string): SyntaxNode[] {
+function findJsEnvVarReads(s: ParsedSource, name: string): SyntaxNode[] {
   const out: SyntaxNode[] = [];
-  walk(tree.rootNode, (node) => {
+  walk(s.tree.rootNode, (node) => {
     if (matchProcessEnv(node, name) || matchImportMetaEnv(node, name) || matchDenoEnvGet(node, name)) {
       out.push(node);
       return false;
@@ -132,8 +96,7 @@ function findEnvVarReads(tree: Tree, name: string): SyntaxNode[] {
 /** `process.env.NAME` — a member_expression chain. */
 function matchProcessEnv(node: SyntaxNode, name: string): boolean {
   if (node.type !== 'member_expression') return false;
-  const prop = node.childForFieldName('property')?.text;
-  if (prop !== name) return false;
+  if (node.childForFieldName('property')?.text !== name) return false;
   const obj = node.childForFieldName('object');
   if (obj?.type !== 'member_expression') return false;
   return obj.childForFieldName('property')?.text === 'env'
@@ -143,16 +106,11 @@ function matchProcessEnv(node: SyntaxNode, name: string): boolean {
 /** `import.meta.env.NAME` */
 function matchImportMetaEnv(node: SyntaxNode, name: string): boolean {
   if (node.type !== 'member_expression') return false;
-  const prop = node.childForFieldName('property')?.text;
-  if (prop !== name) return false;
+  if (node.childForFieldName('property')?.text !== name) return false;
   const obj = node.childForFieldName('object');
   if (obj?.type !== 'member_expression') return false;
   if (obj.childForFieldName('property')?.text !== 'env') return false;
-  const inner = obj.childForFieldName('object');
-  // inner is `import.meta` — member_expression with property 'meta' on
-  // an import identifier (tree-sitter sometimes represents `import` as
-  // `import` keyword via a special node).
-  return inner?.text === 'import.meta';
+  return obj.childForFieldName('object')?.text === 'import.meta';
 }
 
 /** `Deno.env.get('NAME')` */
@@ -165,8 +123,53 @@ function matchDenoEnvGet(node: SyntaxNode, name: string): boolean {
   if (recv?.type !== 'member_expression') return false;
   if (recv.childForFieldName('property')?.text !== 'env') return false;
   if (recv.childForFieldName('object')?.text !== 'Deno') return false;
-  // Check that arg is the name we're looking for.
-  const args = node.childForFieldName('arguments');
+  return callHasStringArg(node, name);
+}
+
+/**
+ * Python env reads: `os.environ.get("NAME")`, `os.getenv("NAME")`,
+ * `os.environ["NAME"]`, and the bare `environ[...]` / `getenv(...)`
+ * forms from `from os import environ, getenv`.
+ */
+function findPyEnvVarReads(s: ParsedSource, name: string): SyntaxNode[] {
+  const out: SyntaxNode[] = [];
+  walk(s.tree.rootNode, (node) => {
+    // os.environ["NAME"] / environ["NAME"]
+    if (node.type === 'subscript') {
+      const value = node.childForFieldName('value');
+      if (value && isEnvironAccess(value, s.source) && subscriptIsString(node, s.source, name)) {
+        out.push(node);
+        return false;
+      }
+    }
+    // os.environ.get("NAME") / os.getenv("NAME") / getenv("NAME") / environ.get("NAME")
+    if (node.type === 'call') {
+      const fn = node.childForFieldName('function');
+      if (fn && isEnvGetterCall(fn, s.source) && pyCallHasStringArg(node, s.source, name)) {
+        out.push(node);
+        return false;
+      }
+    }
+    return true;
+  });
+  return out;
+}
+
+/** `os.environ` or bare `environ`. */
+function isEnvironAccess(node: SyntaxNode, source: string): boolean {
+  const text = source.slice(node.startIndex, node.endIndex);
+  return text === 'os.environ' || text === 'environ';
+}
+
+/** Function expr of `os.environ.get` / `os.getenv` / `getenv` / `environ.get`. */
+function isEnvGetterCall(fn: SyntaxNode, source: string): boolean {
+  const text = source.slice(fn.startIndex, fn.endIndex);
+  return text === 'os.getenv' || text === 'getenv'
+    || text === 'os.environ.get' || text === 'environ.get';
+}
+
+function callHasStringArg(callNode: SyntaxNode, name: string): boolean {
+  const args = callNode.childForFieldName('arguments');
   if (!args) return false;
   for (let i = 0; i < args.namedChildCount; i++) {
     const arg = args.namedChild(i);
@@ -175,50 +178,41 @@ function matchDenoEnvGet(node: SyntaxNode, name: string): boolean {
   return false;
 }
 
+function pyCallHasStringArg(callNode: SyntaxNode, source: string, name: string): boolean {
+  const args = callNode.childForFieldName('arguments');
+  if (!args) return false;
+  for (let i = 0; i < args.namedChildCount; i++) {
+    const arg = args.namedChild(i);
+    if (arg?.type === 'string' && pyStringText(arg, source) === name) return true;
+  }
+  return false;
+}
+
+function subscriptIsString(node: SyntaxNode, source: string, name: string): boolean {
+  const sub = node.childForFieldName('subscript');
+  return !!sub && sub.type === 'string' && pyStringText(sub, source) === name;
+}
+
+function pyStringText(node: SyntaxNode, source: string): string {
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const c = node.namedChild(i);
+    if (c?.type === 'string_content') return source.slice(c.startIndex, c.endIndex);
+  }
+  return source.slice(node.startIndex, node.endIndex).replace(/^[a-zA-Z]*('''|"""|'|")|('''|"""|'|")$/g, '');
+}
+
 // ---------------------------------------------------------------------------
-// dependency detector
+// dependency detector (cross-ecosystem)
 // ---------------------------------------------------------------------------
 
-/**
- * Find every package.json (root + workspaces) and check whether
- * `name` appears in dependencies / devDependencies / peerDependencies.
- * Returns one match per package.json that declares it.
- */
 export function detectForbiddenDependency(rootDir: string, name: string): ForbiddenMatch[] {
   const out: ForbiddenMatch[] = [];
-  const visit = (dir: string): void => {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
+  for (const dep of collectDependencies(rootDir)) {
+    if (dep.name === name) {
+      const version = dep.version ? ` ${dep.version}` : '';
+      out.push({ filePath: dep.filePath, snippet: `${name}${version} (${dep.field})` });
     }
-    for (const entry of entries) {
-      if (SKIP_DIRS.has(entry.name)) continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        visit(full);
-        continue;
-      }
-      if (entry.name !== 'package.json') continue;
-      let pkg: Record<string, unknown>;
-      try {
-        pkg = JSON.parse(fs.readFileSync(full, 'utf-8'));
-      } catch {
-        continue;
-      }
-      for (const key of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
-        const deps = pkg[key];
-        if (deps && typeof deps === 'object' && name in (deps as Record<string, unknown>)) {
-          out.push({
-            filePath: full,
-            snippet: `"${name}": ${JSON.stringify((deps as Record<string, string>)[name])}  (${key})`,
-          });
-        }
-      }
-    }
-  };
-  visit(rootDir);
+  }
   return out;
 }
 
@@ -226,12 +220,6 @@ export function detectForbiddenDependency(rootDir: string, name: string): Forbid
 // feature-flag detector
 // ---------------------------------------------------------------------------
 
-/**
- * Feature flags are typically named env vars OR config keys. Strategy:
- * try the env-var detector first; if that finds nothing, fall back to
- * a textual scan of JSON/YAML/TS config files looking for the flag
- * name as a string literal.
- */
 export async function detectForbiddenFeatureFlag(rootDir: string, name: string): Promise<ForbiddenMatch[]> {
   const envMatches = await detectForbiddenEnvVar(rootDir, name);
   if (envMatches.length > 0) return envMatches;
@@ -240,7 +228,7 @@ export async function detectForbiddenFeatureFlag(rootDir: string, name: string):
 
 function detectFlagInConfigFiles(rootDir: string, name: string): ForbiddenMatch[] {
   const out: ForbiddenMatch[] = [];
-  const CONFIG_EXT = new Set(['.json', '.yaml', '.yml', '.toml', '.env']);
+  const CONFIG_EXT = new Set(['.json', '.yaml', '.yml', '.toml', '.env', '.ini', '.cfg']);
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
     try {
@@ -266,12 +254,7 @@ function detectFlagInConfigFiles(rootDir: string, name: string): ForbiddenMatch[
       const lines = source.split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].includes(name)) {
-          out.push({
-            filePath: full,
-            lineStart: i + 1,
-            lineEnd: i + 1,
-            snippet: lines[i].trim().slice(0, 120),
-          });
+          out.push({ filePath: full, lineStart: i + 1, lineEnd: i + 1, snippet: lines[i].trim().slice(0, 120) });
         }
       }
     }

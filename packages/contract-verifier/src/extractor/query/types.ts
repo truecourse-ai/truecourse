@@ -6,7 +6,7 @@
 
 import type { ArtifactRef, Predicate, QualifiedColumn, SourceLocation } from '../../types/index.js';
 
-export type QueryAdapterName = 'knex' | 'prisma' | 'raw-sql';
+export type QueryAdapterName = 'knex' | 'prisma' | 'raw-sql' | 'sqlalchemy' | 'django';
 
 export interface ExtractedQuery {
   /** Operation this query is reachable from, when the extractor can

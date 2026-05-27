@@ -24,6 +24,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { eachParsedSource } from './source-walker.js';
+import { fastApiFileHasAuthRouter } from './operation-fastapi.js';
 
 const TS_EXT = new Set(['.ts', '.tsx', '.js', '.jsx']);
 
@@ -142,6 +144,14 @@ export async function detectAuthPresence(rootDir: string): Promise<AuthPresenceR
       }
     }
   }
+
+  // Python (FastAPI): a file is auth-protected when one of its routers is
+  // declared with an auth dependency (`APIRouter(dependencies=[Depends(require_bearer)])`).
+  await eachParsedSource(rootDir, (s) => {
+    if (s.lang !== 'python') return;
+    scanned.push(s.filePath);
+    if (fastApiFileHasAuthRouter(s.source, s.tree)) protectedFiles.add(s.filePath);
+  });
 
   return { protectedFiles, scannedFiles: scanned };
 }

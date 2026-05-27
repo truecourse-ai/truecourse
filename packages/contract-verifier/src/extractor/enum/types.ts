@@ -14,7 +14,11 @@ export type EnumShape =
   | 'zod-union'          // z.union([z.literal('a'), z.literal('b')])
   | 'as-const-object'    // const X = { A: 'a' } as const
   | 'set-literal'        // const VALID_X = new Set(['a', 'b'])
-  | 'array-literal';     // const VALID_X = ['a', 'b'] (with conventional name)
+  | 'array-literal'      // const VALID_X = ['a', 'b'] (with conventional name)
+  | 'py-enum'            // class X(str, Enum): A = 'a'
+  | 'py-literal'         // X = Literal['a', 'b']
+  | 'py-set'             // X_SET = {'a', 'b'} / frozenset({...})
+  | 'py-list';           // VALID_X = ['a', 'b'] (with conventional name)
 
 export interface ExtractedEnum {
   /** Identifier in code — type name, const name, or property key. */
