@@ -25,7 +25,7 @@ export const customersRepo = {
     // Spec allows listing customers in the `active` OR `pending` states.
     // This filter only admits `active`, silently hiding every pending
     // signup from the list view.
-    // IL-DRIFT: QueryRule:customers-list.status-allowlist / query.predicate.value-mismatch.status.in
+    // IL-DRIFT: QueryRule:customer.in-status / query.predicate.value-mismatch.status.in
     const items = (await prisma.customer.findMany({
       where: { status: { in: ['active'] } },
       orderBy: { createdAt: 'desc' },

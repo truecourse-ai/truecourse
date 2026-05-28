@@ -1,0 +1,4 @@
+# Ground-truth fixtures — never an input to the scan or the verifier.
+# `reference/` holds the hand-written specs/contracts the generated
+# output is graded against; ingesting it would mean reading the answers.
+reference/

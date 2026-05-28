@@ -1,6 +1,6 @@
 /**
  * Top-level hook for the canonical spec file tree. Mirrors
- * `useContractsTree`: data lives in RepoGraphPage so it persists
+ * `useContractsTree`: data lives in RepoPage so it persists
  * across tab switches; parent wires socket events / Apply completion
  * to `refetch()`.
  */

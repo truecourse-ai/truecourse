@@ -1,3 +1,4 @@
+import type { CapabilitiesResponse } from '@truecourse/shared';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -142,6 +143,13 @@ export type ViolationResponse = {
   lineStart?: number;
   ruleKey?: string;
 };
+
+// Capabilities — fetched once at app boot by AppProvider so any
+// component can ask `useCapability('sso')`. OSS always responds with
+// `{ edition: 'community', capabilities: [] }`.
+export function getCapabilities(): Promise<CapabilitiesResponse> {
+  return fetchApi<CapabilitiesResponse>('/api/capabilities');
+}
 
 // Repos
 export function getRepos(): Promise<RepoResponse[]> {
@@ -820,7 +828,7 @@ export type DriftSeverity = 'info' | 'low' | 'medium' | 'high' | 'critical';
 
 export type ContractDrift = {
   id: string;
-  artifactRef?: { kind: string; identity: string } | null;
+  artifactRef?: { type: string; identity: string } | null;
   obligationKey: string;
   severity: DriftSeverity;
   message: string;

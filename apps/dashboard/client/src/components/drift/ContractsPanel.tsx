@@ -1,6 +1,6 @@
 /**
  * Contracts sidebar — presentation-only. Tree data is owned by the
- * top-level `useContractsTree` hook in RepoGraphPage so it survives
+ * top-level `useContractsTree` hook in RepoPage so it survives
  * tab switches. Single-click in the tree opens a transient tab in
  * the right pane; double-click pins it.
  *

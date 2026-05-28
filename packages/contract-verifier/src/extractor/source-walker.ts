@@ -18,6 +18,7 @@ import path from 'node:path';
 import type { Tree } from 'web-tree-sitter';
 import type { SupportedLanguage } from '@truecourse/shared';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { loadTcIgnore } from '@truecourse/shared';
 
 export type { SupportedLanguage } from '@truecourse/shared';
 
@@ -65,6 +66,7 @@ export async function eachParsedSource(
   visit: (s: ParsedSource) => void,
 ): Promise<void> {
   await initParsers();
+  const tcIgnore = loadTcIgnore(rootDir);
   const walk = (dir: string): void => {
     let entries: fs.Dirent[];
     try {
@@ -75,6 +77,7 @@ export async function eachParsedSource(
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         walk(full);
         continue;

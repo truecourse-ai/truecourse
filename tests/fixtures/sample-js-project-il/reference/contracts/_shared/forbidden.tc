@@ -1,27 +1,27 @@
 // Forbidden-artifact contracts — code presence the spec says must NOT exist.
 
-forbidden-artifact legacy-uploader {
+forbidden-artifact file-glob.src-legacy {
   origin "reference/specs/shared/endpoints.md" "Out of scope" 1..5
   category file-glob
   pattern "src/legacy/**"
   reason "Legacy uploader is out of scope per ADR-003"
 }
 
-forbidden-artifact prod-debug-env {
+forbidden-artifact env-var.prod-debug {
   origin "reference/specs/shared/endpoints.md" "Production hardening" 6..9
   category env-var
   pattern "PROD_DEBUG"
   reason "Spec forbids any debug env-var in production"
 }
 
-forbidden-artifact deprecated-http-client {
+forbidden-artifact dependency.request {
   origin "reference/specs/shared/endpoints.md" "Dependencies" 10..13
   category dependency
   pattern "request"
   reason "Migrate to native fetch"
 }
 
-forbidden-artifact feature-experimental-export {
+forbidden-artifact feature-flag.feature-export-v2 {
   origin "reference/specs/shared/endpoints.md" "Feature flags" 14..17
   category feature-flag
   pattern "FEATURE_EXPORT_V2"

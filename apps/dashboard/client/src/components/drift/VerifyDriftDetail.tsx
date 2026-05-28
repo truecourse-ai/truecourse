@@ -6,6 +6,7 @@
 
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DriftTypeBadge, driftType } from './driftType';
 import type { ContractDrift, DriftSeverity } from '@/lib/api';
 
 interface VerifyDriftDetailProps {
@@ -23,9 +24,7 @@ const SEVERITY_TONE: Record<DriftSeverity, string> = {
 };
 
 export function VerifyDriftDetail({ drift, onClose, onOpenFile }: VerifyDriftDetailProps) {
-  const artifact = drift.artifactRef
-    ? `${drift.artifactRef.kind}:${drift.artifactRef.identity}`
-    : null;
+  const identity = drift.artifactRef?.identity ?? null;
   const tone = SEVERITY_TONE[drift.severity];
 
   return (
@@ -37,6 +36,7 @@ export function VerifyDriftDetail({ drift, onClose, onOpenFile }: VerifyDriftDet
           >
             {drift.severity}
           </span>
+          <DriftTypeBadge kind={driftType(drift)} />
           <h2 className="truncate font-mono text-sm">{drift.obligationKey}</h2>
         </div>
         {onClose && (
@@ -47,13 +47,13 @@ export function VerifyDriftDetail({ drift, onClose, onOpenFile }: VerifyDriftDet
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-4">
-        <div className="mx-auto max-w-4xl space-y-4">
-          {artifact && (
+        <div className="space-y-4">
+          {identity && (
             <div>
               <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 Artifact
               </div>
-              <div className="font-mono text-sm text-foreground">{artifact}</div>
+              <div className="font-mono text-sm text-foreground">{identity}</div>
             </div>
           )}
 

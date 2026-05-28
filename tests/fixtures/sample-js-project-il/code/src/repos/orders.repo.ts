@@ -31,9 +31,9 @@ export const ordersRepo = {
     // view stays complete. This query gets all three wrong: no tenant
     // predicate, the window is anchored on `createdAt`, and it filters
     // soft-deleted rows out entirely.
-    // IL-DRIFT: QueryRule:orders-list.tenant-scope / query.predicate.missing.tenantId.eq
-    // IL-DRIFT: QueryRule:orders-list.date-anchor / query.date-binding.column-mismatch
-    // IL-DRIFT: QueryRule:orders-list.no-soft-deleted-included / query.predicate.forbidden-present.deletedAt.is-null
+    // IL-DRIFT: QueryRule:order.eq-tenantid / query.predicate.missing.tenantId.eq
+    // IL-DRIFT: QueryRule:order.daterange-placedat / query.date-binding.column-mismatch
+    // IL-DRIFT: QueryRule:order.no-is-null-deletedat / query.predicate.forbidden-present.deletedAt.is-null
     const q = db('orders')
       .where('createdAt', '>=', since)
       .where('createdAt', '<', until)

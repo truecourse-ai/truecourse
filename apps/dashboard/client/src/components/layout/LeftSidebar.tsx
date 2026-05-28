@@ -1,77 +1,22 @@
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Home,
-  AlertTriangle,
-  AlertCircle,
-  FolderTree,
-  Workflow,
-  Database,
-  ClipboardList,
-  Network,
-  BookOpen,
-  FileCode2,
-  ShieldCheck,
-  GitMerge,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { HoverPopover } from '@/components/ui/hover-popover';
+import {
+  getTab,
+  useVisibleTabsForSection,
+  type DashboardSection,
+  type LeftTab,
+} from '@/navigation/registry';
 
-export type LeftTab =
-  | 'home'
-  | 'graphs'
-  | 'files'
-  | 'flows'
-  | 'databases'
-  | 'analyses'
-  | 'spec'
-  | 'contracts'
-  | 'verify'
-  | 'decisions';
-
-export type DashboardSection = 'analysis' | 'drift';
-
-const TAB_LABELS: Record<LeftTab, string> = {
-  home: 'Home',
-  graphs: 'Graphs',
-  files: 'Files',
-  flows: 'Flows',
-  databases: 'Databases',
-  analyses: 'Analyses',
-  spec: 'Spec',
-  contracts: 'Contracts',
-  verify: 'Verify',
-  decisions: 'Decisions',
-};
-
-/** Tabs that render no sidebar panel (the icon click is the entire UX). */
-const TABS_WITHOUT_PANEL = new Set<LeftTab>(['home', 'graphs', 'analyses']);
-
-type TabConfig = { id: LeftTab; icon: typeof AlertTriangle; label: string };
-
-const ANALYSIS_TABS: TabConfig[] = [
-  { id: 'home', icon: Home, label: 'Home' },
-  { id: 'graphs', icon: Network, label: 'Graphs' },
-  { id: 'flows', icon: Workflow, label: 'Flows' },
-  { id: 'files', icon: FolderTree, label: 'Files' },
-  { id: 'databases', icon: Database, label: 'Databases' },
-  { id: 'analyses', icon: ClipboardList, label: 'Analyses' },
-];
-
-const DRIFT_TABS: TabConfig[] = [
-  { id: 'spec', icon: BookOpen, label: 'Spec' },
-  { id: 'contracts', icon: FileCode2, label: 'Contracts' },
-  { id: 'verify', icon: ShieldCheck, label: 'Verify' },
-  { id: 'decisions', icon: GitMerge, label: 'Decisions' },
-];
-
-export function tabsForSection(section: DashboardSection): TabConfig[] {
-  return section === 'drift' ? DRIFT_TABS : ANALYSIS_TABS;
-}
-
-/** Default left tab for a given section. */
-export function defaultTabForSection(section: DashboardSection): LeftTab {
-  return section === 'drift' ? 'spec' : 'home';
-}
+// Backward-compatible re-exports — many callsites import these names
+// from '@/components/layout/LeftSidebar'. The registry is the source
+// of truth; this file just forwards.
+export type { DashboardSection, LeftTab };
+export {
+  tabsForSection,
+  defaultTabForSection,
+} from '@/navigation/registry';
 
 type LeftSidebarProps = {
   section: DashboardSection;
@@ -103,7 +48,13 @@ export function LeftSidebar({
   const [maxWidth, setMaxWidth] = useState(800);
   const isDragging = useRef(false);
 
-  const tabs = tabsForSection(section);
+  const tabs = useVisibleTabsForSection(section);
+  // Derived from the registry so a tab's `noPanel: true` flag is the
+  // single switch for "rail icon only, no side panel" behaviour.
+  const tabsWithoutPanel = useMemo(
+    () => new Set(tabs.filter((t) => t.noPanel).map((t) => t.id)),
+    [tabs],
+  );
 
   useEffect(() => {
     const calc = () => Math.floor(window.innerWidth * 0.8);
@@ -138,7 +89,8 @@ export function LeftSidebar({
     [width, minWidth, maxWidth],
   );
 
-  const isOpen = activeTab !== null && !TABS_WITHOUT_PANEL.has(activeTab);
+  const isOpen = activeTab !== null && !tabsWithoutPanel.has(activeTab);
+  const activeTabLabel = activeTab ? getTab(activeTab)?.label ?? '' : '';
 
   return (
     <div className="flex flex-shrink-0 h-full">
@@ -201,7 +153,7 @@ export function LeftSidebar({
           {/* Panel header */}
           <div className="flex h-10 items-center gap-2 border-b border-border px-3">
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {activeTab ? TAB_LABELS[activeTab] : ''}
+              {activeTabLabel}
             </span>
             {(() => {
               const warning = activeTab ? tabWarnings?.[activeTab] : undefined;

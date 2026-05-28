@@ -22,6 +22,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadTcIgnore } from '@truecourse/shared';
 import type { DocKind } from './types.js';
 
 export interface DocCandidate {
@@ -80,6 +81,8 @@ export interface DiscoveryOptions {
 export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocCandidate[] {
   const previewLines = opts.previewLines ?? PREVIEW_LINE_LIMIT;
   const out: DocCandidate[] = [];
+  // Repo-root `.truecourseignore` — same exclusions as code analysis.
+  const tcIgnore = loadTcIgnore(rootDir);
 
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
@@ -98,6 +101,7 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
       if (SKIP_DIRS.has(entry.name)) continue;
       if (entry.name.startsWith('.') && entry.name !== '.') continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

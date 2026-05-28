@@ -17,6 +17,7 @@ import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
 import contractsRouter from './routes/contracts.js';
 import verifyRouter from './routes/verify.js';
+import capabilitiesRouter from './routes/capabilities.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,6 +48,7 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
   app.use('/api/repos', projectResolver, contractsRouter);
   app.use('/api/repos', projectResolver, verifyRouter);
   app.use('/api/rules', rulesRouter);
+  app.use('/api/capabilities', capabilitiesRouter);
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

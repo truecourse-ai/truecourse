@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { loadTcIgnore } from '@truecourse/shared';
 import { extractOperationsFromFile, type ExtractedOperation } from './operation.js';
 import { extractFastApiOperationsFromFile } from './operation-fastapi.js';
 import { eachParsedSource } from './source-walker.js';
@@ -55,11 +56,13 @@ export async function extractOperationsFromDir(rootDir: string): Promise<Extract
   await initParsers();
   const rawOps: ExtractedOperation[] = [];
   const fileAnalyses: FileAnalysis[] = [];
+  const tcIgnore = loadTcIgnore(rootDir);
 
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

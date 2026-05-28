@@ -21,6 +21,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@truecourse/shared": "workspace:*",
     "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
     "zod": "^3.23.8"

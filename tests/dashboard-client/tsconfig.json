@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "jsx": "react-jsx",
+    "types": ["node", "@testing-library/jest-dom"],
+    "rootDir": ".",
+    "outDir": "./dist",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["../../apps/dashboard/client/src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

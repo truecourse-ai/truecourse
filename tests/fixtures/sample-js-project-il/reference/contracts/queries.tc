@@ -5,7 +5,7 @@
 // a single rule) is deterministic: the first-declared rule wins, so the
 // loyalty rule is declared first.
 
-query-rule loyalty-tiers.allowed-tiers {
+query-rule loyalty-tiers.in-code {
   origin "reference/specs/modules/customers/data.md" "Loyalty tiers" 20..25
   entity Entity:LoyaltyTier
   required {
@@ -13,7 +13,7 @@ query-rule loyalty-tiers.allowed-tiers {
   }
 }
 
-query-rule orders-list.tenant-scope {
+query-rule order.eq-tenantid {
   origin "reference/specs/modules/orders/data.md" "Tenant scoping" 30..34
   entity Entity:Order
   required {
@@ -21,13 +21,13 @@ query-rule orders-list.tenant-scope {
   }
 }
 
-query-rule orders-list.date-anchor {
+query-rule order.daterange-placedat {
   origin "reference/specs/modules/orders/data.md" "Date scoping" 35..38
   entity Entity:Order
   date-range-binding column orders.placedAt
 }
 
-query-rule orders-list.no-soft-deleted-included {
+query-rule order.no-is-null-deletedat {
   origin "reference/specs/modules/orders/data.md" "Soft delete" 39..42
   entity Entity:Order
   forbidden {
@@ -35,7 +35,7 @@ query-rule orders-list.no-soft-deleted-included {
   }
 }
 
-query-rule customers-list.status-allowlist {
+query-rule customer.in-status {
   origin "reference/specs/modules/customers/data.md" "Status allowlist" 26..29
   entity Entity:Customer
   required {

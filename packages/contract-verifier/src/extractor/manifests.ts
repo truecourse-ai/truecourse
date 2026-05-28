@@ -14,6 +14,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadTcIgnore } from '@truecourse/shared';
 
 export interface DeclaredDependency {
   /** Distribution name as declared (`pg`, `psycopg2-binary`, `@prisma/client`). */
@@ -31,6 +32,7 @@ const SKIP_DIRS = new Set([
 
 export function collectDependencies(rootDir: string): DeclaredDependency[] {
   const out: DeclaredDependency[] = [];
+  const tcIgnore = loadTcIgnore(rootDir);
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
     try {
@@ -41,6 +43,7 @@ export function collectDependencies(rootDir: string): DeclaredDependency[] {
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

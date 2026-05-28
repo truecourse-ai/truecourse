@@ -18,3 +18,9 @@ all surfaces.
 
 - **gRPC** — browser support requires an extra proxy hop.
 - **GraphQL** — over-fetching is not a problem at our current scale.
+
+## Build tooling
+
+The dashboard frontend is built with **Vite**. Hot-module replacement is
+required for the dashboard's development loop, so Vite is the mandated
+build system — not Webpack, and not a bare `tsc` pipeline.

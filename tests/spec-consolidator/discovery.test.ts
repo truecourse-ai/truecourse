@@ -205,6 +205,28 @@ describe('discoverDocs — walker', () => {
     expect(docs.map((d) => d.path)).toEqual(['docs/source.md']);
   });
 
+  it('honors .truecourseignore at the repo root (excludes matched dirs)', () => {
+    place('.truecourseignore', 'reference/\n');
+    place('docs/real.md', '# real');
+    place('reference/specs/answers.md', '# ground truth — must never be scanned');
+    place('reference/EVAL.md', '# eval report');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('docs/real.md');
+    expect(paths).not.toContain('reference/specs/answers.md');
+    expect(paths).not.toContain('reference/EVAL.md');
+  });
+
+  it('supports glob patterns in .truecourseignore', () => {
+    place('.truecourseignore', '**/*.generated.md\n');
+    place('docs/real.md', '# real');
+    place('docs/api.generated.md', '# generated — skip');
+
+    const paths = discoverDocs(root, { skipGit: true }).map((d) => d.path);
+    expect(paths).toContain('docs/real.md');
+    expect(paths).not.toContain('docs/api.generated.md');
+  });
+
   it('captures content hash (cache key) and preview', () => {
     place('SPEC.md', 'line one\nline two\nline three\n');
     const [doc] = discoverDocs(root, { skipGit: true, previewLines: 2 });

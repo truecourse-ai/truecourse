@@ -34,6 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { loadTcIgnore } from '@truecourse/shared';
 import type { OperationContract } from '../types/index.js';
 import { extractResponsesFromBody, collectHandlerObservationsFromBody } from './operation.js';
 import type { ExtractedOperation } from './operation.js';
@@ -84,6 +85,7 @@ export async function extractFileBasedRoutesFromDir(rootDir: string): Promise<Ex
 function findDirs(rootDir: string, wantedRel: string): string[] {
   const results: string[] = [];
   const wantedSegments = wantedRel.split('/');
+  const tcIgnore = loadTcIgnore(rootDir);
 
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
@@ -103,6 +105,7 @@ function findDirs(rootDir: string, wantedRel: string): string[] {
       ) continue;
       if (!entry.isDirectory()) continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       // Match: does the trail ending at `full` match the wanted path?
       const match = path.join(...wantedSegments);
       if (full.endsWith(path.sep + match) || full === match) {
@@ -124,10 +127,12 @@ function findDirs(rootDir: string, wantedRel: string): string[] {
 // ---------------------------------------------------------------------------
 
 function walkRoot(rootAbs: string, root: RouteRoot, out: ExtractedOperation[]): void {
+  const tcIgnore = loadTcIgnore(rootAbs);
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

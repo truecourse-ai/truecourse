@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { minimatch } from '../../../comparator/minimatch.js';
+import { loadTcIgnore } from '@truecourse/shared';
 import type { CodebaseScan, DetectionSignal } from '../types.js';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache', '.truecourse']);
@@ -20,6 +21,7 @@ export interface FileIndex {
 export function collectFileIndex(rootDir: string): FileIndex {
   const files: string[] = [];
   const cache = new Map<string, string | null>();
+  const tcIgnore = loadTcIgnore(rootDir);
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
     try {
@@ -30,6 +32,7 @@ export function collectFileIndex(rootDir: string): FileIndex {
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

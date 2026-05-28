@@ -33,6 +33,7 @@ import {
 } from './claims-reader.js';
 import { mergeRankedFragments, type MergeDiagnostic, type RankedFragment } from './merger.js';
 import { propagateCrossCuttingTags } from './tag-propagator.js';
+import { normalizeMergedArtifacts } from './normalizer.js';
 import { repair } from './repair.js';
 import { validateMerged, type ValidationIssue } from './validator.js';
 import { writeContracts, type WriteResult } from './writer.js';
@@ -175,9 +176,30 @@ export async function generateContracts(opts: GenerateOptions): Promise<Generate
     gcOrphanedSlices(repoRoot, manifest);
   }
 
-  // ---- Merge + cross-cutting tag propagation + repair + validate ---------
+  // ---- Merge + cross-cutting tag propagation + normalize + repair + validate
   const merged = mergeRankedFragments(ranked);
   merged.artifacts = propagateCrossCuttingTags(merged.artifacts, slices);
+  // Deterministic post-merge normalization — canonicalize Entity:<x>
+  // cross-references against declared entities, lift parseable
+  // `raw "<expr>"` query-rule predicates into the structured algebra,
+  // and dedup query-rules that bind to the same (entity, predicate set)
+  // under different identities. Runs before repair so the repair LLM
+  // sees the cleaned shape.
+  const normalized = normalizeMergedArtifacts(merged.artifacts);
+  merged.artifacts = normalized.artifacts;
+  if (
+    normalized.stats.entityRefsRewritten +
+      normalized.stats.rawPredicatesLifted +
+      normalized.stats.identitiesAssigned +
+      normalized.stats.artifactsDeduplicated >
+    0
+  ) {
+    merged.diagnostics.push({
+      artifactKey: 'normalize',
+      severity: 'info',
+      message: `normalize: entity-refs=${normalized.stats.entityRefsRewritten}, raw→structured=${normalized.stats.rawPredicatesLifted}, identities=${normalized.stats.identitiesAssigned}, dedup=${normalized.stats.artifactsDeduplicated}`,
+    });
+  }
   // `repair` runs LLM-targeted re-prompts when an artifact references a
   // missing cross-ref or violates a per-kind structural rule. Tests
   // opt out via `disableRepair: true` because repair spawns `claude`

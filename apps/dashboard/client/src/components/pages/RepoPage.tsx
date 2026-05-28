@@ -1,14 +1,29 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useSearchParams, useNavigate, Navigate } from 'react-router-dom';
+import { useParams, Navigate } from 'react-router-dom';
 import { Loader2, AlertCircle, Wifi, WifiOff, X, Workflow, Database, Check, CircleX, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
+import { LeftSidebar, type LeftTab } from '@/components/layout/LeftSidebar';
 import {
-  LeftSidebar,
-  defaultTabForSection,
-  type DashboardSection,
-  type LeftTab,
-} from '@/components/layout/LeftSidebar';
+  NavigationProvider,
+  useNavigation,
+} from '@/contexts/NavigationContext';
+import {
+  GraphViewProvider,
+  useGraphView,
+} from '@/contexts/GraphViewContext';
+import {
+  OpenTabsProvider,
+  useOpenTabs,
+} from '@/contexts/OpenTabsContext';
+import {
+  DriftViewProvider,
+  useDriftView,
+} from '@/contexts/DriftViewContext';
+import {
+  ViewModeProvider,
+  useViewMode,
+} from '@/contexts/ViewModeContext';
 import { SpecHeaderActions } from '@/components/spec/SpecHeaderActions';
 import { SpecPanePlaceholder } from '@/components/spec/SpecPanePlaceholder';
 import { SpecProgressPopup } from '@/components/spec/SpecProgressPopup';
@@ -50,493 +65,110 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
 import type { RepoResponse } from '@/lib/api';
-import type { DepthLevel } from '@/types/graph';
 import type { Node, Edge } from '@xyflow/react';
 
-type OpenFile = {
-  path: string;
-  pinned: boolean;
-  scrollToLine?: number;
-};
+// Outer shell: mounts the navigation context (top-level section +
+// active left tab, kept in sync with the URL) so the page body and
+// every panel read/write it through `useNavigation()` instead of
+// having it prop-drilled out of one giant component.
+export default function RepoPage() {
+  return (
+    <NavigationProvider>
+      <GraphViewProvider>
+        <OpenTabsProvider>
+          <DriftViewProvider>
+            <ViewModeProvider>
+              <RepoPageInner />
+            </ViewModeProvider>
+          </DriftViewProvider>
+        </OpenTabsProvider>
+      </GraphViewProvider>
+    </NavigationProvider>
+  );
+}
 
-type OpenFlow = {
-  id: string;
-  name: string;
-  pinned: boolean;
-};
-
-type OpenDatabase = {
-  id: string;
-  name: string;
-  pinned: boolean;
-};
-
-const VALID_LEFT_TABS = new Set<LeftTab>([
-  'home',
-  'graphs',
-  'files',
-  'flows',
-  'databases',
-  'analyses',
-  'spec',
-  'contracts',
-  'verify',
-  'decisions',
-]);
-
-const MAIN_CONTENT_TABS = new Set<LeftTab>([
-  'home',
-  'graphs',
-  'analyses',
-]);
-
-const DRIFT_TABS = new Set<LeftTab>(['spec', 'contracts', 'verify', 'decisions']);
-
-export default function RepoGraphPage() {
+function RepoPageInner() {
   const { repoId = '' } = useParams();
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
+  // Section + active tab live in NavigationContext now; bound to the
+  // same local names the rest of this component already uses.
+  const {
+    section: dashboardSection,
+    leftTab,
+    setSection: setDashboardSection,
+    setLeftTab,
+  } = useNavigation();
+  // Graph depth / scope / focus + selected node live in GraphViewContext;
+  // bound to the same local names the rest of this component uses.
+  const {
+    selectedService,
+    setSelectedService,
+    depthLevel,
+    setDepthLevel,
+    scopedServiceId,
+    setScopedServiceId,
+    scopedModuleId,
+    setScopedModuleId,
+    focusRequest,
+    locateNode: handleLocateNode,
+  } = useGraphView();
+  // Diff toggle, history selection, and path highlight live in
+  // ViewModeContext; bound to the same local names used below.
+  const {
+    isDiffMode,
+    setIsDiffMode,
+    selectedAnalysisId,
+    setSelectedAnalysisId,
+    selectedPath,
+    setSelectedPath,
+  } = useViewMode();
   const [repo, setRepo] = useState<RepoResponse | null>(null);
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-
-  // Map URL terms (functions) ↔ internal terms (methods)
-  const urlToDepth: Record<string, DepthLevel> = { services: 'services', modules: 'modules', functions: 'methods' };
-  const depthToUrl: Record<DepthLevel, string> = { services: 'services', modules: 'modules', methods: 'functions' };
-  const modeFromUrl = searchParams?.get('mode') || '';
-  const initialMode = urlToDepth[modeFromUrl] || 'services';
-  const [depthLevel, setDepthLevelState] = useState<DepthLevel>(initialMode);
-
-  const [scopedServiceId, setScopedServiceIdState] = useState<string | null>(
-    () => searchParams?.get('scopeService') || null,
-  );
-  const [scopedModuleId, setScopedModuleIdState] = useState<string | null>(
-    () => searchParams?.get('scopeModule') || null,
-  );
-
-  const setScopedServiceId = useCallback((id: string | null) => {
-    setScopedServiceIdState(id);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('scopeService', id);
-    else url.searchParams.delete('scopeService');
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const setScopedModuleId = useCallback((id: string | null) => {
-    setScopedModuleIdState(id);
-    const url = new URL(window.location.href);
-    if (id) url.searchParams.set('scopeModule', id);
-    else url.searchParams.delete('scopeModule');
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const setDepthLevel = useCallback((level: DepthLevel) => {
-    setDepthLevelState(level);
-    const url = new URL(window.location.href);
-    if (level === 'services') {
-      url.searchParams.delete('mode');
-      // Services depth doesn't consume scope params — strip them from the URL
-      // but keep them in memory so returning to modules/methods restores the
-      // user's last picks.
-      url.searchParams.delete('scopeService');
-      url.searchParams.delete('scopeModule');
-    } else if (level === 'modules') {
-      url.searchParams.set('mode', 'modules');
-      // Modules depth uses `scopeService` but not `scopeModule` — keep the
-      // module id in memory for when the user returns to methods.
-      url.searchParams.delete('scopeModule');
-      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
-    } else {
-      url.searchParams.set('mode', depthToUrl[level]);
-      // Methods depth: restore both scope params to URL from memory if present.
-      if (scopedServiceId) url.searchParams.set('scopeService', scopedServiceId);
-      if (scopedModuleId) url.searchParams.set('scopeModule', scopedModuleId);
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate, scopedServiceId, scopedModuleId]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Top-level dashboard section: 'analysis' (code architecture world)
-  // or 'drift' (spec/contracts/verify world). Persisted via
-  // `?section=drift`. Default 'analysis'.
-  const sectionFromUrl = searchParams?.get('section');
-  const [dashboardSection, setDashboardSectionState] = useState<DashboardSection>(
-    sectionFromUrl === 'drift' ? 'drift' : 'analysis',
-  );
+  // File / flow / database viewer tabs live in OpenTabsContext; bound
+  // to the same local names the rest of this component uses.
+  const {
+    openFiles,
+    activeFilePath,
+    handleOpenFile,
+    handleCloseFile,
+    openFlows,
+    activeFlowId,
+    handleOpenFlow,
+    handleCloseFlow,
+    syncFlowNames,
+    openDatabases,
+    activeDbId,
+    handleOpenDatabase,
+    handleCloseDatabase,
+    handleSelectTab,
+    showFlowView,
+    showDatabaseView,
+    handleLeftTabChange,
+  } = useOpenTabs();
 
-  const [leftTab, setLeftTabState] = useState<LeftTab | null>(() => {
-    const tabParam = searchParams?.get('tab');
-    // Legacy URL compat: ?tab=violations now maps to the Graphs tab.
-    if (tabParam === 'violations') return 'graphs';
-    // Legacy URL compat: the Analytics tab was folded into Home.
-    if (tabParam === 'analytics') return 'home';
-    if (tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)) {
-      return tabParam as LeftTab;
-    }
-    if (searchParams?.get('flow')) return 'flows';
-    if (searchParams?.get('file')) return 'files';
-    return defaultTabForSection(
-      searchParams?.get('section') === 'drift' ? 'drift' : 'analysis',
-    );
-  });
-
-  const setDashboardSection = useCallback((next: DashboardSection) => {
-    setDashboardSectionState(next);
-    // Reset leftTab to the section's default tab. The URL captures
-    // both pieces, so reloads stay coherent.
-    const nextTab = defaultTabForSection(next);
-    setLeftTabState(nextTab);
-    const url = new URL(window.location.href);
-    if (next === 'drift') {
-      url.searchParams.set('section', 'drift');
-    } else {
-      url.searchParams.delete('section');
-    }
-    // Drop tab-scoped params that don't apply in the new section.
-    for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
-      url.searchParams.delete(key);
-    }
-    if (nextTab !== 'home') {
-      url.searchParams.set('tab', nextTab);
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-  const setLeftTab = useCallback((tab: LeftTab | null) => {
-    setLeftTabState(tab);
-    const url = new URL(window.location.href);
-    if (tab && tab !== 'home') {
-      url.searchParams.set('tab', tab);
-    } else {
-      // Home is the default landing. Strip tab-scoped params so the URL
-      // shortens to /repos/:id, but keep `view=diff` — diff mode is a
-      // page-level mode that home now renders alongside the default view.
-      for (const key of ['tab', 'mode', 'scopeService', 'scopeModule', 'file', 'flow']) {
-        url.searchParams.delete(key);
-      }
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-  const [focusRequest, setFocusRequest] = useState<{ nodeId: string; key: number } | null>(null);
-  const [isDiffMode, setIsDiffModeState] = useState(searchParams?.get('view') === 'diff');
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
-
-  // Multi-tab file viewer state — restore from URL
-  const fileFromUrl = searchParams?.get('file') || null;
-  const [openFiles, setOpenFiles] = useState<OpenFile[]>(() =>
-    fileFromUrl ? [{ path: fileFromUrl, pinned: true }] : []
-  );
-  const [activeFilePath, setActiveFilePathState] = useState<string | null>(fileFromUrl);
-
-  const setActiveFilePath = useCallback((path: string | null) => {
-    setActiveFilePathState(path);
-    const url = new URL(window.location.href);
-    if (path) {
-      url.searchParams.set('file', path);
-    } else {
-      url.searchParams.delete('file');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const handleOpenFile = useCallback((path: string, pinned: boolean, scrollToLine?: number) => {
-    setOpenFiles((prev) => {
-      const existing = prev.find((f) => f.path === path);
-      if (existing) {
-        return prev.map((f) => f.path === path
-          ? { ...f, pinned: pinned || f.pinned, scrollToLine: scrollToLine ?? f.scrollToLine }
-          : f);
-      }
-
-      if (pinned) {
-        return [...prev, { path, pinned: true, scrollToLine }];
-      }
-
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) {
-        return prev.map((f) => !f.pinned ? { path, pinned: false, scrollToLine } : f);
-      }
-      return [...prev, { path, pinned: false, scrollToLine }];
-    });
-    setActiveFilePath(path);
-    setLeftTab('files');
-  }, []);
-
-  const handleCloseFile = useCallback((path: string) => {
-    setOpenFiles((prev) => {
-      const next = prev.filter((f) => f.path !== path);
-      return next;
-    });
-    if (activeFilePath === path) {
-      const remaining = openFiles.filter((f) => f.path !== path);
-      setActiveFilePath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
-    }
-  }, [openFiles, activeFilePath, setActiveFilePath]);
-
-  // Multi-tab flow viewer state — restore from URL
-  const flowFromUrl = searchParams?.get('flow') || null;
-  const [openFlows, setOpenFlows] = useState<OpenFlow[]>(() =>
-    flowFromUrl ? [{ id: flowFromUrl, name: 'Flow', pinned: true }] : []
-  );
-  const [activeFlowId, setActiveFlowIdState] = useState<string | null>(flowFromUrl);
-
-  const setActiveFlowId = useCallback((id: string | null) => {
-    setActiveFlowIdState(id);
-    const url = new URL(window.location.href);
-    if (id) {
-      url.searchParams.set('flow', id);
-      url.searchParams.delete('file');
-    } else {
-      url.searchParams.delete('flow');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
-
-  const handleCloseFlow = useCallback((flowId: string) => {
-    setOpenFlows((prev) => prev.filter((f) => f.id !== flowId));
-    if (activeFlowId === flowId) {
-      const remaining = openFlows.filter((f) => f.id !== flowId);
-      setActiveFlowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-    }
-  }, [openFlows, activeFlowId, setActiveFlowId]);
-
-  // Multi-tab database viewer state
-  const [openDatabases, setOpenDatabases] = useState<OpenDatabase[]>([]);
-  const [activeDbId, setActiveDbIdState] = useState<string | null>(null);
-
-  const setActiveDbId = useCallback((id: string | null) => {
-    setActiveDbIdState(id);
-  }, []);
-
-  // Spec tab: which conflict is currently being reviewed in the
-  // main content slot. The list (sidebar) and the detail (main)
-  // share state via SpecProvider; this id just tracks which conflict
-  // the user picked.
-  const [activeSpecConflictId, setActiveSpecConflictId] = useState<string | null>(null);
-  // Spec tab — canonical file viewer selection. The sidebar view
-  // itself (conflicts vs canonical) is derived from scan state inside
-  // SpecPanel, not toggled by the user.
-  const [activeCanonicalPath, setActiveCanonicalPath] = useState<string | null>(null);
-  // Multi-tab canonical-spec viewer state — same pattern as
-  // openFiles/openFlows/openDatabases. Single-click in the tree
-  // replaces the transient tab; double-click pins it.
-  const [openCanonicalFiles, setOpenCanonicalFiles] = useState<
-    Array<{ path: string; pinned: boolean }>
-  >([]);
-  // Same multi-tab pattern for the BL-drift Contracts viewer.
-  const [activeContractsPath, setActiveContractsPath] = useState<string | null>(null);
-  const [openContractsFiles, setOpenContractsFiles] = useState<
-    Array<{ path: string; pinned: boolean }>
-  >([]);
-
-  const handleOpenContracts = useCallback((path: string, pinned: boolean) => {
-    setOpenContractsFiles((prev) => {
-      const existing = prev.find((f) => f.path === path);
-      if (existing) {
-        return prev.map((f) => (f.path === path ? { ...f, pinned: pinned || f.pinned } : f));
-      }
-      if (pinned) return [...prev, { path, pinned: true }];
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
-      return [...prev, { path, pinned: false }];
-    });
-    setActiveContractsPath(path);
-  }, []);
-
-  const handleCloseContracts = useCallback(
-    (path: string) => {
-      setOpenContractsFiles((prev) => prev.filter((f) => f.path !== path));
-      if (activeContractsPath === path) {
-        const remaining = openContractsFiles.filter((f) => f.path !== path);
-        setActiveContractsPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
-      }
-    },
-    [openContractsFiles, activeContractsPath],
-  );
-
-  const handleOpenCanonical = useCallback((path: string, pinned: boolean) => {
-    setOpenCanonicalFiles((prev) => {
-      const existing = prev.find((f) => f.path === path);
-      if (existing) {
-        return prev.map((f) =>
-          f.path === path ? { ...f, pinned: pinned || f.pinned } : f,
-        );
-      }
-      if (pinned) return [...prev, { path, pinned: true }];
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) {
-        return prev.map((f) => (!f.pinned ? { path, pinned: false } : f));
-      }
-      return [...prev, { path, pinned: false }];
-    });
-    setActiveCanonicalPath(path);
-    // Right pane is single-slot: opening a canonical section deselects
-    // any active conflict so the new selection wins display priority.
-    setActiveSpecConflictId(null);
-  }, []);
-
-  // Conflict selection — mutually exclusive with the canonical pane.
-  // Clearing activeCanonicalPath lets `showingSpecConflict` win the
-  // right-pane gate in the render block below.
-  const handleSelectSpecConflict = useCallback((id: string | null) => {
-    setActiveSpecConflictId(id);
-    if (id !== null) {
-      setActiveCanonicalPath(null);
-    }
-  }, []);
-
-  const handleCloseCanonical = useCallback(
-    (path: string) => {
-      setOpenCanonicalFiles((prev) => prev.filter((f) => f.path !== path));
-      if (activeCanonicalPath === path) {
-        const remaining = openCanonicalFiles.filter((f) => f.path !== path);
-        setActiveCanonicalPath(remaining.length > 0 ? remaining[remaining.length - 1].path : null);
-      }
-    },
-    [openCanonicalFiles, activeCanonicalPath],
-  );
-
-  // Sync React state from the URL on every location change. This covers
-  // browser Back / Forward (and deep-linked reloads) — without it, the URL
-  // changes but in-memory state stays frozen at whatever the user last set.
-  // Setters are idempotent, so running this on our own navigations is a no-op.
-  useEffect(() => {
-    const tabParam = searchParams?.get('tab') ?? null;
-    const derivedTab: LeftTab =
-      tabParam === 'violations'
-        ? 'graphs'
-        : tabParam === 'analytics'
-          ? 'home'
-          : tabParam && VALID_LEFT_TABS.has(tabParam as LeftTab)
-            ? (tabParam as LeftTab)
-            : searchParams?.get('flow')
-              ? 'flows'
-              : searchParams?.get('file')
-                ? 'files'
-                : 'home';
-
-    const sectionParam = searchParams?.get('section');
-    const resolvedSection: DashboardSection = sectionParam === 'drift' ? 'drift' : 'analysis';
-
-    // Resolve the final tab in one pass before setting state, so the
-    // header's section-actions slot never momentarily renders the wrong
-    // buttons (e.g. spec actions for one frame when entering ?section=drift
-    // without a ?tab=).
-    const tabBelongsToSection =
-      resolvedSection === 'drift' ? DRIFT_TABS.has(derivedTab) : !DRIFT_TABS.has(derivedTab);
-    const finalTab: LeftTab = tabBelongsToSection
-      ? derivedTab
-      : defaultTabForSection(resolvedSection);
-
-    setLeftTabState(finalTab);
-    setDashboardSectionState(resolvedSection);
-
-    const modeParam = searchParams?.get('mode') ?? '';
-    setDepthLevelState(urlToDepth[modeParam] ?? 'services');
-
-    setScopedServiceIdState(searchParams?.get('scopeService') ?? null);
-    setScopedModuleIdState(searchParams?.get('scopeModule') ?? null);
-    setActiveFilePathState(searchParams?.get('file') ?? null);
-    setActiveFlowIdState(searchParams?.get('flow') ?? null);
-    setIsDiffModeState(searchParams?.get('view') === 'diff');
-  }, [searchParams]);
-
-  const clearActiveDetailView = useCallback(() => {
-    setActiveFilePath(null);
-    setActiveFlowId(null);
-    setActiveDbId(null);
-  }, [setActiveFilePath, setActiveFlowId, setActiveDbId]);
-
-  const showFileView = useCallback((path: string | null) => {
-    setActiveFilePath(path);
-    setActiveFlowId(null);
-    setActiveDbId(null);
-    if (path !== null) setLeftTab('files');
-  }, [setActiveFilePath, setActiveFlowId, setActiveDbId, setLeftTab]);
-
-  const handleSelectTab = useCallback((path: string | null) => {
-    showFileView(path);
-  }, [showFileView]);
-
-  const showFlowView = useCallback((flowId: string | null) => {
-    setActiveFlowId(flowId);
-    setActiveFilePath(null);
-    setActiveDbId(null);
-    if (flowId !== null) setLeftTab('flows');
-  }, [setActiveFlowId, setActiveFilePath, setActiveDbId, setLeftTab]);
-
-  const showDatabaseView = useCallback((dbId: string | null) => {
-    setActiveDbId(dbId);
-    setActiveFilePath(null);
-    setActiveFlowId(null);
-    if (dbId !== null) setLeftTab('databases');
-  }, [setActiveDbId, setActiveFilePath, setActiveFlowId, setLeftTab]);
-
-  // Home is the default + locked tab. Clicking an active rail icon (which the
-  // sidebar signals as `null`) falls back to Home instead of nulling out.
-  // When entering Files/Flows/Databases with no active item (e.g. URL params
-  // were stripped by a prior Home visit), restore the last-opened item so the
-  // detail view reopens instead of showing the empty placeholder.
-  const handleLeftTabChange = useCallback((tab: LeftTab | null) => {
-    const next = tab ?? 'home';
-    setLeftTab(next);
-    if (next === 'flows' && activeFlowId === null && openFlows.length > 0) {
-      setActiveFlowId(openFlows[openFlows.length - 1].id);
-    } else if (next === 'files' && activeFilePath === null && openFiles.length > 0) {
-      setActiveFilePath(openFiles[openFiles.length - 1].path);
-    } else if (next === 'databases' && activeDbId === null && openDatabases.length > 0) {
-      setActiveDbId(openDatabases[openDatabases.length - 1].id);
-    }
-  }, [
-    setLeftTab,
-    activeFlowId, openFlows, setActiveFlowId,
-    activeFilePath, openFiles, setActiveFilePath,
-    activeDbId, openDatabases, setActiveDbId,
-  ]);
-
-  const handleOpenFlow = useCallback((flowId: string, flowName: string, pinned: boolean) => {
-    setOpenFlows((prev) => {
-      const existing = prev.find((f) => f.id === flowId);
-      if (existing) {
-        // Update name too — it may have been 'Flow' placeholder from a URL restore.
-        return prev.map((f) => f.id === flowId ? { ...f, name: flowName, pinned: pinned || f.pinned } : f);
-      }
-      if (pinned) {
-        return [...prev, { id: flowId, name: flowName, pinned: true }];
-      }
-      const hasUnpinned = prev.find((f) => !f.pinned);
-      if (hasUnpinned) {
-        return prev.map((f) => !f.pinned ? { id: flowId, name: flowName, pinned: false } : f);
-      }
-      return [...prev, { id: flowId, name: flowName, pinned: false }];
-    });
-    showFlowView(flowId);
-  }, [showFlowView]);
-
-  const handleOpenDatabase = useCallback((dbId: string, dbName: string, pinned: boolean) => {
-    setOpenDatabases((prev) => {
-      const existing = prev.find((d) => d.id === dbId);
-      if (existing) {
-        return prev.map((d) => d.id === dbId ? { ...d, pinned: pinned || d.pinned } : d);
-      }
-      if (pinned) {
-        return [...prev, { id: dbId, name: dbName, pinned: true }];
-      }
-      const hasUnpinned = prev.find((d) => !d.pinned);
-      if (hasUnpinned) {
-        return prev.map((d) => !d.pinned ? { id: dbId, name: dbName, pinned: false } : d);
-      }
-      return [...prev, { id: dbId, name: dbName, pinned: false }];
-    });
-    showDatabaseView(dbId);
-  }, [showDatabaseView]);
-
-  const handleCloseDatabase = useCallback((dbId: string) => {
-    setOpenDatabases((prev) => prev.filter((d) => d.id !== dbId));
-    if (activeDbId === dbId) {
-      const remaining = openDatabases.filter((d) => d.id !== dbId);
-      setActiveDbId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-    }
-  }, [openDatabases, activeDbId, setActiveDbId]);
+  // Spec / canonical / contracts / verify-drift view state lives in
+  // DriftViewContext; bound to the same local names used below.
+  const {
+    activeSpecConflictId,
+    setActiveSpecConflictId,
+    handleSelectSpecConflict,
+    activeCanonicalPath,
+    setActiveCanonicalPath,
+    openCanonicalFiles,
+    handleOpenCanonical,
+    handleCloseCanonical,
+    activeContractsPath,
+    setActiveContractsPath,
+    openContractsFiles,
+    handleOpenContracts,
+    handleCloseContracts,
+    activeDriftId,
+    setActiveDriftId,
+    openDriftTabs,
+    handleOpenDrift,
+    handleCloseDrift,
+    reconcileDriftTabs,
+  } = useDriftView();
 
   const currentBranch = repo?.defaultBranch;
   const {
@@ -666,55 +298,14 @@ export default function RepoGraphPage() {
     verifyStale,
     refetch: refetchStaleness,
   } = useSpecStaleness(repoId);
-  const [activeDriftId, setActiveDriftId] = useState<string | null>(null);
-  // Multi-tab drift viewer state — same preview/pin pattern as
-  // openFiles / openCanonicalFiles / openContractsFiles.
-  const [openDriftTabs, setOpenDriftTabs] = useState<
-    Array<{ id: string; pinned: boolean }>
-  >([]);
-
-  const handleOpenDrift = useCallback((id: string, pinned: boolean) => {
-    setOpenDriftTabs((prev) => {
-      const existing = prev.find((d) => d.id === id);
-      if (existing) {
-        return prev.map((d) =>
-          d.id === id ? { ...d, pinned: pinned || d.pinned } : d,
-        );
-      }
-      if (pinned) return [...prev, { id, pinned: true }];
-      const hasUnpinned = prev.find((d) => !d.pinned);
-      if (hasUnpinned) {
-        return prev.map((d) => (!d.pinned ? { id, pinned: false } : d));
-      }
-      return [...prev, { id, pinned: false }];
-    });
-    setActiveDriftId(id);
-  }, []);
-
-  const handleCloseDrift = useCallback(
-    (id: string) => {
-      setOpenDriftTabs((prev) => prev.filter((d) => d.id !== id));
-      if (activeDriftId === id) {
-        const remaining = openDriftTabs.filter((d) => d.id !== id);
-        setActiveDriftId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-      }
-    },
-    [openDriftTabs, activeDriftId],
-  );
-
   // When the underlying verify run changes (re-run / fresh load), drop
   // any open drift tabs whose ids no longer exist so we never show a
   // stale tab pointing at nothing.
   useEffect(() => {
-    if (!verifyState) {
-      setOpenDriftTabs([]);
-      setActiveDriftId(null);
-      return;
-    }
-    const validIds = new Set(verifyState.drifts.map((d) => d.id));
-    setOpenDriftTabs((prev) => prev.filter((d) => validIds.has(d.id)));
-    setActiveDriftId((prev) => (prev && validIds.has(prev) ? prev : null));
-  }, [verifyState]);
+    reconcileDriftTabs(
+      verifyState ? new Set(verifyState.drifts.map((d) => d.id)) : null,
+    );
+  }, [verifyState, reconcileDriftTabs]);
 
   const isViewingHistory = !!selectedAnalysisId;
   const selectedAnalysis = selectedAnalysisId ? analyses.find((a) => a.id === selectedAnalysisId) : null;
@@ -855,17 +446,6 @@ export default function RepoGraphPage() {
     }
   }, [nodes, handleOpenDatabase]);
 
-
-  const setIsDiffMode = useCallback((diff: boolean) => {
-    setIsDiffModeState(diff);
-    const url = new URL(window.location.href);
-    if (diff) {
-      url.searchParams.set('view', 'diff');
-    } else {
-      url.searchParams.delete('view');
-    }
-    navigate(url.pathname + url.search);
-  }, [navigate]);
 
   const handleEnterDiffMode = useCallback(() => {
     setIsDiffMode(true);
@@ -1129,48 +709,6 @@ export default function RepoGraphPage() {
     return <Navigate to="/" replace />;
   }
 
-  const handleLocateNode = useCallback((
-    nodeId: string,
-    requiredDepth?: string,
-    hints?: { serviceId?: string | null; moduleId?: string | null },
-  ) => {
-    const targetDepth = (requiredDepth ?? depthLevel) as DepthLevel;
-
-    // Derive next scope from hints + target depth. Hints win when provided;
-    // otherwise we preserve existing scope (e.g. a repeat Locate on the same service).
-    let nextServiceId: string | null = scopedServiceId;
-    let nextModuleId: string | null = scopedModuleId;
-    if (targetDepth === 'services') {
-      nextServiceId = null;
-      nextModuleId = null;
-    } else if (targetDepth === 'modules') {
-      if (hints?.serviceId !== undefined) nextServiceId = hints.serviceId ?? null;
-      nextModuleId = null;
-    } else {
-      if (hints?.serviceId !== undefined) nextServiceId = hints.serviceId ?? null;
-      if (hints?.moduleId !== undefined) nextModuleId = hints.moduleId ?? null;
-    }
-
-    setDepthLevelState(targetDepth);
-    setScopedServiceIdState(nextServiceId);
-    setScopedModuleIdState(nextModuleId);
-
-    const url = new URL(window.location.href);
-    if (targetDepth === 'services') url.searchParams.delete('mode');
-    else url.searchParams.set('mode', depthToUrl[targetDepth]);
-    if (nextServiceId) url.searchParams.set('scopeService', nextServiceId);
-    else url.searchParams.delete('scopeService');
-    if (nextModuleId) url.searchParams.set('scopeModule', nextModuleId);
-    else url.searchParams.delete('scopeModule');
-    navigate(url.pathname + url.search);
-
-    if (requiredDepth && requiredDepth !== depthLevel) {
-      setTimeout(() => setFocusRequest({ nodeId, key: Date.now() }), 500);
-    } else {
-      setFocusRequest({ nodeId, key: Date.now() });
-    }
-  }, [depthLevel, scopedServiceId, scopedModuleId, navigate]);
-
   const handleLocateNodeFromHome = useCallback((
     nodeId: string,
     requiredDepth?: string,
@@ -1196,14 +734,8 @@ export default function RepoGraphPage() {
 
   // Update flow names when flow list loads
   useEffect(() => {
-    if (flowList.length === 0) return;
-    setOpenFlows((prev) =>
-      prev.map((f) => {
-        const match = flowList.find((fl) => fl.id === f.id);
-        return match ? { ...f, name: match.name } : f;
-      })
-    );
-  }, [flowList]);
+    syncFlowNames(flowList);
+  }, [flowList, syncFlowNames]);
 
   return (
     <SpecProvider repoId={repoId}>
@@ -1586,7 +1118,7 @@ export default function RepoGraphPage() {
                 const label = drift.obligationKey || drift.id;
                 const isActive = activeDriftId === t.id;
                 const tooltip = drift.artifactRef
-                  ? `${drift.artifactRef.kind}:${drift.artifactRef.identity} — ${drift.obligationKey}`
+                  ? `${drift.artifactRef.type}:${drift.artifactRef.identity} — ${drift.obligationKey}`
                   : drift.obligationKey;
                 return (
                   <div

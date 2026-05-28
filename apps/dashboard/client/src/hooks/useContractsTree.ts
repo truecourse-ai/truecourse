@@ -2,7 +2,7 @@
  * Top-level hook for the BL Drift Contracts tree. Same shape as
  * `useGraph` / `useFlows`: `{ tree, isLoading, error, refetch }`.
  *
- * Mounted in RepoGraphPage so the tree survives tab switches —
+ * Mounted in RepoPage so the tree survives tab switches —
  * navigating contracts → graphs → contracts keeps the data warm
  * instead of re-fetching. The parent wires `spec:complete` events
  * from the socket to `refetch()` so a successful Apply auto-refreshes

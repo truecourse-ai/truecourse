@@ -52,6 +52,12 @@ Mutating endpoints that accept an `Idempotency-Key` header must
 short-circuit on a repeat request — return the original response without
 re-running side effects.
 
+## API versioning
+
+The service exposes **API v2**. The version identifier `v2` is a stable
+constant (`ApiVersion = "v2"`) surfaced in service metadata and response
+headers.
+
 ---
 
 ## Entities
@@ -80,6 +86,31 @@ re-running side effects.
 | `name`         | string         | non-empty                                               |
 | `createdAt`    | ISO timestamp  | server-assigned, immutable                              |
 
+### CustomerTier (enum)
+
+Customer billing tier: `bronze | silver | gold | platinum`. `platinum` is
+the top tier, reserved for the highest-volume accounts.
+
+### LoyaltyTier (enum)
+
+Customer loyalty status, distinct from billing tier:
+`standard | silver | gold`. Stored on `Customer.loyaltyTier` (default
+`standard`, mutable).
+
+### ShippingCarrier (enum)
+
+Carrier used for an outbound shipment: `ups | fedex | usps`.
+
+### Loyalty tiers (lookup table)
+
+A `loyalty_tiers` reference table backs loyalty lookups:
+
+| Column      | Type    | Constraint                          |
+|-------------|---------|-------------------------------------|
+| `code`      | string  | one of `bronze`, `silver`, `gold`   |
+| `name`      | string  | display name                        |
+| `threshold` | integer | spend threshold, ≥ 0                |
+
 ## Order lifecycle
 
 Every order moves through the lifecycle below. Once an order reaches a
@@ -96,6 +127,17 @@ recovery, no retry, no override.
   - `shipped → delivered`
 
 Any other transition is illegal.
+
+### Status groupings
+
+Two named groupings of `OrderStatus` are referenced by business rules:
+
+- **Non-terminal statuses**: `placed`, `paid`, `shipped` — the statuses an
+  order can still transition out of (`delivered` and `cancelled` are
+  terminal and excluded).
+- **Refundable statuses**: `paid`, `shipped` — only paid-or-shipped orders
+  are refund-eligible. `placed`, `delivered`, and `cancelled` orders are
+  never refundable.
 
 ---
 
@@ -205,6 +247,20 @@ client-supplied `subtotalCents`:
 These fields are server-computed at order creation and must not be
 client-supplied. They are immutable after creation.
 
+### Discount tiers
+
+The loyalty discount percentage is configured per tier as a fixed map,
+`DiscountTiers`:
+
+| Tier   | Discount |
+|--------|----------|
+| bronze | 5%       |
+| silver | 10%      |
+| gold   | 20%      |
+
+This map is a stable business constant and must match the configured
+`DiscountTiers` values exactly.
+
 ---
 
 ## Effects
@@ -220,6 +276,43 @@ Each payload carries the order's `id`, the new `status`, and the ISO
 timestamp of the transition. **No event is emitted on failed transitions
 or validation errors.**
 
+### Retry budget
+
+Event emission to the bus is retried on transient failure. The retry
+budget is a fixed constant `MAX_RETRY`, set to **3** attempts.
+
+---
+
+## Data access rules
+
+These constraints govern how the data layer queries the database. They
+hold for every query against the named table, independent of endpoint.
+
+- **Tenant scoping (orders)** — every query against the `orders` table must
+  filter by tenant: `orders.tenantId = <current tenant>`. A query missing
+  this predicate leaks cross-tenant data.
+- **Date scoping (orders)** — any date-range filter on orders must bind to
+  the `orders.placedAt` column (never `updatedAt`).
+- **Soft delete (orders)** — orders are hard-deleted; there is no
+  `deletedAt` soft-delete column. Order queries must not include a
+  `deletedAt IS NULL` predicate.
+- **Status allowlist (customers)** — customer-list queries must restrict
+  `customers.status` to the allowed set `["active", "pending"]`.
+- **Loyalty tiers** — queries against the `loyalty_tiers` table must
+  restrict `code` to `["bronze", "silver", "gold"]`.
+
+## Production hardening
+
+The following must never appear in the shipped codebase:
+
+- No file under `src/legacy/**` — the legacy uploader is out of scope.
+- No `PROD_DEBUG` environment variable — debug env-vars are forbidden in
+  production.
+- No dependency on the `request` HTTP-client package — migrate to native
+  `fetch`.
+- No `FEATURE_EXPORT_V2` feature flag in any config — the export feature is
+  GA-gated and the flag must not appear.
+
 ---
 
 ## Out of Scope
@@ -232,3 +325,4 @@ ship without a follow-up PRD:
 
 - `POST /api/orders/:id/replace` — replacement order flow
 - `POST /api/orders/:id/refund` — money-back flow
+- `GET /api/orders/:id/export` — per-order data export

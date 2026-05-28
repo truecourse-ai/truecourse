@@ -16,7 +16,7 @@ export const loyaltyRepo = {
     // the dynamically-interpolated `activeFilter` fragment is opaque to
     // the verifier — surfaced as a coverage gap rather than silently
     // dropped.
-    // IL-DRIFT: QueryRule:loyalty-tiers.allowed-tiers / query.unparseable
+    // IL-DRIFT: QueryRule:loyalty-tiers.in-code / query.unparseable
     const result = await db.raw(
       `SELECT code, name, threshold
          FROM loyalty_tiers

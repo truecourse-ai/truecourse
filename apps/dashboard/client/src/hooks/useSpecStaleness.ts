@@ -1,6 +1,6 @@
 /**
  * Tracks whether Generate / Verify have unfinished work to do.
- * Parent (RepoGraphPage) calls `refetch()` after every `spec:complete`
+ * Parent (RepoPage) calls `refetch()` after every `spec:complete`
  * socket event and every decision change so the indicators stay in
  * sync without polling.
  */

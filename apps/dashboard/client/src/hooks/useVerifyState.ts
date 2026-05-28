@@ -1,7 +1,7 @@
 /**
  * Top-level hook for the BL Drift Verify state. Same shape as
  * `useContractsTree` / `useCanonicalSpecTree`: state lives in
- * RepoGraphPage so it survives tab switches; the parent wires the
+ * RepoPage so it survives tab switches; the parent wires the
  * `spec:complete` socket event (kind === 'verify') to `refetch()`.
  *
  * Three actions exposed:

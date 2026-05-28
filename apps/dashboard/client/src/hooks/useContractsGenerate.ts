@@ -1,6 +1,6 @@
 /**
  * Hook owning the IL-extraction (`POST /contracts/generate`) state.
- * Lives at RepoGraphPage level so the result banner and the running
+ * Lives at RepoPage level so the result banner and the running
  * spinner survive sidebar/tab switches.
  */
 

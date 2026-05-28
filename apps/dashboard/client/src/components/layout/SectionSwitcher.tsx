@@ -1,40 +1,29 @@
 /**
  * Section switcher — a compact dropdown that lives in the page
  * header (next to the logo). Click to flip the dashboard between
- * code-analysis and BL-drift modes. Scales cleanly if more sections
- * arrive later (Settings, Plugins, ...).
+ * the registered sections (Code Analysis, BL Drift, …, plus any
+ * `ee/`-contributed sections that pass the current capability gate).
+ *
+ * The list of sections comes from `useVisibleSections()` so the
+ * switcher always reflects whatever the registry currently exposes
+ * to this edition + license — no edits to this file are needed when
+ * a new section is added.
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Network, ShieldCheck, Check } from 'lucide-react';
-import type { DashboardSection } from './LeftSidebar';
+import { ChevronDown, Check } from 'lucide-react';
+import {
+  useVisibleSections,
+  type DashboardSection,
+} from '@/navigation/registry';
 
 interface SectionSwitcherProps {
   value: DashboardSection;
   onChange: (next: DashboardSection) => void;
 }
 
-const SECTIONS: Array<{
-  id: DashboardSection;
-  label: string;
-  description: string;
-  icon: typeof Network;
-}> = [
-  {
-    id: 'analysis',
-    label: 'Code Analysis',
-    description: 'Architecture graphs, files, flows, databases',
-    icon: Network,
-  },
-  {
-    id: 'drift',
-    label: 'BL Drift',
-    description: 'Spec consolidation, contracts, verification',
-    icon: ShieldCheck,
-  },
-];
-
 export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
+  const sections = useVisibleSections();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -47,7 +36,11 @@ export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
     return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  const current = SECTIONS.find((s) => s.id === value) ?? SECTIONS[0];
+  // Fall back to the first visible section if the current value was
+  // gated off (e.g. a license was just revoked). Avoids rendering a
+  // dropdown stuck on an id that's no longer in the registry.
+  const current = sections.find((s) => s.id === value) ?? sections[0];
+  if (!current) return null;
   const CurrentIcon = current.icon;
 
   return (
@@ -68,7 +61,7 @@ export function SectionSwitcher({ value, onChange }: SectionSwitcherProps) {
           role="menu"
           className="absolute left-0 top-full z-50 mt-1 min-w-64 rounded-md border border-border bg-popover p-1 shadow-lg"
         >
-          {SECTIONS.map((s) => {
+          {sections.map((s) => {
             const Icon = s.icon;
             const isCurrent = s.id === value;
             return (

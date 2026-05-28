@@ -71,6 +71,13 @@ You are given ONE block of markdown from a documentation file (a PRD, ADR, RFC, 
    - "errors"     — error envelope shape, error code catalog, status-to-meaning mappings.
    - "effects"    — events emitted/consumed, side effects, queues, webhooks, mining rewards.
    - "overview"   — product description, scope, glossary, system summary.
+   - "forbidden"  — non-endpoint artifacts the spec says MUST NOT exist in the
+                    codebase: out-of-scope file globs ("no file under src/legacy/**"),
+                    forbidden env vars ("no PROD_DEBUG in production"), forbidden
+                    dependencies ("no \`request\` package; use native fetch"),
+                    forbidden feature flags ("FEATURE_X must not appear in config").
+                    HTTP endpoints that are out-of-scope stay under "endpoints"
+                    with status="out-of-scope" — do not duplicate them here.
 
    A block can touch multiple topics. Return only the topics that the block actually substantively addresses.
 
@@ -187,6 +194,26 @@ You are given ONE block of markdown from a documentation file (a PRD, ADR, RFC, 
   "summary": "free text — one paragraph max"
 }
 
+## forbidden
+{
+  "category": "file-glob" | "env-var" | "dependency" | "feature-flag",
+  "pattern": "<the literal/glob/identifier the spec forbids, verbatim>",
+  "reason": "<short prose for WHY, verbatim or paraphrased from the spec>"
+}
+
+Use one claim PER forbidden item — never group multiple patterns into one
+claim. Subject = the pattern itself ("src/legacy/**", "PROD_DEBUG",
+"request", "FEATURE_EXPORT_V2") so the same forbidden artifact mentioned
+in two docs merges on a stable (topic, subject) key. \`kind\` is always
+"definition" — the section's purpose is to define that the artifact is
+forbidden. Pick \`category\` from the spec's phrasing:
+
+  - file-glob   when the spec names a path, module, file, or directory.
+  - env-var     when the spec names an environment-variable identifier
+                (typically UPPER_SNAKE_CASE).
+  - dependency  when the spec names a package/library (npm, pip, gem, …).
+  - feature-flag when the spec names a feature-flag identifier.
+
 # Output
 
 Return ONLY a JSON object matching this exact shape — no prose, no code fences:
@@ -218,6 +245,34 @@ A constraint example — the section is "### Resource ownership" but it adds a 4
   "content": { "method": "GET", "path": "/api/orders/:id", "auth": "required", "responses": { "403": { "error": { "code": "forbidden" } } } },
   "kind": "constraint",
   "line": 182
+}
+
+A forbidden-artifact example — the section is "## Production hardening" and lists "No \`PROD_DEBUG\` environment variable — debug env-vars are forbidden in production." Emit ONE claim per bullet:
+
+{
+  "topic": "forbidden",
+  "subject": "PROD_DEBUG",
+  "content": {
+    "category": "env-var",
+    "pattern": "PROD_DEBUG",
+    "reason": "debug env-vars are forbidden in production"
+  },
+  "kind": "definition",
+  "line": 297
+}
+
+And a file-glob variant from the same section ("No file under \`src/legacy/**\` — the legacy uploader is out of scope"):
+
+{
+  "topic": "forbidden",
+  "subject": "src/legacy/**",
+  "content": {
+    "category": "file-glob",
+    "pattern": "src/legacy/**",
+    "reason": "the legacy uploader is out of scope"
+  },
+  "kind": "definition",
+  "line": 296
 }
 
 If the block asserts nothing concrete about the system, return {"topics": [], "claims": []}.

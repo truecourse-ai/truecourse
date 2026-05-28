@@ -249,6 +249,25 @@ describe('QueryRule comparator', () => {
     expect(drifts[0].codeSide).toContain('EXISTS');
   });
 
+  it('does NOT attribute an unparseable clause to a rule whose entity is a different table', () => {
+    // The unparseable query is against `loyalty_tiers`; this rule binds a
+    // different entity (jobs). Ownership of `query.unparseable` belongs to
+    // the entity-matching rule, not every rule — otherwise cross-rule dedup
+    // attributes it to whichever happens to be first in index order.
+    const drifts = compareQueryRule({
+      ref: RULE_REF,
+      origin: null,
+      contract: mkRule({}), // entity = core.jobs
+      codeQueries: [
+        mkQuery({
+          entity: { table: 'loyalty_tiers' },
+          unparseable: [{ reason: 'sub-query', raw: 'EXISTS (SELECT 1 …)' }],
+        }),
+      ],
+    });
+    expect(obligations(drifts).filter((o) => o === 'query.unparseable')).toEqual([]);
+  });
+
   it('handles zero code queries by emitting missing drifts citing the rule', () => {
     const drifts = compareQueryRule({
       ref: RULE_REF,

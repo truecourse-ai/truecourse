@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { initParsers, parseFile } from '@truecourse/analyzer';
+import { loadTcIgnore } from '@truecourse/shared';
 import { eachParsedSource } from './source-walker.js';
 import { fastApiFileHasAuthRouter } from './operation-fastapi.js';
 
@@ -70,11 +71,13 @@ export async function detectAuthPresence(rootDir: string): Promise<AuthPresenceR
   const fileImports = new Map<string, FileImports>();
   const routerVarsByFile = new Map<string, Set<string>>();
   const scanned: string[] = [];
+  const tcIgnore = loadTcIgnore(rootDir);
 
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

@@ -18,6 +18,7 @@ import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { minimatch } from '../../comparator/minimatch.js';
 import { eachParsedSource, type ParsedSource } from '../source-walker.js';
 import { collectDependencies } from '../manifests.js';
+import { loadTcIgnore } from '@truecourse/shared';
 
 export interface ForbiddenMatch {
   filePath: string;
@@ -35,6 +36,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'co
 
 export function detectForbiddenFiles(rootDir: string, pattern: string): ForbiddenMatch[] {
   const out: ForbiddenMatch[] = [];
+  const tcIgnore = loadTcIgnore(rootDir);
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
     try {
@@ -45,6 +47,7 @@ export function detectForbiddenFiles(rootDir: string, pattern: string): Forbidde
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;
@@ -229,6 +232,7 @@ export async function detectForbiddenFeatureFlag(rootDir: string, name: string):
 function detectFlagInConfigFiles(rootDir: string, name: string): ForbiddenMatch[] {
   const out: ForbiddenMatch[] = [];
   const CONFIG_EXT = new Set(['.json', '.yaml', '.yml', '.toml', '.env', '.ini', '.cfg']);
+  const tcIgnore = loadTcIgnore(rootDir);
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
     try {
@@ -239,6 +243,7 @@ function detectFlagInConfigFiles(rootDir: string, name: string): ForbiddenMatch[
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      if (tcIgnore.ignores(full)) continue;
       if (entry.isDirectory()) {
         visit(full);
         continue;

@@ -112,7 +112,15 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
   }
 
   // ---- Unparseable clauses (info-level coverage gap surfacing) ----
+  // An unparseable WHERE clause still leaves the FROM table known, so we
+  // attribute the drift to the rule whose entity matches that table —
+  // rather than letting every rule emit it and having the orchestrator's
+  // cross-rule dedup keep whichever happens to be first in index order
+  // (which is non-deterministic across a multi-file generated corpus).
+  // When the table is genuinely unknown, fall back to emit-for-all.
   for (const q of codeQueries) {
+    if (q.unparseable.length === 0) continue;
+    if (q.entity.table && !tableMatchesEntity(q.entity.table, contract.entity.identity)) continue;
     for (const u of q.unparseable) {
       drifts.push({
         id: randomUUID(),
@@ -134,6 +142,24 @@ export function compareQueryRule(input: QueryRuleCompareInput): ContractDrift[] 
   // against the same file:line. Collapse on the tuple that humans care
   // about (what + where), keeping the first instance.
   return dedupeDrifts(drifts);
+}
+
+/**
+ * True when a code query's FROM table refers to the same logical entity
+ * as a rule's `entity` identity, tolerant of the table-name ↔ entity-name
+ * gap (snake_case plural table vs PascalCase singular entity):
+ * `loyalty_tiers` ↔ `LoyaltyTier`, `customers` ↔ `Customer`.
+ */
+function tableMatchesEntity(table: string, entityIdentity: string): boolean {
+  // Compare on the final dotted segment (drop a module/schema qualifier
+  // like `core.jobs` → `jobs`), normalized for the snake-plural ↔
+  // PascalCase-singular gap.
+  const norm = (s: string): string => {
+    let n = (s.split('.').pop() ?? s).toLowerCase().replace(/[_-]/g, '');
+    if (n.length > 2 && n.endsWith('s')) n = n.slice(0, -1);
+    return n;
+  };
+  return norm(table) === norm(entityIdentity);
 }
 
 function dedupeDrifts(drifts: ContractDrift[]): ContractDrift[] {

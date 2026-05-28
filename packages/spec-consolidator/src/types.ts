@@ -35,6 +35,11 @@ export const TopicSchema = z.enum([
   'errors',
   'effects',
   'overview',
+  // Negative spec: artifacts the spec says MUST NOT exist in code —
+  // out-of-scope file globs, forbidden env vars, forbidden dependencies,
+  // forbidden feature flags. (Out-of-scope HTTP endpoints stay under
+  // `endpoints` with `status: out-of-scope` — they have their own shape.)
+  'forbidden',
 ]);
 export type Topic = z.infer<typeof TopicSchema>;
 
