@@ -13,8 +13,10 @@ function listTcFiles(root: string): string[] {
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) visit(full);
-      else if (entry.isFile() && full.endsWith('.tc')) out.push(full);
+      if (entry.isDirectory()) {
+        if (entry.name === '_inferred') continue; // reverse-engineered, not authored corpus
+        visit(full);
+      } else if (entry.isFile() && full.endsWith('.tc')) out.push(full);
     }
   };
   visit(root);

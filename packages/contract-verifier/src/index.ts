@@ -9,6 +9,14 @@ export * as comparator from './comparator/index.js';
 export * as types from './types/index.js';
 export { verify } from './verify.js';
 export type { VerifyOptions, VerifyResult } from './verify.js';
+export { infer, writeInferred, renderDecision } from './infer/index.js';
+export type {
+  InferOptions,
+  InferResult,
+  InferredDecision,
+  RenderedArtifact,
+  WriteInferredResult,
+} from './infer/index.js';
 export { driftToViolation, driftsToViolations } from './adapter/violation.js';
 export type { ContractDriftViolation } from './adapter/violation.js';
 

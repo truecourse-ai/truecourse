@@ -13,3 +13,21 @@ def list_eligible_tiers(db, active_filter):
         f"SELECT code, name, threshold FROM loyalty_tiers "
         f"WHERE code IN ('bronze', 'silver', 'gold') AND {active_filter}"
     )
+
+
+def list_active_tiers(db):
+    # Every direct lookup restricts to active tiers — retired tiers stay in
+    # the table for historical orders but must never be offered to customers.
+    # A real, consistently-applied data policy that no spec records.
+    return db.execute(
+        "SELECT code, name, threshold FROM loyalty_tiers "
+        "WHERE is_active = TRUE ORDER BY threshold ASC"
+    )
+
+
+def find_active_tier(db, code):
+    return db.execute(
+        "SELECT code, name, threshold FROM loyalty_tiers "
+        "WHERE is_active = TRUE AND code = :code",
+        {"code": code},
+    )

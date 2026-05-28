@@ -4,9 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { initParsers, parseFile } from '../../packages/analyzer/src/index.js';
 import { compareEntity } from '../../packages/contract-verifier/src/comparator/entity.js';
+import { extractEntityFacts } from '../../packages/contract-verifier/src/extractor/entity-facts/index.js';
 import { compareStateMachine } from '../../packages/contract-verifier/src/comparator/state-machine.js';
+import { extractStateMachineFacts } from '../../packages/contract-verifier/src/extractor/state-machine-facts/index.js';
 import { compareFormula } from '../../packages/contract-verifier/src/comparator/formula.js';
+import { extractFormulaFacts } from '../../packages/contract-verifier/src/extractor/formula-facts/index.js';
 import { compareEffectGroup } from '../../packages/contract-verifier/src/comparator/effect-group.js';
+import { extractEmissionFacts } from '../../packages/contract-verifier/src/extractor/effect/emission-facts.js';
 import { extractOperationsFromFile } from '../../packages/contract-verifier/src/extractor/operation.js';
 import type {
   ArtifactRef,
@@ -76,10 +80,10 @@ describe('compareEntity', () => {
         placedAt: { type: 'string', mutability: 'immutable' },
       },
     };
-    const drifts = await compareEntity({
+    const drifts = compareEntity({
       entityRef: ref('Entity', 'Order'),
       contract,
-      codeDir: root,
+      facts: await extractEntityFacts(root),
     });
     expect(drifts).toHaveLength(1);
     expect(drifts[0].obligationKey).toBe('field.placedAt.mutability');
@@ -99,10 +103,10 @@ describe('compareEntity', () => {
     const contract: EntityContract = {
       fields: { placedAt: { type: 'string', mutability: 'immutable' } },
     };
-    const drifts = await compareEntity({
+    const drifts = compareEntity({
       entityRef: ref('Entity', 'Order'),
       contract,
-      codeDir: root,
+      facts: await extractEntityFacts(root),
     });
     expect(drifts).toEqual([]);
   });
@@ -124,10 +128,10 @@ describe('compareEntity', () => {
         email: { type: 'string', normalize: 'lowercase' },
       },
     };
-    const drifts = await compareEntity({
+    const drifts = compareEntity({
       entityRef: ref('Entity', 'Customer'),
       contract,
-      codeDir: root,
+      facts: await extractEntityFacts(root),
     });
     expect(drifts.some((d) => d.obligationKey === 'field.email.normalize')).toBe(true);
   });
@@ -146,10 +150,10 @@ describe('compareEntity', () => {
     const contract: EntityContract = {
       fields: { email: { type: 'string', normalize: 'lowercase' } },
     };
-    const drifts = await compareEntity({
+    const drifts = compareEntity({
       entityRef: ref('Entity', 'Customer'),
       contract,
-      codeDir: root,
+      facts: await extractEntityFacts(root),
     });
     expect(drifts).toEqual([]);
   });
@@ -192,10 +196,10 @@ describe('compareStateMachine', () => {
       `,
     );
 
-    const drifts = await compareStateMachine({
+    const drifts = compareStateMachine({
       machineRef,
       contract: baseContract,
-      codeDir: root,
+      facts: await extractStateMachineFacts(root),
     });
     expect(drifts.some((d) => d.obligationKey === 'transition.illegal.shipped-to-cancelled')).toBe(true);
   });
@@ -212,10 +216,10 @@ describe('compareStateMachine', () => {
       `,
     );
 
-    const drifts = await compareStateMachine({
+    const drifts = compareStateMachine({
       machineRef,
       contract: baseContract,
-      codeDir: root,
+      facts: await extractStateMachineFacts(root),
     });
     expect(drifts.some((d) => d.obligationKey === 'transition.unguarded-terminal-regression.to-paid')).toBe(true);
   });
@@ -233,10 +237,10 @@ describe('compareStateMachine', () => {
         };
       `,
     );
-    const drifts = await compareStateMachine({
+    const drifts = compareStateMachine({
       machineRef,
       contract: baseContract,
-      codeDir: root,
+      facts: await extractStateMachineFacts(root),
     });
     expect(drifts.filter((d) => d.obligationKey.startsWith('transition.illegal'))).toEqual([]);
   });
@@ -271,10 +275,10 @@ describe('compareFormula', () => {
       immutableAfterCreation: true,
       dependsOn: [],
     };
-    const drifts = await compareFormula({
+    const drifts = compareFormula({
       formulaRef: discountRef,
       contract,
-      codeDir: root,
+      facts: await extractFormulaFacts(root, contract.output.field),
     });
     expect(drifts.some((d) => d.obligationKey === 'expression.threshold-operator.10000')).toBe(true);
   });
@@ -303,10 +307,10 @@ describe('compareFormula', () => {
       immutableAfterCreation: true,
       dependsOn: [],
     };
-    const drifts = await compareFormula({
+    const drifts = compareFormula({
       formulaRef: taxRef,
       contract,
-      codeDir: root,
+      facts: await extractFormulaFacts(root, contract.output.field),
     });
     expect(drifts.some((d) => d.obligationKey === 'inputs.discountCents.unused')).toBe(true);
   });
@@ -329,10 +333,10 @@ describe('compareFormula', () => {
       immutableAfterCreation: true,
       dependsOn: [],
     };
-    const drifts = await compareFormula({
+    const drifts = compareFormula({
       formulaRef: discountRef,
       contract,
-      codeDir: root,
+      facts: await extractFormulaFacts(root, contract.output.field),
     });
     expect(drifts).toEqual([]);
   });
@@ -363,6 +367,7 @@ describe('compareEffectGroup', () => {
     return {
       ref: ref('Operation', `${method} ${urlPath}`),
       origin: null,
+      provenance: 'authored',
       declarationLoc: { filePath: '<spec>', lineStart: 1, lineEnd: 1 },
       body: { head: [], block: [], loc: { line: 1, col: 1 } } as any,
       contract: opContract,
@@ -380,8 +385,7 @@ describe('compareEffectGroup', () => {
         res.status(200).json({ status: 'cancelled' });
       });
     `;
-    const ops = extractOps(filePath, source);
-    const specOp = specOpFor('POST', '/api/orders/{id}/cancel');
+    const ops = extractOps(filePath, source).map((o) => ({ ...o, identity: 'POST /api/orders/{id}/cancel' }));
 
     const contract: EffectGroupContract = {
       channel: 'orders',
@@ -401,8 +405,7 @@ describe('compareEffectGroup', () => {
     const drifts = compareEffectGroup({
       effectGroupRef: groupRef,
       contract,
-      specOps: new Map([['POST /api/orders/{id}/cancel', specOp]]),
-      recognizedOps: ops.map((o) => ({ ...o, identity: 'POST /api/orders/{id}/cancel' })),
+      emission: extractEmissionFacts(ops),
     });
     expect(drifts.some((d) => d.obligationKey === 'Effect:order.cancelled / missing-emission')).toBe(true);
   });
@@ -418,8 +421,7 @@ describe('compareEffectGroup', () => {
         res.status(200).json({ status: 'cancelled' });
       });
     `;
-    const ops = extractOps(filePath, source);
-    const specOp = specOpFor('POST', '/api/orders/{id}/cancel');
+    const ops = extractOps(filePath, source).map((o) => ({ ...o, identity: 'POST /api/orders/{id}/cancel' }));
 
     const contract: EffectGroupContract = {
       channel: 'orders',
@@ -438,8 +440,7 @@ describe('compareEffectGroup', () => {
     const drifts = compareEffectGroup({
       effectGroupRef: groupRef,
       contract,
-      specOps: new Map([['POST /api/orders/{id}/cancel', specOp]]),
-      recognizedOps: ops.map((o) => ({ ...o, identity: 'POST /api/orders/{id}/cancel' })),
+      emission: extractEmissionFacts(ops),
     });
     expect(drifts.filter((d) => d.obligationKey.endsWith('missing-emission'))).toEqual([]);
   });

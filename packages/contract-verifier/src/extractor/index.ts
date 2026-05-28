@@ -36,6 +36,24 @@ export {
 export type { ForbiddenMatch } from './forbidden/index.js';
 export { extractConstantsFromDir } from './constant/index.js';
 export type { ExtractedConstant, ConstantShape } from './constant/index.js';
+export { extractEffectsFromDir } from './effect/index.js';
+export type { ExtractedEffect } from './effect/index.js';
+export { extractEmissionFacts } from './effect/emission-facts.js';
+export type { EmissionFacts, OperationEmission, FailureEmitSite } from './effect/emission-facts.js';
+export { extractEntitiesFromDir } from './entity-schema/index.js';
+export type { ExtractedEntity, ExtractedEntityField, EntityFieldType } from './entity-schema/index.js';
+export { extractComputedFieldsFromDir } from './computed-field/index.js';
+export type { ExtractedComputedField } from './computed-field/index.js';
+export { extractStateFieldsFromDir } from './state-field/index.js';
+export type { ExtractedStateField } from './state-field/index.js';
+export { extractStateMachineFacts } from './state-machine-facts/index.js';
+export type { StateMachineFacts, TransitionMapFact, StateAssignmentFact, GuardClause } from './state-machine-facts/index.js';
+export { extractFormulaFacts } from './formula-facts/index.js';
+export type { FormulaImplFacts, FormulaParamFact } from './formula-facts/index.js';
+export { extractEntityFacts } from './entity-facts/index.js';
+export type { EntityFacts, EntityFileFacts, EntityAssignment } from './entity-facts/index.js';
+export { extractCodeContracts } from './code-contracts.js';
+export type { CodeContractSet } from './code-contracts.js';
 export { buildCodebaseScan, getArchitectureDetector } from './architecture/index.js';
 export type { CodebaseScan, DetectedArchitectureChoice, ArchitectureDetector } from './architecture/index.js';
 

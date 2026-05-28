@@ -30,6 +30,7 @@ import {
   runSpecResolve,
   runSpecStatus,
   runVerify,
+  runInfer,
 } from "./commands/spec.js";
 import {
   runSpecConflictsList,
@@ -370,6 +371,16 @@ program
   .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
   .action(async (options) => {
     await runVerify({ codeDir: options.codeDir });
+  });
+
+// Infer — reverse-engineers undocumented decisions from code into _inferred/.
+program
+  .command("infer")
+  .description("Reverse-engineer undocumented decisions from code into inferred contracts")
+  .option("--code-dir <path>", "Override the code directory (default: auto-detect)")
+  .option("--dry-run", "Report what would be written without touching disk")
+  .action(async (options) => {
+    await runInfer({ codeDir: options.codeDir, dryRun: options.dryRun });
   });
 
 // Rules management — reads/writes per-repo config.json directly. No server needed.

@@ -37,6 +37,7 @@ function specOpFromContract(ref: ArtifactRef, contract: OperationContract): Reso
   return {
     ref,
     origin: null,
+    provenance: 'authored',
     declarationLoc: { filePath: '<spec>', lineStart: 1, lineEnd: 1 },
     body: { head: [], block: [], loc: { line: 1, col: 1 } } as any,
     contract,
@@ -408,8 +409,7 @@ describe('compareEffectGroup (operation-target resolution)', () => {
     const drifts = compareEffectGroup({
       effectGroupRef: groupRef,
       contract,
-      specOps: new Map(),
-      recognizedOps: [],
+      emission: new Map(),
     });
     expect(drifts).toEqual([]);
   });

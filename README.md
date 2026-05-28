@@ -131,6 +131,10 @@ truecourse contracts validate                      # Parse + resolve TC files; r
 
 # Verification (code against contracts) — separate command, not part of `analyze`
 truecourse verify
+
+# Inference (code → inferred contracts) — reverse-engineer undocumented decisions
+truecourse infer                                   # Write inferred .tc files to contracts/_inferred/
+truecourse infer --dry-run                          # Report what would be written, touch nothing
 ```
 
 ### Rules
@@ -205,6 +209,8 @@ unresolved cross-references). On the bundled fixture this hits
 
 **3. Verification** — Parses the contracts, walks the source tree, and runs per-kind comparators (operations, entities, state machines, etc.). Drifts surface in the dashboard alongside code violations and from the CLI as JSON. Verification is its own command — `truecourse verify` — not a stage of `truecourse analyze`, because the two pipelines answer different questions, have different prerequisites, and run on different time scales.
 
+**4. Inference** — The mirror image of verification. `verify` asks "the spec says X — does the code do X?"; `truecourse infer` asks "the code does X — does any spec mention X?". It runs code-side extractors *un-driven by a spec*, subtracts whatever the authored contracts already cover, and writes the remainder to `.truecourse/contracts/_inferred/` as `.tc` artifacts tagged with an `inferred-from "<code-path>" a..b` provenance line and a `confidence` level (instead of the authored `origin SOURCE "section" a..b`). It covers the full artifact spread — undocumented endpoints, entities (from ORM schema), enums, named constants, query policies, emitted events, computed formulas, architecture choices, and the cross-cutting conventions (auth, pagination, idempotency, error envelope). Confidence reflects fidelity: a value read straight from code is `high`; a synthesized convention (e.g. an assumed auth scheme, or a state machine whose transitions can't be reconstructed) is a `low`-confidence draft to confirm. Because coverage is computed from authored contracts only, a decision drops out of `_inferred/` the moment it's documented — the directory is a shrinking backlog of "decisions your code made that your docs never recorded". Inferred contracts are descriptive, not prescriptive, so `verify` skips `_inferred/` by default.
+
 **Storage layout** (per repo, under `.truecourse/`):
 
 ```
@@ -213,6 +219,7 @@ unresolved cross-references). On the bundled fixture this hits
 │   ├── claims.json          ← structured snapshot: modules + claims + provenance
 │   └── decisions.json       ← user resolutions + version chains + manual includes
 ├── contracts/               ← generated TC contract artifacts (gitignored by default)
+│   └── _inferred/            ← reverse-engineered, undocumented decisions (`truecourse infer`)
 ├── analyses/                ← analysis snapshots (gitignored)
 ├── LATEST.json              ← current-state view (committable)
 └── .cache/                  ← LLM + slice cache (gitignored)

@@ -25,6 +25,8 @@ import {
   SCAN_STEPS,
   verifyInProcess,
   VERIFY_STEPS,
+  inferInProcess,
+  INFER_STEPS,
 } from "@truecourse/core/commands/spec-in-process";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 
@@ -195,6 +197,61 @@ export async function runVerify(opts: RunVerifyOptions = {}): Promise<void> {
       verify.drifts.length === 0
         ? "No drift detected."
         : `${verify.drifts.length} drift item${verify.drifts.length === 1 ? "" : "s"} — review the list above.`,
+    );
+  } catch (e) {
+    renderer.dispose();
+    p.cancel(`Failed: ${(e as Error).message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// infer
+// ---------------------------------------------------------------------------
+
+export interface RunInferOptions extends RunSpecOptions {
+  /** Override the code dir (default: auto-detect repo/code or repoRoot). */
+  codeDir?: string;
+  /** Report what would be written without touching disk. */
+  dryRun?: boolean;
+}
+
+export async function runInfer(opts: RunInferOptions = {}): Promise<void> {
+  const root = repoRoot(opts);
+  p.intro("Infer");
+  const { renderer, tracker } = withTracker(INFER_STEPS);
+  try {
+    const { infer, written, proposed } = await inferInProcess(root, {
+      tracker,
+      codeDir: opts.codeDir,
+      dryRun: opts.dryRun,
+    });
+    renderer.dispose();
+
+    const byKind = new Map<string, number>();
+    for (const d of infer.decisions) byKind.set(d.kind, (byKind.get(d.kind) ?? 0) + 1);
+
+    p.log.step(`decisions   ${infer.decisions.length} undocumented`);
+    for (const [kind, n] of [...byKind].sort()) p.log.message(`  ${kind}  ${n}`);
+
+    if (infer.decisions.length > 0) {
+      p.log.message("");
+      p.log.message("Inferred:");
+      for (const d of infer.decisions.slice(0, 20)) {
+        const loc = `${d.codeLoc.path}:${d.codeLoc.lines[0]}`;
+        p.log.message(`  [${d.confidence}] ${d.kind}:${d.identity}  ${loc}`);
+      }
+      if (infer.decisions.length > 20) {
+        p.log.message(`  … (+${infer.decisions.length - 20} more)`);
+      }
+    }
+
+    const wrote = opts.dryRun ? proposed.length : written.length;
+    p.outro(
+      infer.decisions.length === 0
+        ? "No undocumented decisions found."
+        : opts.dryRun
+          ? `${wrote} inferred contract${wrote === 1 ? "" : "s"} would be written to _inferred/ (dry run).`
+          : `${wrote} inferred contract${wrote === 1 ? "" : "s"} written to _inferred/.`,
     );
   } catch (e) {
     renderer.dispose();

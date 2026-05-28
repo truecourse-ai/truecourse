@@ -3185,3 +3185,129 @@ Token-based comparison algorithm to detect copy-pasted code blocks across the co
 3. Hash each window, compare across files
 4. Merge overlapping matches into contiguous duplicate blocks
 5. Report duplicate blocks with file locations and percentage
+
+## Phase 37: Spec Inference (Reverse Engineering) `STATUS: DONE`
+
+The mirror image of verification. `verify` is spec-driven ("the spec says X —
+does the code do X?"); `truecourse infer` runs the same spec-independent
+code-side extractors *un-driven by a spec*, subtracts whatever the authored
+contracts already cover, and emits the remainder as `inferred` `.tc` artifacts
+under `.truecourse/contracts/_inferred/`. These are the **undocumented
+decisions** baked into the code — things no PRD/ADR/spec records.
+
+### How It Works
+
+1. **Coverage** — Parse + resolve authored contracts (the `_inferred/` subtree
+   is excluded), building per-kind coverage sets: operation identities,
+   constant names, enum names + value-sets (incl. trigger-subsets), authored
+   query-rule predicate columns, asserted architecture categories.
+2. **Extraction** — Run the existing code-side extractors (`extractOperationsFromDir`,
+   `extractConstantsFromDir`, `extractEnumsFromDir`, `extractQueriesFromDir`,
+   architecture detectors) over the code dir.
+3. **Subtraction + emission** — For each extracted artifact not covered,
+   synthesize an `.tc` artifact with an `inferred-from "<code-path>" a..b`
+   provenance header and a `confidence` level, written under `_inferred/`
+   mirroring the authored tree.
+
+### Mirror coverage
+
+Every artifact kind with a code-side signal now has a spec-independent
+"enumerate-from-code" extractor + inferer:
+
+- `Operation` — routes in code, absent from every authored op
+- `NamedConstant` — SCREAMING_SNAKE primitive policy constants no authored constant asserts
+- `Enum` — declaration-style enums (unions/enums, not derived `Set`/array value-groups) with no authored counterpart
+- `QueryRule` — a constant predicate present across **all** fully-parseable queries to an entity, on a column no authored rule constrains
+- `ArchitectureDecision` — a category resolved by a **concrete signal** (package/import/config-file, not a default/absence) with no authored decision
+- `EffectGroup` — `emit('x.y', …)` / `emitXxx('x.y', …)` call sites, grouped by namespace; covered = any authored effect-group declares the event
+- `Entity` — models enumerated from declarative ORM schema (Prisma `model X {}`); ORM-only by design (loose interfaces are unbounded)
+- `Formula` — `compute<Field>`/`calculate<Field>`/`derive<Field>` pure (non-async) functions; field + inputs + expression; entity bound only when a known entity has the field (else a low-confidence draft)
+- `PaginationContract` / `ErrorEnvelope` / `AuthRequirement` / `IdempotencyContract` — cross-cutting singletons synthesized from operation observations + presence detectors; inferred only when the spec declares NONE of that kind. Confidence reflects fidelity (scheme/params observed = medium; assumed auth scheme = low)
+- `StateMachine` — a status-like field assigned ≥2 distinct literals of one known enum on the **same receiver**; transitions are NOT reconstructed (they flow through variables — recovering them needs data-flow analysis), so these are low-confidence drafts
+
+`ForbiddenArtifact` / `UnenforceableObligation` are spec-only negatives,
+intentionally not inferable.
+
+The cross-cutting kinds, EffectGroup, Entity, Formula and StateMachine are
+all already documented in the IL fixtures, so they're correctly **silent**
+against the authored corpus; they're exercised positively by running `infer`
+against an empty corpus (nothing covered → every kind the code exhibits
+surfaces). The long-term direction is to converge `verify` onto these same
+extractors (uniform spec-contract vs code-contract diff), migrating kind by
+kind without disturbing the working verify path.
+
+### Design notes
+
+- **Descriptive, not prescriptive** — `verify` skips `_inferred/` by default
+  (`includeInferred` opts in). Inferred contracts restate what the code does;
+  verifying against them would be circular.
+- **Shrinking backlog** — coverage uses authored contracts only, so documenting
+  a decision (authoring a contract / ADR) drops it from the next `infer` run.
+- **Provenance** — resolver gained `inferred-from`/`confidence` parsing and a
+  `provenance: 'authored' | 'inferred'` field on the resolved envelope.
+
+### Verification (Phase 37)
+
+- Both IL fixtures (`sample-js-project-il`, `sample-python-project-il`) plant
+  real undocumented decisions (pnpm lockfile, `RATE_LIMIT_PER_MINUTE`, loyalty
+  `is_active` query policy, the `GET /api/loyalty-tiers` endpoint, a
+  `NotificationChannel` enum). `reference/contracts/_inferred/` holds the
+  reviewed golden output.
+- `tests/contract-verifier/infer-fixture.test.ts` re-runs `infer` and diffs
+  against the golden corpus; `infer.test.ts` pins coverage subtraction,
+  provenance round-trip, and `writeInferred` idempotency/pruning;
+  `infer-full-mirror.test.ts` exercises the cross-cutting/structural kinds via
+  an empty corpus (every kind fires, every rendered artifact resolves as
+  `inferred`) and asserts they go silent against the full authored corpus.
+- Existing verify/consolidator suites stay green: planted code produces no new
+  drift, and `_inferred/` is excluded from the authored corpus + verify.
+
+## Phase 38: Unify verify + infer on a shared code→contract layer `STATUS: DONE`
+
+Both pipelines read the code; the long-term model is one extraction, two
+consumers: `verify` = diff(spec-contract, code-contract), `infer` =
+code-contract − authored coverage.
+
+**Done this pass:**
+
+1. **Shared extraction layer** — `extractor/code-contracts.ts` exposes a lazy,
+   memoized `CodeContractSet` (operations, enums, constants, queries, effects,
+   entities, computed-fields, state-fields, architecture scan, auth/idempotency
+   presence). Laziness preserves verify's conditional extraction (it only pays
+   for kinds its spec references); memoization de-dups within a run. Both
+   `verify.ts` and `infer/index.ts` now read code-side data exclusively through
+   this layer.
+2. **EffectGroup converged (pilot)** — the handler-AST analysis moved OUT of
+   `comparator/effect-group.ts` INTO `extractor/effect/emission-facts.ts`
+   (`extractEmissionFacts(ops) → EmissionFacts`: per-op static events, dynamic-
+   emit flag, failure-block emit sites, per-literal branch emission). The
+   comparator is now a pure diff over those facts. `verify-end-to-end` stays
+   22/22, 0 FP — the diff reproduces the exact drift keys.
+
+**All behavioral comparators converged** (every one preserved the exact drift
+keys; `verify-end-to-end` stayed 22/22, 0 FP at each step):
+
+- **StateMachine** — `extractor/state-machine-facts/` extracts candidate
+  transition maps + guarded field-assignments (spec-independent); comparator
+  filters by spec scope and diffs.
+- **Formula** — `extractor/formula-facts/` locates the implementation by output
+  field and captures param/operator facts (field-driven, like idempotency);
+  comparator diffs.
+- **Entity** — `extractor/entity-facts/` extracts per-file assignments +
+  construction signals + lowercase-call presence (keeps verify's full recall:
+  `new X` / typed literal / Python kwarg); comparator filters + diffs.
+
+Every behavioral comparator is now a pure diff over extracted facts; all code
+AST analysis lives in the extraction layer. Spec-independent facts hang off the
+zero-arg `CodeContractSet` accessors; field/header-driven ones
+(`formulaFacts(field)`, `idempotencyPresence(header)`) are memoized per key.
+`ForbiddenArtifact` / `UnenforceableObligation` stay spec-only.
+
+### Verification (Phase 38)
+
+- `verify-end-to-end` / `verify-python-end-to-end` stay green (exact `IL-DRIFT`
+  marker set) through the shared-layer refactor and EVERY comparator
+  convergence (EffectGroup, StateMachine, Formula, Entity).
+- `comparators-codedir.test.ts` + `comparators.test.ts` updated to drive the
+  converged comparators via their facts extractors; all infer suites unchanged.
+- Full suite: 4138 passed.

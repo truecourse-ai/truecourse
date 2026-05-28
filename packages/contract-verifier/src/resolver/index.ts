@@ -79,6 +79,16 @@ const KEYWORD_TO_KIND: Record<string, ArtifactKind> = {
 export interface ResolvedArtifact {
   ref: ArtifactRef;
   origin: SpecOrigin | null;
+  /**
+   * Where the artifact came from. `authored` artifacts trace to a prose
+   * doc via `origin`; `inferred` artifacts were reverse-engineered from
+   * code by the inference engine and carry an `inferred-from "<code-path>"
+   * a..b` header instead (surfaced through `origin` with the code path as
+   * `source`). Defaults to `authored`.
+   */
+  provenance: 'authored' | 'inferred';
+  /** How strong the code-side signal was for an inferred artifact. */
+  confidence?: 'high' | 'medium' | 'low';
   declarationLoc: SourceLocation;
   /** Pointer back to the parsed statement, kept so per-kind lifters
    *  (and any future re-interpretation pass) can re-read the body. */
@@ -278,7 +288,7 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     };
   }
 
-  const origin = extractOrigin(stmt.block);
+  const { origin, provenance, confidence } = extractProvenance(stmt.block);
   const declarationLoc: SourceLocation = {
     filePath,
     lineStart: stmt.loc.line,
@@ -347,6 +357,8 @@ function liftArtifact(filePath: string, stmt: StatementNode): LiftResult {
     artifact: {
       ref: { type: kind, identity, quoted },
       origin,
+      provenance,
+      confidence,
       declarationLoc,
       body: stmt,
       contract,
@@ -380,6 +392,50 @@ function extractOrigin(block: StatementNode[]): SpecOrigin | null {
     return { source, section, lines };
   }
   return null;
+}
+
+/**
+ * Resolve an artifact's provenance from its body. An artifact is either:
+ *   - `authored` — traces to a prose doc via `origin SOURCE "section" a..b`;
+ *   - `inferred` — reverse-engineered from code, carrying instead
+ *     `inferred-from "<code-path>" a..b` plus an optional `confidence`.
+ *
+ * The two forms are mutually exclusive in practice; `inferred-from` wins if
+ * both appear. Inferred artifacts surface their code location through the
+ * same `origin` envelope (`source` = code path, `section` = `(inferred)`) so
+ * downstream consumers don't need a second provenance channel.
+ */
+function extractProvenance(block: StatementNode[]): {
+  origin: SpecOrigin | null;
+  provenance: 'authored' | 'inferred';
+  confidence?: 'high' | 'medium' | 'low';
+} {
+  for (const stmt of block) {
+    const head = stmt.head;
+    if (head.length === 0 || head[0].kind !== 'ident' || head[0].value !== 'inferred-from') continue;
+    const source = head[1]?.kind === 'string' ? head[1].value : null;
+    let lines: [number, number] = [-1, -1];
+    if (head[2]?.kind === 'range') lines = [head[2].start, head[2].end];
+    if (!source) continue;
+    return {
+      origin: { source, section: '(inferred)', lines },
+      provenance: 'inferred',
+      confidence: extractConfidence(block),
+    };
+  }
+  return { origin: extractOrigin(block), provenance: 'authored' };
+}
+
+/** Read the optional `confidence high|medium|low` line from a body block. */
+function extractConfidence(block: StatementNode[]): 'high' | 'medium' | 'low' | undefined {
+  for (const stmt of block) {
+    const head = stmt.head;
+    if (head.length < 2 || head[0].kind !== 'ident' || head[0].value !== 'confidence') continue;
+    if (head[1].kind !== 'ident') continue;
+    const v = head[1].value;
+    if (v === 'high' || v === 'medium' || v === 'low') return v;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +516,8 @@ function indexInnerEffects(
     index.set(key, {
       ref,
       origin: group.origin,
+      provenance: group.provenance,
+      confidence: group.confidence,
       declarationLoc: { filePath, lineStart: inner.loc.line, lineEnd: inner.loc.line },
       body: inner,
     });

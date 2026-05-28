@@ -1,0 +1,9 @@
+query-rule loyalty_tiers.eq-is_active {
+  // inferred — every query against `loyalty_tiers` constrains `is_active` but no spec records this data policy
+  inferred-from "app/repos/loyalty_repo.py" 23..24
+  confidence high
+  entity Entity:loyalty_tiers
+  required {
+    eq is_active true
+  }
+}

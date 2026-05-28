@@ -52,8 +52,11 @@ function debugLog(msg: string): void {
 }
 import {
   verify,
+  infer,
+  writeInferred,
   type ContractDrift,
   type VerifyResult,
+  type InferResult,
 } from '@truecourse/contract-verifier';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -86,6 +89,12 @@ export const VERIFY_STEPS = [
   { key: 'load', label: 'Loading contracts' },
   { key: 'extract-code', label: 'Scanning code for operations' },
   { key: 'compare', label: 'Comparing code against contracts' },
+] as const;
+
+export const INFER_STEPS = [
+  { key: 'load', label: 'Loading authored contracts' },
+  { key: 'scan', label: 'Reverse-engineering decisions from code' },
+  { key: 'write', label: 'Writing inferred contracts' },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -129,6 +138,15 @@ export interface VerifyState {
   drifts: ContractDrift[];
   resolverErrors: string[];
   unresolvedRefs: string[];
+}
+
+export interface InferInProcessResult {
+  /** Inference output — the undocumented decisions found in code. */
+  infer: InferResult;
+  /** Files written under `_inferred/` (empty on a dry run). */
+  written: string[];
+  /** Files that would be written, on a dry run. */
+  proposed: string[];
 }
 
 export interface SpecResolveAllDefaultsResult {
@@ -753,6 +771,65 @@ export async function verifyInProcess(
   writeVerifyState(repoRoot, state);
 
   return { verify: result, state };
+}
+
+export interface InferInProcessOptions {
+  tracker?: StepTracker;
+  /** Where authored contracts live (the coverage baseline). Defaults to
+   *  `<repoRoot>/.truecourse/contracts`. `_inferred/` is always excluded. */
+  contractsDir?: string;
+  /** Where the implementation code lives. Defaults to the auto-detected
+   *  code dir (the `code/` subdir when present, else the repo root). */
+  codeDir?: string;
+  /** When true, don't write — just report what would be written. */
+  dryRun?: boolean;
+}
+
+/**
+ * Reverse-engineer undocumented decisions from `codeDir` and write them as
+ * `inferred` `.tc` artifacts under `<contractsDir>/_inferred/`. The mirror of
+ * `verifyInProcess`: instead of checking code against the spec, it surfaces
+ * what the code decided that the spec never recorded. Coverage is computed
+ * from authored contracts only, so a decision drops out once it's documented.
+ */
+export async function inferInProcess(
+  repoRoot: string,
+  options: InferInProcessOptions = {},
+): Promise<InferInProcessResult> {
+  const { tracker } = options;
+  const contractsDir =
+    options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
+  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
+
+  tracker?.start('load');
+  let result: InferResult;
+  try {
+    result = await infer({ contractsDir, codeDir });
+  } catch (e) {
+    tracker?.error('load', (e as Error).message);
+    throw e;
+  }
+  const covered = Object.values(result.coveredCounts).reduce((a, b) => a + b, 0);
+  tracker?.done('load', `${covered} authored artifact${covered === 1 ? '' : 's'}`);
+
+  tracker?.start('scan');
+  tracker?.done(
+    'scan',
+    `${result.decisions.length} undocumented decision${result.decisions.length === 1 ? '' : 's'}`,
+  );
+
+  tracker?.start('write');
+  const { written, proposed } = writeInferred(contractsDir, result.decisions, {
+    dryRun: options.dryRun,
+  });
+  tracker?.done(
+    'write',
+    options.dryRun
+      ? `${proposed.length} would be written`
+      : `${written.length} written`,
+  );
+
+  return { infer: result, written, proposed };
 }
 
 /**

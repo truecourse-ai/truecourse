@@ -25,4 +25,28 @@ export const loyaltyRepo = {
     );
     return result.rows as LoyaltyTierRow[];
   },
+
+  // Every direct lookup restricts to active tiers — retired tiers stay in the
+  // table for historical orders but must never be offered to customers. This
+  // is a real, consistently-applied data policy that no spec records.
+  async listActiveTiers(): Promise<LoyaltyTierRow[]> {
+    const result = await db.raw(
+      `SELECT code, name, threshold
+         FROM loyalty_tiers
+        WHERE is_active = TRUE
+        ORDER BY threshold ASC`,
+    );
+    return result.rows as LoyaltyTierRow[];
+  },
+
+  async findActiveTier(code: string): Promise<LoyaltyTierRow | null> {
+    const result = await db.raw(
+      `SELECT code, name, threshold
+         FROM loyalty_tiers
+        WHERE is_active = TRUE
+          AND code = $1`,
+      [code],
+    );
+    return (result.rows[0] as LoyaltyTierRow | undefined) ?? null;
+  },
 };

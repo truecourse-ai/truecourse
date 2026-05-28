@@ -14,13 +14,8 @@ import path from 'node:path';
 import { parseFile } from './parser/index.js';
 import { resolve, type ResolvedArtifact, refKey } from './resolver/index.js';
 import {
-  extractOperationsFromDir,
-  detectAuthPresence,
-  detectIdempotencyPresence,
-  extractQueriesFromDir,
-  extractEnumsFromDir,
-  extractConstantsFromDir,
-  buildCodebaseScan,
+  extractCodeContracts,
+  extractEmissionFacts,
   getArchitectureDetector,
   type DetectedArchitectureChoice,
 } from './extractor/index.js';
@@ -65,6 +60,14 @@ export interface VerifyOptions {
   contractsDir: string;
   /** Directory containing TS/JS source files to verify against. */
   codeDir: string;
+  /**
+   * Include the `_inferred/` subtree in verification. Off by default:
+   * inferred contracts are descriptive (reverse-engineered from code), not
+   * prescriptive obligations, so verifying code against them would just
+   * restate what's already there. Set this only to hold code to a set of
+   * promoted inferred decisions.
+   */
+  includeInferred?: boolean;
 }
 
 export interface VerifyResult {
@@ -85,12 +88,14 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
   walkTcFiles(opts.contractsDir, (filePath) => {
     const source = fs.readFileSync(filePath, 'utf-8');
     specFiles.push(parseFile(filePath, source));
-  });
+  }, opts.includeInferred ?? false);
   const resolution = resolve(specFiles);
 
-  // ---- Code side: extract operations from source ----
-  const extractedOps = await extractOperationsFromDir(opts.codeDir);
-  const authPresence = await detectAuthPresence(opts.codeDir);
+  // ---- Code side: one shared, lazily-memoized extraction set ----
+  // (the same layer `infer` reads — see extractor/code-contracts.ts).
+  const code = extractCodeContracts(opts.codeDir);
+  const extractedOps = await code.operations();
+  const authPresence = await code.authPresence();
 
   // ---- Index code-side operations by identity ----
   // Spec uses RFC-6570-style path params (`{id}`), Express uses `:id`.
@@ -207,19 +212,13 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
   }
 
   // ---- Cross-cutting: IdempotencyContract ----
-  // Header values may differ per contract, so cache the presence detection
-  // by configured request-header to avoid re-walking the source tree N times.
-  const idempotencyPresenceByHeader = new Map<string, Awaited<ReturnType<typeof detectIdempotencyPresence>>>();
+  // Presence detection is memoized per request-header by the shared set, so
+  // repeated headers don't re-walk the source tree.
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'IdempotencyContract') continue;
     if (!artifact.contract) continue;
     const contract = artifact.contract as IdempotencyContractC;
-    const headerKey = contract.requestHeader.toLowerCase();
-    let presence = idempotencyPresenceByHeader.get(headerKey);
-    if (!presence) {
-      presence = await detectIdempotencyPresence(opts.codeDir, contract.requestHeader);
-      idempotencyPresenceByHeader.set(headerKey, presence);
-    }
+    const presence = await code.idempotencyPresence(contract.requestHeader);
     drifts.push(
       ...compareIdempotency({
         idempotencyRef: artifact.ref,
@@ -247,28 +246,33 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
   }
 
   // ---- Domain shapes: Entity ----
+  // Per-file entity facts extracted once (code→contract); comparator diffs.
+  const entityFacts = await code.entityFacts();
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'Entity') continue;
     if (!artifact.contract) continue;
     drifts.push(
-      ...(await compareEntity({
+      ...compareEntity({
         entityRef: artifact.ref,
         contract: artifact.contract as EntityContract,
-        codeDir: opts.codeDir,
-      })),
+        facts: entityFacts,
+      }),
     );
   }
 
   // ---- Domain shapes: StateMachine ----
+  // Code→contract facts (transition maps + guarded assignments) extracted once;
+  // the comparator is a pure diff over them.
+  const stateMachineFacts = await code.stateMachineFacts();
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'StateMachine') continue;
     if (!artifact.contract) continue;
     drifts.push(
-      ...(await compareStateMachine({
+      ...compareStateMachine({
         machineRef: artifact.ref,
         contract: artifact.contract as StateMachineContract,
-        codeDir: opts.codeDir,
-      })),
+        facts: stateMachineFacts,
+      }),
     );
   }
 
@@ -286,6 +290,10 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
   }
 
   // ---- Business rules: EffectGroup ----
+  // Emission facts are the code→contract view: the per-operation AST analysis
+  // lives in the extractor, the comparator just diffs. Scoped to the
+  // spec-recognized ops (same set the comparator iterated when inline).
+  const emissionFacts = extractEmissionFacts(recognizedOps);
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'EffectGroup') continue;
     if (!artifact.contract) continue;
@@ -293,22 +301,27 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
       ...compareEffectGroup({
         effectGroupRef: artifact.ref,
         contract: artifact.contract as EffectGroupContract,
-        specOps: specOpsByIdentity,
-        recognizedOps,
+        emission: emissionFacts,
       }),
     );
   }
 
   // ---- Business rules: Formula ----
+  // Implementation facts are looked up per output field (code→contract); the
+  // comparator is a pure diff over them.
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'Formula') continue;
     if (!artifact.contract) continue;
+    const contract = artifact.contract as FormulaContract;
+    const facts = contract.output.field
+      ? await code.formulaFacts(contract.output.field)
+      : null;
     drifts.push(
-      ...(await compareFormula({
+      ...compareFormula({
         formulaRef: artifact.ref,
-        contract: artifact.contract as FormulaContract,
-        codeDir: opts.codeDir,
-      })),
+        contract,
+        facts,
+      }),
     );
   }
 
@@ -328,7 +341,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
   // distinctive columns (warranty_id, completedon, skuname) where the
   // false-positive risk is small. If this changes, the rule's `entity`
   // field becomes the right place to re-introduce filtering.
-  const extractedQueries = await extractQueriesFromDir(opts.codeDir);
+  const extractedQueries = await code.queries();
   const queryDriftCollector: ContractDrift[] = [];
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'QueryRule') continue;
@@ -360,7 +373,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
   // Same orchestrator shape as queries: extract all code-side enums
   // once, dispatch each spec Enum artifact's comparator with the full
   // set, and dedupe cross-rule emissions.
-  const extractedEnums = await extractEnumsFromDir(opts.codeDir);
+  const extractedEnums = await code.enums();
   const enumDriftCollector: ContractDrift[] = [];
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'Enum') continue;
@@ -411,7 +424,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
 
   // ---- Named constants: value-set drift on top-level constants /
   // object properties / default args. Same orchestrator pattern.
-  const extractedConstants = await extractConstantsFromDir(opts.codeDir);
+  const extractedConstants = await code.constants();
   const constantDriftCollector: ContractDrift[] = [];
   for (const artifact of resolution.index.values()) {
     if (artifact.ref.type !== 'NamedConstant') continue;
@@ -442,7 +455,7 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
     (a) => a.ref.type === 'ArchitectureDecision' && a.contract,
   );
   if (archArtifacts.length > 0) {
-    const scan = await buildCodebaseScan(opts.codeDir);
+    const scan = await code.architectureScan();
     const detectCache = new Map<string, DetectedArchitectureChoice>();
     for (const artifact of archArtifacts) {
       const contract = artifact.contract as ArchitectureDecisionContract;
@@ -481,11 +494,19 @@ export async function verify(opts: VerifyOptions): Promise<VerifyResult> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function walkTcFiles(rootDir: string, visit: (filePath: string) => void): void {
+function walkTcFiles(
+  rootDir: string,
+  visit: (filePath: string) => void,
+  includeInferred: boolean,
+): void {
   for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
     const full = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) walkTcFiles(full, visit);
-    else if (entry.isFile() && full.endsWith('.tc')) visit(full);
+    if (entry.isDirectory()) {
+      // The `_inferred/` subtree holds reverse-engineered, descriptive
+      // contracts — skip it unless the caller opts in.
+      if (!includeInferred && entry.name === '_inferred') continue;
+      walkTcFiles(full, visit, includeInferred);
+    } else if (entry.isFile() && full.endsWith('.tc')) visit(full);
   }
 }
 

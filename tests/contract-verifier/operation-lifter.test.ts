@@ -12,8 +12,12 @@ function loadAll() {
   const visit = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) visit(full);
-      else if (entry.isFile() && full.endsWith('.tc')) {
+      // `_inferred/` holds reverse-engineered contracts, not the authored
+      // corpus these assertions cover — skip it.
+      if (entry.isDirectory()) {
+        if (entry.name === '_inferred') continue;
+        visit(full);
+      } else if (entry.isFile() && full.endsWith('.tc')) {
         files.push(parseFile(full, fs.readFileSync(full, 'utf-8')));
       }
     }

@@ -1,0 +1,5 @@
+operation GET "/api/loyalty-tiers" {
+  // inferred — route handled in code but documented in no spec
+  inferred-from "src/controllers/customers.controller.ts" 53..53
+  confidence high
+}
