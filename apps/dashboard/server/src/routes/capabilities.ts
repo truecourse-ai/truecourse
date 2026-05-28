@@ -2,30 +2,23 @@
  * GET /api/capabilities
  *
  * Reports the edition the dashboard is running as and which feature
- * gates are turned on. OSS always reports `community` with an empty
- * list. The enterprise build (under `ee/`) will replace this router
- * with one that validates a signed license key and emits the
- * unlocked capabilities — the client just consumes the response
- * either way.
+ * gates are on. Community → `community` with an empty list. Enterprise
+ * → `enterprise` with whatever capabilities the loaded ee plugin lit up
+ * (e.g. sso, workspace). Public (mounted before the auth gate) so the
+ * client can discover the edition before authenticating.
  */
 
 import { Router } from 'express';
-import type {
-  CapabilitiesResponse,
-  Edition,
-  Capability,
-} from '@truecourse/shared';
-import { COMMUNITY_CAPABILITIES } from '@truecourse/shared';
+import type { CapabilitiesResponse } from '@truecourse/shared';
+import { detectEdition } from '../edition.js';
+import { getCapabilities } from '../ee-loader.js';
 
 const router: Router = Router();
 
-const EDITION: Edition = 'community';
-const CAPABILITIES: Capability[] = [...COMMUNITY_CAPABILITIES];
-
 router.get('/', (_req, res) => {
   const body: CapabilitiesResponse = {
-    edition: EDITION,
-    capabilities: CAPABILITIES,
+    edition: detectEdition(),
+    capabilities: getCapabilities(),
   };
   res.json(body);
 });

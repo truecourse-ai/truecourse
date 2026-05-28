@@ -12,6 +12,7 @@
   "dependencies": {
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/core": "workspace:*",
+    "@truecourse/ee-server": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "chokidar": "^4.0.0",

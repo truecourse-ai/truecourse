@@ -20,6 +20,9 @@ async function fetchApi<T>(
   const url = `${BASE_URL}${endpoint}`;
   const res = await fetch(url, {
     ...options,
+    // Send the enterprise session cookie (no-op in community). Required
+    // because the dashboard API sits behind the auth gate in enterprise.
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,

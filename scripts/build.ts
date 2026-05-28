@@ -82,6 +82,10 @@ run(
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
+    // Keep the commercial enterprise plugin OUT of the community
+    // artifact. The server reaches it only via a guarded dynamic
+    // import, which resolves to nothing here → runs as community.
+    '--external:@truecourse/ee-server',
     versionDefine,
     '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
   ].join(' '),
@@ -107,6 +111,8 @@ run(
     '--external:web-tree-sitter',
     '--external:pyright',
     '--external:typescript',
+    // Community artifact excludes the commercial enterprise plugin.
+    '--external:@truecourse/ee-server',
     versionDefine,
     '--banner:js="import { createRequire as __cR } from \'node:module\'; const require = __cR(import.meta.url);"',
   ].join(' '),
