@@ -390,7 +390,9 @@ the target — a row with `Delta: 0` is a smell.
   from the before/after measurements, label `fp-fix`. Comment + unlock
   each fixed issue. End.
 
-**Queue empty path** (no open `fp-fix` issues for the current campaign):
+**Queue empty path** (no *pickable* `fp-fix` issues — the queue is
+empty **or every remaining open issue is `fp-blocked`/`fp-skipped`**,
+and the session has 0 successes):
 
 1. `pnpm install && pnpm build:dist` to rebuild dist with all merged
    fixes on `main`.
@@ -408,9 +410,17 @@ the target — a row with `Delta: 0` is a smell.
    - body listing the campaign's rule fixes by PR number and the
      before/after TP-rate (noting the measurement was taken against
      `node dist/cli.mjs` from the freshly-built dist).
-4. **If < 90 %**: file new `fp-fix` issues for newly-discovered FPs
-   (same shape as discovery). Leave campaign `status: in_progress`.
-   **No campaign-close PR is opened** — no release is cut.
+4. **If < 90 %**: file new `fp-fix` issues for FP-rules that **don't
+   already have an open issue** (dedupe against existing, including
+   `fp-blocked`). Leave campaign `status: in_progress`. No
+   campaign-close PR.
+   - Filed ≥ 1 new issue → continue into the per-issue loop in the
+     same session and start fixing.
+   - Filed 0 (every FP-rule is already tracked and all are blocked) →
+     the campaign can't self-progress. File/update a single
+     `[fp-campaign-stuck] <owner>/<repo>` tracking issue (TP rate +
+     checklist of blocked issues, `cc @mushgev`) — this fires the TG
+     alert — then end. **Never dead-end silently.**
 5. End. The campaign-close PR merge fires `fp-campaign-close` and
    `fp-discover` in parallel.
 

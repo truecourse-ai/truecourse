@@ -79,7 +79,15 @@ iteration is one "attempt" (success or skip).
   **excluding** any with label `fp-in-progress`, `fp-blocked`, or
   `fp-skipped`.
 - Also exclude any issue already in `fixed_issues` for this session.
-- If none → break out of the loop and go to "Open the batched PR".
+- If none (the **pickable** queue is empty — note this is also true
+  when open issues remain but every one is `fp-blocked`/`fp-skipped`):
+  - If `successes >= 1` → break out of the loop and go to "Open the
+    batched PR" (ship the batch you've built).
+  - If `successes == 0` → go to the **Queue-empty path**. Do **not**
+    just end the session — an empty pickable queue is the cue to
+    re-measure the campaign (re-analyze, recompute TP, then close /
+    re-discover / flag-stuck). This holds even when the only remaining
+    issues are blocked.
 - Otherwise: pick the **oldest** by `created_at`.
 
 ### 2. Take the concurrency lock
@@ -257,9 +265,12 @@ error output so the reason is concrete, not "unknown".
 
 After the loop:
 
-- If `successes == 0`: end the session with no PR. (Comment on the
-  most recent `fp-fix` issue noting that the session ended with no
-  successful fixes after `attempts` attempts.)
+- If `successes == 0`: do **not** end here. You only reach this section
+  with zero successes if you attempted issues that all failed
+  (blocked / no-reproduce / refactor) — the pickable queue ran out
+  mid-session. Go to the **Queue-empty path** to re-measure the
+  campaign. (Step 1 already routes a start-empty queue straight there;
+  this catches the case where the queue drained during the loop.)
 - If `successes >= 1`:
   - **Verify your branch.** Run `git rev-parse --abbrev-ref HEAD` and
     confirm it starts with `claude/fp-fix/batch-`. If it doesn't —
@@ -323,9 +334,14 @@ After the loop:
 
 ## Queue-empty path
 
-If the per-issue loop's step 1 found zero open `fp-fix` issues (true
-queue empty, not just exhausted-the-batch), AND `successes == 0` so
-far in this session:
+Enter this path when the **pickable** queue is empty AND
+`successes == 0` this session. "Pickable empty" means step 1 found no
+open `fp-fix` issue that lacks `fp-in-progress`/`fp-blocked`/`fp-skipped`
+— **including the case where open issues remain but all are blocked.**
+Do not require "zero issues exist at all"; all-blocked counts.
+
+(If `successes >= 1`, you ship the batch PR instead — never run this
+path in a session that already produced fixes.)
 
 1. Find the campaign in `docs/fp-automation/campaigns.yaml` with
    `status: in_progress` or `status: discovering`. There should be
@@ -366,23 +382,44 @@ far in this session:
      with `cc @mushgev`.
    - End. The merge fires fp-campaign-close (tags + ships) and
      fp-discover (next campaign).
-6. **If `tp_rate < 0.90`** — campaign continues. File one new fp-fix
-   issue per rule with FPs (same shape as discovery). Leave the
-   campaign's `status` as `in_progress`. **Do not** open a
-   campaign-close PR; no release is cut.
+6. **If `tp_rate < 0.90`** — campaign continues. Leave the campaign's
+   `status` as `in_progress`. **Do not** open a campaign-close PR; no
+   release is cut.
 
-   **Then continue into the per-issue loop in this same session** —
-   the target clone, dist build, `before_counts`, and counters are
-   all still valid; only the issue list needs re-fetching. Process
-   the freshly-filed issues with the remaining `successes`/`attempts`
-   budget. If the budget allows at least one success, the session
-   will end with a normal batched PR (which carries the FP-count
-   delta and fires Trigger B on merge).
+   **File new issues, but dedupe first.** For each rule that still
+   shows FPs, check whether an **open** `fp-fix` issue for that
+   `rule_key` already exists (any label — `fp-blocked` counts).
+   - Rule has no open issue → file a new fp-fix issue (same shape as
+     discovery).
+   - Rule already has an open issue → **skip it**. Re-filing a rule
+     that's already tracked (especially one that's `fp-blocked`) just
+     creates duplicates.
 
-   The rationale: this path used to end here and require a manual
-   "Run now" click to kick the loop. Continuing in-session removes
-   that hand-off — the session that filed the new issues immediately
-   starts processing them.
+   **Then branch on what you filed:**
+   - **Filed ≥ 1 new issue** → continue into the per-issue loop in
+     this same session. The target clone, dist build, `before_counts`,
+     and counters are all still valid; only the issue list needs
+     re-fetching. If the budget allows at least one success, the
+     session ends with a normal batched PR (carrying the FP-count
+     delta, firing Trigger B on merge). This removes the old manual
+     "Run now" hand-off.
+   - **Filed 0 new issues** (every FP-rule already has an open issue,
+     and all pickable ones are blocked) → the campaign **cannot
+     self-progress**: the only thing standing between it and 0.90 is
+     human-gated work. Do not end silently. Instead **file or update a
+     single tracking issue**:
+     - First search for an open issue titled
+       `[fp-campaign-stuck] <owner>/<repo>`.
+     - If none exists → open one. Title:
+       `[fp-campaign-stuck] <owner>/<repo>`. Body: current `tp_rate`,
+       the close threshold (0.90), and a checklist of every open
+       `fp-blocked` issue (number + rule_key) that must be resolved by
+       a human before automation can proceed. End the body with
+       `cc @mushgev`.
+     - If one already exists → add a comment refreshing the `tp_rate`
+       and the current blocked list (don't open a duplicate).
+     - Then end the session. Opening/commenting the tracking issue is
+       the human signal — never dead-end without it.
 
 If the queue empties during the per-issue loop **after** at least one
 success, go to "Open the batched PR" with what you have — don't run
