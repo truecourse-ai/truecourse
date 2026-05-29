@@ -11,6 +11,8 @@ import { z } from 'unresolved-schema-lib';
 import { useTypedQuery } from 'unresolved-query-lib';
 import { useState } from 'unresolved-ui-lib';
 import { prismaLike } from 'unresolved-orm-lib';
+import type { Envelope } from 'unresolved-orm-lib';
+import { Controller } from 'unresolved-form-lib';
 
 // 1) Schema parse — `.parse()` would give back the inferred output type.
 const SearchParamsSchema = z.object({ q: z.string() });
@@ -42,4 +44,24 @@ export async function getRecipientEmail(recipientId: string): Promise<string | n
   const recipient = await prismaLike.recipient.findUnique({ where: { id: recipientId } });
   if (!recipient) return null;
   return recipient.email;
+}
+
+// 5) Destructured prop typed by an unresolved import. `envelope` is `any` only
+// because `Envelope` (an ORM model type) can't be resolved without
+// node_modules — the member access must NOT fire.
+export function EnvelopeRow({ envelope }: { envelope: Envelope }): string {
+  return envelope.id;
+}
+
+// 6) react-hook-form-style render callback. The destructured `field` parameter
+// is `any` because the form library's generic is unresolved — accessing
+// `field.value` / calling `field.onChange` must NOT fire.
+export function FieldControl(): unknown {
+  return Controller({
+    name: 'subject',
+    render: ({ field }) => {
+      field.onChange('next');
+      return field.value;
+    },
+  });
 }

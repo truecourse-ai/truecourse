@@ -659,15 +659,36 @@ function tracesAnyToExternalSource(
     }
 
     if (ts.isBindingElement(decl)) {
-      // `const [a, b] = expr` / `const { x } = expr` — find the enclosing
-      // VariableDeclaration and recurse into its initializer.
+      // Destructuring binding. Find the enclosing declaration the pattern
+      // belongs to — either a `const { x } = expr` variable declaration or a
+      // destructured function/callback parameter `({ x }) => ...`.
       let walker: ts.Node = decl
-      while (walker.parent && !ts.isVariableDeclaration(walker.parent)) {
+      while (
+        walker.parent &&
+        !ts.isVariableDeclaration(walker.parent) &&
+        !ts.isParameter(walker.parent)
+      ) {
         walker = walker.parent
       }
-      const varDecl = walker.parent
-      if (varDecl && ts.isVariableDeclaration(varDecl) && varDecl.initializer) {
-        if (tracesAnyToExternalSource(checker, varDecl.initializer, visited)) {
+      const enclosing = walker.parent
+
+      if (enclosing && ts.isParameter(enclosing)) {
+        // Destructured parameter: `function Row({ envelope }: Props)`,
+        // `render={({ field }) => ...}` (react-hook-form), `match(x).with(...)`
+        // arms, etc. The binding is `any` either because the param's type
+        // annotation is a TypeReference to an unresolved import (Props →
+        // unresolved), or because the param is an untyped contextual callback
+        // of an unresolved library generic. Both are external noise once
+        // node_modules is absent. Only an explicit `: any` on the parameter
+        // itself is developer-authored.
+        if (enclosing.type && enclosing.type.kind === ts.SyntaxKind.AnyKeyword) return false
+        return true
+      }
+
+      if (enclosing && ts.isVariableDeclaration(enclosing) && enclosing.initializer) {
+        // `const { x } = expr` / `const [a] = expr` — recurse into the
+        // initializer (e.g. `const { data } = useLoaderData()`).
+        if (tracesAnyToExternalSource(checker, enclosing.initializer, visited)) {
           return true
         }
       }
